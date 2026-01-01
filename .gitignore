@@ -23,8 +23,9 @@ build/
 *.sqlite3
 indexes/
 
-# Exception: test fixture (small, needed for CI)
+# Exception: test fixtures (small, needed for CI)
 !tests/fixtures/test.db
+!tests/fixtures/divisions.db
 
 # Parquet exports (generated, large)
 exports/

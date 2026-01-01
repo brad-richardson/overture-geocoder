@@ -11,21 +11,52 @@ const STARTUP_TIMEOUT = 15000;
 
 // D1 database location for wrangler local dev
 const D1_STATE_DIR = '.wrangler/state/v3/d1/miniflare-D1DatabaseObject';
-const D1_DB_FILE = 'd3e041905f05e515c70eeff7a19bb719b7fd5943de6f9e0a4f0dad6a65e8bfec.sqlite';
+
+// Database file hashes (determined by wrangler/miniflare from binding names)
+const D1_DB_FILES = {
+  DB_MA: 'd3e041905f05e515c70eeff7a19bb719b7fd5943de6f9e0a4f0dad6a65e8bfec.sqlite',
+  DB_DIVISIONS: '6a593fa526311561b192f28ff582309b09b9be3c2857186ee19b9b2a1255904b.sqlite',
+};
 
 let workerProcess: ChildProcess | null = null;
 
 /**
- * Copy test fixture to wrangler D1 location.
+ * Copy a database file and clean up WAL files.
  */
-function setupTestDatabase(): void {
-  const fixtureDb = join(process.cwd(), 'tests/fixtures/test.db');
-  const targetDir = join(process.cwd(), D1_STATE_DIR);
-  const targetDb = join(targetDir, D1_DB_FILE);
+function copyDatabase(sourceFile: string, targetDir: string, targetFile: string): void {
+  const targetPath = join(targetDir, targetFile);
 
-  if (!existsSync(fixtureDb)) {
+  // Remove any existing WAL files
+  const walFile = targetPath + '-wal';
+  const shmFile = targetPath + '-shm';
+  if (existsSync(walFile)) rmSync(walFile);
+  if (existsSync(shmFile)) rmSync(shmFile);
+
+  // Copy fixture to D1 location
+  copyFileSync(sourceFile, targetPath);
+}
+
+/**
+ * Copy test fixtures to wrangler D1 locations.
+ */
+function setupTestDatabases(): void {
+  const fixturesDir = join(process.cwd(), 'tests/fixtures');
+  const targetDir = join(process.cwd(), D1_STATE_DIR);
+
+  // Check fixtures exist
+  const featuresFixture = join(fixturesDir, 'test.db');
+  const divisionsFixture = join(fixturesDir, 'divisions.db');
+
+  if (!existsSync(featuresFixture)) {
     throw new Error(
-      `Test fixture not found: ${fixtureDb}\n` +
+      `Test fixture not found: ${featuresFixture}\n` +
+      'Run: python scripts/create_test_fixture.py'
+    );
+  }
+
+  if (!existsSync(divisionsFixture)) {
+    throw new Error(
+      `Test fixture not found: ${divisionsFixture}\n` +
       'Run: python scripts/create_test_fixture.py'
     );
   }
@@ -33,22 +64,17 @@ function setupTestDatabase(): void {
   // Create D1 state directory if it doesn't exist
   mkdirSync(targetDir, { recursive: true });
 
-  // Remove any existing WAL files
-  const walFile = targetDb + '-wal';
-  const shmFile = targetDb + '-shm';
-  if (existsSync(walFile)) rmSync(walFile);
-  if (existsSync(shmFile)) rmSync(shmFile);
-
-  // Copy fixture to D1 location
-  copyFileSync(fixtureDb, targetDb);
+  // Copy both fixtures
+  copyDatabase(featuresFixture, targetDir, D1_DB_FILES.DB_MA);
+  copyDatabase(divisionsFixture, targetDir, D1_DB_FILES.DB_DIVISIONS);
 }
 
 /**
  * Start wrangler dev and wait for it to be ready.
  */
 export async function startWorker(): Promise<string> {
-  // Setup test database
-  setupTestDatabase();
+  // Setup test databases
+  setupTestDatabases();
 
   const baseUrl = `http://localhost:${TEST_PORT}`;
 
