@@ -121,8 +121,10 @@ function getAddressDatabases(env: Env, _query: string): D1Database[] {
 /**
  * Prepare FTS5 query from user input.
  * Handles common query patterns and escapes special characters.
+ * @param query - User search query
+ * @param autocomplete - If true, adds prefix wildcard to last token for autocomplete behavior
  */
-function prepareFtsQuery(query: string): string {
+function prepareFtsQuery(query: string, autocomplete: boolean = true): string {
   const tokens = query
     .toLowerCase()
     // Remove punctuation except hyphens and Unicode letters/numbers
@@ -136,9 +138,11 @@ function prepareFtsQuery(query: string): string {
 
   if (tokens.length === 0) return "";
 
-  // Quote each token, and add prefix wildcard to last token for autocomplete
+  // Quote each token; optionally add prefix wildcard to last token for autocomplete
   return tokens
-    .map((t, i) => (i === tokens.length - 1 ? `"${t}"*` : `"${t}"`))
+    .map((t, i) =>
+      autocomplete && i === tokens.length - 1 ? `"${t}"*` : `"${t}"`
+    )
     .join(" ");
 }
 
@@ -148,11 +152,12 @@ function prepareFtsQuery(query: string): string {
 async function searchDivisions(
   db: D1Database | undefined,
   query: string,
-  limit: number
+  limit: number,
+  autocomplete: boolean = true
 ): Promise<GeocoderResult[]> {
   if (!db) return [];
 
-  const ftsQuery = prepareFtsQuery(query);
+  const ftsQuery = prepareFtsQuery(query, autocomplete);
   if (!ftsQuery) return [];
 
   try {
@@ -215,9 +220,10 @@ async function searchAddresses(
   dbs: D1Database[],
   query: string,
   limit: number,
-  addressdetails: boolean
+  addressdetails: boolean,
+  autocomplete: boolean = true
 ): Promise<GeocoderResult[]> {
-  const ftsQuery = prepareFtsQuery(query);
+  const ftsQuery = prepareFtsQuery(query, autocomplete);
   if (!ftsQuery) return [];
 
   const results: GeocoderResult[] = [];
@@ -487,6 +493,8 @@ async function handleSearch(
     40
   );
   const addressdetails = url.searchParams.get("addressdetails") === "1";
+  // autocomplete: default to 1 (enabled) for prefix matching on last token
+  const autocomplete = url.searchParams.get("autocomplete") !== "0";
   // const countrycodes = url.searchParams.get("countrycodes");
   // const viewbox = url.searchParams.get("viewbox");
   // const bounded = url.searchParams.get("bounded") === "1";
@@ -499,8 +507,8 @@ async function handleSearch(
   const addressDbs = getAddressDatabases(env, q);
 
   const [divisionResults, addressResults] = await Promise.all([
-    searchDivisions(env.DB_DIVISIONS, q, limit),
-    searchAddresses(addressDbs, q, limit, addressdetails),
+    searchDivisions(env.DB_DIVISIONS, q, limit, autocomplete),
+    searchAddresses(addressDbs, q, limit, addressdetails, autocomplete),
   ]);
 
   // Merge results: divisions first (higher priority), then addresses

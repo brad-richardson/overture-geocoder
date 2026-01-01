@@ -392,7 +392,7 @@ describe('/search endpoint', () => {
   });
 
   describe('common query patterns - prefix/partial matches', () => {
-    it('should find Boston for "bost" prefix query', async () => {
+    it('should find Boston for "bost" prefix query (autocomplete enabled by default)', async () => {
       const response = await fetch(`${baseUrl}/search?q=bost&limit=5`);
       expect(response.ok).toBe(true);
 
@@ -417,6 +417,44 @@ describe('/search endpoint', () => {
       const results = await response.json();
       expect(results.length).toBeGreaterThan(0);
       expect(results[0].primary_name).toContain('New York');
+    });
+  });
+
+  describe('autocomplete parameter', () => {
+    it('should enable prefix matching by default (autocomplete=1)', async () => {
+      const response = await fetch(`${baseUrl}/search?q=bost&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
+    });
+
+    it('should enable prefix matching with explicit autocomplete=1', async () => {
+      const response = await fetch(`${baseUrl}/search?q=bost&autocomplete=1&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
+    });
+
+    it('should disable prefix matching with autocomplete=0', async () => {
+      const response = await fetch(`${baseUrl}/search?q=bost&autocomplete=0&limit=5`);
+      expect(response.ok).toBe(true);
+
+      // "bost" with autocomplete=0 should NOT match "boston"
+      const results = await response.json();
+      expect(results.length).toBe(0);
+    });
+
+    it('should still find exact matches with autocomplete=0', async () => {
+      const response = await fetch(`${baseUrl}/search?q=boston&autocomplete=0&limit=5`);
+      expect(response.ok).toBe(true);
+
+      const results = await response.json();
+      expect(results.length).toBeGreaterThan(0);
+      expect(results[0].primary_name).toContain('Boston');
     });
   });
 });
