@@ -56,10 +56,6 @@ export interface SearchOptions {
   format?: "json" | "jsonv2" | "geojson";
 }
 
-export interface LookupOptions {
-  /** Response format */
-  format?: "json" | "jsonv2" | "geojson";
-}
 
 export interface OvertureGeocoderConfig {
   /** API base URL (default: 'https://overture-geocoder.bradr.workers.dev') */
@@ -223,60 +219,6 @@ export class OvertureGeocoder {
     return response.json();
   }
 
-  /**
-   * Lookup features by their GERS IDs.
-   */
-  async lookup(
-    gersIds: string | string[],
-    options: LookupOptions = {}
-  ): Promise<GeocoderResult[]> {
-    const ids = Array.isArray(gersIds) ? gersIds : [gersIds];
-    if (ids.length === 0) return [];
-
-    const params = new URLSearchParams({
-      gers_ids: ids.join(","),
-      format: options.format || "jsonv2",
-    });
-
-    const url = `${this.baseUrl}/lookup?${params}`;
-    const response = await this.fetchWithRetry(url);
-    const data = await response.json();
-
-    if (options.format === "geojson") {
-      return data as unknown as GeocoderResult[];
-    }
-
-    return this.parseResults(data);
-  }
-
-  /**
-   * Lookup features and return as GeoJSON FeatureCollection.
-   */
-  async lookupGeoJSON(gersIds: string | string[]): Promise<GeoJSONFeatureCollection> {
-    const ids = Array.isArray(gersIds) ? gersIds : [gersIds];
-    if (ids.length === 0) {
-      return { type: "FeatureCollection", features: [] };
-    }
-
-    const params = new URLSearchParams({
-      gers_ids: ids.join(","),
-      format: "geojson",
-    });
-
-    const url = `${this.baseUrl}/lookup?${params}`;
-    const response = await this.fetchWithRetry(url);
-    return response.json();
-  }
-
-  /**
-   * Get full geometry for a GERS ID.
-   * Note: This returns point geometry from the API.
-   * For full building/parcel geometries, use DuckDB with Overture S3 directly.
-   */
-  async getGeometry(gersId: string): Promise<GeoJSONFeature | null> {
-    const result = await this.lookupGeoJSON(gersId);
-    return result.features[0] || null;
-  }
 
   /**
    * Get the Overture release version configured for this client.
@@ -344,11 +286,11 @@ export class OvertureGeocoder {
       return null; // NULL filepath means deleted in this release
     }
 
-    // Step 4: Query actual geometry from the specific data file
+    // Step 4: Query actual geometry + names from the specific data file
     const dataPath = getDataS3Path(filepath);
 
     const geometryResult = await this.queryDuckDB(conn, `
-      SELECT id, ST_AsGeoJSON(geometry) as geojson
+      SELECT id, ST_AsGeoJSON(geometry) as geojson, names
       FROM read_parquet('${dataPath}')
       WHERE id = '${gersId}'
       LIMIT 1
@@ -364,7 +306,9 @@ export class OvertureGeocoder {
     return {
       type: "Feature",
       id: gersId,
-      properties: {},
+      properties: {
+        names: row.names as Record<string, unknown> | null,
+      },
       bbox: bbox ? [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax] : undefined,
       geometry,
     };
@@ -595,17 +539,6 @@ export async function geocode(
 ): Promise<GeocoderResult[]> {
   const client = new OvertureGeocoder();
   return client.search(query, options);
-}
-
-/**
- * Quick lookup function using default settings.
- */
-export async function lookup(
-  gersIds: string | string[],
-  options?: LookupOptions
-): Promise<GeocoderResult[]> {
-  const client = new OvertureGeocoder();
-  return client.lookup(gersIds, options);
 }
 
 export default OvertureGeocoder;

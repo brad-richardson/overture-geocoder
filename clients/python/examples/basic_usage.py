@@ -4,7 +4,7 @@
 Run with: python examples/basic_usage.py
 """
 
-from overture_geocoder import OvertureGeocoder, geocode, lookup
+from overture_geocoder import OvertureGeocoder, geocode
 
 
 def main():
@@ -85,32 +85,23 @@ def main():
             print(f"  Coordinates: {feature['geometry']['coordinates']}")
 
         # =====================================================================
-        # Lookup by GERS ID
+        # Get full geometry by GERS ID (fetches directly from Overture S3)
         # =====================================================================
 
-        print("\n--- Lookup by GERS ID ---")
+        print("\n--- Get full geometry by GERS ID ---")
 
         if results:
             gers_id = results[0].gers_id
-            print(f"Looking up GERS ID: {gers_id}")
+            print(f"Fetching geometry for GERS ID: {gers_id}")
 
-            # Single lookup
-            lookup_result = client.lookup(gers_id)
-            if lookup_result:
-                print(f"Lookup result: {lookup_result[0].display_name}")
-
-            # Multiple lookups
-            if len(results) > 1:
-                ids = [r.gers_id for r in results[:3]]
-                multi_lookup = client.lookup(ids)
-                print(f"Multi-lookup results: {len(multi_lookup)}")
-
-            # Get geometry as GeoJSON
-            geojson_lookup = client.lookup_geojson(gers_id)
-            if geojson_lookup["features"]:
-                feature = geojson_lookup["features"][0]
-                print(f"Geometry type: {feature['geometry']['type']}")
-                print(f"Coordinates: {feature['geometry']['coordinates']}")
+            # Get full geometry (requires overturemaps package)
+            try:
+                feature = client.get_geometry(gers_id)
+                if feature:
+                    print(f"Geometry type: {feature['geometry']['type']}")
+                    print(f"Properties: {list(feature['properties'].keys())}")
+            except ImportError as e:
+                print(f"Skipping geometry fetch: {e}")
 
     print("\n=== Done ===")
 

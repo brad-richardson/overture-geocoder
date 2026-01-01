@@ -333,157 +333,6 @@ async function handleSearch(
 }
 
 /**
- * Handle /lookup endpoint for GERS ID lookups.
- */
-async function handleLookup(
-  request: Request,
-  env: Env
-): Promise<Response> {
-  const url = new URL(request.url);
-  const idsParam = url.searchParams.get("gers_ids") || url.searchParams.get("ids") || "";
-  const format = url.searchParams.get("format") || "jsonv2";
-
-  // Parse GERS IDs (comma-separated UUIDs)
-  const gersIds = idsParam
-    .split(",")
-    .map((id) => id.trim())
-    .filter((id) => id.length > 0);
-
-  if (gersIds.length === 0) {
-    return jsonResponse([]);
-  }
-
-  const results: GeocoderResult[] = [];
-  const placeholders = gersIds.map(() => "?").join(",");
-
-  // Search divisions database
-  if (env.DB_DIVISIONS) {
-    try {
-      const divResult = await env.DB_DIVISIONS
-        .prepare(
-          `
-          SELECT
-            rowid,
-            gers_id,
-            type,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            population,
-            country,
-            region
-          FROM divisions
-          WHERE gers_id IN (${placeholders})
-        `
-        )
-        .bind(...gersIds)
-        .all<DivisionRow>();
-
-      for (const row of divResult.results || []) {
-        results.push({
-          gers_id: row.gers_id,
-          primary_name: row.primary_name,
-          lat: row.lat.toFixed(7),
-          lon: row.lon.toFixed(7),
-          boundingbox: [
-            row.bbox_ymin.toFixed(7),
-            row.bbox_ymax.toFixed(7),
-            row.bbox_xmin.toFixed(7),
-            row.bbox_xmax.toFixed(7),
-          ],
-          importance: 1,
-          type: row.type,
-        });
-      }
-    } catch (e) {
-      console.error("Division lookup error:", e);
-    }
-  }
-
-  // Search address databases
-  const addressDbs = getAddressDatabases(env, "");
-  for (const db of addressDbs) {
-    try {
-      const addrResult = await db
-        .prepare(
-          `
-          SELECT
-            rowid,
-            gers_id,
-            type,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            population,
-            city,
-            state,
-            postcode
-          FROM features
-          WHERE gers_id IN (${placeholders})
-        `
-        )
-        .bind(...gersIds)
-        .all<FeatureRow>();
-
-      for (const row of addrResult.results || []) {
-        results.push({
-          gers_id: row.gers_id,
-          primary_name: row.primary_name,
-          lat: row.lat.toFixed(7),
-          lon: row.lon.toFixed(7),
-          boundingbox: [
-            row.bbox_ymin.toFixed(7),
-            row.bbox_ymax.toFixed(7),
-            row.bbox_xmin.toFixed(7),
-            row.bbox_xmax.toFixed(7),
-          ],
-          importance: 1,
-          type: row.type,
-          address: row.type === "address" ? {
-            city: row.city || undefined,
-            state: row.state || undefined,
-            postcode: row.postcode || undefined,
-            country: "United States",
-            country_code: "us",
-          } : undefined,
-        });
-      }
-    } catch (e) {
-      console.error("Address lookup error:", e);
-    }
-  }
-
-  if (format === "geojson") {
-    return jsonResponse({
-      type: "FeatureCollection",
-      features: results.map((r) => ({
-        type: "Feature",
-        id: r.gers_id,
-        properties: {
-          gers_id: r.gers_id,
-          primary_name: r.primary_name,
-          ...r.address,
-        },
-        geometry: {
-          type: "Point",
-          coordinates: [parseFloat(r.lon), parseFloat(r.lat)],
-        },
-      })),
-    });
-  }
-
-  return jsonResponse(results);
-}
-
-/**
  * Create JSON response with CORS headers.
  */
 function jsonResponse(data: unknown, status = 200): Response {
@@ -520,16 +369,12 @@ export default {
       case "/search":
         return handleSearch(request, env);
 
-      case "/lookup":
-        return handleLookup(request, env);
-
       case "/":
         return jsonResponse({
           name: "Overture Geocoder",
           version: "0.1.0",
           endpoints: {
             search: "/search?q={query}",
-            lookup: "/lookup?gers_ids={gers_id},{gers_id}",
           },
           documentation: "https://github.com/bradrichardson/overture-geocode",
         });

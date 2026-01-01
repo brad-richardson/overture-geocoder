@@ -5,7 +5,6 @@ import {
   GeocoderTimeoutError,
   GeocoderNetworkError,
   geocode,
-  lookup,
   clearCatalogCache,
 } from "./index";
 
@@ -191,90 +190,6 @@ describe("OvertureGeocoder", () => {
       expect(result.type).toBe("FeatureCollection");
       expect(result.features).toHaveLength(1);
       expect(result.features[0].geometry.type).toBe("Point");
-    });
-  });
-
-  describe("lookup", () => {
-    it("should lookup single GERS ID", async () => {
-      const mockFetch = createMockFetch([mockSearchResults[0]]);
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const results = await client.lookup("abc-123");
-
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("/lookup?");
-      expect(url).toContain("gers_ids=abc-123");
-
-      expect(results).toHaveLength(1);
-      expect(results[0].gers_id).toBe("abc-123");
-    });
-
-    it("should lookup multiple GERS IDs", async () => {
-      const mockFetch = createMockFetch(mockSearchResults);
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const results = await client.lookup(["abc-123", "def-456"]);
-
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("gers_ids=abc-123%2Cdef-456");
-
-      expect(results).toHaveLength(2);
-    });
-
-    it("should return empty array for empty input", async () => {
-      const mockFetch = createMockFetch([]);
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const results = await client.lookup([]);
-
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(results).toEqual([]);
-    });
-  });
-
-  describe("lookupGeoJSON", () => {
-    it("should return GeoJSON FeatureCollection", async () => {
-      const mockFetch = createMockFetch(mockGeoJSONResponse);
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const result = await client.lookupGeoJSON("abc-123");
-
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toContain("format=geojson");
-
-      expect(result.type).toBe("FeatureCollection");
-    });
-
-    it("should return empty FeatureCollection for empty input", async () => {
-      const mockFetch = createMockFetch([]);
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const result = await client.lookupGeoJSON([]);
-
-      expect(mockFetch).not.toHaveBeenCalled();
-      expect(result).toEqual({ type: "FeatureCollection", features: [] });
-    });
-  });
-
-  describe("getGeometry", () => {
-    it("should return first feature from lookup", async () => {
-      const mockFetch = createMockFetch(mockGeoJSONResponse);
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const result = await client.getGeometry("abc-123");
-
-      expect(result).toBeDefined();
-      expect(result?.id).toBe("abc-123");
-      expect(result?.geometry.type).toBe("Point");
-    });
-
-    it("should return null when no results", async () => {
-      const mockFetch = createMockFetch({ type: "FeatureCollection", features: [] });
-      const client = new OvertureGeocoder({ fetch: mockFetch });
-
-      const result = await client.getGeometry("nonexistent");
-
-      expect(result).toBeNull();
     });
   });
 
@@ -513,17 +428,6 @@ describe("convenience functions", () => {
     const results = await geocode("123 Main St");
 
     expect(results).toHaveLength(2);
-
-    vi.unstubAllGlobals();
-  });
-
-  it("lookup should use default client", async () => {
-    const mockFetch = createMockFetch([mockSearchResults[0]]);
-    vi.stubGlobal("fetch", mockFetch);
-
-    const results = await lookup("abc-123");
-
-    expect(results).toHaveLength(1);
 
     vi.unstubAllGlobals();
   });

@@ -18,7 +18,6 @@ __all__ = [
     "GeocoderTimeoutError",
     "GeocoderNetworkError",
     "geocode",
-    "lookup",
 ]
 
 # =============================================================================
@@ -261,59 +260,6 @@ class OvertureGeocoder:
         response = self._request_with_retry(f"{self.base_url}/search", params=params)
         return response.json()
 
-    def lookup(
-        self,
-        gers_ids: str | list[str],
-        *,
-        format: str = "jsonv2",
-    ) -> list[GeocoderResult]:
-        """Lookup features by their GERS IDs.
-
-        Args:
-            gers_ids: Single GERS ID or list of IDs
-            format: Response format ('json', 'jsonv2', 'geojson')
-
-        Returns:
-            List of GeocoderResult objects
-        """
-        ids = [gers_ids] if isinstance(gers_ids, str) else gers_ids
-        if not ids:
-            return []
-
-        params = {
-            "gers_ids": ",".join(ids),
-            "format": format,
-        }
-
-        response = self._request_with_retry(f"{self.base_url}/lookup", params=params)
-        data = response.json()
-
-        if format == "geojson":
-            return data  # type: ignore
-
-        return self._parse_results(data, include_geocoder=True)
-
-    def lookup_geojson(self, gers_ids: str | list[str]) -> dict[str, Any]:
-        """Lookup features and return as GeoJSON FeatureCollection.
-
-        Args:
-            gers_ids: Single GERS ID or list of IDs
-
-        Returns:
-            GeoJSON FeatureCollection dict
-        """
-        ids = [gers_ids] if isinstance(gers_ids, str) else gers_ids
-        if not ids:
-            return {"type": "FeatureCollection", "features": []}
-
-        params = {
-            "gers_ids": ",".join(ids),
-            "format": "geojson",
-        }
-
-        response = self._request_with_retry(f"{self.base_url}/lookup", params=params)
-        return response.json()
-
     def get_geometry(self, gers_id: str) -> Optional[dict[str, Any]]:
         """Fetch full geometry from Overture S3 via the overturemaps-py library.
 
@@ -509,17 +455,3 @@ def geocode(query: str, **kwargs: Any) -> list[GeocoderResult]:
     """
     with OvertureGeocoder() as client:
         return client.search(query, **kwargs)
-
-
-def lookup(gers_ids: str | list[str], **kwargs: Any) -> list[GeocoderResult]:
-    """Quick lookup function using default settings.
-
-    Args:
-        gers_ids: Single GERS ID or list of IDs
-        **kwargs: Additional arguments passed to lookup()
-
-    Returns:
-        List of GeocoderResult objects
-    """
-    with OvertureGeocoder() as client:
-        return client.lookup(gers_ids, **kwargs)

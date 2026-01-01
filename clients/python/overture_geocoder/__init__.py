@@ -8,7 +8,6 @@ from .client import (
     GeocoderTimeoutError,
     GeocoderNetworkError,
     geocode,
-    lookup,
 )
 
 __version__ = "0.1.0"
@@ -20,5 +19,4 @@ __all__ = [
     "GeocoderTimeoutError",
     "GeocoderNetworkError",
     "geocode",
-    "lookup",
 ]

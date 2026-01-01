@@ -15,7 +15,6 @@ from overture_geocoder import (
     GeocoderTimeoutError,
     GeocoderNetworkError,
     geocode,
-    lookup,
 )
 
 
@@ -183,85 +182,6 @@ class TestSearchGeoJSON:
         assert result["type"] == "FeatureCollection"
         assert len(result["features"]) == 1
         assert result["features"][0]["geometry"]["type"] == "Point"
-
-
-class TestLookup:
-    """Tests for lookup functionality."""
-
-    def test_lookup_single_gers_id(self, mock_search_results):
-        """Should lookup single GERS ID."""
-        mock_response = MagicMock()
-        mock_response.is_success = True
-        mock_response.json.return_value = [mock_search_results[0]]
-
-        mock_client = MagicMock()
-        mock_client.get.return_value = mock_response
-
-        client = OvertureGeocoder(http_client=mock_client)
-        results = client.lookup("abc-123")
-
-        call_args = mock_client.get.call_args
-        assert "/lookup" in call_args[0][0]
-        assert call_args[1]["params"]["gers_ids"] == "abc-123"
-
-        assert len(results) == 1
-        assert results[0].gers_id == "abc-123"
-
-    def test_lookup_multiple_gers_ids(self, mock_search_results):
-        """Should lookup multiple GERS IDs."""
-        mock_response = MagicMock()
-        mock_response.is_success = True
-        mock_response.json.return_value = mock_search_results
-
-        mock_client = MagicMock()
-        mock_client.get.return_value = mock_response
-
-        client = OvertureGeocoder(http_client=mock_client)
-        results = client.lookup(["abc-123", "def-456"])
-
-        call_args = mock_client.get.call_args
-        assert call_args[1]["params"]["gers_ids"] == "abc-123,def-456"
-
-        assert len(results) == 2
-
-    def test_lookup_empty_list(self):
-        """Should return empty list for empty input."""
-        mock_client = MagicMock()
-        client = OvertureGeocoder(http_client=mock_client)
-        results = client.lookup([])
-
-        mock_client.get.assert_not_called()
-        assert results == []
-
-
-class TestLookupGeoJSON:
-    """Tests for lookupGeoJSON functionality."""
-
-    def test_returns_geojson_feature_collection(self, mock_geojson_response):
-        """Should return GeoJSON FeatureCollection."""
-        mock_response = MagicMock()
-        mock_response.is_success = True
-        mock_response.json.return_value = mock_geojson_response
-
-        mock_client = MagicMock()
-        mock_client.get.return_value = mock_response
-
-        client = OvertureGeocoder(http_client=mock_client)
-        result = client.lookup_geojson("abc-123")
-
-        call_args = mock_client.get.call_args
-        assert call_args[1]["params"]["format"] == "geojson"
-
-        assert result["type"] == "FeatureCollection"
-
-    def test_returns_empty_for_empty_input(self):
-        """Should return empty FeatureCollection for empty input."""
-        mock_client = MagicMock()
-        client = OvertureGeocoder(http_client=mock_client)
-        result = client.lookup_geojson([])
-
-        mock_client.get.assert_not_called()
-        assert result == {"type": "FeatureCollection", "features": []}
 
 
 class TestErrorHandling:
@@ -509,20 +429,3 @@ class TestConvenienceFunctions:
             results = geocode("123 Main St")
 
             assert len(results) == 2
-
-    def test_lookup_function(self, mock_search_results):
-        """Should use default client for lookup."""
-        mock_response = MagicMock()
-        mock_response.is_success = True
-        mock_response.json.return_value = [mock_search_results[0]]
-
-        with patch("httpx.Client") as mock_client_class:
-            mock_instance = MagicMock()
-            mock_instance.get.return_value = mock_response
-            mock_instance.__enter__ = MagicMock(return_value=mock_instance)
-            mock_instance.__exit__ = MagicMock(return_value=False)
-            mock_client_class.return_value = mock_instance
-
-            results = lookup("abc-123")
-
-            assert len(results) == 1
