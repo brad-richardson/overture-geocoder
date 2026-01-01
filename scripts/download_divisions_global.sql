@@ -1,8 +1,10 @@
 -- Download Overture Maps divisions globally
--- Run with: duckdb < scripts/download_divisions_global.sql
+-- Run with: ./scripts/download_divisions.sh (fetches latest release automatically)
 --
 -- Output: exports/divisions-global.parquet
 -- Expected: ~4.3M records
+--
+-- Note: __OVERTURE_RELEASE__ is substituted at runtime with the latest release
 
 -- Install and load required extensions
 INSTALL httpfs;
@@ -52,7 +54,7 @@ COPY (
             COALESCE(ARRAY_TO_STRING(MAP_VALUES(names.common), ' '), '')
         )) as search_text
     FROM read_parquet(
-        's3://overturemaps-us-west-2/release/2025-12-17.0/theme=divisions/type=division/*',
+        's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
         hive_partitioning = true
     )
     WHERE subtype IN ('locality', 'localadmin', 'neighborhood', 'macrohood', 'county')

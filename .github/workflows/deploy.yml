@@ -31,9 +31,7 @@ jobs:
         run: pip install duckdb
 
       - name: Download global divisions from Overture
-        run: |
-          mkdir -p exports
-          duckdb < scripts/download_divisions_global.sql
+        run: ./scripts/download_divisions.sh
 
       - name: Build divisions index
         run: |
