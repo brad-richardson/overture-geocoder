@@ -17,9 +17,14 @@ build/
 
 # SQLite indexes (generated, large)
 *.db
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite3
 indexes/
+
+# Exception: test fixture (small, needed for CI)
+!tests/fixtures/test.db
 
 # Parquet exports (generated, large)
 exports/

@@ -6,11 +6,14 @@
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
     "d1:create": "wrangler d1 create geocoder-us-ma",
-    "d1:upload": "wrangler d1 execute geocoder-us-ma --file=indexes/US-MA.sql"
+    "d1:upload": "wrangler d1 execute geocoder-us-ma --file=indexes/US-MA.sql",
+    "test": "vitest",
+    "test:e2e": "vitest run tests/e2e"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20241218.0",
     "typescript": "^5.3.3",
+    "vitest": "^4.0.16",
     "wrangler": "^3.99.0"
   }
 }
