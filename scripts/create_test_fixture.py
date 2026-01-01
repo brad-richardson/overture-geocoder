@@ -15,6 +15,7 @@ from pathlib import Path
 
 
 # Test data for divisions (matches what tests expect)
+# search_text includes hierarchy to match production data format
 DIVISIONS_DATA = [
     # Boston - locality with high population (should rank first for "boston")
     {
@@ -30,9 +31,9 @@ DIVISIONS_DATA = [
         "population": 675647,
         "country": "US",
         "region": "US-MA",
-        "search_text": "boston",
+        "search_text": "boston massachusetts united states ma us suffolk county",
     },
-    # Cambridge - locality
+    # Cambridge, MA - locality (for disambiguation with Cambridge UK)
     {
         "gers_id": "e66a9243-9cc5-40a8-a44e-363f9721113f",
         "type": "locality",
@@ -46,7 +47,7 @@ DIVISIONS_DATA = [
         "population": 105162,
         "country": "US",
         "region": "US-MA",
-        "search_text": "cambridge",
+        "search_text": "cambridge massachusetts united states ma us middlesex county",
     },
     # Worcester County - higher population than city
     {
@@ -62,7 +63,7 @@ DIVISIONS_DATA = [
         "population": 862111,
         "country": "US",
         "region": "US-MA",
-        "search_text": "worcester county",
+        "search_text": "worcester county massachusetts united states ma us",
     },
     # Worcester City - lower population than county
     {
@@ -78,7 +79,7 @@ DIVISIONS_DATA = [
         "population": 206518,
         "country": "US",
         "region": "US-MA",
-        "search_text": "worcester",
+        "search_text": "worcester massachusetts united states ma us",
     },
     # Boston neighborhoods (macrohood)
     {
@@ -94,7 +95,7 @@ DIVISIONS_DATA = [
         "population": None,
         "country": "US",
         "region": "US-MA",
-        "search_text": "south boston southie",
+        "search_text": "south boston southie massachusetts united states ma us",
     },
     {
         "gers_id": "c2345678-90ab-cdef-1234-567890abcdef",
@@ -109,7 +110,88 @@ DIVISIONS_DATA = [
         "population": None,
         "country": "US",
         "region": "US-MA",
-        "search_text": "east boston eastie",
+        "search_text": "east boston eastie massachusetts united states ma us",
+    },
+    # === International cities ===
+    # Paris, France
+    {
+        "gers_id": "paris-france-001",
+        "type": "locality",
+        "primary_name": "Paris",
+        "lat": 48.8566,
+        "lon": 2.3522,
+        "bbox_xmin": 2.2241,
+        "bbox_ymin": 48.8156,
+        "bbox_xmax": 2.4699,
+        "bbox_ymax": 48.9022,
+        "population": 2161000,
+        "country": "FR",
+        "region": None,
+        "search_text": "paris france île-de-france fr europe",
+    },
+    # New York City (with alternate names)
+    {
+        "gers_id": "nyc-001",
+        "type": "locality",
+        "primary_name": "New York City, NY",
+        "lat": 40.7128,
+        "lon": -74.0060,
+        "bbox_xmin": -74.2591,
+        "bbox_ymin": 40.4774,
+        "bbox_xmax": -73.7004,
+        "bbox_ymax": 40.9176,
+        "population": 8336817,
+        "country": "US",
+        "region": "US-NY",
+        "search_text": "new york city nyc ny new york united states us big apple manhattan",
+    },
+    # London, UK
+    {
+        "gers_id": "london-uk-001",
+        "type": "locality",
+        "primary_name": "London",
+        "lat": 51.5074,
+        "lon": -0.1278,
+        "bbox_xmin": -0.5103,
+        "bbox_ymin": 51.2868,
+        "bbox_xmax": 0.3340,
+        "bbox_ymax": 51.6919,
+        "population": 8982000,
+        "country": "GB",
+        "region": None,
+        "search_text": "london england united kingdom uk gb great britain",
+    },
+    # Tokyo, Japan
+    {
+        "gers_id": "tokyo-001",
+        "type": "locality",
+        "primary_name": "Tokyo",
+        "lat": 35.6762,
+        "lon": 139.6503,
+        "bbox_xmin": 138.9428,
+        "bbox_ymin": 35.5006,
+        "bbox_xmax": 139.9200,
+        "bbox_ymax": 35.8984,
+        "population": 13960000,
+        "country": "JP",
+        "region": None,
+        "search_text": "tokyo japan jp 東京",
+    },
+    # Cambridge, UK (for disambiguation with Cambridge MA)
+    {
+        "gers_id": "cambridge-uk-001",
+        "type": "locality",
+        "primary_name": "Cambridge",
+        "lat": 52.2053,
+        "lon": 0.1218,
+        "bbox_xmin": 0.0469,
+        "bbox_ymin": 52.1551,
+        "bbox_xmax": 0.1922,
+        "bbox_ymax": 52.2371,
+        "population": 145700,
+        "country": "GB",
+        "region": None,
+        "search_text": "cambridge england united kingdom uk gb cambridgeshire",
     },
 ]
 

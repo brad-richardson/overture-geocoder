@@ -123,21 +123,23 @@ function getAddressDatabases(env: Env, _query: string): D1Database[] {
  * Handles common query patterns and escapes special characters.
  */
 function prepareFtsQuery(query: string): string {
-  return (
-    query
-      .toLowerCase()
-      // Remove punctuation except hyphens and Unicode letters/numbers
-      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
-      // Collapse whitespace
-      .replace(/\s+/g, " ")
-      .trim()
-      // Split into tokens and filter empty
-      .split(" ")
-      .filter((t) => t.length > 0)
-      // Quote each token to handle special characters
-      .map((t) => `"${t}"`)
-      .join(" ")
-  );
+  const tokens = query
+    .toLowerCase()
+    // Remove punctuation except hyphens and Unicode letters/numbers
+    .replace(/[^\p{L}\p{N}\s-]/gu, " ")
+    // Collapse whitespace
+    .replace(/\s+/g, " ")
+    .trim()
+    // Split into tokens and filter empty
+    .split(" ")
+    .filter((t) => t.length > 0);
+
+  if (tokens.length === 0) return "";
+
+  // Quote each token, and add prefix wildcard to last token for autocomplete
+  return tokens
+    .map((t, i) => (i === tokens.length - 1 ? `"${t}"*` : `"${t}"`))
+    .join(" ");
 }
 
 /**
