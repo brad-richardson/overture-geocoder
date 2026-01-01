@@ -5,7 +5,9 @@
  */
 
 export interface Env {
-  // D1 database bindings (one per state)
+  // Global divisions database
+  DB_DIVISIONS: D1Database;
+  // State-specific address databases
   DB_MA: D1Database;
   // Add more states as needed:
   // DB_CA: D1Database;
@@ -51,11 +53,28 @@ interface FeatureRow {
   boosted_score: number;
 }
 
+interface DivisionRow {
+  rowid: number;
+  gers_id: string;
+  type: string;
+  display_name: string;
+  lat: number;
+  lon: number;
+  bbox_xmin: number;
+  bbox_ymin: number;
+  bbox_xmax: number;
+  bbox_ymax: number;
+  population?: number;
+  country?: string;
+  region?: string;
+  boosted_score: number;
+}
+
 /**
- * Get database bindings based on query analysis.
+ * Get address database bindings based on query analysis.
  * For now, only MA is supported.
  */
-function getDatabases(env: Env, _query: string): D1Database[] {
+function getAddressDatabases(env: Env, _query: string): D1Database[] {
   // TODO: Add state detection from query
   // For now, just return MA
   const dbs: D1Database[] = [];
@@ -71,8 +90,8 @@ function prepareFtsQuery(query: string): string {
   return (
     query
       .toLowerCase()
-      // Remove punctuation except hyphens in addresses
-      .replace(/[^\w\s-]/g, " ")
+      // Remove punctuation except hyphens and Unicode letters/numbers
+      .replace(/[^\p{L}\p{N}\s-]/gu, " ")
       // Collapse whitespace
       .replace(/\s+/g, " ")
       .trim()
@@ -86,9 +105,75 @@ function prepareFtsQuery(query: string): string {
 }
 
 /**
- * Search features (addresses and divisions) using FTS5.
+ * Search global divisions database using FTS5.
  */
-async function searchFeatures(
+async function searchDivisions(
+  db: D1Database | undefined,
+  query: string,
+  limit: number
+): Promise<GeocoderResult[]> {
+  if (!db) return [];
+
+  const ftsQuery = prepareFtsQuery(query);
+  if (!ftsQuery) return [];
+
+  try {
+    // Use population-based boosted ranking for divisions
+    const stmt = db.prepare(`
+      SELECT
+        d.rowid,
+        d.gers_id,
+        d.type,
+        d.display_name,
+        d.lat,
+        d.lon,
+        d.bbox_xmin,
+        d.bbox_ymin,
+        d.bbox_xmax,
+        d.bbox_ymax,
+        d.population,
+        d.country,
+        d.region,
+        CASE
+          WHEN d.population IS NOT NULL
+          THEN bm25(divisions_fts) - (LOG(d.population + 1) * 2.0)
+          ELSE bm25(divisions_fts) - 2.0
+        END as boosted_score
+      FROM divisions_fts
+      JOIN divisions d ON divisions_fts.rowid = d.rowid
+      WHERE divisions_fts MATCH ?
+      ORDER BY boosted_score
+      LIMIT ?
+    `);
+
+    const result = await stmt.bind(ftsQuery, limit).all<DivisionRow>();
+
+    return (result.results || []).map((row) => ({
+      gers_id: row.gers_id,
+      display_name: row.display_name,
+      lat: row.lat.toFixed(7),
+      lon: row.lon.toFixed(7),
+      boundingbox: [
+        row.bbox_ymin.toFixed(7),
+        row.bbox_ymax.toFixed(7),
+        row.bbox_xmin.toFixed(7),
+        row.bbox_xmax.toFixed(7),
+      ],
+      // boosted_score is negative (lower = better match + higher population)
+      // Convert to 0-1 importance: more negative = higher importance
+      importance: Math.max(0, Math.min(1, -row.boosted_score / 50)),
+      type: row.type,
+    }));
+  } catch (e) {
+    console.error("Division search error:", e);
+    return [];
+  }
+}
+
+/**
+ * Search address databases using FTS5.
+ */
+async function searchAddresses(
   dbs: D1Database[],
   query: string,
   limit: number,
@@ -102,11 +187,6 @@ async function searchFeatures(
   // Query each database in parallel
   const promises = dbs.map(async (db) => {
     try {
-      // Use population-based boosted ranking:
-      // - BM25 returns negative scores (more negative = better match)
-      // - For divisions with population, subtract LOG(population)*2 to boost higher
-      // - For divisions without population, subtract 2.0 as base boost
-      // - Addresses get no boost (raw BM25 score)
       const stmt = db.prepare(`
         SELECT
           f.rowid,
@@ -139,7 +219,7 @@ async function searchFeatures(
 
       return await stmt.bind(ftsQuery, limit).all<FeatureRow>();
     } catch (e) {
-      console.error("Search error:", e);
+      console.error("Address search error:", e);
       return { results: [] };
     }
   });
@@ -161,14 +241,13 @@ async function searchFeatures(
             row.bbox_xmin.toFixed(7),
             row.bbox_xmax.toFixed(7),
           ],
-          // Boosted score is negative, lower is better
-          importance: Math.min(1, Math.max(0, 1 + row.boosted_score / 20)),
+          // boosted_score is negative (lower = better match + higher population)
+          // Convert to 0-1 importance: more negative = higher importance
+          importance: Math.max(0, Math.min(1, -row.boosted_score / 50)),
           type: row.type,
         };
 
         if (addressdetails && row.type === "address") {
-          // Parse display_name to extract address components
-          // Format: "123 Main St, Boston, MA 02101"
           const parts = row.display_name.split(", ");
           geocoderResult.address = {
             road: parts[0]?.replace(/^\d+\s+/, "") || undefined,
@@ -186,9 +265,7 @@ async function searchFeatures(
     }
   }
 
-  // Results are already sorted by boosted_score (ascending = best first)
-  // Just slice to limit
-  return results.slice(0, limit);
+  return results;
 }
 
 /**
@@ -216,15 +293,19 @@ async function handleSearch(
     return jsonResponse([]);
   }
 
-  const dbs = getDatabases(env, q);
-  if (dbs.length === 0) {
-    return jsonResponse(
-      { error: "No database available" },
-      400
-    );
-  }
+  // Search both divisions and addresses in parallel
+  const addressDbs = getAddressDatabases(env, q);
 
-  const results = await searchFeatures(dbs, q, limit, addressdetails);
+  const [divisionResults, addressResults] = await Promise.all([
+    searchDivisions(env.DB_DIVISIONS, q, limit),
+    searchAddresses(addressDbs, q, limit, addressdetails),
+  ]);
+
+  // Merge results: divisions first (higher priority), then addresses
+  // Sort by importance (boosted score), take top N
+  const results = [...divisionResults, ...addressResults]
+    .sort((a, b) => b.importance - a.importance)
+    .slice(0, limit);
 
   // Handle different output formats
   if (format === "geojson") {
@@ -272,59 +353,113 @@ async function handleLookup(
     return jsonResponse([]);
   }
 
-  // For now, just search in MA database
-  const db = env.DB_MA;
-  if (!db) {
-    return jsonResponse({ error: "No database available" }, 400);
+  const results: GeocoderResult[] = [];
+  const placeholders = gersIds.map(() => "?").join(",");
+
+  // Search divisions database
+  if (env.DB_DIVISIONS) {
+    try {
+      const divResult = await env.DB_DIVISIONS
+        .prepare(
+          `
+          SELECT
+            rowid,
+            gers_id,
+            type,
+            display_name,
+            lat,
+            lon,
+            bbox_xmin,
+            bbox_ymin,
+            bbox_xmax,
+            bbox_ymax,
+            population,
+            country,
+            region
+          FROM divisions
+          WHERE gers_id IN (${placeholders})
+        `
+        )
+        .bind(...gersIds)
+        .all<DivisionRow>();
+
+      for (const row of divResult.results || []) {
+        results.push({
+          gers_id: row.gers_id,
+          display_name: row.display_name,
+          lat: row.lat.toFixed(7),
+          lon: row.lon.toFixed(7),
+          boundingbox: [
+            row.bbox_ymin.toFixed(7),
+            row.bbox_ymax.toFixed(7),
+            row.bbox_xmin.toFixed(7),
+            row.bbox_xmax.toFixed(7),
+          ],
+          importance: 1,
+          type: row.type,
+        });
+      }
+    } catch (e) {
+      console.error("Division lookup error:", e);
+    }
   }
 
-  const placeholders = gersIds.map(() => "?").join(",");
-  const result = await db
-    .prepare(
-      `
-      SELECT
-        rowid,
-        gers_id,
-        type,
-        display_name,
-        lat,
-        lon,
-        bbox_xmin,
-        bbox_ymin,
-        bbox_xmax,
-        bbox_ymax,
-        population,
-        city,
-        state,
-        postcode
-      FROM features
-      WHERE gers_id IN (${placeholders})
-    `
-    )
-    .bind(...gersIds)
-    .all<FeatureRow>();
+  // Search address databases
+  const addressDbs = getAddressDatabases(env, "");
+  for (const db of addressDbs) {
+    try {
+      const addrResult = await db
+        .prepare(
+          `
+          SELECT
+            rowid,
+            gers_id,
+            type,
+            display_name,
+            lat,
+            lon,
+            bbox_xmin,
+            bbox_ymin,
+            bbox_xmax,
+            bbox_ymax,
+            population,
+            city,
+            state,
+            postcode
+          FROM features
+          WHERE gers_id IN (${placeholders})
+        `
+        )
+        .bind(...gersIds)
+        .all<FeatureRow>();
 
-  const results: GeocoderResult[] = (result.results || []).map((row) => ({
-    gers_id: row.gers_id,
-    display_name: row.display_name,
-    lat: row.lat.toFixed(7),
-    lon: row.lon.toFixed(7),
-    boundingbox: [
-      row.bbox_ymin.toFixed(7),
-      row.bbox_ymax.toFixed(7),
-      row.bbox_xmin.toFixed(7),
-      row.bbox_xmax.toFixed(7),
-    ],
-    importance: 1,
-    type: row.type,
-    address: row.type === "address" ? {
-      city: row.city || undefined,
-      state: row.state || undefined,
-      postcode: row.postcode || undefined,
-      country: "United States",
-      country_code: "us",
-    } : undefined,
-  }));
+      for (const row of addrResult.results || []) {
+        results.push({
+          gers_id: row.gers_id,
+          display_name: row.display_name,
+          lat: row.lat.toFixed(7),
+          lon: row.lon.toFixed(7),
+          boundingbox: [
+            row.bbox_ymin.toFixed(7),
+            row.bbox_ymax.toFixed(7),
+            row.bbox_xmin.toFixed(7),
+            row.bbox_xmax.toFixed(7),
+          ],
+          importance: 1,
+          type: row.type,
+          address: row.type === "address" ? {
+            city: row.city || undefined,
+            state: row.state || undefined,
+            postcode: row.postcode || undefined,
+            country: "United States",
+            country_code: "us",
+          } : undefined,
+        });
+      }
+    } catch (e) {
+      console.error("Address lookup error:", e);
+    }
+  }
 
   if (format === "geojson") {
     return jsonResponse({
