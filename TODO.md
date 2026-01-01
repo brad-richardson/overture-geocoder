@@ -5,7 +5,7 @@
 ### Indexing Pipeline
 - [x] Set up DuckDB extraction script (`scripts/download_addresses.sql`)
 - [x] Filter Overture addresses for Massachusetts
-- [x] Build display_name and search_text transformations
+- [x] Build primary_name and search_text transformations
 - [x] Export to Parquet with ZSTD compression
 - [x] Create SQLite FTS5 index builder (`scripts/build_index.py`)
 - [x] Generate `indexes/US-MA.db`
@@ -15,14 +15,15 @@
 - [x] Initialize Wrangler project
 - [x] Create `/search` endpoint
 - [x] Implement FTS5 query with BM25 ranking
-- [ ] Add query parameter parsing (limit, viewbox, bounded)
-- [ ] Deploy to Cloudflare Workers
-- [ ] Upload MA index to D1 (see D1 Data Sync section)
+- [x] Add limit parameter
+- [ ] Add viewbox/bounded filtering
+- [x] Deploy to Cloudflare Workers
+- [x] Upload divisions index to D1
 
 ### Divisions Support (Priority!)
 - [x] Add STAC client for dynamic release discovery
-- [x] Extract Overture divisions for MA (localities, neighborhoods)
-- [x] Add divisions table with FTS to index (unified `features` table)
+- [x] Extract Overture divisions globally (localities, neighborhoods, counties)
+- [x] Add divisions table with FTS to index
 - [x] Update search to query both divisions and addresses
 - [x] Rank divisions higher than addresses (cities before street addresses)
 - [x] Include population in ranking
@@ -71,7 +72,7 @@
 ## Infrastructure
 
 - [x] Add STAC client (`stac.overturemaps.org`) for dynamic release discovery
-- [ ] Auto-detect latest Overture release in scripts
+- [x] Auto-detect latest Overture release in scripts (`download_divisions.sh` fetches from STAC)
 - [x] Set up GitHub Actions for CI/CD
 
 ### D1 Data Sync
