@@ -1,0 +1,74 @@
+name: Test Client Libraries
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'clients/**'
+      - '.github/workflows/test-clients.yml'
+  pull_request:
+    paths:
+      - 'clients/**'
+      - '.github/workflows/test-clients.yml'
+
+jobs:
+  test-js:
+    name: Test JavaScript/TypeScript Client
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: clients/js/package-lock.json
+
+      - name: Install dependencies
+        working-directory: clients/js
+        run: npm ci
+
+      - name: Run type check
+        working-directory: clients/js
+        run: npm run typecheck
+
+      - name: Run tests
+        working-directory: clients/js
+        run: npm run test:ci
+
+      - name: Build package
+        working-directory: clients/js
+        run: npm run build
+
+  test-python:
+    name: Test Python Client
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.9', '3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install dependencies
+        working-directory: clients/python
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run tests
+        working-directory: clients/python
+        run: pytest tests/ -v
+
+      - name: Build package
+        working-directory: clients/python
+        run: pip install build && python -m build
