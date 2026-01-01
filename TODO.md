@@ -33,6 +33,9 @@
 - [x] Add E2E tests for division types (locality, neighborhood, county)
 - [x] Add E2E tests for address search (123 main → addresses returned)
 - [x] Add E2E tests for /lookup endpoint with GERS IDs
+- [x] Add E2E tests for international cities (Paris, NYC, London, Tokyo)
+- [x] Add E2E tests for autocomplete/prefix matching
+- [x] Add E2E tests for case insensitivity
 
 ### Python Client
 - [x] Create package structure (`clients/python/`)
@@ -44,8 +47,9 @@
 ### JavaScript Client
 - [x] Create package structure (`clients/js/`)
 - [x] Implement browser + Node.js client
-- [x] Add DuckDB-WASM support for client-side geometry (STAC + getFullGeometry)
-- [x] Write basic tests (45 tests)
+- [x] Add geometry fetching via `@bradrichardson/overturemaps` package
+- [x] Add reverse geocoding support
+- [x] Write basic tests (22 tests)
 - [ ] Publish to npm (optional)
 
 ## Phase 2: Full US Coverage
@@ -58,10 +62,12 @@
 
 ## Phase 3: Reverse Geocoding
 
-- [ ] Add H3 spatial index to address schema
-- [ ] Implement `/reverse` endpoint
-- [ ] Add H3 cell query with neighbor expansion
-- [ ] Distance-based ranking for results
+- [x] Build divisions reverse index with bbox and hierarchy
+- [x] Implement `/reverse` endpoint for divisions
+- [x] Add hierarchy information (parent divisions)
+- [x] Confidence levels (exact polygon, bbox, approximate)
+- [ ] Add H3 spatial index for address reverse geocoding
+- [ ] Distance-based ranking for address results
 
 ## Phase 4: Places (POIs)
 
@@ -79,13 +85,15 @@
 - [x] Add SQL export script with chunked output (`scripts/export_to_sql.py`)
 - [x] Add UNIQUE constraint on gers_id for upsert support
 - [x] Add FTS5 triggers for automatic index updates
-- [ ] Add --diff mode to export script (fetch remote GERS IDs, export only new records)
-- [ ] Add content hash column for detecting changed records
-- [ ] Paginated GERS ID fetch for large databases
+- [x] Add differential update script (`scripts/diff_and_update.py`)
+- [x] Add version-based change detection
+- [x] Add `--force-all` flag for schema/logic changes
+- [x] Create composite action for D1 updates (`.github/actions/apply-d1-updates`)
+- [x] Add `force_full_rebuild` workflow trigger for drop+recreate
 
 ## Stretch Goals
 
-- [ ] Add address autocomplete endpoint (`/autocomplete`)
+- [x] Add autocomplete support (prefix matching via `autocomplete` parameter)
 - [ ] Implement structured query parsing (street, city, state fields)
 - [ ] Add batch geocoding endpoint
 - [ ] Create OpenAPI/Swagger documentation

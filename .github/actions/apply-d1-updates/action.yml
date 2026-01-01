@@ -1,0 +1,114 @@
+name: 'Apply D1 Updates'
+description: 'Apply differential or full updates to a Cloudflare D1 database'
+
+inputs:
+  database-name:
+    description: 'D1 database name (e.g., geocoder-divisions-global)'
+    required: true
+  index-path:
+    description: 'Path to the SQLite index file (e.g., indexes/divisions-global.db)'
+    required: true
+  diff-path:
+    description: 'Path to the diff SQL files (e.g., exports/diff)'
+    required: true
+  table-name:
+    description: 'Table name for export (divisions or divisions_reverse)'
+    required: true
+  force-full-rebuild:
+    description: 'Force full schema + data rebuild'
+    required: false
+    default: 'false'
+  has-changes:
+    description: 'Whether there are changes to apply'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Show diff stats
+      if: inputs.has-changes == 'true'
+      shell: bash
+      run: |
+        echo "Diff stats for ${{ inputs.database-name }}:"
+        cat ${{ inputs.diff-path }}/stats.json
+
+    - name: Check if full rebuild needed
+      if: inputs.has-changes == 'true'
+      id: check-rebuild
+      shell: bash
+      run: |
+        # Force full rebuild if requested
+        if [ "${{ inputs.force-full-rebuild }}" = "true" ]; then
+          echo "Force full rebuild requested"
+          echo "full_rebuild=true" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+
+        # Check if this is an initial deployment (all inserts, no unchanged)
+        INSERTS=$(jq '.inserts' ${{ inputs.diff-path }}/stats.json)
+        UNCHANGED=$(jq '.unchanged' ${{ inputs.diff-path }}/stats.json)
+        TOTAL_NEW=$(jq '.total_new' ${{ inputs.diff-path }}/stats.json)
+
+        if [ "$UNCHANGED" -eq 0 ] && [ "$INSERTS" -eq "$TOTAL_NEW" ] && [ "$INSERTS" -gt 0 ]; then
+          echo "Initial deployment detected"
+          echo "full_rebuild=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "Incremental update"
+          echo "full_rebuild=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Export full SQL (for full rebuild)
+      if: inputs.has-changes == 'true' && steps.check-rebuild.outputs.full_rebuild == 'true'
+      shell: bash
+      run: |
+        python scripts/export_to_sql.py \
+          ${{ inputs.index-path }} \
+          ${{ inputs.diff-path }}-full \
+          --table ${{ inputs.table-name }}
+
+    - name: Apply schema (full rebuild)
+      if: inputs.has-changes == 'true' && steps.check-rebuild.outputs.full_rebuild == 'true'
+      shell: bash
+      run: |
+        echo "Applying schema to ${{ inputs.database-name }}..."
+        npx wrangler d1 execute ${{ inputs.database-name }} \
+          --remote \
+          --file=${{ inputs.diff-path }}-full/schema.sql
+
+    - name: Apply full data (full rebuild)
+      if: inputs.has-changes == 'true' && steps.check-rebuild.outputs.full_rebuild == 'true'
+      shell: bash
+      run: |
+        for file in ${{ inputs.diff-path }}-full/data-*.sql; do
+          echo "Uploading $file..."
+          npx wrangler d1 execute ${{ inputs.database-name }} \
+            --remote \
+            --file="$file"
+        done
+
+    - name: Apply upserts (incremental)
+      if: inputs.has-changes == 'true' && steps.check-rebuild.outputs.full_rebuild == 'false'
+      shell: bash
+      run: |
+        echo "Applying upserts to ${{ inputs.database-name }}..."
+        npx wrangler d1 execute ${{ inputs.database-name }} \
+          --remote \
+          --file=${{ inputs.diff-path }}/upserts.sql
+
+    - name: Apply deletes (incremental)
+      if: inputs.has-changes == 'true' && steps.check-rebuild.outputs.full_rebuild == 'false'
+      shell: bash
+      run: |
+        echo "Applying deletes to ${{ inputs.database-name }}..."
+        npx wrangler d1 execute ${{ inputs.database-name }} \
+          --remote \
+          --file=${{ inputs.diff-path }}/deletes.sql
+
+    - name: Update metadata
+      if: inputs.has-changes == 'true'
+      shell: bash
+      run: |
+        echo "Updating metadata for ${{ inputs.database-name }}..."
+        npx wrangler d1 execute ${{ inputs.database-name }} \
+          --remote \
+          --file=${{ inputs.diff-path }}/metadata.sql

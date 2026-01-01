@@ -122,8 +122,13 @@ def generate_diff(
     release: str,
     table: str = "divisions",
     chunk_size: int = 10000,
+    force_all: bool = False,
 ) -> dict:
-    """Generate differential SQL updates."""
+    """Generate differential SQL updates.
+
+    Args:
+        force_all: If True, treat all records as updates (for schema/logic changes)
+    """
 
     if not db_path.exists():
         raise FileNotFoundError(f"Database not found: {db_path}")
@@ -142,6 +147,7 @@ def generate_diff(
     # Track stats
     stats = {
         "release": release,
+        "force_all": force_all,
         "total_new": 0,
         "inserts": 0,
         "updates": 0,
@@ -155,7 +161,10 @@ def generate_diff(
     # Open upserts file
     upserts_file = output_dir / "upserts.sql"
     with open(upserts_file, "w") as f:
-        f.write(f"-- Upserts: new and changed records for {table}\n\n")
+        if force_all:
+            f.write(f"-- Force all: updating all records for {table}\n\n")
+        else:
+            f.write(f"-- Upserts: new and changed records for {table}\n\n")
 
         cursor = db.execute(f"SELECT {cols_str} FROM {table}")
 
@@ -174,8 +183,8 @@ def generate_diff(
                 values = ", ".join(format_value(v) for v in row)
                 f.write(f"INSERT OR REPLACE INTO {table} ({cols_str}) VALUES ({values});\n")
                 batch_count += 1
-            elif new_version > prod_version:
-                # Updated record
+            elif force_all or new_version > prod_version:
+                # Updated record (or forced update)
                 stats["updates"] += 1
                 values = ", ".join(format_value(v) for v in row)
                 f.write(f"INSERT OR REPLACE INTO {table} ({cols_str}) VALUES ({values});\n")
@@ -270,12 +279,20 @@ def main():
         action="store_true",
         help="Skip the safety check and allow any change percentage"
     )
+    parser.add_argument(
+        "--force-all",
+        action="store_true",
+        help="Treat all records as updates (for schema/logic changes)"
+    )
 
     args = parser.parse_args()
 
     print(f"Loading production versions from {args.prod_versions}...")
     prod_versions = load_prod_versions(args.prod_versions)
     print(f"  Found {len(prod_versions):,} records in production")
+
+    if args.force_all:
+        print(f"\n⚠️  FORCE ALL: All records will be marked as updates")
 
     print(f"\nGenerating diff from {args.db_path} (table: {args.table})...")
     stats = generate_diff(
@@ -285,6 +302,7 @@ def main():
         release=args.release,
         table=args.table,
         chunk_size=args.chunk_size,
+        force_all=args.force_all,
     )
 
     print(f"\nDiff statistics:")
@@ -303,10 +321,11 @@ def main():
 
     # Safety check: ensure updates + deletes don't exceed threshold
     # (inserts are generally safe - they're new data)
+    # Skip safety check if --force-all since we're intentionally updating everything
     if "destructive_pct" in stats:
         print(f"\n  Destructive changes (updates + deletes): {stats['destructive_changes']:,} ({stats['destructive_pct']:.2f}% of production)")
 
-        if stats["destructive_pct"] > args.max_change_pct and not args.force:
+        if stats["destructive_pct"] > args.max_change_pct and not args.force and not args.force_all:
             print(f"\n❌ SAFETY CHECK FAILED: Destructive changes ({stats['destructive_pct']:.2f}%) exceed threshold ({args.max_change_pct}%)")
             print(f"   This could indicate a data issue or schema change.")
             print(f"   Use --force to override, or --max-change-pct to adjust the threshold.")

@@ -13,6 +13,10 @@ on:
         description: 'Force rebuild with current release (for schema/SQL changes)'
         type: boolean
         default: false
+      force_full_rebuild:
+        description: 'Force full rebuild (drop + recreate tables with all data)'
+        type: boolean
+        default: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -30,6 +34,7 @@ jobs:
       prod_release: ${{ steps.check.outputs.prod_release }}
       release_changed: ${{ steps.check.outputs.release_changed }}
       needs_update: ${{ steps.decide.outputs.needs_update }}
+      force_full_rebuild: ${{ steps.decide.outputs.force_full_rebuild }}
     steps:
       - uses: actions/checkout@v4
 
@@ -63,16 +68,24 @@ jobs:
       - name: Decide if update needed
         id: decide
         run: |
-          if [ "${{ github.event.inputs.force_data_update }}" = "true" ] || \
-             [ "${{ github.event.inputs.force_schema_rebuild }}" = "true" ]; then
+          # Check if force full rebuild requested
+          if [ "${{ github.event.inputs.force_full_rebuild }}" = "true" ]; then
+            echo "Force full rebuild requested"
+            echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            echo "force_full_rebuild=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event.inputs.force_data_update }}" = "true" ] || \
+               [ "${{ github.event.inputs.force_schema_rebuild }}" = "true" ]; then
             echo "Force update requested"
             echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            echo "force_full_rebuild=false" >> "$GITHUB_OUTPUT"
           elif [ "${{ steps.check.outputs.release_changed }}" = "true" ]; then
             echo "Release changed, update needed"
             echo "needs_update=true" >> "$GITHUB_OUTPUT"
+            echo "force_full_rebuild=false" >> "$GITHUB_OUTPUT"
           else
             echo "No update needed"
             echo "needs_update=false" >> "$GITHUB_OUTPUT"
+            echo "force_full_rebuild=false" >> "$GITHUB_OUTPUT"
           fi
 
   build-and-diff:
@@ -128,24 +141,36 @@ jobs:
 
       - name: Generate differential update (forward)
         run: |
+          FORCE_ALL_FLAG=""
+          if [ "${{ needs.check-release.outputs.force_full_rebuild }}" = "true" ]; then
+            FORCE_ALL_FLAG="--force-all"
+          fi
+
           python scripts/diff_and_update.py \
             indexes/divisions-global.db \
             exports/diff \
             --prod-versions prod_versions.csv \
             --release "${{ needs.check-release.outputs.overture_release }}" \
-            --table divisions
+            --table divisions \
+            $FORCE_ALL_FLAG
 
           echo "Forward geocoding diff:"
           cat exports/diff/stats.json
 
       - name: Generate differential update (reverse)
         run: |
+          FORCE_ALL_FLAG=""
+          if [ "${{ needs.check-release.outputs.force_full_rebuild }}" = "true" ]; then
+            FORCE_ALL_FLAG="--force-all"
+          fi
+
           python scripts/diff_and_update.py \
             indexes/divisions-reverse.db \
             exports/diff-reverse \
             --prod-versions prod_versions_reverse.csv \
             --release "${{ needs.check-release.outputs.overture_release }}" \
-            --table divisions_reverse
+            --table divisions_reverse \
+            $FORCE_ALL_FLAG
 
           echo "Reverse geocoding diff:"
           cat exports/diff-reverse/stats.json
@@ -230,6 +255,7 @@ jobs:
       has_changes: ${{ steps.changes.outputs.has_changes }}
       has_forward_changes: ${{ steps.changes.outputs.has_forward_changes }}
       has_reverse_changes: ${{ steps.changes.outputs.has_reverse_changes }}
+      force_full_rebuild: ${{ needs.check-release.outputs.force_full_rebuild }}
 
   apply-updates:
     needs: [check-release, build-and-diff]
@@ -266,109 +292,33 @@ jobs:
           name: diff-sql-reverse
           path: exports/diff-reverse/
 
-      - name: Download full indexes (for initial deployment)
+      - name: Download full indexes (for initial/full rebuild)
         uses: actions/download-artifact@v4
         with:
           name: divisions-indexes
           path: indexes/
 
       # ==================== FORWARD GEOCODING ====================
-      - name: Show forward diff stats
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true'
-        run: |
-          echo "Forward geocoding diff:"
-          cat exports/diff/stats.json
-
-      - name: Check if initial deployment needed (forward)
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true'
-        id: check-initial-forward
-        run: |
-          INSERTS=$(jq '.inserts' exports/diff/stats.json)
-          UNCHANGED=$(jq '.unchanged' exports/diff/stats.json)
-          TOTAL_NEW=$(jq '.total_new' exports/diff/stats.json)
-
-          if [ "$UNCHANGED" -eq 0 ] && [ "$INSERTS" -eq "$TOTAL_NEW" ] && [ "$INSERTS" -gt 0 ]; then
-            echo "Initial deployment detected for forward geocoding"
-            echo "initial_deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Incremental update for forward geocoding"
-            echo "initial_deploy=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Apply schema (forward initial deployment)
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true' && steps.check-initial-forward.outputs.initial_deploy == 'true'
-        run: |
-          python scripts/export_to_sql.py indexes/divisions-global.db exports/full --table divisions
-          npx wrangler d1 execute geocoder-divisions-global --remote --file=exports/full/schema.sql
-
-      - name: Apply full data (forward initial deployment)
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true' && steps.check-initial-forward.outputs.initial_deploy == 'true'
-        run: |
-          for file in exports/full/data-*.sql; do
-            echo "Uploading $file..."
-            npx wrangler d1 execute geocoder-divisions-global --remote --file="$file"
-          done
-
-      - name: Apply upserts (forward incremental)
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true' && steps.check-initial-forward.outputs.initial_deploy == 'false'
-        run: npx wrangler d1 execute geocoder-divisions-global --remote --file=exports/diff/upserts.sql
-
-      - name: Apply deletes (forward incremental)
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true' && steps.check-initial-forward.outputs.initial_deploy == 'false'
-        run: npx wrangler d1 execute geocoder-divisions-global --remote --file=exports/diff/deletes.sql
-
-      - name: Update metadata (forward)
-        if: needs.build-and-diff.outputs.has_forward_changes == 'true'
-        run: npx wrangler d1 execute geocoder-divisions-global --remote --file=exports/diff/metadata.sql
+      - name: Apply forward geocoding updates
+        uses: ./.github/actions/apply-d1-updates
+        with:
+          database-name: geocoder-divisions-global
+          index-path: indexes/divisions-global.db
+          diff-path: exports/diff
+          table-name: divisions
+          force-full-rebuild: ${{ needs.build-and-diff.outputs.force_full_rebuild }}
+          has-changes: ${{ needs.build-and-diff.outputs.has_forward_changes }}
 
       # ==================== REVERSE GEOCODING ====================
-      - name: Show reverse diff stats
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true'
-        run: |
-          echo "Reverse geocoding diff:"
-          cat exports/diff-reverse/stats.json
-
-      - name: Check if initial deployment needed (reverse)
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true'
-        id: check-initial-reverse
-        run: |
-          INSERTS=$(jq '.inserts' exports/diff-reverse/stats.json)
-          UNCHANGED=$(jq '.unchanged' exports/diff-reverse/stats.json)
-          TOTAL_NEW=$(jq '.total_new' exports/diff-reverse/stats.json)
-
-          if [ "$UNCHANGED" -eq 0 ] && [ "$INSERTS" -eq "$TOTAL_NEW" ] && [ "$INSERTS" -gt 0 ]; then
-            echo "Initial deployment detected for reverse geocoding"
-            echo "initial_deploy=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "Incremental update for reverse geocoding"
-            echo "initial_deploy=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Apply schema (reverse initial deployment)
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true' && steps.check-initial-reverse.outputs.initial_deploy == 'true'
-        run: |
-          python scripts/export_to_sql.py indexes/divisions-reverse.db exports/full-reverse --table divisions_reverse
-          npx wrangler d1 execute geocoder-divisions-reverse --remote --file=exports/full-reverse/schema.sql
-
-      - name: Apply full data (reverse initial deployment)
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true' && steps.check-initial-reverse.outputs.initial_deploy == 'true'
-        run: |
-          for file in exports/full-reverse/data-*.sql; do
-            echo "Uploading $file..."
-            npx wrangler d1 execute geocoder-divisions-reverse --remote --file="$file"
-          done
-
-      - name: Apply upserts (reverse incremental)
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true' && steps.check-initial-reverse.outputs.initial_deploy == 'false'
-        run: npx wrangler d1 execute geocoder-divisions-reverse --remote --file=exports/diff-reverse/upserts.sql
-
-      - name: Apply deletes (reverse incremental)
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true' && steps.check-initial-reverse.outputs.initial_deploy == 'false'
-        run: npx wrangler d1 execute geocoder-divisions-reverse --remote --file=exports/diff-reverse/deletes.sql
-
-      - name: Update metadata (reverse)
-        if: needs.build-and-diff.outputs.has_reverse_changes == 'true'
-        run: npx wrangler d1 execute geocoder-divisions-reverse --remote --file=exports/diff-reverse/metadata.sql
+      - name: Apply reverse geocoding updates
+        uses: ./.github/actions/apply-d1-updates
+        with:
+          database-name: geocoder-divisions-reverse
+          index-path: indexes/divisions-reverse.db
+          diff-path: exports/diff-reverse
+          table-name: divisions_reverse
+          force-full-rebuild: ${{ needs.build-and-diff.outputs.force_full_rebuild }}
+          has-changes: ${{ needs.build-and-diff.outputs.has_reverse_changes }}
 
       # ==================== VERIFY ====================
       - name: Verify updates
