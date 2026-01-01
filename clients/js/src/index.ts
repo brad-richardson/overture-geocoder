@@ -22,7 +22,7 @@ export { getStacCatalog, findRegistryFile, getLatestRelease, clearCatalogCache }
 
 export interface GeocoderResult {
   gers_id: string;
-  display_name: string;
+  primary_name: string;
   lat: number;
   lon: number;
   boundingbox: [number, number, number, number];
@@ -561,7 +561,7 @@ export class OvertureGeocoder {
       const record = r as Record<string, unknown>;
       return {
         gers_id: record.gers_id as string,
-        display_name: record.display_name as string,
+        primary_name: record.primary_name as string,
         lat: parseFloat(record.lat as string),
         lon: parseFloat(record.lon as string),
         boundingbox: (record.boundingbox as string[]).map(parseFloat) as [

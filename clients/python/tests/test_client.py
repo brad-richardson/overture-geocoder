@@ -432,7 +432,7 @@ class TestGeocoderResult:
         """Should have correct fields."""
         result = GeocoderResult(
             gers_id="abc-123",
-            display_name="123 Main St",
+            primary_name="123 Main St",
             lat=42.36,
             lon=-71.06,
             boundingbox=[42.35, 42.37, -71.07, -71.05],
@@ -441,7 +441,7 @@ class TestGeocoderResult:
         )
 
         assert result.gers_id == "abc-123"
-        assert result.display_name == "123 Main St"
+        assert result.primary_name == "123 Main St"
         assert result.lat == 42.36
         assert result.lon == -71.06
         assert result.importance == 0.85
@@ -450,7 +450,7 @@ class TestGeocoderResult:
         """Should raise error when getting geometry without geocoder."""
         result = GeocoderResult(
             gers_id="abc-123",
-            display_name="123 Main St",
+            primary_name="123 Main St",
             lat=42.36,
             lon=-71.06,
             boundingbox=[42.35, 42.37, -71.07, -71.05],

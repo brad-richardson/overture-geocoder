@@ -90,7 +90,7 @@ class GeocoderResult:
     """A geocoding result."""
 
     gers_id: str
-    display_name: str
+    primary_name: str
     lat: float
     lon: float
     boundingbox: list[float]
@@ -146,7 +146,7 @@ class OvertureGeocoder:
         >>> client = OvertureGeocoder(base_url="https://api.example.com")
         >>> results = client.search("123 Main St, Boston, MA")
         >>> for r in results:
-        ...     print(f"{r.display_name}: ({r.lat}, {r.lon})")
+        ...     print(f"{r.primary_name}: ({r.lat}, {r.lon})")
     """
 
     def __init__(
@@ -478,7 +478,7 @@ class OvertureGeocoder:
 
             result = GeocoderResult(
                 gers_id=r["gers_id"],
-                display_name=r["display_name"],
+                primary_name=r["primary_name"],
                 lat=float(r["lat"]),
                 lon=float(r["lon"]),
                 boundingbox=[float(b) for b in r["boundingbox"]],

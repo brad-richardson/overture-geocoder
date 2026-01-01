@@ -13,7 +13,7 @@ import {
 const mockSearchResults = [
   {
     gers_id: "abc-123",
-    display_name: "123 Main St, Boston, MA 02101",
+    primary_name: "123 Main St, Boston, MA 02101",
     lat: "42.3601000",
     lon: "-71.0589000",
     boundingbox: ["42.3600000", "42.3602000", "-71.0590000", "-71.0588000"],
@@ -22,7 +22,7 @@ const mockSearchResults = [
   },
   {
     gers_id: "def-456",
-    display_name: "456 Oak Ave, Boston, MA 02102",
+    primary_name: "456 Oak Ave, Boston, MA 02102",
     lat: "42.3611000",
     lon: "-71.0599000",
     boundingbox: ["42.3610000", "42.3612000", "-71.0600000", "-71.0598000"],
@@ -54,7 +54,7 @@ const mockGeoJSONResponse = {
       id: "abc-123",
       properties: {
         gers_id: "abc-123",
-        display_name: "123 Main St, Boston, MA 02101",
+        primary_name: "123 Main St, Boston, MA 02101",
         importance: 0.85,
       },
       bbox: [42.36, 42.3602, -71.059, -71.0588],
