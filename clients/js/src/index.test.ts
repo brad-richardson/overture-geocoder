@@ -81,7 +81,7 @@ describe("OvertureGeocoder", () => {
   describe("constructor", () => {
     it("should use default configuration", () => {
       const client = new OvertureGeocoder();
-      expect(client.getBaseUrl()).toBe("http://localhost:8787");
+      expect(client.getBaseUrl()).toBe("https://overture-geocoder.bradr.workers.dev");
       expect(client.getOvertureRelease()).toBe("2025-12-17.0");
     });
 

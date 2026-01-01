@@ -62,7 +62,7 @@ export interface LookupOptions {
 }
 
 export interface OvertureGeocoderConfig {
-  /** API base URL (default: 'http://localhost:8787') */
+  /** API base URL (default: 'https://overture-geocoder.bradr.workers.dev') */
   baseUrl?: string;
   /** Request timeout in milliseconds (default: 30000) */
   timeout?: number;
@@ -136,7 +136,7 @@ export class GeocoderNetworkError extends GeocoderError {
 // Constants
 // ============================================================================
 
-const DEFAULT_BASE_URL = "http://localhost:8787";
+const DEFAULT_BASE_URL = "https://overture-geocoder.bradr.workers.dev";
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_RETRIES = 0;
 const DEFAULT_RETRY_DELAY = 1000;
