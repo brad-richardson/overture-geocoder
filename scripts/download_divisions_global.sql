@@ -51,33 +51,43 @@ COPY (
                 CONCAT(names.primary, ', ', country)
         END as primary_name,
         -- Search text includes all name variants + enclosing divisions for FTS
-        LOWER(CONCAT_WS(' ',
-            names.primary,
-            -- Common names (multilingual translations)
-            COALESCE(ARRAY_TO_STRING(MAP_VALUES(names.common), ' '), ''),
-            -- All name variants from rules array (official, alternate, short)
-            COALESCE(
-                ARRAY_TO_STRING(
-                    LIST_TRANSFORM(names.rules, r -> r.value),
-                    ' '
-                ),
-                ''
-            ),
-            -- Hierarchy names (enclosing divisions: country, region, county, etc.)
-            COALESCE(
-                ARRAY_TO_STRING(
-                    LIST_TRANSFORM(hierarchies[1], h -> h.name),
-                    ' '
-                ),
-                ''
-            ),
-            -- Region code (e.g., "MA" for US, or full region code)
-            CASE WHEN country = 'US' AND region IS NOT NULL
-                THEN REPLACE(region, 'US-', '')
-                ELSE region
-            END,
-            -- Country code
-            country
+        -- Uses LIST_DISTINCT to remove duplicate words
+        LOWER(ARRAY_TO_STRING(
+            LIST_DISTINCT(
+                LIST_FILTER(
+                    STRING_SPLIT(
+                        CONCAT_WS(' ',
+                            names.primary,
+                            -- Common names (multilingual translations)
+                            COALESCE(ARRAY_TO_STRING(MAP_VALUES(names.common), ' '), ''),
+                            -- All name variants from rules array (official, alternate, short)
+                            COALESCE(
+                                ARRAY_TO_STRING(
+                                    LIST_TRANSFORM(names.rules, r -> r.value),
+                                    ' '
+                                ),
+                                ''
+                            ),
+                            -- Hierarchy names (enclosing divisions: country, region, county, etc.)
+                            COALESCE(
+                                ARRAY_TO_STRING(
+                                    LIST_TRANSFORM(hierarchies[1], h -> h.name),
+                                    ' '
+                                ),
+                                ''
+                            ),
+                            -- Region code (e.g., "MA" for US, or full region code)
+                            CASE WHEN country = 'US' AND region IS NOT NULL
+                                THEN REPLACE(region, 'US-', '')
+                                ELSE region
+                            END,
+                            -- Country code
+                            country
+                        ), ' '
+                    ),
+                    x -> x IS NOT NULL AND x != ''
+                )
+            ), ' '
         )) as search_text
     FROM read_parquet(
         's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',

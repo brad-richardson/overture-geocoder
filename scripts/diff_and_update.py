@@ -7,7 +7,7 @@ Uses the version field (which increments when features change) to identify updat
 
 Supports two table types:
 - divisions: Forward geocoding with FTS search_text
-- divisions_reverse: Reverse geocoding with hierarchy_json
+- divisions_reverse: Reverse geocoding with bbox/H3 spatial index
 
 Usage:
     # Forward geocoding (default)
@@ -45,9 +45,9 @@ TABLE_SCHEMAS = {
     "divisions_reverse": {
         "columns": [
             "gers_id", "version", "subtype", "primary_name", "lat", "lon",
+            "population", "country", "region",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-            "area", "population", "country", "region",
-            "parent_division_id", "hierarchy_json"
+            "area", "h3_cells"
         ],
     },
 }

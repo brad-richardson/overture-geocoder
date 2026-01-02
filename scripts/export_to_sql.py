@@ -51,7 +51,8 @@ CREATE VIRTUAL TABLE divisions_fts USING fts5(
     search_text,
     content=divisions,
     content_rowid=rowid,
-    tokenize='porter unicode61 remove_diacritics 1'
+    tokenize='porter unicode61 remove_diacritics 1',
+    prefix='2 3'
 );
 
 -- Triggers for FTS sync (auto-update on INSERT OR REPLACE)
@@ -135,6 +136,7 @@ CREATE INDEX idx_type ON features(type);
 def get_divisions_reverse_schema() -> str:
     """Return the divisions_reverse table schema for reverse geocoding."""
     return """-- Divisions reverse table schema for D1 (reverse geocoding)
+-- Note: hierarchy_json removed - hierarchy built from query results
 DROP TABLE IF EXISTS divisions_reverse;
 
 CREATE TABLE divisions_reverse (
@@ -145,16 +147,15 @@ CREATE TABLE divisions_reverse (
     primary_name TEXT NOT NULL,
     lat REAL NOT NULL,
     lon REAL NOT NULL,
+    population INTEGER,
+    country TEXT,
+    region TEXT,
     bbox_xmin REAL NOT NULL,
     bbox_ymin REAL NOT NULL,
     bbox_xmax REAL NOT NULL,
     bbox_ymax REAL NOT NULL,
     area REAL,
-    population INTEGER,
-    country TEXT,
-    region TEXT,
-    parent_division_id TEXT,
-    hierarchy_json TEXT
+    h3_cells TEXT
 );
 
 -- Metadata table
@@ -173,6 +174,7 @@ CREATE INDEX idx_bbox_ymax ON divisions_reverse(bbox_ymax);
 CREATE INDEX idx_subtype ON divisions_reverse(subtype);
 CREATE INDEX idx_country ON divisions_reverse(country);
 CREATE INDEX idx_area ON divisions_reverse(area);
+CREATE INDEX idx_h3_cells ON divisions_reverse(h3_cells);
 """
 
 
@@ -223,9 +225,9 @@ def export_to_sql(
         schema = get_divisions_reverse_schema()
         columns = [
             "gers_id", "version", "subtype", "primary_name", "lat", "lon",
+            "population", "country", "region",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
-            "area", "population", "country", "region",
-            "parent_division_id", "hierarchy_json"
+            "area", "h3_cells"
         ]
     else:
         schema = get_features_schema()

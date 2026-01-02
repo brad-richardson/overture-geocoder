@@ -8,7 +8,7 @@
 #
 # Outputs:
 #   exports/divisions-global.parquet  - Forward geocoding data (with FTS search_text)
-#   exports/divisions-reverse.parquet - Reverse geocoding data (with hierarchy_json)
+#   exports/divisions-reverse.parquet - Reverse geocoding data (with bbox/H3 cells)
 
 set -e
 
@@ -52,9 +52,9 @@ fi
 
 echo "Forward geocoding: exports/divisions-global.parquet ($ROW_COUNT rows)"
 
-# Download reverse geocoding data
+# Download reverse geocoding data (JOINs division + division_area)
 echo "Downloading reverse geocoding data..."
-sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_reverse.sql | duckdb
+sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_area.sql | duckdb
 
 # Verify reverse data
 if [ ! -f "$PROJECT_DIR/exports/divisions-reverse.parquet" ]; then

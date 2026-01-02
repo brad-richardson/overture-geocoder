@@ -103,7 +103,9 @@ interface DivisionReverseRow {
   bbox_ymax: number;
   area: number;
   population: number | null;
-  hierarchy_json: string | null;
+  country: string | null;
+  region: string | null;
+  h3_cells: string | null;
 }
 
 /**
@@ -335,30 +337,10 @@ function haversineDistance(
 }
 
 /**
- * Build hierarchy from the most specific division.
- * Uses stored hierarchy_json if available, otherwise builds from overlapping candidates.
+ * Build hierarchy from overlapping division candidates.
+ * Candidates are sorted by type priority (most specific first).
  */
-function buildHierarchy(
-  mostSpecific: DivisionReverseRow,
-  allCandidates: DivisionReverseRow[]
-): HierarchyEntry[] {
-  // Try stored hierarchy first
-  if (mostSpecific.hierarchy_json) {
-    try {
-      const stored = JSON.parse(mostSpecific.hierarchy_json);
-      if (Array.isArray(stored)) {
-        return stored.map((entry: { division_id?: string; id?: string; subtype: string; name: string }) => ({
-          gers_id: entry.division_id || entry.id || "",
-          subtype: entry.subtype,
-          name: entry.name,
-        }));
-      }
-    } catch {
-      // Fall through to build from candidates
-    }
-  }
-
-  // Build from overlapping candidates sorted by type priority
+function buildHierarchy(candidates: DivisionReverseRow[]): HierarchyEntry[] {
   const typePriority: Record<string, number> = {
     neighborhood: 1,
     macrohood: 2,
@@ -369,7 +351,7 @@ function buildHierarchy(
     country: 7,
   };
 
-  return [...allCandidates]
+  return [...candidates]
     .sort((a, b) => (typePriority[a.subtype] || 0) - (typePriority[b.subtype] || 0))
     .map((div) => ({
       gers_id: div.gers_id,
@@ -413,7 +395,7 @@ async function handleReverse(
         gers_id, subtype, primary_name,
         lat, lon,
         bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-        area, population, hierarchy_json
+        area, population, country, region, h3_cells
       FROM divisions_reverse
       WHERE bbox_xmin <= ?
         AND bbox_xmax >= ?
@@ -430,9 +412,8 @@ async function handleReverse(
       return jsonResponse([]);
     }
 
-    // Build hierarchy from most specific division
-    const mostSpecific = candidates[0];
-    const hierarchy = buildHierarchy(mostSpecific, candidates);
+    // Build hierarchy from overlapping candidates (sorted by specificity)
+    const hierarchy = buildHierarchy(candidates);
 
     // Format results
     const results: ReverseGeocoderResult[] = candidates.map((div) => ({
