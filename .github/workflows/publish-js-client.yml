@@ -3,7 +3,7 @@ name: Publish JS Client to npm
 on:
   push:
     tags:
-      - 'v*'
+      - 'js-v*'
   workflow_dispatch:
 
 jobs:
@@ -41,4 +41,4 @@ jobs:
         run: npm run test:ci
 
       - name: Publish to npm (OIDC)
-        run: npm publish --provenance --access public
+        run: npm publish --access public
