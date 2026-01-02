@@ -176,7 +176,8 @@ export class OvertureGeocoder {
     this.retries = config.retries ?? DEFAULT_RETRIES;
     this.retryDelay = config.retryDelay ?? DEFAULT_RETRY_DELAY;
     this.headers = config.headers ?? {};
-    this.fetchFn = config.fetch ?? globalThis.fetch;
+    // Bind fetch to globalThis to avoid "Illegal invocation" errors in browsers
+    this.fetchFn = config.fetch ?? globalThis.fetch.bind(globalThis);
     this.onRequest = config.onRequest;
     this.onResponse = config.onResponse;
   }
