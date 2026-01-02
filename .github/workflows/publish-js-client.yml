@@ -1,0 +1,44 @@
+name: Publish JS Client to npm
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # Required for OIDC trusted publishing
+
+    defaults:
+      run:
+        working-directory: clients/js
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js 24 (includes npm 11.5+ for OIDC)
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: clients/js/package-lock.json
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Verify npm version
+        run: npm --version
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Test
+        run: npm run test:ci
+
+      - name: Publish to npm (OIDC)
+        run: npm publish --provenance --access public

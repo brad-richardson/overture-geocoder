@@ -1,22 +1,24 @@
 {
-  "name": "overture-geocoder",
+  "name": "@bradrichardson/overture-geocoder",
   "version": "0.1.0",
   "description": "Forward geocoder using Overture Maps data with Nominatim-compatible API",
+  "type": "module",
   "main": "dist/index.js",
-  "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js"
+      "import": "./dist/index.js"
     }
   },
   "files": [
-    "dist"
+    "dist",
+    "README.md",
+    "LICENSE"
   ],
   "scripts": {
-    "build": "tsup src/index.ts --format cjs,esm --dts",
+    "build": "tsc",
+    "prepublishOnly": "npm run build",
     "test": "vitest",
     "test:ci": "vitest run",
     "typecheck": "tsc --noEmit"
@@ -31,12 +33,26 @@
   ],
   "author": "Brad Richardson",
   "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/bradrichardson/overture-geocoder.git",
+    "directory": "clients/js"
+  },
+  "homepage": "https://github.com/bradrichardson/overture-geocoder#readme",
+  "bugs": {
+    "url": "https://github.com/bradrichardson/overture-geocoder/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
   "dependencies": {
     "@bradrichardson/overturemaps": "^0.3.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",
-    "tsup": "^8.0.0",
     "typescript": "^5.3.3",
     "vitest": "^1.0.0"
   }
