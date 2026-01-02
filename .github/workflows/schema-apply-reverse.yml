@@ -47,11 +47,11 @@ jobs:
       - name: Generate schema SQL
         run: |
           mkdir -p exports/schema
-          python -c "
-from scripts.export_to_sql import get_divisions_reverse_schema
-with open('exports/schema/schema.sql', 'w') as f:
-    f.write(get_divisions_reverse_schema())
-"
+          python3 << 'EOF'
+          from scripts.export_to_sql import get_divisions_reverse_schema
+          with open('exports/schema/schema.sql', 'w') as f:
+              f.write(get_divisions_reverse_schema())
+          EOF
 
       - name: Apply schema (DROP + CREATE)
         run: |
