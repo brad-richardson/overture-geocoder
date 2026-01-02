@@ -1,0 +1,30 @@
+[package]
+name = "geocoder-worker"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cloudflare Worker for Overture geocoding"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+# Cloudflare Workers
+worker = "0.5"
+
+# Core geocoder (without native SQLite)
+geocoder-core = { path = "../geocoder-core", default-features = false }
+
+# Serialization
+serde = { workspace = true }
+serde_json = { workspace = true }
+
+# Async
+futures = "0.3"
+
+# WASM compatibility
+getrandom = { version = "0.2", features = ["js"] }
+console_error_panic_hook = "0.1"
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"

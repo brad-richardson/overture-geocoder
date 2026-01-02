@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "geocoder-core",
     "geocoder-cli",
+    "geocoder-worker",
 ]
 
 [workspace.package]

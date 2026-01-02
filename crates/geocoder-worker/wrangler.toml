@@ -1,0 +1,20 @@
+name = "overture-geocoder-v2"
+main = "build/worker/shim.mjs"
+compatibility_date = "2024-01-01"
+
+[build]
+command = "cargo install -q worker-build && worker-build --release"
+
+[[r2_buckets]]
+binding = "SHARDS_BUCKET"
+bucket_name = "geocoder-shards"
+
+# Rate limiting (optional)
+# [[unsafe.bindings]]
+# name = "RATE_LIMITER"
+# type = "ratelimit"
+# namespace_id = "1001"
+# simple = { limit = 60, period = 60 }
+
+[vars]
+ENVIRONMENT = "production"
