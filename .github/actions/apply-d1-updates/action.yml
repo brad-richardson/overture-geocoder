@@ -27,9 +27,40 @@ runs:
       shell: bash
       run: |
         echo "Applying upserts to ${{ inputs.database-name }}..."
-        npx wrangler d1 execute ${{ inputs.database-name }} \
-          --remote \
-          --file=${{ inputs.diff-path }}/upserts.sql
+        UPSERTS_FILE="${{ inputs.diff-path }}/upserts.sql"
+        TOTAL_LINES=$(wc -l < "$UPSERTS_FILE")
+        echo "Total lines in upserts.sql: $TOTAL_LINES"
+
+        # D1 can handle ~50K statements per import before hitting memory limits
+        CHUNK_SIZE=50000
+
+        if [ "$TOTAL_LINES" -le "$CHUNK_SIZE" ]; then
+          # Small file - import directly
+          echo "Importing directly (small file)..."
+          npx wrangler d1 execute ${{ inputs.database-name }} \
+            --remote \
+            --file="$UPSERTS_FILE"
+        else
+          # Large file - split and import in chunks
+          echo "Large file detected. Splitting into chunks of $CHUNK_SIZE lines..."
+          mkdir -p ${{ inputs.diff-path }}/chunks
+
+          # Split file (skip comment lines for accurate chunking)
+          grep -v '^--' "$UPSERTS_FILE" | split -l $CHUNK_SIZE - "${{ inputs.diff-path }}/chunks/chunk_"
+
+          CHUNK_NUM=1
+          TOTAL_CHUNKS=$(ls ${{ inputs.diff-path }}/chunks/chunk_* | wc -l)
+
+          for chunk in ${{ inputs.diff-path }}/chunks/chunk_*; do
+            echo "Importing chunk $CHUNK_NUM of $TOTAL_CHUNKS..."
+            npx wrangler d1 execute ${{ inputs.database-name }} \
+              --remote \
+              --file="$chunk"
+            CHUNK_NUM=$((CHUNK_NUM + 1))
+          done
+
+          echo "All chunks imported successfully."
+        fi
 
     - name: Apply deletes
       if: inputs.has-changes == 'true'
