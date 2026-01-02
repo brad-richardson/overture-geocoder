@@ -88,15 +88,36 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      - name: Download global divisions from Overture
+      - name: Download forward geocoding data
+        if: github.event.inputs.database == 'forward' || github.event.inputs.database == 'both'
         run: |
-          chmod +x scripts/download_divisions.sh
-          ./scripts/download_divisions.sh "${{ needs.check-release.outputs.overture_release }}"
+          mkdir -p exports
+          RELEASE="${{ needs.check-release.outputs.overture_release }}"
+          echo "Downloading forward geocoding data for release $RELEASE..."
+          sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_global.sql | duckdb
+          ROW_COUNT=$(duckdb -c "SELECT COUNT(*) FROM read_parquet('exports/divisions-global.parquet')" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+          echo "Forward geocoding: exports/divisions-global.parquet ($ROW_COUNT rows)"
 
-      - name: Build divisions indexes
+      - name: Download reverse geocoding data
+        if: github.event.inputs.database == 'reverse' || github.event.inputs.database == 'both'
+        run: |
+          mkdir -p exports
+          RELEASE="${{ needs.check-release.outputs.overture_release }}"
+          echo "Downloading reverse geocoding data for release $RELEASE..."
+          sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_area.sql | duckdb
+          ROW_COUNT=$(duckdb -c "SELECT COUNT(*) FROM read_parquet('exports/divisions-reverse.parquet')" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+          echo "Reverse geocoding: exports/divisions-reverse.parquet ($ROW_COUNT rows)"
+
+      - name: Build forward geocoding index
+        if: github.event.inputs.database == 'forward' || github.event.inputs.database == 'both'
         run: |
           mkdir -p indexes
           python scripts/build_divisions_index.py
+
+      - name: Build reverse geocoding index
+        if: github.event.inputs.database == 'reverse' || github.event.inputs.database == 'both'
+        run: |
+          mkdir -p indexes
           python scripts/build_divisions_reverse_index.py
 
       # ==================== FORWARD GEOCODING ====================

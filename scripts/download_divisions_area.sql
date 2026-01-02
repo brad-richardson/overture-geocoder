@@ -58,7 +58,7 @@ COPY (
         WHERE subtype IN ('locality', 'localadmin', 'neighborhood', 'macrohood', 'county')
           AND names.primary IS NOT NULL
     ),
-    areas AS (
+    areas_all AS (
         SELECT
             division_id,
             -- Bbox from polygon geometry (more accurate than division's pre-computed bbox)
@@ -67,11 +67,18 @@ COPY (
             ST_XMax(geometry) as bbox_xmax,
             ST_YMax(geometry) as bbox_ymax,
             -- Area for ranking (smaller = more specific)
-            ST_Area(geometry) as area
+            ST_Area(geometry) as area,
+            -- Pick one area per division (prefer smallest/most specific)
+            ROW_NUMBER() OVER (PARTITION BY division_id ORDER BY ST_Area(geometry) ASC) as rn
         FROM read_parquet(
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division_area/*',
             hive_partitioning = true
         )
+    ),
+    areas AS (
+        SELECT division_id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
+        FROM areas_all
+        WHERE rn = 1
     )
     SELECT
         d.gers_id,
