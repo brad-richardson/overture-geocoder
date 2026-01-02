@@ -388,22 +388,26 @@ export class OvertureGeocoder {
     const geometryPromises = results.map(async (result) => {
       try {
         const contains = await this.verifyContainsPoint(result.gers_id, lat, lon);
-        return { result, contains };
+        return { result, contains, verified: true };
       } catch {
-        // If geometry fetch fails, assume bbox is correct
-        return { result, contains: true };
+        // If geometry fetch fails, keep result with original bbox confidence
+        return { result, contains: false, verified: false };
       }
     });
 
     const checks = await Promise.all(geometryPromises);
 
-    for (const { result, contains } of checks) {
+    for (const { result, contains, verified: wasVerified } of checks) {
       if (contains) {
         verified.push({
           ...result,
           confidence: "exact", // Upgraded from bbox
         });
+      } else if (!wasVerified) {
+        // Geometry fetch failed, keep original result with bbox confidence
+        verified.push(result);
       }
+      // If verified but not contains, exclude from results (false positive)
     }
 
     return verified;
@@ -524,9 +528,10 @@ export class OvertureGeocoder {
 
       // Calculate distances and filter
       return features
+        .filter((f) => f.geometry.type === "Point") // Only Point geometries
         .map((f) => {
           const props = f.properties as Record<string, unknown>;
-          const coords = (f.geometry as { coordinates: [number, number] }).coordinates;
+          const coords = (f.geometry as { type: "Point"; coordinates: [number, number] }).coordinates;
           const fLon = coords[0];
           const fLat = coords[1];
           return {
@@ -582,9 +587,10 @@ export class OvertureGeocoder {
 
       // Calculate distances and filter
       return features
+        .filter((f) => f.geometry.type === "Point") // Only Point geometries
         .map((f) => {
           const props = f.properties as Record<string, unknown>;
-          const coords = (f.geometry as { coordinates: [number, number] }).coordinates;
+          const coords = (f.geometry as { type: "Point"; coordinates: [number, number] }).coordinates;
           const fLon = coords[0];
           const fLat = coords[1];
           return {
@@ -658,8 +664,8 @@ export class OvertureGeocoder {
 
     return {
       divisions,
-      places: places ?? undefined,
-      addresses: addresses ?? undefined,
+      places,
+      addresses,
     };
   }
 

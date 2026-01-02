@@ -129,19 +129,21 @@ var OvertureGeocoder = class {
     const geometryPromises = results.map(async (result) => {
       try {
         const contains = await this.verifyContainsPoint(result.gers_id, lat, lon);
-        return { result, contains };
+        return { result, contains, verified: true };
       } catch {
-        return { result, contains: true };
+        return { result, contains: false, verified: false };
       }
     });
     const checks = await Promise.all(geometryPromises);
-    for (const { result, contains } of checks) {
+    for (const { result, contains, verified: wasVerified } of checks) {
       if (contains) {
         verified.push({
           ...result,
           confidence: "exact"
           // Upgraded from bbox
         });
+      } else if (!wasVerified) {
+        verified.push(result);
       }
     }
     return verified;
@@ -233,7 +235,7 @@ var OvertureGeocoder = class {
     const bbox = this.radiusToBbox(lat, lon, radiusKm);
     try {
       const features = await readByBboxAll("place", bbox, { limit: limit * 3 });
-      return features.map((f) => {
+      return features.filter((f) => f.geometry.type === "Point").map((f) => {
         const props = f.properties;
         const coords = f.geometry.coordinates;
         const fLon = coords[0];
@@ -275,7 +277,7 @@ var OvertureGeocoder = class {
     const bbox = this.radiusToBbox(lat, lon, radiusKm);
     try {
       const features = await readByBboxAll("address", bbox, { limit: limit * 3 });
-      return features.map((f) => {
+      return features.filter((f) => f.geometry.type === "Point").map((f) => {
         const props = f.properties;
         const coords = f.geometry.coordinates;
         const fLon = coords[0];
@@ -336,8 +338,8 @@ var OvertureGeocoder = class {
     ]);
     return {
       divisions,
-      places: places ?? void 0,
-      addresses: addresses ?? void 0
+      places,
+      addresses
     };
   }
   // ==========================================================================

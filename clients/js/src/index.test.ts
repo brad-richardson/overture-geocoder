@@ -537,12 +537,73 @@ describe("getNearbyPlaces", () => {
     const client = new OvertureGeocoder();
     expect(typeof client.getNearbyPlaces).toBe("function");
   });
+
+  it("should accept NearbySearchOptions", () => {
+    const client = new OvertureGeocoder();
+    // Verify the method signature accepts the expected options
+    expect(async () => {
+      // This will fail at runtime without DuckDB, but verifies types compile
+      try {
+        await client.getNearbyPlaces(42.35, -71.08, {
+          radiusKm: 0.5,
+          limit: 5,
+          category: "restaurant",
+        });
+      } catch {
+        // Expected to fail without actual DuckDB/S3 access
+      }
+    }).not.toThrow();
+  });
 });
 
 describe("getNearbyAddresses", () => {
   it("should have the getNearbyAddresses method", () => {
     const client = new OvertureGeocoder();
     expect(typeof client.getNearbyAddresses).toBe("function");
+  });
+});
+
+describe("radiusToBbox calculation", () => {
+  it("should create valid bounding box from radius", () => {
+    const client = new OvertureGeocoder();
+    // Access private method through prototype for testing
+    const radiusToBbox = (client as unknown as { radiusToBbox: (lat: number, lon: number, radiusKm: number) => { xmin: number; ymin: number; xmax: number; ymax: number } }).radiusToBbox.bind(client);
+
+    const bbox = radiusToBbox(42.35, -71.08, 1);
+
+    // Verify bbox structure
+    expect(bbox).toHaveProperty("xmin");
+    expect(bbox).toHaveProperty("ymin");
+    expect(bbox).toHaveProperty("xmax");
+    expect(bbox).toHaveProperty("ymax");
+
+    // Verify bbox is centered on the point
+    expect(bbox.xmin).toBeLessThan(-71.08);
+    expect(bbox.xmax).toBeGreaterThan(-71.08);
+    expect(bbox.ymin).toBeLessThan(42.35);
+    expect(bbox.ymax).toBeGreaterThan(42.35);
+  });
+});
+
+describe("haversineDistance calculation", () => {
+  it("should calculate distance between two points", () => {
+    const client = new OvertureGeocoder();
+    // Access private method through prototype for testing
+    const haversineDistance = (client as unknown as { haversineDistance: (lat1: number, lon1: number, lat2: number, lon2: number) => number }).haversineDistance.bind(client);
+
+    // Boston to Cambridge (roughly 5km apart)
+    const distance = haversineDistance(42.3601, -71.0589, 42.3736, -71.1097);
+
+    expect(distance).toBeGreaterThan(4);
+    expect(distance).toBeLessThan(6);
+  });
+
+  it("should return 0 for same point", () => {
+    const client = new OvertureGeocoder();
+    const haversineDistance = (client as unknown as { haversineDistance: (lat1: number, lon1: number, lat2: number, lon2: number) => number }).haversineDistance.bind(client);
+
+    const distance = haversineDistance(42.35, -71.08, 42.35, -71.08);
+    expect(distance).toBe(0);
   });
 });
 
@@ -556,5 +617,11 @@ describe("type exports", () => {
     expect(typeof client.getNearbyPlaces).toBe("function");
     expect(typeof client.getNearbyAddresses).toBe("function");
     expect(typeof client.reverseAndRefine).toBe("function");
+  });
+
+  it("should export readByBbox and readByBboxAll from overturemaps", async () => {
+    const module = await import("./index");
+    expect(module.readByBbox).toBeDefined();
+    expect(module.readByBboxAll).toBeDefined();
   });
 });
