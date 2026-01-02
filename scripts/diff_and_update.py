@@ -5,6 +5,9 @@ Differential update script for Overture geocoder D1 database.
 Compares new Overture data against production and generates minimal SQL updates.
 Uses the version field (which increments when features change) to identify updates.
 
+Uses proper UPSERT (INSERT ... ON CONFLICT) to avoid delete+reinsert overhead
+that occurs with INSERT OR REPLACE. This is critical for minimizing D1 write costs.
+
 Supports two table types:
 - divisions: Forward geocoding with FTS search_text
 - divisions_reverse: Reverse geocoding with bbox/H3 spatial index
@@ -20,7 +23,7 @@ Usage:
         --table divisions_reverse
 
 Output:
-    exports/diff/upserts.sql    - INSERT OR REPLACE for new/changed records
+    exports/diff/upserts.sql    - INSERT ... ON CONFLICT for new/changed records
     exports/diff/deletes.sql    - DELETE for removed records
     exports/diff/metadata.sql   - UPDATE release version
     exports/diff/stats.json     - Statistics about the diff
@@ -41,10 +44,22 @@ TABLE_SCHEMAS = {
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
             "population", "country", "region", "search_text"
         ],
+        # Columns to update on conflict (excludes gers_id which is the key)
+        "update_columns": [
+            "version", "type", "primary_name", "lat", "lon",
+            "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
+            "population", "country", "region", "search_text"
+        ],
     },
     "divisions_reverse": {
         "columns": [
             "gers_id", "version", "subtype", "primary_name", "lat", "lon",
+            "population", "country", "region",
+            "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
+            "area"
+        ],
+        "update_columns": [
+            "version", "subtype", "primary_name", "lat", "lon",
             "population", "country", "region",
             "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
             "area"
@@ -115,6 +130,20 @@ def format_value(val) -> str:
     return escape_sql_string(str(val))
 
 
+def generate_upsert_statement(table: str, columns: list[str], update_columns: list[str], values: str) -> str:
+    """Generate a proper UPSERT statement using ON CONFLICT.
+
+    Uses INSERT ... ON CONFLICT(gers_id) DO UPDATE SET instead of INSERT OR REPLACE
+    to avoid delete+reinsert overhead and reduce D1 write costs.
+    """
+    cols_str = ", ".join(columns)
+    set_clauses = ", ".join(f"{col} = excluded.{col}" for col in update_columns)
+    return (
+        f"INSERT INTO {table} ({cols_str}) VALUES ({values})\n"
+        f"ON CONFLICT(gers_id) DO UPDATE SET {set_clauses};\n"
+    )
+
+
 def generate_diff(
     db_path: Path,
     output_dir: Path,
@@ -125,6 +154,10 @@ def generate_diff(
     force_all: bool = False,
 ) -> dict:
     """Generate differential SQL updates.
+
+    Uses proper UPSERT (INSERT ... ON CONFLICT) instead of INSERT OR REPLACE
+    to minimize D1 write costs. INSERT OR REPLACE causes a delete+reinsert
+    which triggers extra index and FTS maintenance.
 
     Args:
         force_all: If True, treat all records as updates (for schema/logic changes)
@@ -142,6 +175,7 @@ def generate_diff(
 
     schema = TABLE_SCHEMAS[table]
     columns = schema["columns"]
+    update_columns = schema["update_columns"]
     cols_str = ", ".join(columns)
 
     # Track stats
@@ -162,9 +196,10 @@ def generate_diff(
     upserts_file = output_dir / "upserts.sql"
     with open(upserts_file, "w") as f:
         if force_all:
-            f.write(f"-- Force all: updating all records for {table}\n\n")
+            f.write(f"-- Force all: updating all records for {table}\n")
         else:
-            f.write(f"-- Upserts: new and changed records for {table}\n\n")
+            f.write(f"-- Upserts: new and changed records for {table}\n")
+        f.write(f"-- Using INSERT ... ON CONFLICT (proper UPSERT) to minimize write costs\n\n")
 
         cursor = db.execute(f"SELECT {cols_str} FROM {table}")
 
@@ -178,16 +213,16 @@ def generate_diff(
             prod_version = prod_versions.get(gers_id)
 
             if prod_version is None:
-                # New record
+                # New record - use UPSERT for safety (handles race conditions)
                 stats["inserts"] += 1
                 values = ", ".join(format_value(v) for v in row)
-                f.write(f"INSERT OR REPLACE INTO {table} ({cols_str}) VALUES ({values});\n")
+                f.write(generate_upsert_statement(table, columns, update_columns, values))
                 batch_count += 1
             elif force_all or new_version > prod_version:
                 # Updated record (or forced update)
                 stats["updates"] += 1
                 values = ", ".join(format_value(v) for v in row)
-                f.write(f"INSERT OR REPLACE INTO {table} ({cols_str}) VALUES ({values});\n")
+                f.write(generate_upsert_statement(table, columns, update_columns, values))
                 batch_count += 1
             else:
                 # Unchanged
@@ -209,12 +244,14 @@ def generate_diff(
                 stats["deletes"] += 1
                 f.write(f"DELETE FROM {table} WHERE gers_id = {escape_sql_string(gers_id)};\n")
 
-    # Generate metadata update
+    # Generate metadata update (using proper UPSERT)
     metadata_file = output_dir / "metadata.sql"
     with open(metadata_file, "w") as f:
         f.write("-- Update release metadata\n")
-        f.write(f"INSERT OR REPLACE INTO metadata (key, value) VALUES ('overture_release', {escape_sql_string(release)});\n")
-        f.write(f"INSERT OR REPLACE INTO metadata (key, value) VALUES ('updated_at', datetime('now'));\n")
+        f.write(f"INSERT INTO metadata (key, value) VALUES ('overture_release', {escape_sql_string(release)})\n")
+        f.write(f"ON CONFLICT(key) DO UPDATE SET value = excluded.value;\n")
+        f.write(f"INSERT INTO metadata (key, value) VALUES ('updated_at', datetime('now'))\n")
+        f.write(f"ON CONFLICT(key) DO UPDATE SET value = excluded.value;\n")
 
     # Calculate destructive change percentage
     prod_count = len(prod_versions)

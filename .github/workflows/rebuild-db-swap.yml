@@ -1,0 +1,366 @@
+name: Rebuild Database (DB Swap)
+
+# Creates a new D1 database, loads data optimally, then swaps the binding.
+# This avoids write amplification from INSERT OR REPLACE on the live database.
+#
+# Benefits:
+# - Zero writes to active production DB during rebuild
+# - Eliminates index/FTS maintenance overhead during bulk load
+# - Trivial rollback (just keep the old DB)
+# - Ideal for dev iterations when schema/FTS is changing frequently
+
+on:
+  workflow_dispatch:
+    inputs:
+      database:
+        description: 'Which database to rebuild'
+        type: choice
+        required: true
+        options:
+          - forward
+          - reverse
+      db_suffix:
+        description: 'New database suffix (e.g., v42, 2024-01-15)'
+        type: string
+        required: true
+      delete_old_db:
+        description: 'Delete old database after successful swap'
+        type: boolean
+        default: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  rebuild-forward:
+    if: inputs.database == 'forward'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          pip install duckdb pyarrow
+
+      - name: Get current database info
+        id: current_db
+        run: |
+          # Extract current database ID from wrangler.toml
+          OLD_DB_NAME=$(grep -A2 'binding = "DB_DIVISIONS"' wrangler.toml | grep database_name | sed 's/.*= "\(.*\)"/\1/')
+          OLD_DB_ID=$(grep -A2 'binding = "DB_DIVISIONS"' wrangler.toml | grep database_id | sed 's/.*= "\(.*\)"/\1/')
+          echo "old_db_name=$OLD_DB_NAME" >> $GITHUB_OUTPUT
+          echo "old_db_id=$OLD_DB_ID" >> $GITHUB_OUTPUT
+          echo "Current database: $OLD_DB_NAME ($OLD_DB_ID)"
+
+      - name: Create new D1 database
+        id: new_db
+        run: |
+          NEW_DB_NAME="geocoder-divisions-${{ inputs.db_suffix }}"
+          echo "Creating new database: $NEW_DB_NAME"
+
+          # Create the database and capture output
+          npx wrangler d1 create "$NEW_DB_NAME" --json > /tmp/db-create.json 2>&1 || true
+
+          # Check if database already exists
+          if grep -q "already exists" /tmp/db-create.json; then
+            echo "Database $NEW_DB_NAME already exists, fetching info..."
+            npx wrangler d1 info "$NEW_DB_NAME" --json > /tmp/db-info.json
+            NEW_DB_ID=$(jq -r '.uuid' /tmp/db-info.json)
+          else
+            NEW_DB_ID=$(jq -r '.uuid' /tmp/db-create.json)
+          fi
+
+          echo "new_db_name=$NEW_DB_NAME" >> $GITHUB_OUTPUT
+          echo "new_db_id=$NEW_DB_ID" >> $GITHUB_OUTPUT
+          echo "Created database: $NEW_DB_NAME ($NEW_DB_ID)"
+
+      - name: Download divisions data
+        run: |
+          echo "Downloading global divisions from Overture..."
+          duckdb < scripts/download_divisions_global.sql
+
+      - name: Build local index
+        run: |
+          echo "Building local SQLite index..."
+          python scripts/build_divisions_index.py
+
+      - name: Export data (rebuild mode)
+        run: |
+          echo "Exporting data with plain INSERT statements..."
+          python scripts/export_to_sql.py \
+            indexes/divisions-global.db \
+            exports/divisions \
+            --table divisions \
+            --mode rebuild
+
+      - name: Apply base schema
+        run: |
+          echo "Phase 1: Creating tables..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --file=exports/divisions/schema-base.sql
+
+      - name: Load data chunks
+        run: |
+          echo "Phase 2: Loading data..."
+          for chunk in exports/divisions/data-*.sql; do
+            echo "  Loading $chunk..."
+            npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+              --remote \
+              --file="$chunk"
+          done
+
+      - name: Create indexes
+        run: |
+          echo "Phase 3: Creating indexes..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --file=exports/divisions/schema-indexes.sql
+
+      - name: Build FTS index
+        run: |
+          echo "Phase 4: Creating FTS and triggers..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --file=exports/divisions/schema-fts.sql
+
+      - name: Verify new database
+        run: |
+          echo "Verifying new database..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --command "SELECT COUNT(*) as count FROM divisions" --json
+
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --command "SELECT name FROM sqlite_master WHERE type='table'" --json
+
+      - name: Update wrangler.toml
+        run: |
+          echo "Updating wrangler.toml with new database binding..."
+
+          # Update database_name
+          sed -i 's/database_name = "geocoder-divisions-[^"]*"/database_name = "${{ steps.new_db.outputs.new_db_name }}"/' wrangler.toml
+
+          # Update database_id (for DB_DIVISIONS binding)
+          # This is a bit tricky - we need to update only the DB_DIVISIONS section
+          python3 << 'EOF'
+          import re
+
+          with open('wrangler.toml', 'r') as f:
+              content = f.read()
+
+          # Find and replace the DB_DIVISIONS section
+          pattern = r'(binding = "DB_DIVISIONS"\ndatabase_name = "[^"]*"\n)database_id = "[^"]*"'
+          replacement = r'\1database_id = "${{ steps.new_db.outputs.new_db_id }}"'
+          content = re.sub(pattern, replacement, content)
+
+          with open('wrangler.toml', 'w') as f:
+              f.write(content)
+          EOF
+
+          echo "Updated wrangler.toml:"
+          grep -A3 'DB_DIVISIONS' wrangler.toml
+
+      - name: Deploy worker with new binding
+        run: |
+          echo "Deploying worker with new database binding..."
+          npx wrangler deploy
+
+      - name: Commit binding update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add wrangler.toml
+          git commit -m "chore: switch forward geocoding to ${{ steps.new_db.outputs.new_db_name }}"
+          git push
+
+      - name: Delete old database
+        if: inputs.delete_old_db == true
+        run: |
+          echo "Deleting old database: ${{ steps.current_db.outputs.old_db_name }}"
+          npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }} --skip-confirmation || true
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Rebuild complete!"
+          echo "=========================================="
+          echo "Old database: ${{ steps.current_db.outputs.old_db_name }}"
+          echo "New database: ${{ steps.new_db.outputs.new_db_name }}"
+          echo ""
+          if [ "${{ inputs.delete_old_db }}" != "true" ]; then
+            echo "Old database was kept. To delete it manually:"
+            echo "  npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }}"
+          fi
+
+  rebuild-reverse:
+    if: inputs.database == 'reverse'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          pip install duckdb pyarrow
+
+      - name: Get current database info
+        id: current_db
+        run: |
+          OLD_DB_NAME=$(grep -A2 'binding = "DB_DIVISIONS_REVERSE"' wrangler.toml | grep database_name | sed 's/.*= "\(.*\)"/\1/')
+          OLD_DB_ID=$(grep -A2 'binding = "DB_DIVISIONS_REVERSE"' wrangler.toml | grep database_id | sed 's/.*= "\(.*\)"/\1/')
+          echo "old_db_name=$OLD_DB_NAME" >> $GITHUB_OUTPUT
+          echo "old_db_id=$OLD_DB_ID" >> $GITHUB_OUTPUT
+          echo "Current database: $OLD_DB_NAME ($OLD_DB_ID)"
+
+      - name: Create new D1 database
+        id: new_db
+        run: |
+          NEW_DB_NAME="geocoder-reverse-${{ inputs.db_suffix }}"
+          echo "Creating new database: $NEW_DB_NAME"
+
+          npx wrangler d1 create "$NEW_DB_NAME" --json > /tmp/db-create.json 2>&1 || true
+
+          if grep -q "already exists" /tmp/db-create.json; then
+            echo "Database $NEW_DB_NAME already exists, fetching info..."
+            npx wrangler d1 info "$NEW_DB_NAME" --json > /tmp/db-info.json
+            NEW_DB_ID=$(jq -r '.uuid' /tmp/db-info.json)
+          else
+            NEW_DB_ID=$(jq -r '.uuid' /tmp/db-create.json)
+          fi
+
+          echo "new_db_name=$NEW_DB_NAME" >> $GITHUB_OUTPUT
+          echo "new_db_id=$NEW_DB_ID" >> $GITHUB_OUTPUT
+          echo "Created database: $NEW_DB_NAME ($NEW_DB_ID)"
+
+      - name: Download divisions area data
+        run: |
+          echo "Downloading divisions with area from Overture..."
+          duckdb < scripts/download_divisions_area.sql
+
+      - name: Build local reverse index
+        run: |
+          echo "Building local SQLite index..."
+          python scripts/build_divisions_reverse_index.py
+
+      - name: Export data (rebuild mode)
+        run: |
+          echo "Exporting data with plain INSERT statements..."
+          python scripts/export_to_sql.py \
+            indexes/divisions-reverse.db \
+            exports/divisions-reverse \
+            --table divisions_reverse \
+            --mode rebuild
+
+      - name: Apply base schema
+        run: |
+          echo "Phase 1: Creating tables..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --file=exports/divisions-reverse/schema-base.sql
+
+      - name: Load data chunks
+        run: |
+          echo "Phase 2: Loading data..."
+          for chunk in exports/divisions-reverse/data-*.sql; do
+            echo "  Loading $chunk..."
+            npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+              --remote \
+              --file="$chunk"
+          done
+
+      - name: Create indexes
+        run: |
+          echo "Phase 3: Creating indexes..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --file=exports/divisions-reverse/schema-indexes.sql
+
+      - name: Verify new database
+        run: |
+          echo "Verifying new database..."
+          npx wrangler d1 execute ${{ steps.new_db.outputs.new_db_name }} \
+            --remote \
+            --command "SELECT COUNT(*) as count FROM divisions_reverse" --json
+
+      - name: Update wrangler.toml
+        run: |
+          echo "Updating wrangler.toml with new database binding..."
+
+          sed -i 's/database_name = "geocoder-divisions-reverse[^"]*"/database_name = "${{ steps.new_db.outputs.new_db_name }}"/' wrangler.toml
+
+          python3 << 'EOF'
+          import re
+
+          with open('wrangler.toml', 'r') as f:
+              content = f.read()
+
+          pattern = r'(binding = "DB_DIVISIONS_REVERSE"\ndatabase_name = "[^"]*"\n)database_id = "[^"]*"'
+          replacement = r'\1database_id = "${{ steps.new_db.outputs.new_db_id }}"'
+          content = re.sub(pattern, replacement, content)
+
+          with open('wrangler.toml', 'w') as f:
+              f.write(content)
+          EOF
+
+          echo "Updated wrangler.toml:"
+          grep -A3 'DB_DIVISIONS_REVERSE' wrangler.toml
+
+      - name: Deploy worker with new binding
+        run: |
+          echo "Deploying worker with new database binding..."
+          npx wrangler deploy
+
+      - name: Commit binding update
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add wrangler.toml
+          git commit -m "chore: switch reverse geocoding to ${{ steps.new_db.outputs.new_db_name }}"
+          git push
+
+      - name: Delete old database
+        if: inputs.delete_old_db == true
+        run: |
+          echo "Deleting old database: ${{ steps.current_db.outputs.old_db_name }}"
+          npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }} --skip-confirmation || true
+
+      - name: Summary
+        run: |
+          echo ""
+          echo "=========================================="
+          echo "Rebuild complete!"
+          echo "=========================================="
+          echo "Old database: ${{ steps.current_db.outputs.old_db_name }}"
+          echo "New database: ${{ steps.new_db.outputs.new_db_name }}"
+          echo ""
+          if [ "${{ inputs.delete_old_db }}" != "true" ]; then
+            echo "Old database was kept. To delete it manually:"
+            echo "  npx wrangler d1 delete ${{ steps.current_db.outputs.old_db_name }}"
+          fi
