@@ -2,7 +2,8 @@ import {
   closeDuckDB,
   isDuckDBAvailable,
   queryOverture
-} from "./chunk-4MI5S6BT.mjs";
+} from "./chunk-KYG7E6JB.mjs";
+import "./chunk-OOIUSZB4.mjs";
 export {
   closeDuckDB,
   isDuckDBAvailable,

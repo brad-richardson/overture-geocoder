@@ -34,16 +34,7 @@
   "dependencies": {
     "@bradrichardson/overturemaps": "^0.2.1"
   },
-  "peerDependencies": {
-    "@duckdb/duckdb-wasm": "^1.28.0"
-  },
-  "peerDependenciesMeta": {
-    "@duckdb/duckdb-wasm": {
-      "optional": true
-    }
-  },
   "devDependencies": {
-    "@duckdb/duckdb-wasm": "^1.28.0",
     "@types/node": "^20.10.0",
     "tsup": "^8.0.0",
     "typescript": "^5.3.3",

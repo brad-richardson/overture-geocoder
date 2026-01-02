@@ -4,8 +4,13 @@
  * Provides direct SQL queries against Overture Maps S3 data using DuckDB-WASM.
  * Used for nearby places/addresses lookups that aren't in the indexed D1 database.
  *
- * NOTE: Requires @duckdb/duckdb-wasm as an optional peer dependency.
- * If not installed, the S3 query features will throw an error.
+ * NOTE: Uses @duckdb/duckdb-wasm which is a transitive dependency via @bradrichardson/overturemaps.
+ * Ideally, the overturemaps package would export a queryOverture function directly,
+ * which would avoid the need for this separate module. This is a prototype implementation
+ * that demonstrates the capability.
+ *
+ * TODO: Add queryOverture export to @bradrichardson/overturemaps package to share
+ * the DuckDB instance and avoid potential duplicate initialization.
  */
 /**
  * Execute a query against Overture S3 data
