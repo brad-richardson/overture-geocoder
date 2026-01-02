@@ -1,4 +1,4 @@
-export { StacCatalog, StacLink, clearCache as clearCatalogCache, getLatestRelease, getStacCatalog } from '@bradrichardson/overturemaps';
+export { BoundingBox, Feature, OvertureType, StacCatalog, StacLink, clearCache as clearCatalogCache, getLatestRelease, getStacCatalog, readByBbox, readByBboxAll } from '@bradrichardson/overturemaps';
 
 /**
  * Overture Geocoder JavaScript/TypeScript Client
@@ -13,35 +13,30 @@ interface GeocoderResult {
     lon: number;
     boundingbox: [number, number, number, number];
     importance: number;
-    type?: string;
-    address?: AddressDetails;
-}
-interface AddressDetails {
-    house_number?: string;
-    road?: string;
-    city?: string;
-    state?: string;
-    postcode?: string;
-    country?: string;
-    country_code?: string;
+    type: string;
 }
 interface SearchOptions {
     /** Maximum number of results (1-40, default: 10) */
     limit?: number;
-    /** Comma-separated ISO 3166-1 alpha-2 country codes */
-    countrycodes?: string;
-    /** Bounding box [lon1, lat1, lon2, lat2] */
-    viewbox?: [number, number, number, number];
-    /** Restrict results to viewbox */
-    bounded?: boolean;
-    /** Include address breakdown in results */
-    addressdetails?: boolean;
     /** Response format */
     format?: "json" | "jsonv2" | "geojson";
 }
 interface ReverseOptions {
     /** Response format */
     format?: "jsonv2" | "geojson";
+    /**
+     * Verify point-in-polygon using full geometry from S3.
+     * When enabled, fetches full polygon for each bbox-matched result
+     * and filters to only results where the point is truly inside.
+     * @default false
+     */
+    verifyGeometry?: boolean;
+    /**
+     * Maximum number of results to verify geometry for.
+     * Higher values increase accuracy but take longer.
+     * @default 10
+     */
+    verifyLimit?: number;
 }
 interface HierarchyEntry {
     gers_id: string;
@@ -107,6 +102,101 @@ interface GeoJSONFeatureCollection {
     type: "FeatureCollection";
     features: GeoJSONFeature[];
 }
+interface OverturePlace {
+    id: string;
+    names: {
+        primary: string;
+        common?: Record<string, string>;
+    };
+    categories?: {
+        primary?: string;
+        alternate?: string[];
+    };
+    addresses?: Array<{
+        freeform?: string;
+        locality?: string;
+        region?: string;
+        country?: string;
+        postcode?: string;
+    }>;
+    phones?: string[];
+    websites?: string[];
+    brand?: {
+        names?: {
+            primary?: string;
+        };
+    };
+    lat: number;
+    lon: number;
+    distance_km: number;
+    confidence: number;
+}
+interface OvertureAddress {
+    id: string;
+    number?: string;
+    street?: string;
+    unit?: string;
+    postcode?: string;
+    freeform?: string;
+    lat: number;
+    lon: number;
+    distance_km: number;
+}
+interface NearbySearchOptions {
+    /**
+     * Search radius in kilometers
+     * @default 1
+     */
+    radiusKm?: number;
+    /**
+     * Maximum number of results
+     * @default 10
+     */
+    limit?: number;
+    /**
+     * Category filter for places (e.g., 'restaurant', 'cafe')
+     */
+    category?: string;
+}
+interface RefinedReverseResult {
+    /** Division hierarchy for the location */
+    divisions: ReverseGeocoderResult[];
+    /** Nearby places from Overture */
+    places?: OverturePlace[];
+    /** Nearby addresses from Overture */
+    addresses?: OvertureAddress[];
+}
+interface ReverseAndRefineOptions {
+    /**
+     * Verify division geometry using point-in-polygon
+     * @default true
+     */
+    verifyGeometry?: boolean;
+    /**
+     * Include nearby places in results
+     * @default true
+     */
+    includePlaces?: boolean;
+    /**
+     * Include nearby addresses in results
+     * @default true
+     */
+    includeAddresses?: boolean;
+    /**
+     * Search radius for nearby places/addresses in km
+     * @default 0.5
+     */
+    radiusKm?: number;
+    /**
+     * Maximum nearby results per type
+     * @default 5
+     */
+    nearbyLimit?: number;
+    /**
+     * Category filter for places
+     */
+    placeCategory?: string;
+}
 declare class GeocoderError extends Error {
     readonly status?: number | undefined;
     readonly response?: Response | undefined;
@@ -143,8 +233,20 @@ declare class OvertureGeocoder {
      * Returns divisions (localities, neighborhoods, counties, etc.) that
      * contain the given coordinate. Results are sorted by specificity
      * (smallest/most specific first).
+     *
+     * @param lat Latitude
+     * @param lon Longitude
+     * @param options Reverse geocoding options
+     * @param options.verifyGeometry If true, fetches full polygons from S3 and filters
+     *                               to only results where point is inside the polygon
      */
     reverse(lat: number, lon: number, options?: ReverseOptions): Promise<ReverseGeocoderResult[]>;
+    /**
+     * Verify which reverse geocode results actually contain the point.
+     * Fetches full geometry from S3 and performs point-in-polygon checks.
+     * Updates confidence to "exact" for verified results.
+     */
+    private verifyResultsGeometry;
     /**
      * Reverse geocode and return results as GeoJSON FeatureCollection.
      */
@@ -171,15 +273,64 @@ declare class OvertureGeocoder {
     getFullGeometry(gersId: string): Promise<GeoJSONFeature | null>;
     /**
      * Close DuckDB connection and release resources.
-     * Call this when done with geometry fetching to free memory.
+     * Call this when done with geometry/place/address fetching to free memory.
      */
     close(): Promise<void>;
+    /**
+     * Get nearby places from Overture S3.
+     *
+     * Queries the Overture places theme directly from S3 within a radius
+     * of the given coordinates. Results include business names, categories,
+     * addresses, and contact info.
+     *
+     * @param lat Latitude of center point
+     * @param lon Longitude of center point
+     * @param options Search options (radius, limit, category filter)
+     * @returns Array of nearby places sorted by distance
+     */
+    getNearbyPlaces(lat: number, lon: number, options?: NearbySearchOptions): Promise<OverturePlace[]>;
+    /**
+     * Get nearby addresses from Overture S3.
+     *
+     * Queries the Overture addresses theme directly from S3 within a radius
+     * of the given coordinates. Returns structured address components.
+     *
+     * @param lat Latitude of center point
+     * @param lon Longitude of center point
+     * @param options Search options (radius, limit)
+     * @returns Array of nearby addresses sorted by distance
+     */
+    getNearbyAddresses(lat: number, lon: number, options?: Omit<NearbySearchOptions, "category">): Promise<OvertureAddress[]>;
+    /**
+     * Combined reverse geocode with optional geometry verification and
+     * nearby places/addresses lookup.
+     *
+     * This is a convenience method that combines:
+     * 1. Reverse geocoding (division hierarchy)
+     * 2. Optional point-in-polygon verification
+     * 3. Nearby places from Overture S3
+     * 4. Nearby addresses from Overture S3
+     *
+     * @param lat Latitude
+     * @param lon Longitude
+     * @param options Configuration for what to include
+     * @returns Combined result with divisions, places, and addresses
+     */
+    reverseAndRefine(lat: number, lon: number, options?: ReverseAndRefineOptions): Promise<RefinedReverseResult>;
     private fetchWithRetry;
     private doFetch;
     private parseResults;
     private parseReverseResults;
     private pointInPolygon;
     private delay;
+    /**
+     * Convert a radius in km to a bounding box centered on lat/lon
+     */
+    private radiusToBbox;
+    /**
+     * Calculate Haversine distance between two points in km
+     */
+    private haversineDistance;
 }
 /**
  * Quick geocode function using default settings.
@@ -190,4 +341,4 @@ declare function geocode(query: string, options?: SearchOptions): Promise<Geocod
  */
 declare function reverseGeocode(lat: number, lon: number, options?: ReverseOptions): Promise<ReverseGeocoderResult[]>;
 
-export { type AddressDetails, type GeoJSONFeature, type GeoJSONFeatureCollection, type GeoJSONGeometry, GeocoderError, GeocoderNetworkError, type GeocoderResult, GeocoderTimeoutError, type HierarchyEntry, OvertureGeocoder, type OvertureGeocoderConfig, type ReverseGeocoderResult, type ReverseOptions, type SearchOptions, OvertureGeocoder as default, geocode, reverseGeocode };
+export { type GeoJSONFeature, type GeoJSONFeatureCollection, type GeoJSONGeometry, GeocoderError, GeocoderNetworkError, type GeocoderResult, GeocoderTimeoutError, type HierarchyEntry, type NearbySearchOptions, type OvertureAddress, OvertureGeocoder, type OvertureGeocoderConfig, type OverturePlace, type RefinedReverseResult, type ReverseAndRefineOptions, type ReverseGeocoderResult, type ReverseOptions, type SearchOptions, OvertureGeocoder as default, geocode, reverseGeocode };

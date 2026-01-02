@@ -25,12 +25,14 @@
     "geocoding",
     "overture",
     "maps",
-    "nominatim"
+    "nominatim",
+    "places",
+    "addresses"
   ],
   "author": "Brad Richardson",
   "license": "MIT",
   "dependencies": {
-    "@bradrichardson/overturemaps": "^0.2.1"
+    "@bradrichardson/overturemaps": "^0.3.2"
   },
   "devDependencies": {
     "@types/node": "^20.10.0",

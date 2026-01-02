@@ -417,3 +417,211 @@ describe("getFullGeometry and close", () => {
   // Note: getFullGeometry tests for STAC behavior are now in the
   // @bradrichardson/overturemaps package which handles the STAC lookup
 });
+
+// Mock reverse results for testing
+const mockReverseResults = [
+  {
+    gers_id: "div-123",
+    primary_name: "Back Bay",
+    subtype: "neighborhood",
+    lat: 42.3501,
+    lon: -71.0789,
+    boundingbox: [42.34, 42.36, -71.09, -71.07],
+    distance_km: 0.1,
+    confidence: "bbox" as const,
+    hierarchy: [
+      { gers_id: "div-456", subtype: "locality", name: "Boston, MA" },
+    ],
+  },
+  {
+    gers_id: "div-456",
+    primary_name: "Boston, MA",
+    subtype: "locality",
+    lat: 42.3601,
+    lon: -71.0589,
+    boundingbox: [42.227, 42.397, -71.191, -70.923],
+    distance_km: 0.5,
+    confidence: "bbox" as const,
+  },
+];
+
+describe("reverse with verifyGeometry", () => {
+  it("should return results without verification when verifyGeometry is false", async () => {
+    const mockFetch = createMockFetch(mockReverseResults);
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    const results = await client.reverse(42.3501, -71.0789, {
+      verifyGeometry: false,
+    });
+
+    expect(results).toHaveLength(2);
+    expect(results[0].confidence).toBe("bbox");
+  });
+
+  it("should include verifyGeometry in ReverseOptions", async () => {
+    const mockFetch = createMockFetch(mockReverseResults);
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    // This should compile and run without error
+    const results = await client.reverse(42.3501, -71.0789, {
+      verifyGeometry: false,
+      verifyLimit: 5,
+    });
+
+    expect(results).toHaveLength(2);
+  });
+});
+
+describe("reverseAndRefine", () => {
+  it("should call reverse with correct parameters", async () => {
+    const mockFetch = createMockFetch(mockReverseResults);
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    // Mock the getNearbyPlaces and getNearbyAddresses to return empty arrays
+    // since DuckDB isn't available in tests
+    vi.spyOn(client, "getNearbyPlaces").mockResolvedValue([]);
+    vi.spyOn(client, "getNearbyAddresses").mockResolvedValue([]);
+
+    const result = await client.reverseAndRefine(42.3501, -71.0789, {
+      verifyGeometry: false, // Skip geometry verification in test
+      includePlaces: true,
+      includeAddresses: true,
+    });
+
+    expect(result.divisions).toHaveLength(2);
+    expect(result.places).toEqual([]);
+    expect(result.addresses).toEqual([]);
+  });
+
+  it("should skip places when includePlaces is false", async () => {
+    const mockFetch = createMockFetch(mockReverseResults);
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    vi.spyOn(client, "getNearbyPlaces").mockResolvedValue([]);
+    vi.spyOn(client, "getNearbyAddresses").mockResolvedValue([]);
+
+    const result = await client.reverseAndRefine(42.3501, -71.0789, {
+      verifyGeometry: false,
+      includePlaces: false,
+      includeAddresses: true,
+    });
+
+    expect(result.divisions).toHaveLength(2);
+    expect(result.places).toBeUndefined();
+    expect(result.addresses).toEqual([]);
+    expect(client.getNearbyPlaces).not.toHaveBeenCalled();
+  });
+
+  it("should skip addresses when includeAddresses is false", async () => {
+    const mockFetch = createMockFetch(mockReverseResults);
+    const client = new OvertureGeocoder({ fetch: mockFetch });
+
+    vi.spyOn(client, "getNearbyPlaces").mockResolvedValue([]);
+    vi.spyOn(client, "getNearbyAddresses").mockResolvedValue([]);
+
+    const result = await client.reverseAndRefine(42.3501, -71.0789, {
+      verifyGeometry: false,
+      includePlaces: true,
+      includeAddresses: false,
+    });
+
+    expect(result.divisions).toHaveLength(2);
+    expect(result.places).toEqual([]);
+    expect(result.addresses).toBeUndefined();
+    expect(client.getNearbyAddresses).not.toHaveBeenCalled();
+  });
+});
+
+describe("getNearbyPlaces", () => {
+  it("should have the getNearbyPlaces method", () => {
+    const client = new OvertureGeocoder();
+    expect(typeof client.getNearbyPlaces).toBe("function");
+  });
+
+  it("should accept NearbySearchOptions", () => {
+    const client = new OvertureGeocoder();
+    // Verify the method signature accepts the expected options
+    expect(async () => {
+      // This will fail at runtime without DuckDB, but verifies types compile
+      try {
+        await client.getNearbyPlaces(42.35, -71.08, {
+          radiusKm: 0.5,
+          limit: 5,
+          category: "restaurant",
+        });
+      } catch {
+        // Expected to fail without actual DuckDB/S3 access
+      }
+    }).not.toThrow();
+  });
+});
+
+describe("getNearbyAddresses", () => {
+  it("should have the getNearbyAddresses method", () => {
+    const client = new OvertureGeocoder();
+    expect(typeof client.getNearbyAddresses).toBe("function");
+  });
+});
+
+describe("radiusToBbox calculation", () => {
+  it("should create valid bounding box from radius", () => {
+    const client = new OvertureGeocoder();
+    // Access private method through prototype for testing
+    const radiusToBbox = (client as unknown as { radiusToBbox: (lat: number, lon: number, radiusKm: number) => { xmin: number; ymin: number; xmax: number; ymax: number } }).radiusToBbox.bind(client);
+
+    const bbox = radiusToBbox(42.35, -71.08, 1);
+
+    // Verify bbox structure
+    expect(bbox).toHaveProperty("xmin");
+    expect(bbox).toHaveProperty("ymin");
+    expect(bbox).toHaveProperty("xmax");
+    expect(bbox).toHaveProperty("ymax");
+
+    // Verify bbox is centered on the point
+    expect(bbox.xmin).toBeLessThan(-71.08);
+    expect(bbox.xmax).toBeGreaterThan(-71.08);
+    expect(bbox.ymin).toBeLessThan(42.35);
+    expect(bbox.ymax).toBeGreaterThan(42.35);
+  });
+});
+
+describe("haversineDistance calculation", () => {
+  it("should calculate distance between two points", () => {
+    const client = new OvertureGeocoder();
+    // Access private method through prototype for testing
+    const haversineDistance = (client as unknown as { haversineDistance: (lat1: number, lon1: number, lat2: number, lon2: number) => number }).haversineDistance.bind(client);
+
+    // Boston to Cambridge (roughly 5km apart)
+    const distance = haversineDistance(42.3601, -71.0589, 42.3736, -71.1097);
+
+    expect(distance).toBeGreaterThan(4);
+    expect(distance).toBeLessThan(6);
+  });
+
+  it("should return 0 for same point", () => {
+    const client = new OvertureGeocoder();
+    const haversineDistance = (client as unknown as { haversineDistance: (lat1: number, lon1: number, lat2: number, lon2: number) => number }).haversineDistance.bind(client);
+
+    const distance = haversineDistance(42.35, -71.08, 42.35, -71.08);
+    expect(distance).toBe(0);
+  });
+});
+
+describe("type exports", () => {
+  it("should export all new types", async () => {
+    // Import types to verify they're exported
+    const module = await import("./index");
+
+    // Verify the new methods exist on the class
+    const client = new module.OvertureGeocoder();
+    expect(typeof client.getNearbyPlaces).toBe("function");
+    expect(typeof client.getNearbyAddresses).toBe("function");
+    expect(typeof client.reverseAndRefine).toBe("function");
+  });
+
+  it("should export readByBbox and readByBboxAll from overturemaps", async () => {
+    const module = await import("./index");
+    expect(module.readByBbox).toBeDefined();
+    expect(module.readByBboxAll).toBeDefined();
+  });
+});
