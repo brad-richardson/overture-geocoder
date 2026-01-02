@@ -55,7 +55,7 @@ COPY (
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
             hive_partitioning = true
         )
-        WHERE subtype IN ('locality', 'localadmin', 'neighborhood', 'macrohood', 'county')
+        WHERE subtype IN ('country', 'region', 'county', 'localadmin', 'locality', 'neighborhood', 'macrohood')
           AND names.primary IS NOT NULL
     ),
     areas_all AS (

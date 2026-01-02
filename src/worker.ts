@@ -345,6 +345,8 @@ function haversineDistance(
 /**
  * Build hierarchy from overlapping division candidates.
  * Candidates are sorted by type priority (most specific first).
+ * Only keeps the smallest (most specific) division per subtype to avoid
+ * including neighboring divisions with overlapping bboxes.
  */
 function buildHierarchy(candidates: DivisionReverseRow[]): HierarchyEntry[] {
   const typePriority: Record<string, number> = {
@@ -357,7 +359,17 @@ function buildHierarchy(candidates: DivisionReverseRow[]): HierarchyEntry[] {
     country: 7,
   };
 
-  return [...candidates]
+  // Deduplicate by subtype, keeping smallest area (candidates already sorted by area ASC)
+  const seenSubtypes = new Set<string>();
+  const deduped = candidates.filter((div) => {
+    if (seenSubtypes.has(div.subtype)) {
+      return false;
+    }
+    seenSubtypes.add(div.subtype);
+    return true;
+  });
+
+  return deduped
     .sort((a, b) => (typePriority[a.subtype] || 0) - (typePriority[b.subtype] || 0))
     .map((div) => ({
       gers_id: div.gers_id,
