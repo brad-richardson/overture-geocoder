@@ -1,0 +1,105 @@
+name: Rebuild R2 Shards
+
+on:
+  workflow_dispatch:
+    inputs:
+      countries:
+        description: 'Comma-separated country codes (empty = all countries)'
+        type: string
+        required: false
+        default: ''
+      head_threshold:
+        description: 'Population threshold for HEAD shard'
+        type: number
+        required: false
+        default: 100000
+      confirm:
+        description: 'Type "REBUILD" to confirm'
+        type: string
+        required: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  rebuild-shards:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'REBUILD'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Download divisions data
+        run: ./scripts/download_divisions.sh
+
+      - name: Build shards
+        run: |
+          ARGS="--head-threshold ${{ github.event.inputs.head_threshold }}"
+          if [ -n "${{ github.event.inputs.countries }}" ]; then
+            ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
+          fi
+          python scripts/build_shards.py $ARGS
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(ls -1 shards/ | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' | sort -r | head -1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Built version: $VERSION"
+
+      - name: Upload shards to R2
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          # Upload catalog
+          wrangler r2 object put geocoder-shards/catalog.json \
+            --file shards/catalog.json --remote
+
+          # Upload collection
+          wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
+            --file "shards/${VERSION}/collection.json" --remote
+
+          # Upload all shard databases
+          for db in shards/${VERSION}/shards/*.db; do
+            SHARD_ID=$(basename "$db" .db)
+            echo "Uploading ${SHARD_ID}.db..."
+            wrangler r2 object put "geocoder-shards/${VERSION}/shards/${SHARD_ID}.db" \
+              --file "$db" --remote
+          done
+
+          # Upload all item metadata
+          for item in shards/${VERSION}/items/*.json; do
+            SHARD_ID=$(basename "$item" .json)
+            echo "Uploading ${SHARD_ID}.json..."
+            wrangler r2 object put "geocoder-shards/${VERSION}/items/${SHARD_ID}.json" \
+              --file "$item" --remote
+          done
+
+      - name: Summary
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          echo "## R2 Shards Rebuild Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Shards uploaded:**" >> $GITHUB_STEP_SUMMARY
+          ls -1 shards/${VERSION}/shards/*.db | wc -l >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Total size:**" >> $GITHUB_STEP_SUMMARY
+          du -sh shards/${VERSION}/shards/ >> $GITHUB_STEP_SUMMARY
