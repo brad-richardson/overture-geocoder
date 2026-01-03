@@ -23,6 +23,7 @@ const MAX_LOCATION_SHARDS: usize = 4; // Max shards to load (excluding HEAD)
 #[derive(Debug, Clone, Default)]
 pub struct UserLocation {
     pub country: Option<String>,
+    #[allow(dead_code)]
     pub region: Option<String>,
     pub lat: Option<f64>,
     pub lon: Option<f64>,
@@ -49,6 +50,7 @@ impl UserLocation {
     }
 
     /// Check if we have coordinates.
+    #[allow(dead_code)]
     pub fn has_coordinates(&self) -> bool {
         self.lat.is_some() && self.lon.is_some()
     }
@@ -89,6 +91,7 @@ struct EmbeddedItem {
     bbox: Option<[f64; 4]>,
     /// Parent country code for region shards (e.g., "CN" for "CN-GD")
     #[serde(default)]
+    #[allow(dead_code)]
     parent_country: Option<String>,
 }
 
