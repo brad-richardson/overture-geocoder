@@ -119,7 +119,8 @@ mod tests {
             primary_name: name.to_string(),
             lat,
             lon,
-            bbox: [lat - 0.1, lat + 0.1, lon - 0.1, lon + 0.1],
+            // GeoJSON bbox: [min_lon, min_lat, max_lon, max_lat]
+            bbox: [lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1],
             importance: 0.5,
             division_type: "locality".to_string(),
             country: country.map(String::from),

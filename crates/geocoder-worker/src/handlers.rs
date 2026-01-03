@@ -15,8 +15,15 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
         .collect();
 
     // Parse query parameters
+    const MAX_QUERY_LENGTH: usize = 200;
     let q = match params.get("q") {
-        Some(q) if !q.is_empty() => q.clone(),
+        Some(q) if !q.is_empty() && q.len() <= MAX_QUERY_LENGTH => q.clone(),
+        Some(q) if q.len() > MAX_QUERY_LENGTH => {
+            return Response::error(
+                format!("Query too long: max {} characters", MAX_QUERY_LENGTH),
+                400,
+            )
+        }
         _ => return Response::error("Missing required parameter: q", 400),
     };
 
@@ -24,7 +31,7 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
         .get("limit")
         .and_then(|l| l.parse().ok())
         .unwrap_or(10)
-        .min(50);
+        .min(40);
 
     let autocomplete = params
         .get("autocomplete")
@@ -74,23 +81,19 @@ pub async fn handle_reverse(req: Request, _ctx: RouteContext<()>) -> Result<Resp
         .collect();
 
     let _lat: f64 = match params.get("lat").and_then(|l| l.parse().ok()) {
-        Some(l) => l,
+        Some(l) if (-90.0..=90.0).contains(&l) => l,
+        Some(_) => return Response::error("lat must be between -90 and 90", 400),
         None => return Response::error("Missing or invalid parameter: lat", 400),
     };
 
     let _lon: f64 = match params.get("lon").and_then(|l| l.parse().ok()) {
-        Some(l) => l,
+        Some(l) if (-180.0..=180.0).contains(&l) => l,
+        Some(_) => return Response::error("lon must be between -180 and 180", 400),
         None => return Response::error("Missing or invalid parameter: lon", 400),
     };
 
     // TODO: Implement reverse geocoding with R2 shards
     Response::error("Reverse geocoding not yet implemented for R2 shards", 501)
-}
-
-#[derive(Serialize)]
-struct SearchResponse {
-    results: Vec<ResultItem>,
-    query: QueryInfo,
 }
 
 #[derive(Serialize)]
@@ -107,13 +110,6 @@ struct ResultItem {
     country: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     region: Option<String>,
-}
-
-#[derive(Serialize)]
-struct QueryInfo {
-    text: String,
-    limit: usize,
-    autocomplete: bool,
 }
 
 fn to_json_response(results: &[GeocoderResult]) -> Result<Response> {

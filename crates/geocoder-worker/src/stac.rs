@@ -4,11 +4,16 @@ use geocoder_core::{query::apply_location_bias, Database, GeocoderQuery, Geocode
 use serde::Deserialize;
 use worker::*;
 
+// TODO: Implement edge caching using Cloudflare Cache API
+// These TTLs will be used when caching is implemented to reduce R2 fetches.
+#[allow(dead_code)]
 const CATALOG_CACHE_TTL: u64 = 300; // 5 minutes
+#[allow(dead_code)]
 const SHARD_CACHE_TTL: u64 = 3600; // 1 hour
 
 /// Loads and caches shards from R2.
 pub struct ShardLoader<'a> {
+    #[allow(dead_code)] // Reserved for future caching implementation
     env: &'a Env,
     bucket: Bucket,
 }
@@ -28,12 +33,14 @@ struct StacLink {
 
 #[derive(Debug, Deserialize)]
 struct StacCollection {
+    #[allow(dead_code)] // Available for future use (e.g., version display)
     id: String,
     links: Vec<StacLink>,
 }
 
 #[derive(Debug, Deserialize)]
 struct StacItem {
+    #[allow(dead_code)] // Available for future use (e.g., shard identification)
     id: String,
     properties: StacItemProperties,
     assets: StacAssets,
@@ -42,7 +49,9 @@ struct StacItem {
 #[derive(Debug, Deserialize)]
 struct StacItemProperties {
     record_count: u64,
+    #[allow(dead_code)] // Available for cache validation
     size_bytes: u64,
+    #[allow(dead_code)] // Available for integrity verification
     sha256: String,
 }
 
@@ -70,23 +79,20 @@ impl<'a> ShardLoader<'a> {
     ) -> Result<Vec<GeocoderResult>> {
         // Load STAC catalog to find shards
         let catalog = self.load_catalog().await?;
-        let collection = self.load_latest_collection(&catalog).await?;
+        let (version, collection) = self.load_latest_collection(&catalog).await?;
 
-        // Determine which shards to query
-        let mut shard_ids = vec!["HEAD".to_string()];
+        // Query HEAD shard (required - fail if unavailable)
+        let head_results = self.query_shard(&version, "HEAD", query).await?;
+        let mut all_results = head_results;
+
+        // Query country shard if available (optional - log errors but continue)
         if let Some(country) = cf_country {
             if self.collection_has_shard(&collection, country) {
-                shard_ids.push(country.to_string());
-            }
-        }
-
-        // Load and query each shard
-        let mut all_results = Vec::new();
-        for shard_id in &shard_ids {
-            match self.query_shard(&collection, shard_id, query).await {
-                Ok(results) => all_results.extend(results),
-                Err(e) => {
-                    console_log!("Error querying shard {}: {:?}", shard_id, e);
+                match self.query_shard(&version, country, query).await {
+                    Ok(results) => all_results.extend(results),
+                    Err(e) => {
+                        console_log!("Warning: country shard {} unavailable: {:?}", country, e);
+                    }
                 }
             }
         }
@@ -128,7 +134,8 @@ impl<'a> ShardLoader<'a> {
             .map_err(|e| Error::RustError(format!("Failed to parse catalog: {}", e)))
     }
 
-    async fn load_latest_collection(&self, catalog: &StacCatalog) -> Result<StacCollection> {
+    /// Load the latest collection and return it along with its version string.
+    async fn load_latest_collection(&self, catalog: &StacCatalog) -> Result<(String, StacCollection)> {
         // Find the link marked as latest
         let latest_link = catalog
             .links
@@ -142,7 +149,8 @@ impl<'a> ShardLoader<'a> {
             .trim_start_matches("./")
             .split('/')
             .next()
-            .ok_or_else(|| Error::RustError("Invalid collection href".into()))?;
+            .ok_or_else(|| Error::RustError("Invalid collection href".into()))?
+            .to_string();
 
         let key = format!("{}/collection.json", version);
         let obj = self
@@ -155,8 +163,10 @@ impl<'a> ShardLoader<'a> {
         let bytes = obj.body().ok_or_else(|| Error::RustError("Empty collection".into()))?;
         let text = bytes.text().await?;
 
-        serde_json::from_str(&text)
-            .map_err(|e| Error::RustError(format!("Failed to parse collection: {}", e)))
+        let collection: StacCollection = serde_json::from_str(&text)
+            .map_err(|e| Error::RustError(format!("Failed to parse collection: {}", e)))?;
+
+        Ok((version, collection))
     }
 
     fn collection_has_shard(&self, collection: &StacCollection, shard_id: &str) -> bool {
@@ -168,12 +178,11 @@ impl<'a> ShardLoader<'a> {
 
     async fn query_shard(
         &self,
-        collection: &StacCollection,
+        version: &str,
         shard_id: &str,
         query: &GeocoderQuery,
     ) -> Result<Vec<GeocoderResult>> {
         // Load the shard item metadata
-        let version = &collection.id.replace("geocoder-", "");
         let item_key = format!("{}/items/{}.json", version, shard_id);
 
         let item_obj = self

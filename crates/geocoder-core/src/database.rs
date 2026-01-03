@@ -46,11 +46,11 @@ impl Database {
         })
     }
 
-    /// Open a database from bytes (for WASM compatibility testing).
+    /// Open a database from bytes.
     ///
-    /// Note: In actual WASM, we use sqlite3_deserialize instead.
-    /// This method creates a temp file for native testing, which is automatically
-    /// cleaned up when the Database is dropped.
+    /// On native: creates a temp file (cleaned up when dropped).
+    /// On WASM: uses SQLite's in-memory deserialize.
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         // Write bytes to a temp file (cleaned up on Drop)
         let temp_path = std::env::temp_dir().join(format!("geocoder-{}.db", uuid_v4()));
@@ -71,6 +71,58 @@ impl Database {
         Ok(Self {
             conn,
             temp_file: Some(temp_path),
+        })
+    }
+
+    /// Open a database from bytes (WASM version).
+    ///
+    /// Uses SQLite's deserialize to load the database directly into memory
+    /// without filesystem access.
+    #[cfg(target_arch = "wasm32")]
+    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
+        use rusqlite::ffi;
+        use std::ffi::CString;
+        use std::ptr;
+
+        // Open an in-memory database
+        let conn = Connection::open_in_memory()?;
+
+        // Allocate SQLite memory and copy the bytes
+        let sz = bytes.len();
+        let ptr = unsafe { ffi::sqlite3_malloc64(sz as u64) as *mut u8 };
+        if ptr.is_null() {
+            return Err(crate::error::Error::Database("Failed to allocate SQLite memory".into()));
+        }
+        unsafe {
+            ptr::copy_nonoverlapping(bytes.as_ptr(), ptr, sz);
+        }
+
+        // Deserialize into the main database
+        let schema = CString::new("main").unwrap();
+        let rc = unsafe {
+            ffi::sqlite3_deserialize(
+                conn.handle(),
+                schema.as_ptr(),
+                ptr,
+                sz as i64,
+                sz as i64,
+                ffi::SQLITE_DESERIALIZE_FREEONCLOSE | ffi::SQLITE_DESERIALIZE_READONLY,
+            )
+        };
+
+        if rc != ffi::SQLITE_OK {
+            // Memory will be freed by SQLite due to FREEONCLOSE flag
+            return Err(crate::error::Error::Database(
+                format!("sqlite3_deserialize failed: {}", rc)
+            ));
+        }
+
+        // Configure for read-only performance
+        conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
+
+        Ok(Self {
+            conn,
+            temp_file: None,
         })
     }
 

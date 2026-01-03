@@ -37,16 +37,6 @@ npx wrangler dev
 npx wrangler deploy
 ```
 
-## Testing
-
-```bash
-# Run native tests
-cargo test -p geocoder-worker
-
-# Run WASM tests (requires wasm-pack)
-wasm-pack test --node crates/geocoder-worker
-```
-
 ## Prerequisites
 
 1. R2 bucket named `geocoder-shards`
@@ -63,7 +53,7 @@ wasm-pack test --node crates/geocoder-worker
 
 Parameters:
 - `q` (required): Search query
-- `limit`: Max results (default: 10, max: 50)
+- `limit`: Max results (default: 10, max: 40)
 - `autocomplete`: Enable prefix matching (default: true)
 - `format`: `json` or `geojson` (default: json)
 

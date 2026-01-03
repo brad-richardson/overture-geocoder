@@ -74,7 +74,7 @@ pub struct GeocoderResult {
     pub lat: f64,
     /// Longitude of the centroid.
     pub lon: f64,
-    /// Bounding box [min_lat, max_lat, min_lon, max_lon].
+    /// Bounding box in GeoJSON order: [min_lon, min_lat, max_lon, max_lat].
     #[serde(rename = "boundingbox")]
     pub bbox: [f64; 4],
     /// Importance score (0-1, higher is more important).
@@ -121,7 +121,8 @@ impl DivisionRow {
             primary_name: self.primary_name,
             lat: self.lat,
             lon: self.lon,
-            bbox: [self.bbox_ymin, self.bbox_ymax, self.bbox_xmin, self.bbox_xmax],
+            // GeoJSON bbox order: [min_lon, min_lat, max_lon, max_lat]
+            bbox: [self.bbox_xmin, self.bbox_ymin, self.bbox_xmax, self.bbox_ymax],
             // Convert boosted score to importance (0-1 scale).
             // More negative score = higher importance.
             importance: (-self.boosted_score / 50.0).clamp(0.0, 1.0),
@@ -188,7 +189,7 @@ pub struct ReverseResult {
     pub lat: f64,
     /// Longitude of the centroid.
     pub lon: f64,
-    /// Bounding box [min_lat, max_lat, min_lon, max_lon].
+    /// Bounding box in GeoJSON order: [min_lon, min_lat, max_lon, max_lat].
     #[serde(rename = "boundingbox")]
     pub bbox: [f64; 4],
     /// Distance from query point in kilometers.
