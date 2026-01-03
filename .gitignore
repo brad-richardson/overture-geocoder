@@ -74,3 +74,4 @@ crates/target/
 
 # Shard outputs (generated, large)
 shards/
+data/

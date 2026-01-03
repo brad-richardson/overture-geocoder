@@ -96,9 +96,10 @@ DEFAULT_HEAD_THRESHOLD = 100_000
 ANTIMERIDIAN_WIDTH_THRESHOLD = 180.0
 
 
-def get_version() -> str:
-    """Get version string (date-based)."""
-    return datetime.now(timezone.utc).strftime("%Y-%m-%d") + ".0"
+def get_version(suffix: str = "0") -> str:
+    """Get version string (date-based with suffix)."""
+    date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    return f"{date}.{suffix}"
 
 
 def get_countries(parquet_path: Path) -> list[str]:
@@ -753,53 +754,6 @@ def hash_file(path: Path) -> str:
     return sha256.hexdigest()
 
 
-def generate_stac_item(
-    shard_id: str,
-    shard_info: dict,
-    shard_path: Path,
-    version: str,
-) -> dict:
-    """Generate STAC Item for a shard."""
-    bbox = shard_info["bbox"]
-
-    return {
-        "type": "Feature",
-        "stac_version": "1.1.0",
-        "stac_extensions": [],
-        "id": shard_id,
-        "bbox": bbox,
-        "geometry": {
-            "type": "Polygon",
-            "coordinates": [[
-                [bbox[0], bbox[1]],
-                [bbox[2], bbox[1]],
-                [bbox[2], bbox[3]],
-                [bbox[0], bbox[3]],
-                [bbox[0], bbox[1]],
-            ]]
-        },
-        "properties": {
-            "datetime": datetime.now(timezone.utc).isoformat(),
-            "record_count": shard_info["record_count"],
-            "size_bytes": shard_info["size_bytes"],
-            "sha256": hash_file(shard_path),
-        },
-        "assets": {
-            "data": {
-                "href": f"./shards/{shard_id}.db",
-                "type": "application/x-sqlite3",
-                "roles": ["data"],
-                "title": f"{shard_id} geocoding shard",
-            }
-        },
-        "links": [
-            {"rel": "root", "href": "../../catalog.json", "type": "application/json"},
-            {"rel": "parent", "href": "../collection.json", "type": "application/json"},
-            {"rel": "collection", "href": "../collection.json", "type": "application/json"},
-        ]
-    }
-
-
 def generate_stac_collection(
     version: str,
     shard_infos: dict[str, dict],
@@ -906,7 +860,6 @@ def write_json(path: Path, data: dict):
 def build_forward_shards(args, version: str, version_dir: Path) -> dict:
     """Build forward geocoding shards (FTS-based)."""
     shards_subdir = version_dir / "shards"
-    items_subdir = version_dir / "items"
 
     print(f"Building FORWARD geocoding shards for version {version}")
     print(f"Output directory: {version_dir}")
@@ -1002,14 +955,8 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         shard_path = shards_subdir / f"{shard_id}.db"
         shard_hashes[shard_id] = hash_file(shard_path)
 
-    # Generate STAC items (for backward compatibility)
-    print("Generating STAC catalog...")
-    for shard_id, info in shard_infos.items():
-        shard_path = shards_subdir / f"{shard_id}.db"
-        item = generate_stac_item(shard_id, info, shard_path, version)
-        write_json(items_subdir / f"{shard_id}.json", item)
-
     # Generate collection with embedded items and region_sharded metadata
+    print("Generating STAC catalog...")
     collection = generate_stac_collection(
         version, shard_infos, shard_hashes, "shards",
         region_sharded=region_sharded if region_sharded else None
@@ -1022,7 +969,6 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
 def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
     """Build reverse geocoding shards (bbox-based)."""
     reverse_subdir = version_dir / "reverse"
-    reverse_items_subdir = version_dir / "reverse-items"
 
     # Use reverse parquet if available, otherwise error
     parquet_path = args.parquet
@@ -1083,17 +1029,8 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
         shard_path = reverse_subdir / f"{shard_id}.db"
         shard_hashes[shard_id] = hash_file(shard_path)
 
-    # Generate STAC items for reverse shards (for backward compatibility)
-    print("Generating reverse STAC catalog...")
-    for shard_id, info in shard_infos.items():
-        shard_path = reverse_subdir / f"{shard_id}.db"
-        item = generate_stac_item(shard_id, info, shard_path, version)
-        # Update asset href for reverse
-        item["assets"]["data"]["href"] = f"./reverse/{shard_id}.db"
-        item["assets"]["data"]["title"] = f"{shard_id} reverse geocoding shard"
-        write_json(reverse_items_subdir / f"{shard_id}.json", item)
-
     # Generate reverse collection with embedded items
+    print("Generating reverse STAC catalog...")
     collection = generate_stac_collection(version, shard_infos, shard_hashes, "reverse")
     collection["id"] = f"geocoder-reverse-shards-{version}"
     collection["title"] = f"Overture Reverse Geocoder Shards {version}"
@@ -1105,7 +1042,9 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
 
 def main():
     parser = argparse.ArgumentParser(description="Build geocoder shards")
-    parser.add_argument("--version", help="Version string (default: date-based)")
+    parser.add_argument("--version", help="Version string (default: date-based with suffix)")
+    parser.add_argument("--version-suffix", default="0",
+                        help="Version suffix (default: 0, use 1, 2, etc. for rebuilds)")
     parser.add_argument("--head-threshold", type=int, default=DEFAULT_HEAD_THRESHOLD,
                         help=f"Population threshold for HEAD shard (default: {DEFAULT_HEAD_THRESHOLD})")
     parser.add_argument("--countries", help="Comma-separated list of countries to build")
@@ -1122,7 +1061,7 @@ def main():
         print("Run: ./scripts/download_divisions.sh")
         sys.exit(1)
 
-    version = args.version or get_version()
+    version = args.version or get_version(args.version_suffix)
     version_dir = SHARDS_DIR / version
 
     if args.reverse:
@@ -1130,13 +1069,11 @@ def main():
         shard_type = "reverse"
         collection_file = "reverse-collection.json"
         shards_subdir = "reverse"
-        items_subdir = "reverse-items"
     else:
         shard_infos = build_forward_shards(args, version, version_dir)
         shard_type = "forward"
         collection_file = "collection.json"
         shards_subdir = "shards"
-        items_subdir = "items"
 
     # Update root catalog (only for forward shards, reverse has its own collection)
     if not args.reverse:
@@ -1166,7 +1103,6 @@ def main():
     if not args.reverse:
         print(f"  {SHARDS_DIR}/catalog.json")
     print(f"  {version_dir}/{collection_file}")
-    print(f"  {version_dir}/{items_subdir}/*.json")
     print(f"  {version_dir}/{shards_subdir}/*.db")
 
 

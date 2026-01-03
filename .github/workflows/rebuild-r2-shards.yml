@@ -17,6 +17,11 @@ on:
         type: number
         required: false
         default: 100000
+      version_suffix:
+        description: 'Version suffix (0 = default, 1/2/3 = same-day rebuilds)'
+        type: string
+        required: false
+        default: '0'
       build_type:
         description: 'What to build'
         type: choice
@@ -77,7 +82,8 @@ jobs:
       - name: Build forward geocoding shards
         if: github.event.inputs.build_type == 'forward' || github.event.inputs.build_type == 'both'
         run: |
-          ARGS="--head-threshold ${{ github.event.inputs.head_threshold }}"
+          ARGS="--head-threshold ${{ github.event.inputs.head_threshold || 100000 }}"
+          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
@@ -86,7 +92,8 @@ jobs:
       - name: Build reverse geocoding shards
         if: github.event.inputs.build_type == 'reverse' || github.event.inputs.build_type == 'both'
         run: |
-          ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold }}"
+          ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold || 100000 }}"
+          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
@@ -110,13 +117,12 @@ jobs:
           wrangler r2 object put geocoder-shards/catalog.json \
             --file shards/catalog.json --remote > /dev/null
 
-          # Upload forward geocoding collection
+          # Upload forward geocoding collection (contains embedded item metadata)
           wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
             --file "shards/${VERSION}/collection.json" --remote > /dev/null
 
-          # Count total files
+          # Count total database files
           TOTAL_DB=$(find "shards/${VERSION}/shards" -name "*.db" | wc -l)
-          TOTAL_ITEMS=$(find "shards/${VERSION}/items" -name "*.json" | wc -l)
           echo "Uploading ${TOTAL_DB} forward shard databases..."
 
           # Upload function with progress tracking
@@ -158,27 +164,6 @@ jobs:
             exit 1
           fi
 
-          # Reset progress for items
-          rm -f "$PROGRESS_DIR"/*
-          echo "Uploading ${TOTAL_ITEMS} forward item metadata..."
-
-          find "shards/${VERSION}/items" -name "*.json" | \
-            xargs -P 8 -I {} bash -c "upload_file '{}' '${VERSION}' '${VERSION}/items/\$(basename {})' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
-
-          while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_ITEMS" ]; do
-            DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
-            printf "\r  Progress: %d/%d items" "$DONE" "$TOTAL_ITEMS"
-            sleep 1
-          done
-          wait
-          printf "\r  Progress: %d/%d items ✓\n" "$TOTAL_ITEMS" "$TOTAL_ITEMS"
-
-          if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
-            echo "::error::Some uploads failed:"
-            cat "$ERRORS_DIR"/*.log
-            exit 1
-          fi
-
           rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
 
       - name: Upload reverse shards to R2
@@ -188,13 +173,12 @@ jobs:
           PROGRESS_DIR=$(mktemp -d)
           ERRORS_DIR=$(mktemp -d)
 
-          # Upload reverse geocoding collection
+          # Upload reverse geocoding collection (contains embedded item metadata)
           wrangler r2 object put "geocoder-shards/${VERSION}/reverse-collection.json" \
             --file "shards/${VERSION}/reverse-collection.json" --remote > /dev/null
 
-          # Count total files
+          # Count total database files
           TOTAL_DB=$(find "shards/${VERSION}/reverse" -name "*.db" | wc -l)
-          TOTAL_ITEMS=$(find "shards/${VERSION}/reverse-items" -name "*.json" | wc -l)
           echo "Uploading ${TOTAL_DB} reverse shard databases..."
 
           upload_file() {
@@ -225,26 +209,6 @@ jobs:
           done
           wait
           printf "\r  Progress: %d/%d databases ✓\n" "$TOTAL_DB" "$TOTAL_DB"
-
-          if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
-            echo "::error::Some uploads failed:"
-            cat "$ERRORS_DIR"/*.log
-            exit 1
-          fi
-
-          rm -f "$PROGRESS_DIR"/*
-          echo "Uploading ${TOTAL_ITEMS} reverse item metadata..."
-
-          find "shards/${VERSION}/reverse-items" -name "*.json" | \
-            xargs -P 8 -I {} bash -c "upload_file '{}' '${VERSION}' '${VERSION}/reverse-items/\$(basename {})' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
-
-          while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_ITEMS" ]; do
-            DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
-            printf "\r  Progress: %d/%d items" "$DONE" "$TOTAL_ITEMS"
-            sleep 1
-          done
-          wait
-          printf "\r  Progress: %d/%d items ✓\n" "$TOTAL_ITEMS" "$TOTAL_ITEMS"
 
           if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
             echo "::error::Some uploads failed:"

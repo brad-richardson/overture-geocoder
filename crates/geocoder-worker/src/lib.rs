@@ -27,9 +27,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     if let Ok(rate_limiter) = env.rate_limiter("RATE_LIMITER") {
         if let Ok(outcome) = rate_limiter.limit(ip).await {
             if !outcome.success {
-                let headers = cors_headers();
-                headers.set("Retry-After", "60").ok();
-                return Ok(Response::error("Rate limit exceeded", 429)?.with_headers(headers));
+                let mut resp = Response::error("Rate limit exceeded", 429)?;
+                resp.headers_mut().set("Access-Control-Allow-Origin", "*")?;
+                resp.headers_mut().set("Retry-After", "60")?;
+                return Ok(resp);
             }
         }
     }
@@ -48,15 +49,12 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .run(req, env)
         .await?;
 
-    // Apply CORS headers to all responses
-    Ok(response.with_headers(cors_headers()))
-}
-
-/// CORS headers applied to all responses.
-fn cors_headers() -> Headers {
-    let headers = Headers::new();
-    headers.set("Access-Control-Allow-Origin", "*").unwrap();
-    headers
+    // Add CORS header to existing response headers (don't replace)
+    let mut response = response;
+    response
+        .headers_mut()
+        .set("Access-Control-Allow-Origin", "*")?;
+    Ok(response)
 }
 
 /// Response for CORS preflight (OPTIONS) requests.

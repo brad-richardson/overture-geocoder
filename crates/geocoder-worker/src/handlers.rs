@@ -211,3 +211,4 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
         .set("Content-Type", "application/geo+json; charset=utf-8")?;
     Ok(resp)
 }
+
