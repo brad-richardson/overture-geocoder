@@ -5,7 +5,10 @@
 -- Output: exports/divisions-reverse.parquet
 -- Expected: ~450K records (divisions with matching areas)
 --
--- Note: __OVERTURE_RELEASE__ is substituted at runtime with the latest release
+-- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
+-- The download_divisions.sh script fetches the latest release version from the
+-- Overture STAC catalog and replaces this placeholder via sed before execution.
+-- Example: sed "s|__OVERTURE_RELEASE__|2025-01-01.0|g" ... | duckdb
 
 -- Install and load required extensions
 INSTALL httpfs;

@@ -1,0 +1,19 @@
+[package]
+name = "geocoder-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Core geocoding engine for Overture Maps data"
+
+[features]
+default = ["native"]
+native = ["rusqlite"]
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+rusqlite = { workspace = true, optional = true }
+
+[dev-dependencies]
+pretty_assertions = { workspace = true }

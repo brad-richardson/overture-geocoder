@@ -68,3 +68,9 @@ htmlcov/
 
 # Build artifacts
 *.tsbuildinfo
+
+# Rust
+crates/target/
+
+# Shard outputs (generated, large)
+shards/

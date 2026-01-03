@@ -4,7 +4,13 @@
 -- Output: exports/divisions-global.parquet
 -- Expected: ~4.3M records
 --
--- Note: __OVERTURE_RELEASE__ is substituted at runtime with the latest release
+-- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
+-- The download_divisions.sh script fetches the latest release version from the
+-- Overture STAC catalog and replaces this placeholder via sed before execution.
+-- Example: sed "s|__OVERTURE_RELEASE__|2025-01-01.0|g" ... | duckdb
+--
+-- TODO: Future iteration - download raw data first, then filter/transform in a
+-- separate step. This would avoid re-downloading when tweaking search_text logic.
 
 -- Install and load required extensions
 INSTALL httpfs;
@@ -50,33 +56,44 @@ COPY (
             ELSE
                 CONCAT(names.primary, ', ', country)
         END as primary_name,
-        -- Search text includes all name variants + enclosing divisions for FTS
-        -- Uses LIST_DISTINCT to remove duplicate words
+        -- Search text for FTS - focused on key searchable terms
+        -- Includes: primary, short names (NYC), English common/alternate, region, country
+        -- Excludes: multilingual translations to keep BM25 scoring balanced
+        -- TODO: Consider language-specific shards for full multilingual search
         LOWER(ARRAY_TO_STRING(
             LIST_DISTINCT(
                 LIST_FILTER(
                     STRING_SPLIT(
                         CONCAT_WS(' ',
+                            -- Primary name (the main searchable name)
                             names.primary,
-                            -- Common names (multilingual translations)
-                            COALESCE(ARRAY_TO_STRING(MAP_VALUES(names.common), ' '), ''),
-                            -- All name variants from rules array (official, alternate, short)
-                            COALESCE(
-                                ARRAY_TO_STRING(
-                                    LIST_TRANSFORM(names.rules, r -> r.value),
-                                    ' '
+                            -- Short names with null language (e.g., "NYC", "LA")
+                            COALESCE(ARRAY_TO_STRING(
+                                list_transform(
+                                    list_filter(names.rules, x -> x.variant = 'short' AND x.language IS NULL),
+                                    x -> x.value
                                 ),
-                                ''
-                            ),
-                            -- Hierarchy names (enclosing divisions: country, region, county, etc.)
-                            COALESCE(
-                                ARRAY_TO_STRING(
-                                    LIST_TRANSFORM(hierarchies[1], h -> h.name),
-                                    ' '
+                                ' '
+                            ), ''),
+                            -- English common name (names.common is MAP<language, value>)
+                            COALESCE(list_extract(map_extract(names.common, 'en'), 1), ''),
+                            -- Official names with null language (e.g., "New York" for NYC)
+                            COALESCE(ARRAY_TO_STRING(
+                                list_transform(
+                                    list_filter(names.rules, x -> x.variant = 'official' AND x.language IS NULL),
+                                    x -> x.value
                                 ),
-                                ''
-                            ),
-                            -- Region code (e.g., "MA" for US, or full region code)
+                                ' '
+                            ), ''),
+                            -- Alternate names with null/English language (e.g., "New York City", "Big Apple")
+                            COALESCE(ARRAY_TO_STRING(
+                                list_transform(
+                                    list_filter(names.rules, x -> x.variant = 'alternate' AND (x.language IS NULL OR x.language LIKE 'en%')),
+                                    x -> x.value
+                                ),
+                                ' '
+                            ), ''),
+                            -- Region code (e.g., "MA" for US)
                             CASE WHEN country = 'US' AND region IS NOT NULL
                                 THEN REPLACE(region, 'US-', '')
                                 ELSE region

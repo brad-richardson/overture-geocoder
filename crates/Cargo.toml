@@ -1,0 +1,30 @@
+[workspace]
+resolver = "2"
+members = [
+    "geocoder-core",
+    "geocoder-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/brad-richardson/overture-geocoder"
+
+[workspace.dependencies]
+# Serialization
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+
+# Error handling
+thiserror = "2.0"
+anyhow = "1.0"
+
+# SQLite - native builds
+rusqlite = { version = "0.32", features = ["bundled", "vtab"] }
+
+# Async runtime (for CLI)
+tokio = { version = "1.0", features = ["full"] }
+
+# Testing
+pretty_assertions = "1.4"
