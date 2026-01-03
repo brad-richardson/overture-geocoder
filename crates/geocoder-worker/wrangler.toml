@@ -7,7 +7,7 @@ command = "cargo install -q worker-build && worker-build --release"
 
 # CPU limit to prevent runaway requests
 [limits]
-cpu_ms = 100
+cpu_ms = 500
 
 # Custom domain for Cache API support
 routes = [

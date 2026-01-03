@@ -1,10 +1,10 @@
 //! STAC catalog loading and shard management with edge caching.
 
 use geocoder_core::{
-    query::apply_location_bias, Database, GeocoderQuery, GeocoderResult, LocationBias,
-    ReverseResult,
+    query::{apply_exact_match_bonus, apply_location_bias},
+    Database, GeocoderQuery, GeocoderResult, LocationBias, ReverseResult,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use worker::*;
 
 // Cache TTLs for different resource types
@@ -49,9 +49,51 @@ impl UserLocation {
     }
 
     /// Check if we have coordinates.
+    #[allow(dead_code)]
     pub fn has_coordinates(&self) -> bool {
         self.lat.is_some() && self.lon.is_some()
     }
+}
+
+/// Debug info about a loaded shard.
+#[derive(Debug, Clone, Serialize)]
+pub struct ShardDebugInfo {
+    pub id: String,
+    pub size_bytes: usize,
+    pub record_count: u64,
+}
+
+/// Debug info about the search operation.
+#[derive(Debug, Clone, Serialize)]
+pub struct SearchDebugInfo {
+    pub user_location: UserLocationDebug,
+    pub shards_loaded: Vec<ShardDebugInfo>,
+}
+
+/// Serializable user location for debug output.
+#[derive(Debug, Clone, Serialize)]
+pub struct UserLocationDebug {
+    pub country: Option<String>,
+    pub region: Option<String>,
+    pub lat: Option<f64>,
+    pub lon: Option<f64>,
+}
+
+impl From<&UserLocation> for UserLocationDebug {
+    fn from(loc: &UserLocation) -> Self {
+        Self {
+            country: loc.country.clone(),
+            region: loc.region.clone(),
+            lat: loc.lat,
+            lon: loc.lon,
+        }
+    }
+}
+
+/// Search result with optional debug info.
+pub struct SearchResult {
+    pub results: Vec<GeocoderResult>,
+    pub debug: Option<SearchDebugInfo>,
 }
 
 /// Loads and caches shards from R2 with edge caching via Cache API.
@@ -89,6 +131,7 @@ struct EmbeddedItem {
     bbox: Option<[f64; 4]>,
     /// Parent country code for region shards (e.g., "CN" for "CN-GD")
     #[serde(default)]
+    #[allow(dead_code)]
     parent_country: Option<String>,
 }
 
@@ -200,16 +243,23 @@ impl<'a> ShardLoader<'a> {
         &self,
         query: &GeocoderQuery,
         user_location: &UserLocation,
-    ) -> Result<Vec<GeocoderResult>> {
+        include_debug: bool,
+    ) -> Result<SearchResult> {
         // Load STAC catalog to find shards
         let catalog = self.load_catalog().await?;
         let (version, collection) = self.load_latest_collection(&catalog).await?;
 
+        // Track loaded shards for debug
+        let mut shards_loaded = Vec::new();
+
         // Query HEAD shard (required - fail if unavailable)
-        let head_results = self
-            .query_shard(&version, "HEAD", &collection, query)
+        let (head_results, head_info) = self
+            .query_shard_with_info(&version, "HEAD", &collection, query)
             .await?;
         let mut all_results = head_results;
+        if include_debug {
+            shards_loaded.push(head_info);
+        }
 
         // Select nearby shards based on user location
         let nearby_shards = self.select_nearby_shards(&collection, user_location);
@@ -218,10 +268,15 @@ impl<'a> ShardLoader<'a> {
         // Query each nearby shard
         for shard_id in nearby_shards {
             match self
-                .query_shard(&version, &shard_id, &collection, query)
+                .query_shard_with_info(&version, &shard_id, &collection, query)
                 .await
             {
-                Ok(results) => all_results.extend(results),
+                Ok((results, info)) => {
+                    all_results.extend(results);
+                    if include_debug {
+                        shards_loaded.push(info);
+                    }
+                }
                 Err(e) => {
                     console_log!("Warning: shard {} unavailable: {:?}", shard_id, e);
                 }
@@ -239,6 +294,9 @@ impl<'a> ShardLoader<'a> {
         let mut seen = std::collections::HashSet::new();
         all_results.retain(|r| seen.insert(r.gers_id.clone()));
 
+        // Apply exact match bonus (helps "Paris" rank above "Parish")
+        apply_exact_match_bonus(&mut all_results, &query.text);
+
         // Apply location bias (can elevate results from country shard)
         if !matches!(query.bias, LocationBias::None) {
             apply_location_bias(&mut all_results, &query.bias);
@@ -247,7 +305,20 @@ impl<'a> ShardLoader<'a> {
         // Truncate to requested limit after bias is applied
         all_results.truncate(query.limit);
 
-        Ok(all_results)
+        // Build debug info if requested
+        let debug = if include_debug {
+            Some(SearchDebugInfo {
+                user_location: user_location.into(),
+                shards_loaded,
+            })
+        } else {
+            None
+        };
+
+        Ok(SearchResult {
+            results: all_results,
+            debug,
+        })
     }
 
     /// Select shards to query based on user location and proximity.
@@ -468,13 +539,14 @@ impl<'a> ShardLoader<'a> {
         collection.items.get(shard_id)
     }
 
-    async fn query_shard(
+    /// Query a shard and return both results and debug info.
+    async fn query_shard_with_info(
         &self,
         version: &str,
         shard_id: &str,
         collection: &StacCollection,
         query: &GeocoderQuery,
-    ) -> Result<Vec<GeocoderResult>> {
+    ) -> Result<(Vec<GeocoderResult>, ShardDebugInfo)> {
         // Get item metadata from embedded items (new format) or fall back to separate file
         let (shard_href, record_count) =
             if let Some(item) = self.get_embedded_item(collection, shard_id) {
@@ -501,10 +573,12 @@ impl<'a> ShardLoader<'a> {
             .await?
             .ok_or_else(|| Error::RustError(format!("Shard {} not found", shard_key)))?;
 
+        let shard_size = shard_bytes.len();
+
         console_log!(
             "Loading shard {} ({} bytes, {} records)",
             shard_id,
-            shard_bytes.len(),
+            shard_size,
             record_count
         );
 
@@ -516,7 +590,13 @@ impl<'a> ShardLoader<'a> {
             .search(query)
             .map_err(|e| Error::RustError(format!("Search failed: {}", e)))?;
 
-        Ok(results)
+        let debug_info = ShardDebugInfo {
+            id: shard_id.to_string(),
+            size_bytes: shard_size,
+            record_count,
+        };
+
+        Ok((results, debug_info))
     }
 }
 

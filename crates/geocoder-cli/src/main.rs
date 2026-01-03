@@ -119,6 +119,9 @@ fn cmd_search(args: &[String]) -> Result<()> {
     // Execute search (returns more results than limit to allow bias to elevate)
     let mut results = db.search(&query)?;
 
+    // Apply exact match bonus (helps "Paris" rank above "Parish")
+    geocoder_core::query::apply_exact_match_bonus(&mut results, query_text);
+
     // Apply location bias (re-ranks results)
     if !matches!(bias, LocationBias::None) {
         geocoder_core::query::apply_location_bias(&mut results, &bias);

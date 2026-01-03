@@ -4,7 +4,7 @@ use geocoder_core::{GeocoderQuery, GeocoderResult, LocationBias};
 use serde::Serialize;
 use worker::*;
 
-use crate::stac::{ShardLoader, UserLocation};
+use crate::stac::{SearchDebugInfo, ShardLoader, UserLocation};
 
 /// Search request handler.
 pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -40,6 +40,11 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
 
+    let include_debug = params
+        .get("debug")
+        .map(|d| d == "1" || d == "true")
+        .unwrap_or(false);
+
     // Extract user location from Cloudflare headers
     let user_location = UserLocation::from_request(&req);
 
@@ -73,12 +78,12 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
 
     // Load shards and search
     let loader = ShardLoader::new(&ctx.env)?;
-    let results = loader.search(&query, &user_location).await?;
+    let search_result = loader.search(&query, &user_location, include_debug).await?;
 
     // Format response
     match format {
-        "geojson" => to_geojson_response(&results),
-        _ => to_json_response(&results),
+        "geojson" => to_geojson_response(&search_result.results),
+        _ => to_json_response(&search_result.results, search_result.debug),
     }
 }
 
@@ -112,7 +117,12 @@ pub async fn handle_reverse(req: Request, ctx: RouteContext<()>) -> Result<Respo
         .await?;
 
     match result {
-        Some(r) => Response::from_json(&r),
+        Some(r) => {
+            let mut resp = Response::from_json(&r)?;
+            resp.headers_mut()
+                .set("Content-Type", "application/json; charset=utf-8")?;
+            Ok(resp)
+        }
         None => Response::error("No results found for coordinates", 404),
     }
 }
@@ -133,7 +143,10 @@ struct ResultItem {
     region: Option<String>,
 }
 
-fn to_json_response(results: &[GeocoderResult]) -> Result<Response> {
+fn to_json_response(
+    results: &[GeocoderResult],
+    debug: Option<SearchDebugInfo>,
+) -> Result<Response> {
     let items: Vec<ResultItem> = results
         .iter()
         .map(|r| ResultItem {
@@ -149,11 +162,20 @@ fn to_json_response(results: &[GeocoderResult]) -> Result<Response> {
         })
         .collect();
 
-    let response = serde_json::json!({
-        "results": items,
-    });
+    let response = match debug {
+        Some(debug_info) => serde_json::json!({
+            "results": items,
+            "debug": debug_info,
+        }),
+        None => serde_json::json!({
+            "results": items,
+        }),
+    };
 
-    Response::from_json(&response)
+    let mut resp = Response::from_json(&response)?;
+    resp.headers_mut()
+        .set("Content-Type", "application/json; charset=utf-8")?;
+    Ok(resp)
 }
 
 fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
@@ -184,5 +206,8 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
         "features": features
     });
 
-    Response::from_json(&geojson)
+    let mut resp = Response::from_json(&geojson)?;
+    resp.headers_mut()
+        .set("Content-Type", "application/geo+json; charset=utf-8")?;
+    Ok(resp)
 }

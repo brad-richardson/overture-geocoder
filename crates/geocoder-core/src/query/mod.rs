@@ -4,7 +4,7 @@ mod bias;
 mod fts;
 mod merge;
 
-pub use bias::apply_location_bias;
+pub use bias::{apply_exact_match_bonus, apply_location_bias};
 pub use fts::prepare_fts_query;
 pub use merge::merge_results;
 

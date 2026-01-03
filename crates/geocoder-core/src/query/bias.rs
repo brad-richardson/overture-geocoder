@@ -10,20 +10,64 @@ use crate::types::{GeocoderResult, LocationBias};
 
 /// Importance boost for results in the same country (country-only bias).
 /// Applied when using `LocationBias::Country`.
-const COUNTRY_ONLY_BOOST: f64 = 0.15;
+const COUNTRY_ONLY_BOOST: f64 = 0.35;
 
 /// Importance boost for results in the same country (combined with coordinates).
 /// Lower than `COUNTRY_ONLY_BOOST` since distance also contributes.
-const COUNTRY_WITH_COORDS_BOOST: f64 = 0.1;
+const COUNTRY_WITH_COORDS_BOOST: f64 = 0.25;
 
 /// Maximum importance boost from proximity.
 /// Applied to results at the exact bias coordinates.
-const MAX_DISTANCE_BOOST: f64 = 0.1;
+const MAX_DISTANCE_BOOST: f64 = 0.2;
 
 /// Distance decay reference in kilometers.
 /// Results within this distance receive significant proximity boost.
 /// The boost halves at this distance from the bias point.
 const DISTANCE_DECAY_REFERENCE_KM: f64 = 100.0;
+
+/// Bonus for exact name matches (when query token exactly matches start of name).
+/// Helps "paris" match "Paris, FR" better than "Jefferson Parish, LA".
+const EXACT_MATCH_BONUS: f64 = 0.1;
+
+/// Apply exact match bonus to search results.
+///
+/// Boosts results where the query tokens match the start of the name exactly
+/// (not just as a prefix). This helps distinguish "Paris" from "Parish".
+pub fn apply_exact_match_bonus(results: &mut [GeocoderResult], query: &str) {
+    let query_lower = query.to_lowercase();
+    // Split on whitespace and common punctuation
+    let tokens: Vec<&str> = query_lower
+        .split(|c: char| c.is_whitespace() || c == ',')
+        .filter(|s| !s.is_empty())
+        .collect();
+
+    if tokens.is_empty() {
+        return;
+    }
+
+    for result in results.iter_mut() {
+        let name_lower = result.primary_name.to_lowercase();
+
+        // Check if any query token matches the start of the name exactly
+        for token in &tokens {
+            if name_lower.starts_with(token) {
+                // Token must be followed by a word boundary (space, comma, end)
+                let next_char = name_lower.chars().nth(token.len());
+                if next_char.is_none() || next_char == Some(',') || next_char == Some(' ') {
+                    result.importance = (result.importance + EXACT_MATCH_BONUS).clamp(0.0, 1.0);
+                    break; // Only apply bonus once per result
+                }
+            }
+        }
+    }
+
+    // Re-sort by adjusted importance (descending)
+    results.sort_by(|a, b| {
+        b.importance
+            .partial_cmp(&a.importance)
+            .unwrap_or(std::cmp::Ordering::Equal)
+    });
+}
 
 /// Apply location bias to search results.
 ///
