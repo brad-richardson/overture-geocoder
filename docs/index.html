@@ -546,16 +546,6 @@
               'background-color': '#a3c7df'
             }
           },
-          // Water
-          {
-            id: 'water',
-            type: 'fill',
-            source: 'overture-base',
-            'source-layer': 'water',
-            paint: {
-              'fill-color': '#a3c7df'
-            }
-          },
           // Land
           {
             id: 'land',
@@ -564,6 +554,16 @@
             'source-layer': 'land',
             paint: {
               'fill-color': '#f5f3ed'
+            }
+          },
+          // Water (after land so lakes/rivers show)
+          {
+            id: 'water',
+            type: 'fill',
+            source: 'overture-base',
+            'source-layer': 'water',
+            paint: {
+              'fill-color': '#a3c7df'
             }
           },
           // Land use
@@ -592,7 +592,7 @@
             type: 'line',
             source: 'overture-transportation',
             'source-layer': 'segment',
-            filter: ['in', ['get', 'subtype'], ['literal', ['residential', 'service', 'track', 'path']]],
+            filter: ['in', ['get', 'class'], ['literal', ['residential', 'service', 'track', 'path']]],
             paint: {
               'line-color': '#ffffff',
               'line-width': [
@@ -609,7 +609,7 @@
             type: 'line',
             source: 'overture-transportation',
             'source-layer': 'segment',
-            filter: ['in', ['get', 'subtype'], ['literal', ['primary', 'secondary', 'tertiary']]],
+            filter: ['in', ['get', 'class'], ['literal', ['primary', 'secondary', 'tertiary']]],
             paint: {
               'line-color': '#e8dcc0',
               'line-width': [
@@ -627,7 +627,7 @@
             type: 'line',
             source: 'overture-transportation',
             'source-layer': 'segment',
-            filter: ['in', ['get', 'subtype'], ['literal', ['motorway', 'trunk']]],
+            filter: ['in', ['get', 'class'], ['literal', ['motorway', 'trunk']]],
             paint: {
               'line-color': '#d4a0a0',
               'line-width': [
@@ -663,27 +663,93 @@
             },
             minzoom: 15
           },
-          // City/locality labels
+          // Country boundaries
           {
-            id: 'city-labels',
+            id: 'country-boundaries',
+            type: 'line',
+            source: 'overture-divisions',
+            'source-layer': 'division_boundary',
+            filter: ['==', ['get', 'subtype'], 'country'],
+            paint: {
+              'line-color': '#707080',
+              'line-width': [
+                'interpolate', ['linear'], ['zoom'],
+                1, 0.5,
+                4, 1.5,
+                8, 2
+              ]
+            },
+            minzoom: 1
+          },
+          // Region/state boundaries
+          {
+            id: 'region-boundaries',
+            type: 'line',
+            source: 'overture-divisions',
+            'source-layer': 'division_boundary',
+            filter: ['==', ['get', 'subtype'], 'region'],
+            paint: {
+              'line-color': '#9090a0',
+              'line-width': 1,
+              'line-dasharray': [4, 2]
+            },
+            minzoom: 3
+          },
+          // Major city labels (100k+ population) - show at low zoom
+          {
+            id: 'major-city-labels',
             type: 'symbol',
             source: 'overture-divisions',
             'source-layer': 'division',
-            filter: ['==', ['get', 'subtype'], 'locality'],
-            minzoom: 3,
+            filter: ['all',
+              ['==', ['get', 'subtype'], 'locality'],
+              ['>=', ['coalesce', ['get', 'population'], 0], 100000]
+            ],
+            minzoom: 4,
             layout: {
               'text-field': ['get', '@name'],
               'text-font': ['Noto Sans Bold'],
               'text-size': [
                 'interpolate', ['linear'], ['zoom'],
-                3, 10,
-                6, 12,
-                10, 14,
-                14, 16
+                3, 11,
+                6, 14,
+                10, 16
               ],
               'text-anchor': 'center',
               'text-max-width': 8,
-              'text-optional': false,
+              'text-allow-overlap': false,
+              'text-padding': 2,
+              'symbol-sort-key': ['*', -1, ['coalesce', ['get', 'population'], 0]]
+            },
+            paint: {
+              'text-color': '#404050',
+              'text-halo-color': '#ffffff',
+              'text-halo-width': 1.5
+            }
+          },
+          // City labels (smaller cities) - show at higher zoom
+          {
+            id: 'city-labels',
+            type: 'symbol',
+            source: 'overture-divisions',
+            'source-layer': 'division',
+            filter: ['all',
+              ['==', ['get', 'subtype'], 'locality'],
+              ['>=', ['coalesce', ['get', 'population'], 0], 1000],
+              ['<', ['coalesce', ['get', 'population'], 0], 100000]
+            ],
+            minzoom: 9,
+            layout: {
+              'text-field': ['get', '@name'],
+              'text-font': ['Noto Sans Bold'],
+              'text-size': [
+                'interpolate', ['linear'], ['zoom'],
+                7, 10,
+                10, 12,
+                14, 14
+              ],
+              'text-anchor': 'center',
+              'text-max-width': 8,
               'text-allow-overlap': false,
               'text-padding': 2,
               'symbol-sort-key': ['*', -1, ['coalesce', ['get', 'population'], 0]]
