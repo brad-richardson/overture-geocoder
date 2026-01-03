@@ -23,7 +23,7 @@ class TestOvertureGeocoderInit:
     def test_default_configuration(self):
         """Should use default configuration values."""
         client = OvertureGeocoder()
-        assert client.get_base_url() == "https://overture-geocoder.bradr.workers.dev"
+        assert client.get_base_url() == "https://geocoder.bradr.workers.dev"
         assert client.timeout == 30.0
         assert client.retries == 0
         client.close()

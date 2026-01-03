@@ -65,7 +65,7 @@ describe("OvertureGeocoder", () => {
   describe("constructor", () => {
     it("should use default configuration", () => {
       const client = new OvertureGeocoder();
-      expect(client.getBaseUrl()).toBe("https://overture-geocoder.bradr.workers.dev");
+      expect(client.getBaseUrl()).toBe("https://geocoder.bradr.workers.dev");
     });
 
     it("should accept custom baseUrl", () => {
