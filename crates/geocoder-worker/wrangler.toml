@@ -1,4 +1,4 @@
-name = "overture-geocoder-v2"
+name = "geocoder"
 main = "build/worker/shim.mjs"
 compatibility_date = "2024-01-01"
 

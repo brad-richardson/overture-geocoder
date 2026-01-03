@@ -26,7 +26,7 @@ __all__ = [
 # Constants
 # =============================================================================
 
-DEFAULT_BASE_URL = "https://overture-geocoder.bradr.workers.dev"
+DEFAULT_BASE_URL = "https://geocoder.bradr.workers.dev"
 DEFAULT_TIMEOUT = 30.0
 DEFAULT_RETRIES = 0
 DEFAULT_RETRY_DELAY = 1.0
@@ -183,7 +183,7 @@ class OvertureGeocoder:
     """Forward geocoder using Overture Maps address data.
 
     Args:
-        base_url: API base URL (default: 'https://overture-geocoder.bradr.workers.dev')
+        base_url: API base URL (default: 'https://geocoder.bradr.workers.dev')
         timeout: Request timeout in seconds (default: 30.0)
         retries: Number of retry attempts for failed requests (default: 0)
         retry_delay: Delay between retries in seconds (default: 1.0)
