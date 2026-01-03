@@ -4,7 +4,7 @@ use geocoder_core::{GeocoderQuery, GeocoderResult, LocationBias};
 use serde::Serialize;
 use worker::*;
 
-use crate::stac::ShardLoader;
+use crate::stac::{ShardLoader, UserLocation};
 
 /// Search request handler.
 pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Response> {
@@ -40,13 +40,30 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
 
-    // Get country bias from Cloudflare headers
-    let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
+    // Extract user location from Cloudflare headers
+    let user_location = UserLocation::from_request(&req);
 
-    // Build query with location bias
-    let bias = match &cf_country {
-        Some(country) => LocationBias::Country(country.clone()),
-        None => LocationBias::None,
+    // Allow explicit lat/lon override via query params (for testing)
+    let user_location = if params.contains_key("lat") && params.contains_key("lon") {
+        UserLocation {
+            lat: params.get("lat").and_then(|l| l.parse().ok()),
+            lon: params.get("lon").and_then(|l| l.parse().ok()),
+            ..user_location
+        }
+    } else {
+        user_location
+    };
+
+    // Build location bias from user location
+    let bias = match (&user_location.country, user_location.lat, user_location.lon) {
+        (Some(country), Some(lat), Some(lon)) => LocationBias::Full {
+            country: country.clone(),
+            lat,
+            lon,
+        },
+        (Some(country), None, None) => LocationBias::Country(country.clone()),
+        (None, Some(lat), Some(lon)) => LocationBias::Coordinates { lat, lon },
+        _ => LocationBias::None,
     };
 
     let query = GeocoderQuery::new(&q)
@@ -56,7 +73,7 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
 
     // Load shards and search
     let loader = ShardLoader::new(&ctx.env)?;
-    let results = loader.search(&query, cf_country.as_deref()).await?;
+    let results = loader.search(&query, &user_location).await?;
 
     // Format response
     match format {

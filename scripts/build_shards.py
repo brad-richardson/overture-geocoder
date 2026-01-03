@@ -49,6 +49,14 @@ import duckdb
 
 # Validation patterns
 COUNTRY_CODE_PATTERN = re.compile(r'^[A-Z]{2}$')
+REGION_CODE_PATTERN = re.compile(r'^[A-Z]{2}-[A-Z0-9]{1,3}$')
+
+# Shard size threshold for region splitting (50MB to stay under 128MB CF worker limit)
+SHARD_SIZE_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50MB
+
+# Fallback region suffix for records with null region codes
+FALLBACK_REGION_SUFFIX = "XX"
+
 
 def validate_country_code(code: str) -> str:
     """Validate and return a country code, or raise ValueError."""
@@ -61,6 +69,18 @@ def validate_population_threshold(threshold: int) -> int:
     if not isinstance(threshold, int) or threshold < 0 or threshold > 10_000_000_000:
         raise ValueError(f"Invalid population threshold: {threshold}")
     return threshold
+
+
+def validate_region_code(code: str) -> str:
+    """Validate and return a region code, or raise ValueError."""
+    # Allow fallback region codes like "CN-XX"
+    if code.endswith(f"-{FALLBACK_REGION_SUFFIX}"):
+        country = code[:2]
+        if COUNTRY_CODE_PATTERN.match(country):
+            return code
+    if not REGION_CODE_PATTERN.match(code):
+        raise ValueError(f"Invalid region code: {code!r} (must be like 'US-MA' or 'CN-GD')")
+    return code
 
 # Default paths
 EXPORTS_DIR = Path("exports")
@@ -93,6 +113,145 @@ def get_countries(parquet_path: Path) -> list[str]:
     """).fetchall()
     con.close()
     return [r[0] for r in result]
+
+
+def get_regions_for_country(parquet_path: Path, country_code: str) -> list[tuple[str, int]]:
+    """
+    Get list of regions and their record counts for a country.
+
+    Returns list of (region_code, record_count) tuples, including a fallback
+    region for records with null region codes.
+    """
+    country_code = validate_country_code(country_code)
+    parquet_str = str(parquet_path.resolve())
+    fallback_region = f"{country_code}-{FALLBACK_REGION_SUFFIX}"
+
+    con = duckdb.connect()
+    result = con.execute(f"""
+        SELECT
+            COALESCE(region, '{fallback_region}') as region,
+            COUNT(*) as cnt
+        FROM read_parquet('{parquet_str}')
+        WHERE country = '{country_code}'
+        GROUP BY region
+        ORDER BY cnt DESC
+    """).fetchall()
+    con.close()
+
+    return [(r[0], r[1]) for r in result]
+
+
+def build_region_shard(
+    parquet_path: Path,
+    country_code: str,
+    region_code: str,
+    output_path: Path,
+    version: str,
+) -> dict:
+    """
+    Build SQLite shard for a single region within a country.
+
+    Args:
+        parquet_path: Path to the parquet file
+        country_code: ISO 3166-1 alpha-2 country code (e.g., "CN")
+        region_code: Full ISO 3166-2 region code (e.g., "CN-GD") or fallback (e.g., "CN-XX")
+        output_path: Path to output SQLite database
+        version: Version string for metadata
+
+    Returns:
+        Dict with region, record_count, size_bytes, bbox
+    """
+    # Validate inputs
+    country_code = validate_country_code(country_code)
+    region_code = validate_region_code(region_code)
+    parquet_str = str(parquet_path.resolve())
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if output_path.exists():
+        output_path.unlink()
+
+    con = duckdb.connect()
+    db = sqlite3.connect(output_path)
+
+    build_shard_schema(db)
+
+    # Handle fallback region (null region records)
+    is_fallback = region_code.endswith(f"-{FALLBACK_REGION_SUFFIX}")
+    if is_fallback:
+        region_filter = "region IS NULL"
+    else:
+        region_filter = f"region = '{region_code}'"
+
+    # Query divisions for this region
+    cursor = con.execute(f"""
+        SELECT
+            gers_id,
+            version,
+            subtype as type,
+            primary_name,
+            lat,
+            lon,
+            bbox_xmin,
+            bbox_ymin,
+            bbox_xmax,
+            bbox_ymax,
+            population,
+            country,
+            region,
+            search_text
+        FROM read_parquet('{parquet_str}')
+        WHERE country = '{country_code}' AND {region_filter}
+    """)
+
+    # Stream rows in chunks
+    count = 0
+    bbox = [180.0, 90.0, -180.0, -90.0]  # [min_lon, min_lat, max_lon, max_lat]
+    FETCH_SIZE = 50000
+
+    while True:
+        rows = cursor.fetchmany(FETCH_SIZE)
+        if not rows:
+            break
+
+        # Update bbox from this batch
+        for row in rows:
+            bbox[0] = min(bbox[0], row[6])  # bbox_xmin
+            bbox[1] = min(bbox[1], row[7])  # bbox_ymin
+            bbox[2] = max(bbox[2], row[8])  # bbox_xmax
+            bbox[3] = max(bbox[3], row[9])  # bbox_ymax
+
+        db.executemany("""
+            INSERT INTO divisions (
+                gers_id, version, type, primary_name, lat, lon,
+                bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                population, country, region, search_text
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, rows)
+        count += len(rows)
+
+    # Store metadata
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('country', ?)", (country_code,))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('region', ?)", (region_code,))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
+               (datetime.now(timezone.utc).isoformat(),))
+
+    # Optimize FTS and compact database
+    db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
+    db.commit()
+    db.execute("VACUUM")
+    db.close()
+    con.close()
+
+    return {
+        "country": country_code,
+        "region": region_code,
+        "record_count": count,
+        "size_bytes": output_path.stat().st_size,
+        "bbox": bbox,
+    }
 
 
 def build_shard_schema(db: sqlite3.Connection):
@@ -646,8 +805,19 @@ def generate_stac_collection(
     shard_infos: dict[str, dict],
     shard_hashes: dict[str, str],
     shards_subdir: str = "shards",
+    region_sharded: dict[str, list[str]] | None = None,
 ) -> dict:
-    """Generate STAC Collection for all shards with embedded items."""
+    """
+    Generate STAC Collection for all shards with embedded items.
+
+    Args:
+        version: Version string
+        shard_infos: Dict of shard_id -> {record_count, size_bytes, bbox, ...}
+        shard_hashes: Dict of shard_id -> sha256 hash
+        shards_subdir: Subdirectory name for shard files
+        region_sharded: Dict of country_code -> list of region shard IDs
+                        e.g., {"CN": ["CN-GD", "CN-BJ", ...], "IN": [...]}
+    """
     # Calculate overall bbox and temporal extent
     overall_bbox = [-180.0, -90.0, 180.0, 90.0]
     now = datetime.now(timezone.utc).isoformat()
@@ -655,15 +825,19 @@ def generate_stac_collection(
     # Embed item metadata directly in collection (reduces R2 fetches)
     items = {}
     for shard_id, info in shard_infos.items():
-        items[shard_id] = {
+        item_data = {
             "record_count": info["record_count"],
             "size_bytes": info["size_bytes"],
             "sha256": shard_hashes.get(shard_id, ""),
             "href": f"./{shards_subdir}/{shard_id}.db",
             "bbox": info["bbox"],
         }
+        # Add parent_country for region shards
+        if "region" in info:
+            item_data["parent_country"] = info["country"]
+        items[shard_id] = item_data
 
-    return {
+    collection = {
         "type": "Collection",
         "stac_version": "1.1.0",
         "stac_extensions": [],
@@ -687,6 +861,12 @@ def generate_stac_collection(
             {"rel": "self", "href": "./collection.json", "type": "application/json"},
         ],
     }
+
+    # Add region_sharded metadata if any countries were split
+    if region_sharded:
+        collection["region_sharded"] = region_sharded
+
+    return collection
 
 
 def generate_stac_catalog(versions: list[str], latest: str) -> dict:
@@ -746,6 +926,9 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         print(f"  HEAD: {head_info['record_count']:,} records, "
               f"{head_info['size_bytes'] / 1024 / 1024:.1f} MB")
 
+    # Track which countries are split into regions
+    region_sharded = {}
+
     if args.head_only:
         print("\nHead-only mode, skipping country shards")
     else:
@@ -757,17 +940,60 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
             countries = get_countries(args.parquet)
             print(f"Found {len(countries)} countries")
 
-        # Build country shards
-        print(f"\nBuilding {len(countries)} country shards...")
+        # PASS 1: Build country shards
+        print(f"\nPass 1: Building {len(countries)} country shards...")
+        oversized_countries = []
 
         for i, country in enumerate(countries, 1):
             output_path = shards_subdir / f"{country}.db"
             info = build_country_shard(args.parquet, country, output_path, version)
-            shard_infos[country] = info
+
+            size_mb = info['size_bytes'] / 1024 / 1024
+            threshold_mb = SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024
             pct = 100 * i / len(countries)
-            print(f"  [{i}/{len(countries)} {pct:.0f}%] {country}: "
-                  f"{info['record_count']:,} records, "
-                  f"{info['size_bytes'] / 1024 / 1024:.1f} MB")
+
+            if info['size_bytes'] > SHARD_SIZE_THRESHOLD_BYTES:
+                oversized_countries.append(country)
+                print(f"  [{i}/{len(countries)} {pct:.0f}%] {country}: "
+                      f"{info['record_count']:,} records, "
+                      f"{size_mb:.1f} MB (OVERSIZED > {threshold_mb:.0f} MB)")
+            else:
+                shard_infos[country] = info
+                print(f"  [{i}/{len(countries)} {pct:.0f}%] {country}: "
+                      f"{info['record_count']:,} records, "
+                      f"{size_mb:.1f} MB")
+
+        # PASS 2: Rebuild oversized countries as region shards
+        if oversized_countries:
+            print(f"\nPass 2: Splitting {len(oversized_countries)} oversized countries into regions...")
+
+            for country in oversized_countries:
+                # Delete the oversized country shard
+                country_shard_path = shards_subdir / f"{country}.db"
+                if country_shard_path.exists():
+                    country_shard_path.unlink()
+
+                # Get regions for this country
+                regions = get_regions_for_country(args.parquet, country)
+                print(f"\n  {country}: Splitting into {len(regions)} regions...")
+
+                region_sharded[country] = []
+
+                for region_code, record_count in regions:
+                    output_path = shards_subdir / f"{region_code}.db"
+                    info = build_region_shard(
+                        args.parquet, country, region_code, output_path, version
+                    )
+                    shard_infos[region_code] = info
+                    region_sharded[country].append(region_code)
+
+                    size_mb = info['size_bytes'] / 1024 / 1024
+                    if size_mb > SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024:
+                        print(f"    {region_code}: {info['record_count']:,} records, "
+                              f"{size_mb:.1f} MB (WARNING: still large)")
+                    else:
+                        print(f"    {region_code}: {info['record_count']:,} records, "
+                              f"{size_mb:.1f} MB")
 
     # Calculate hashes for all shards
     print("\nCalculating shard hashes...")
@@ -783,8 +1009,11 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         item = generate_stac_item(shard_id, info, shard_path, version)
         write_json(items_subdir / f"{shard_id}.json", item)
 
-    # Generate collection with embedded items
-    collection = generate_stac_collection(version, shard_infos, shard_hashes, "shards")
+    # Generate collection with embedded items and region_sharded metadata
+    collection = generate_stac_collection(
+        version, shard_infos, shard_hashes, "shards",
+        region_sharded=region_sharded if region_sharded else None
+    )
     write_json(version_dir / "collection.json", collection)
 
     return shard_infos
