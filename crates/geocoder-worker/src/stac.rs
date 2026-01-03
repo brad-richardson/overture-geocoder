@@ -1,6 +1,6 @@
 //! STAC catalog loading and shard management.
 
-use geocoder_core::{query::apply_location_bias, Database, GeocoderQuery, GeocoderResult, LocationBias};
+use geocoder_core::{query::apply_location_bias, Database, GeocoderQuery, GeocoderResult, LocationBias, ReverseResult};
 use serde::Deserialize;
 use worker::*;
 
@@ -117,6 +117,91 @@ impl<'a> ShardLoader<'a> {
         all_results.truncate(query.limit);
 
         Ok(all_results)
+    }
+
+    /// Reverse geocode a lat/lon coordinate.
+    pub async fn reverse_geocode(
+        &self,
+        lat: f64,
+        lon: f64,
+        cf_country: Option<&str>,
+    ) -> Result<Option<ReverseResult>> {
+        // Load STAC catalog to find reverse shards
+        let catalog = self.load_catalog().await?;
+        let (version, _collection) = self.load_latest_collection(&catalog).await?;
+
+        // Try country shard first if available (more specific data)
+        if let Some(country) = cf_country {
+            match self.query_reverse_shard(&version, country, lat, lon).await {
+                Ok(Some(result)) => return Ok(Some(result)),
+                Ok(None) => {
+                    console_log!("No result in country {} reverse shard", country);
+                }
+                Err(e) => {
+                    console_log!("Warning: country reverse shard {} unavailable: {:?}", country, e);
+                }
+            }
+        }
+
+        // Fall back to HEAD shard
+        self.query_reverse_shard(&version, "HEAD", lat, lon).await
+    }
+
+    async fn query_reverse_shard(
+        &self,
+        version: &str,
+        shard_id: &str,
+        lat: f64,
+        lon: f64,
+    ) -> Result<Option<ReverseResult>> {
+        // Load the reverse shard item metadata
+        let item_key = format!("{}/reverse-items/{}.json", version, shard_id);
+
+        let item_obj = self
+            .bucket
+            .get(&item_key)
+            .execute()
+            .await?
+            .ok_or_else(|| Error::RustError(format!("Reverse item {} not found", item_key)))?;
+
+        let item_bytes = item_obj.body().ok_or_else(|| Error::RustError("Empty item".into()))?;
+        let item_text = item_bytes.text().await?;
+        let item: StacItem = serde_json::from_str(&item_text)
+            .map_err(|e| Error::RustError(format!("Failed to parse item: {}", e)))?;
+
+        // Load the actual reverse shard database
+        let shard_href = &item.assets.data.href;
+        let shard_key = format!("{}/{}", version, shard_href.trim_start_matches("./"));
+
+        let shard_obj = self
+            .bucket
+            .get(&shard_key)
+            .execute()
+            .await?
+            .ok_or_else(|| Error::RustError(format!("Reverse shard {} not found", shard_key)))?;
+
+        let shard_bytes = shard_obj
+            .body()
+            .ok_or_else(|| Error::RustError("Empty shard".into()))?
+            .bytes()
+            .await?;
+
+        console_log!(
+            "Loading reverse shard {} ({} bytes, {} records)",
+            shard_id,
+            shard_bytes.len(),
+            item.properties.record_count
+        );
+
+        // Open the SQLite database from bytes and query it
+        let db = Database::from_bytes(&shard_bytes)
+            .map_err(|e| Error::RustError(format!("Failed to open reverse shard database: {}", e)))?;
+
+        let result = db
+            .reverse_geocode(lat, lon)
+            .map_err(|e| Error::RustError(format!("Reverse geocode failed: {}", e)))?;
+
+        Ok(result)
     }
 
     async fn load_catalog(&self) -> Result<StacCatalog> {

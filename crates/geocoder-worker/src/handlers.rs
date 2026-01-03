@@ -73,27 +73,40 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
 }
 
 /// Reverse geocoding handler.
-pub async fn handle_reverse(req: Request, _ctx: RouteContext<()>) -> Result<Response> {
+pub async fn handle_reverse(req: Request, ctx: RouteContext<()>) -> Result<Response> {
     let url = req.url()?;
     let params: std::collections::HashMap<String, String> = url
         .query_pairs()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
-    let _lat: f64 = match params.get("lat").and_then(|l| l.parse().ok()) {
+    let lat: f64 = match params.get("lat").and_then(|l| l.parse().ok()) {
         Some(l) if (-90.0..=90.0).contains(&l) => l,
         Some(_) => return Response::error("lat must be between -90 and 90", 400),
         None => return Response::error("Missing or invalid parameter: lat", 400),
     };
 
-    let _lon: f64 = match params.get("lon").and_then(|l| l.parse().ok()) {
+    let lon: f64 = match params.get("lon").and_then(|l| l.parse().ok()) {
         Some(l) if (-180.0..=180.0).contains(&l) => l,
         Some(_) => return Response::error("lon must be between -180 and 180", 400),
         None => return Response::error("Missing or invalid parameter: lon", 400),
     };
 
-    // TODO: Implement reverse geocoding with R2 shards
-    Response::error("Reverse geocoding not yet implemented for R2 shards", 501)
+    // Get country from Cloudflare headers
+    let cf_country = req
+        .headers()
+        .get("CF-IPCountry")
+        .ok()
+        .flatten();
+
+    // Load shards and reverse geocode
+    let loader = ShardLoader::new(&ctx.env)?;
+    let result = loader.reverse_geocode(lat, lon, cf_country.as_deref()).await?;
+
+    match result {
+        Some(r) => Response::from_json(&r),
+        None => Response::error("No results found for coordinates", 404),
+    }
 }
 
 #[derive(Serialize)]

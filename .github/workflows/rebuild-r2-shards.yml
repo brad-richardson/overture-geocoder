@@ -34,6 +34,13 @@ jobs:
         with:
           python-version: '3.11'
 
+      - name: Install DuckDB CLI
+        run: |
+          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-amd64.zip
+          unzip duckdb.zip
+          sudo mv duckdb /usr/local/bin/
+          duckdb --version
+
       - name: Install Python dependencies
         run: pip install duckdb
 
@@ -48,9 +55,17 @@ jobs:
       - name: Download divisions data
         run: ./scripts/download_divisions.sh
 
-      - name: Build shards
+      - name: Build forward geocoding shards
         run: |
           ARGS="--head-threshold ${{ github.event.inputs.head_threshold }}"
+          if [ -n "${{ github.event.inputs.countries }}" ]; then
+            ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
+          fi
+          python scripts/build_shards.py $ARGS
+
+      - name: Build reverse geocoding shards
+        run: |
+          ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
@@ -71,23 +86,43 @@ jobs:
           wrangler r2 object put geocoder-shards/catalog.json \
             --file shards/catalog.json --remote
 
-          # Upload collection
+          # Upload forward geocoding collection
           wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
             --file "shards/${VERSION}/collection.json" --remote
 
-          # Upload all shard databases
+          # Upload all forward shard databases
           for db in shards/${VERSION}/shards/*.db; do
             SHARD_ID=$(basename "$db" .db)
-            echo "Uploading ${SHARD_ID}.db..."
+            echo "Uploading forward ${SHARD_ID}.db..."
             wrangler r2 object put "geocoder-shards/${VERSION}/shards/${SHARD_ID}.db" \
               --file "$db" --remote
           done
 
-          # Upload all item metadata
+          # Upload all forward item metadata
           for item in shards/${VERSION}/items/*.json; do
             SHARD_ID=$(basename "$item" .json)
-            echo "Uploading ${SHARD_ID}.json..."
+            echo "Uploading forward item ${SHARD_ID}.json..."
             wrangler r2 object put "geocoder-shards/${VERSION}/items/${SHARD_ID}.json" \
+              --file "$item" --remote
+          done
+
+          # Upload reverse geocoding collection
+          wrangler r2 object put "geocoder-shards/${VERSION}/reverse-collection.json" \
+            --file "shards/${VERSION}/reverse-collection.json" --remote
+
+          # Upload all reverse shard databases
+          for db in shards/${VERSION}/reverse/*.db; do
+            SHARD_ID=$(basename "$db" .db)
+            echo "Uploading reverse ${SHARD_ID}.db..."
+            wrangler r2 object put "geocoder-shards/${VERSION}/reverse/${SHARD_ID}.db" \
+              --file "$db" --remote
+          done
+
+          # Upload all reverse item metadata
+          for item in shards/${VERSION}/reverse-items/*.json; do
+            SHARD_ID=$(basename "$item" .json)
+            echo "Uploading reverse item ${SHARD_ID}.json..."
+            wrangler r2 object put "geocoder-shards/${VERSION}/reverse-items/${SHARD_ID}.json" \
               --file "$item" --remote
           done
 
@@ -98,8 +133,10 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Shards uploaded:**" >> $GITHUB_STEP_SUMMARY
-          ls -1 shards/${VERSION}/shards/*.db | wc -l >> $GITHUB_STEP_SUMMARY
+          echo "### Forward Geocoding Shards" >> $GITHUB_STEP_SUMMARY
+          echo "**Count:** $(ls -1 shards/${VERSION}/shards/*.db | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** $(du -sh shards/${VERSION}/shards/ | cut -f1)" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Total size:**" >> $GITHUB_STEP_SUMMARY
-          du -sh shards/${VERSION}/shards/ >> $GITHUB_STEP_SUMMARY
+          echo "### Reverse Geocoding Shards" >> $GITHUB_STEP_SUMMARY
+          echo "**Count:** $(ls -1 shards/${VERSION}/reverse/*.db | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** $(du -sh shards/${VERSION}/reverse/ | cut -f1)" >> $GITHUB_STEP_SUMMARY

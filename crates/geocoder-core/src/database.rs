@@ -7,8 +7,10 @@ use std::path::Path;
 use rusqlite::{Connection, OpenFlags};
 
 use crate::error::Result;
-use crate::query::{calculate_boosted_score, prepare_fts_query, SEARCH_DIVISIONS_SQL};
-use crate::types::{DivisionRow, GeocoderQuery, GeocoderResult};
+use crate::query::{calculate_boosted_score, prepare_fts_query, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL};
+use crate::types::{DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult};
+
+use std::collections::HashSet;
 
 /// A SQLite database connection for geocoding queries.
 pub struct Database {
@@ -187,6 +189,138 @@ impl Database {
             Err(e) => Err(e.into()),
         }
     }
+
+    /// Reverse geocode a lat/lon coordinate.
+    ///
+    /// Returns the most specific division containing the point, along with
+    /// a hierarchy of parent divisions.
+    ///
+    /// This method expects a reverse geocoding shard (divisions_reverse table).
+    pub fn reverse_geocode(&self, lat: f64, lon: f64) -> Result<Option<ReverseResult>> {
+        let mut stmt = self.conn.prepare_cached(REVERSE_GEOCODE_SQL)?;
+
+        // Query for divisions whose bbox contains this point
+        // lon is ?1, lat is ?2 (matching the SQL parameter order)
+        let rows = stmt.query_map([lon, lat], |row| {
+            Ok(ReverseDivisionRow {
+                gers_id: row.get(0)?,
+                subtype: row.get(1)?,
+                primary_name: row.get(2)?,
+                lat: row.get(3)?,
+                lon: row.get(4)?,
+                bbox_xmin: row.get(5)?,
+                bbox_ymin: row.get(6)?,
+                bbox_xmax: row.get(7)?,
+                bbox_ymax: row.get(8)?,
+                area: row.get(9)?,
+                population: row.get(10)?,
+                country: row.get(11)?,
+                region: row.get(12)?,
+            })
+        })?;
+
+        let division_rows: Vec<ReverseDivisionRow> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
+
+        if division_rows.is_empty() {
+            return Ok(None);
+        }
+
+        // Deduplicate by gers_id (for antimeridian-split divisions)
+        let mut seen_ids = HashSet::new();
+        let deduped: Vec<ReverseDivisionRow> = division_rows
+            .into_iter()
+            .filter(|row| seen_ids.insert(row.gers_id.clone()))
+            .collect();
+
+        // First row is the most specific (smallest area) due to ORDER BY area ASC
+        let most_specific = &deduped[0];
+
+        // Build hierarchy by collecting one of each subtype
+        let mut hierarchy = Vec::new();
+        let mut seen_subtypes = HashSet::new();
+
+        for row in &deduped {
+            if let Some(div_type) = DivisionType::from_str(&row.subtype) {
+                if seen_subtypes.insert(div_type) {
+                    hierarchy.push(HierarchyEntry {
+                        gers_id: row.gers_id.clone(),
+                        subtype: row.subtype.clone(),
+                        name: row.primary_name.clone(),
+                    });
+                }
+            }
+        }
+
+        // Sort hierarchy by priority (most specific first)
+        hierarchy.sort_by_key(|h| {
+            DivisionType::from_str(&h.subtype)
+                .map(|dt| dt.priority())
+                .unwrap_or(10)
+        });
+
+        // Calculate distance from query point to division centroid
+        let distance_km = haversine_distance(lat, lon, most_specific.lat, most_specific.lon);
+
+        // Determine confidence based on area
+        let confidence = if most_specific.area < 0.01 {
+            "high"
+        } else if most_specific.area < 0.1 {
+            "medium"
+        } else {
+            "low"
+        };
+
+        Ok(Some(ReverseResult {
+            gers_id: most_specific.gers_id.clone(),
+            primary_name: most_specific.primary_name.clone(),
+            subtype: most_specific.subtype.clone(),
+            lat: most_specific.lat,
+            lon: most_specific.lon,
+            bbox: [
+                most_specific.bbox_xmin,
+                most_specific.bbox_ymin,
+                most_specific.bbox_xmax,
+                most_specific.bbox_ymax,
+            ],
+            distance_km,
+            confidence: confidence.to_string(),
+            hierarchy,
+        }))
+    }
+}
+
+/// Raw reverse geocoding row from the database.
+#[derive(Debug, Clone)]
+struct ReverseDivisionRow {
+    gers_id: String,
+    subtype: String,
+    primary_name: String,
+    lat: f64,
+    lon: f64,
+    bbox_xmin: f64,
+    bbox_ymin: f64,
+    bbox_xmax: f64,
+    bbox_ymax: f64,
+    area: f64,
+    population: Option<i64>,
+    country: Option<String>,
+    region: Option<String>,
+}
+
+/// Calculate distance between two points using Haversine formula.
+fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
+    const EARTH_RADIUS_KM: f64 = 6371.0;
+
+    let lat1_rad = lat1.to_radians();
+    let lat2_rad = lat2.to_radians();
+    let delta_lat = (lat2 - lat1).to_radians();
+    let delta_lon = (lon2 - lon1).to_radians();
+
+    let a = (delta_lat / 2.0).sin().powi(2)
+        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
+    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
+
+    EARTH_RADIUS_KM * c
 }
 
 /// Generate a simple UUID v4 for temp file names.
