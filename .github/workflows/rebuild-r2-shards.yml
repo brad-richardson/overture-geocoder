@@ -74,7 +74,9 @@ jobs:
           node-version: '20'
 
       - name: Install wrangler
-        run: npm install -g wrangler
+        run: |
+          npm install -g wrangler
+          echo "Wrangler version: $(wrangler --version)"
 
       - name: Download divisions data
         run: ./scripts/download_divisions.sh
@@ -113,13 +115,13 @@ jobs:
           PROGRESS_DIR=$(mktemp -d)
           ERRORS_DIR=$(mktemp -d)
 
-          # Upload catalog
+          # Upload catalog (log output to catch local vs remote)
+          echo "Uploading catalog.json..."
           wrangler r2 object put geocoder-shards/catalog.json \
-            --file shards/catalog.json --remote > /dev/null
-
-          # Upload forward geocoding collection (contains embedded item metadata)
+            --file shards/catalog.json --remote
+          echo "Uploading ${VERSION}/collection.json..."
           wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
-            --file "shards/${VERSION}/collection.json" --remote > /dev/null
+            --file "shards/${VERSION}/collection.json" --remote
 
           # Count total database files
           TOTAL_DB=$(find "shards/${VERSION}/shards" -name "*.db" | wc -l)
@@ -135,6 +137,10 @@ jobs:
             local filename=$(basename "$file")
 
             if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
+              # Check for accidental local storage
+              if echo "$output" | grep -q "Resource location: local"; then
+                echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+              fi
               touch "${progress_dir}/${filename}"
             else
               echo "$output" > "${errors_dir}/${filename}.log"
@@ -173,9 +179,9 @@ jobs:
           PROGRESS_DIR=$(mktemp -d)
           ERRORS_DIR=$(mktemp -d)
 
-          # Upload reverse geocoding collection (contains embedded item metadata)
+          echo "Uploading ${VERSION}/reverse-collection.json..."
           wrangler r2 object put "geocoder-shards/${VERSION}/reverse-collection.json" \
-            --file "shards/${VERSION}/reverse-collection.json" --remote > /dev/null
+            --file "shards/${VERSION}/reverse-collection.json" --remote
 
           # Count total database files
           TOTAL_DB=$(find "shards/${VERSION}/reverse" -name "*.db" | wc -l)
@@ -190,6 +196,9 @@ jobs:
             local filename=$(basename "$file")
 
             if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
+              if echo "$output" | grep -q "Resource location: local"; then
+                echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+              fi
               touch "${progress_dir}/${filename}"
             else
               echo "$output" > "${errors_dir}/${filename}.log"
@@ -217,6 +226,62 @@ jobs:
           fi
 
           rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
+
+      - name: Verify R2 uploads
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
+          FAILED=0
+
+          echo "Verifying R2 uploads for version ${VERSION}..."
+
+          # Verify catalog.json exists
+          if [ "$BUILD_TYPE" = "forward" ] || [ "$BUILD_TYPE" = "both" ]; then
+            if wrangler r2 object get geocoder-shards/catalog.json --remote --pipe > /dev/null 2>&1; then
+              echo "  ✓ catalog.json"
+            else
+              echo "::error::catalog.json NOT FOUND in R2 after upload"
+              FAILED=1
+            fi
+
+            if wrangler r2 object get "geocoder-shards/${VERSION}/collection.json" --remote --pipe > /dev/null 2>&1; then
+              echo "  ✓ ${VERSION}/collection.json"
+            else
+              echo "::error::${VERSION}/collection.json NOT FOUND in R2 after upload"
+              FAILED=1
+            fi
+
+            # Spot-check HEAD shard
+            if wrangler r2 object get "geocoder-shards/${VERSION}/shards/HEAD.db" --remote --pipe > /dev/null 2>&1; then
+              echo "  ✓ ${VERSION}/shards/HEAD.db"
+            else
+              echo "::error::${VERSION}/shards/HEAD.db NOT FOUND in R2 after upload"
+              FAILED=1
+            fi
+          fi
+
+          if [ "$BUILD_TYPE" = "reverse" ] || [ "$BUILD_TYPE" = "both" ]; then
+            if wrangler r2 object get "geocoder-shards/${VERSION}/reverse-collection.json" --remote --pipe > /dev/null 2>&1; then
+              echo "  ✓ ${VERSION}/reverse-collection.json"
+            else
+              echo "::error::${VERSION}/reverse-collection.json NOT FOUND in R2 after upload"
+              FAILED=1
+            fi
+
+            # Spot-check reverse HEAD shard
+            if wrangler r2 object get "geocoder-shards/${VERSION}/reverse/HEAD.db" --remote --pipe > /dev/null 2>&1; then
+              echo "  ✓ ${VERSION}/reverse/HEAD.db"
+            else
+              echo "::error::${VERSION}/reverse/HEAD.db NOT FOUND in R2 after upload"
+              FAILED=1
+            fi
+          fi
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::R2 verification failed - uploads may not have persisted"
+            exit 1
+          fi
+          echo "All R2 verification checks passed."
 
       - name: Cleanup old versions (90+ days)
         if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'

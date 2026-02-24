@@ -405,13 +405,17 @@ impl<'a> ShardLoader<'a> {
         lon: f64,
         cf_country: Option<&str>,
     ) -> Result<Option<ReverseResult>> {
-        // Load STAC catalog to find reverse shards
+        // Load STAC catalog to find version, then load reverse collection
         let catalog = self.load_catalog().await?;
         let (version, _collection) = self.load_latest_collection(&catalog).await?;
+        let reverse_collection = self.load_reverse_collection(&version).await?;
 
         // Try country shard first if available (more specific data)
         if let Some(country) = cf_country {
-            match self.query_reverse_shard(&version, country, lat, lon).await {
+            match self
+                .query_reverse_shard(&version, country, &reverse_collection, lat, lon)
+                .await
+            {
                 Ok(Some(result)) => return Ok(Some(result)),
                 Ok(None) => {
                     console_log!("No result in country {} reverse shard", country);
@@ -427,28 +431,30 @@ impl<'a> ShardLoader<'a> {
         }
 
         // Fall back to HEAD shard
-        self.query_reverse_shard(&version, "HEAD", lat, lon).await
+        self.query_reverse_shard(&version, "HEAD", &reverse_collection, lat, lon)
+            .await
     }
 
     async fn query_reverse_shard(
         &self,
         version: &str,
         shard_id: &str,
+        collection: &StacCollection,
         lat: f64,
         lon: f64,
     ) -> Result<Option<ReverseResult>> {
-        // Load the reverse shard item metadata (cached)
-        let item_key = format!("{}/reverse-items/{}.json", version, shard_id);
-        let item_text = self
-            .cached_get_text(&item_key, SHARD_CACHE_TTL)
-            .await?
-            .ok_or_else(|| Error::RustError(format!("Reverse item {} not found", item_key)))?;
-
-        let item: StacItem = serde_json::from_str(&item_text)
-            .map_err(|e| Error::RustError(format!("Failed to parse item: {}", e)))?;
+        // Get item metadata from embedded items in reverse-collection.json
+        let (shard_href, record_count) =
+            if let Some(item) = self.get_embedded_item(collection, shard_id) {
+                (item.href.clone(), item.record_count)
+            } else {
+                return Err(Error::RustError(format!(
+                    "Reverse shard {} not found in collection",
+                    shard_id
+                )));
+            };
 
         // Load the actual reverse shard database (cached)
-        let shard_href = &item.assets.data.href;
         let shard_key = format!("{}/{}", version, shard_href.trim_start_matches("./"));
 
         let shard_bytes = self
@@ -460,7 +466,7 @@ impl<'a> ShardLoader<'a> {
             "Loading reverse shard {} ({} bytes, {} records)",
             shard_id,
             shard_bytes.len(),
-            item.properties.record_count
+            record_count
         );
 
         // Open the SQLite database from bytes and query it
@@ -473,6 +479,18 @@ impl<'a> ShardLoader<'a> {
             .map_err(|e| Error::RustError(format!("Reverse geocode failed: {}", e)))?;
 
         Ok(result)
+    }
+
+    /// Load the reverse collection for a given version.
+    async fn load_reverse_collection(&self, version: &str) -> Result<StacCollection> {
+        let key = format!("{}/reverse-collection.json", version);
+        let text = self
+            .cached_get_text(&key, COLLECTION_CACHE_TTL)
+            .await?
+            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+
+        serde_json::from_str(&text)
+            .map_err(|e| Error::RustError(format!("Failed to parse reverse collection: {}", e)))
     }
 
     async fn load_catalog(&self) -> Result<StacCatalog> {
