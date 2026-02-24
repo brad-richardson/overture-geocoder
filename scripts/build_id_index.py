@@ -2,26 +2,31 @@
 """
 Build GERS ID -> bbox index as UUID-prefix-sharded SQLite databases.
 
-Performance-optimized pipeline:
-1. Download registry parquet files locally (aws s3 cp, ~10-50x faster than httpfs)
-2. Use DuckDB to compute hex prefixes and export partitioned parquet
-3. Build SQLite shards in parallel from partitioned parquet
+R2 Staging Pipeline (default):
+  Phase 1: DuckDB streams Overture S3 -> R2 staging (partitioned parquet)
+  Phase 2: Build SQLite shards from R2 staging, upload to R2 final
+  Phase 3: Generate id-collection.json, upload to R2
+
+Local Pipeline (--skip-upload):
+  Phase 1: DuckDB partitions to local disk
+  Phase 2: Build SQLite shards from local partitions
+  Phase 3: Generate id-collection.json locally
 
 Usage:
-    python scripts/build_id_index.py                          # Build all registry types
-    python scripts/build_id_index.py --types division          # Single type
-    python scripts/build_id_index.py --dry-run                 # Count records only
-    python scripts/build_id_index.py --prefix-len 3            # 4096 shards (default)
-    python scripts/build_id_index.py --skip-download           # Reuse previously downloaded registry
+    python scripts/build_id_index.py                      # Full R2 pipeline
+    python scripts/build_id_index.py --types division      # Single type
+    python scripts/build_id_index.py --dry-run             # Count records only
+    python scripts/build_id_index.py --skip-upload         # Local build only
+    python scripts/build_id_index.py --phase partition     # Only Phase 1
 
-Output:
-    shards/{version}/
-        id-index/{prefix}.db   (e.g., 000.db, 001.db, ..., fff.db)
-        id-collection.json
+Environment (R2 mode):
+    R2_ACCESS_KEY_ID      S3 API key for DuckDB R2 access
+    R2_SECRET_ACCESS_KEY  S3 API secret for DuckDB R2 access
+    CLOUDFLARE_ACCOUNT_ID Account ID (R2 S3 endpoint)
+    CLOUDFLARE_API_TOKEN  API token for wrangler uploads
 """
 
 import argparse
-import hashlib
 import json
 import multiprocessing
 import os
@@ -34,24 +39,16 @@ from pathlib import Path
 
 import duckdb
 
-# Add scripts directory to path for stac module
 sys.path.insert(0, str(Path(__file__).parent))
 from stac import get_latest_release
 
-# Registry types: all in s3://overturemaps-us-west-2/registry/ (flat, not partitioned)
+# Registry types: flat in s3://overturemaps-us-west-2/registry/
 # The 'path' column encodes type: "theme=buildings/type=building/part-..."
 REGISTRY_TYPES = [
-    "building",
-    "connector",
-    "division",
-    "division_area",
-    "division_boundary",
-    "place",
-    "segment",
+    "building", "connector", "division", "division_area",
+    "division_boundary", "place", "segment",
 ]
 
-# Non-registry types: queried from release buckets (stubbed for now)
-# Maps type_name -> (theme, type) for S3 path construction
 RELEASE_TYPES = {
     "address": ("addresses", "address"),
     "infrastructure": ("base", "infrastructure"),
@@ -62,208 +59,184 @@ RELEASE_TYPES = {
     "bathymetry": ("base", "bathymetry"),
 }
 
-REGISTRY_S3_URL = "s3://overturemaps-us-west-2/registry/"
+REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
 EXPORTS_DIR = Path("exports")
-REGISTRY_LOCAL_DIR = EXPORTS_DIR / "registry"
 PARTITIONED_DIR = EXPORTS_DIR / "id-partitioned"
 SHARDS_DIR = Path("shards")
 
 
-def get_version(suffix: str = "0") -> str:
-    """Get version string (date-based with suffix)."""
+def get_version(suffix="0"):
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return f"{date}.{suffix}"
 
 
-def hash_file(path: Path) -> str:
-    """Calculate SHA256 hash of a file."""
-    sha256 = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(8192), b""):
-            sha256.update(chunk)
-    return sha256.hexdigest()
-
-
-def write_json(path: Path, data: dict):
-    """Write JSON file with pretty formatting."""
+def write_json(path, data):
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w") as f:
         json.dump(data, f, indent=2)
 
 
-def download_registry(skip_download: bool = False):
-    """Download registry parquet files from S3 to local disk."""
-    if skip_download and REGISTRY_LOCAL_DIR.exists():
-        parquet_files = list(REGISTRY_LOCAL_DIR.glob("*.parquet"))
-        if parquet_files:
-            print(f"  Skipping download, using {len(parquet_files)} existing files in {REGISTRY_LOCAL_DIR}")
-            return
-
-    REGISTRY_LOCAL_DIR.mkdir(parents=True, exist_ok=True)
-    print(f"  Downloading registry from {REGISTRY_S3_URL} ...")
-    t0 = time.time()
-
-    result = subprocess.run(
-        [
-            "aws", "s3", "cp",
-            "--no-sign-request",
-            "--recursive",
-            REGISTRY_S3_URL,
-            str(REGISTRY_LOCAL_DIR),
-        ],
-        capture_output=True,
-        text=True,
+def get_r2_config(args):
+    """Get R2 configuration from args/env, or None if unavailable."""
+    account_id = (
+        args.r2_account_id
+        or os.environ.get("CLOUDFLARE_ACCOUNT_ID")
+        or os.environ.get("R2_ACCOUNT_ID")
     )
+    access_key = args.r2_access_key or os.environ.get("R2_ACCESS_KEY_ID")
+    secret_key = args.r2_secret_key or os.environ.get("R2_SECRET_ACCESS_KEY")
 
-    if result.returncode != 0:
-        print(f"  ERROR downloading registry: {result.stderr}")
-        sys.exit(1)
+    if not all([account_id, access_key, secret_key]):
+        return None
 
-    elapsed = time.time() - t0
-    parquet_files = list(REGISTRY_LOCAL_DIR.glob("*.parquet"))
-    total_size = sum(f.stat().st_size for f in parquet_files)
-    print(f"  Downloaded {len(parquet_files)} files ({total_size / 1024 / 1024 / 1024:.1f} GB) in {elapsed:.0f}s")
+    return {
+        "account_id": account_id,
+        "endpoint": f"{account_id}.r2.cloudflarestorage.com",
+        "key_id": access_key,
+        "secret": secret_key,
+        "bucket": args.r2_bucket,
+    }
 
 
-def dry_run(types: list[str], prefix_len: int, skip_download: bool):
-    """Count records per type without building."""
+def make_type_filter(types):
+    """Build SQL WHERE clause for registry type filtering."""
+    return " OR ".join(f"path LIKE '%/type={t}/%'" for t in types)
+
+
+# ---------------------------------------------------------------------------
+# Dry run
+# ---------------------------------------------------------------------------
+
+def dry_run(types, prefix_len, release_version):
     registry_types = [t for t in types if t in REGISTRY_TYPES]
-    release_types = [t for t in types if t in RELEASE_TYPES]
 
-    print(f"Dry run: counting records per type")
-    print()
-
+    print(f"Dry run: counting records (release {release_version})\n")
     total = 0
 
     if registry_types:
-        # Download registry for fast local scan
-        download_registry(skip_download)
-
         con = duckdb.connect()
         con.execute("SET memory_limit = '8GB';")
-        local_glob = str(REGISTRY_LOCAL_DIR / "*.parquet")
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+        con.execute("SET s3_region = 'us-west-2';")
 
-        print("  Registry types (local scan)...", flush=True)
         t0 = time.time()
-
-        type_likes = " OR ".join(
-            f"path LIKE '%/type={t}/%'" for t in registry_types
-        )
         result = con.execute(f"""
-            SELECT
-                regexp_extract(path, 'type=([^/]+)', 1) as feature_type,
-                COUNT(*) as cnt
-            FROM read_parquet('{local_glob}')
-            WHERE ({type_likes})
-            GROUP BY feature_type
-            ORDER BY cnt DESC
+            SELECT regexp_extract(path, 'type=([^/]+)', 1) as feature_type,
+                   COUNT(*) as cnt
+            FROM read_parquet('{REGISTRY_S3}*')
+            WHERE ({make_type_filter(registry_types)})
+              AND last_seen = '{release_version}'
+            GROUP BY feature_type ORDER BY cnt DESC
         """).fetchall()
 
-        elapsed = time.time() - t0
         for row in result:
-            print(f"    {row[0]}: {row[1]:,} records")
+            print(f"  {row[0]}: {row[1]:,}")
             total += row[1]
-        print(f"    (scanned in {elapsed:.1f}s)")
+        print(f"  (scanned in {time.time() - t0:.1f}s)")
 
-        # Estimate shard sizes
         shard_count = 16 ** prefix_len
-        avg_per_shard = total // shard_count if total else 0
-        # Rough estimate: ~30 bytes per row in SQLite (id=36 + type~10 + 4*4 floats + overhead)
-        est_shard_mb = avg_per_shard * 70 / 1024 / 1024
-        print(f"\n  Estimated sharding ({prefix_len} hex chars = {shard_count} shards):")
-        print(f"    ~{avg_per_shard:,} records/shard")
-        print(f"    ~{est_shard_mb:.1f} MB/shard (rough estimate)")
+        avg = total // shard_count if total else 0
+        est_mb = avg * 70 / 1024 / 1024
+        print(f"\n  Sharding: {prefix_len} hex = {shard_count} shards")
+        print(f"  ~{avg:,} records/shard, ~{est_mb:.1f} MB/shard")
         con.close()
 
-    if release_types:
-        print(f"\n  Release types: {', '.join(release_types)} (not yet implemented)")
-
-    print(f"\n  Total: {total:,} records")
+    print(f"\n  Total: {total:,}")
 
 
-def partition_registry(types: list[str], prefix_len: int):
-    """Use DuckDB to scan local registry and export prefix-partitioned parquet."""
-    print("  Partitioning registry by ID prefix...")
+# ---------------------------------------------------------------------------
+# Phase 1: Partition
+# ---------------------------------------------------------------------------
+
+def _partition_query(types, prefix_len, release_version):
+    """Return the SELECT query used for partitioning."""
+    return f"""
+        SELECT
+            id,
+            regexp_extract(path, 'type=([^/]+)', 1) as type,
+            bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin,
+            bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
+            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+        FROM read_parquet('{REGISTRY_S3}*')
+        WHERE ({make_type_filter(types)})
+          AND last_seen = '{release_version}'
+          AND id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+    """
+
+
+def phase_partition_r2(types, prefix_len, release_version, r2_config, version):
+    """Partition from Overture S3 directly to R2 staging (zero local disk)."""
+    print("  Streaming Overture S3 -> R2 staging...")
+
+    con = duckdb.connect()
+    con.execute("SET memory_limit = '8GB'; SET threads TO 4;")
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute("SET s3_region = 'us-west-2';")
+    con.execute(f"""
+        CREATE SECRET r2 (
+            TYPE S3,
+            SCOPE 's3://{r2_config["bucket"]}/',
+            KEY_ID '{r2_config["key_id"]}',
+            SECRET '{r2_config["secret"]}',
+            ENDPOINT '{r2_config["endpoint"]}',
+            REGION 'auto',
+            URL_STYLE 'path'
+        );
+    """)
+
+    staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
+    query = _partition_query(types, prefix_len, release_version)
+
     t0 = time.time()
+    con.execute(f"""
+        COPY ({query})
+        TO '{staging}'
+        (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
+    """)
+    con.close()
+    print(f"  Done in {time.time() - t0:.0f}s")
 
-    # Clean previous partitioned output
+
+def phase_partition_local(types, prefix_len, release_version):
+    """Partition from Overture S3 to local disk."""
+    import shutil
     if PARTITIONED_DIR.exists():
-        import shutil
         shutil.rmtree(PARTITIONED_DIR)
     PARTITIONED_DIR.mkdir(parents=True, exist_ok=True)
 
+    print("  Streaming Overture S3 -> local disk...")
+
     con = duckdb.connect()
-    con.execute("SET memory_limit = '8GB';")
-    con.execute("SET threads TO 4;")
-    local_glob = str(REGISTRY_LOCAL_DIR / "*.parquet")
+    con.execute("SET memory_limit = '8GB'; SET threads TO 4;")
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute("SET s3_region = 'us-west-2';")
 
-    # Build type filter using LIKE (faster than split_part)
-    type_likes = " OR ".join(f"path LIKE '%/type={t}/%'" for t in types)
+    query = _partition_query(types, prefix_len, release_version)
 
-    # Compute prefix and export partitioned by prefix
-    # This lets DuckDB do the heavy lifting - grouping billions of rows by prefix
+    t0 = time.time()
     con.execute(f"""
-        COPY (
-            SELECT
-                id,
-                regexp_extract(path, 'type=([^/]+)', 1) as type,
-                bbox.xmin as bbox_xmin,
-                bbox.ymin as bbox_ymin,
-                bbox.xmax as bbox_xmax,
-                bbox.ymax as bbox_ymax,
-                lower(left(replace(id, '-', ''), {prefix_len})) as prefix
-            FROM read_parquet('{local_glob}')
-            WHERE ({type_likes})
-              AND id IS NOT NULL
-              AND bbox IS NOT NULL
-              AND bbox.xmin IS NOT NULL
-        ) TO '{PARTITIONED_DIR}' (
-            FORMAT PARQUET,
-            PARTITION_BY (prefix),
-            OVERWRITE_OR_IGNORE
-        );
+        COPY ({query})
+        TO '{PARTITIONED_DIR}'
+        (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
     """)
     con.close()
 
-    elapsed = time.time() - t0
-    # Count partitions created
     prefix_dirs = [d for d in PARTITIONED_DIR.iterdir() if d.is_dir()]
-    print(f"  Partitioned into {len(prefix_dirs)} prefix groups in {elapsed:.1f}s")
-    return len(prefix_dirs)
+    print(f"  {len(prefix_dirs)} prefixes in {time.time() - t0:.0f}s")
 
 
-def build_single_shard(args_tuple):
-    """Build a single SQLite shard from its partitioned parquet. (multiprocessing worker)"""
-    prefix, parquet_dir, output_path = args_tuple
+# ---------------------------------------------------------------------------
+# Phase 2: Build SQLite shards
+# ---------------------------------------------------------------------------
 
-    # Read the partitioned parquet for this prefix
-    parquet_glob = str(parquet_dir / "*.parquet")
-
-    try:
-        con = duckdb.connect()
-        rows = con.execute(f"""
-            SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
-            FROM read_parquet('{parquet_glob}')
-        """).fetchall()
-        con.close()
-    except Exception as e:
-        return (prefix, 0, 0, str(e))
-
-    if not rows:
-        return (prefix, 0, 0, None)
-
-    # Create SQLite shard
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    if output_path.exists():
-        output_path.unlink()
-
-    db = sqlite3.connect(str(output_path))
+def _create_shard_db(db_path, rows):
+    """Create a SQLite WITHOUT ROWID shard from rows."""
+    db = sqlite3.connect(str(db_path))
     db.executescript("""
         PRAGMA journal_mode=OFF;
         PRAGMA synchronous=OFF;
         PRAGMA cache_size=-64000;
         PRAGMA locking_mode=EXCLUSIVE;
-
         CREATE TABLE ids (
             id TEXT PRIMARY KEY,
             type TEXT NOT NULL,
@@ -273,154 +246,172 @@ def build_single_shard(args_tuple):
             bbox_ymax REAL NOT NULL
         ) WITHOUT ROWID;
     """)
-
-    # Bulk insert all rows
-    db.executemany(
-        "INSERT OR IGNORE INTO ids VALUES (?, ?, ?, ?, ?, ?)",
-        rows,
-    )
+    db.executemany("INSERT OR IGNORE INTO ids VALUES (?, ?, ?, ?, ?, ?)", rows)
     db.commit()
     db.execute("VACUUM")
     db.close()
 
-    size = output_path.stat().st_size
+
+def _upload_to_r2(local_path, r2_key, retries=3):
+    """Upload a file to R2 via wrangler with retries."""
+    for attempt in range(retries):
+        result = subprocess.run(
+            ["wrangler", "r2", "object", "put", r2_key,
+             "--file", str(local_path), "--remote"],
+            capture_output=True, text=True, timeout=120,
+        )
+        if result.returncode == 0:
+            return None
+    return result.stderr[:200]
+
+
+def _worker_build_r2(args_tuple):
+    """Multiprocessing worker: read from R2 staging, build shard, upload."""
+    prefix, r2_config, version, tmp_dir = args_tuple
+
+    staging = (
+        f"s3://{r2_config['bucket']}/{version}"
+        f"/staging/id-partitioned/prefix={prefix}/*.parquet"
+    )
+
+    try:
+        con = duckdb.connect()
+        con.execute("LOAD httpfs;")
+        con.execute(f"""
+            CREATE SECRET r2 (
+                TYPE S3,
+                SCOPE 's3://{r2_config["bucket"]}/',
+                KEY_ID '{r2_config["key_id"]}',
+                SECRET '{r2_config["secret"]}',
+                ENDPOINT '{r2_config["endpoint"]}',
+                REGION 'auto',
+                URL_STYLE 'path'
+            );
+        """)
+        rows = con.execute(f"""
+            SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+            FROM read_parquet('{staging}')
+        """).fetchall()
+        con.close()
+    except Exception:
+        return (prefix, 0, 0, None)
+
+    if not rows:
+        return (prefix, 0, 0, None)
+
+    db_path = Path(tmp_dir) / f"{prefix}.db"
+    _create_shard_db(db_path, rows)
+    size = db_path.stat().st_size
+
+    r2_key = f"geocoder-shards/{version}/id-index/{prefix}.db"
+    err = _upload_to_r2(db_path, r2_key)
+    db_path.unlink(missing_ok=True)
+
+    if err:
+        return (prefix, len(rows), size, f"Upload failed: {err}")
     return (prefix, len(rows), size, None)
 
 
-def build_id_index(args):
-    """Main build pipeline."""
-    # Discover release version
-    if args.version:
-        version = args.version
-    else:
-        version = get_version(args.version_suffix)
+def _worker_build_local(args_tuple):
+    """Multiprocessing worker: build shard from local partition."""
+    prefix, parquet_dir, output_path = args_tuple
 
-    print(f"Discovering latest Overture release...")
-    release_version = get_latest_release()
-    print(f"  Release: {release_version}")
+    try:
+        con = duckdb.connect()
+        rows = con.execute(f"""
+            SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+            FROM read_parquet('{parquet_dir}/*.parquet')
+        """).fetchall()
+        con.close()
+    except Exception as e:
+        return (prefix, 0, 0, str(e))
 
-    # Determine types to index
-    if args.types:
-        types = [t.strip() for t in args.types.split(",")]
-        for t in types:
-            if t not in REGISTRY_TYPES and t not in RELEASE_TYPES:
-                print(f"Error: Unknown type '{t}'.")
-                print(f"  Registry: {', '.join(REGISTRY_TYPES)}")
-                print(f"  Release: {', '.join(RELEASE_TYPES.keys())}")
-                sys.exit(1)
-    else:
-        types = REGISTRY_TYPES
+    if not rows:
+        return (prefix, 0, 0, None)
 
-    # Separate registry vs release types
-    registry_types = [t for t in types if t in REGISTRY_TYPES]
-    release_types = [t for t in types if t in RELEASE_TYPES]
+    _create_shard_db(Path(output_path), rows)
+    return (prefix, len(rows), Path(output_path).stat().st_size, None)
 
-    shard_count = 16 ** args.prefix_len
-    print(f"  Types: {', '.join(types)}")
-    print(f"  Prefix length: {args.prefix_len} ({shard_count} shards)")
-    print(f"  Version: {version}")
-    print(f"  Workers: {args.workers}")
+
+def _run_pool(worker_fn, work_items, total_label, workers):
+    """Run multiprocessing pool with progress reporting."""
+    total = len(work_items)
+    results = []
+
+    with multiprocessing.Pool(workers) as pool:
+        for i, result in enumerate(pool.imap_unordered(worker_fn, work_items)):
+            results.append(result)
+            if (i + 1) % 100 == 0 or (i + 1) == total:
+                built = sum(1 for r in results if r[1] > 0)
+                print(
+                    f"    {i+1}/{total} {total_label}, {built} with data...",
+                    end="\r", flush=True,
+                )
     print()
+    return results
 
-    # Dry run mode
-    if args.dry_run:
-        dry_run(types, args.prefix_len, args.skip_download)
-        return
 
-    if release_types:
-        print(f"  NOTE: Release types ({', '.join(release_types)}) not yet implemented, skipping.")
-        print()
-        if not registry_types:
-            print("No registry types to build. Exiting.")
-            return
+def phase_build_r2(prefix_len, r2_config, version, workers):
+    """Build shards from R2 staging, upload to R2."""
+    # Pre-install httpfs so workers only need LOAD
+    con = duckdb.connect()
+    con.execute("INSTALL httpfs;")
+    con.close()
 
-    # === Phase 1: Download registry locally ===
-    print("Phase 1: Download registry")
-    download_registry(args.skip_download)
+    tmp_dir = "tmp-id-shards"
+    os.makedirs(tmp_dir, exist_ok=True)
 
-    # === Phase 2: Partition by ID prefix using DuckDB ===
-    print("\nPhase 2: Partition by ID prefix")
-    t_total = time.time()
-    partition_registry(registry_types, args.prefix_len)
+    shard_count = 16 ** prefix_len
+    prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
+    work = [(p, r2_config, version, tmp_dir) for p in prefixes]
 
-    # === Phase 3: Build SQLite shards in parallel ===
-    print(f"\nPhase 3: Build SQLite shards ({args.workers} workers)")
+    print(f"  Processing {shard_count} prefixes ({workers} workers)...")
+    results = _run_pool(_worker_build_r2, work, "checked", workers)
+
+    import shutil
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    return results
+
+
+def phase_build_local(prefix_len, version, workers):
+    """Build shards from local partitions."""
     output_dir = SHARDS_DIR / version / "id-index"
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    # Collect all prefix directories that have data
-    work_items = []
-    for prefix_dir in sorted(PARTITIONED_DIR.iterdir()):
-        if not prefix_dir.is_dir():
+    work = []
+    for d in sorted(PARTITIONED_DIR.iterdir()):
+        if not d.is_dir():
             continue
-        prefix = prefix_dir.name.split("=", 1)[-1]  # "prefix=0a" -> "0a"
-        db_path = output_dir / f"{prefix}.db"
-        work_items.append((prefix, prefix_dir, db_path))
+        prefix = d.name.split("=", 1)[-1]
+        work.append((prefix, str(d), str(output_dir / f"{prefix}.db")))
 
-    print(f"  Building {len(work_items)} shards...")
-    t0 = time.time()
+    print(f"  Building {len(work)} shards ({workers} workers)...")
+    return _run_pool(_worker_build_local, work, "built", workers)
 
-    # Build shards in parallel
-    with multiprocessing.Pool(args.workers) as pool:
-        results = []
-        for i, result in enumerate(pool.imap_unordered(build_single_shard, work_items)):
-            results.append(result)
-            if (i + 1) % 100 == 0 or (i + 1) == len(work_items):
-                print(f"    {i + 1}/{len(work_items)} shards built...", end="\r", flush=True)
 
-    print()
-    elapsed_build = time.time() - t0
+# ---------------------------------------------------------------------------
+# Phase 3: Metadata
+# ---------------------------------------------------------------------------
 
-    # Process results
+def phase_metadata(results, prefix_len, version, release_version, r2_config, skip_upload):
+    """Generate id-collection.json and optionally upload to R2."""
     shard_infos = {}
     total_records = 0
     errors = []
-    for prefix, count, size, error in results:
-        if error:
-            errors.append((prefix, error))
-            continue
-        if count == 0:
-            # Remove empty shard if it exists
-            db_path = output_dir / f"{prefix}.db"
-            if db_path.exists():
-                db_path.unlink()
-            continue
-        shard_infos[prefix] = {
-            "record_count": count,
-            "size_bytes": size,
-            "href": f"./id-index/{prefix}.db",
-        }
-        total_records += count
+
+    for prefix, count, size, err in results:
+        if err:
+            errors.append((prefix, err))
+        elif count > 0:
+            shard_infos[prefix] = {"record_count": count, "size_bytes": size}
+            total_records += count
 
     if errors:
-        print(f"  WARNING: {len(errors)} shards had errors:")
-        for prefix, err in errors[:5]:
-            print(f"    {prefix}: {err}")
+        print(f"  {len(errors)} shard errors:")
+        for p, e in errors[:5]:
+            print(f"    {p}: {e}")
 
-    print(f"  Built {len(shard_infos)} shards with {total_records:,} records in {elapsed_build:.1f}s")
-
-    # === Phase 4: Calculate hashes ===
-    print("\nPhase 4: Calculate hashes")
-    t0 = time.time()
-    for prefix in shard_infos:
-        path = output_dir / f"{prefix}.db"
-        shard_infos[prefix]["sha256"] = hash_file(path)
-    print(f"  Hashed {len(shard_infos)} shards in {time.time() - t0:.1f}s")
-
-    # === Phase 5: Generate id-collection.json ===
-    print("\nPhase 5: Generate id-collection.json")
-    version_dir = SHARDS_DIR / version
     now = datetime.now(timezone.utc).isoformat()
-
-    # Count records per type across all shards
-    type_counts = {}
-    for prefix in shard_infos:
-        path = output_dir / f"{prefix}.db"
-        db = sqlite3.connect(str(path))
-        for row in db.execute("SELECT type, COUNT(*) FROM ids GROUP BY type").fetchall():
-            type_counts[row[0]] = type_counts.get(row[0], 0) + row[1]
-        db.close()
-
     collection = {
         "type": "Collection",
         "stac_version": "1.1.0",
@@ -429,25 +420,23 @@ def build_id_index(args):
         "description": "UUID-prefix-sharded SQLite index mapping GERS IDs to bounding boxes",
         "license": "CDLA-Permissive-2.0",
         "extent": {
-            "spatial": {"bbox": [[-180.0, -90.0, 180.0, 90.0]]},
+            "spatial": {"bbox": [[-180, -90, 180, 90]]},
             "temporal": {"interval": [[now, None]]},
         },
         "summaries": {
             "shard_count": len(shard_infos),
             "total_records": total_records,
             "total_size_bytes": sum(s["size_bytes"] for s in shard_infos.values()),
-            "prefix_len": args.prefix_len,
+            "prefix_len": prefix_len,
             "overture_release": release_version,
-            "type_counts": type_counts,
         },
         "items": {
-            prefix: {
-                "record_count": info["record_count"],
-                "size_bytes": info["size_bytes"],
-                "sha256": info["sha256"],
-                "href": info["href"],
+            p: {
+                "record_count": s["record_count"],
+                "size_bytes": s["size_bytes"],
+                "href": f"./id-index/{p}.db",
             }
-            for prefix, info in sorted(shard_infos.items())
+            for p, s in sorted(shard_infos.items())
         },
         "links": [
             {"rel": "root", "href": "../catalog.json", "type": "application/json"},
@@ -455,50 +444,168 @@ def build_id_index(args):
             {"rel": "self", "href": "./id-collection.json", "type": "application/json"},
         ],
     }
-    write_json(version_dir / "id-collection.json", collection)
 
-    # === Summary ===
-    elapsed_total = time.time() - t_total
-    total_size = sum(s["size_bytes"] for s in shard_infos.values())
-    max_shard = max(s["size_bytes"] for s in shard_infos.values()) if shard_infos else 0
-    min_shard = min(s["size_bytes"] for s in shard_infos.values()) if shard_infos else 0
+    if skip_upload:
+        path = SHARDS_DIR / version / "id-collection.json"
+        write_json(path, collection)
+        print(f"  Wrote {path}")
+    else:
+        tmp = Path("tmp-id-collection.json")
+        write_json(tmp, collection)
+        err = _upload_to_r2(tmp, f"geocoder-shards/{version}/id-collection.json")
+        tmp.unlink(missing_ok=True)
+        if err:
+            print(f"  ERROR uploading id-collection.json: {err}")
+            sys.exit(1)
+        print("  Uploaded id-collection.json to R2")
 
-    print(f"\nDone! ({elapsed_total:.0f}s total)")
-    print(f"  Shards: {len(shard_infos)} (of {shard_count} possible)")
-    print(f"  Total records: {total_records:,}")
-    print(f"  Total size: {total_size / 1024 / 1024:.1f} MB")
-    print(f"  Shard sizes: {min_shard / 1024 / 1024:.1f} MB - {max_shard / 1024 / 1024:.1f} MB")
-    print(f"  Type breakdown:")
-    for t, c in sorted(type_counts.items(), key=lambda x: -x[1]):
-        print(f"    {t}: {c:,}")
-    print(f"\nOutput:")
-    print(f"  {version_dir}/id-collection.json")
-    print(f"  {output_dir}/*.db")
+    return shard_infos, total_records, errors
 
-    if max_shard > 128 * 1024 * 1024:
-        print(f"\n  WARNING: Max shard size ({max_shard / 1024 / 1024:.1f} MB) exceeds 128MB worker limit!")
-        print(f"  Consider rebuilding with --prefix-len {args.prefix_len + 1}")
+
+# ---------------------------------------------------------------------------
+# Main pipeline
+# ---------------------------------------------------------------------------
+
+def build_id_index(args):
+    if args.version:
+        version = args.version
+    else:
+        version = get_version(args.version_suffix)
+
+    print("Discovering latest Overture release...")
+    release_version = get_latest_release()
+    print(f"  Release: {release_version}")
+
+    # Determine types
+    if args.types:
+        types = [t.strip() for t in args.types.split(",")]
+        for t in types:
+            if t not in REGISTRY_TYPES and t not in RELEASE_TYPES:
+                print(f"Error: Unknown type '{t}'")
+                sys.exit(1)
+    else:
+        types = REGISTRY_TYPES
+
+    registry_types = [t for t in types if t in REGISTRY_TYPES]
+    release_types = [t for t in types if t in RELEASE_TYPES]
+
+    shard_count = 16 ** args.prefix_len
+    print(f"  Types: {', '.join(types)}")
+    print(f"  Sharding: {args.prefix_len} hex = {shard_count} shards")
+    print(f"  Version: {version}")
+
+    if args.dry_run:
+        dry_run(types, args.prefix_len, release_version)
+        return
+
+    if release_types:
+        print(f"  NOTE: Release types not yet implemented: {', '.join(release_types)}")
+        if not registry_types:
+            return
+
+    # Determine mode
+    r2_config = None if args.skip_upload else get_r2_config(args)
+    use_r2 = r2_config is not None
+
+    if not use_r2 and not args.skip_upload:
+        print("\nWARNING: R2 credentials not found, using local mode")
+        print("  Set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID")
+
+    print(f"\nMode: {'R2 staging' if use_r2 else 'local'}")
+    print(f"  Workers: {args.workers}")
+
+    phases = args.phase.split(",") if args.phase else ["all"]
+    run_all = "all" in phases
+    t_total = time.time()
+
+    # === Phase 1: Partition ===
+    if run_all or "partition" in phases:
+        if args.skip_partition:
+            print("\nPhase 1: Skipped (--skip-partition)")
+        else:
+            print(f"\nPhase 1: Partition registry (release {release_version})")
+            if use_r2:
+                phase_partition_r2(
+                    registry_types, args.prefix_len, release_version,
+                    r2_config, version,
+                )
+            else:
+                phase_partition_local(
+                    registry_types, args.prefix_len, release_version,
+                )
+
+    # === Phase 2: Build shards ===
+    results = None
+    if run_all or "build" in phases:
+        print(f"\nPhase 2: Build SQLite shards")
+        t0 = time.time()
+        if use_r2:
+            results = phase_build_r2(
+                args.prefix_len, r2_config, version, args.workers,
+            )
+        else:
+            results = phase_build_local(
+                args.prefix_len, version, args.workers,
+            )
+        elapsed = time.time() - t0
+
+        built = sum(1 for r in results if r[1] > 0)
+        records = sum(r[1] for r in results)
+        errs = sum(1 for r in results if r[3] is not None)
+        print(f"  {built} shards, {records:,} records in {elapsed:.0f}s")
+        if errs:
+            print(f"  {errs} upload errors")
+
+    # === Phase 3: Metadata ===
+    if (run_all or "metadata" in phases) and results:
+        print(f"\nPhase 3: Metadata")
+        shard_infos, total_records, errors = phase_metadata(
+            results, args.prefix_len, version, release_version,
+            r2_config, args.skip_upload,
+        )
+
+        total_size = sum(s["size_bytes"] for s in shard_infos.values())
+        max_shard = max((s["size_bytes"] for s in shard_infos.values()), default=0)
+
+        print(f"\nDone! ({time.time() - t_total:.0f}s)")
+        print(f"  Shards: {len(shard_infos)} / {shard_count}")
+        print(f"  Records: {total_records:,}")
+        print(f"  Total: {total_size / 1024 / 1024:.1f} MB")
+        if max_shard:
+            print(f"  Max shard: {max_shard / 1024 / 1024:.1f} MB")
+        if max_shard > 128 * 1024 * 1024:
+            print(f"\n  WARNING: Exceeds 128MB! Use --prefix-len {args.prefix_len + 1}")
 
 
 def main():
-    # Default workers: use most CPUs but leave some headroom
     default_workers = max(1, (os.cpu_count() or 4) - 1)
 
-    parser = argparse.ArgumentParser(description="Build GERS ID -> bbox index")
-    parser.add_argument("--version", help="Version string (default: date-based)")
-    parser.add_argument("--version-suffix", default="0",
-                        help="Version suffix (default: 0)")
-    parser.add_argument("--types", help="Comma-separated types to index (default: all registry)")
-    parser.add_argument("--prefix-len", type=int, default=3,
-                        help="Hex prefix length for sharding (default: 3 = 4096 shards)")
-    parser.add_argument("--dry-run", action="store_true",
-                        help="Count records per type without building")
-    parser.add_argument("--skip-download", action="store_true",
-                        help="Skip registry download (reuse existing local files)")
-    parser.add_argument("--workers", type=int, default=default_workers,
-                        help=f"Parallel workers for shard building (default: {default_workers})")
-    args = parser.parse_args()
+    p = argparse.ArgumentParser(description="Build GERS ID -> bbox index")
+    p.add_argument("--version", help="Version string (default: date-based)")
+    p.add_argument("--version-suffix", default="0", help="Version suffix")
+    p.add_argument("--types", help="Comma-separated types to index")
+    p.add_argument("--prefix-len", type=int, default=3,
+                   help="Hex prefix length (default: 3 = 4096 shards)")
+    p.add_argument("--dry-run", action="store_true", help="Count records only")
+    p.add_argument("--workers", type=int, default=default_workers,
+                   help=f"Parallel workers (default: {default_workers})")
 
+    # R2 configuration
+    p.add_argument("--r2-account-id", help="Cloudflare account ID")
+    p.add_argument("--r2-access-key", help="R2 S3 API access key")
+    p.add_argument("--r2-secret-key", help="R2 S3 API secret key")
+    p.add_argument("--r2-bucket", default="geocoder-shards",
+                   help="R2 bucket name (default: geocoder-shards)")
+
+    # Pipeline control
+    p.add_argument("--phase",
+                   help="Run specific phase: partition, build, metadata, or all")
+    p.add_argument("--skip-partition", action="store_true",
+                   help="Skip Phase 1 (reuse existing staging)")
+    p.add_argument("--skip-upload", action="store_true",
+                   help="Local build only (no R2)")
+
+    args = p.parse_args()
     build_id_index(args)
 
 

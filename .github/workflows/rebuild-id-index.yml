@@ -22,6 +22,16 @@ on:
         type: string
         required: false
         default: '0'
+      phase:
+        description: 'Pipeline phase (all, partition, build, metadata)'
+        type: string
+        required: false
+        default: 'all'
+      skip_partition:
+        description: 'Skip Phase 1 (reuse existing R2 staging)'
+        type: boolean
+        required: false
+        default: false
       confirm:
         description: 'Type "REBUILD" to confirm (not required for scheduled runs)'
         type: string
@@ -30,6 +40,8 @@ on:
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
 
 jobs:
   rebuild-id-index:
@@ -60,99 +72,57 @@ jobs:
       - name: Check disk space
         run: df -h /
 
+      - name: Verify R2 credentials
+        run: |
+          if [ -z "$R2_ACCESS_KEY_ID" ] || [ -z "$R2_SECRET_ACCESS_KEY" ]; then
+            echo "::error::R2 S3 API credentials not configured"
+            echo "Add R2_ACCESS_KEY_ID and R2_SECRET_ACCESS_KEY to repository secrets"
+            echo "Create tokens at: Cloudflare Dashboard > R2 > Manage R2 API Tokens"
+            exit 1
+          fi
+          echo "R2 credentials configured"
+
       - name: Build ID index
         run: |
           ARGS="--prefix-len ${{ github.event.inputs.prefix_len || 3 }}"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          ARGS="$ARGS --phase ${{ github.event.inputs.phase || 'all' }}"
           if [ -n "${{ github.event.inputs.types }}" ]; then
             ARGS="$ARGS --types ${{ github.event.inputs.types }}"
           fi
+          if [ "${{ github.event.inputs.skip_partition }}" = "true" ]; then
+            ARGS="$ARGS --skip-partition"
+          fi
+          echo "Running: python scripts/build_id_index.py $ARGS"
           python scripts/build_id_index.py $ARGS
 
-      - name: Get version
-        id: version
-        run: |
-          VERSION=$(ls -1 shards/ | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' | sort -r | head -1)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Built version: $VERSION"
-
-      - name: Upload ID index to R2
-        run: |
-          VERSION="${{ steps.version.outputs.version }}"
-          PROGRESS_DIR=$(mktemp -d)
-          ERRORS_DIR=$(mktemp -d)
-
-          # Upload id-collection.json
-          echo "Uploading ${VERSION}/id-collection.json..."
-          wrangler r2 object put "geocoder-shards/${VERSION}/id-collection.json" \
-            --file "shards/${VERSION}/id-collection.json" --remote
-
-          # Count total database files
-          TOTAL_DB=$(find "shards/${VERSION}/id-index" -name "*.db" | wc -l)
-          echo "Uploading ${TOTAL_DB} ID index shard databases..."
-
-          upload_file() {
-            local file="$1"
-            local version="$2"
-            local progress_dir="$3"
-            local errors_dir="$4"
-            local filename=$(basename "$file")
-
-            if output=$(wrangler r2 object put "geocoder-shards/${version}/id-index/${filename}" --file "$file" --remote 2>&1); then
-              if echo "$output" | grep -q "Resource location: local"; then
-                echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
-              fi
-              touch "${progress_dir}/${filename}"
-            else
-              echo "$output" > "${errors_dir}/${filename}.log"
-              touch "${progress_dir}/${filename}"
-            fi
-          }
-          export -f upload_file
-          export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
-
-          find "shards/${VERSION}/id-index" -name "*.db" | \
-            xargs -P 16 -I {} bash -c "upload_file '{}' '${VERSION}' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
-
-          # Show progress while uploading
-          while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_DB" ]; do
-            DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
-            printf "\r  Progress: %d/%d databases" "$DONE" "$TOTAL_DB"
-            sleep 2
-          done
-          wait
-          printf "\r  Progress: %d/%d databases done\n" "$TOTAL_DB" "$TOTAL_DB"
-
-          # Check for errors
-          if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
-            echo "::error::Some uploads failed:"
-            cat "$ERRORS_DIR"/*.log
-            exit 1
-          fi
-
-          rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
-
       - name: Verify R2 uploads
+        if: contains(github.event.inputs.phase || 'all', 'all') || contains(github.event.inputs.phase || 'all', 'metadata')
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          # Get the version that was built
+          VERSION=$(python3 -c "
+          from datetime import datetime, timezone
+          suffix = '${{ github.event.inputs.version_suffix || 0 }}'
+          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.' + suffix)
+          ")
+          echo "Verifying version: ${VERSION}"
           FAILED=0
-
-          echo "Verifying R2 uploads for version ${VERSION}..."
 
           # Verify id-collection.json
           if wrangler r2 object get "geocoder-shards/${VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
             echo "  ok: ${VERSION}/id-collection.json"
           else
-            echo "::error::${VERSION}/id-collection.json NOT FOUND in R2 after upload"
+            echo "::error::${VERSION}/id-collection.json NOT FOUND in R2"
             FAILED=1
           fi
 
           # Spot-check a few shards
           for PREFIX in 000 080 0ff 800 fff; do
             if wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.db" --remote --pipe > /dev/null 2>&1; then
-              echo "  ok: ${VERSION}/id-index/${PREFIX}.db"
+              SIZE=$(wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.db" --remote --pipe 2>/dev/null | wc -c)
+              echo "  ok: ${VERSION}/id-index/${PREFIX}.db (${SIZE} bytes)"
             else
-              echo "  skip: ${VERSION}/id-index/${PREFIX}.db (may not exist for this prefix)"
+              echo "  skip: ${VERSION}/id-index/${PREFIX}.db (may not exist)"
             fi
           done
 
@@ -163,14 +133,19 @@ jobs:
           echo "R2 verification passed."
 
       - name: Summary
+        if: always()
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION=$(python3 -c "
+          from datetime import datetime, timezone
+          suffix = '${{ github.event.inputs.version_suffix || 0 }}'
+          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.' + suffix)
+          ")
 
-          echo "## ID Index Rebuild Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## ID Index Rebuild" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### ID Index Shards" >> $GITHUB_STEP_SUMMARY
-          echo "**Count:** $(ls -1 shards/${VERSION}/id-index/*.db 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
-          echo "**Size:** $(du -sh shards/${VERSION}/id-index/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+          echo "**Phase:** ${{ github.event.inputs.phase || 'all' }}" >> $GITHUB_STEP_SUMMARY
+          if [ -n "${{ github.event.inputs.types }}" ]; then
+            echo "**Types:** ${{ github.event.inputs.types }}" >> $GITHUB_STEP_SUMMARY
+          fi
