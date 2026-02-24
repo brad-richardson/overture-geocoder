@@ -211,3 +211,15 @@ pub struct HierarchyEntry {
     /// Display name.
     pub name: String,
 }
+
+/// Result of a GERS ID lookup (ID -> bbox).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdLookupResult {
+    /// Overture GERS ID.
+    pub id: String,
+    /// Feature type (e.g., "place", "building", "address").
+    #[serde(rename = "type")]
+    pub feature_type: String,
+    /// Bounding box [xmin, ymin, xmax, ymax].
+    pub bbox: [f64; 4],
+}

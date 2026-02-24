@@ -11,7 +11,8 @@ use crate::query::{
     calculate_boosted_score, prepare_fts_query, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL,
 };
 use crate::types::{
-    DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
+    DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, IdLookupResult,
+    ReverseResult,
 };
 
 use std::collections::HashSet;
@@ -189,6 +190,29 @@ impl Database {
 
         match result {
             Ok(value) => Ok(Some(value)),
+            Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    /// Look up a GERS ID to get its feature type and bounding box.
+    ///
+    /// This method expects an ID index shard (ids table).
+    pub fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
+        let result = self.conn.query_row(
+            "SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax FROM ids WHERE id = ?1",
+            [gers_id],
+            |row| {
+                Ok(IdLookupResult {
+                    id: row.get(0)?,
+                    feature_type: row.get(1)?,
+                    bbox: [row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?],
+                })
+            },
+        );
+
+        match result {
+            Ok(r) => Ok(Some(r)),
             Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
             Err(e) => Err(e.into()),
         }

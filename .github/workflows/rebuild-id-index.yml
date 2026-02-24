@@ -1,0 +1,176 @@
+name: Rebuild ID Index
+
+on:
+  # Monthly scheduled rebuild (26th of each month, day after geocoder shards)
+  schedule:
+    - cron: '0 6 26 * *'  # 6 AM UTC, 26th of each month
+
+  workflow_dispatch:
+    inputs:
+      types:
+        description: 'Comma-separated types to index (empty = all registry types)'
+        type: string
+        required: false
+        default: ''
+      prefix_len:
+        description: 'Hex prefix length for sharding (3 = 4096 shards)'
+        type: number
+        required: false
+        default: 3
+      version_suffix:
+        description: 'Version suffix (0 = default, 1/2/3 = same-day rebuilds)'
+        type: string
+        required: false
+        default: '0'
+      confirm:
+        description: 'Type "REBUILD" to confirm (not required for scheduled runs)'
+        type: string
+        required: false
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+jobs:
+  rebuild-id-index:
+    runs-on: ubuntu-latest-xlarge
+    # Run if: scheduled OR manual with REBUILD confirmation
+    if: github.event_name == 'schedule' || github.event.inputs.confirm == 'REBUILD'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: |
+          npm install -g wrangler
+          echo "Wrangler version: $(wrangler --version)"
+
+      - name: Check disk space
+        run: df -h /
+
+      - name: Build ID index
+        run: |
+          ARGS="--prefix-len ${{ github.event.inputs.prefix_len || 3 }}"
+          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          if [ -n "${{ github.event.inputs.types }}" ]; then
+            ARGS="$ARGS --types ${{ github.event.inputs.types }}"
+          fi
+          python scripts/build_id_index.py $ARGS
+
+      - name: Get version
+        id: version
+        run: |
+          VERSION=$(ls -1 shards/ | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' | sort -r | head -1)
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Built version: $VERSION"
+
+      - name: Upload ID index to R2
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          PROGRESS_DIR=$(mktemp -d)
+          ERRORS_DIR=$(mktemp -d)
+
+          # Upload id-collection.json
+          echo "Uploading ${VERSION}/id-collection.json..."
+          wrangler r2 object put "geocoder-shards/${VERSION}/id-collection.json" \
+            --file "shards/${VERSION}/id-collection.json" --remote
+
+          # Count total database files
+          TOTAL_DB=$(find "shards/${VERSION}/id-index" -name "*.db" | wc -l)
+          echo "Uploading ${TOTAL_DB} ID index shard databases..."
+
+          upload_file() {
+            local file="$1"
+            local version="$2"
+            local progress_dir="$3"
+            local errors_dir="$4"
+            local filename=$(basename "$file")
+
+            if output=$(wrangler r2 object put "geocoder-shards/${version}/id-index/${filename}" --file "$file" --remote 2>&1); then
+              if echo "$output" | grep -q "Resource location: local"; then
+                echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+              fi
+              touch "${progress_dir}/${filename}"
+            else
+              echo "$output" > "${errors_dir}/${filename}.log"
+              touch "${progress_dir}/${filename}"
+            fi
+          }
+          export -f upload_file
+          export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
+
+          find "shards/${VERSION}/id-index" -name "*.db" | \
+            xargs -P 16 -I {} bash -c "upload_file '{}' '${VERSION}' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
+
+          # Show progress while uploading
+          while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_DB" ]; do
+            DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
+            printf "\r  Progress: %d/%d databases" "$DONE" "$TOTAL_DB"
+            sleep 2
+          done
+          wait
+          printf "\r  Progress: %d/%d databases done\n" "$TOTAL_DB" "$TOTAL_DB"
+
+          # Check for errors
+          if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
+            echo "::error::Some uploads failed:"
+            cat "$ERRORS_DIR"/*.log
+            exit 1
+          fi
+
+          rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
+
+      - name: Verify R2 uploads
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          FAILED=0
+
+          echo "Verifying R2 uploads for version ${VERSION}..."
+
+          # Verify id-collection.json
+          if wrangler r2 object get "geocoder-shards/${VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
+            echo "  ok: ${VERSION}/id-collection.json"
+          else
+            echo "::error::${VERSION}/id-collection.json NOT FOUND in R2 after upload"
+            FAILED=1
+          fi
+
+          # Spot-check a few shards
+          for PREFIX in 000 080 0ff 800 fff; do
+            if wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.db" --remote --pipe > /dev/null 2>&1; then
+              echo "  ok: ${VERSION}/id-index/${PREFIX}.db"
+            else
+              echo "  skip: ${VERSION}/id-index/${PREFIX}.db (may not exist for this prefix)"
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::R2 verification failed"
+            exit 1
+          fi
+          echo "R2 verification passed."
+
+      - name: Summary
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+
+          echo "## ID Index Rebuild Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### ID Index Shards" >> $GITHUB_STEP_SUMMARY
+          echo "**Count:** $(ls -1 shards/${VERSION}/id-index/*.db 2>/dev/null | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "**Size:** $(du -sh shards/${VERSION}/id-index/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY

@@ -2,7 +2,7 @@
 
 use geocoder_core::{
     query::{apply_exact_match_bonus, apply_location_bias},
-    Database, GeocoderQuery, GeocoderResult, LocationBias, ReverseResult,
+    Database, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias, ReverseResult,
 };
 use serde::{Deserialize, Serialize};
 use worker::*;
@@ -148,6 +148,18 @@ struct StacCollection {
     /// e.g., {"CN": ["CN-GD", "CN-BJ", ...], "IN": [...]}
     #[serde(default)]
     region_sharded: std::collections::HashMap<String, Vec<String>>,
+    /// Collection summaries (includes prefix_len for ID index)
+    #[serde(default)]
+    summaries: Option<StacSummaries>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StacSummaries {
+    #[allow(dead_code)]
+    #[serde(default)]
+    shard_count: Option<u64>,
+    #[serde(default)]
+    prefix_len: Option<u32>,
 }
 
 /// Legacy STAC item format (for backward compatibility with old catalogs)
@@ -479,6 +491,65 @@ impl<'a> ShardLoader<'a> {
             .map_err(|e| Error::RustError(format!("Reverse geocode failed: {}", e)))?;
 
         Ok(result)
+    }
+
+    /// Look up a GERS ID to get its feature type and bounding box.
+    pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
+        let catalog = self.load_catalog().await?;
+        let (version, _collection) = self.load_latest_collection(&catalog).await?;
+
+        // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
+        let hex_id: String = gers_id.replace('-', "").to_lowercase();
+        if hex_id.len() < 2 {
+            return Err(Error::RustError("Invalid GERS ID".into()));
+        }
+
+        // Load id-collection.json to get prefix_len
+        let id_collection = self.load_id_collection(&version).await?;
+        let prefix_len = id_collection
+            .summaries
+            .as_ref()
+            .and_then(|s| s.prefix_len)
+            .unwrap_or(2) as usize;
+
+        let prefix = &hex_id[..prefix_len];
+
+        // Check if shard exists in collection
+        let item = id_collection.items.get(prefix).ok_or_else(|| {
+            Error::RustError(format!("ID index shard {} not found in collection", prefix))
+        })?;
+
+        // Load the shard
+        let shard_key = format!("{}/{}", version, item.href.trim_start_matches("./"));
+
+        let shard_bytes = self
+            .cached_get(&shard_key, SHARD_CACHE_TTL)
+            .await?
+            .ok_or_else(|| Error::RustError(format!("ID index shard {} not found", shard_key)))?;
+
+        console_log!(
+            "Loading ID index shard {} ({} bytes)",
+            prefix,
+            shard_bytes.len()
+        );
+
+        let db = Database::from_bytes(&shard_bytes)
+            .map_err(|e| Error::RustError(format!("Failed to open ID index shard: {}", e)))?;
+
+        db.lookup_id(gers_id)
+            .map_err(|e| Error::RustError(format!("ID lookup failed: {}", e)))
+    }
+
+    /// Load the ID index collection for a given version.
+    async fn load_id_collection(&self, version: &str) -> Result<StacCollection> {
+        let key = format!("{}/id-collection.json", version);
+        let text = self
+            .cached_get_text(&key, COLLECTION_CACHE_TTL)
+            .await?
+            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+
+        serde_json::from_str(&text)
+            .map_err(|e| Error::RustError(format!("Failed to parse ID collection: {}", e)))
     }
 
     /// Load the reverse collection for a given version.
