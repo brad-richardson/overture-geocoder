@@ -2,7 +2,7 @@
 -- Run with: ./scripts/download_divisions.sh (fetches latest release automatically)
 --
 -- Output: exports/divisions-global.parquet
--- Expected: ~4.3M records
+-- Expected: ~500 records (country/region/locality with population >1M)
 --
 -- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
 -- The download_divisions.sh script fetches the latest release version from the
@@ -159,7 +159,7 @@ COPY (
     ) d
     LEFT JOIN country_names cn ON d.country = cn.country_code
     LEFT JOIN region_names rn ON d.region = rn.region_code
-    WHERE d.subtype IN ('locality', 'localadmin', 'neighborhood', 'macrohood', 'county')
+    WHERE (d.subtype IN ('country', 'region') OR (d.subtype = 'locality' AND d.population > 10000))
       AND d.names.primary IS NOT NULL
 )
 TO 'exports/divisions-global.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);

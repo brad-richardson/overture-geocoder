@@ -3,7 +3,6 @@
 -- Run with: ./scripts/download_divisions.sh (uses same shell wrapper)
 --
 -- Output: exports/divisions-reverse.parquet
--- Expected: ~450K records (divisions with matching areas)
 --
 -- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
 -- The download_divisions.sh script fetches the latest release version from the
@@ -58,7 +57,7 @@ COPY (
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
             hive_partitioning = true
         )
-        WHERE subtype IN ('country', 'region', 'county', 'localadmin', 'locality', 'neighborhood', 'macrohood')
+        WHERE subtype IN ('country', 'region', 'county')
           AND names.primary IS NOT NULL
     ),
     areas_all AS (
