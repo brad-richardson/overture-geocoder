@@ -42,6 +42,16 @@ import duckdb
 sys.path.insert(0, str(Path(__file__).parent))
 from stac import get_latest_release
 
+# Load .env file if present (for local dev)
+_env_path = Path(__file__).resolve().parent.parent / ".env"
+if _env_path.exists():
+    with open(_env_path) as _f:
+        for _line in _f:
+            _line = _line.strip()
+            if _line and not _line.startswith("#") and "=" in _line:
+                _key, _, _val = _line.partition("=")
+                os.environ.setdefault(_key.strip(), _val.strip())
+
 # Registry types: flat in s3://overturemaps-us-west-2/registry/
 # The 'path' column encodes type: "theme=buildings/type=building/part-..."
 REGISTRY_TYPES = [
@@ -119,13 +129,16 @@ def dry_run(types, prefix_len, release_version):
         con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute("SET s3_region = 'us-west-2';")
 
+        all_registry = set(registry_types) == set(REGISTRY_TYPES)
+        type_clause = "" if all_registry else f"AND ({make_type_filter(registry_types)})"
+
         t0 = time.time()
         result = con.execute(f"""
             SELECT regexp_extract(path, 'type=([^/]+)', 1) as feature_type,
                    COUNT(*) as cnt
             FROM read_parquet('{REGISTRY_S3}*')
-            WHERE ({make_type_filter(registry_types)})
-              AND last_seen = '{release_version}'
+            WHERE last_seen = '{release_version}'
+              {type_clause}
             GROUP BY feature_type ORDER BY cnt DESC
         """).fetchall()
 
@@ -148,8 +161,13 @@ def dry_run(types, prefix_len, release_version):
 # Phase 1: Partition
 # ---------------------------------------------------------------------------
 
-def _partition_query(types, prefix_len, release_version):
-    """Return the SELECT query used for partitioning."""
+def _partition_query(prefix_len, release_version):
+    """Return the SELECT query for partitioning.
+
+    Always stages ALL registry types — the S3 scan is the bottleneck
+    regardless of type filtering, so we grab everything in one pass.
+    Type filtering (if needed) happens in Phase 2 during shard building.
+    """
     return f"""
         SELECT
             id,
@@ -158,15 +176,42 @@ def _partition_query(types, prefix_len, release_version):
             bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
             lower(left(replace(id, '-', ''), {prefix_len})) as prefix
         FROM read_parquet('{REGISTRY_S3}*')
-        WHERE ({make_type_filter(types)})
-          AND last_seen = '{release_version}'
+        WHERE last_seen = '{release_version}'
           AND id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
     """
 
 
-def phase_partition_r2(types, prefix_len, release_version, r2_config, version):
-    """Partition from Overture S3 directly to R2 staging (zero local disk)."""
-    print("  Streaming Overture S3 -> R2 staging...")
+def _r2_staging_exists(r2_config, version):
+    """Check if R2 staging data already exists for this version."""
+    try:
+        con = duckdb.connect()
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+        con.execute(f"""
+            CREATE SECRET r2 (
+                TYPE S3,
+                SCOPE 's3://{r2_config["bucket"]}/',
+                KEY_ID '{r2_config["key_id"]}',
+                SECRET '{r2_config["secret"]}',
+                ENDPOINT '{r2_config["endpoint"]}',
+                REGION 'auto',
+                URL_STYLE 'path'
+            );
+        """)
+        # Try reading from a common prefix (000 is almost always populated)
+        staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned/prefix=000/*.parquet"
+        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{staging}')").fetchone()[0]
+        con.close()
+        return count > 0
+    except Exception:
+        return False
+
+
+def phase_partition_r2(prefix_len, release_version, r2_config, version):
+    """Partition from Overture S3 directly to R2 staging (zero local disk).
+
+    Always stages ALL registry types — one scan, reusable staging.
+    """
+    print("  Streaming Overture S3 -> R2 staging (all types)...")
 
     con = duckdb.connect()
     con.execute("SET memory_limit = '8GB'; SET threads TO 4;")
@@ -185,7 +230,7 @@ def phase_partition_r2(types, prefix_len, release_version, r2_config, version):
     """)
 
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
-    query = _partition_query(types, prefix_len, release_version)
+    query = _partition_query(prefix_len, release_version)
 
     t0 = time.time()
     con.execute(f"""
@@ -197,21 +242,21 @@ def phase_partition_r2(types, prefix_len, release_version, r2_config, version):
     print(f"  Done in {time.time() - t0:.0f}s")
 
 
-def phase_partition_local(types, prefix_len, release_version):
-    """Partition from Overture S3 to local disk."""
+def phase_partition_local(prefix_len, release_version):
+    """Partition from Overture S3 to local disk (all types)."""
     import shutil
     if PARTITIONED_DIR.exists():
         shutil.rmtree(PARTITIONED_DIR)
     PARTITIONED_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("  Streaming Overture S3 -> local disk...")
+    print("  Streaming Overture S3 -> local disk (all types)...")
 
     con = duckdb.connect()
     con.execute("SET memory_limit = '8GB'; SET threads TO 4;")
     con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute("SET s3_region = 'us-west-2';")
 
-    query = _partition_query(types, prefix_len, release_version)
+    query = _partition_query(prefix_len, release_version)
 
     t0 = time.time()
     con.execute(f"""
@@ -518,20 +563,21 @@ def build_id_index(args):
     run_all = "all" in phases
     t_total = time.time()
 
-    # === Phase 1: Partition ===
+    # === Phase 1: Partition (always stages ALL types) ===
     if run_all or "partition" in phases:
         if args.skip_partition:
             print("\nPhase 1: Skipped (--skip-partition)")
+        elif use_r2 and _r2_staging_exists(r2_config, version):
+            print(f"\nPhase 1: Skipped (staging already exists for {version})")
         else:
             print(f"\nPhase 1: Partition registry (release {release_version})")
             if use_r2:
                 phase_partition_r2(
-                    registry_types, args.prefix_len, release_version,
-                    r2_config, version,
+                    args.prefix_len, release_version, r2_config, version,
                 )
             else:
                 phase_partition_local(
-                    registry_types, args.prefix_len, release_version,
+                    args.prefix_len, release_version,
                 )
 
     # === Phase 2: Build shards ===
