@@ -159,8 +159,7 @@ COPY (
     ) d
     LEFT JOIN country_names cn ON d.country = cn.country_code
     LEFT JOIN region_names rn ON d.region = rn.region_code
-    WHERE d.subtype IN ('country', 'region', 'locality')
-      AND d.population > 1000000
+    WHERE (d.subtype IN ('country', 'region') OR (d.subtype = 'locality' AND d.population > 1000000))
       AND d.names.primary IS NOT NULL
 )
 TO 'exports/divisions-global.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);

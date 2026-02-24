@@ -58,8 +58,7 @@ COPY (
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
             hive_partitioning = true
         )
-        WHERE subtype IN ('country', 'region', 'locality')
-          AND population > 1000000
+        WHERE (subtype IN ('country', 'region') OR (subtype = 'locality' AND population > 1000000))
           AND names.primary IS NOT NULL
     ),
     areas_all AS (
