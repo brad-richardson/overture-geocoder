@@ -45,7 +45,7 @@ env:
 
 jobs:
   rebuild-id-index:
-    runs-on: ubuntu-latest-xlarge
+    runs-on: ubuntu-latest
     # Run if: scheduled OR manual with REBUILD confirmation
     if: github.event_name == 'schedule' || github.event.inputs.confirm == 'REBUILD'
     steps:
