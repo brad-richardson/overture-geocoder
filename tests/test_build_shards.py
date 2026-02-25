@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from build_shards import (
+    enrich_search_text,
     validate_country_code,
     validate_region_code,
     validate_population_threshold,
@@ -69,6 +70,71 @@ class TestValidatePopulationThreshold:
     def test_invalid_too_large(self):
         with pytest.raises(ValueError, match="Invalid population threshold"):
             validate_population_threshold(100_000_000_000)
+
+
+class TestEnrichSearchText:
+    def test_concatenated_pairwise(self):
+        result = enrich_search_text("new york city nyc ny")
+        tokens = result.split()
+        assert "newyork" in tokens
+        assert "yorkcity" in tokens
+
+    def test_concatenated_full(self):
+        result = enrich_search_text("new york city nyc ny")
+        tokens = result.split()
+        assert "newyorkcity" in tokens
+
+    def test_abbreviation_saint_to_st(self):
+        result = enrich_search_text("saint louis missouri")
+        assert " st " in f" {result} "
+
+    def test_abbreviation_st_to_saint(self):
+        result = enrich_search_text("st louis missouri")
+        assert "saint" in result
+
+    def test_abbreviation_fort_to_ft(self):
+        result = enrich_search_text("fort worth texas")
+        assert " ft " in f" {result} "
+
+    def test_abbreviation_ft_to_fort(self):
+        result = enrich_search_text("ft worth texas")
+        assert "fort" in result
+
+    def test_abbreviation_mount_to_mt(self):
+        result = enrich_search_text("mount vernon virginia")
+        assert " mt " in f" {result} "
+
+    def test_abbreviation_directional(self):
+        result = enrich_search_text("north charleston south carolina")
+        assert " n " in f" {result} "
+        assert " s " in f" {result} "
+
+    def test_single_word_no_concatenation(self):
+        result = enrich_search_text("boston")
+        # Single word should not produce concatenations
+        assert result == "boston"
+
+    def test_empty_input(self):
+        assert enrich_search_text("") == ""
+
+    def test_no_duplicates_in_abbreviations(self):
+        # If "st" is already in the text, don't add it again
+        result = enrich_search_text("saint louis st louis")
+        count = result.split().count("st")
+        # "st" appears once in original, should not be added again
+        assert count == 1
+
+    def test_short_concat_skipped(self):
+        # Pairwise concatenation of very short words (< 4 chars) should be skipped
+        result = enrich_search_text("a bc rest of text")
+        extras = result.split()[5:]  # Skip original words
+        # "abc" (3 chars) should not appear as its own token
+        assert "abc" not in extras
+
+    def test_preserves_original_text(self):
+        original = "boston massachusetts united states"
+        result = enrich_search_text(original)
+        assert result.startswith(original)
 
 
 class TestConstants:

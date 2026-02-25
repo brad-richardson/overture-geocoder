@@ -54,8 +54,78 @@ REGION_CODE_PATTERN = re.compile(r'^[A-Z]{2}-[A-Z0-9]{1,3}$')
 # Shard size threshold for region splitting (50MB to stay under 128MB CF worker limit)
 SHARD_SIZE_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50MB
 
+# FTS5 prefix index lengths (higher values improve autocomplete at ~5-10% per extra level)
+FTS5_PREFIX_LENGTHS = '2 3 4'
+
+# Bidirectional abbreviation pairs for search text enrichment
+ABBREVIATION_PAIRS = [
+    ("saint", "st"), ("sainte", "ste"),
+    ("fort", "ft"), ("mount", "mt"),
+    ("north", "n"), ("south", "s"),
+    ("east", "e"), ("west", "w"),
+    ("port", "pt"), ("point", "pt"),
+]
+
 # Fallback region suffix for records with null region codes
 FALLBACK_REGION_SUFFIX = "XX"
+
+
+def enrich_search_text(search_text: str) -> str:
+    """
+    Enrich search_text with compact aliases and abbreviation variants.
+
+    Appends:
+    - Pairwise adjacent concatenations: "new"+"york" → "newyork"
+    - Full concatenation (2-4 word names): "new york city" → "newyorkcity"
+    - Abbreviation variants: "saint" ↔ "st", "fort" ↔ "ft", etc.
+    """
+    if not search_text:
+        return search_text
+
+    words = search_text.lower().split()
+    if not words:
+        return search_text
+
+    extras = []
+
+    # Build lookup maps for abbreviation expansion (both directions)
+    abbrev_from = {}
+    for long, short in ABBREVIATION_PAIRS:
+        abbrev_from.setdefault(long, set()).add(short)
+        abbrev_from.setdefault(short, set()).add(long)
+
+    # --- Concatenated forms from the primary name portion ---
+    # Primary name is typically the first few tokens before geographic hierarchy.
+    # Use up to the first 4 words for concatenation (covers most place names).
+    primary_words = [w for w in words[:4] if w.isalpha()]
+
+    # Pairwise adjacent concatenations
+    for i in range(len(primary_words) - 1):
+        concat = primary_words[i] + primary_words[i + 1]
+        if 4 <= len(concat) <= 30:
+            extras.append(concat)
+
+    # Full concatenations for 2-4 word prefixes
+    if len(primary_words) >= 2:
+        max_len = min(4, len(primary_words))
+        for n in range(2, max_len + 1):
+            full = "".join(primary_words[:n])
+            if 4 <= len(full) <= 30 and full not in extras:
+                extras.append(full)
+
+    # --- Abbreviation variants ---
+    seen_words = set(words)
+    for word in words:
+        if word in abbrev_from:
+            for variant in sorted(abbrev_from[word]):
+                if variant not in seen_words:
+                    extras.append(variant)
+                    seen_words.add(variant)
+
+    if not extras:
+        return search_text
+
+    return search_text + " " + " ".join(extras)
 
 
 def validate_country_code(code: str) -> str:
@@ -222,14 +292,17 @@ def build_region_shard(
             bbox[2] = max(bbox[2], row[8])  # bbox_xmax
             bbox[3] = max(bbox[3], row[9])  # bbox_ymax
 
+        # Enrich search_text (column 13) with compact aliases
+        enriched = [row[:13] + (enrich_search_text(row[13]),) for row in rows]
+
         db.executemany("""
             INSERT INTO divisions (
                 gers_id, version, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 population, country, region, search_text
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
-        count += len(rows)
+        """, enriched)
+        count += len(enriched)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
@@ -257,7 +330,7 @@ def build_region_shard(
 
 def build_shard_schema(db: sqlite3.Connection):
     """Create the shard schema with FTS5."""
-    db.executescript("""
+    db.executescript(f"""
         PRAGMA journal_mode=DELETE;
         PRAGMA synchronous=NORMAL;
         PRAGMA cache_size=-64000;
@@ -290,7 +363,7 @@ def build_shard_schema(db: sqlite3.Connection):
             content=divisions,
             content_rowid=rowid,
             tokenize='porter unicode61 remove_diacritics 1',
-            prefix='2 3'
+            prefix='{FTS5_PREFIX_LENGTHS}'
         );
 
         CREATE TRIGGER IF NOT EXISTS divisions_ai AFTER INSERT ON divisions BEGIN
@@ -372,14 +445,17 @@ def build_country_shard(
             bbox[2] = max(bbox[2], row[8])  # bbox_xmax
             bbox[3] = max(bbox[3], row[9])  # bbox_ymax
 
+        # Enrich search_text (column 13) with compact aliases
+        enriched = [row[:13] + (enrich_search_text(row[13]),) for row in rows]
+
         db.executemany("""
             INSERT INTO divisions (
                 gers_id, version, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 population, country, region, search_text
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
-        count += len(rows)
+        """, enriched)
+        count += len(enriched)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
@@ -461,14 +537,17 @@ def build_head_shard(
         if not rows:
             break
 
+        # Enrich search_text (column 13) with compact aliases
+        enriched = [row[:13] + (enrich_search_text(row[13]),) for row in rows]
+
         db.executemany("""
             INSERT INTO divisions (
                 gers_id, version, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 population, country, region, search_text
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
-        count += len(rows)
+        """, enriched)
+        count += len(enriched)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
