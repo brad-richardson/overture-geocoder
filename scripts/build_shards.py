@@ -105,11 +105,13 @@ def enrich_search_text(search_text: str) -> str:
         if 4 <= len(concat) <= 30:
             extras.append(concat)
 
-    # Full concatenation (only if 2-4 words)
-    if 2 <= len(primary_words) <= 4:
-        full = "".join(primary_words)
-        if 4 <= len(full) <= 30 and full not in extras:
-            extras.append(full)
+    # Full concatenations for 2-4 word prefixes
+    if len(primary_words) >= 2:
+        max_len = min(4, len(primary_words))
+        for n in range(2, max_len + 1):
+            full = "".join(primary_words[:n])
+            if 4 <= len(full) <= 30 and full not in extras:
+                extras.append(full)
 
     # --- Abbreviation variants ---
     seen_words = set(words)
