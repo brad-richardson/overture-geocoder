@@ -112,6 +112,7 @@ def _check_staging_progress(r2_config, staging_path):
     and total compressed size. Falls back to glob() for just file count
     if metadata reading is too slow or fails.
     """
+    con = None
     try:
         con = _r2_con(r2_config)
         # Try parquet_metadata for file count + total bytes (reads footers only)
@@ -122,7 +123,6 @@ def _check_staging_progress(r2_config, staging_path):
                     COALESCE(SUM(total_compressed_size), 0) as total_bytes
                 FROM parquet_metadata('{staging_path}/prefix=*/*.parquet')
             """).fetchone()
-            con.close()
             if result:
                 return result[0], result[1]
         except Exception:
@@ -131,10 +131,12 @@ def _check_staging_progress(r2_config, staging_path):
         result = con.execute(f"""
             SELECT COUNT(*) FROM glob('{staging_path}/prefix=*/*.parquet')
         """).fetchone()
-        con.close()
         return (result[0] if result else 0), None
     except Exception:
         return None, None
+    finally:
+        if con:
+            con.close()
 
 
 def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, interval=60):
@@ -165,26 +167,6 @@ def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, 
     finally:
         stop.set()
         thread.join(timeout=5)
-
-
-def _run_with_heartbeat(fn, label, interval=30):
-    """Run fn() while printing periodic heartbeat messages with elapsed time."""
-    t0 = time.time()
-    stop = threading.Event()
-
-    def _printer():
-        while not stop.wait(interval):
-            elapsed = time.time() - t0
-            mins, secs = divmod(int(elapsed), 60)
-            print(f"    [{mins:02d}:{secs:02d}] {label}...", flush=True)
-
-    thread = threading.Thread(target=_printer, daemon=True)
-    thread.start()
-    try:
-        return fn()
-    finally:
-        stop.set()
-        thread.join(timeout=2)
 
 
 # ---------------------------------------------------------------------------
@@ -241,7 +223,7 @@ def _r2_con(r2_config):
     return con
 
 
-def _write_staging_marker(r2_config, staging_path, partition_count):
+def _write_staging_marker(r2_config, version, staging_dir, partition_count):
     """Write a _SUCCESS marker to R2 staging after a completed COPY."""
     marker = {
         "status": "complete",
@@ -250,7 +232,7 @@ def _write_staging_marker(r2_config, staging_path, partition_count):
     }
     tmp = Path("tmp-staging-marker.json")
     write_json(tmp, marker)
-    r2_key = f"geocoder-shards/{staging_path.split(r2_config['bucket'] + '/')[1]}/_SUCCESS"
+    r2_key = f"geocoder-shards/{version}/staging/{staging_dir}/_SUCCESS"
     err = _upload_to_r2(tmp, r2_key)
     tmp.unlink(missing_ok=True)
     if err:
@@ -333,7 +315,7 @@ def phase_partition_r2(prefix_len, r2_config, version, limit=None):
     mins, secs = divmod(int(elapsed), 60)
     print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
 
-    _write_staging_marker(r2_config, staging, shard_count)
+    _write_staging_marker(r2_config, version, "id-partitioned", shard_count)
 
 
 def _release_id_query(prefix_len, release_version, limit=None):
@@ -395,7 +377,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     mins, secs = divmod(int(elapsed), 60)
     print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
 
-    _write_staging_marker(r2_config, staging, shard_count)
+    _write_staging_marker(r2_config, version, "id-release", shard_count)
 
 
 # ---------------------------------------------------------------------------
@@ -508,7 +490,7 @@ def _run_pool(worker_fn, work_items, total_label, workers):
                 built = sum(1 for r in results if r[1] > 0)
                 elapsed = time.time() - t0
                 rate = done / elapsed if elapsed > 0 else 0
-                if rate > 0 and done < total:
+                if rate > 0 and done < total and done >= total // 10:
                     remaining = (total - done) / rate
                     mins_r, secs_r = divmod(int(remaining), 60)
                     eta = f", ~{mins_r}m{secs_r:02d}s remaining"
