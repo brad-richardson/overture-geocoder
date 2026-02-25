@@ -131,10 +131,11 @@ jobs:
           upload_file() {
             local file="$1"
             local version="$2"
-            local r2_path="$3"
+            local subdir="$3"
             local progress_dir="$4"
             local errors_dir="$5"
             local filename=$(basename "$file")
+            local r2_path="${version}/${subdir}/${filename}"
 
             if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
               # Check for accidental local storage
@@ -152,7 +153,7 @@ jobs:
 
           # Upload databases with progress
           find "shards/${VERSION}/shards" -name "*.db" | \
-            xargs -P 8 -I {} bash -c "upload_file '{}' '${VERSION}' '${VERSION}/shards/\$(basename {})' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
+            xargs -P 8 -I {} bash -c "upload_file '{}' '${VERSION}' 'shards' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
 
           # Show progress while uploading
           while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_DB" ]; do
@@ -190,10 +191,11 @@ jobs:
           upload_file() {
             local file="$1"
             local version="$2"
-            local r2_path="$3"
+            local subdir="$3"
             local progress_dir="$4"
             local errors_dir="$5"
             local filename=$(basename "$file")
+            local r2_path="${version}/${subdir}/${filename}"
 
             if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
               if echo "$output" | grep -q "Resource location: local"; then
@@ -209,7 +211,7 @@ jobs:
           export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
 
           find "shards/${VERSION}/reverse" -name "*.db" | \
-            xargs -P 8 -I {} bash -c "upload_file '{}' '${VERSION}' '${VERSION}/reverse/\$(basename {})' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
+            xargs -P 8 -I {} bash -c "upload_file '{}' '${VERSION}' 'reverse' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
 
           while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_DB" ]; do
             DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
