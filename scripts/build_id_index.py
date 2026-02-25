@@ -139,6 +139,23 @@ def _check_staging_progress(r2_config, staging_path):
             con.close()
 
 
+def _retry_transient(fn, retries=3, backoff=30):
+    """Wrap fn to retry on transient HTTP errors (502, 503, etc.)."""
+    def _wrapped():
+        for attempt in range(retries):
+            try:
+                return fn()
+            except duckdb.HTTPException as exc:
+                if attempt < retries - 1:
+                    wait = backoff * (2 ** attempt)
+                    print(f"    Transient HTTP error (attempt {attempt + 1}/{retries}): {exc}")
+                    print(f"    Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise
+    return _wrapped
+
+
 def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, interval=60):
     """Run fn() while polling R2 staging to report write progress."""
     t0 = time.time()
@@ -260,60 +277,110 @@ def _r2_staging_exists(r2_config, version):
     return _read_staging_marker(r2_config, version, "id-partitioned") is not None
 
 
-def _id_query(prefix_len, limit=None):
-    """Return the SELECT query for indexing all GERS IDs with bounding boxes.
+def _id_query_for_prefix(prefix, limit=None):
+    """Return a SELECT for a single prefix, filtering by id LIKE '{prefix}%'.
 
-    Indexes ALL IDs in the registry (no release filtering) — any valid
-    GERS ID should resolve to a bbox. Only reads id + bbox columns
-    for minimal I/O on the 76GB registry scan.
+    On sorted registry parquet, DuckDB can use row group min/max stats
+    to skip irrelevant data (predicate pushdown).
     """
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
     return f"""
         SELECT
             id::UUID as id,
             bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
-            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
-            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax
         FROM read_parquet('{REGISTRY_S3}*')
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+          AND id::VARCHAR LIKE '{prefix}%'
         {limit_clause}
     """
 
 
-def phase_partition_r2(prefix_len, r2_config, version, limit=None):
-    """Scan Overture S3, project id+bbox, partition directly to R2.
+def _get_existing_staging_prefixes(con, staging):
+    """Return set of prefixes already written to R2 staging."""
+    try:
+        rows = con.execute(f"""
+            SELECT file_name FROM glob('{staging}/prefix=*/*.parquet')
+        """).fetchall()
+        prefixes = set()
+        for (path,) in rows:
+            # Extract prefix value from .../prefix=XXX/data_0.parquet
+            for part in path.split("/"):
+                if part.startswith("prefix="):
+                    prefixes.add(part[len("prefix="):])
+        return prefixes
+    except Exception:
+        return set()
 
-    Uses preserve_insertion_order=false to keep memory low during
-    PARTITION_BY with 4096 partitions.
+
+def phase_partition_r2(prefix_len, r2_config, version, prefixes=None):
+    """Scan Overture S3 registry per-prefix, writing each partition to R2.
+
+    Iterates over hex prefixes individually, using id LIKE '{prefix}%' to
+    leverage predicate pushdown on sorted registry parquet. Each prefix is
+    independently retryable, and already-staged prefixes are skipped on resume.
     """
     shard_count = 16 ** prefix_len
-    limit_msg = f" (limit {limit})" if limit else ""
-    print(f"  Streaming Overture S3 -> R2 partitioned staging{limit_msg}...")
+    if prefixes is None:
+        prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
 
     con = _r2_con(r2_config)
     con.execute("SET memory_limit = '10GB';")
-    con.execute("SET preserve_insertion_order = false;")
     con.execute("SET s3_region = 'us-west-2';")
 
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
 
+    # Check which prefixes already exist
+    existing = _get_existing_staging_prefixes(con, staging)
+    remaining = [p for p in prefixes if p not in existing]
+    if existing:
+        print(f"  Resuming: {len(existing)} already staged, {len(remaining)} remaining")
+    else:
+        print(f"  Writing {len(remaining)} prefixes...")
+
     t0 = time.time()
+    wrote = 0
+    retries = 3
 
-    def _do_copy():
-        con.execute(f"""
-            COPY ({_id_query(prefix_len, limit=limit)})
-            TO '{staging}'
-            (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
-        """)
+    for i, prefix in enumerate(remaining):
+        dest = f"{staging}/prefix={prefix}/data_0.parquet"
+        query = _id_query_for_prefix(prefix)
 
-    _run_with_r2_progress(
-        _do_copy, r2_config, staging, shard_count,
-        "Registry scan", interval=60,
-    )
+        for attempt in range(retries):
+            try:
+                # Check if any records exist for this prefix
+                row = con.execute(f"SELECT 1 FROM ({query}) LIMIT 1").fetchone()
+                if row is None:
+                    break
+
+                con.execute(f"""
+                    COPY ({query})
+                    TO '{dest}'
+                    (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
+                wrote += 1
+                break
+            except duckdb.HTTPException as exc:
+                if attempt < retries - 1:
+                    wait = 30 * (2 ** attempt)
+                    print(f"    Transient error on prefix {prefix} "
+                          f"(attempt {attempt + 1}/{retries}): {exc}")
+                    print(f"    Retrying in {wait}s...")
+                    time.sleep(wait)
+                else:
+                    raise
+
+        done = i + 1
+        if done % 100 == 0 or done == len(remaining):
+            elapsed = time.time() - t0
+            mins, secs = divmod(int(elapsed), 60)
+            print(f"    {done}/{len(remaining)} prefixes "
+                  f"({wrote} with data) [{mins:02d}:{secs:02d}]")
+
     con.close()
     elapsed = time.time() - t0
     mins, secs = divmod(int(elapsed), 60)
-    print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
+    print(f"  Done: {wrote} prefixes with data in {mins}m{secs:02d}s")
 
     _write_staging_marker(r2_config, version, "id-partitioned", shard_count)
 
@@ -369,7 +436,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
         """)
 
     _run_with_r2_progress(
-        _do_copy, r2_config, staging, shard_count,
+        _retry_transient(_do_copy), r2_config, staging, shard_count,
         "Release themes scan", interval=60,
     )
     con.close()
@@ -538,7 +605,7 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
     all_prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
 
     # Discover which prefixes actually have staging data to avoid
-    # checking all 4096 shards via HTTP when most are empty (e.g. --limit)
+    # checking all 4096 shards via HTTP when most are empty (e.g. --smoke-test)
     staged = _discover_staging_prefixes(r2_config, version)
     if staged and len(staged) < shard_count:
         print(f"  Found {len(staged)}/{shard_count} prefixes with staging data")
@@ -691,10 +758,19 @@ def build_id_index(args):
         print("  Set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID")
         sys.exit(1)
 
-    limit = getattr(args, 'limit', None)
+    smoke = getattr(args, 'smoke_test', False)
     print(f"\n  Workers: {args.workers}")
-    if limit:
-        print(f"  Limit: {limit} records per source")
+    if smoke:
+        print(f"  Mode: smoke test")
+
+    # Smoke test: pick ~5 evenly-spaced prefixes for Phase 1a
+    smoke_prefixes = None
+    smoke_release_limit = None
+    if smoke:
+        indices = [0, shard_count // 4, shard_count // 2,
+                   3 * shard_count // 4, shard_count - 1]
+        smoke_prefixes = [format(i, f'0{args.prefix_len}x') for i in indices]
+        smoke_release_limit = 50
 
     phases = args.phase.split(",") if args.phase else ["all"]
     run_all = "all" in phases
@@ -702,7 +778,7 @@ def build_id_index(args):
     phase_times = {}
 
     # === Phase 1: Partition (1a registry + 1b release themes in parallel) ===
-    from concurrent.futures import ThreadPoolExecutor
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     phase1_futures = {}
     if run_all or "partition" in phases or args.release_only:
@@ -719,7 +795,7 @@ def build_id_index(args):
                 print(f"\nPhase 1a: Partition registry")
                 phase1_futures["1a"] = executor.submit(
                     phase_partition_r2, args.prefix_len, r2_config, version,
-                    limit=limit,
+                    prefixes=smoke_prefixes,
                 )
 
         # Phase 1b: Release themes
@@ -732,12 +808,24 @@ def build_id_index(args):
             phase1_futures["1b"] = executor.submit(
                 phase_partition_release_r2,
                 args.prefix_len, release_version, r2_config, version,
-                limit=limit,
+                limit=smoke_release_limit,
             )
 
-        # Wait for all Phase 1 tasks
-        for name, future in phase1_futures.items():
-            future.result()  # raises if the phase failed
+        # Wait for all Phase 1 tasks; fail fast if any phase errors
+        first_error = None
+        for future in as_completed(phase1_futures.values()):
+            try:
+                future.result()
+            except Exception as exc:
+                first_error = exc
+                # Cancel any remaining futures
+                for f in phase1_futures.values():
+                    f.cancel()
+                break
+
+        if first_error is not None:
+            executor.shutdown(wait=False, cancel_futures=True)
+            raise first_error
 
         executor.shutdown(wait=False)
         phase_times["Phase 1 (partition)"] = time.time() - t_phase1
@@ -814,8 +902,8 @@ def main():
     p.add_argument("--prefix-len", type=int, default=3,
                    help="Hex prefix length (default: 3 = 4096 shards)")
     p.add_argument("--dry-run", action="store_true", help="Count records only")
-    p.add_argument("--limit", type=int, default=None,
-                   help="Limit records per source (for smoke testing)")
+    p.add_argument("--smoke-test", action="store_true",
+                   help="Quick validation: ~5 prefixes for registry, limited release records")
     p.add_argument("--workers", type=int, default=default_workers,
                    help=f"Parallel workers (default: {default_workers})")
 
