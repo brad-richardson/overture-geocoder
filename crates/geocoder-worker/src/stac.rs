@@ -21,6 +21,7 @@ const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
 // Shard selection constants
 const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
 const MAX_LOCATION_SHARDS: usize = 4; // Max shards to load (excluding HEAD)
+const MAX_VERSION_ATTEMPTS: usize = 3; // Max versions to try (latest + fallbacks)
 
 /// User location derived from Cloudflare request headers.
 #[derive(Debug, Clone, Default)]
@@ -69,6 +70,7 @@ pub struct ShardDebugInfo {
 /// Debug info about the search operation.
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchDebugInfo {
+    pub version: String,
     pub user_location: UserLocationDebug,
     pub shards_loaded: Vec<ShardDebugInfo>,
 }
@@ -256,22 +258,63 @@ impl<'a> ShardLoader<'a> {
     }
 
     /// Search across HEAD and nearby shards based on user location.
+    /// Falls back to older versions if the latest version's shards are unavailable.
     pub async fn search(
         &self,
         query: &GeocoderQuery,
         user_location: &UserLocation,
         include_debug: bool,
     ) -> Result<SearchResult> {
-        // Load STAC catalog to find shards
         let catalog = self.load_catalog().await?;
-        let (version, collection) = self.load_latest_collection(&catalog).await?;
+        let versions = get_ordered_versions(&catalog);
+
+        if versions.is_empty() {
+            return Err(Error::RustError("No versions found in catalog".into()));
+        }
+
+        let mut last_error = None;
+        for version in &versions {
+            match self
+                .try_search(version, query, user_location, include_debug)
+                .await
+            {
+                Ok(result) => {
+                    if last_error.is_some() {
+                        console_log!("Fallback to version {} succeeded", version);
+                    }
+                    return Ok(result);
+                }
+                Err(e) => {
+                    console_log!(
+                        "Version {} failed for search: {:?}, trying fallback",
+                        version,
+                        e
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| Error::RustError("No working version found in catalog".into())))
+    }
+
+    /// Attempt search against a specific version.
+    async fn try_search(
+        &self,
+        version: &str,
+        query: &GeocoderQuery,
+        user_location: &UserLocation,
+        include_debug: bool,
+    ) -> Result<SearchResult> {
+        let collection = self.load_collection(version).await?;
 
         // Track loaded shards for debug
         let mut shards_loaded = Vec::new();
 
-        // Query HEAD shard (required - fail if unavailable)
+        // Query HEAD shard (required - fail triggers version fallback)
         let (head_results, head_info) = self
-            .query_shard_with_info(&version, "HEAD", &collection, query)
+            .query_shard_with_info(version, "HEAD", &collection, query)
             .await?;
         let mut all_results = head_results;
         if include_debug {
@@ -282,10 +325,10 @@ impl<'a> ShardLoader<'a> {
         let nearby_shards = self.select_nearby_shards(&collection, user_location);
         console_log!("Selected shards: {:?}", nearby_shards);
 
-        // Query each nearby shard
+        // Query each nearby shard (non-fatal failures)
         for shard_id in nearby_shards {
             match self
-                .query_shard_with_info(&version, &shard_id, &collection, query)
+                .query_shard_with_info(version, &shard_id, &collection, query)
                 .await
             {
                 Ok((results, info)) => {
@@ -325,6 +368,7 @@ impl<'a> ShardLoader<'a> {
         // Build debug info if requested
         let debug = if include_debug {
             Some(SearchDebugInfo {
+                version: version.to_string(),
                 user_location: user_location.into(),
                 shards_loaded,
             })
@@ -416,21 +460,61 @@ impl<'a> ShardLoader<'a> {
     }
 
     /// Reverse geocode a lat/lon coordinate.
+    /// Falls back to older versions if the latest version's shards are unavailable.
     pub async fn reverse_geocode(
         &self,
         lat: f64,
         lon: f64,
         cf_country: Option<&str>,
     ) -> Result<Option<ReverseResult>> {
-        // Load STAC catalog to find version, then load reverse collection
         let catalog = self.load_catalog().await?;
-        let (version, _collection) = self.load_latest_collection(&catalog).await?;
-        let reverse_collection = self.load_reverse_collection(&version).await?;
+        let versions = get_ordered_versions(&catalog);
+
+        if versions.is_empty() {
+            return Err(Error::RustError("No versions found in catalog".into()));
+        }
+
+        let mut last_error = None;
+        for version in &versions {
+            match self
+                .try_reverse_geocode(version, lat, lon, cf_country)
+                .await
+            {
+                Ok(result) => {
+                    if last_error.is_some() {
+                        console_log!("Fallback to version {} succeeded for reverse", version);
+                    }
+                    return Ok(result);
+                }
+                Err(e) => {
+                    console_log!(
+                        "Version {} failed for reverse: {:?}, trying fallback",
+                        version,
+                        e
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| Error::RustError("No working version found in catalog".into())))
+    }
+
+    /// Attempt reverse geocode against a specific version.
+    async fn try_reverse_geocode(
+        &self,
+        version: &str,
+        lat: f64,
+        lon: f64,
+        cf_country: Option<&str>,
+    ) -> Result<Option<ReverseResult>> {
+        let reverse_collection = self.load_reverse_collection(version).await?;
 
         // Try country shard first if available (more specific data)
         if let Some(country) = cf_country {
             match self
-                .query_reverse_shard(&version, country, &reverse_collection, lat, lon)
+                .query_reverse_shard(version, country, &reverse_collection, lat, lon)
                 .await
             {
                 Ok(Some(result)) => return Ok(Some(result)),
@@ -448,7 +532,7 @@ impl<'a> ShardLoader<'a> {
         }
 
         // Fall back to HEAD shard
-        self.query_reverse_shard(&version, "HEAD", &reverse_collection, lat, lon)
+        self.query_reverse_shard(version, "HEAD", &reverse_collection, lat, lon)
             .await
     }
 
@@ -499,12 +583,42 @@ impl<'a> ShardLoader<'a> {
     }
 
     /// Look up a GERS ID to get its bounding box from a parquet shard.
+    /// Falls back to older versions if the latest version's index is unavailable.
     pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
         let catalog = self.load_catalog().await?;
-        let (version, _collection) = self.load_latest_collection(&catalog).await?;
+        let versions = get_ordered_versions(&catalog);
 
-        // Load id-collection.json to get prefix_len
-        let id_collection = self.load_id_collection(&version).await?;
+        if versions.is_empty() {
+            return Err(Error::RustError("No versions found in catalog".into()));
+        }
+
+        let mut last_error = None;
+        for version in &versions {
+            match self.try_lookup_id(version, gers_id).await {
+                Ok(result) => {
+                    if last_error.is_some() {
+                        console_log!("Fallback to version {} succeeded for ID lookup", version);
+                    }
+                    return Ok(result);
+                }
+                Err(e) => {
+                    console_log!(
+                        "Version {} failed for ID lookup: {:?}, trying fallback",
+                        version,
+                        e
+                    );
+                    last_error = Some(e);
+                }
+            }
+        }
+
+        Err(last_error
+            .unwrap_or_else(|| Error::RustError("No working version found in catalog".into())))
+    }
+
+    /// Attempt ID lookup against a specific version.
+    async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<Option<IdLookupResult>> {
+        let id_collection = self.load_id_collection(version).await?;
         let prefix_len = id_collection
             .summaries
             .as_ref()
@@ -577,37 +691,16 @@ impl<'a> ShardLoader<'a> {
             .map_err(|e| Error::RustError(format!("Failed to parse catalog: {}", e)))
     }
 
-    /// Load the latest collection and return it along with its version string.
-    async fn load_latest_collection(
-        &self,
-        catalog: &StacCatalog,
-    ) -> Result<(String, StacCollection)> {
-        // Find the link marked as latest
-        let latest_link = catalog
-            .links
-            .iter()
-            .find(|l| l.rel == "child" && l.latest)
-            .ok_or_else(|| Error::RustError("No latest collection found".into()))?;
-
-        // Extract version from href (e.g., "./2026-01-02.0/collection.json")
-        let version = latest_link
-            .href
-            .trim_start_matches("./")
-            .split('/')
-            .next()
-            .ok_or_else(|| Error::RustError("Invalid collection href".into()))?
-            .to_string();
-
+    /// Load a forward collection for a specific version.
+    async fn load_collection(&self, version: &str) -> Result<StacCollection> {
         let key = format!("{}/collection.json", version);
         let text = self
             .cached_get_text(&key, COLLECTION_CACHE_TTL)
             .await?
             .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
 
-        let collection: StacCollection = serde_json::from_str(&text)
-            .map_err(|e| Error::RustError(format!("Failed to parse collection: {}", e)))?;
-
-        Ok((version, collection))
+        serde_json::from_str(&text)
+            .map_err(|e| Error::RustError(format!("Failed to parse collection: {}", e)))
     }
 
     fn collection_has_shard(&self, collection: &StacCollection, shard_id: &str) -> bool {
@@ -690,6 +783,47 @@ impl<'a> ShardLoader<'a> {
 
         Ok((results, debug_info))
     }
+}
+
+/// Extract ordered versions from catalog (latest first, then descending by version string).
+///
+/// Returns up to `MAX_VERSION_ATTEMPTS` versions so the caller can try each
+/// in order until one succeeds.
+fn get_ordered_versions(catalog: &StacCatalog) -> Vec<String> {
+    let mut latest = None;
+    let mut others: Vec<String> = Vec::new();
+
+    for link in &catalog.links {
+        if link.rel != "child" {
+            continue;
+        }
+        let version = link
+            .href
+            .trim_start_matches("./")
+            .split('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        if version.is_empty() {
+            continue;
+        }
+        if link.latest {
+            latest = Some(version);
+        } else {
+            others.push(version);
+        }
+    }
+
+    // Sort non-latest versions descending (date-based strings sort naturally)
+    others.sort_unstable_by(|a, b| b.cmp(a));
+
+    let mut versions = Vec::new();
+    if let Some(v) = latest {
+        versions.push(v);
+    }
+    versions.extend(others);
+    versions.truncate(MAX_VERSION_ATTEMPTS);
+    versions
 }
 
 /// Parse a GERS ID string into 16 UUID bytes.
@@ -892,5 +1026,128 @@ mod tests {
         assert!(parse_uuid_bytes("too-short").is_none());
         assert!(parse_uuid_bytes("").is_none());
         assert!(parse_uuid_bytes("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
+    }
+
+    #[test]
+    fn test_get_ordered_versions_latest_first() {
+        let catalog = StacCatalog {
+            links: vec![
+                StacLink {
+                    rel: "self".to_string(),
+                    href: "./catalog.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2025-12-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2026-02-25.0/collection.json".to_string(),
+                    latest: true,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2026-01-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+            ],
+        };
+
+        let versions = get_ordered_versions(&catalog);
+        assert_eq!(
+            versions,
+            vec!["2026-02-25.0", "2026-01-25.0", "2025-12-25.0"]
+        );
+    }
+
+    #[test]
+    fn test_get_ordered_versions_truncates_to_max() {
+        let catalog = StacCatalog {
+            links: vec![
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2025-10-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2025-11-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2025-12-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2026-01-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2026-02-25.0/collection.json".to_string(),
+                    latest: true,
+                },
+            ],
+        };
+
+        let versions = get_ordered_versions(&catalog);
+        assert_eq!(versions.len(), MAX_VERSION_ATTEMPTS);
+        assert_eq!(versions[0], "2026-02-25.0"); // latest first
+        assert_eq!(versions[1], "2026-01-25.0"); // then descending
+        assert_eq!(versions[2], "2025-12-25.0");
+    }
+
+    #[test]
+    fn test_get_ordered_versions_no_latest_flag() {
+        let catalog = StacCatalog {
+            links: vec![
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2026-01-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+                StacLink {
+                    rel: "child".to_string(),
+                    href: "./2026-02-25.0/collection.json".to_string(),
+                    latest: false,
+                },
+            ],
+        };
+
+        let versions = get_ordered_versions(&catalog);
+        // No latest flag, so just sorted descending
+        assert_eq!(versions, vec!["2026-02-25.0", "2026-01-25.0"]);
+    }
+
+    #[test]
+    fn test_get_ordered_versions_single_version() {
+        let catalog = StacCatalog {
+            links: vec![StacLink {
+                rel: "child".to_string(),
+                href: "./2026-02-25.0/collection.json".to_string(),
+                latest: true,
+            }],
+        };
+
+        let versions = get_ordered_versions(&catalog);
+        assert_eq!(versions, vec!["2026-02-25.0"]);
+    }
+
+    #[test]
+    fn test_get_ordered_versions_empty() {
+        let catalog = StacCatalog {
+            links: vec![StacLink {
+                rel: "self".to_string(),
+                href: "./catalog.json".to_string(),
+                latest: false,
+            }],
+        };
+
+        let versions = get_ordered_versions(&catalog);
+        assert!(versions.is_empty());
     }
 }
