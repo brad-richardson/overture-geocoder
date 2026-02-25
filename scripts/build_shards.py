@@ -117,7 +117,7 @@ def enrich_search_text(search_text: str) -> str:
     seen_words = set(words)
     for word in words:
         if word in abbrev_from:
-            for variant in abbrev_from[word]:
+            for variant in sorted(abbrev_from[word]):
                 if variant not in seen_words:
                     extras.append(variant)
                     seen_words.add(variant)
