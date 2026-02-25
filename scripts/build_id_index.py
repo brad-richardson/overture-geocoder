@@ -356,7 +356,7 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None):
                 con.execute(f"""
                     COPY ({query})
                     TO '{dest}'
-                    (FORMAT PARQUET, COMPRESSION ZSTD);
+                    (FORMAT PARQUET, COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
                 """)
                 wrote += 1
                 break
