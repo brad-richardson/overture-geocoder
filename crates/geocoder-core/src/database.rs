@@ -155,7 +155,7 @@ impl Database {
         // results that wouldn't otherwise make the cut.
         let fetch_limit = (query.limit * 10).max(100);
 
-        let rows = stmt.query_map([fts_query, &fetch_limit.to_string()], |row| {
+        let rows = stmt.query_map([fts_query, &fetch_limit], |row| {
             let population: Option<i64> = row.get(10)?;
             let bm25_score: f64 = row.get(13)?;
             let boosted_score = calculate_boosted_score(bm25_score, population);
