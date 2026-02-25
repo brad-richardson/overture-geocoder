@@ -237,7 +237,7 @@ def phase_partition_local(prefix_len):
 
 def _release_id_query(prefix_len, release_version):
     """Query for release theme IDs (addresses, base) not in the registry."""
-    sources = " ".join(
+    sources = ", ".join(
         f"'{RELEASE_S3}{release_version}/theme={t}/**/*.parquet'"
         for t in RELEASE_THEMES
     )
