@@ -224,16 +224,41 @@ def _r2_con(r2_config):
     return con
 
 
-def _r2_staging_exists(r2_config, version):
-    """Check if R2 staging data already exists for this version."""
+def _write_staging_marker(r2_config, staging_path, partition_count):
+    """Write a _SUCCESS marker to R2 staging after a completed COPY."""
+    marker = {
+        "status": "complete",
+        "partitions": partition_count,
+        "timestamp": datetime.now(timezone.utc).isoformat(),
+    }
+    tmp = Path("tmp-staging-marker.json")
+    write_json(tmp, marker)
+    r2_key = f"geocoder-shards/{staging_path.split(r2_config['bucket'] + '/')[1]}/_SUCCESS"
+    err = _upload_to_r2(tmp, r2_key)
+    tmp.unlink(missing_ok=True)
+    if err:
+        print(f"  WARNING: Failed to write staging marker: {err}")
+
+
+def _read_staging_marker(r2_config, version, staging_dir):
+    """Check if a _SUCCESS marker exists for this staging path."""
     try:
-        con = _r2_con(r2_config)
-        staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned/prefix=000/*.parquet"
-        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{staging}')").fetchone()[0]
-        con.close()
-        return count > 0
+        result = subprocess.run(
+            ["wrangler", "r2", "object", "get",
+             f"geocoder-shards/{version}/staging/{staging_dir}/_SUCCESS",
+             "--remote", "--pipe"],
+            capture_output=True, text=True, timeout=30,
+        )
+        if result.returncode == 0:
+            return json.loads(result.stdout)
     except Exception:
-        return False
+        pass
+    return None
+
+
+def _r2_staging_exists(r2_config, version):
+    """Check if completed R2 staging data exists for this version."""
+    return _read_staging_marker(r2_config, version, "id-partitioned") is not None
 
 
 def _id_query(prefix_len, limit=None):
@@ -291,6 +316,8 @@ def phase_partition_r2(prefix_len, r2_config, version, limit=None):
     mins, secs = divmod(int(elapsed), 60)
     print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
 
+    _write_staging_marker(r2_config, staging, shard_count)
+
 
 def _release_id_query(prefix_len, release_version, limit=None):
     """Query for release theme IDs (base) not in the registry."""
@@ -312,15 +339,8 @@ def _release_id_query(prefix_len, release_version, limit=None):
 
 
 def _r2_release_staging_exists(r2_config, version):
-    """Check if release staging data already exists for this version."""
-    try:
-        con = _r2_con(r2_config)
-        staging = f"s3://{r2_config['bucket']}/{version}/staging/id-release/prefix=000/*.parquet"
-        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{staging}')").fetchone()[0]
-        con.close()
-        return count > 0
-    except Exception:
-        return False
+    """Check if completed release staging data exists for this version."""
+    return _read_staging_marker(r2_config, version, "id-release") is not None
 
 
 def phase_partition_release_r2(prefix_len, release_version, r2_config, version, limit=None):
@@ -357,6 +377,8 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     elapsed = time.time() - t0
     mins, secs = divmod(int(elapsed), 60)
     print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
+
+    _write_staging_marker(r2_config, staging, shard_count)
 
 
 # ---------------------------------------------------------------------------
@@ -693,7 +715,7 @@ def build_id_index(args):
             if args.skip_partition:
                 print("\nPhase 1a: Skipped (--skip-partition)")
             elif _r2_staging_exists(r2_config, version):
-                print(f"\nPhase 1a: Skipped (registry staging exists for {version})")
+                print(f"\nPhase 1a: Skipped (registry staging complete for {version})")
             else:
                 print(f"\nPhase 1a: Partition registry")
                 phase1_futures["1a"] = executor.submit(
@@ -705,7 +727,7 @@ def build_id_index(args):
         if args.skip_partition:
             print("\nPhase 1b: Skipped (--skip-partition)")
         elif _r2_release_staging_exists(r2_config, version):
-            print(f"\nPhase 1b: Skipped (release staging exists for {version})")
+            print(f"\nPhase 1b: Skipped (release staging complete for {version})")
         else:
             print(f"\nPhase 1b: Partition release themes ({', '.join(RELEASE_THEMES)})")
             phase1_futures["1b"] = executor.submit(
