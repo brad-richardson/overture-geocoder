@@ -55,6 +55,9 @@ if _env_path.exists():
                 os.environ.setdefault(_key.strip(), _val.strip())
 
 REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
+RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
+# Release themes with IDs not in the registry
+RELEASE_THEMES = ["addresses", "base"]
 EXPORTS_DIR = Path("exports")
 PARTITIONED_DIR = EXPORTS_DIR / "id-partitioned"
 SHARDS_DIR = Path("shards")
@@ -229,6 +232,60 @@ def phase_partition_local(prefix_len):
     print(f"  {len(prefix_dirs)} prefixes in {time.time() - t0:.0f}s")
 
 
+def _release_id_query(prefix_len, release_version):
+    """Query for release theme IDs (addresses, base) not in the registry."""
+    sources = " ".join(
+        f"'{RELEASE_S3}{release_version}/theme={t}/**/*.parquet'"
+        for t in RELEASE_THEMES
+    )
+    return f"""
+        SELECT
+            id,
+            bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin,
+            bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
+            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+        FROM read_parquet([{sources}], union_by_name=true)
+        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+    """
+
+
+def _r2_release_staging_exists(r2_config, version):
+    """Check if release staging data already exists for this version."""
+    try:
+        con = _r2_con(r2_config)
+        staging = f"s3://{r2_config['bucket']}/{version}/staging/id-release/prefix=000/*.parquet"
+        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{staging}')").fetchone()[0]
+        con.close()
+        return count > 0
+    except Exception:
+        return False
+
+
+def phase_partition_release_r2(prefix_len, release_version, r2_config, version):
+    """Scan release themes (addresses, base) and partition to R2.
+
+    Writes to a separate staging path from the registry data so both
+    can run independently.
+    """
+    print(f"  Scanning release themes ({', '.join(RELEASE_THEMES)})...")
+
+    con = _r2_con(r2_config)
+    con.execute("SET memory_limit = '10GB';")
+    con.execute("SET preserve_insertion_order = false;")
+    con.execute("SET s3_region = 'us-west-2';")
+
+    staging = f"s3://{r2_config['bucket']}/{version}/staging/id-release"
+
+    t0 = time.time()
+    con.execute(f"""
+        COPY ({_release_id_query(prefix_len, release_version)})
+        TO '{staging}'
+        (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
+    """)
+    con.close()
+    print(f"  Done in {time.time() - t0:.0f}s")
+
+
 # ---------------------------------------------------------------------------
 # Phase 2: Build SQLite shards
 # ---------------------------------------------------------------------------
@@ -272,10 +329,11 @@ def _worker_build_r2(args_tuple):
     """Multiprocessing worker: read from R2 staging, build shard, upload."""
     prefix, r2_config, version, tmp_dir = args_tuple
 
-    staging = (
-        f"s3://{r2_config['bucket']}/{version}"
-        f"/staging/id-partitioned/prefix={prefix}/*.parquet"
-    )
+    bucket = r2_config['bucket']
+    staging_paths = [
+        f"s3://{bucket}/{version}/staging/id-partitioned/prefix={prefix}/*.parquet",
+        f"s3://{bucket}/{version}/staging/id-release/prefix={prefix}/*.parquet",
+    ]
 
     try:
         con = duckdb.connect()
@@ -291,11 +349,19 @@ def _worker_build_r2(args_tuple):
                 URL_STYLE 'path'
             );
         """)
-        rows = con.execute(f"""
-            SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
-            FROM read_parquet('{staging}')
-        """).fetchall()
+        # Read from all staging paths that exist
+        all_rows = []
+        for path in staging_paths:
+            try:
+                rows = con.execute(f"""
+                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+                    FROM read_parquet('{path}')
+                """).fetchall()
+                all_rows.extend(rows)
+            except Exception:
+                pass  # Path doesn't exist for this prefix
         con.close()
+        rows = all_rows
     except Exception:
         return (prefix, 0, 0, None)
 
@@ -502,14 +568,14 @@ def build_id_index(args):
     run_all = "all" in phases
     t_total = time.time()
 
-    # === Phase 1: Partition (always stages ALL types) ===
+    # === Phase 1a: Partition registry ===
     if run_all or "partition" in phases:
         if args.skip_partition:
-            print("\nPhase 1: Skipped (--skip-partition)")
+            print("\nPhase 1a: Skipped (--skip-partition)")
         elif use_r2 and _r2_staging_exists(r2_config, version):
-            print(f"\nPhase 1: Skipped (staging already exists for {version})")
+            print(f"\nPhase 1a: Skipped (registry staging exists for {version})")
         else:
-            print(f"\nPhase 1: Partition registry")
+            print(f"\nPhase 1a: Partition registry")
             if use_r2:
                 phase_partition_r2(
                     args.prefix_len, r2_config, version,
@@ -518,6 +584,20 @@ def build_id_index(args):
                 phase_partition_local(
                     args.prefix_len,
                 )
+
+    # === Phase 1b: Partition release themes (addresses, base) ===
+    if run_all or "partition" in phases:
+        if args.skip_partition:
+            print("\nPhase 1b: Skipped (--skip-partition)")
+        elif not use_r2:
+            print("\nPhase 1b: Skipped (release themes only supported in R2 mode)")
+        elif _r2_release_staging_exists(r2_config, version):
+            print(f"\nPhase 1b: Skipped (release staging exists for {version})")
+        else:
+            print(f"\nPhase 1b: Partition release themes ({', '.join(RELEASE_THEMES)})")
+            phase_partition_release_r2(
+                args.prefix_len, release_version, r2_config, version,
+            )
 
     # === Phase 2: Build shards ===
     results = None
