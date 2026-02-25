@@ -375,7 +375,7 @@ def _worker_build_r2(args_tuple):
                 GROUP BY id
                 ORDER BY id
             ) TO '{local_path}'
-            (FORMAT PARQUET, COMPRESSION SNAPPY);
+            (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)
         con.close()
 
@@ -419,7 +419,7 @@ def _worker_build_local(args_tuple):
                 GROUP BY id
                 ORDER BY id
             ) TO '{output_path}'
-            (FORMAT PARQUET, COMPRESSION SNAPPY);
+            (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)
         con.close()
 
