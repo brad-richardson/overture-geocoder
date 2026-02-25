@@ -33,6 +33,7 @@ import multiprocessing
 import os
 import subprocess
 import sys
+import threading
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -89,6 +90,84 @@ def get_r2_config(args):
         "secret": secret_key,
         "bucket": args.r2_bucket,
     }
+
+
+# ---------------------------------------------------------------------------
+# Progress helpers
+# ---------------------------------------------------------------------------
+
+def _count_staging_partitions(r2_config, staging_path):
+    """Count partition files written to R2 staging via S3 listing."""
+    try:
+        con = duckdb.connect()
+        con.execute("INSTALL httpfs; LOAD httpfs;")
+        con.execute(f"""
+            CREATE SECRET r2 (
+                TYPE S3,
+                SCOPE 's3://{r2_config["bucket"]}/',
+                KEY_ID '{r2_config["key_id"]}',
+                SECRET '{r2_config["secret"]}',
+                ENDPOINT '{r2_config["endpoint"]}',
+                REGION 'auto',
+                URL_STYLE 'path'
+            );
+        """)
+        result = con.execute(f"""
+            SELECT COUNT(*) FROM glob('{staging_path}/prefix=*/*.parquet')
+        """).fetchone()
+        con.close()
+        return result[0] if result else 0
+    except Exception:
+        return None
+
+
+def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, interval=60):
+    """Run fn() while polling R2 staging to report partition write progress."""
+    t0 = time.time()
+    stop = threading.Event()
+
+    def _monitor():
+        while not stop.wait(interval):
+            elapsed = time.time() - t0
+            mins, secs = divmod(int(elapsed), 60)
+            count = _count_staging_partitions(r2_config, staging_path)
+            if count is not None and total_partitions > 0:
+                pct = count * 100 // total_partitions
+                print(
+                    f"    [{mins:02d}:{secs:02d}] {label}: "
+                    f"{count}/{total_partitions} partitions written ({pct}%)",
+                    flush=True,
+                )
+            else:
+                print(f"    [{mins:02d}:{secs:02d}] {label}...", flush=True)
+
+    thread = threading.Thread(target=_monitor, daemon=True)
+    thread.start()
+    try:
+        return fn()
+    finally:
+        stop.set()
+        thread.join(timeout=5)
+
+
+def _run_with_heartbeat(fn, label, interval=30):
+    """Run fn() while printing periodic heartbeat messages with elapsed time."""
+    t0 = time.time()
+    stop = threading.Event()
+
+    def _printer():
+        while not stop.wait(interval):
+            elapsed = time.time() - t0
+            mins, secs = divmod(int(elapsed), 60)
+            print(f"    [{mins:02d}:{secs:02d}] {label}...", flush=True)
+
+    thread = threading.Thread(target=_printer, daemon=True)
+    thread.start()
+    try:
+        return fn()
+    finally:
+        stop.set()
+        thread.join(timeout=2)
 
 
 # ---------------------------------------------------------------------------
@@ -183,6 +262,7 @@ def phase_partition_r2(prefix_len, r2_config, version, limit=None):
     Uses preserve_insertion_order=false to keep memory low during
     PARTITION_BY with 4096 partitions.
     """
+    shard_count = 16 ** prefix_len
     limit_msg = f" (limit {limit})" if limit else ""
     print(f"  Streaming Overture S3 -> R2 partitioned staging{limit_msg}...")
 
@@ -194,13 +274,22 @@ def phase_partition_r2(prefix_len, r2_config, version, limit=None):
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
 
     t0 = time.time()
-    con.execute(f"""
-        COPY ({_id_query(prefix_len, limit=limit)})
-        TO '{staging}'
-        (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
-    """)
+
+    def _do_copy():
+        con.execute(f"""
+            COPY ({_id_query(prefix_len, limit=limit)})
+            TO '{staging}'
+            (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
+        """)
+
+    _run_with_r2_progress(
+        _do_copy, r2_config, staging, shard_count,
+        "Registry scan", interval=60,
+    )
     con.close()
-    print(f"  Done in {time.time() - t0:.0f}s")
+    elapsed = time.time() - t0
+    mins, secs = divmod(int(elapsed), 60)
+    print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
 
 
 def _release_id_query(prefix_len, release_version, limit=None):
@@ -240,6 +329,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     Writes to a separate staging path from the registry data so both
     can run independently.
     """
+    shard_count = 16 ** prefix_len
     limit_msg = f" (limit {limit})" if limit else ""
     print(f"  Scanning release themes ({', '.join(RELEASE_THEMES)}){limit_msg}...")
 
@@ -251,13 +341,22 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-release"
 
     t0 = time.time()
-    con.execute(f"""
-        COPY ({_release_id_query(prefix_len, release_version, limit=limit)})
-        TO '{staging}'
-        (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
-    """)
+
+    def _do_copy():
+        con.execute(f"""
+            COPY ({_release_id_query(prefix_len, release_version, limit=limit)})
+            TO '{staging}'
+            (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
+        """)
+
+    _run_with_r2_progress(
+        _do_copy, r2_config, staging, shard_count,
+        "Release themes scan", interval=60,
+    )
     con.close()
-    print(f"  Done in {time.time() - t0:.0f}s")
+    elapsed = time.time() - t0
+    mins, secs = divmod(int(elapsed), 60)
+    print(f"  Done in {mins}m{secs:02d}s ({elapsed:.0f}s)")
 
 
 # ---------------------------------------------------------------------------
@@ -360,17 +459,28 @@ def _run_pool(worker_fn, work_items, total_label, workers):
     """Run multiprocessing pool with progress reporting."""
     total = len(work_items)
     results = []
+    t0 = time.time()
 
     with multiprocessing.Pool(workers) as pool:
         for i, result in enumerate(pool.imap_unordered(worker_fn, work_items)):
             results.append(result)
-            if (i + 1) % 100 == 0 or (i + 1) == total:
+            done = i + 1
+            if done % 100 == 0 or done == total:
                 built = sum(1 for r in results if r[1] > 0)
+                elapsed = time.time() - t0
+                rate = done / elapsed if elapsed > 0 else 0
+                if rate > 0 and done < total:
+                    remaining = (total - done) / rate
+                    mins_r, secs_r = divmod(int(remaining), 60)
+                    eta = f", ~{mins_r}m{secs_r:02d}s remaining"
+                else:
+                    eta = ""
+                mins_e, secs_e = divmod(int(elapsed), 60)
                 print(
-                    f"    {i+1}/{total} {total_label}, {built} with data...",
-                    end="\r", flush=True,
+                    f"    {done}/{total} {total_label}, {built} with data"
+                    f" ({mins_e}m{secs_e:02d}s elapsed{eta})",
+                    flush=True,
                 )
-    print()
     return results
 
 
@@ -462,9 +572,8 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
             found = sum(1 for r in results if r[1] > 0)
             print(
                 f"    {i+1}/{shard_count} scanned, {found} with data...",
-                end="\r", flush=True,
+                flush=True,
             )
-    print()
     con.close()
     return results
 
@@ -569,12 +678,14 @@ def build_id_index(args):
     phases = args.phase.split(",") if args.phase else ["all"]
     run_all = "all" in phases
     t_total = time.time()
+    phase_times = {}
 
     # === Phase 1: Partition (1a registry + 1b release themes in parallel) ===
     from concurrent.futures import ThreadPoolExecutor
 
     phase1_futures = {}
     if run_all or "partition" in phases or args.release_only:
+        t_phase1 = time.time()
         executor = ThreadPoolExecutor(max_workers=2)
 
         # Phase 1a: Registry
@@ -608,9 +719,12 @@ def build_id_index(args):
             future.result()  # raises if the phase failed
 
         executor.shutdown(wait=False)
+        phase_times["Phase 1 (partition)"] = time.time() - t_phase1
 
     if args.release_only:
-        print(f"\nDone! ({time.time() - t_total:.0f}s)")
+        elapsed = time.time() - t_total
+        mins, secs = divmod(int(elapsed), 60)
+        print(f"\nDone! ({mins}m{secs:02d}s)")
         return
 
     # === Phase 2: Build shards ===
@@ -621,17 +735,20 @@ def build_id_index(args):
         results = phase_build_r2(
             args.prefix_len, r2_config, version, args.workers,
         )
-        elapsed = time.time() - t0
+        elapsed_p2 = time.time() - t0
+        phase_times["Phase 2 (build)"] = elapsed_p2
 
         built = sum(1 for r in results if r[1] > 0)
         records = sum(r[1] for r in results)
         errs = sum(1 for r in results if r[3] is not None)
-        print(f"  {built} shards, {records:,} records in {elapsed:.0f}s")
+        mins, secs = divmod(int(elapsed_p2), 60)
+        print(f"  {built} shards, {records:,} records in {mins}m{secs:02d}s")
         if errs:
             print(f"  {errs} upload errors")
 
     # === Phase 3: Metadata ===
     if run_all or "metadata" in phases:
+        t_phase3 = time.time()
         # If Phase 2 didn't run, gather shard info from existing R2 data
         if results is None:
             results = _gather_shard_info_from_r2(
@@ -642,11 +759,14 @@ def build_id_index(args):
         shard_infos, total_records, errors = phase_metadata(
             results, args.prefix_len, version, release_version, r2_config,
         )
+        phase_times["Phase 3 (metadata)"] = time.time() - t_phase3
 
         total_size = sum(s["size_bytes"] for s in shard_infos.values())
         max_shard = max((s["size_bytes"] for s in shard_infos.values()), default=0)
 
-        print(f"\nDone! ({time.time() - t_total:.0f}s)")
+        total_elapsed = time.time() - t_total
+        total_mins, total_secs = divmod(int(total_elapsed), 60)
+        print(f"\nDone! ({total_mins}m{total_secs:02d}s total)")
         print(f"  Shards: {len(shard_infos)} / {shard_count}")
         print(f"  Records: {total_records:,}")
         print(f"  Total: {total_size / 1024 / 1024:.1f} MB")
@@ -654,6 +774,14 @@ def build_id_index(args):
             print(f"  Max shard: {max_shard / 1024 / 1024:.1f} MB")
         if max_shard > 128 * 1024 * 1024:
             print(f"\n  WARNING: Exceeds 128MB! Use --prefix-len {args.prefix_len + 1}")
+
+        # Per-phase timing breakdown
+        if phase_times:
+            print(f"\n  Timing breakdown:")
+            for name, t in phase_times.items():
+                mins, secs = divmod(int(t), 60)
+                pct = t * 100 / total_elapsed if total_elapsed > 0 else 0
+                print(f"    {name}: {mins}m{secs:02d}s ({pct:.0f}%)")
 
 
 def main():
