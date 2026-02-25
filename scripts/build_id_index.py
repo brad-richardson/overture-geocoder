@@ -595,7 +595,7 @@ def build_id_index(args):
     t_total = time.time()
 
     # === Phase 1a: Partition registry ===
-    if run_all or "partition" in phases:
+    if (run_all or "partition" in phases) and not args.release_only:
         if args.skip_partition:
             print("\nPhase 1a: Skipped (--skip-partition)")
         elif use_r2 and _r2_staging_exists(r2_config, version):
@@ -612,7 +612,7 @@ def build_id_index(args):
                 )
 
     # === Phase 1b: Partition release themes (addresses, base) ===
-    if run_all or "partition" in phases:
+    if run_all or "partition" in phases or args.release_only:
         if args.skip_partition:
             print("\nPhase 1b: Skipped (--skip-partition)")
         elif not use_r2:
@@ -624,6 +624,10 @@ def build_id_index(args):
             phase_partition_release_r2(
                 args.prefix_len, release_version, r2_config, version,
             )
+
+    if args.release_only:
+        print(f"\nDone! ({time.time() - t_total:.0f}s)")
+        return
 
     # === Phase 2: Build shards ===
     results = None
@@ -694,6 +698,8 @@ def main():
                    help="Skip Phase 1 (reuse existing staging)")
     p.add_argument("--skip-upload", action="store_true",
                    help="Local build only (no R2)")
+    p.add_argument("--release-only", action="store_true",
+                   help="Only run Phase 1b (release theme staging)")
 
     args = p.parse_args()
     build_id_index(args)
