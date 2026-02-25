@@ -1,0 +1,149 @@
+name: Smoke Test R2 Pipeline
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/**'
+      - '.github/workflows/smoketest-r2-pipeline.yml'
+      - '.github/workflows/rebuild-r2-shards.yml'
+  workflow_dispatch:
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  # Fixed version prefix for smoke tests (never collides with real date-based versions)
+  SMOKE_VERSION: smoketest
+
+jobs:
+  smoketest:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install DuckDB CLI
+        run: |
+          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-aarch64.zip
+          unzip duckdb.zip
+          sudo mv duckdb /usr/local/bin/
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      # --- Shard pipeline (forward + reverse for a tiny country) ---
+
+      - name: Download divisions data
+        run: ./scripts/download_divisions.sh
+
+      - name: Build forward shards (MC only, skip HEAD)
+        run: python scripts/build_shards.py --version $SMOKE_VERSION --countries MC --skip-head
+
+      - name: Build reverse shards (MC only, skip HEAD)
+        run: python scripts/build_shards.py --version $SMOKE_VERSION --countries MC --skip-head --reverse
+
+      - name: Upload test shards to R2
+        run: |
+          # Upload collection metadata
+          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/collection.json" \
+            --file "shards/${SMOKE_VERSION}/collection.json" --remote
+          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/reverse-collection.json" \
+            --file "shards/${SMOKE_VERSION}/reverse-collection.json" --remote
+
+          # Upload shard databases
+          for f in shards/${SMOKE_VERSION}/shards/*.db; do
+            name=$(basename "$f")
+            wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/shards/${name}" \
+              --file "$f" --remote
+          done
+          for f in shards/${SMOKE_VERSION}/reverse/*.db; do
+            name=$(basename "$f")
+            wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/reverse/${name}" \
+              --file "$f" --remote
+          done
+
+      - name: Verify shard uploads
+        run: |
+          FAILED=0
+          for key in \
+            "${SMOKE_VERSION}/collection.json" \
+            "${SMOKE_VERSION}/shards/MC.db" \
+            "${SMOKE_VERSION}/reverse-collection.json" \
+            "${SMOKE_VERSION}/reverse/MC.db"
+          do
+            if wrangler r2 object get "geocoder-shards/${key}" --remote --pipe > /dev/null 2>&1; then
+              echo "  ok: ${key}"
+            else
+              echo "  FAIL: ${key}"
+              FAILED=1
+            fi
+          done
+
+          if [ "$FAILED" -eq 1 ]; then
+            echo "::error::Shard smoke test verification failed"
+            exit 1
+          fi
+          echo "Shard verification passed."
+
+      # --- ID index pipeline (registry + release, limited to 100 records) ---
+
+      - name: Build ID index (100 records)
+        run: |
+          python scripts/build_id_index.py \
+            --version $SMOKE_VERSION \
+            --prefix-len 3 \
+            --limit 100 \
+            --workers 2
+
+      - name: Verify ID index uploads
+        run: |
+          if wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
+            echo "  ok: ${SMOKE_VERSION}/id-collection.json"
+          else
+            echo "::error::${SMOKE_VERSION}/id-collection.json NOT FOUND"
+            exit 1
+          fi
+          echo "ID index verification passed."
+
+      # --- Cleanup: remove all smoketest objects from R2 ---
+
+      - name: Cleanup test data from R2
+        if: always()
+        run: |
+          echo "Cleaning up smoke test data from R2..."
+
+          # List all objects under the smoketest prefix and delete them
+          OBJECTS=$(wrangler r2 object list geocoder-shards \
+            --prefix "${SMOKE_VERSION}/" --remote 2>/dev/null \
+            | grep -oE '"key": "[^"]+' | sed 's/"key": "//' || true)
+
+          COUNT=0
+          for OBJ in $OBJECTS; do
+            wrangler r2 object delete "geocoder-shards/${OBJ}" --remote 2>/dev/null || true
+            COUNT=$((COUNT + 1))
+          done
+
+          echo "Deleted $COUNT objects from R2."
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## R2 Pipeline Smoke Test" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Country:** MC (Monaco)" >> $GITHUB_STEP_SUMMARY
+          echo "**ID index limit:** 100 records" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
