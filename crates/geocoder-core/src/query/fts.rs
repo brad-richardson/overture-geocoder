@@ -126,5 +126,8 @@ mod tests {
         assert_eq!(prepare_fts_query("MALMÖ", true), r#""malmö"*"#);
         // Mixed ASCII and non-ASCII
         assert_eq!(prepare_fts_query("São Paulo", true), r#""são" "paulo"*"#);
+        // Case where Unicode lowercasing uses an expansion (e.g., 'İ' → "i\u{307}")
+        // This ensures truncation bugs from `.to_lowercase().next()` are caught.
+        assert_eq!(prepare_fts_query("İSTANBUL", true), r#""istanbul"*"#);
     }
 }
