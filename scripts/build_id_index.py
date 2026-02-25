@@ -96,33 +96,49 @@ def get_r2_config(args):
 # Progress helpers
 # ---------------------------------------------------------------------------
 
-def _count_staging_partitions(r2_config, staging_path):
-    """Count partition files written to R2 staging via S3 listing."""
+def _human_bytes(n):
+    """Format byte count as human-readable string."""
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(n) < 1024:
+            return f"{n:.1f} {unit}"
+        n /= 1024
+    return f"{n:.1f} PB"
+
+
+def _check_staging_progress(r2_config, staging_path):
+    """Check partition files and total bytes written to R2 staging.
+
+    Uses parquet_metadata() to read footers (not data) for file count
+    and total compressed size. Falls back to glob() for just file count
+    if metadata reading is too slow or fails.
+    """
     try:
-        con = duckdb.connect()
-        con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute(f"""
-            CREATE SECRET r2 (
-                TYPE S3,
-                SCOPE 's3://{r2_config["bucket"]}/',
-                KEY_ID '{r2_config["key_id"]}',
-                SECRET '{r2_config["secret"]}',
-                ENDPOINT '{r2_config["endpoint"]}',
-                REGION 'auto',
-                URL_STYLE 'path'
-            );
-        """)
+        con = _r2_con(r2_config)
+        # Try parquet_metadata for file count + total bytes (reads footers only)
+        try:
+            result = con.execute(f"""
+                SELECT
+                    COUNT(DISTINCT file_name) as files,
+                    COALESCE(SUM(total_compressed_size), 0) as total_bytes
+                FROM parquet_metadata('{staging_path}/prefix=*/*.parquet')
+            """).fetchone()
+            con.close()
+            if result:
+                return result[0], result[1]
+        except Exception:
+            pass
+        # Fall back to glob for file count only (single ListObjects call)
         result = con.execute(f"""
             SELECT COUNT(*) FROM glob('{staging_path}/prefix=*/*.parquet')
         """).fetchone()
         con.close()
-        return result[0] if result else 0
+        return (result[0] if result else 0), None
     except Exception:
-        return None
+        return None, None
 
 
 def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, interval=60):
-    """Run fn() while polling R2 staging to report partition write progress."""
+    """Run fn() while polling R2 staging to report write progress."""
     t0 = time.time()
     stop = threading.Event()
 
@@ -130,12 +146,13 @@ def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, 
         while not stop.wait(interval):
             elapsed = time.time() - t0
             mins, secs = divmod(int(elapsed), 60)
-            count = _count_staging_partitions(r2_config, staging_path)
-            if count is not None and total_partitions > 0:
-                pct = count * 100 // total_partitions
+            count, total_bytes = _check_staging_progress(r2_config, staging_path)
+            if count is not None:
+                parts = [f"{count}/{total_partitions} partitions"]
+                if total_bytes is not None:
+                    parts.append(_human_bytes(total_bytes))
                 print(
-                    f"    [{mins:02d}:{secs:02d}] {label}: "
-                    f"{count}/{total_partitions} partitions written ({pct}%)",
+                    f"    [{mins:02d}:{secs:02d}] {label}: {', '.join(parts)}",
                     flush=True,
                 )
             else:
