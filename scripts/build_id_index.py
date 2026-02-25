@@ -60,7 +60,7 @@ if _env_path.exists():
 REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
 RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
-RELEASE_THEMES = ["addresses", "base"]
+RELEASE_THEMES = ["base"]
 EXPORTS_DIR = Path("exports")
 PARTITIONED_DIR = EXPORTS_DIR / "id-partitioned"
 SHARDS_DIR = Path("shards")
@@ -174,9 +174,9 @@ def _id_query(prefix_len):
     """
     return f"""
         SELECT
-            id,
-            bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin,
-            bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
+            id::UUID as id,
+            bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
+            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
             lower(left(replace(id, '-', ''), {prefix_len})) as prefix
         FROM read_parquet('{REGISTRY_S3}*')
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
@@ -243,9 +243,9 @@ def _release_id_query(prefix_len, release_version):
     )
     return f"""
         SELECT
-            id,
-            bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin,
-            bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
+            id::UUID as id,
+            bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
+            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
             lower(left(replace(id, '-', ''), {prefix_len})) as prefix
         FROM read_parquet([{sources}], union_by_name=true)
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
@@ -356,24 +356,16 @@ def _worker_build_r2(args_tuple):
         ]
         union_query = " UNION ALL ".join(union_parts)
 
-        # Count distinct IDs
+        # Count rows
         count = con.execute(
-            f"SELECT COUNT(DISTINCT id) FROM ({union_query})"
+            f"SELECT COUNT(*) FROM ({union_query})"
         ).fetchone()[0]
 
-        # Write sorted snappy parquet with UUID column + float bbox
+        # Sort and write — UUID + FLOAT types already set in Phase 1
         local_path = f"{tmp_dir}/{prefix}.parquet"
         con.execute(f"""
             COPY (
-                SELECT
-                    id::UUID as id,
-                    ANY_VALUE(bbox_xmin)::FLOAT as bbox_xmin,
-                    ANY_VALUE(bbox_ymin)::FLOAT as bbox_ymin,
-                    ANY_VALUE(bbox_xmax)::FLOAT as bbox_xmax,
-                    ANY_VALUE(bbox_ymax)::FLOAT as bbox_ymax
-                FROM ({union_query})
-                GROUP BY id
-                ORDER BY id
+                SELECT * FROM ({union_query}) ORDER BY id
             ) TO '{local_path}'
             (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)
@@ -400,7 +392,7 @@ def _worker_build_local(args_tuple):
     try:
         con = duckdb.connect()
         count = con.execute(
-            f"SELECT COUNT(DISTINCT id) FROM read_parquet('{parquet_dir}/*.parquet')"
+            f"SELECT COUNT(*) FROM read_parquet('{parquet_dir}/*.parquet')"
         ).fetchone()[0]
 
         if count == 0:
@@ -409,15 +401,7 @@ def _worker_build_local(args_tuple):
 
         con.execute(f"""
             COPY (
-                SELECT
-                    id::UUID as id,
-                    ANY_VALUE(bbox_xmin)::FLOAT as bbox_xmin,
-                    ANY_VALUE(bbox_ymin)::FLOAT as bbox_ymin,
-                    ANY_VALUE(bbox_xmax)::FLOAT as bbox_xmax,
-                    ANY_VALUE(bbox_ymax)::FLOAT as bbox_ymax
-                FROM read_parquet('{parquet_dir}/*.parquet')
-                GROUP BY id
-                ORDER BY id
+                SELECT * FROM read_parquet('{parquet_dir}/*.parquet') ORDER BY id
             ) TO '{output_path}'
             (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)
@@ -594,36 +578,49 @@ def build_id_index(args):
     run_all = "all" in phases
     t_total = time.time()
 
-    # === Phase 1a: Partition registry ===
-    if (run_all or "partition" in phases) and not args.release_only:
-        if args.skip_partition:
-            print("\nPhase 1a: Skipped (--skip-partition)")
-        elif use_r2 and _r2_staging_exists(r2_config, version):
-            print(f"\nPhase 1a: Skipped (registry staging exists for {version})")
-        else:
-            print(f"\nPhase 1a: Partition registry")
-            if use_r2:
-                phase_partition_r2(
-                    args.prefix_len, r2_config, version,
-                )
-            else:
-                phase_partition_local(
-                    args.prefix_len,
-                )
+    # === Phase 1: Partition (1a registry + 1b release themes in parallel) ===
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
-    # === Phase 1b: Partition release themes (addresses, base) ===
+    phase1_futures = {}
     if run_all or "partition" in phases or args.release_only:
-        if args.skip_partition:
-            print("\nPhase 1b: Skipped (--skip-partition)")
-        elif not use_r2:
+        executor = ThreadPoolExecutor(max_workers=2)
+
+        # Phase 1a: Registry
+        if not args.release_only:
+            if args.skip_partition:
+                print("\nPhase 1a: Skipped (--skip-partition)")
+            elif use_r2 and _r2_staging_exists(r2_config, version):
+                print(f"\nPhase 1a: Skipped (registry staging exists for {version})")
+            else:
+                print(f"\nPhase 1a: Partition registry")
+                if use_r2:
+                    phase1_futures["1a"] = executor.submit(
+                        phase_partition_r2, args.prefix_len, r2_config, version,
+                    )
+                else:
+                    phase1_futures["1a"] = executor.submit(
+                        phase_partition_local, args.prefix_len,
+                    )
+
+        # Phase 1b: Release themes
+        if not use_r2:
             print("\nPhase 1b: Skipped (release themes only supported in R2 mode)")
+        elif args.skip_partition:
+            print("\nPhase 1b: Skipped (--skip-partition)")
         elif _r2_release_staging_exists(r2_config, version):
             print(f"\nPhase 1b: Skipped (release staging exists for {version})")
         else:
             print(f"\nPhase 1b: Partition release themes ({', '.join(RELEASE_THEMES)})")
-            phase_partition_release_r2(
+            phase1_futures["1b"] = executor.submit(
+                phase_partition_release_r2,
                 args.prefix_len, release_version, r2_config, version,
             )
+
+        # Wait for all Phase 1 tasks
+        for name, future in phase1_futures.items():
+            future.result()  # raises if the phase failed
+
+        executor.shutdown(wait=False)
 
     if args.release_only:
         print(f"\nDone! ({time.time() - t_total:.0f}s)")
