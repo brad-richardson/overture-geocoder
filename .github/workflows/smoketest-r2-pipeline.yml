@@ -99,14 +99,14 @@ jobs:
           fi
           echo "Shard verification passed."
 
-      # --- ID index pipeline (registry + release, limited to 100 records) ---
+      # --- ID index pipeline (registry + release, smoke test) ---
 
-      - name: Build ID index (50 records)
+      - name: Build ID index (smoke test)
         run: |
           python scripts/build_id_index.py \
             --version $SMOKE_VERSION \
             --prefix-len 3 \
-            --limit 50 \
+            --smoke-test \
             --workers 2
 
       - name: Verify ID index uploads
