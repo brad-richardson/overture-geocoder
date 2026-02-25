@@ -40,10 +40,11 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     let response = router
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
+        .get_async("/id/:gers_id", handlers::handle_id_lookup)
         .get("/health", |_, _| Response::ok("ok"))
         .get("/", |_, _| {
             Response::ok(
-                r#"{"name":"overture-geocoder","version":"0.2.0","endpoints":["/search","/reverse"]}"#,
+                r#"{"name":"overture-geocoder","version":"0.3.0","endpoints":["/search","/reverse","/id/:id"]}"#,
             )
         })
         .run(req, env)

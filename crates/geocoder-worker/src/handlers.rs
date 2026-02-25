@@ -127,6 +127,42 @@ pub async fn handle_reverse(req: Request, ctx: RouteContext<()>) -> Result<Respo
     }
 }
 
+/// GERS ID lookup handler.
+pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let gers_id = ctx
+        .param("gers_id")
+        .ok_or_else(|| Error::RustError("Missing gers_id parameter".into()))?
+        .to_string();
+
+    // Validate GERS ID format (UUID-like, 2-64 chars)
+    if gers_id.len() < 2 || gers_id.len() > 64 {
+        return Response::error("Invalid GERS ID: must be 2-64 characters", 400);
+    }
+
+    let loader = ShardLoader::new(&ctx.env)?;
+    let result = loader.lookup_id(&gers_id).await;
+
+    match result {
+        Ok(Some(r)) => {
+            let mut resp = Response::from_json(&r)?;
+            resp.headers_mut()
+                .set("Content-Type", "application/json; charset=utf-8")?;
+            resp.headers_mut()
+                .set("Cache-Control", "public, max-age=86400")?;
+            Ok(resp)
+        }
+        Ok(None) => Response::error("GERS ID not found", 404),
+        Err(e) => {
+            // If id-collection.json is not found, the feature isn't deployed yet
+            let err_msg = format!("{:?}", e);
+            if err_msg.contains("id-collection.json not found") {
+                return Response::error("ID index not available", 503);
+            }
+            Err(e)
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct ResultItem {
     gers_id: String,
@@ -211,4 +247,3 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
         .set("Content-Type", "application/geo+json; charset=utf-8")?;
     Ok(resp)
 }
-

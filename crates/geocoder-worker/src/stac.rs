@@ -1,9 +1,12 @@
 //! STAC catalog loading and shard management with edge caching.
 
+use bytes::Bytes;
 use geocoder_core::{
     query::{apply_exact_match_bonus, apply_location_bias},
-    Database, GeocoderQuery, GeocoderResult, LocationBias, ReverseResult,
+    Database, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias, ReverseResult,
 };
+use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::record::RowAccessor;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -124,7 +127,8 @@ struct EmbeddedItem {
     #[allow(dead_code)]
     size_bytes: u64,
     #[allow(dead_code)]
-    sha256: String,
+    #[serde(default)]
+    sha256: Option<String>,
     href: String,
     /// Bounding box [min_lon, min_lat, max_lon, max_lat] for proximity queries
     #[serde(default)]
@@ -148,6 +152,18 @@ struct StacCollection {
     /// e.g., {"CN": ["CN-GD", "CN-BJ", ...], "IN": [...]}
     #[serde(default)]
     region_sharded: std::collections::HashMap<String, Vec<String>>,
+    /// Collection summaries (includes prefix_len for ID index)
+    #[serde(default)]
+    summaries: Option<StacSummaries>,
+}
+
+#[derive(Debug, Deserialize)]
+struct StacSummaries {
+    #[allow(dead_code)]
+    #[serde(default)]
+    shard_count: Option<u64>,
+    #[serde(default)]
+    prefix_len: Option<u32>,
 }
 
 /// Legacy STAC item format (for backward compatibility with old catalogs)
@@ -165,7 +181,8 @@ struct StacItemProperties {
     #[allow(dead_code)]
     size_bytes: u64,
     #[allow(dead_code)]
-    sha256: String,
+    #[serde(default)]
+    sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -481,6 +498,63 @@ impl<'a> ShardLoader<'a> {
         Ok(result)
     }
 
+    /// Look up a GERS ID to get its bounding box from a parquet shard.
+    pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
+        let catalog = self.load_catalog().await?;
+        let (version, _collection) = self.load_latest_collection(&catalog).await?;
+
+        // Load id-collection.json to get prefix_len
+        let id_collection = self.load_id_collection(&version).await?;
+        let prefix_len = id_collection
+            .summaries
+            .as_ref()
+            .and_then(|s| s.prefix_len)
+            .unwrap_or(3) as usize;
+
+        // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
+        let hex_id: String = gers_id.replace('-', "").to_lowercase();
+        if hex_id.len() < prefix_len {
+            return Ok(None);
+        }
+
+        let prefix = &hex_id[..prefix_len];
+
+        // Check if shard exists in collection
+        let item = match id_collection.items.get(prefix) {
+            Some(item) => item,
+            None => return Ok(None),
+        };
+
+        // Load the parquet shard
+        let shard_key = format!("{}/{}", version, item.href.trim_start_matches("./"));
+
+        let shard_bytes = self
+            .cached_get(&shard_key, SHARD_CACHE_TTL)
+            .await?
+            .ok_or_else(|| Error::RustError(format!("ID index shard {} not found", shard_key)))?;
+
+        console_log!(
+            "Loading ID index shard {} ({} bytes)",
+            prefix,
+            shard_bytes.len()
+        );
+
+        lookup_in_parquet(shard_bytes, gers_id)
+            .map_err(|e| Error::RustError(format!("Parquet lookup failed: {}", e)))
+    }
+
+    /// Load the ID index collection for a given version.
+    async fn load_id_collection(&self, version: &str) -> Result<StacCollection> {
+        let key = format!("{}/id-collection.json", version);
+        let text = self
+            .cached_get_text(&key, COLLECTION_CACHE_TTL)
+            .await?
+            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+
+        serde_json::from_str(&text)
+            .map_err(|e| Error::RustError(format!("Failed to parse ID collection: {}", e)))
+    }
+
     /// Load the reverse collection for a given version.
     async fn load_reverse_collection(&self, version: &str) -> Result<StacCollection> {
         let key = format!("{}/reverse-collection.json", version);
@@ -618,6 +692,82 @@ impl<'a> ShardLoader<'a> {
     }
 }
 
+/// Parse a GERS ID string into 16 UUID bytes.
+///
+/// Accepts both hyphenated ("08b2a100-d664-...") and plain ("08b2a100d664...") formats.
+fn parse_uuid_bytes(gers_id: &str) -> Option<[u8; 16]> {
+    let hex: String = gers_id.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for i in 0..16 {
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
+/// Look up a GERS ID in a parquet shard (sorted by UUID, snappy compressed).
+///
+/// Uses row group min/max statistics to skip row groups that can't contain
+/// the target UUID, then scans matching row groups.
+fn lookup_in_parquet(
+    data: Vec<u8>,
+    gers_id: &str,
+) -> std::result::Result<Option<IdLookupResult>, String> {
+    let target = match parse_uuid_bytes(gers_id) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    let bytes = Bytes::from(data);
+    let reader =
+        SerializedFileReader::new(bytes).map_err(|e| format!("Failed to read parquet: {}", e))?;
+    let metadata = reader.metadata();
+    let num_row_groups = metadata.num_row_groups();
+
+    for rg_idx in 0..num_row_groups {
+        // Check row group statistics to skip non-matching groups
+        let rg_meta = metadata.row_group(rg_idx);
+        if let Some(stats) = rg_meta.column(0).statistics() {
+            if let (Some(min), Some(max)) = (stats.min_bytes_opt(), stats.max_bytes_opt()) {
+                if target.as_slice() < min || target.as_slice() > max {
+                    continue;
+                }
+            }
+        }
+
+        // Scan this row group
+        let rg_reader = reader
+            .get_row_group(rg_idx)
+            .map_err(|e| format!("Failed to read row group {}: {}", rg_idx, e))?;
+        let iter = rg_reader
+            .get_row_iter(None)
+            .map_err(|e| format!("Failed to iterate row group {}: {}", rg_idx, e))?;
+        for row in iter {
+            let row = row.map_err(|e| format!("Failed to read row: {}", e))?;
+            let id_bytes = row
+                .get_bytes(0)
+                .map_err(|e| format!("Failed to read UUID column: {}", e))?;
+            if id_bytes.data() == target.as_slice() {
+                let bbox_xmin = row.get_float(1).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                let bbox_ymin = row.get_float(2).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                let bbox_xmax = row.get_float(3).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                let bbox_ymax = row.get_float(4).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                return Ok(Some(IdLookupResult {
+                    id: gers_id.to_string(),
+                    bbox: geocoder_core::BBox {
+                        xmin: bbox_xmin,
+                        ymin: bbox_ymin,
+                        xmax: bbox_xmax,
+                        ymax: bbox_ymax,
+                    },
+                }));
+            }
+        }
+    }
+    Ok(None)
+}
+
 /// Calculate the minimum distance from a point to a bounding box in kilometers.
 /// Returns 0 if the point is inside the bbox.
 fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
@@ -711,5 +861,36 @@ mod tests {
 
         let loc_no_coords = UserLocation::default();
         assert!(!loc_no_coords.has_coordinates());
+    }
+
+    #[test]
+    fn test_parse_uuid_bytes_hyphenated() {
+        let bytes = parse_uuid_bytes("08b2a100-d664-7fff-0200-a44bcea04b76").unwrap();
+        assert_eq!(
+            bytes,
+            [
+                0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0,
+                0x4b, 0x76
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_uuid_bytes_plain() {
+        let bytes = parse_uuid_bytes("08b2a100d6647fff0200a44bcea04b76").unwrap();
+        assert_eq!(
+            bytes,
+            [
+                0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0,
+                0x4b, 0x76
+            ]
+        );
+    }
+
+    #[test]
+    fn test_parse_uuid_bytes_invalid() {
+        assert!(parse_uuid_bytes("too-short").is_none());
+        assert!(parse_uuid_bytes("").is_none());
+        assert!(parse_uuid_bytes("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
     }
 }
