@@ -11,6 +11,6 @@ pub mod types;
 pub use database::Database;
 pub use error::{Error, Result};
 pub use types::{
-    DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias,
+    BBox, DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias,
     ReverseResult,
 };

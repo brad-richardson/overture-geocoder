@@ -212,11 +212,19 @@ pub struct HierarchyEntry {
     pub name: String,
 }
 
+/// Bounding box matching Overture schema.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BBox {
+    pub xmin: f64,
+    pub ymin: f64,
+    pub xmax: f64,
+    pub ymax: f64,
+}
+
 /// Result of a GERS ID lookup (ID -> bbox).
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdLookupResult {
     /// Overture GERS ID.
     pub id: String,
-    /// Bounding box [xmin, ymin, xmax, ymax].
-    pub bbox: [f64; 4],
+    pub bbox: BBox,
 }

@@ -755,7 +755,12 @@ fn lookup_in_parquet(
                 let bbox_ymax = row.get_float(4).map_err(|e| format!("Bad bbox: {}", e))? as f64;
                 return Ok(Some(IdLookupResult {
                     id: gers_id.to_string(),
-                    bbox: [bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax],
+                    bbox: geocoder_core::BBox {
+                        xmin: bbox_xmin,
+                        ymin: bbox_ymin,
+                        xmax: bbox_xmax,
+                        ymax: bbox_ymax,
+                    },
                 }));
             }
         }

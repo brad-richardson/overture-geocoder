@@ -205,7 +205,12 @@ impl Database {
             |row| {
                 Ok(IdLookupResult {
                     id: row.get(0)?,
-                    bbox: [row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?],
+                    bbox: crate::types::BBox {
+                        xmin: row.get(1)?,
+                        ymin: row.get(2)?,
+                        xmax: row.get(3)?,
+                        ymax: row.get(4)?,
+                    },
                 })
             },
         );
