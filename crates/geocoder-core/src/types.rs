@@ -217,9 +217,6 @@ pub struct HierarchyEntry {
 pub struct IdLookupResult {
     /// Overture GERS ID.
     pub id: String,
-    /// Feature type (e.g., "place", "building", "address").
-    #[serde(rename = "type")]
-    pub feature_type: String,
     /// Bounding box [xmin, ymin, xmax, ymax].
     pub bbox: [f64; 4],
 }

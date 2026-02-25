@@ -200,13 +200,12 @@ impl Database {
     /// This method expects an ID index shard (ids table).
     pub fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
         let result = self.conn.query_row(
-            "SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax FROM ids WHERE id = ?1",
+            "SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax FROM ids WHERE id = ?1",
             [gers_id],
             |row| {
                 Ok(IdLookupResult {
                     id: row.get(0)?,
-                    feature_type: row.get(1)?,
-                    bbox: [row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?],
+                    bbox: [row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?],
                 })
             },
         );

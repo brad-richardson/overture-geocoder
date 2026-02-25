@@ -12,9 +12,11 @@ Local Pipeline (--skip-upload):
   Phase 2: Build SQLite shards from local partitions
   Phase 3: Generate id-collection.json locally
 
+Indexes ALL GERS IDs with bounding boxes from the Overture registry.
+No type or release filtering — any valid GERS ID resolves to a bbox.
+
 Usage:
     python scripts/build_id_index.py                      # Full R2 pipeline
-    python scripts/build_id_index.py --types division      # Single type
     python scripts/build_id_index.py --dry-run             # Count records only
     python scripts/build_id_index.py --skip-upload         # Local build only
     python scripts/build_id_index.py --phase partition     # Only Phase 1
@@ -51,23 +53,6 @@ if _env_path.exists():
             if _line and not _line.startswith("#") and "=" in _line:
                 _key, _, _val = _line.partition("=")
                 os.environ.setdefault(_key.strip(), _val.strip())
-
-# Registry types: flat in s3://overturemaps-us-west-2/registry/
-# The 'path' column encodes type: "theme=buildings/type=building/part-..."
-REGISTRY_TYPES = [
-    "building", "connector", "division", "division_area",
-    "division_boundary", "place", "segment",
-]
-
-RELEASE_TYPES = {
-    "address": ("addresses", "address"),
-    "infrastructure": ("base", "infrastructure"),
-    "land": ("base", "land"),
-    "water": ("base", "water"),
-    "land_cover": ("base", "land_cover"),
-    "land_use": ("base", "land_use"),
-    "bathymetry": ("base", "bathymetry"),
-}
 
 REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
 EXPORTS_DIR = Path("exports")
@@ -108,115 +93,46 @@ def get_r2_config(args):
     }
 
 
-def make_type_filter(types):
-    """Build SQL WHERE clause for registry type filtering."""
-    return " OR ".join(f"path LIKE '%/type={t}/%'" for t in types)
-
-
 # ---------------------------------------------------------------------------
 # Dry run
 # ---------------------------------------------------------------------------
 
-def dry_run(types, prefix_len, release_version):
-    registry_types = [t for t in types if t in REGISTRY_TYPES]
+def dry_run(prefix_len):
+    print("Dry run: counting all registry IDs with bbox\n")
 
-    print(f"Dry run: counting records (release {release_version})\n")
-    total = 0
+    con = duckdb.connect()
+    con.execute("SET memory_limit = '8GB';")
+    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute("SET s3_region = 'us-west-2';")
 
-    if registry_types:
-        con = duckdb.connect()
-        con.execute("SET memory_limit = '8GB';")
-        con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute("SET s3_region = 'us-west-2';")
+    t0 = time.time()
+    result = con.execute(f"""
+        SELECT COUNT(*) as cnt
+        FROM read_parquet('{REGISTRY_S3}*')
+        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+    """).fetchone()
+    total = result[0]
+    print(f"  IDs with bbox: {total:,}")
+    print(f"  (scanned in {time.time() - t0:.1f}s)")
 
-        all_registry = set(registry_types) == set(REGISTRY_TYPES)
-        type_clause = "" if all_registry else f"AND ({make_type_filter(registry_types)})"
-
-        t0 = time.time()
-        result = con.execute(f"""
-            SELECT regexp_extract(path, 'type=([^/]+)', 1) as feature_type,
-                   COUNT(*) as cnt
-            FROM read_parquet('{REGISTRY_S3}*')
-            WHERE last_seen = '{release_version}'
-              {type_clause}
-            GROUP BY feature_type ORDER BY cnt DESC
-        """).fetchall()
-
-        for row in result:
-            print(f"  {row[0]}: {row[1]:,}")
-            total += row[1]
-        print(f"  (scanned in {time.time() - t0:.1f}s)")
-
-        shard_count = 16 ** prefix_len
-        avg = total // shard_count if total else 0
-        est_mb = avg * 70 / 1024 / 1024
-        print(f"\n  Sharding: {prefix_len} hex = {shard_count} shards")
-        print(f"  ~{avg:,} records/shard, ~{est_mb:.1f} MB/shard")
-        con.close()
+    shard_count = 16 ** prefix_len
+    avg = total // shard_count if total else 0
+    est_mb = avg * 50 / 1024 / 1024
+    print(f"\n  Sharding: {prefix_len} hex = {shard_count} shards")
+    print(f"  ~{avg:,} records/shard, ~{est_mb:.1f} MB/shard")
+    con.close()
 
     print(f"\n  Total: {total:,}")
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: Partition
+# Phase 1: Stage + Partition
 # ---------------------------------------------------------------------------
 
-def _partition_query(prefix_len, release_version):
-    """Return the SELECT query for partitioning.
-
-    Always stages ALL registry types — the S3 scan is the bottleneck
-    regardless of type filtering, so we grab everything in one pass.
-    Type filtering (if needed) happens in Phase 2 during shard building.
-    """
-    return f"""
-        SELECT
-            id,
-            regexp_extract(path, 'type=([^/]+)', 1) as type,
-            bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin,
-            bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
-            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
-        FROM read_parquet('{REGISTRY_S3}*')
-        WHERE last_seen = '{release_version}'
-          AND id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
-    """
-
-
-def _r2_staging_exists(r2_config, version):
-    """Check if R2 staging data already exists for this version."""
-    try:
-        con = duckdb.connect()
-        con.execute("INSTALL httpfs; LOAD httpfs;")
-        con.execute(f"""
-            CREATE SECRET r2 (
-                TYPE S3,
-                SCOPE 's3://{r2_config["bucket"]}/',
-                KEY_ID '{r2_config["key_id"]}',
-                SECRET '{r2_config["secret"]}',
-                ENDPOINT '{r2_config["endpoint"]}',
-                REGION 'auto',
-                URL_STYLE 'path'
-            );
-        """)
-        # Try reading from a common prefix (000 is almost always populated)
-        staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned/prefix=000/*.parquet"
-        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{staging}')").fetchone()[0]
-        con.close()
-        return count > 0
-    except Exception:
-        return False
-
-
-def phase_partition_r2(prefix_len, release_version, r2_config, version):
-    """Partition from Overture S3 directly to R2 staging (zero local disk).
-
-    Always stages ALL registry types — one scan, reusable staging.
-    """
-    print("  Streaming Overture S3 -> R2 staging (all types)...")
-
+def _r2_con(r2_config):
+    """Create a DuckDB connection with R2 credentials configured."""
     con = duckdb.connect()
-    con.execute("SET memory_limit = '8GB'; SET threads TO 4;")
     con.execute("INSTALL httpfs; LOAD httpfs;")
-    con.execute("SET s3_region = 'us-west-2';")
     con.execute(f"""
         CREATE SECRET r2 (
             TYPE S3,
@@ -228,13 +144,57 @@ def phase_partition_r2(prefix_len, release_version, r2_config, version):
             URL_STYLE 'path'
         );
     """)
+    return con
+
+
+def _r2_staging_exists(r2_config, version):
+    """Check if R2 staging data already exists for this version."""
+    try:
+        con = _r2_con(r2_config)
+        staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned/prefix=000/*.parquet"
+        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{staging}')").fetchone()[0]
+        con.close()
+        return count > 0
+    except Exception:
+        return False
+
+
+def _id_query(prefix_len):
+    """Return the SELECT query for indexing all GERS IDs with bounding boxes.
+
+    Indexes ALL IDs in the registry (no release filtering) — any valid
+    GERS ID should resolve to a bbox. Only reads id + bbox columns
+    for minimal I/O on the 76GB registry scan.
+    """
+    return f"""
+        SELECT
+            id,
+            bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin,
+            bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
+            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+        FROM read_parquet('{REGISTRY_S3}*')
+        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+    """
+
+
+def phase_partition_r2(prefix_len, r2_config, version):
+    """Scan Overture S3, project id+bbox, partition directly to R2.
+
+    Uses preserve_insertion_order=false to keep memory low during
+    PARTITION_BY with 4096 partitions.
+    """
+    print("  Streaming Overture S3 -> R2 partitioned staging...")
+
+    con = _r2_con(r2_config)
+    con.execute("SET memory_limit = '10GB';")
+    con.execute("SET preserve_insertion_order = false;")
+    con.execute("SET s3_region = 'us-west-2';")
 
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
-    query = _partition_query(prefix_len, release_version)
 
     t0 = time.time()
     con.execute(f"""
-        COPY ({query})
+        COPY ({_id_query(prefix_len)})
         TO '{staging}'
         (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
     """)
@@ -242,25 +202,24 @@ def phase_partition_r2(prefix_len, release_version, r2_config, version):
     print(f"  Done in {time.time() - t0:.0f}s")
 
 
-def phase_partition_local(prefix_len, release_version):
-    """Partition from Overture S3 to local disk (all types)."""
+def phase_partition_local(prefix_len):
+    """Scan Overture S3, project id+bbox, partition to local disk."""
     import shutil
     if PARTITIONED_DIR.exists():
         shutil.rmtree(PARTITIONED_DIR)
     PARTITIONED_DIR.mkdir(parents=True, exist_ok=True)
 
-    print("  Streaming Overture S3 -> local disk (all types)...")
+    print("  Streaming Overture S3 -> local disk...")
 
     con = duckdb.connect()
-    con.execute("SET memory_limit = '8GB'; SET threads TO 4;")
+    con.execute("SET memory_limit = '8GB';")
+    con.execute("SET preserve_insertion_order = false;")
     con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute("SET s3_region = 'us-west-2';")
 
-    query = _partition_query(prefix_len, release_version)
-
     t0 = time.time()
     con.execute(f"""
-        COPY ({query})
+        COPY ({_id_query(prefix_len)})
         TO '{PARTITIONED_DIR}'
         (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
     """)
@@ -284,14 +243,13 @@ def _create_shard_db(db_path, rows):
         PRAGMA locking_mode=EXCLUSIVE;
         CREATE TABLE ids (
             id TEXT PRIMARY KEY,
-            type TEXT NOT NULL,
             bbox_xmin REAL NOT NULL,
             bbox_ymin REAL NOT NULL,
             bbox_xmax REAL NOT NULL,
             bbox_ymax REAL NOT NULL
         ) WITHOUT ROWID;
     """)
-    db.executemany("INSERT OR IGNORE INTO ids VALUES (?, ?, ?, ?, ?, ?)", rows)
+    db.executemany("INSERT OR IGNORE INTO ids VALUES (?, ?, ?, ?, ?)", rows)
     db.commit()
     db.execute("VACUUM")
     db.close()
@@ -334,7 +292,7 @@ def _worker_build_r2(args_tuple):
             );
         """)
         rows = con.execute(f"""
-            SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+            SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
             FROM read_parquet('{staging}')
         """).fetchall()
         con.close()
@@ -364,7 +322,7 @@ def _worker_build_local(args_tuple):
     try:
         con = duckdb.connect()
         rows = con.execute(f"""
-            SELECT id, type, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+            SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
             FROM read_parquet('{parquet_dir}/*.parquet')
         """).fetchall()
         con.close()
@@ -521,32 +479,13 @@ def build_id_index(args):
     release_version = get_latest_release()
     print(f"  Release: {release_version}")
 
-    # Determine types
-    if args.types:
-        types = [t.strip() for t in args.types.split(",")]
-        for t in types:
-            if t not in REGISTRY_TYPES and t not in RELEASE_TYPES:
-                print(f"Error: Unknown type '{t}'")
-                sys.exit(1)
-    else:
-        types = REGISTRY_TYPES
-
-    registry_types = [t for t in types if t in REGISTRY_TYPES]
-    release_types = [t for t in types if t in RELEASE_TYPES]
-
     shard_count = 16 ** args.prefix_len
-    print(f"  Types: {', '.join(types)}")
     print(f"  Sharding: {args.prefix_len} hex = {shard_count} shards")
     print(f"  Version: {version}")
 
     if args.dry_run:
-        dry_run(types, args.prefix_len, release_version)
+        dry_run(args.prefix_len)
         return
-
-    if release_types:
-        print(f"  NOTE: Release types not yet implemented: {', '.join(release_types)}")
-        if not registry_types:
-            return
 
     # Determine mode
     r2_config = None if args.skip_upload else get_r2_config(args)
@@ -570,14 +509,14 @@ def build_id_index(args):
         elif use_r2 and _r2_staging_exists(r2_config, version):
             print(f"\nPhase 1: Skipped (staging already exists for {version})")
         else:
-            print(f"\nPhase 1: Partition registry (release {release_version})")
+            print(f"\nPhase 1: Partition registry")
             if use_r2:
                 phase_partition_r2(
-                    args.prefix_len, release_version, r2_config, version,
+                    args.prefix_len, r2_config, version,
                 )
             else:
                 phase_partition_local(
-                    args.prefix_len, release_version,
+                    args.prefix_len,
                 )
 
     # === Phase 2: Build shards ===
@@ -629,7 +568,6 @@ def main():
     p = argparse.ArgumentParser(description="Build GERS ID -> bbox index")
     p.add_argument("--version", help="Version string (default: date-based)")
     p.add_argument("--version-suffix", default="0", help="Version suffix")
-    p.add_argument("--types", help="Comma-separated types to index")
     p.add_argument("--prefix-len", type=int, default=3,
                    help="Hex prefix length (default: 3 = 4096 shards)")
     p.add_argument("--dry-run", action="store_true", help="Count records only")
