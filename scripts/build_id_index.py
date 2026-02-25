@@ -2,30 +2,25 @@
 """
 Build GERS ID -> bbox index as UUID-prefix-sharded parquet files.
 
-R2 Staging Pipeline (default):
+Pipeline (R2 staging):
   Phase 1: DuckDB streams Overture S3 -> R2 staging (partitioned parquet)
-  Phase 2: Merge, deduplicate, sort, and write final snappy parquet shards
+  Phase 2: Merge, sort, and write final snappy parquet shards to R2
   Phase 3: Generate id-collection.json, upload to R2
 
-Local Pipeline (--skip-upload):
-  Phase 1: DuckDB partitions to local disk
-  Phase 2: Build sorted snappy parquet shards from local partitions
-  Phase 3: Generate id-collection.json locally
-
 Indexes ALL GERS IDs with bounding boxes from the Overture registry
-and release themes (addresses, base). No type or release filtering —
+and release themes (base). No type or release filtering —
 any valid GERS ID resolves to a bbox.
 
 Final parquet format: UUID column (FIXED_LEN_BYTE_ARRAY(16)),
 float bbox columns, snappy compression, sorted by ID.
 
 Usage:
-    python scripts/build_id_index.py                      # Full R2 pipeline
+    python scripts/build_id_index.py                      # Full pipeline
     python scripts/build_id_index.py --dry-run             # Count records only
-    python scripts/build_id_index.py --skip-upload         # Local build only
     python scripts/build_id_index.py --phase partition     # Only Phase 1
+    python scripts/build_id_index.py --phase metadata      # Regenerate metadata from existing shards
 
-Environment (R2 mode):
+Environment:
     R2_ACCESS_KEY_ID      S3 API key for DuckDB R2 access
     R2_SECRET_ACCESS_KEY  S3 API secret for DuckDB R2 access
     CLOUDFLARE_ACCOUNT_ID Account ID (R2 S3 endpoint)
@@ -61,9 +56,6 @@ REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
 RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
 RELEASE_THEMES = ["base"]
-EXPORTS_DIR = Path("exports")
-PARTITIONED_DIR = EXPORTS_DIR / "id-partitioned"
-SHARDS_DIR = Path("shards")
 
 
 def get_version(suffix="0"):
@@ -78,7 +70,7 @@ def write_json(path, data):
 
 
 def get_r2_config(args):
-    """Get R2 configuration from args/env, or None if unavailable."""
+    """Get R2 configuration from args/env."""
     account_id = (
         args.r2_account_id
         or os.environ.get("CLOUDFLARE_ACCOUNT_ID")
@@ -208,35 +200,8 @@ def phase_partition_r2(prefix_len, r2_config, version):
     print(f"  Done in {time.time() - t0:.0f}s")
 
 
-def phase_partition_local(prefix_len):
-    """Scan Overture S3, project id+bbox, partition to local disk."""
-    import shutil
-    if PARTITIONED_DIR.exists():
-        shutil.rmtree(PARTITIONED_DIR)
-    PARTITIONED_DIR.mkdir(parents=True, exist_ok=True)
-
-    print("  Streaming Overture S3 -> local disk...")
-
-    con = duckdb.connect()
-    con.execute("SET memory_limit = '8GB';")
-    con.execute("SET preserve_insertion_order = false;")
-    con.execute("INSTALL httpfs; LOAD httpfs;")
-    con.execute("SET s3_region = 'us-west-2';")
-
-    t0 = time.time()
-    con.execute(f"""
-        COPY ({_id_query(prefix_len)})
-        TO '{PARTITIONED_DIR}'
-        (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
-    """)
-    con.close()
-
-    prefix_dirs = [d for d in PARTITIONED_DIR.iterdir() if d.is_dir()]
-    print(f"  {len(prefix_dirs)} prefixes in {time.time() - t0:.0f}s")
-
-
 def _release_id_query(prefix_len, release_version):
-    """Query for release theme IDs (addresses, base) not in the registry."""
+    """Query for release theme IDs (base) not in the registry."""
     sources = ", ".join(
         f"'{RELEASE_S3}{release_version}/theme={t}/**/*.parquet'"
         for t in RELEASE_THEMES
@@ -265,7 +230,7 @@ def _r2_release_staging_exists(r2_config, version):
 
 
 def phase_partition_release_r2(prefix_len, release_version, r2_config, version):
-    """Scan release themes (addresses, base) and partition to R2.
+    """Scan release themes (base) and partition to R2.
 
     Writes to a separate staging path from the registry data so both
     can run independently.
@@ -385,34 +350,6 @@ def _worker_build_r2(args_tuple):
         return (prefix, 0, 0, str(e))
 
 
-def _worker_build_local(args_tuple):
-    """Multiprocessing worker: build sorted snappy parquet from local partition."""
-    prefix, parquet_dir, output_path = args_tuple
-
-    try:
-        con = duckdb.connect()
-        count = con.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{parquet_dir}/*.parquet')"
-        ).fetchone()[0]
-
-        if count == 0:
-            con.close()
-            return (prefix, 0, 0, None)
-
-        con.execute(f"""
-            COPY (
-                SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
-                FROM read_parquet('{parquet_dir}/*.parquet') ORDER BY id
-            ) TO '{output_path}'
-            (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
-        """)
-        con.close()
-
-        return (prefix, count, Path(output_path).stat().st_size, None)
-    except Exception as e:
-        return (prefix, 0, 0, str(e))
-
-
 def _run_pool(worker_fn, work_items, total_label, workers):
     """Run multiprocessing pool with progress reporting."""
     total = len(work_items)
@@ -453,28 +390,45 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
     return results
 
 
-def phase_build_local(prefix_len, version, workers):
-    """Build parquet shards from local partitions."""
-    output_dir = SHARDS_DIR / version / "id-index"
-    output_dir.mkdir(parents=True, exist_ok=True)
-
-    work = []
-    for d in sorted(PARTITIONED_DIR.iterdir()):
-        if not d.is_dir():
-            continue
-        prefix = d.name.split("=", 1)[-1]
-        work.append((prefix, str(d), str(output_dir / f"{prefix}.parquet")))
-
-    print(f"  Building {len(work)} shards ({workers} workers)...")
-    return _run_pool(_worker_build_local, work, "built", workers)
-
-
 # ---------------------------------------------------------------------------
 # Phase 3: Metadata
 # ---------------------------------------------------------------------------
 
-def phase_metadata(results, prefix_len, version, release_version, r2_config, skip_upload):
-    """Generate id-collection.json and optionally upload to R2."""
+def _gather_shard_info_from_r2(prefix_len, r2_config, version):
+    """Gather shard info from existing R2 shards (for metadata-only runs)."""
+    print("  Scanning existing R2 shards...")
+    shard_count = 16 ** prefix_len
+    prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
+
+    con = _r2_con(r2_config)
+    results = []
+    for i, prefix in enumerate(prefixes):
+        path = f"s3://{r2_config['bucket']}/{version}/id-index/{prefix}.parquet"
+        try:
+            row = con.execute(
+                f"SELECT COUNT(*) as cnt, "
+                f"SUM(LENGTH(id) + 4*4)::BIGINT as est_size "
+                f"FROM read_parquet('{path}')"
+            ).fetchone()
+            if row and row[0] > 0:
+                results.append((prefix, row[0], row[1] or 0, None))
+            else:
+                results.append((prefix, 0, 0, None))
+        except Exception:
+            results.append((prefix, 0, 0, None))
+        if (i + 1) % 100 == 0 or (i + 1) == shard_count:
+            found = sum(1 for r in results if r[1] > 0)
+            print(
+                f"    {i+1}/{shard_count} scanned, {found} with data...",
+                end="\r", flush=True,
+            )
+    print()
+    con.close()
+    return results
+
+
+def phase_metadata(results, prefix_len, version, release_version, r2_config):
+    """Generate id-collection.json and upload to R2."""
     shard_infos = {}
     total_records = 0
     errors = []
@@ -525,19 +479,14 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config, ski
         ],
     }
 
-    if skip_upload:
-        path = SHARDS_DIR / version / "id-collection.json"
-        write_json(path, collection)
-        print(f"  Wrote {path}")
-    else:
-        tmp = Path("tmp-id-collection.json")
-        write_json(tmp, collection)
-        err = _upload_to_r2(tmp, f"geocoder-shards/{version}/id-collection.json")
-        tmp.unlink(missing_ok=True)
-        if err:
-            print(f"  ERROR uploading id-collection.json: {err}")
-            sys.exit(1)
-        print("  Uploaded id-collection.json to R2")
+    tmp = Path("tmp-id-collection.json")
+    write_json(tmp, collection)
+    err = _upload_to_r2(tmp, f"geocoder-shards/{version}/id-collection.json")
+    tmp.unlink(missing_ok=True)
+    if err:
+        print(f"  ERROR uploading id-collection.json: {err}")
+        sys.exit(1)
+    print("  Uploaded id-collection.json to R2")
 
     return shard_infos, total_records, errors
 
@@ -564,23 +513,20 @@ def build_id_index(args):
         dry_run(args.prefix_len)
         return
 
-    # Determine mode
-    r2_config = None if args.skip_upload else get_r2_config(args)
-    use_r2 = r2_config is not None
-
-    if not use_r2 and not args.skip_upload:
-        print("\nWARNING: R2 credentials not found, using local mode")
+    r2_config = get_r2_config(args)
+    if r2_config is None:
+        print("\nERROR: R2 credentials required")
         print("  Set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID")
+        sys.exit(1)
 
-    print(f"\nMode: {'R2 staging' if use_r2 else 'local'}")
-    print(f"  Workers: {args.workers}")
+    print(f"\n  Workers: {args.workers}")
 
     phases = args.phase.split(",") if args.phase else ["all"]
     run_all = "all" in phases
     t_total = time.time()
 
     # === Phase 1: Partition (1a registry + 1b release themes in parallel) ===
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+    from concurrent.futures import ThreadPoolExecutor
 
     phase1_futures = {}
     if run_all or "partition" in phases or args.release_only:
@@ -590,23 +536,16 @@ def build_id_index(args):
         if not args.release_only:
             if args.skip_partition:
                 print("\nPhase 1a: Skipped (--skip-partition)")
-            elif use_r2 and _r2_staging_exists(r2_config, version):
+            elif _r2_staging_exists(r2_config, version):
                 print(f"\nPhase 1a: Skipped (registry staging exists for {version})")
             else:
                 print(f"\nPhase 1a: Partition registry")
-                if use_r2:
-                    phase1_futures["1a"] = executor.submit(
-                        phase_partition_r2, args.prefix_len, r2_config, version,
-                    )
-                else:
-                    phase1_futures["1a"] = executor.submit(
-                        phase_partition_local, args.prefix_len,
-                    )
+                phase1_futures["1a"] = executor.submit(
+                    phase_partition_r2, args.prefix_len, r2_config, version,
+                )
 
         # Phase 1b: Release themes
-        if not use_r2:
-            print("\nPhase 1b: Skipped (release themes only supported in R2 mode)")
-        elif args.skip_partition:
+        if args.skip_partition:
             print("\nPhase 1b: Skipped (--skip-partition)")
         elif _r2_release_staging_exists(r2_config, version):
             print(f"\nPhase 1b: Skipped (release staging exists for {version})")
@@ -632,14 +571,9 @@ def build_id_index(args):
     if run_all or "build" in phases:
         print(f"\nPhase 2: Build parquet shards")
         t0 = time.time()
-        if use_r2:
-            results = phase_build_r2(
-                args.prefix_len, r2_config, version, args.workers,
-            )
-        else:
-            results = phase_build_local(
-                args.prefix_len, version, args.workers,
-            )
+        results = phase_build_r2(
+            args.prefix_len, r2_config, version, args.workers,
+        )
         elapsed = time.time() - t0
 
         built = sum(1 for r in results if r[1] > 0)
@@ -650,11 +584,16 @@ def build_id_index(args):
             print(f"  {errs} upload errors")
 
     # === Phase 3: Metadata ===
-    if (run_all or "metadata" in phases) and results:
+    if run_all or "metadata" in phases:
+        # If Phase 2 didn't run, gather shard info from existing R2 data
+        if results is None:
+            results = _gather_shard_info_from_r2(
+                args.prefix_len, r2_config, version,
+            )
+
         print(f"\nPhase 3: Metadata")
         shard_infos, total_records, errors = phase_metadata(
-            results, args.prefix_len, version, release_version,
-            r2_config, args.skip_upload,
+            results, args.prefix_len, version, release_version, r2_config,
         )
 
         total_size = sum(s["size_bytes"] for s in shard_infos.values())
@@ -694,8 +633,6 @@ def main():
                    help="Run specific phase: partition, build, metadata, or all")
     p.add_argument("--skip-partition", action="store_true",
                    help="Skip Phase 1 (reuse existing staging)")
-    p.add_argument("--skip-upload", action="store_true",
-                   help="Local build only (no R2)")
     p.add_argument("--release-only", action="store_true",
                    help="Only run Phase 1b (release theme staging)")
 
