@@ -159,7 +159,7 @@ def dry_run(prefix_len):
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: Stage + Partition
+# Stage: Partition registry + release data to R2
 # ---------------------------------------------------------------------------
 
 def _r2_con(r2_config):
@@ -469,7 +469,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Build parquet shards (sorted, snappy, UUID + float bbox)
+# Build: Merge, sort, and write final snappy parquet shards
 # ---------------------------------------------------------------------------
 
 
@@ -528,11 +528,19 @@ def _worker_build_r2(args_tuple):
 
         # Release: single file per type, filter on stored prefix column
         for release_path in release_files:
-            sources.append(
-                f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-                f"FROM read_parquet('{release_path}') "
-                f"WHERE prefix = '{prefix}'"
-            )
+            try:
+                row = con.execute(
+                    f"SELECT 1 FROM read_parquet('{release_path}') "
+                    f"WHERE prefix = '{prefix}' LIMIT 1"
+                ).fetchone()
+                if row:
+                    sources.append(
+                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                        f"FROM read_parquet('{release_path}') "
+                        f"WHERE prefix = '{prefix}'"
+                    )
+            except Exception:
+                pass
 
         if not sources:
             con.close()
@@ -549,7 +557,7 @@ def _worker_build_r2(args_tuple):
             con.close()
             return (prefix, 0, 0, None)
 
-        # Sort and write — UUID + FLOAT types already set in Phase 1
+        # Sort and write — UUID + FLOAT types already set in staging
         local_path = f"{tmp_dir}/{prefix}.parquet"
         con.execute(f"""
             COPY (
@@ -622,7 +630,7 @@ def _discover_release_staging_files(con, r2_config, version):
 
 
 def _discover_staging_prefixes(r2_config, version):
-    """List prefixes that have data in registry staging, plus release file paths."""
+    """List prefixes that have data in registry or release staging, plus release file paths."""
     con = _r2_con(r2_config)
 
     # Find release staging files (single file per type)
@@ -641,6 +649,18 @@ def _discover_staging_prefixes(r2_config, version):
         prefixes.update(r[0] for r in rows if r[0])
     except Exception:
         pass
+
+    # Also include prefixes from release staging files (release-only IDs)
+    for release_path in release_files:
+        try:
+            rows = con.execute(f"""
+                SELECT DISTINCT prefix
+                FROM read_parquet('{release_path}')
+            """).fetchall()
+            prefixes.update(r[0] for r in rows if r[0])
+        except Exception:
+            pass
+
     con.close()
     return sorted(prefixes), release_files
 
@@ -688,7 +708,7 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
 
 
 # ---------------------------------------------------------------------------
-# Phase 3: Metadata
+# Metadata: Generate id-collection.json
 # ---------------------------------------------------------------------------
 
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
@@ -820,7 +840,7 @@ def build_id_index(args):
     if smoke:
         print(f"  Mode: smoke test")
 
-    # Smoke test: pick ~5 evenly-spaced prefixes for Phase 1a
+    # Smoke test: pick ~5 evenly-spaced prefixes for registry staging
     smoke_prefixes = None
     smoke_release_limit = None
     if smoke:
@@ -879,7 +899,11 @@ def build_id_index(args):
             mins, secs = divmod(int(elapsed_p2), 60)
             print(f"  {built} shards, {records:,} records in {mins}m{secs:02d}s")
             if errs:
-                print(f"  {errs} upload errors")
+                print(f"  {errs} upload errors — not marking build complete")
+                for r in results:
+                    if r[3] is not None:
+                        print(f"    {r[0]}: {r[3]}")
+                raise RuntimeError(f"Build failed: {errs} shard errors")
 
             _write_staging_marker(r2_config, version, "build", built,
                                   extra={"records": records})
