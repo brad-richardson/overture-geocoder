@@ -189,7 +189,7 @@ def _write_staging_marker(r2_config, version, staging_dir, partition_count, extr
     }
     if extra:
         marker.update(extra)
-    tmp = Path("tmp-staging-marker.json")
+    tmp = Path(f"tmp-staging-marker-{staging_dir}-{os.getpid()}.json")
     write_json(tmp, marker)
     r2_key = f"geocoder-shards/{version}/staging/{staging_dir}/_SUCCESS"
     err = _upload_to_r2(tmp, r2_key)
@@ -335,15 +335,20 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None, workers=4)
     _write_staging_marker(r2_config, version, "id-partitioned", shard_count)
 
 
-def _release_id_query_for_type(release_version, theme, type_name, limit=None):
-    """Query for release IDs from a specific theme/type."""
+def _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=None):
+    """Query for release IDs from a specific theme/type.
+
+    Includes a computed `prefix` column so the build phase can filter
+    on it with predicate pushdown (stored column vs computed expression).
+    """
     source = f"'{RELEASE_S3}{release_version}/theme={theme}/type={type_name}/**/*.parquet'"
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
     return f"""
         SELECT
             id::UUID as id,
             bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
-            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax
+            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
+            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
         FROM read_parquet({source}, union_by_name=true)
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
         {limit_clause}
@@ -379,7 +384,7 @@ def _discover_release_types(release_version):
     return sorted(types)
 
 
-def _partition_release_type(theme, type_name, release_version,
+def _partition_release_type(theme, type_name, prefix_len, release_version,
                             r2_config, version, limit=None):
     """Stage a single release theme/type as one parquet file on R2."""
     staging_dir = f"id-release-{theme}-{type_name}"
@@ -396,7 +401,7 @@ def _partition_release_type(theme, type_name, release_version,
     con.execute("SET memory_limit = '4GB';")
     con.execute("SET s3_region = 'us-west-2';")
 
-    query = _release_id_query_for_type(release_version, theme, type_name, limit=limit)
+    query = _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=limit)
 
     def _do_copy():
         con.execute(f"""
@@ -412,7 +417,7 @@ def _partition_release_type(theme, type_name, release_version,
     return (theme, type_name)
 
 
-def phase_partition_release_r2(release_version, r2_config, version, limit=None):
+def phase_partition_release_r2(prefix_len, release_version, r2_config, version, limit=None):
     """Stage release themes to R2, one parquet file per type.
 
     Discovers type= sub-directories under each theme and runs them
@@ -436,7 +441,7 @@ def phase_partition_release_r2(release_version, r2_config, version, limit=None):
         for theme, type_name in types:
             f = executor.submit(
                 _partition_release_type,
-                theme, type_name, release_version,
+                theme, type_name, prefix_len, release_version,
                 r2_config, version, limit=limit,
             )
             futures[f] = (theme, type_name)
@@ -521,12 +526,12 @@ def _worker_build_r2(args_tuple):
         except Exception:
             pass
 
-        # Release: single file per type, filter by UUID prefix
+        # Release: single file per type, filter on stored prefix column
         for release_path in release_files:
             sources.append(
                 f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
                 f"FROM read_parquet('{release_path}') "
-                f"WHERE lower(left(replace(id::VARCHAR, '-', ''), {len(prefix)})) = '{prefix}'"
+                f"WHERE prefix = '{prefix}'"
             )
 
         if not sources:
@@ -848,7 +853,7 @@ def build_id_index(args):
             print(f"\nStage base: Partition release themes ({', '.join(RELEASE_THEMES)})")
             t0 = time.time()
             phase_partition_release_r2(
-                release_version, r2_config, version,
+                args.prefix_len, release_version, r2_config, version,
                 limit=smoke_release_limit,
             )
             phase_times["Stage base"] = time.time() - t0

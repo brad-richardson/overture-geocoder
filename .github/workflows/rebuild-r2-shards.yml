@@ -379,41 +379,44 @@ jobs:
           fi
           echo "R2 credentials configured"
 
+      - name: Compute version
+        id: id-version
+        run: |
+          SUFFIX="${{ github.event.inputs.version_suffix || '0' }}"
+          VERSION=$(python3 -c "
+          from datetime import datetime, timezone
+          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.${SUFFIX}')
+          ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "ID index version: $VERSION"
+
       - name: Stage registry
         run: |
-          ARGS="--phase stage-registry --prefix-len 3 --workers 8"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
-          echo "Running: python -u scripts/build_id_index.py $ARGS"
-          python -u scripts/build_id_index.py $ARGS
+          python -u scripts/build_id_index.py \
+            --phase stage-registry --prefix-len 3 --workers 8 \
+            --version ${{ steps.id-version.outputs.version }}
 
       - name: Stage base
         run: |
-          ARGS="--phase stage-base --prefix-len 3 --workers 8"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
-          echo "Running: python -u scripts/build_id_index.py $ARGS"
-          python -u scripts/build_id_index.py $ARGS
+          python -u scripts/build_id_index.py \
+            --phase stage-base --prefix-len 3 --workers 8 \
+            --version ${{ steps.id-version.outputs.version }}
 
       - name: Build ID shards
         run: |
-          ARGS="--phase build --prefix-len 3 --workers 8"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
-          echo "Running: python -u scripts/build_id_index.py $ARGS"
-          python -u scripts/build_id_index.py $ARGS
+          python -u scripts/build_id_index.py \
+            --phase build --prefix-len 3 --workers 8 \
+            --version ${{ steps.id-version.outputs.version }}
 
       - name: Build ID metadata
         run: |
-          ARGS="--phase metadata --prefix-len 3"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
-          echo "Running: python -u scripts/build_id_index.py $ARGS"
-          python -u scripts/build_id_index.py $ARGS
+          python -u scripts/build_id_index.py \
+            --phase metadata --prefix-len 3 \
+            --version ${{ steps.id-version.outputs.version }}
 
       - name: Verify R2 uploads
         run: |
-          VERSION=$(python3 -c "
-          from datetime import datetime, timezone
-          suffix = '${{ github.event.inputs.version_suffix || 0 }}'
-          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.' + suffix)
-          ")
+          VERSION="${{ steps.id-version.outputs.version }}"
           echo "Verifying version: ${VERSION}"
 
           if wrangler r2 object get "geocoder-shards/${VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
@@ -435,11 +438,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          VERSION=$(python3 -c "
-          from datetime import datetime, timezone
-          suffix = '${{ github.event.inputs.version_suffix || 0 }}'
-          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.' + suffix)
-          ")
+          VERSION="${{ steps.id-version.outputs.version }}"
           echo "## ID Index Rebuild" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
