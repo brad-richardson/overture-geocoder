@@ -155,7 +155,7 @@ pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Re
         Err(e) => {
             // If id-collection.json is not found, the feature isn't deployed yet
             let err_msg = format!("{:?}", e);
-            if err_msg.contains("not found") {
+            if err_msg.contains("id-collection.json not found") {
                 return Response::error("ID index not available", 503);
             }
             Err(e)

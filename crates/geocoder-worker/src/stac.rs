@@ -124,7 +124,8 @@ struct EmbeddedItem {
     #[allow(dead_code)]
     size_bytes: u64,
     #[allow(dead_code)]
-    sha256: String,
+    #[serde(default)]
+    sha256: Option<String>,
     href: String,
     /// Bounding box [min_lon, min_lat, max_lon, max_lat] for proximity queries
     #[serde(default)]
@@ -177,7 +178,8 @@ struct StacItemProperties {
     #[allow(dead_code)]
     size_bytes: u64,
     #[allow(dead_code)]
-    sha256: String,
+    #[serde(default)]
+    sha256: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -498,12 +500,6 @@ impl<'a> ShardLoader<'a> {
         let catalog = self.load_catalog().await?;
         let (version, _collection) = self.load_latest_collection(&catalog).await?;
 
-        // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
-        let hex_id: String = gers_id.replace('-', "").to_lowercase();
-        if hex_id.len() < 2 {
-            return Err(Error::RustError("Invalid GERS ID".into()));
-        }
-
         // Load id-collection.json to get prefix_len
         let id_collection = self.load_id_collection(&version).await?;
         let prefix_len = id_collection
@@ -512,12 +508,19 @@ impl<'a> ShardLoader<'a> {
             .and_then(|s| s.prefix_len)
             .unwrap_or(2) as usize;
 
+        // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
+        let hex_id: String = gers_id.replace('-', "").to_lowercase();
+        if hex_id.len() < prefix_len {
+            return Ok(None);
+        }
+
         let prefix = &hex_id[..prefix_len];
 
         // Check if shard exists in collection
-        let item = id_collection.items.get(prefix).ok_or_else(|| {
-            Error::RustError(format!("ID index shard {} not found in collection", prefix))
-        })?;
+        let item = match id_collection.items.get(prefix) {
+            Some(item) => item,
+            None => return Ok(None),
+        };
 
         // Load the shard
         let shard_key = format!("{}/{}", version, item.href.trim_start_matches("./"));
