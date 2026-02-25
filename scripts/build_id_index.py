@@ -374,6 +374,25 @@ def _run_pool(worker_fn, work_items, total_label, workers):
     return results
 
 
+def _discover_staging_prefixes(r2_config, version):
+    """List prefixes that have data in either staging path."""
+    con = _r2_con(r2_config)
+    prefixes = set()
+    for staging_dir in ["id-partitioned", "id-release"]:
+        try:
+            rows = con.execute(f"""
+                SELECT DISTINCT prefix
+                FROM read_parquet(
+                    's3://{r2_config["bucket"]}/{version}/staging/{staging_dir}/*/*'
+                )
+            """).fetchall()
+            prefixes.update(r[0] for r in rows)
+        except Exception:
+            pass
+    con.close()
+    return sorted(prefixes)
+
+
 def phase_build_r2(prefix_len, r2_config, version, workers):
     """Build parquet shards from R2 staging, upload to R2."""
     # Pre-install httpfs so workers only need LOAD
@@ -385,11 +404,28 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
     os.makedirs(tmp_dir, exist_ok=True)
 
     shard_count = 16 ** prefix_len
-    prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
+    all_prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
+
+    # Discover which prefixes actually have staging data to avoid
+    # checking all 4096 shards via HTTP when most are empty (e.g. --limit)
+    staged = _discover_staging_prefixes(r2_config, version)
+    if staged and len(staged) < shard_count:
+        print(f"  Found {len(staged)}/{shard_count} prefixes with staging data")
+        prefixes = staged
+    else:
+        prefixes = all_prefixes
+
     work = [(p, r2_config, version, tmp_dir) for p in prefixes]
 
-    print(f"  Processing {shard_count} prefixes ({workers} workers)...")
+    print(f"  Processing {len(prefixes)} prefixes ({workers} workers)...")
     results = _run_pool(_worker_build_r2, work, "checked", workers)
+
+    # Add empty results for skipped prefixes (for metadata accuracy)
+    if len(prefixes) < shard_count:
+        processed = {r[0] for r in results}
+        for p in all_prefixes:
+            if p not in processed:
+                results.append((p, 0, 0, None))
 
     import shutil
     shutil.rmtree(tmp_dir, ignore_errors=True)
