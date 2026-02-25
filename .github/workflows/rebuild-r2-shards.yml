@@ -89,7 +89,7 @@ jobs:
         run: ./scripts/download_divisions.sh
 
       - name: Build forward geocoding shards
-        if: github.event.inputs.build_type == 'forward' || github.event.inputs.build_type == 'both'
+        if: github.event.inputs.build_type != 'reverse'
         run: |
           ARGS="--head-threshold ${{ github.event.inputs.head_threshold || 100000 }}"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
@@ -99,7 +99,7 @@ jobs:
           python scripts/build_shards.py $ARGS
 
       - name: Build reverse geocoding shards
-        if: github.event.inputs.build_type == 'reverse' || github.event.inputs.build_type == 'both'
+        if: github.event.inputs.build_type != 'forward'
         run: |
           ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold || 100000 }}"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
@@ -116,7 +116,7 @@ jobs:
           echo "Built version: $VERSION"
 
       - name: Upload forward shards to R2
-        if: github.event.inputs.build_type == 'forward' || github.event.inputs.build_type == 'both'
+        if: github.event.inputs.build_type != 'reverse'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PROGRESS_DIR=$(mktemp -d)
@@ -181,7 +181,7 @@ jobs:
           rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
 
       - name: Upload reverse shards to R2
-        if: github.event.inputs.build_type == 'reverse' || github.event.inputs.build_type == 'both'
+        if: github.event.inputs.build_type != 'forward'
         run: |
           VERSION="${{ steps.version.outputs.version }}"
           PROGRESS_DIR=$(mktemp -d)
