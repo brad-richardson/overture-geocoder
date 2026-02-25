@@ -381,7 +381,7 @@ jobs:
 
       - name: Build ID index
         run: |
-          ARGS="--prefix-len 3"
+          ARGS="--prefix-len 3 --workers 8"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           echo "Running: python scripts/build_id_index.py $ARGS"
           python scripts/build_id_index.py $ARGS
