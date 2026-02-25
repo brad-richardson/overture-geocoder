@@ -40,6 +40,13 @@ from pathlib import Path
 
 import duckdb
 
+# Force line-buffered stdout so CI shows output in real time
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(line_buffering=True)
+    except Exception:
+        pass
+
 sys.path.insert(0, str(Path(__file__).parent))
 from stac import get_latest_release
 
@@ -296,23 +303,6 @@ def _id_query_for_prefix(prefix, limit=None):
     """
 
 
-def _get_existing_staging_prefixes(con, staging):
-    """Return set of prefixes already written to R2 staging."""
-    try:
-        rows = con.execute(f"""
-            SELECT file_name FROM glob('{staging}/prefix=*/*.parquet')
-        """).fetchall()
-        prefixes = set()
-        for (path,) in rows:
-            # Extract prefix value from .../prefix=XXX/data_0.parquet
-            for part in path.split("/"):
-                if part.startswith("prefix="):
-                    prefixes.add(part[len("prefix="):])
-        return prefixes
-    except Exception:
-        return set()
-
-
 def phase_partition_r2(prefix_len, r2_config, version, prefixes=None):
     """Scan Overture S3 registry per-prefix, writing each partition to R2.
 
@@ -330,19 +320,13 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None):
 
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
 
-    # Check which prefixes already exist
-    existing = _get_existing_staging_prefixes(con, staging)
-    remaining = [p for p in prefixes if p not in existing]
-    if existing:
-        print(f"  Resuming: {len(existing)} already staged, {len(remaining)} remaining")
-    else:
-        print(f"  Writing {len(remaining)} prefixes...")
+    print(f"  Writing {len(prefixes)} prefixes...")
 
     t0 = time.time()
     wrote = 0
     retries = 3
 
-    for i, prefix in enumerate(remaining):
+    for i, prefix in enumerate(prefixes):
         dest = f"{staging}/prefix={prefix}/data_0.parquet"
         query = _id_query_for_prefix(prefix)
 
@@ -353,10 +337,12 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None):
                 if row is None:
                     break
 
+                # Single-file COPY TO on S3/R2 is an atomic PUT; naturally
+                # overwrites if the file exists from a previous partial run.
                 con.execute(f"""
                     COPY ({query})
                     TO '{dest}'
-                    (FORMAT PARQUET, COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
+                    (FORMAT PARQUET, COMPRESSION ZSTD);
                 """)
                 wrote += 1
                 break
@@ -371,11 +357,11 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None):
                     raise
 
         done = i + 1
-        if done % 100 == 0 or done == len(remaining):
+        if done % 100 == 0 or done == len(prefixes):
             elapsed = time.time() - t0
             mins, secs = divmod(int(elapsed), 60)
-            print(f"    {done}/{len(remaining)} prefixes "
-                  f"({wrote} with data) [{mins:02d}:{secs:02d}]")
+            print(f"    {done}/{len(prefixes)} prefixes "
+                  f"({wrote} written) [{mins:02d}:{secs:02d}]")
 
     con.close()
     elapsed = time.time() - t0
@@ -409,6 +395,42 @@ def _r2_release_staging_exists(r2_config, version):
     return _read_staging_marker(r2_config, version, "id-release") is not None
 
 
+def _clear_r2_staging(con, r2_config, staging):
+    """Delete all files in an R2 staging directory (cleanup after partial failure)."""
+    try:
+        rows = con.execute(f"""
+            SELECT file_name FROM glob('{staging}/**')
+        """).fetchall()
+    except Exception:
+        return 0
+    bucket = r2_config["bucket"]
+    deleted = 0
+    failed = 0
+    for (path,) in rows:
+        # path is full s3:// URL, extract the key after the bucket
+        key = path.split(f"s3://{bucket}/", 1)[-1]
+        try:
+            result = subprocess.run(
+                ["wrangler", "r2", "object", "delete",
+                 f"{bucket}/{key}", "--remote"],
+                capture_output=True, text=True, timeout=30,
+            )
+            if result.returncode == 0:
+                deleted += 1
+            else:
+                failed += 1
+                print(f"    WARNING: Failed to delete {key}: {result.stderr.strip()}")
+        except Exception as exc:
+            failed += 1
+            print(f"    WARNING: Failed to delete {key}: {exc}")
+    if failed:
+        raise RuntimeError(
+            f"Failed to clean {failed}/{deleted + failed} stale staging files; "
+            f"cannot proceed without a clean staging directory"
+        )
+    return deleted
+
+
 def phase_partition_release_r2(prefix_len, release_version, r2_config, version, limit=None):
     """Scan release themes (base) and partition to R2.
 
@@ -426,13 +448,18 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
 
     staging = f"s3://{r2_config['bucket']}/{version}/staging/id-release"
 
+    # Clean up any stale staging from a previous partial run
+    cleaned = _clear_r2_staging(con, r2_config, staging)
+    if cleaned:
+        print(f"  Cleaned {cleaned} stale files from previous partial run")
+
     t0 = time.time()
 
     def _do_copy():
         con.execute(f"""
             COPY ({_release_id_query(prefix_len, release_version, limit=limit)})
             TO '{staging}'
-            (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
+            (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD);
         """)
 
     _run_with_r2_progress(
