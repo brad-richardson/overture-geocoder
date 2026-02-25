@@ -401,7 +401,8 @@ def _worker_build_local(args_tuple):
 
         con.execute(f"""
             COPY (
-                SELECT * FROM read_parquet('{parquet_dir}/*.parquet') ORDER BY id
+                SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+                FROM read_parquet('{parquet_dir}/*.parquet') ORDER BY id
             ) TO '{output_path}'
             (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)

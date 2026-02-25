@@ -509,7 +509,7 @@ impl<'a> ShardLoader<'a> {
             .summaries
             .as_ref()
             .and_then(|s| s.prefix_len)
-            .unwrap_or(2) as usize;
+            .unwrap_or(3) as usize;
 
         // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
@@ -539,7 +539,8 @@ impl<'a> ShardLoader<'a> {
             shard_bytes.len()
         );
 
-        Ok(lookup_in_parquet(&shard_bytes, gers_id))
+        lookup_in_parquet(shard_bytes, gers_id)
+            .map_err(|e| Error::RustError(format!("Parquet lookup failed: {}", e)))
     }
 
     /// Load the ID index collection for a given version.
@@ -710,10 +711,17 @@ fn parse_uuid_bytes(gers_id: &str) -> Option<[u8; 16]> {
 ///
 /// Uses row group min/max statistics to skip row groups that can't contain
 /// the target UUID, then scans matching row groups.
-fn lookup_in_parquet(data: &[u8], gers_id: &str) -> Option<IdLookupResult> {
-    let target = parse_uuid_bytes(gers_id)?;
-    let bytes = Bytes::from(data.to_vec());
-    let reader = SerializedFileReader::new(bytes).ok()?;
+fn lookup_in_parquet(
+    data: Vec<u8>,
+    gers_id: &str,
+) -> std::result::Result<Option<IdLookupResult>, String> {
+    let target = match parse_uuid_bytes(gers_id) {
+        Some(t) => t,
+        None => return Ok(None),
+    };
+    let bytes = Bytes::from(data);
+    let reader =
+        SerializedFileReader::new(bytes).map_err(|e| format!("Failed to read parquet: {}", e))?;
     let metadata = reader.metadata();
     let num_row_groups = metadata.num_row_groups();
 
@@ -729,24 +737,30 @@ fn lookup_in_parquet(data: &[u8], gers_id: &str) -> Option<IdLookupResult> {
         }
 
         // Scan this row group
-        let rg_reader = reader.get_row_group(rg_idx).ok()?;
-        let iter = rg_reader.get_row_iter(None).ok()?;
+        let rg_reader = reader
+            .get_row_group(rg_idx)
+            .map_err(|e| format!("Failed to read row group {}: {}", rg_idx, e))?;
+        let iter = rg_reader
+            .get_row_iter(None)
+            .map_err(|e| format!("Failed to iterate row group {}: {}", rg_idx, e))?;
         for row in iter {
-            let row = row.ok()?;
-            let id_bytes = row.get_bytes(0).ok()?;
+            let row = row.map_err(|e| format!("Failed to read row: {}", e))?;
+            let id_bytes = row
+                .get_bytes(0)
+                .map_err(|e| format!("Failed to read UUID column: {}", e))?;
             if id_bytes.data() == target.as_slice() {
-                let bbox_xmin = row.get_float(1).ok()? as f64;
-                let bbox_ymin = row.get_float(2).ok()? as f64;
-                let bbox_xmax = row.get_float(3).ok()? as f64;
-                let bbox_ymax = row.get_float(4).ok()? as f64;
-                return Some(IdLookupResult {
+                let bbox_xmin = row.get_float(1).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                let bbox_ymin = row.get_float(2).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                let bbox_xmax = row.get_float(3).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                let bbox_ymax = row.get_float(4).map_err(|e| format!("Bad bbox: {}", e))? as f64;
+                return Ok(Some(IdLookupResult {
                     id: gers_id.to_string(),
                     bbox: [bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax],
-                });
+                }));
             }
         }
     }
-    None
+    Ok(None)
 }
 
 /// Calculate the minimum distance from a point to a bounding box in kilometers.
@@ -849,7 +863,10 @@ mod tests {
         let bytes = parse_uuid_bytes("08b2a100-d664-7fff-0200-a44bcea04b76").unwrap();
         assert_eq!(
             bytes,
-            [0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0, 0x4b, 0x76]
+            [
+                0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0,
+                0x4b, 0x76
+            ]
         );
     }
 
@@ -858,7 +875,10 @@ mod tests {
         let bytes = parse_uuid_bytes("08b2a100d6647fff0200a44bcea04b76").unwrap();
         assert_eq!(
             bytes,
-            [0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0, 0x4b, 0x76]
+            [
+                0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0,
+                0x4b, 0x76
+            ]
         );
     }
 

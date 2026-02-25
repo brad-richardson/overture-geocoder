@@ -7,11 +7,6 @@ on:
 
   workflow_dispatch:
     inputs:
-      types:
-        description: 'Comma-separated types to index (empty = all registry types)'
-        type: string
-        required: false
-        default: ''
       prefix_len:
         description: 'Hex prefix length for sharding (3 = 4096 shards)'
         type: number
@@ -87,9 +82,6 @@ jobs:
           ARGS="--prefix-len ${{ github.event.inputs.prefix_len || 3 }}"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           ARGS="$ARGS --phase ${{ github.event.inputs.phase || 'all' }}"
-          if [ -n "${{ github.event.inputs.types }}" ]; then
-            ARGS="$ARGS --types ${{ github.event.inputs.types }}"
-          fi
           if [ "${{ github.event.inputs.skip_partition }}" = "true" ]; then
             ARGS="$ARGS --skip-partition"
           fi
@@ -118,11 +110,11 @@ jobs:
 
           # Spot-check a few shards
           for PREFIX in 000 080 0ff 800 fff; do
-            if wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.db" --remote --pipe > /dev/null 2>&1; then
-              SIZE=$(wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.db" --remote --pipe 2>/dev/null | wc -c)
-              echo "  ok: ${VERSION}/id-index/${PREFIX}.db (${SIZE} bytes)"
+            if wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.parquet" --remote --pipe > /dev/null 2>&1; then
+              SIZE=$(wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.parquet" --remote --pipe 2>/dev/null | wc -c)
+              echo "  ok: ${VERSION}/id-index/${PREFIX}.parquet (${SIZE} bytes)"
             else
-              echo "  skip: ${VERSION}/id-index/${PREFIX}.db (may not exist)"
+              echo "  skip: ${VERSION}/id-index/${PREFIX}.parquet (may not exist)"
             fi
           done
 
