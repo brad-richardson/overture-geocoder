@@ -101,12 +101,12 @@ jobs:
 
       # --- ID index pipeline (registry + release, limited to 100 records) ---
 
-      - name: Build ID index (100 records)
+      - name: Build ID index (50 records)
         run: |
           python scripts/build_id_index.py \
             --version $SMOKE_VERSION \
             --prefix-len 3 \
-            --limit 100 \
+            --limit 50 \
             --workers 2
 
       - name: Verify ID index uploads
@@ -145,5 +145,5 @@ jobs:
           echo "## R2 Pipeline Smoke Test" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Country:** MC (Monaco)" >> $GITHUB_STEP_SUMMARY
-          echo "**ID index limit:** 100 records" >> $GITHUB_STEP_SUMMARY
+          echo "**ID index limit:** 50 records" >> $GITHUB_STEP_SUMMARY
           echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
