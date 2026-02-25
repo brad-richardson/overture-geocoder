@@ -75,12 +75,14 @@ class TestValidatePopulationThreshold:
 class TestEnrichSearchText:
     def test_concatenated_pairwise(self):
         result = enrich_search_text("new york city nyc ny")
-        assert "newyork" in result
-        assert "yorkcity" in result
+        tokens = result.split()
+        assert "newyork" in tokens
+        assert "yorkcity" in tokens
 
     def test_concatenated_full(self):
         result = enrich_search_text("new york city nyc ny")
-        assert "newyorkcity" in result
+        tokens = result.split()
+        assert "newyorkcity" in tokens
 
     def test_abbreviation_saint_to_st(self):
         result = enrich_search_text("saint louis missouri")
