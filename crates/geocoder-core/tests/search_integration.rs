@@ -14,6 +14,7 @@ use geocoder_core::{query::apply_location_bias, Database, GeocoderQuery, Locatio
 use std::path::Path;
 
 const US_SHARD_PATH: &str = "../../shards/2026-01-02.0/shards/US.db";
+const FIXTURE_PATH: &str = "../../tests/fixtures/divisions.db";
 
 fn get_db() -> Option<Database> {
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(US_SHARD_PATH);
@@ -22,6 +23,12 @@ fn get_db() -> Option<Database> {
     } else {
         None
     }
+}
+
+fn get_fixture_db() -> Database {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(FIXTURE_PATH);
+    Database::open(&path)
+        .expect("Fixture DB should exist. Run: python scripts/create_test_fixture.py")
 }
 
 #[test]
@@ -185,5 +192,115 @@ fn test_location_bias_us_elevates_us_results() {
         us_count_in_top_5 >= 3,
         "With US bias, at least 3 of top 5 should be US results, got {}",
         us_count_in_top_5
+    );
+}
+
+// =============================================================================
+// Fixture-based tests (always run, use tests/fixtures/divisions.db)
+// =============================================================================
+
+#[test]
+fn test_fixture_search_newyork_concatenated() {
+    let db = get_fixture_db();
+
+    // "newyork" should match NYC via the concatenated alias in search_text
+    let query = GeocoderQuery::new("newyork").with_autocomplete(false);
+    let results = db.search(&query).unwrap();
+
+    assert!(
+        !results.is_empty(),
+        "Should return results for 'newyork' (concatenated form)"
+    );
+    assert!(
+        results[0].primary_name.contains("New York"),
+        "First result should be New York City, got: {}",
+        results[0].primary_name
+    );
+}
+
+#[test]
+fn test_fixture_search_newyork_fallback() {
+    let db = get_fixture_db();
+
+    // Even without autocomplete, the single-token fallback should try prefix wildcard
+    // "newyork" (7 chars >= 6) should trigger fallback if exact match fails
+    let query = GeocoderQuery::new("newyork");
+    let results = db.search(&query).unwrap();
+
+    assert!(
+        !results.is_empty(),
+        "Should return results for 'newyork' via fallback"
+    );
+    let has_nyc = results.iter().any(|r| r.primary_name.contains("New York"));
+    assert!(has_nyc, "Should find New York City for 'newyork'");
+}
+
+#[test]
+fn test_fixture_search_abbreviation_st_louis() {
+    let db = get_fixture_db();
+
+    // "st louis" should match "Saint Louis" because the fixture includes "st" as a variant
+    let query = GeocoderQuery::new("st louis");
+    let results = db.search(&query).unwrap();
+
+    assert!(!results.is_empty(), "Should return results for 'st louis'");
+    let has_stlouis = results
+        .iter()
+        .any(|r| r.primary_name.contains("Saint Louis"));
+    assert!(
+        has_stlouis,
+        "Should find Saint Louis for 'st louis', got: {:?}",
+        results.iter().map(|r| &r.primary_name).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_fixture_search_abbreviation_ft_worth() {
+    let db = get_fixture_db();
+
+    // "ft worth" should match "Fort Worth" because the fixture includes "ft" as a variant
+    let query = GeocoderQuery::new("ft worth");
+    let results = db.search(&query).unwrap();
+
+    assert!(!results.is_empty(), "Should return results for 'ft worth'");
+    let has_ftworth = results
+        .iter()
+        .any(|r| r.primary_name.contains("Fort Worth"));
+    assert!(
+        has_ftworth,
+        "Should find Fort Worth for 'ft worth', got: {:?}",
+        results.iter().map(|r| &r.primary_name).collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn test_fixture_search_spaced_still_works() {
+    let db = get_fixture_db();
+
+    // Normal spaced queries should still work correctly
+    let query = GeocoderQuery::new("new york");
+    let results = db.search(&query).unwrap();
+
+    assert!(!results.is_empty(), "Should return results for 'new york'");
+    assert!(
+        results[0].primary_name.contains("New York"),
+        "First result should be New York City for 'new york', got: {}",
+        results[0].primary_name
+    );
+}
+
+#[test]
+fn test_fixture_search_boston_ranking() {
+    let db = get_fixture_db();
+
+    // Boston should rank city above neighborhoods due to population
+    let query = GeocoderQuery::new("boston");
+    let results = db.search(&query).unwrap();
+
+    assert!(!results.is_empty(), "Should return results for 'boston'");
+    assert!(
+        results[0].primary_name.contains("Boston, MA"),
+        "Boston city should rank first, got: {}",
+        results[0].primary_name
     );
 }

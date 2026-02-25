@@ -95,7 +95,7 @@ DIVISIONS_DATA = [
         "population": None,
         "country": "US",
         "region": "US-MA",
-        "search_text": "south boston southie massachusetts united states ma us",
+        "search_text": "south boston southie massachusetts united states ma us southboston s",
     },
     {
         "gers_id": "c2345678-90ab-cdef-1234-567890abcdef",
@@ -110,7 +110,7 @@ DIVISIONS_DATA = [
         "population": None,
         "country": "US",
         "region": "US-MA",
-        "search_text": "east boston eastie massachusetts united states ma us",
+        "search_text": "east boston eastie massachusetts united states ma us eastboston e",
     },
     # === International cities ===
     # Paris, France
@@ -143,7 +143,7 @@ DIVISIONS_DATA = [
         "population": 8336817,
         "country": "US",
         "region": "US-NY",
-        "search_text": "new york city nyc ny new york united states us big apple manhattan",
+        "search_text": "new york city nyc ny new york united states us big apple manhattan newyork yorkcity newyorkcity",
     },
     # London, UK
     {
@@ -192,6 +192,38 @@ DIVISIONS_DATA = [
         "country": "GB",
         "region": None,
         "search_text": "cambridge england united kingdom uk gb cambridgeshire",
+    },
+    # Saint Louis, MO (for abbreviation testing: "saint" ↔ "st")
+    {
+        "gers_id": "stlouis-001",
+        "type": "locality",
+        "primary_name": "Saint Louis, MO",
+        "lat": 38.6270,
+        "lon": -90.1994,
+        "bbox_xmin": -90.3207,
+        "bbox_ymin": 38.5321,
+        "bbox_xmax": -90.1663,
+        "bbox_ymax": 38.7741,
+        "population": 301578,
+        "country": "US",
+        "region": "US-MO",
+        "search_text": "saint louis missouri united states mo us st saintlouis",
+    },
+    # Fort Worth, TX (for abbreviation testing: "fort" ↔ "ft")
+    {
+        "gers_id": "ftworth-001",
+        "type": "locality",
+        "primary_name": "Fort Worth, TX",
+        "lat": 32.7555,
+        "lon": -97.3308,
+        "bbox_xmin": -97.5500,
+        "bbox_ymin": 32.5500,
+        "bbox_xmax": -97.1000,
+        "bbox_ymax": 32.9500,
+        "population": 958692,
+        "country": "US",
+        "region": "US-TX",
+        "search_text": "fort worth texas united states tx us ft fortworth",
     },
 ]
 
@@ -263,13 +295,14 @@ def create_divisions_fixture(output_dir: Path) -> bool:
         output_db.unlink()
 
     db = sqlite3.connect(output_db)
-    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA journal_mode=DELETE")
 
-    # Create divisions table (same schema as build_divisions_index.py)
+    # Create divisions table (same schema as build_shards.py)
     db.execute("""
         CREATE TABLE divisions (
             rowid INTEGER PRIMARY KEY,
             gers_id TEXT NOT NULL UNIQUE,
+            version INTEGER NOT NULL DEFAULT 0,
             type TEXT NOT NULL,
             primary_name TEXT NOT NULL,
             lat REAL NOT NULL,
@@ -291,7 +324,8 @@ def create_divisions_fixture(output_dir: Path) -> bool:
             search_text,
             content=divisions,
             content_rowid=rowid,
-            tokenize='porter unicode61 remove_diacritics 1'
+            tokenize='porter unicode61 remove_diacritics 1',
+            prefix='2 3 4'
         )
     """)
 
@@ -321,12 +355,12 @@ def create_divisions_fixture(output_dir: Path) -> bool:
     for div in DIVISIONS_DATA:
         db.execute("""
             INSERT INTO divisions (
-                gers_id, type, primary_name, lat, lon,
+                gers_id, version, type, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 population, country, region, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            div["gers_id"], div["type"], div["primary_name"],
+            div["gers_id"], 0, div["type"], div["primary_name"],
             div["lat"], div["lon"],
             div["bbox_xmin"], div["bbox_ymin"], div["bbox_xmax"], div["bbox_ymax"],
             div["population"], div["country"], div["region"], div["search_text"]
@@ -341,6 +375,7 @@ def create_divisions_fixture(output_dir: Path) -> bool:
     db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
 
     db.commit()
+    db.execute("VACUUM")
     count = db.execute("SELECT COUNT(*) FROM divisions").fetchone()[0]
     db.close()
 
@@ -357,7 +392,7 @@ def create_features_fixture(output_dir: Path) -> bool:
         output_db.unlink()
 
     db = sqlite3.connect(output_db)
-    db.execute("PRAGMA journal_mode=WAL")
+    db.execute("PRAGMA journal_mode=DELETE")
 
     # Create features table (same schema as build_index.py)
     db.execute("""

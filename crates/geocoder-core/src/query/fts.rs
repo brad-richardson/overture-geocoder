@@ -24,12 +24,12 @@
 /// assert_eq!(prepare_fts_query("new york, ny", true), r#""new" "york" "ny"*"#);
 /// ```
 pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
-    // Tokenize: lowercase, keep only alphanumeric, whitespace, and hyphens
+    // Tokenize: lowercase (Unicode-aware), keep only alphanumeric, whitespace, and hyphens
     let normalized: String = query
         .chars()
         .map(|c| {
             if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
-                c.to_ascii_lowercase()
+                c.to_lowercase().next().unwrap_or(c)
             } else {
                 // Replace punctuation with space
                 ' '
@@ -116,5 +116,15 @@ mod tests {
             prepare_fts_query("  boston   ma  ", true),
             r#""boston" "ma"*"#
         );
+    }
+
+    #[test]
+    fn test_unicode_lowercasing() {
+        // Non-ASCII characters should be lowercased correctly
+        assert_eq!(prepare_fts_query("MÜNCHEN", true), r#""münchen"*"#);
+        assert_eq!(prepare_fts_query("ZÜRICH", true), r#""zürich"*"#);
+        assert_eq!(prepare_fts_query("MALMÖ", true), r#""malmö"*"#);
+        // Mixed ASCII and non-ASCII
+        assert_eq!(prepare_fts_query("São Paulo", true), r#""são" "paulo"*"#);
     }
 }

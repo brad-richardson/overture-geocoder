@@ -122,13 +122,40 @@ impl Database {
             return Ok(vec![]);
         }
 
+        let results = self.execute_fts_search(&fts_query, query)?;
+
+        // Single-token fallback: if AND returned nothing and query is one long token,
+        // retry with prefix wildcard to match compact aliases (e.g., "newyork" → "newyork"*)
+        if results.is_empty() {
+            let tokens: Vec<&str> = query.text.split_whitespace().collect();
+            if tokens.len() == 1 && tokens[0].len() >= 6 {
+                let fallback_query = prepare_fts_query(&query.text, true);
+                if fallback_query != fts_query {
+                    let mut fallback = self.execute_fts_search(&fallback_query, query)?;
+                    for r in &mut fallback {
+                        r.importance *= 0.8;
+                    }
+                    return Ok(fallback);
+                }
+            }
+        }
+
+        Ok(results)
+    }
+
+    /// Execute an FTS5 search and return scored results.
+    fn execute_fts_search(
+        &self,
+        fts_query: &str,
+        query: &GeocoderQuery,
+    ) -> Result<Vec<GeocoderResult>> {
         let mut stmt = self.conn.prepare_cached(SEARCH_DIVISIONS_SQL)?;
 
         // Fetch more results than the final limit to allow bias to elevate
         // results that wouldn't otherwise make the cut.
         let fetch_limit = (query.limit * 10).max(100);
 
-        let rows = stmt.query_map([&fts_query, &fetch_limit.to_string()], |row| {
+        let rows = stmt.query_map([fts_query, &fetch_limit.to_string()], |row| {
             let population: Option<i64> = row.get(10)?;
             let bm25_score: f64 = row.get(13)?;
             let boosted_score = calculate_boosted_score(bm25_score, population);
