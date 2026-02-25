@@ -157,13 +157,14 @@ def _r2_staging_exists(r2_config, version):
         return False
 
 
-def _id_query(prefix_len):
+def _id_query(prefix_len, limit=None):
     """Return the SELECT query for indexing all GERS IDs with bounding boxes.
 
     Indexes ALL IDs in the registry (no release filtering) — any valid
     GERS ID should resolve to a bbox. Only reads id + bbox columns
     for minimal I/O on the 76GB registry scan.
     """
+    limit_clause = f"LIMIT {int(limit)}" if limit else ""
     return f"""
         SELECT
             id::UUID as id,
@@ -172,16 +173,18 @@ def _id_query(prefix_len):
             lower(left(replace(id, '-', ''), {prefix_len})) as prefix
         FROM read_parquet('{REGISTRY_S3}*')
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+        {limit_clause}
     """
 
 
-def phase_partition_r2(prefix_len, r2_config, version):
+def phase_partition_r2(prefix_len, r2_config, version, limit=None):
     """Scan Overture S3, project id+bbox, partition directly to R2.
 
     Uses preserve_insertion_order=false to keep memory low during
     PARTITION_BY with 4096 partitions.
     """
-    print("  Streaming Overture S3 -> R2 partitioned staging...")
+    limit_msg = f" (limit {limit})" if limit else ""
+    print(f"  Streaming Overture S3 -> R2 partitioned staging{limit_msg}...")
 
     con = _r2_con(r2_config)
     con.execute("SET memory_limit = '10GB';")
@@ -192,7 +195,7 @@ def phase_partition_r2(prefix_len, r2_config, version):
 
     t0 = time.time()
     con.execute(f"""
-        COPY ({_id_query(prefix_len)})
+        COPY ({_id_query(prefix_len, limit=limit)})
         TO '{staging}'
         (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
     """)
@@ -200,12 +203,13 @@ def phase_partition_r2(prefix_len, r2_config, version):
     print(f"  Done in {time.time() - t0:.0f}s")
 
 
-def _release_id_query(prefix_len, release_version):
+def _release_id_query(prefix_len, release_version, limit=None):
     """Query for release theme IDs (base) not in the registry."""
     sources = ", ".join(
         f"'{RELEASE_S3}{release_version}/theme={t}/**/*.parquet'"
         for t in RELEASE_THEMES
     )
+    limit_clause = f"LIMIT {int(limit)}" if limit else ""
     return f"""
         SELECT
             id::UUID as id,
@@ -214,6 +218,7 @@ def _release_id_query(prefix_len, release_version):
             lower(left(replace(id, '-', ''), {prefix_len})) as prefix
         FROM read_parquet([{sources}], union_by_name=true)
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+        {limit_clause}
     """
 
 
@@ -229,13 +234,14 @@ def _r2_release_staging_exists(r2_config, version):
         return False
 
 
-def phase_partition_release_r2(prefix_len, release_version, r2_config, version):
+def phase_partition_release_r2(prefix_len, release_version, r2_config, version, limit=None):
     """Scan release themes (base) and partition to R2.
 
     Writes to a separate staging path from the registry data so both
     can run independently.
     """
-    print(f"  Scanning release themes ({', '.join(RELEASE_THEMES)})...")
+    limit_msg = f" (limit {limit})" if limit else ""
+    print(f"  Scanning release themes ({', '.join(RELEASE_THEMES)}){limit_msg}...")
 
     con = _r2_con(r2_config)
     con.execute("SET memory_limit = '10GB';")
@@ -246,7 +252,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version):
 
     t0 = time.time()
     con.execute(f"""
-        COPY ({_release_id_query(prefix_len, release_version)})
+        COPY ({_release_id_query(prefix_len, release_version, limit=limit)})
         TO '{staging}'
         (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD, OVERWRITE_OR_IGNORE);
     """)
@@ -519,7 +525,10 @@ def build_id_index(args):
         print("  Set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID")
         sys.exit(1)
 
+    limit = getattr(args, 'limit', None)
     print(f"\n  Workers: {args.workers}")
+    if limit:
+        print(f"  Limit: {limit} records per source")
 
     phases = args.phase.split(",") if args.phase else ["all"]
     run_all = "all" in phases
@@ -542,6 +551,7 @@ def build_id_index(args):
                 print(f"\nPhase 1a: Partition registry")
                 phase1_futures["1a"] = executor.submit(
                     phase_partition_r2, args.prefix_len, r2_config, version,
+                    limit=limit,
                 )
 
         # Phase 1b: Release themes
@@ -554,6 +564,7 @@ def build_id_index(args):
             phase1_futures["1b"] = executor.submit(
                 phase_partition_release_r2,
                 args.prefix_len, release_version, r2_config, version,
+                limit=limit,
             )
 
         # Wait for all Phase 1 tasks
@@ -618,6 +629,8 @@ def main():
     p.add_argument("--prefix-len", type=int, default=3,
                    help="Hex prefix length (default: 3 = 4096 shards)")
     p.add_argument("--dry-run", action="store_true", help="Count records only")
+    p.add_argument("--limit", type=int, default=None,
+                   help="Limit records per source (for smoke testing)")
     p.add_argument("--workers", type=int, default=default_workers,
                    help=f"Parallel workers (default: {default_workers})")
 
