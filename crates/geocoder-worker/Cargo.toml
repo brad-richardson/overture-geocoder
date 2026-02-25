@@ -22,6 +22,10 @@ serde_json = { workspace = true }
 # Async
 futures = "0.3"
 
+# Parquet reading (snappy only, minimal features for wasm32)
+parquet = { version = "54", default-features = false, features = ["snap"] }
+bytes = "1"
+
 # WASM compatibility
 getrandom = { version = "0.2", features = ["js"] }
 console_error_panic_hook = "0.1"

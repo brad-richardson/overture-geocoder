@@ -1,9 +1,12 @@
 //! STAC catalog loading and shard management with edge caching.
 
+use bytes::Bytes;
 use geocoder_core::{
     query::{apply_exact_match_bonus, apply_location_bias},
     Database, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias, ReverseResult,
 };
+use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::record::RowAccessor;
 use serde::{Deserialize, Serialize};
 use worker::*;
 
@@ -495,7 +498,7 @@ impl<'a> ShardLoader<'a> {
         Ok(result)
     }
 
-    /// Look up a GERS ID to get its feature type and bounding box.
+    /// Look up a GERS ID to get its bounding box from a parquet shard.
     pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
         let catalog = self.load_catalog().await?;
         let (version, _collection) = self.load_latest_collection(&catalog).await?;
@@ -522,7 +525,7 @@ impl<'a> ShardLoader<'a> {
             None => return Ok(None),
         };
 
-        // Load the shard
+        // Load the parquet shard
         let shard_key = format!("{}/{}", version, item.href.trim_start_matches("./"));
 
         let shard_bytes = self
@@ -536,11 +539,7 @@ impl<'a> ShardLoader<'a> {
             shard_bytes.len()
         );
 
-        let db = Database::from_bytes(&shard_bytes)
-            .map_err(|e| Error::RustError(format!("Failed to open ID index shard: {}", e)))?;
-
-        db.lookup_id(gers_id)
-            .map_err(|e| Error::RustError(format!("ID lookup failed: {}", e)))
+        Ok(lookup_in_parquet(&shard_bytes, gers_id))
     }
 
     /// Load the ID index collection for a given version.
@@ -692,6 +691,64 @@ impl<'a> ShardLoader<'a> {
     }
 }
 
+/// Parse a GERS ID string into 16 UUID bytes.
+///
+/// Accepts both hyphenated ("08b2a100-d664-...") and plain ("08b2a100d664...") formats.
+fn parse_uuid_bytes(gers_id: &str) -> Option<[u8; 16]> {
+    let hex: String = gers_id.chars().filter(|c| *c != '-').collect();
+    if hex.len() != 32 {
+        return None;
+    }
+    let mut bytes = [0u8; 16];
+    for i in 0..16 {
+        bytes[i] = u8::from_str_radix(&hex[i * 2..i * 2 + 2], 16).ok()?;
+    }
+    Some(bytes)
+}
+
+/// Look up a GERS ID in a parquet shard (sorted by UUID, snappy compressed).
+///
+/// Uses row group min/max statistics to skip row groups that can't contain
+/// the target UUID, then scans matching row groups.
+fn lookup_in_parquet(data: &[u8], gers_id: &str) -> Option<IdLookupResult> {
+    let target = parse_uuid_bytes(gers_id)?;
+    let bytes = Bytes::from(data.to_vec());
+    let reader = SerializedFileReader::new(bytes).ok()?;
+    let metadata = reader.metadata();
+    let num_row_groups = metadata.num_row_groups();
+
+    for rg_idx in 0..num_row_groups {
+        // Check row group statistics to skip non-matching groups
+        let rg_meta = metadata.row_group(rg_idx);
+        if let Some(stats) = rg_meta.column(0).statistics() {
+            if let (Some(min), Some(max)) = (stats.min_bytes_opt(), stats.max_bytes_opt()) {
+                if target.as_slice() < min || target.as_slice() > max {
+                    continue;
+                }
+            }
+        }
+
+        // Scan this row group
+        let rg_reader = reader.get_row_group(rg_idx).ok()?;
+        let iter = rg_reader.get_row_iter(None).ok()?;
+        for row in iter {
+            let row = row.ok()?;
+            let id_bytes = row.get_bytes(0).ok()?;
+            if id_bytes.data() == target.as_slice() {
+                let bbox_xmin = row.get_float(1).ok()? as f64;
+                let bbox_ymin = row.get_float(2).ok()? as f64;
+                let bbox_xmax = row.get_float(3).ok()? as f64;
+                let bbox_ymax = row.get_float(4).ok()? as f64;
+                return Some(IdLookupResult {
+                    id: gers_id.to_string(),
+                    bbox: [bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax],
+                });
+            }
+        }
+    }
+    None
+}
+
 /// Calculate the minimum distance from a point to a bounding box in kilometers.
 /// Returns 0 if the point is inside the bbox.
 fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
@@ -785,5 +842,30 @@ mod tests {
 
         let loc_no_coords = UserLocation::default();
         assert!(!loc_no_coords.has_coordinates());
+    }
+
+    #[test]
+    fn test_parse_uuid_bytes_hyphenated() {
+        let bytes = parse_uuid_bytes("08b2a100-d664-7fff-0200-a44bcea04b76").unwrap();
+        assert_eq!(
+            bytes,
+            [0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0, 0x4b, 0x76]
+        );
+    }
+
+    #[test]
+    fn test_parse_uuid_bytes_plain() {
+        let bytes = parse_uuid_bytes("08b2a100d6647fff0200a44bcea04b76").unwrap();
+        assert_eq!(
+            bytes,
+            [0x08, 0xb2, 0xa1, 0x00, 0xd6, 0x64, 0x7f, 0xff, 0x02, 0x00, 0xa4, 0x4b, 0xce, 0xa0, 0x4b, 0x76]
+        );
+    }
+
+    #[test]
+    fn test_parse_uuid_bytes_invalid() {
+        assert!(parse_uuid_bytes("too-short").is_none());
+        assert!(parse_uuid_bytes("").is_none());
+        assert!(parse_uuid_bytes("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
     }
 }

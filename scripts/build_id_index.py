@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-Build GERS ID -> bbox index as UUID-prefix-sharded SQLite databases.
+Build GERS ID -> bbox index as UUID-prefix-sharded parquet files.
 
 R2 Staging Pipeline (default):
   Phase 1: DuckDB streams Overture S3 -> R2 staging (partitioned parquet)
-  Phase 2: Build SQLite shards from R2 staging, upload to R2 final
+  Phase 2: Merge, deduplicate, sort, and write final snappy parquet shards
   Phase 3: Generate id-collection.json, upload to R2
 
 Local Pipeline (--skip-upload):
   Phase 1: DuckDB partitions to local disk
-  Phase 2: Build SQLite shards from local partitions
+  Phase 2: Build sorted snappy parquet shards from local partitions
   Phase 3: Generate id-collection.json locally
 
-Indexes ALL GERS IDs with bounding boxes from the Overture registry.
-No type or release filtering — any valid GERS ID resolves to a bbox.
+Indexes ALL GERS IDs with bounding boxes from the Overture registry
+and release themes (addresses, base). No type or release filtering —
+any valid GERS ID resolves to a bbox.
+
+Final parquet format: UUID column (FIXED_LEN_BYTE_ARRAY(16)),
+float bbox columns, snappy compression, sorted by ID.
 
 Usage:
     python scripts/build_id_index.py                      # Full R2 pipeline
@@ -32,7 +36,6 @@ import argparse
 import json
 import multiprocessing
 import os
-import sqlite3
 import subprocess
 import sys
 import time
@@ -287,29 +290,8 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version):
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Build SQLite shards
+# Phase 2: Build parquet shards (sorted, snappy, UUID + float bbox)
 # ---------------------------------------------------------------------------
-
-def _create_shard_db(db_path, rows):
-    """Create a SQLite WITHOUT ROWID shard from rows."""
-    db = sqlite3.connect(str(db_path))
-    db.executescript("""
-        PRAGMA journal_mode=OFF;
-        PRAGMA synchronous=OFF;
-        PRAGMA cache_size=-64000;
-        PRAGMA locking_mode=EXCLUSIVE;
-        CREATE TABLE ids (
-            id TEXT PRIMARY KEY,
-            bbox_xmin REAL NOT NULL,
-            bbox_ymin REAL NOT NULL,
-            bbox_xmax REAL NOT NULL,
-            bbox_ymax REAL NOT NULL
-        ) WITHOUT ROWID;
-    """)
-    db.executemany("INSERT OR IGNORE INTO ids VALUES (?, ?, ?, ?, ?)", rows)
-    db.commit()
-    db.execute("VACUUM")
-    db.close()
 
 
 def _upload_to_r2(local_path, r2_key, retries=3):
@@ -326,7 +308,7 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 
 
 def _worker_build_r2(args_tuple):
-    """Multiprocessing worker: read from R2 staging, build shard, upload."""
+    """Multiprocessing worker: read staging parquet, merge/sort, write final snappy parquet."""
     prefix, r2_config, version, tmp_dir = args_tuple
 
     bucket = r2_config['bucket']
@@ -349,57 +331,101 @@ def _worker_build_r2(args_tuple):
                 URL_STYLE 'path'
             );
         """)
-        # Read from all staging paths that exist
-        all_rows = []
+
+        # Find which staging paths have data
+        sources = []
         for path in staging_paths:
             try:
-                rows = con.execute(f"""
-                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
-                    FROM read_parquet('{path}')
-                """).fetchall()
-                all_rows.extend(rows)
+                cnt = con.execute(
+                    f"SELECT COUNT(*) FROM read_parquet('{path}')"
+                ).fetchone()[0]
+                if cnt > 0:
+                    sources.append(path)
             except Exception:
-                pass  # Path doesn't exist for this prefix
+                pass
+
+        if not sources:
+            con.close()
+            return (prefix, 0, 0, None)
+
+        # Build UNION ALL from available sources
+        union_parts = [
+            f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+            f"FROM read_parquet('{s}')"
+            for s in sources
+        ]
+        union_query = " UNION ALL ".join(union_parts)
+
+        # Count distinct IDs
+        count = con.execute(
+            f"SELECT COUNT(DISTINCT id) FROM ({union_query})"
+        ).fetchone()[0]
+
+        # Write sorted snappy parquet with UUID column + float bbox
+        local_path = f"{tmp_dir}/{prefix}.parquet"
+        con.execute(f"""
+            COPY (
+                SELECT
+                    id::UUID as id,
+                    ANY_VALUE(bbox_xmin)::FLOAT as bbox_xmin,
+                    ANY_VALUE(bbox_ymin)::FLOAT as bbox_ymin,
+                    ANY_VALUE(bbox_xmax)::FLOAT as bbox_xmax,
+                    ANY_VALUE(bbox_ymax)::FLOAT as bbox_ymax
+                FROM ({union_query})
+                GROUP BY id
+                ORDER BY id
+            ) TO '{local_path}'
+            (FORMAT PARQUET, COMPRESSION SNAPPY);
+        """)
         con.close()
-        rows = all_rows
-    except Exception:
-        return (prefix, 0, 0, None)
 
-    if not rows:
-        return (prefix, 0, 0, None)
+        size = os.path.getsize(local_path)
 
-    db_path = Path(tmp_dir) / f"{prefix}.db"
-    _create_shard_db(db_path, rows)
-    size = db_path.stat().st_size
+        r2_key = f"geocoder-shards/{version}/id-index/{prefix}.parquet"
+        err = _upload_to_r2(local_path, r2_key)
+        os.unlink(local_path)
 
-    r2_key = f"geocoder-shards/{version}/id-index/{prefix}.db"
-    err = _upload_to_r2(db_path, r2_key)
-    db_path.unlink(missing_ok=True)
+        if err:
+            return (prefix, count, size, f"Upload failed: {err}")
+        return (prefix, count, size, None)
 
-    if err:
-        return (prefix, len(rows), size, f"Upload failed: {err}")
-    return (prefix, len(rows), size, None)
+    except Exception as e:
+        return (prefix, 0, 0, str(e))
 
 
 def _worker_build_local(args_tuple):
-    """Multiprocessing worker: build shard from local partition."""
+    """Multiprocessing worker: build sorted snappy parquet from local partition."""
     prefix, parquet_dir, output_path = args_tuple
 
     try:
         con = duckdb.connect()
-        rows = con.execute(f"""
-            SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
-            FROM read_parquet('{parquet_dir}/*.parquet')
-        """).fetchall()
+        count = con.execute(
+            f"SELECT COUNT(DISTINCT id) FROM read_parquet('{parquet_dir}/*.parquet')"
+        ).fetchone()[0]
+
+        if count == 0:
+            con.close()
+            return (prefix, 0, 0, None)
+
+        con.execute(f"""
+            COPY (
+                SELECT
+                    id::UUID as id,
+                    ANY_VALUE(bbox_xmin)::FLOAT as bbox_xmin,
+                    ANY_VALUE(bbox_ymin)::FLOAT as bbox_ymin,
+                    ANY_VALUE(bbox_xmax)::FLOAT as bbox_xmax,
+                    ANY_VALUE(bbox_ymax)::FLOAT as bbox_ymax
+                FROM read_parquet('{parquet_dir}/*.parquet')
+                GROUP BY id
+                ORDER BY id
+            ) TO '{output_path}'
+            (FORMAT PARQUET, COMPRESSION SNAPPY);
+        """)
         con.close()
+
+        return (prefix, count, Path(output_path).stat().st_size, None)
     except Exception as e:
         return (prefix, 0, 0, str(e))
-
-    if not rows:
-        return (prefix, 0, 0, None)
-
-    _create_shard_db(Path(output_path), rows)
-    return (prefix, len(rows), Path(output_path).stat().st_size, None)
 
 
 def _run_pool(worker_fn, work_items, total_label, workers):
@@ -421,7 +447,7 @@ def _run_pool(worker_fn, work_items, total_label, workers):
 
 
 def phase_build_r2(prefix_len, r2_config, version, workers):
-    """Build shards from R2 staging, upload to R2."""
+    """Build parquet shards from R2 staging, upload to R2."""
     # Pre-install httpfs so workers only need LOAD
     con = duckdb.connect()
     con.execute("INSTALL httpfs;")
@@ -443,7 +469,7 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
 
 
 def phase_build_local(prefix_len, version, workers):
-    """Build shards from local partitions."""
+    """Build parquet shards from local partitions."""
     output_dir = SHARDS_DIR / version / "id-index"
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -452,7 +478,7 @@ def phase_build_local(prefix_len, version, workers):
         if not d.is_dir():
             continue
         prefix = d.name.split("=", 1)[-1]
-        work.append((prefix, str(d), str(output_dir / f"{prefix}.db")))
+        work.append((prefix, str(d), str(output_dir / f"{prefix}.parquet")))
 
     print(f"  Building {len(work)} shards ({workers} workers)...")
     return _run_pool(_worker_build_local, work, "built", workers)
@@ -486,7 +512,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config, ski
         "stac_version": "1.1.0",
         "id": f"geocoder-id-index-{version}",
         "title": f"Overture GERS ID Index {version}",
-        "description": "UUID-prefix-sharded SQLite index mapping GERS IDs to bounding boxes",
+        "description": "UUID-prefix-sharded parquet index mapping GERS IDs to bounding boxes",
         "license": "CDLA-Permissive-2.0",
         "extent": {
             "spatial": {"bbox": [[-180, -90, 180, 90]]},
@@ -503,7 +529,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config, ski
             p: {
                 "record_count": s["record_count"],
                 "size_bytes": s["size_bytes"],
-                "href": f"./id-index/{p}.db",
+                "href": f"./id-index/{p}.parquet",
             }
             for p, s in sorted(shard_infos.items())
         },
@@ -602,7 +628,7 @@ def build_id_index(args):
     # === Phase 2: Build shards ===
     results = None
     if run_all or "build" in phases:
-        print(f"\nPhase 2: Build SQLite shards")
+        print(f"\nPhase 2: Build parquet shards")
         t0 = time.time()
         if use_r2:
             results = phase_build_r2(
