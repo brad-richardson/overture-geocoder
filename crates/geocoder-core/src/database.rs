@@ -4,7 +4,7 @@
 
 use std::path::Path;
 
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{params, Connection, OpenFlags};
 
 use crate::error::Result;
 use crate::query::{
@@ -153,9 +153,9 @@ impl Database {
 
         // Fetch more results than the final limit to allow bias to elevate
         // results that wouldn't otherwise make the cut.
-        let fetch_limit = (query.limit * 10).max(100);
+        let fetch_limit = (query.limit * 10).max(100) as i64;
 
-        let rows = stmt.query_map([fts_query, &fetch_limit], |row| {
+        let rows = stmt.query_map(params![fts_query, fetch_limit], |row| {
             let population: Option<i64> = row.get(10)?;
             let bm25_score: f64 = row.get(13)?;
             let boosted_score = calculate_boosted_score(bm25_score, population);

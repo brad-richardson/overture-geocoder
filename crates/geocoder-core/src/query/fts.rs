@@ -24,18 +24,20 @@
 /// assert_eq!(prepare_fts_query("new york, ny", true), r#""new" "york" "ny"*"#);
 /// ```
 pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
-    // Tokenize: lowercase (Unicode-aware), keep only alphanumeric, whitespace, and hyphens
-    let normalized: String = query
-        .chars()
-        .map(|c| {
-            if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
-                c.to_lowercase().next().unwrap_or(c)
-            } else {
-                // Replace punctuation with space
-                ' '
+    // Tokenize: lowercase (Unicode-aware), keep only alphanumeric, whitespace, and hyphens.
+    // Use a loop with the full to_lowercase() iterator to avoid truncating multi-char
+    // expansions (e.g., İ → i + combining dot above).
+    let mut normalized = String::with_capacity(query.len());
+    for c in query.chars() {
+        if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
+            for lc in c.to_lowercase() {
+                normalized.push(lc);
             }
-        })
-        .collect();
+        } else {
+            // Replace punctuation with space
+            normalized.push(' ');
+        }
+    }
 
     // Split into tokens, filter empty
     let tokens: Vec<&str> = normalized
@@ -127,7 +129,7 @@ mod tests {
         // Mixed ASCII and non-ASCII
         assert_eq!(prepare_fts_query("São Paulo", true), r#""são" "paulo"*"#);
         // Case where Unicode lowercasing uses an expansion (e.g., 'İ' → "i\u{307}")
-        // This ensures truncation bugs from `.to_lowercase().next()` are caught.
-        assert_eq!(prepare_fts_query("İSTANBUL", true), r#""istanbul"*"#);
+        // The full to_lowercase() iterator is preserved, so the combining dot above remains.
+        assert_eq!(prepare_fts_query("İSTANBUL", true), "\"i\u{0307}stanbul\"*");
     }
 }
