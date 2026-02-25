@@ -91,7 +91,7 @@ jobs:
       - name: Build forward geocoding shards
         if: github.event.inputs.build_type != 'reverse'
         run: |
-          ARGS="--head-threshold ${{ github.event.inputs.head_threshold || 100000 }}"
+          ARGS="--head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
@@ -101,7 +101,7 @@ jobs:
       - name: Build reverse geocoding shards
         if: github.event.inputs.build_type != 'forward'
         run: |
-          ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold || 100000 }}"
+          ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"

@@ -1124,7 +1124,7 @@ def main():
     parser.add_argument("--version", help="Version string (default: date-based with suffix)")
     parser.add_argument("--version-suffix", default="0",
                         help="Version suffix (default: 0, use 1, 2, etc. for rebuilds)")
-    parser.add_argument("--head-threshold", type=int, default=DEFAULT_HEAD_THRESHOLD,
+    parser.add_argument("--head-threshold", type=lambda s: int(float(s)), default=DEFAULT_HEAD_THRESHOLD,
                         help=f"Population threshold for HEAD shard (default: {DEFAULT_HEAD_THRESHOLD})")
     parser.add_argument("--countries", help="Comma-separated list of countries to build")
     parser.add_argument("--head-only", action="store_true", help="Build HEAD shard only")
