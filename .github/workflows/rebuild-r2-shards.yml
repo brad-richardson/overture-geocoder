@@ -379,9 +379,30 @@ jobs:
           fi
           echo "R2 credentials configured"
 
-      - name: Build ID index
+      - name: Stage registry
         run: |
-          ARGS="--prefix-len 3 --workers 8"
+          ARGS="--phase stage-registry --prefix-len 3 --workers 8"
+          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          echo "Running: python -u scripts/build_id_index.py $ARGS"
+          python -u scripts/build_id_index.py $ARGS
+
+      - name: Stage base
+        run: |
+          ARGS="--phase stage-base --prefix-len 3 --workers 8"
+          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          echo "Running: python -u scripts/build_id_index.py $ARGS"
+          python -u scripts/build_id_index.py $ARGS
+
+      - name: Build ID shards
+        run: |
+          ARGS="--phase build --prefix-len 3 --workers 8"
+          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          echo "Running: python -u scripts/build_id_index.py $ARGS"
+          python -u scripts/build_id_index.py $ARGS
+
+      - name: Build ID metadata
+        run: |
+          ARGS="--phase metadata --prefix-len 3"
           ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
           echo "Running: python -u scripts/build_id_index.py $ARGS"
           python -u scripts/build_id_index.py $ARGS
