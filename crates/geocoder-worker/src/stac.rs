@@ -22,6 +22,7 @@ const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
 const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
 const MAX_LOCATION_SHARDS: usize = 4; // Max shards to load (excluding HEAD)
 const MAX_VERSION_ATTEMPTS: usize = 3; // Max versions to try (latest + fallbacks)
+const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for missing objects
 
 /// User location derived from Cloudflare request headers.
 #[derive(Debug, Clone, Default)]
@@ -197,6 +198,60 @@ struct StacAsset {
     href: String,
 }
 
+/// Check if an error indicates a missing resource that should trigger version fallback.
+///
+/// Only "not found" errors are retriable — these indicate a version whose data hasn't
+/// been fully deployed yet. Operational errors (database corruption, query failures,
+/// parse errors) are surfaced immediately to avoid silently serving stale data.
+fn is_retriable_error(e: &Error) -> bool {
+    let msg = format!("{:?}", e);
+    msg.contains("not found")
+}
+
+/// Run an async operation with version fallback.
+///
+/// Tries each version in order. Errors matching `is_retriable_error` (missing resources)
+/// trigger fallback to the next version. Non-retriable errors (corruption, query failures)
+/// are returned immediately.
+macro_rules! with_version_fallback {
+    ($self:expr, $endpoint:expr, $version:ident, $body:expr) => {{
+        let catalog = $self.load_catalog().await?;
+        let versions = get_ordered_versions(&catalog);
+        if versions.is_empty() {
+            return Err(Error::RustError("No versions found in catalog".into()));
+        }
+        let mut last_error = None;
+        for $version in &versions {
+            let $version = $version.as_str();
+            match $body {
+                Ok(result) => {
+                    if last_error.is_some() {
+                        console_log!(
+                            "Fallback to version {} succeeded for {}",
+                            $version,
+                            $endpoint
+                        );
+                    }
+                    return Ok(result);
+                }
+                Err(e) if is_retriable_error(&e) => {
+                    console_log!(
+                        "Version {} not available for {}: {:?}, trying fallback",
+                        $version,
+                        $endpoint,
+                        e
+                    );
+                    last_error = Some(e);
+                }
+                Err(e) => return Err(e),
+            }
+        }
+        Err(last_error.unwrap_or_else(|| {
+            Error::RustError(format!("No working version found for {}", $endpoint))
+        }))
+    }};
+}
+
 impl<'a> ShardLoader<'a> {
     pub fn new(env: &'a Env) -> Result<Self> {
         let bucket = env.bucket("SHARDS_BUCKET")?;
@@ -205,14 +260,22 @@ impl<'a> ShardLoader<'a> {
     }
 
     /// Fetch from R2 with edge caching via Cache API.
+    ///
+    /// Caches both positive results (with the caller's TTL) and negative results
+    /// (object not found, with a short TTL) to avoid hammering R2 during deployments.
     async fn cached_get(&self, key: &str, ttl: u64) -> Result<Option<Vec<u8>>> {
         let cache_key = format!("{}{}", CACHE_PREFIX, key);
 
         // Try cache first
         let request = Request::new(&cache_key, Method::Get)?;
         if let Some(mut response) = self.cache.get(&request, false).await? {
-            console_log!("Cache HIT: {}", key);
             let bytes = response.bytes().await?;
+            // Empty body is our negative-cache sentinel (real R2 objects are never empty)
+            if bytes.is_empty() {
+                console_log!("Cache HIT (negative): {}", key);
+                return Ok(None);
+            }
+            console_log!("Cache HIT: {}", key);
             return Ok(Some(bytes));
         }
 
@@ -242,6 +305,17 @@ impl<'a> ShardLoader<'a> {
             return Ok(Some(bytes));
         }
 
+        // Cache the negative result (empty body sentinel) with a short TTL to avoid
+        // repeated R2 GETs for objects that don't exist yet during deployments
+        let neg_headers = Headers::new();
+        neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
+        neg_headers.set("Content-Type", "application/octet-stream")?;
+        let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
+        let neg_request = Request::new(&cache_key, Method::Get)?;
+        if let Err(e) = self.cache.put(&neg_request, neg_response).await {
+            console_log!("Negative cache PUT failed for {}: {:?}", key, e);
+        }
+
         Ok(None)
     }
 
@@ -265,38 +339,10 @@ impl<'a> ShardLoader<'a> {
         user_location: &UserLocation,
         include_debug: bool,
     ) -> Result<SearchResult> {
-        let catalog = self.load_catalog().await?;
-        let versions = get_ordered_versions(&catalog);
-
-        if versions.is_empty() {
-            return Err(Error::RustError("No versions found in catalog".into()));
-        }
-
-        let mut last_error = None;
-        for version in &versions {
-            match self
-                .try_search(version, query, user_location, include_debug)
+        with_version_fallback!(self, "search", version, {
+            self.try_search(version, query, user_location, include_debug)
                 .await
-            {
-                Ok(result) => {
-                    if last_error.is_some() {
-                        console_log!("Fallback to version {} succeeded", version);
-                    }
-                    return Ok(result);
-                }
-                Err(e) => {
-                    console_log!(
-                        "Version {} failed for search: {:?}, trying fallback",
-                        version,
-                        e
-                    );
-                    last_error = Some(e);
-                }
-            }
-        }
-
-        Err(last_error
-            .unwrap_or_else(|| Error::RustError("No working version found in catalog".into())))
+        })
     }
 
     /// Attempt search against a specific version.
@@ -467,38 +513,10 @@ impl<'a> ShardLoader<'a> {
         lon: f64,
         cf_country: Option<&str>,
     ) -> Result<Option<ReverseResult>> {
-        let catalog = self.load_catalog().await?;
-        let versions = get_ordered_versions(&catalog);
-
-        if versions.is_empty() {
-            return Err(Error::RustError("No versions found in catalog".into()));
-        }
-
-        let mut last_error = None;
-        for version in &versions {
-            match self
-                .try_reverse_geocode(version, lat, lon, cf_country)
+        with_version_fallback!(self, "reverse", version, {
+            self.try_reverse_geocode(version, lat, lon, cf_country)
                 .await
-            {
-                Ok(result) => {
-                    if last_error.is_some() {
-                        console_log!("Fallback to version {} succeeded for reverse", version);
-                    }
-                    return Ok(result);
-                }
-                Err(e) => {
-                    console_log!(
-                        "Version {} failed for reverse: {:?}, trying fallback",
-                        version,
-                        e
-                    );
-                    last_error = Some(e);
-                }
-            }
-        }
-
-        Err(last_error
-            .unwrap_or_else(|| Error::RustError("No working version found in catalog".into())))
+        })
     }
 
     /// Attempt reverse geocode against a specific version.
@@ -585,35 +603,9 @@ impl<'a> ShardLoader<'a> {
     /// Look up a GERS ID to get its bounding box from a parquet shard.
     /// Falls back to older versions if the latest version's index is unavailable.
     pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
-        let catalog = self.load_catalog().await?;
-        let versions = get_ordered_versions(&catalog);
-
-        if versions.is_empty() {
-            return Err(Error::RustError("No versions found in catalog".into()));
-        }
-
-        let mut last_error = None;
-        for version in &versions {
-            match self.try_lookup_id(version, gers_id).await {
-                Ok(result) => {
-                    if last_error.is_some() {
-                        console_log!("Fallback to version {} succeeded for ID lookup", version);
-                    }
-                    return Ok(result);
-                }
-                Err(e) => {
-                    console_log!(
-                        "Version {} failed for ID lookup: {:?}, trying fallback",
-                        version,
-                        e
-                    );
-                    last_error = Some(e);
-                }
-            }
-        }
-
-        Err(last_error
-            .unwrap_or_else(|| Error::RustError("No working version found in catalog".into())))
+        with_version_fallback!(self, "id_lookup", version, {
+            self.try_lookup_id(version, gers_id).await
+        })
     }
 
     /// Attempt ID lookup against a specific version.
@@ -1026,6 +1018,34 @@ mod tests {
         assert!(parse_uuid_bytes("too-short").is_none());
         assert!(parse_uuid_bytes("").is_none());
         assert!(parse_uuid_bytes("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz").is_none());
+    }
+
+    #[test]
+    fn test_is_retriable_error_not_found() {
+        let e = Error::RustError("2026-02-25.0/collection.json not found".into());
+        assert!(is_retriable_error(&e));
+
+        let e = Error::RustError("Shard 2026-02-25.0/HEAD.db not found".into());
+        assert!(is_retriable_error(&e));
+
+        let e = Error::RustError("Item 2026-02-25.0/items/US.json not found".into());
+        assert!(is_retriable_error(&e));
+    }
+
+    #[test]
+    fn test_is_retriable_error_operational() {
+        // Operational errors should NOT be retriable
+        let e = Error::RustError("Failed to open shard database: corrupt header".into());
+        assert!(!is_retriable_error(&e));
+
+        let e = Error::RustError("Search failed: FTS5 error".into());
+        assert!(!is_retriable_error(&e));
+
+        let e = Error::RustError("Failed to parse collection: invalid JSON".into());
+        assert!(!is_retriable_error(&e));
+
+        let e = Error::RustError("Reverse geocode failed: query error".into());
+        assert!(!is_retriable_error(&e));
     }
 
     #[test]
