@@ -33,7 +33,7 @@ Usage:
 
     # Range-based parallelism (CI matrix):
     python scripts/build_id_index.py --phase stage-registry --prefix-start 000 --prefix-end 3ff
-    python scripts/build_id_index.py --phase build --prefix-start 000 --prefix-end 3ff
+    python scripts/build_id_index.py --phase build --prefix-len 4 --staging-prefix-len 3 --prefix-start 0000 --prefix-end 3fff
 
 Environment:
     R2_ACCESS_KEY_ID      S3 API key for DuckDB R2 access
@@ -497,13 +497,21 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 
 def _worker_build_r2(args_tuple):
     """Multiprocessing worker: read staging parquet, merge/sort, write final snappy parquet to R2."""
-    prefix, r2_config, version, release_files = args_tuple
+    prefix, r2_config, version, release_files, staging_prefix_len = args_tuple
 
     bucket = r2_config['bucket']
+
+    # Map output prefix to staging prefix (e.g. 4-char "0a3f" -> 3-char "0a3")
+    staging_prefix = prefix[:staging_prefix_len]
+    needs_filter = len(prefix) > staging_prefix_len
     registry_path = (
-        f"s3://{bucket}/{version}/staging/id-partitioned/prefix={prefix}/*.parquet"
+        f"s3://{bucket}/{version}/staging/id-partitioned/prefix={staging_prefix}/*.parquet"
     )
 
+    # ID filter for sub-prefix sharding (e.g. WHERE id::VARCHAR LIKE '0a3f%')
+    id_filter = f"AND id::VARCHAR LIKE '{prefix}%'" if needs_filter else ""
+
+    t0 = time.time()
     try:
         con = duckdb.connect()
         con.execute("SET memory_limit = '2GB';")
@@ -523,15 +531,17 @@ def _worker_build_r2(args_tuple):
         # Build UNION ALL: registry (direct path) + release files (filtered by prefix)
         sources = []
 
-        # Registry: one partition directory per prefix, always exists for full runs
+        # Registry: one partition directory per staging prefix
         try:
             row = con.execute(
-                f"SELECT 1 FROM read_parquet('{registry_path}') LIMIT 1"
+                f"SELECT 1 FROM read_parquet('{registry_path}') "
+                f"WHERE 1=1 {id_filter} LIMIT 1"
             ).fetchone()
             if row:
                 sources.append(
                     f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-                    f"FROM read_parquet('{registry_path}')"
+                    f"FROM read_parquet('{registry_path}') "
+                    f"WHERE 1=1 {id_filter}"
                 )
         except Exception:
             pass
@@ -541,13 +551,13 @@ def _worker_build_r2(args_tuple):
             try:
                 row = con.execute(
                     f"SELECT 1 FROM read_parquet('{release_path}') "
-                    f"WHERE prefix = '{prefix}' LIMIT 1"
+                    f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
                 ).fetchone()
                 if row:
                     sources.append(
                         f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
                         f"FROM read_parquet('{release_path}') "
-                        f"WHERE prefix = '{prefix}'"
+                        f"WHERE prefix = '{staging_prefix}' {id_filter}"
                     )
             except Exception:
                 pass
@@ -578,6 +588,10 @@ def _worker_build_r2(args_tuple):
         if count == 0:
             return (prefix, 0, 0, None)
 
+        elapsed = time.time() - t0
+        if elapsed > 5:
+            print(f"    [build] {prefix}: {count:,} records ({elapsed:.1f}s)", flush=True)
+
         return (prefix, count, size, None)
 
     except Exception as e:
@@ -590,13 +604,16 @@ def _run_pool(worker_fn, work_items, total_label, workers):
     total = len(work_items)
     results = []
     t0 = time.time()
+    # More frequent progress for large sets
+    progress_interval = 50 if total > 500 else (10 if total > 50 else 5)
 
     with multiprocessing.Pool(workers) as pool:
         for i, result in enumerate(pool.imap_unordered(worker_fn, work_items)):
             results.append(result)
             done = i + 1
-            if done % 100 == 0 or done == total:
+            if done % progress_interval == 0 or done == total:
                 built = sum(1 for r in results if r[1] > 0)
+                records = sum(r[1] for r in results)
                 elapsed = time.time() - t0
                 rate = done / elapsed if elapsed > 0 else 0
                 if rate > 0 and done < total and done >= total // 10:
@@ -608,6 +625,7 @@ def _run_pool(worker_fn, work_items, total_label, workers):
                 mins_e, secs_e = divmod(int(elapsed), 60)
                 print(
                     f"    {done}/{total} {total_label}, {built} with data"
+                    f", {records:,} records"
                     f" ({mins_e}m{secs_e:02d}s elapsed{eta})",
                     flush=True,
                 )
@@ -669,12 +687,20 @@ def _discover_staging_prefixes(r2_config, version):
     return sorted(prefixes), release_files
 
 
-def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
+def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
+                   staging_prefix_len=None):
     """Build parquet shards from R2 staging, upload to R2.
 
     If prefixes is provided, only build those specific prefixes (for parallel
     range-based builds). Otherwise, discover from staging or build all.
+
+    staging_prefix_len: length of prefixes used in staging data (e.g. 3 when
+    staging wrote 3-char partitions but output needs 4-char shards). Defaults
+    to prefix_len when not specified.
     """
+    if staging_prefix_len is None:
+        staging_prefix_len = prefix_len
+
     # Pre-install httpfs so workers only need LOAD
     con = duckdb.connect()
     con.execute("INSTALL httpfs;")
@@ -699,8 +725,10 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
 
     if release_files:
         print(f"  Release files: {len(release_files)}")
+    if staging_prefix_len != prefix_len:
+        print(f"  Staging prefix-len: {staging_prefix_len} -> output prefix-len: {prefix_len}")
 
-    work = [(p, r2_config, version, release_files) for p in prefixes]
+    work = [(p, r2_config, version, release_files, staging_prefix_len) for p in prefixes]
 
     print(f"  Processing {len(prefixes)} prefixes ({workers} workers)...")
     results = _run_pool(_worker_build_r2, work, "checked", workers)
@@ -952,11 +980,13 @@ def build_id_index(args):
         if marker is not None:
             print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
+            staging_pl = getattr(args, 'staging_prefix_len', None) or args.prefix_len
             print(f"\nBuild: Build parquet shards")
             t0 = time.time()
             results = phase_build_r2(
                 args.prefix_len, r2_config, version, args.workers,
                 prefixes=range_prefixes,
+                staging_prefix_len=staging_pl,
             )
             elapsed_p2 = time.time() - t0
             phase_times["Build"] = elapsed_p2
@@ -1029,7 +1059,9 @@ def main():
     p.add_argument("--version", help="Version string (default: date-based)")
     p.add_argument("--version-suffix", default="0", help="Version suffix")
     p.add_argument("--prefix-len", type=int, default=3,
-                   help="Hex prefix length (default: 3 = 4096 shards)")
+                   help="Hex prefix length for output shards (default: 3 = 4096 shards)")
+    p.add_argument("--staging-prefix-len", type=int,
+                   help="Prefix length of staging data (for build phase when output differs from staging)")
     p.add_argument("--dry-run", action="store_true", help="Count records only")
     p.add_argument("--smoke-test", action="store_true",
                    help="Quick validation: ~5 prefixes for registry, limited release records")
