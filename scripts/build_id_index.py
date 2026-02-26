@@ -496,8 +496,8 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 
 
 def _worker_build_r2(args_tuple):
-    """Multiprocessing worker: read staging parquet, merge/sort, write final snappy parquet."""
-    prefix, r2_config, version, tmp_dir, release_files = args_tuple
+    """Multiprocessing worker: read staging parquet, merge/sort, write final snappy parquet to R2."""
+    prefix, r2_config, version, release_files = args_tuple
 
     bucket = r2_config['bucket']
     registry_path = (
@@ -558,32 +558,26 @@ def _worker_build_r2(args_tuple):
 
         union_query = " UNION ALL ".join(sources)
 
-        # Sort and write — UUID + FLOAT types already set in staging
-        local_path = f"{tmp_dir}/{prefix}.parquet"
+        # Sort and write directly to R2 via S3
+        r2_dest = f"s3://{bucket}/{version}/id-index/{prefix}.parquet"
         con.execute(f"""
             COPY (
                 SELECT * FROM ({union_query}) ORDER BY id
-            ) TO '{local_path}'
+            ) TO '{r2_dest}'
             (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)
 
         count = con.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{local_path}')"
+            f"SELECT COUNT(*) FROM read_parquet('{r2_dest}')"
         ).fetchone()[0]
         con.close()
 
-        size = os.path.getsize(local_path)
+        # Estimate size: 16 bytes UUID + 4x4 bytes floats per record
+        size = count * (16 + 4 * 4)
 
         if count == 0:
-            os.unlink(local_path)
             return (prefix, 0, 0, None)
 
-        r2_key = f"geocoder-shards/{version}/id-index/{prefix}.parquet"
-        err = _upload_to_r2(local_path, r2_key)
-        os.unlink(local_path)
-
-        if err:
-            return (prefix, count, size, f"Upload failed: {err}")
         return (prefix, count, size, None)
 
     except Exception as e:
@@ -686,9 +680,6 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
     con.execute("INSTALL httpfs;")
     con.close()
 
-    tmp_dir = "tmp-id-shards"
-    os.makedirs(tmp_dir, exist_ok=True)
-
     shard_count = 16 ** prefix_len
     all_prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
 
@@ -709,7 +700,7 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
     if release_files:
         print(f"  Release files: {len(release_files)}")
 
-    work = [(p, r2_config, version, tmp_dir, release_files) for p in prefixes]
+    work = [(p, r2_config, version, release_files) for p in prefixes]
 
     print(f"  Processing {len(prefixes)} prefixes ({workers} workers)...")
     results = _run_pool(_worker_build_r2, work, "checked", workers)
@@ -721,8 +712,6 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
             if p not in processed:
                 results.append((p, 0, 0, None))
 
-    import shutil
-    shutil.rmtree(tmp_dir, ignore_errors=True)
     return results
 
 
