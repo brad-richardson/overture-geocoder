@@ -722,15 +722,28 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
 # ---------------------------------------------------------------------------
 
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
-    """Gather shard info from existing R2 shards (for metadata-only runs)."""
-    print("  Scanning existing R2 shards...")
-    shard_count = 16 ** prefix_len
-    prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
+    """Gather shard info from existing R2 shards (for metadata-only runs).
 
+    Uses glob to discover which shards exist, then only reads those.
+    """
+    print("  Discovering existing R2 shards...")
     con = _r2_con(r2_config)
+
+    # Glob to find only shards that exist (avoids scanning all 4096)
+    bucket = r2_config["bucket"]
+    glob_path = f"s3://{bucket}/{version}/id-index/*.parquet"
+    try:
+        rows = con.execute(f"SELECT file FROM glob('{glob_path}')").fetchall()
+        shard_files = [row[0] for row in rows]
+    except Exception:
+        shard_files = []
+
+    print(f"  Found {len(shard_files)} shards")
+
     results = []
-    for i, prefix in enumerate(prefixes):
-        path = f"s3://{r2_config['bucket']}/{version}/id-index/{prefix}.parquet"
+    for i, path in enumerate(shard_files):
+        # Extract prefix from filename (e.g. ".../0a3.parquet" -> "0a3")
+        prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
         try:
             row = con.execute(
                 f"SELECT COUNT(*) as cnt, "
@@ -743,10 +756,10 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
                 results.append((prefix, 0, 0, None))
         except Exception:
             results.append((prefix, 0, 0, None))
-        if (i + 1) % 100 == 0 or (i + 1) == shard_count:
+        if (i + 1) % 100 == 0 or (i + 1) == len(shard_files):
             found = sum(1 for r in results if r[1] > 0)
             print(
-                f"    {i+1}/{shard_count} scanned, {found} with data...",
+                f"    {i+1}/{len(shard_files)} scanned, {found} with data...",
                 flush=True,
             )
     con.close()
