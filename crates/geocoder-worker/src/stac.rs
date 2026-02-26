@@ -773,18 +773,22 @@ impl<'a> ShardLoader<'a> {
                 .get_bytes(0)
                 .map_err(|e| Error::RustError(format!("Bad UUID column: {}", e)))?;
             if id_bytes.data() == target.as_slice() {
-                let bbox_xmin =
-                    row.get_float(1)
-                        .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))? as f64;
-                let bbox_ymin =
-                    row.get_float(2)
-                        .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))? as f64;
-                let bbox_xmax =
-                    row.get_float(3)
-                        .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))? as f64;
-                let bbox_ymax =
-                    row.get_float(4)
-                        .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))? as f64;
+                let bbox_xmin = row
+                    .get_float(1)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                let bbox_ymin = row
+                    .get_float(2)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                let bbox_xmax = row
+                    .get_float(3)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                let bbox_ymax = row
+                    .get_float(4)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
                 return Ok(Some(IdLookupResult {
                     id: gers_id.to_string(),
                     bbox: geocoder_core::BBox {
@@ -804,7 +808,10 @@ impl<'a> ShardLoader<'a> {
     async fn load_id_prefix_len(&self, version: &str) -> Result<usize> {
         // Try tiny metadata file first (avoids loading multi-MB collection)
         let meta_key = format!("{}/id-meta.json", version);
-        if let Some(text) = self.cached_get_text(&meta_key, COLLECTION_CACHE_TTL).await? {
+        if let Some(text) = self
+            .cached_get_text(&meta_key, COLLECTION_CACHE_TTL)
+            .await?
+        {
             #[derive(Deserialize)]
             struct IdMeta {
                 #[serde(default)]
@@ -822,8 +829,14 @@ impl<'a> ShardLoader<'a> {
         if let Some(text) = self.cached_get_text(&key, COLLECTION_CACHE_TTL).await? {
             if let Some(pos) = text.find("\"prefix_len\"") {
                 let rest = &text[pos + "\"prefix_len\"".len()..];
-                let rest = rest.trim_start().strip_prefix(':').unwrap_or(rest).trim_start();
-                let num_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                let rest = rest
+                    .trim_start()
+                    .strip_prefix(':')
+                    .unwrap_or(rest)
+                    .trim_start();
+                let num_end = rest
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(rest.len());
                 if let Ok(n) = rest[..num_end].parse::<usize>() {
                     return Ok(n);
                 }
