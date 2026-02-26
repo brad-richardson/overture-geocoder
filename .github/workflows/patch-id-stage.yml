@@ -1,0 +1,146 @@
+name: Patch ID Stage
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version string (e.g., 2026-02-26.0)'
+        type: string
+        required: true
+      prefixes:
+        description: 'Comma-separated failed prefixes (e.g., 001,401,801,804,c03,c04,c05)'
+        type: string
+        required: true
+      marker_ranges:
+        description: 'Comma-separated ranges to mark complete (e.g., 000-3ff,400-7ff,800-bff,c00-fff)'
+        type: string
+        required: true
+      run_build:
+        description: 'Run build phase after patching staging'
+        type: boolean
+        required: false
+        default: true
+      run_metadata:
+        description: 'Run metadata phase after build'
+        type: boolean
+        required: false
+        default: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+jobs:
+  patch-stage:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Patch failed prefixes
+        run: |
+          echo "Patching prefixes: ${{ inputs.prefixes }}"
+          echo "Will mark ranges complete: ${{ inputs.marker_ranges }}"
+          python -u scripts/build_id_index.py \
+            --phase stage-registry \
+            --prefix-len 3 --workers 8 \
+            --version ${{ inputs.version }} \
+            --prefixes "${{ inputs.prefixes }}" \
+            --marker-ranges "${{ inputs.marker_ranges }}"
+
+  build:
+    runs-on: ubuntu-24.04-arm
+    needs: patch-stage
+    if: inputs.run_build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - prefix_start: "000"
+            prefix_end: "3ff"
+          - prefix_start: "400"
+            prefix_end: "7ff"
+          - prefix_start: "800"
+            prefix_end: "bff"
+          - prefix_start: "c00"
+            prefix_end: "fff"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: "Build: ${{ matrix.prefix_start }}-${{ matrix.prefix_end }}"
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase build --prefix-len 3 --workers 8 \
+            --version ${{ inputs.version }} \
+            --prefix-start ${{ matrix.prefix_start }} \
+            --prefix-end ${{ matrix.prefix_end }}
+
+  metadata:
+    runs-on: ubuntu-24.04-arm
+    needs: build
+    if: inputs.run_metadata
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Build ID metadata
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase metadata --prefix-len 3 \
+            --version ${{ inputs.version }}
+
+      - name: Summary
+        run: |
+          echo "## Patch ID Stage Complete" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Patched prefixes:** ${{ inputs.prefixes }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Marked ranges:** ${{ inputs.marker_ranges }}" >> $GITHUB_STEP_SUMMARY
