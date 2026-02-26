@@ -5,7 +5,7 @@ use geocoder_core::{
     query::{apply_exact_match_bonus, apply_location_bias},
     Database, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias, ReverseResult,
 };
-use parquet::file::reader::{FileReader, SerializedFileReader};
+use parquet::file::reader::{ChunkReader, FileReader, Length, SerializedFileReader};
 use parquet::record::RowAccessor;
 use serde::{Deserialize, Serialize};
 use worker::*;
@@ -155,18 +155,6 @@ struct StacCollection {
     /// e.g., {"CN": ["CN-GD", "CN-BJ", ...], "IN": [...]}
     #[serde(default)]
     region_sharded: std::collections::HashMap<String, Vec<String>>,
-    /// Collection summaries (includes prefix_len for ID index)
-    #[serde(default)]
-    summaries: Option<StacSummaries>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StacSummaries {
-    #[allow(dead_code)]
-    #[serde(default)]
-    shard_count: Option<u64>,
-    #[serde(default)]
-    prefix_len: Option<u32>,
 }
 
 /// Legacy STAC item format (for backward compatibility with old catalogs)
@@ -608,57 +596,242 @@ impl<'a> ShardLoader<'a> {
         })
     }
 
-    /// Attempt ID lookup against a specific version.
+    /// Attempt ID lookup against a specific version using range reads.
+    ///
+    /// Instead of fetching the entire parquet shard (~28 MB for prefix-len 3),
+    /// this reads only the footer metadata + one matching row group (~1-3 MB):
+    /// 1. Suffix read (32 KB) → get file size + parquet footer
+    /// 2. Parse footer → find row group containing the target UUID via min/max stats
+    /// 3. Range read just that row group's column data
     async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<Option<IdLookupResult>> {
-        let id_collection = self.load_id_collection(version).await?;
-        let prefix_len = id_collection
-            .summaries
-            .as_ref()
-            .and_then(|s| s.prefix_len)
-            .unwrap_or(3) as usize;
+        let prefix_len = self.load_id_prefix_len(version).await?;
 
         // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
         if hex_id.len() < prefix_len {
             return Ok(None);
         }
-
         let prefix = &hex_id[..prefix_len];
+        let shard_key = format!("{}/id-index/{}.parquet", version, prefix);
 
-        // Check if shard exists in collection
-        let item = match id_collection.items.get(prefix) {
-            Some(item) => item,
+        // Parse target UUID early so we can fail fast
+        let target = match parse_uuid_bytes(gers_id) {
+            Some(t) => t,
             None => return Ok(None),
         };
 
-        // Load the parquet shard
-        let shard_key = format!("{}/{}", version, item.href.trim_start_matches("./"));
+        // Step 1: Suffix read to get footer + file size in one R2 call.
+        // 32 KB covers any reasonable footer (~10 row groups × 5 columns ≈ 12 KB metadata).
+        const FOOTER_SUFFIX_SIZE: u64 = 32768;
+        let obj = self
+            .bucket
+            .get(&shard_key)
+            .range(worker::Range::Suffix {
+                suffix: FOOTER_SUFFIX_SIZE,
+            })
+            .execute()
+            .await?;
+        let obj = match obj {
+            Some(o) => o,
+            None => return Ok(None),
+        };
+        let file_size = obj.size();
+        let body = obj
+            .body()
+            .ok_or_else(|| Error::RustError("Empty body on suffix read".into()))?;
+        let tail_bytes = Bytes::from(body.bytes().await?);
+        let tail_len = tail_bytes.len() as u64;
+        let tail_offset = file_size - tail_len;
 
-        let shard_bytes = self
-            .cached_get(&shard_key, SHARD_CACHE_TTL)
-            .await?
-            .ok_or_else(|| Error::RustError(format!("ID index shard {} not found", shard_key)))?;
+        // Step 2: Parse parquet footer from the tail bytes
+        if tail_bytes.len() < 8 {
+            return Err(Error::RustError("Shard too small for parquet".into()));
+        }
+        let footer_8_start = tail_bytes.len() - 8;
+        let magic = &tail_bytes[footer_8_start + 4..];
+        if magic != b"PAR1" {
+            return Err(Error::RustError("Invalid parquet magic".into()));
+        }
+        let metadata_len = u32::from_le_bytes(
+            tail_bytes[footer_8_start..footer_8_start + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        if metadata_len + 8 > tail_bytes.len() {
+            return Err(Error::RustError(format!(
+                "Footer too large ({} bytes), only fetched {}",
+                metadata_len + 8,
+                tail_bytes.len()
+            )));
+        }
+        let metadata_start = tail_bytes.len() - 8 - metadata_len;
+        let metadata = parquet::file::metadata::ParquetMetaDataReader::decode_metadata(
+            &tail_bytes[metadata_start..metadata_start + metadata_len],
+        )
+        .map_err(|e| Error::RustError(format!("Bad parquet metadata: {}", e)))?;
+
+        // Step 3: Find matching row group via UUID column min/max statistics
+        let num_row_groups = metadata.num_row_groups();
+        let mut matching_rg: Option<usize> = None;
+        for rg_idx in 0..num_row_groups {
+            let rg_meta = metadata.row_group(rg_idx);
+            if let Some(stats) = rg_meta.column(0).statistics() {
+                if let (Some(min), Some(max)) = (stats.min_bytes_opt(), stats.max_bytes_opt()) {
+                    if target.as_slice() >= min && target.as_slice() <= max {
+                        matching_rg = Some(rg_idx);
+                        break;
+                    }
+                }
+            }
+        }
+        let rg_idx = match matching_rg {
+            Some(idx) => idx,
+            None => return Ok(None),
+        };
+
+        // Step 4: Compute byte range for the matching row group's columns
+        let rg_meta = metadata.row_group(rg_idx);
+        let num_columns = rg_meta.num_columns();
+        let mut rg_start = u64::MAX;
+        let mut rg_end = 0u64;
+        for col_idx in 0..num_columns {
+            let col_meta = rg_meta.column(col_idx);
+            let col_offset = col_meta
+                .dictionary_page_offset()
+                .map(|o| o as u64)
+                .unwrap_or(col_meta.data_page_offset() as u64);
+            let col_end = col_offset + col_meta.compressed_size() as u64;
+            rg_start = rg_start.min(col_offset);
+            rg_end = rg_end.max(col_end);
+        }
+        let rg_length = rg_end - rg_start;
 
         console_log!(
-            "Loading ID index shard {} ({} bytes)",
+            "ID lookup: shard={} file={}B rg={}/{} range={}..{} ({}B)",
             prefix,
-            shard_bytes.len()
+            file_size,
+            rg_idx,
+            num_row_groups,
+            rg_start,
+            rg_end,
+            rg_length
         );
 
-        lookup_in_parquet(shard_bytes, gers_id)
-            .map_err(|e| Error::RustError(format!("Parquet lookup failed: {}", e)))
+        // Step 5: Fetch row group data (may already be in our tail buffer)
+        let rg_bytes = if rg_start >= tail_offset && rg_end <= tail_offset + tail_bytes.len() as u64
+        {
+            // Row group is within our already-fetched tail (small file or last row group)
+            let local_start = (rg_start - tail_offset) as usize;
+            tail_bytes.slice(local_start..local_start + rg_length as usize)
+        } else {
+            // Range read just this row group from R2
+            let obj = self
+                .bucket
+                .get(&shard_key)
+                .range(worker::Range::OffsetWithLength {
+                    offset: rg_start,
+                    length: rg_length,
+                })
+                .execute()
+                .await?
+                .ok_or_else(|| Error::RustError("Row group fetch failed".into()))?;
+            let body = obj
+                .body()
+                .ok_or_else(|| Error::RustError("Empty row group body".into()))?;
+            Bytes::from(body.bytes().await?)
+        };
+
+        // Step 6: Build a RangeChunkReader backed by our pre-fetched ranges,
+        // then use the standard parquet reader to iterate the matching row group.
+        let chunk_reader = RangeChunkReader {
+            file_size,
+            chunks: vec![(rg_start, rg_bytes), (tail_offset, tail_bytes)],
+        };
+        let file_reader = SerializedFileReader::new(chunk_reader)
+            .map_err(|e| Error::RustError(format!("Failed to create reader: {}", e)))?;
+        let rg_reader = file_reader
+            .get_row_group(rg_idx)
+            .map_err(|e| Error::RustError(format!("Failed to read row group: {}", e)))?;
+        let iter = rg_reader
+            .get_row_iter(None)
+            .map_err(|e| Error::RustError(format!("Failed to iterate: {}", e)))?;
+        for row in iter {
+            let row = row.map_err(|e| Error::RustError(format!("Row read error: {}", e)))?;
+            let id_bytes = row
+                .get_bytes(0)
+                .map_err(|e| Error::RustError(format!("Bad UUID column: {}", e)))?;
+            if id_bytes.data() == target.as_slice() {
+                let bbox_xmin = row
+                    .get_float(1)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                let bbox_ymin = row
+                    .get_float(2)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                let bbox_xmax = row
+                    .get_float(3)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                let bbox_ymax = row
+                    .get_float(4)
+                    .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
+                    as f64;
+                return Ok(Some(IdLookupResult {
+                    id: gers_id.to_string(),
+                    bbox: geocoder_core::BBox {
+                        xmin: bbox_xmin,
+                        ymin: bbox_ymin,
+                        xmax: bbox_xmax,
+                        ymax: bbox_ymax,
+                    },
+                }));
+            }
+        }
+        Ok(None)
     }
 
-    /// Load the ID index collection for a given version.
-    async fn load_id_collection(&self, version: &str) -> Result<StacCollection> {
-        let key = format!("{}/id-collection.json", version);
-        let text = self
-            .cached_get_text(&key, COLLECTION_CACHE_TTL)
+    /// Load the ID index prefix_len from a small metadata file.
+    /// Falls back to id-collection.json summaries if id-meta.json doesn't exist.
+    async fn load_id_prefix_len(&self, version: &str) -> Result<usize> {
+        // Try tiny metadata file first (avoids loading multi-MB collection)
+        let meta_key = format!("{}/id-meta.json", version);
+        if let Some(text) = self
+            .cached_get_text(&meta_key, COLLECTION_CACHE_TTL)
             .await?
-            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+        {
+            #[derive(Deserialize)]
+            struct IdMeta {
+                #[serde(default)]
+                prefix_len: Option<u32>,
+            }
+            if let Ok(meta) = serde_json::from_str::<IdMeta>(&text) {
+                if let Some(n) = meta.prefix_len {
+                    return Ok(n as usize);
+                }
+            }
+        }
 
-        serde_json::from_str(&text)
-            .map_err(|e| Error::RustError(format!("Failed to parse ID collection: {}", e)))
+        // Fallback: load id-collection.json and extract prefix_len via string search
+        let key = format!("{}/id-collection.json", version);
+        if let Some(text) = self.cached_get_text(&key, COLLECTION_CACHE_TTL).await? {
+            if let Some(pos) = text.find("\"prefix_len\"") {
+                let rest = &text[pos + "\"prefix_len\"".len()..];
+                let rest = rest
+                    .trim_start()
+                    .strip_prefix(':')
+                    .unwrap_or(rest)
+                    .trim_start();
+                let num_end = rest
+                    .find(|c: char| !c.is_ascii_digit())
+                    .unwrap_or(rest.len());
+                if let Ok(n) = rest[..num_end].parse::<usize>() {
+                    return Ok(n);
+                }
+            }
+        }
+
+        Ok(3) // default
     }
 
     /// Load the reverse collection for a given version.
@@ -833,65 +1006,53 @@ fn parse_uuid_bytes(gers_id: &str) -> Option<[u8; 16]> {
     Some(bytes)
 }
 
-/// Look up a GERS ID in a parquet shard (sorted by UUID, snappy compressed).
+/// A ChunkReader backed by pre-fetched byte ranges from R2.
 ///
-/// Uses row group min/max statistics to skip row groups that can't contain
-/// the target UUID, then scans matching row groups.
-fn lookup_in_parquet(
-    data: Vec<u8>,
-    gers_id: &str,
-) -> std::result::Result<Option<IdLookupResult>, String> {
-    let target = match parse_uuid_bytes(gers_id) {
-        Some(t) => t,
-        None => return Ok(None),
-    };
-    let bytes = Bytes::from(data);
-    let reader =
-        SerializedFileReader::new(bytes).map_err(|e| format!("Failed to read parquet: {}", e))?;
-    let metadata = reader.metadata();
-    let num_row_groups = metadata.num_row_groups();
+/// Allows the standard parquet reader to operate on non-contiguous file regions
+/// (e.g., a footer from the end of file + a single row group from the middle)
+/// without fetching the entire file.
+struct RangeChunkReader {
+    file_size: u64,
+    /// Pre-fetched ranges: (absolute_offset_in_file, data)
+    chunks: Vec<(u64, Bytes)>,
+}
 
-    for rg_idx in 0..num_row_groups {
-        // Check row group statistics to skip non-matching groups
-        let rg_meta = metadata.row_group(rg_idx);
-        if let Some(stats) = rg_meta.column(0).statistics() {
-            if let (Some(min), Some(max)) = (stats.min_bytes_opt(), stats.max_bytes_opt()) {
-                if target.as_slice() < min || target.as_slice() > max {
-                    continue;
-                }
-            }
-        }
-
-        // Scan this row group
-        let rg_reader = reader
-            .get_row_group(rg_idx)
-            .map_err(|e| format!("Failed to read row group {}: {}", rg_idx, e))?;
-        let iter = rg_reader
-            .get_row_iter(None)
-            .map_err(|e| format!("Failed to iterate row group {}: {}", rg_idx, e))?;
-        for row in iter {
-            let row = row.map_err(|e| format!("Failed to read row: {}", e))?;
-            let id_bytes = row
-                .get_bytes(0)
-                .map_err(|e| format!("Failed to read UUID column: {}", e))?;
-            if id_bytes.data() == target.as_slice() {
-                let bbox_xmin = row.get_float(1).map_err(|e| format!("Bad bbox: {}", e))? as f64;
-                let bbox_ymin = row.get_float(2).map_err(|e| format!("Bad bbox: {}", e))? as f64;
-                let bbox_xmax = row.get_float(3).map_err(|e| format!("Bad bbox: {}", e))? as f64;
-                let bbox_ymax = row.get_float(4).map_err(|e| format!("Bad bbox: {}", e))? as f64;
-                return Ok(Some(IdLookupResult {
-                    id: gers_id.to_string(),
-                    bbox: geocoder_core::BBox {
-                        xmin: bbox_xmin,
-                        ymin: bbox_ymin,
-                        xmax: bbox_xmax,
-                        ymax: bbox_ymax,
-                    },
-                }));
-            }
-        }
+impl Length for RangeChunkReader {
+    fn len(&self) -> u64 {
+        self.file_size
     }
-    Ok(None)
+}
+
+impl ChunkReader for RangeChunkReader {
+    type T = std::io::Cursor<Bytes>;
+
+    fn get_read(&self, start: u64) -> parquet::errors::Result<Self::T> {
+        for (offset, data) in &self.chunks {
+            if start >= *offset && start < *offset + data.len() as u64 {
+                let local_start = (start - *offset) as usize;
+                return Ok(std::io::Cursor::new(data.slice(local_start..)));
+            }
+        }
+        Err(parquet::errors::ParquetError::General(format!(
+            "Range not pre-fetched: offset {}",
+            start
+        )))
+    }
+
+    fn get_bytes(&self, start: u64, length: usize) -> parquet::errors::Result<Bytes> {
+        let end = start + length as u64;
+        for (offset, data) in &self.chunks {
+            let chunk_end = *offset + data.len() as u64;
+            if start >= *offset && end <= chunk_end {
+                let local_start = (start - *offset) as usize;
+                return Ok(data.slice(local_start..local_start + length));
+            }
+        }
+        Err(parquet::errors::ParquetError::General(format!(
+            "Range not pre-fetched: {}..{}",
+            start, end
+        )))
+    }
 }
 
 /// Calculate the minimum distance from a point to a bounding box in kilometers.

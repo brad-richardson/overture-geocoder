@@ -5,7 +5,7 @@ Build GERS ID -> bbox index as UUID-prefix-sharded parquet files.
 Pipeline (R2 staging):
   stage-registry: DuckDB streams Overture S3 registry -> R2 staging (per-prefix)
   stage-base:     DuckDB streams Overture S3 release themes -> R2 staging (per-type)
-  build:          Merge, sort, and write final snappy parquet shards to R2
+  build:          Merge, sort, and write final parquet shards to R2
   metadata:       Generate id-collection.json, upload to R2
 
 Each phase writes a _SUCCESS marker on completion and skips if the marker
@@ -20,7 +20,7 @@ and release themes (base). No type or release filtering —
 any valid GERS ID resolves to a bbox.
 
 Final parquet format: UUID column (FIXED_LEN_BYTE_ARRAY(16)),
-float bbox columns, snappy compression, sorted by ID.
+float bbox columns, uncompressed, sorted by ID.
 
 Usage:
     python scripts/build_id_index.py                              # Full pipeline
@@ -33,7 +33,7 @@ Usage:
 
     # Range-based parallelism (CI matrix):
     python scripts/build_id_index.py --phase stage-registry --prefix-start 000 --prefix-end 3ff
-    python scripts/build_id_index.py --phase build --prefix-len 4 --staging-prefix-len 3 --prefix-start 0000 --prefix-end 3fff
+    python scripts/build_id_index.py --phase build --prefix-start 000 --prefix-end 3ff
 
 Environment:
     R2_ACCESS_KEY_ID      S3 API key for DuckDB R2 access
@@ -496,12 +496,10 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 
 
 def _worker_build_r2_batch(args_tuple):
-    """Worker: download one staging prefix locally, write all sub-prefix shards to R2.
+    """Worker: download one staging prefix locally, write one output shard to R2.
 
-    Downloads the registry staging partition once to local disk, then iterates
-    over output sub-prefixes (e.g. 16 4-char prefixes per 3-char staging prefix),
-    reading from local data and writing each output shard to R2. This avoids
-    redundant R2 reads when output prefix-len > staging prefix-len.
+    Downloads the registry staging partition once to local disk, merges with
+    release data, sorts by ID, and writes the output shard to R2 (uncompressed).
 
     Release files are pre-downloaded locally by the caller and passed as local
     paths. All reads are local; only output writes go to R2.
@@ -596,7 +594,7 @@ def _worker_build_r2_batch(args_tuple):
                 COPY (
                     SELECT * FROM ({union_query}) ORDER BY id
                 ) TO '{r2_dest}'
-                (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
+                (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
             """)
 
             size = count * (16 + 4 * 4)
@@ -705,19 +703,12 @@ def _discover_staging_prefixes(r2_config, version):
     return sorted(prefixes), release_files
 
 
-def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
-                   staging_prefix_len=None):
+def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
     """Build parquet shards from R2 staging, upload to R2.
 
     If prefixes is provided, only build those specific prefixes (for parallel
     range-based builds). Otherwise, discover from staging or build all.
-
-    staging_prefix_len: length of prefixes used in staging data (e.g. 3 when
-    staging wrote 3-char partitions but output needs 4-char shards). Defaults
-    to prefix_len when not specified.
     """
-    if staging_prefix_len is None:
-        staging_prefix_len = prefix_len
 
     # Pre-install httpfs so workers only need LOAD
     con = duckdb.connect()
@@ -743,8 +734,6 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
 
     if release_files:
         print(f"  Release files: {len(release_files)}")
-    if staging_prefix_len != prefix_len:
-        print(f"  Staging prefix-len: {staging_prefix_len} -> output prefix-len: {prefix_len}")
 
     # Download release files locally, sorted by (prefix, id) for fast sequential access
     local_release_files = []
@@ -770,23 +759,15 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
                 print(f"    WARNING: Failed to download {name}: {e}")
         dl_con.close()
 
-    # Group output prefixes by staging prefix for batched local processing
-    from collections import defaultdict
-    groups = defaultdict(list)
-    for p in prefixes:
-        sp = p[:staging_prefix_len]
-        groups[sp].append(p)
-
-    staging_prefixes = sorted(groups.keys())
+    # Each prefix maps 1:1 to a staging prefix (same prefix-len)
     work = [
-        (sp, sorted(groups[sp]), r2_config, version, local_release_files)
-        for sp in staging_prefixes
+        (p, [p], r2_config, version, local_release_files)
+        for p in prefixes
     ]
 
-    print(f"  Processing {len(prefixes)} output shards from "
-          f"{len(staging_prefixes)} staging prefixes ({workers} workers)...")
+    print(f"  Processing {len(prefixes)} shards ({workers} workers)...")
 
-    # Run batch workers (each processes one staging prefix -> N output shards)
+    # Run batch workers (each processes one staging prefix -> one output shard)
     _ensure_httpfs_installed()
     results = []
     t0 = time.time()
@@ -810,10 +791,8 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
                 else:
                     eta = ""
                 mins_e, secs_e = divmod(int(elapsed), 60)
-                output_done = len(results)
                 print(
-                    f"    {done}/{len(work)} staging prefixes "
-                    f"({output_done}/{len(prefixes)} shards), "
+                    f"    {done}/{len(work)} shards, "
                     f"{built} with data, {records:,} records"
                     f" ({mins_e}m{secs_e:02d}s elapsed{eta})",
                     flush=True,
@@ -930,6 +909,17 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
         print(f"  ERROR uploading id-collection.json: {err}")
         sys.exit(1)
     print("  Uploaded id-collection.json to R2")
+
+    # Upload id-meta.json (tiny metadata file for fast worker prefix_len lookup)
+    meta = {"prefix_len": prefix_len, "shard_count": len(shard_infos)}
+    tmp_meta = Path("tmp-id-meta.json")
+    write_json(tmp_meta, meta)
+    err = _upload_to_r2(tmp_meta, f"geocoder-shards/{version}/id-meta.json")
+    tmp_meta.unlink(missing_ok=True)
+    if err:
+        print(f"  ERROR uploading id-meta.json: {err}")
+        sys.exit(1)
+    print("  Uploaded id-meta.json to R2")
 
     return shard_infos, total_records, errors
 
@@ -1058,13 +1048,11 @@ def build_id_index(args):
         if marker is not None:
             print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
-            staging_pl = getattr(args, 'staging_prefix_len', None) or args.prefix_len
             print(f"\nBuild: Build parquet shards")
             t0 = time.time()
             results = phase_build_r2(
                 args.prefix_len, r2_config, version, args.workers,
                 prefixes=range_prefixes,
-                staging_prefix_len=staging_pl,
             )
             elapsed_p2 = time.time() - t0
             phase_times["Build"] = elapsed_p2
@@ -1138,8 +1126,6 @@ def main():
     p.add_argument("--version-suffix", default="0", help="Version suffix")
     p.add_argument("--prefix-len", type=int, default=3,
                    help="Hex prefix length for output shards (default: 3 = 4096 shards)")
-    p.add_argument("--staging-prefix-len", type=int,
-                   help="Prefix length of staging data (for build phase when output differs from staging)")
     p.add_argument("--dry-run", action="store_true", help="Count records only")
     p.add_argument("--smoke-test", action="store_true",
                    help="Quick validation: ~5 prefixes for registry, limited release records")
