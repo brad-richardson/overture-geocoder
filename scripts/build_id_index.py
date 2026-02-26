@@ -850,14 +850,14 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
 # ---------------------------------------------------------------------------
 
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
-    """Gather shard info from existing R2 shards (for metadata-only runs).
+    """Discover existing R2 shards via glob (for metadata-only runs).
 
-    Uses glob to discover which shards exist, then only reads those.
+    Only checks which shards exist — does not read individual files for
+    record counts. Returns (prefix, 1, 0, None) for each shard found.
     """
     print("  Discovering existing R2 shards...")
     con = _r2_con(r2_config)
 
-    # Glob to find only shards that exist (avoids scanning all 4096)
     bucket = r2_config["bucket"]
     glob_path = f"s3://{bucket}/{version}/id-index/*.parquet"
     try:
@@ -866,31 +866,14 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     except Exception:
         shard_files = []
 
-    print(f"  Found {len(shard_files)} shards")
+    con.close()
 
     results = []
-    for i, path in enumerate(shard_files):
-        # Extract prefix from filename (e.g. ".../0a3.parquet" -> "0a3")
+    for path in shard_files:
         prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
-        try:
-            row = con.execute(
-                f"SELECT COUNT(*) as cnt, "
-                f"COUNT(*) * (16 + 4*4) as est_size "
-                f"FROM read_parquet('{path}')"
-            ).fetchone()
-            if row and row[0] > 0:
-                results.append((prefix, row[0], row[1] or 0, None))
-            else:
-                results.append((prefix, 0, 0, None))
-        except Exception:
-            results.append((prefix, 0, 0, None))
-        if (i + 1) % 100 == 0 or (i + 1) == len(shard_files):
-            found = sum(1 for r in results if r[1] > 0)
-            print(
-                f"    {i+1}/{len(shard_files)} scanned, {found} with data...",
-                flush=True,
-            )
-    con.close()
+        results.append((prefix, 1, 0, None))
+
+    print(f"  Found {len(results)} shards")
     return results
 
 
@@ -933,9 +916,11 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
         },
         "items": {
             p: {
-                "record_count": s["record_count"],
-                "size_bytes": s["size_bytes"],
-                "href": f"./id-index/{p}.parquet",
+                k: v for k, v in [
+                    ("href", f"./id-index/{p}.parquet"),
+                    ("record_count", s.get("record_count")),
+                    ("size_bytes", s.get("size_bytes")),
+                ] if v
             }
             for p, s in sorted(shard_infos.items())
         },
