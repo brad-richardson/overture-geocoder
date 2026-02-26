@@ -345,11 +345,47 @@ jobs:
             echo "**Size:** $(du -sh shards/${VERSION}/reverse/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
           fi
 
-  rebuild-id-index:
+  id-prep:
     runs-on: ubuntu-24.04-arm
     if: |
       (github.event_name == 'schedule' || github.event.inputs.confirm == 'REBUILD') &&
       (github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false')
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Compute version
+        id: version
+        run: |
+          SUFFIX="${{ github.event.inputs.version_suffix || '0' }}"
+          VERSION=$(python3 -c "
+          from datetime import datetime, timezone
+          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.${SUFFIX}')
+          ")
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "ID index version: $VERSION"
+
+  id-stage:
+    runs-on: ubuntu-24.04-arm
+    needs: id-prep
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: base
+            phase: stage-base
+            extra_args: ""
+          - name: registry-000-3ff
+            phase: stage-registry
+            extra_args: "--prefix-start 000 --prefix-end 3ff"
+          - name: registry-400-7ff
+            phase: stage-registry
+            extra_args: "--prefix-start 400 --prefix-end 7ff"
+          - name: registry-800-bff
+            phase: stage-registry
+            extra_args: "--prefix-start 800 --prefix-end bff"
+          - name: registry-c00-fff
+            phase: stage-registry
+            extra_args: "--prefix-start c00 --prefix-end fff"
     steps:
       - uses: actions/checkout@v4
 
@@ -367,9 +403,7 @@ jobs:
           node-version: '20'
 
       - name: Install wrangler
-        run: |
-          npm install -g wrangler
-          echo "Wrangler version: $(wrangler --version)"
+        run: npm install -g wrangler
 
       - name: Verify R2 credentials
         run: |
@@ -379,20 +413,86 @@ jobs:
           fi
           echo "R2 credentials configured"
 
-      - name: Build ID index
+      - name: "Stage: ${{ matrix.name }}"
         run: |
-          ARGS="--prefix-len 3 --workers 8"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
-          echo "Running: python -u scripts/build_id_index.py $ARGS"
-          python -u scripts/build_id_index.py $ARGS
+          python -u scripts/build_id_index.py \
+            --phase ${{ matrix.phase }} --prefix-len 3 --workers 8 \
+            --version ${{ needs.id-prep.outputs.version }} \
+            ${{ matrix.extra_args }}
+
+  id-build:
+    runs-on: ubuntu-24.04-arm
+    needs: [id-prep, id-stage]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - prefix_start: "000"
+            prefix_end: "3ff"
+          - prefix_start: "400"
+            prefix_end: "7ff"
+          - prefix_start: "800"
+            prefix_end: "bff"
+          - prefix_start: "c00"
+            prefix_end: "fff"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: "Build: ${{ matrix.prefix_start }}-${{ matrix.prefix_end }}"
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase build --prefix-len 3 --workers 8 \
+            --version ${{ needs.id-prep.outputs.version }} \
+            --prefix-start ${{ matrix.prefix_start }} \
+            --prefix-end ${{ matrix.prefix_end }}
+
+  id-post:
+    runs-on: ubuntu-24.04-arm
+    needs: [id-prep, id-build]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Build ID metadata
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase metadata --prefix-len 3 \
+            --version ${{ needs.id-prep.outputs.version }}
 
       - name: Verify R2 uploads
         run: |
-          VERSION=$(python3 -c "
-          from datetime import datetime, timezone
-          suffix = '${{ github.event.inputs.version_suffix || 0 }}'
-          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.' + suffix)
-          ")
+          VERSION="${{ needs.id-prep.outputs.version }}"
           echo "Verifying version: ${VERSION}"
 
           if wrangler r2 object get "geocoder-shards/${VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
@@ -402,7 +502,7 @@ jobs:
             exit 1
           fi
 
-          for PREFIX in 000 080 0ff 800 fff; do
+          for PREFIX in 000 400 800 c00 fff; do
             if wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.parquet" --remote --pipe > /dev/null 2>&1; then
               echo "  ok: ${VERSION}/id-index/${PREFIX}.parquet"
             else
@@ -414,11 +514,7 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          VERSION=$(python3 -c "
-          from datetime import datetime, timezone
-          suffix = '${{ github.event.inputs.version_suffix || 0 }}'
-          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.' + suffix)
-          ")
+          VERSION="${{ needs.id-prep.outputs.version }}"
           echo "## ID Index Rebuild" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY

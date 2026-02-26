@@ -101,13 +101,40 @@ jobs:
 
       # --- ID index pipeline (registry + release, smoke test) ---
 
-      - name: Build ID index (smoke test)
+      - name: Stage registry (smoke test)
         run: |
           python scripts/build_id_index.py \
+            --phase stage-registry \
             --version $SMOKE_VERSION \
             --prefix-len 3 \
             --smoke-test \
             --workers 2
+
+      - name: Stage base (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase stage-base \
+            --version $SMOKE_VERSION \
+            --prefix-len 3 \
+            --smoke-test \
+            --workers 2
+
+      - name: Build ID shards (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase build \
+            --version $SMOKE_VERSION \
+            --prefix-len 3 \
+            --smoke-test \
+            --workers 2
+
+      - name: Build ID metadata (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase metadata \
+            --version $SMOKE_VERSION \
+            --prefix-len 3 \
+            --smoke-test
 
       - name: Verify ID index uploads
         run: |

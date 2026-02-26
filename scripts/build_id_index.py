@@ -3,9 +3,17 @@
 Build GERS ID -> bbox index as UUID-prefix-sharded parquet files.
 
 Pipeline (R2 staging):
-  Phase 1: DuckDB streams Overture S3 -> R2 staging (partitioned parquet)
-  Phase 2: Merge, sort, and write final snappy parquet shards to R2
-  Phase 3: Generate id-collection.json, upload to R2
+  stage-registry: DuckDB streams Overture S3 registry -> R2 staging (per-prefix)
+  stage-base:     DuckDB streams Overture S3 release themes -> R2 staging (per-type)
+  build:          Merge, sort, and write final snappy parquet shards to R2
+  metadata:       Generate id-collection.json, upload to R2
+
+Each phase writes a _SUCCESS marker on completion and skips if the marker
+already exists, making the pipeline idempotent and resumable.
+
+Supports range-based parallelism via --prefix-start/--prefix-end for
+splitting stage-registry and build across multiple CI jobs. Each range
+gets its own success marker (e.g. id-partitioned-000-3ff/_SUCCESS).
 
 Indexes ALL GERS IDs with bounding boxes from the Overture registry
 and release themes (base). No type or release filtering —
@@ -15,10 +23,17 @@ Final parquet format: UUID column (FIXED_LEN_BYTE_ARRAY(16)),
 float bbox columns, snappy compression, sorted by ID.
 
 Usage:
-    python scripts/build_id_index.py                      # Full pipeline
-    python scripts/build_id_index.py --dry-run             # Count records only
-    python scripts/build_id_index.py --phase partition     # Only Phase 1
-    python scripts/build_id_index.py --phase metadata      # Regenerate metadata from existing shards
+    python scripts/build_id_index.py                              # Full pipeline
+    python scripts/build_id_index.py --dry-run                     # Count records only
+    python scripts/build_id_index.py --phase stage-registry        # Only registry staging
+    python scripts/build_id_index.py --phase stage-base            # Only release staging
+    python scripts/build_id_index.py --phase build                 # Only build shards
+    python scripts/build_id_index.py --phase metadata              # Regenerate metadata
+    python scripts/build_id_index.py --phase stage-registry,build  # Multiple phases
+
+    # Range-based parallelism (CI matrix):
+    python scripts/build_id_index.py --phase stage-registry --prefix-start 000 --prefix-end 3ff
+    python scripts/build_id_index.py --phase build --prefix-start 000 --prefix-end 3ff
 
 Environment:
     R2_ACCESS_KEY_ID      S3 API key for DuckDB R2 access
@@ -33,7 +48,6 @@ import multiprocessing
 import os
 import subprocess
 import sys
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -101,52 +115,8 @@ def get_r2_config(args):
 
 
 # ---------------------------------------------------------------------------
-# Progress helpers
+# Retry helper
 # ---------------------------------------------------------------------------
-
-def _human_bytes(n):
-    """Format byte count as human-readable string."""
-    for unit in ("B", "KB", "MB", "GB", "TB"):
-        if abs(n) < 1024:
-            return f"{n:.1f} {unit}"
-        n /= 1024
-    return f"{n:.1f} PB"
-
-
-def _check_staging_progress(r2_config, staging_path):
-    """Check partition files and total bytes written to R2 staging.
-
-    Uses parquet_metadata() to read footers (not data) for file count
-    and total compressed size. Falls back to glob() for just file count
-    if metadata reading is too slow or fails.
-    """
-    con = None
-    try:
-        con = _r2_con(r2_config)
-        # Try parquet_metadata for file count + total bytes (reads footers only)
-        try:
-            result = con.execute(f"""
-                SELECT
-                    COUNT(DISTINCT file_name) as files,
-                    COALESCE(SUM(total_compressed_size), 0) as total_bytes
-                FROM parquet_metadata('{staging_path}/prefix=*/*.parquet')
-            """).fetchone()
-            if result:
-                return result[0], result[1]
-        except Exception:
-            pass
-        # Fall back to glob for file count only (single ListObjects call)
-        result = con.execute(f"""
-            SELECT COUNT(*) FROM glob('{staging_path}/prefix=*/*.parquet')
-        """).fetchone()
-        return (result[0] if result else 0), None
-    except Exception:
-        return None, None
-    finally:
-        if con:
-            con.close()
-
-
 def _retry_transient(fn, retries=3, backoff=30):
     """Wrap fn to retry on transient HTTP errors (502, 503, etc.)."""
     def _wrapped():
@@ -162,36 +132,6 @@ def _retry_transient(fn, retries=3, backoff=30):
                 else:
                     raise
     return _wrapped
-
-
-def _run_with_r2_progress(fn, r2_config, staging_path, total_partitions, label, interval=60):
-    """Run fn() while polling R2 staging to report write progress."""
-    t0 = time.time()
-    stop = threading.Event()
-
-    def _monitor():
-        while not stop.wait(interval):
-            elapsed = time.time() - t0
-            mins, secs = divmod(int(elapsed), 60)
-            count, total_bytes = _check_staging_progress(r2_config, staging_path)
-            if count is not None:
-                parts = [f"{count}/{total_partitions} partitions"]
-                if total_bytes is not None:
-                    parts.append(_human_bytes(total_bytes))
-                print(
-                    f"    [{mins:02d}:{secs:02d}] {label}: {', '.join(parts)}",
-                    flush=True,
-                )
-            else:
-                print(f"    [{mins:02d}:{secs:02d}] {label}...", flush=True)
-
-    thread = threading.Thread(target=_monitor, daemon=True)
-    thread.start()
-    try:
-        return fn()
-    finally:
-        stop.set()
-        thread.join(timeout=5)
 
 
 # ---------------------------------------------------------------------------
@@ -227,7 +167,7 @@ def dry_run(prefix_len):
 
 
 # ---------------------------------------------------------------------------
-# Phase 1: Stage + Partition
+# Stage: Partition registry + release data to R2
 # ---------------------------------------------------------------------------
 
 def _r2_con(r2_config):
@@ -248,14 +188,16 @@ def _r2_con(r2_config):
     return con
 
 
-def _write_staging_marker(r2_config, version, staging_dir, partition_count):
-    """Write a _SUCCESS marker to R2 staging after a completed COPY."""
+def _write_staging_marker(r2_config, version, staging_dir, partition_count, extra=None):
+    """Write a _SUCCESS marker to R2 staging after a completed phase."""
     marker = {
         "status": "complete",
         "partitions": partition_count,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
-    tmp = Path("tmp-staging-marker.json")
+    if extra:
+        marker.update(extra)
+    tmp = Path(f"tmp-staging-marker-{staging_dir}-{os.getpid()}.json")
     write_json(tmp, marker)
     r2_key = f"geocoder-shards/{version}/staging/{staging_dir}/_SUCCESS"
     err = _upload_to_r2(tmp, r2_key)
@@ -278,11 +220,6 @@ def _read_staging_marker(r2_config, version, staging_dir):
     except Exception:
         pass
     return None
-
-
-def _r2_staging_exists(r2_config, version):
-    """Check if completed R2 staging data exists for this version."""
-    return _read_staging_marker(r2_config, version, "id-partitioned") is not None
 
 
 def _id_query_for_prefix(prefix, limit=None):
@@ -398,11 +335,13 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None, workers=4)
 
     print(f"  [registry] Done: {wrote} prefixes with data in {mins}m{secs:02d}s")
 
-    _write_staging_marker(r2_config, version, "id-partitioned", shard_count)
-
 
 def _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=None):
-    """Query for release IDs from a specific theme/type."""
+    """Query for release IDs from a specific theme/type.
+
+    Includes a computed `prefix` column so the build phase can filter
+    on it with predicate pushdown (stored column vs computed expression).
+    """
     source = f"'{RELEASE_S3}{release_version}/theme={theme}/type={type_name}/**/*.parquet'"
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
     return f"""
@@ -420,43 +359,6 @@ def _release_id_query_for_type(prefix_len, release_version, theme, type_name, li
 def _r2_release_staging_exists(r2_config, version):
     """Check if completed release staging data exists for this version."""
     return _read_staging_marker(r2_config, version, "id-release") is not None
-
-
-def _clear_r2_staging(con, r2_config, staging):
-    """Delete all files in an R2 staging directory (cleanup after partial failure)."""
-    try:
-        rows = con.execute(f"""
-            SELECT file_name FROM glob('{staging}/prefix=*/*.parquet')
-        """).fetchall()
-    except Exception as exc:
-        print(f"    [release] WARNING: Could not list staging files: {exc}")
-        return 0
-    bucket = r2_config["bucket"]
-    deleted = 0
-    failed = 0
-    for (path,) in rows:
-        # path is full s3:// URL, extract the key after the bucket
-        key = path.split(f"s3://{bucket}/", 1)[-1]
-        try:
-            result = subprocess.run(
-                ["wrangler", "r2", "object", "delete",
-                 f"{bucket}/{key}", "--remote"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                deleted += 1
-            else:
-                failed += 1
-                print(f"    [release] WARNING: Failed to delete {key}: {result.stderr.strip()}")
-        except Exception as exc:
-            failed += 1
-            print(f"    [release] WARNING: Failed to delete {key}: {exc}")
-    if failed:
-        raise RuntimeError(
-            f"Failed to clean {failed}/{deleted + failed} stale staging files; "
-            f"cannot proceed without a clean staging directory"
-        )
-    return deleted
 
 
 def _discover_release_types(release_version):
@@ -485,43 +387,43 @@ def _discover_release_types(release_version):
 
 def _partition_release_type(theme, type_name, prefix_len, release_version,
                             r2_config, version, limit=None):
-    """Partition a single release theme/type to R2 staging."""
-    shard_count = 16 ** prefix_len
-    staging = f"s3://{r2_config['bucket']}/{version}/staging/id-release-{theme}-{type_name}"
+    """Stage a single release theme/type as one parquet file on R2."""
+    staging_dir = f"id-release-{theme}-{type_name}"
+
+    # Skip if this type already completed
+    marker = _read_staging_marker(r2_config, version, staging_dir)
+    if marker is not None:
+        print(f"    [release] {theme}/{type_name} already complete, skipping")
+        return (theme, type_name)
+
+    dest = f"s3://{r2_config['bucket']}/{version}/staging/{staging_dir}/data.parquet"
 
     con = _r2_con(r2_config)
     con.execute("SET memory_limit = '4GB';")
-    con.execute("SET preserve_insertion_order = false;")
     con.execute("SET s3_region = 'us-west-2';")
-
-    # Clean up stale staging from a previous partial run
-    cleaned = _clear_r2_staging(con, r2_config, staging)
-    if cleaned:
-        print(f"    [release] Cleaned {cleaned} stale files for {theme}/{type_name}")
 
     query = _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=limit)
 
     def _do_copy():
         con.execute(f"""
             COPY ({query})
-            TO '{staging}'
-            (FORMAT PARQUET, PARTITION_BY (prefix), COMPRESSION ZSTD);
+            TO '{dest}'
+            (FORMAT PARQUET, COMPRESSION ZSTD);
         """)
 
-    _run_with_r2_progress(
-        _retry_transient(_do_copy), r2_config, staging, shard_count,
-        f"[release] {theme}/{type_name}", interval=60,
-    )
+    _retry_transient(_do_copy)()
     con.close()
+
+    _write_staging_marker(r2_config, version, staging_dir, 1)
     return (theme, type_name)
 
 
 def phase_partition_release_r2(prefix_len, release_version, r2_config, version, limit=None):
-    """Scan release themes and partition to R2, one COPY per type.
+    """Stage release themes to R2, one parquet file per type.
 
     Discovers type= sub-directories under each theme and runs them
-    in parallel. Each type writes to its own staging path so there
-    are no conflicts.
+    in parallel. Each type writes a single file to its own staging
+    path so there are no conflicts.
     """
     print(f"  [release] Discovering release types...")
     types = _discover_release_types(release_version)
@@ -535,7 +437,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     t0 = time.time()
     errors = []
 
-    with ThreadPoolExecutor(max_workers=min(len(types), 4)) as executor:
+    with ThreadPoolExecutor(max_workers=min(len(types), 6)) as executor:
         futures = {}
         for theme, type_name in types:
             f = executor.submit(
@@ -564,11 +466,11 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
         raise RuntimeError(f"Release partitioning failed: {len(errors)} type errors")
 
     print(f"  [release] Done: {len(types)} types in {mins}m{secs:02d}s")
-    _write_staging_marker(r2_config, version, "id-release", 16 ** prefix_len)
+    _write_staging_marker(r2_config, version, "id-release", len(types))
 
 
 # ---------------------------------------------------------------------------
-# Phase 2: Build parquet shards (sorted, snappy, UUID + float bbox)
+# Build: Merge, sort, and write final snappy parquet shards
 # ---------------------------------------------------------------------------
 
 
@@ -587,16 +489,12 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 
 def _worker_build_r2(args_tuple):
     """Multiprocessing worker: read staging parquet, merge/sort, write final snappy parquet."""
-    prefix, r2_config, version, tmp_dir, release_staging_dirs = args_tuple
+    prefix, r2_config, version, tmp_dir, release_files = args_tuple
 
     bucket = r2_config['bucket']
-    staging_paths = [
-        f"s3://{bucket}/{version}/staging/id-partitioned/prefix={prefix}/*.parquet",
-    ]
-    for staging_dir in release_staging_dirs:
-        staging_paths.append(
-            f"s3://{bucket}/{version}/staging/{staging_dir}/prefix={prefix}/*.parquet"
-        )
+    registry_path = (
+        f"s3://{bucket}/{version}/staging/id-partitioned/prefix={prefix}/*.parquet"
+    )
 
     try:
         con = duckdb.connect()
@@ -613,15 +511,35 @@ def _worker_build_r2(args_tuple):
             );
         """)
 
-        # Find which staging paths have data (cheap existence check)
+        # Build UNION ALL: registry (direct path) + release files (filtered by prefix)
         sources = []
-        for path in staging_paths:
+
+        # Registry: one partition directory per prefix, always exists for full runs
+        try:
+            row = con.execute(
+                f"SELECT 1 FROM read_parquet('{registry_path}') LIMIT 1"
+            ).fetchone()
+            if row:
+                sources.append(
+                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                    f"FROM read_parquet('{registry_path}')"
+                )
+        except Exception:
+            pass
+
+        # Release: single file per type, filter on stored prefix column
+        for release_path in release_files:
             try:
                 row = con.execute(
-                    f"SELECT 1 FROM read_parquet('{path}') LIMIT 1"
+                    f"SELECT 1 FROM read_parquet('{release_path}') "
+                    f"WHERE prefix = '{prefix}' LIMIT 1"
                 ).fetchone()
                 if row:
-                    sources.append(path)
+                    sources.append(
+                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                        f"FROM read_parquet('{release_path}') "
+                        f"WHERE prefix = '{prefix}'"
+                    )
             except Exception:
                 pass
 
@@ -629,20 +547,18 @@ def _worker_build_r2(args_tuple):
             con.close()
             return (prefix, 0, 0, None)
 
-        # Build UNION ALL from available sources
-        union_parts = [
-            f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-            f"FROM read_parquet('{s}')"
-            for s in sources
-        ]
-        union_query = " UNION ALL ".join(union_parts)
+        union_query = " UNION ALL ".join(sources)
 
         # Count rows
         count = con.execute(
             f"SELECT COUNT(*) FROM ({union_query})"
         ).fetchone()[0]
 
-        # Sort and write — UUID + FLOAT types already set in Phase 1
+        if count == 0:
+            con.close()
+            return (prefix, 0, 0, None)
+
+        # Sort and write — UUID + FLOAT types already set in staging
         local_path = f"{tmp_dir}/{prefix}.parquet"
         con.execute(f"""
             COPY (
@@ -695,61 +611,67 @@ def _run_pool(worker_fn, work_items, total_label, workers):
     return results
 
 
-def _discover_release_staging_dirs(con, r2_config, version):
-    """Discover all id-release-* staging directories in R2."""
+def _discover_release_staging_files(con, r2_config, version):
+    """Discover all id-release-* staging files in R2.
+
+    Returns a list of S3 paths to single-file release staging parquets.
+    """
     bucket = r2_config["bucket"]
     staging_base = f"s3://{bucket}/{version}/staging"
-    dirs = set()
-    # Glob for actual parquet files — S3/R2 doesn't have real directories
+    files = []
     try:
         rows = con.execute(f"""
-            SELECT DISTINCT file_name
-            FROM glob('{staging_base}/id-release-*/prefix=*/*.parquet')
+            SELECT file
+            FROM glob('{staging_base}/id-release-*/data.parquet')
         """).fetchall()
-        for (path,) in rows:
-            for part in path.split("/"):
-                if part.startswith("id-release-"):
-                    dirs.add(part)
+        files = [row[0] for row in rows]
     except Exception:
         pass
-    # Also check legacy id-release path
-    try:
-        row = con.execute(f"""
-            SELECT 1 FROM glob('{staging_base}/id-release/prefix=*/*.parquet') LIMIT 1
-        """).fetchone()
-        if row:
-            dirs.add("id-release")
-    except Exception:
-        pass
-    return sorted(dirs)
+    return sorted(files)
 
 
 def _discover_staging_prefixes(r2_config, version):
-    """List prefixes that have data in any staging path."""
+    """List prefixes that have data in registry or release staging, plus release file paths."""
     con = _r2_con(r2_config)
 
-    # Find all staging directories (registry + all release type dirs)
-    staging_dirs = ["id-partitioned"]
-    staging_dirs.extend(_discover_release_staging_dirs(con, r2_config, version))
+    # Find release staging files (single file per type)
+    release_files = _discover_release_staging_files(con, r2_config, version)
 
+    # Get registry prefixes
     prefixes = set()
-    for staging_dir in staging_dirs:
+    try:
+        rows = con.execute(f"""
+            SELECT DISTINCT
+                regexp_extract(file, 'prefix=([^/]+)', 1) as prefix
+            FROM glob(
+                's3://{r2_config["bucket"]}/{version}/staging/id-partitioned/prefix=*/*.parquet'
+            )
+        """).fetchall()
+        prefixes.update(r[0] for r in rows if r[0])
+    except Exception:
+        pass
+
+    # Also include prefixes from release staging files (release-only IDs)
+    for release_path in release_files:
         try:
             rows = con.execute(f"""
                 SELECT DISTINCT prefix
-                FROM read_parquet(
-                    's3://{r2_config["bucket"]}/{version}/staging/{staging_dir}/*/*'
-                )
+                FROM read_parquet('{release_path}')
             """).fetchall()
-            prefixes.update(r[0] for r in rows)
+            prefixes.update(r[0] for r in rows if r[0])
         except Exception:
             pass
+
     con.close()
-    return sorted(prefixes), [d for d in staging_dirs if d != "id-partitioned"]
+    return sorted(prefixes), release_files
 
 
-def phase_build_r2(prefix_len, r2_config, version, workers):
-    """Build parquet shards from R2 staging, upload to R2."""
+def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
+    """Build parquet shards from R2 staging, upload to R2.
+
+    If prefixes is provided, only build those specific prefixes (for parallel
+    range-based builds). Otherwise, discover from staging or build all.
+    """
     # Pre-install httpfs so workers only need LOAD
     con = duckdb.connect()
     con.execute("INSTALL httpfs;")
@@ -761,19 +683,24 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
     shard_count = 16 ** prefix_len
     all_prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
 
-    # Discover which prefixes actually have staging data to avoid
-    # checking all 4096 shards via HTTP when most are empty (e.g. --smoke-test)
-    staged, release_staging_dirs = _discover_staging_prefixes(r2_config, version)
-    if staged and len(staged) < shard_count:
-        print(f"  Found {len(staged)}/{shard_count} prefixes with staging data")
-        prefixes = staged
+    if prefixes is not None:
+        # Range-based build: use provided prefixes directly, discover release files
+        con = _r2_con(r2_config)
+        release_files = _discover_release_staging_files(con, r2_config, version)
+        con.close()
     else:
-        prefixes = all_prefixes
+        # Full build: discover which prefixes have staging data
+        staged, release_files = _discover_staging_prefixes(r2_config, version)
+        if staged and len(staged) < shard_count:
+            print(f"  Found {len(staged)}/{shard_count} prefixes with staging data")
+            prefixes = staged
+        else:
+            prefixes = all_prefixes
 
-    if release_staging_dirs:
-        print(f"  Release staging dirs: {', '.join(release_staging_dirs)}")
+    if release_files:
+        print(f"  Release files: {len(release_files)}")
 
-    work = [(p, r2_config, version, tmp_dir, release_staging_dirs) for p in prefixes]
+    work = [(p, r2_config, version, tmp_dir, release_files) for p in prefixes]
 
     print(f"  Processing {len(prefixes)} prefixes ({workers} workers)...")
     results = _run_pool(_worker_build_r2, work, "checked", workers)
@@ -791,7 +718,7 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
 
 
 # ---------------------------------------------------------------------------
-# Phase 3: Metadata
+# Metadata: Generate id-collection.json
 # ---------------------------------------------------------------------------
 
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
@@ -923,7 +850,25 @@ def build_id_index(args):
     if smoke:
         print(f"  Mode: smoke test")
 
-    # Smoke test: pick ~5 evenly-spaced prefixes for Phase 1a
+    # Compute prefix range for parallelism
+    all_prefixes = [format(i, f'0{args.prefix_len}x') for i in range(shard_count)]
+    if bool(args.prefix_start) != bool(args.prefix_end):
+        print("ERROR: --prefix-start and --prefix-end must be provided together")
+        sys.exit(1)
+    if args.prefix_start and args.prefix_end:
+        start_idx = int(args.prefix_start, 16)
+        end_idx = int(args.prefix_end, 16)
+        if start_idx > end_idx:
+            print(f"ERROR: --prefix-start ({args.prefix_start}) must be <= --prefix-end ({args.prefix_end})")
+            sys.exit(1)
+        range_prefixes = [p for p in all_prefixes if start_idx <= int(p, 16) <= end_idx]
+        print(f"  Prefix range: {args.prefix_start}-{args.prefix_end} ({len(range_prefixes)} prefixes)")
+    else:
+        range_prefixes = None
+
+    range_suffix = f"-{args.prefix_start}-{args.prefix_end}" if args.prefix_start else ""
+
+    # Smoke test: pick ~5 evenly-spaced prefixes for registry staging
     smoke_prefixes = None
     smoke_release_limit = None
     if smoke:
@@ -937,118 +882,110 @@ def build_id_index(args):
     t_total = time.time()
     phase_times = {}
 
-    # === Phase 1: Partition (1a registry + 1b release themes in parallel) ===
-    phase1_futures = {}
-    if run_all or "partition" in phases or args.release_only:
-        t_phase1 = time.time()
-        executor = ThreadPoolExecutor(max_workers=2)
-
-        # Phase 1a: Registry
-        if not args.release_only:
-            if args.skip_partition:
-                print("\nPhase 1a: Skipped (--skip-partition)")
-            elif _r2_staging_exists(r2_config, version):
-                print(f"\nPhase 1a: Skipped (registry staging complete for {version})")
-            else:
-                print(f"\nPhase 1a: Partition registry")
-                phase1_futures["1a"] = executor.submit(
-                    phase_partition_r2, args.prefix_len, r2_config, version,
-                    prefixes=smoke_prefixes, workers=args.workers,
-                )
-
-        # Phase 1b: Release themes
-        if args.skip_partition:
-            print("\nPhase 1b: Skipped (--skip-partition)")
-        elif _r2_release_staging_exists(r2_config, version):
-            print(f"\nPhase 1b: Skipped (release staging complete for {version})")
+    # === Stage registry ===
+    if run_all or "stage-registry" in phases:
+        staging_marker_key = f"id-partitioned{range_suffix}"
+        if _read_staging_marker(r2_config, version, staging_marker_key) is not None:
+            print(f"\nStage registry: Skipped ({staging_marker_key} complete for {version})")
         else:
-            print(f"\nPhase 1b: Partition release themes ({', '.join(RELEASE_THEMES)})")
-            phase1_futures["1b"] = executor.submit(
-                phase_partition_release_r2,
+            print(f"\nStage registry: Partition registry")
+            t0 = time.time()
+            stage_prefixes = smoke_prefixes or range_prefixes
+            phase_partition_r2(args.prefix_len, r2_config, version,
+                               prefixes=stage_prefixes, workers=args.workers)
+            _write_staging_marker(r2_config, version, staging_marker_key,
+                                  len(stage_prefixes) if stage_prefixes else shard_count)
+            phase_times["Stage registry"] = time.time() - t0
+
+    # === Stage base (release themes) ===
+    if run_all or "stage-base" in phases:
+        if _r2_release_staging_exists(r2_config, version):
+            print(f"\nStage base: Skipped (release staging complete for {version})")
+        else:
+            print(f"\nStage base: Partition release themes ({', '.join(RELEASE_THEMES)})")
+            t0 = time.time()
+            phase_partition_release_r2(
                 args.prefix_len, release_version, r2_config, version,
                 limit=smoke_release_limit,
             )
+            phase_times["Stage base"] = time.time() - t0
 
-        # Wait for all Phase 1 tasks; fail fast if any phase errors
-        first_error = None
-        for future in as_completed(phase1_futures.values()):
-            try:
-                future.result()
-            except Exception as exc:
-                first_error = exc
-                # Cancel any remaining futures
-                for f in phase1_futures.values():
-                    f.cancel()
-                break
-
-        if first_error is not None:
-            executor.shutdown(wait=False, cancel_futures=True)
-            raise first_error
-
-        executor.shutdown(wait=False)
-        phase_times["Phase 1 (partition)"] = time.time() - t_phase1
-
-    if args.release_only:
-        elapsed = time.time() - t_total
-        mins, secs = divmod(int(elapsed), 60)
-        print(f"\nDone! ({mins}m{secs:02d}s)")
-        return
-
-    # === Phase 2: Build shards ===
+    # === Build shards ===
     results = None
     if run_all or "build" in phases:
-        print(f"\nPhase 2: Build parquet shards")
-        t0 = time.time()
-        results = phase_build_r2(
-            args.prefix_len, r2_config, version, args.workers,
-        )
-        elapsed_p2 = time.time() - t0
-        phase_times["Phase 2 (build)"] = elapsed_p2
-
-        built = sum(1 for r in results if r[1] > 0)
-        records = sum(r[1] for r in results)
-        errs = sum(1 for r in results if r[3] is not None)
-        mins, secs = divmod(int(elapsed_p2), 60)
-        print(f"  {built} shards, {records:,} records in {mins}m{secs:02d}s")
-        if errs:
-            print(f"  {errs} upload errors")
-
-    # === Phase 3: Metadata ===
-    if run_all or "metadata" in phases:
-        t_phase3 = time.time()
-        # If Phase 2 didn't run, gather shard info from existing R2 data
-        if results is None:
-            results = _gather_shard_info_from_r2(
-                args.prefix_len, r2_config, version,
+        build_marker_key = f"build{range_suffix}"
+        marker = _read_staging_marker(r2_config, version, build_marker_key)
+        if marker is not None:
+            print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
+        else:
+            print(f"\nBuild: Build parquet shards")
+            t0 = time.time()
+            results = phase_build_r2(
+                args.prefix_len, r2_config, version, args.workers,
+                prefixes=range_prefixes,
             )
+            elapsed_p2 = time.time() - t0
+            phase_times["Build"] = elapsed_p2
 
-        print(f"\nPhase 3: Metadata")
-        shard_infos, total_records, errors = phase_metadata(
-            results, args.prefix_len, version, release_version, r2_config,
-        )
-        phase_times["Phase 3 (metadata)"] = time.time() - t_phase3
+            built = sum(1 for r in results if r[1] > 0)
+            records = sum(r[1] for r in results)
+            errs = sum(1 for r in results if r[3] is not None)
+            mins, secs = divmod(int(elapsed_p2), 60)
+            print(f"  {built} shards, {records:,} records in {mins}m{secs:02d}s")
+            if errs:
+                print(f"  {errs} upload errors — not marking build complete")
+                for r in results:
+                    if r[3] is not None:
+                        print(f"    {r[0]}: {r[3]}")
+                raise RuntimeError(f"Build failed: {errs} shard errors")
 
-        total_size = sum(s["size_bytes"] for s in shard_infos.values())
-        max_shard = max((s["size_bytes"] for s in shard_infos.values()), default=0)
+            _write_staging_marker(r2_config, version, build_marker_key, built,
+                                  extra={"records": records})
 
-        total_elapsed = time.time() - t_total
-        total_mins, total_secs = divmod(int(total_elapsed), 60)
-        print(f"\nDone! ({total_mins}m{total_secs:02d}s total)")
-        print(f"  Shards: {len(shard_infos)} / {shard_count}")
-        print(f"  Records: {total_records:,}")
-        print(f"  Total: {total_size / 1024 / 1024:.1f} MB")
-        if max_shard:
-            print(f"  Max shard: {max_shard / 1024 / 1024:.1f} MB")
-        if max_shard > 128 * 1024 * 1024:
-            print(f"\n  WARNING: Exceeds 128MB! Use --prefix-len {args.prefix_len + 1}")
+    # === Metadata ===
+    if run_all or "metadata" in phases:
+        meta_marker = _read_staging_marker(r2_config, version, "metadata")
+        if meta_marker is not None:
+            print(f"\nMetadata: Skipped (metadata complete for {version})")
+        else:
+            t_meta = time.time()
+            # If build phase didn't run, gather shard info from existing R2 data
+            if results is None:
+                results = _gather_shard_info_from_r2(
+                    args.prefix_len, r2_config, version,
+                )
 
-        # Per-phase timing breakdown
-        if phase_times:
-            print(f"\n  Timing breakdown:")
-            for name, t in phase_times.items():
-                mins, secs = divmod(int(t), 60)
-                pct = t * 100 / total_elapsed if total_elapsed > 0 else 0
-                print(f"    {name}: {mins}m{secs:02d}s ({pct:.0f}%)")
+            print(f"\nMetadata: Generate id-collection.json")
+            shard_infos, total_records, errors = phase_metadata(
+                results, args.prefix_len, version, release_version, r2_config,
+            )
+            phase_times["Metadata"] = time.time() - t_meta
+
+            _write_staging_marker(r2_config, version, "metadata", len(shard_infos),
+                                  extra={"records": total_records})
+
+            total_size = sum(s["size_bytes"] for s in shard_infos.values())
+            max_shard = max((s["size_bytes"] for s in shard_infos.values()), default=0)
+
+            print(f"  Shards: {len(shard_infos)} / {shard_count}")
+            print(f"  Records: {total_records:,}")
+            print(f"  Total: {total_size / 1024 / 1024:.1f} MB")
+            if max_shard:
+                print(f"  Max shard: {max_shard / 1024 / 1024:.1f} MB")
+            if max_shard > 128 * 1024 * 1024:
+                print(f"\n  WARNING: Exceeds 128MB! Use --prefix-len {args.prefix_len + 1}")
+
+    total_elapsed = time.time() - t_total
+    total_mins, total_secs = divmod(int(total_elapsed), 60)
+    print(f"\nDone! ({total_mins}m{total_secs:02d}s total)")
+
+    # Per-phase timing breakdown
+    if phase_times:
+        print(f"\n  Timing breakdown:")
+        for name, t in phase_times.items():
+            mins, secs = divmod(int(t), 60)
+            pct = t * 100 / total_elapsed if total_elapsed > 0 else 0
+            print(f"    {name}: {mins}m{secs:02d}s ({pct:.0f}%)")
 
 
 def main():
@@ -1074,11 +1011,11 @@ def main():
 
     # Pipeline control
     p.add_argument("--phase",
-                   help="Run specific phase: partition, build, metadata, or all")
-    p.add_argument("--skip-partition", action="store_true",
-                   help="Skip Phase 1 (reuse existing staging)")
-    p.add_argument("--release-only", action="store_true",
-                   help="Only run Phase 1b (release theme staging)")
+                   help="Run specific phase(s): stage-registry, stage-base, build, metadata, or all (comma-separated)")
+    p.add_argument("--prefix-start",
+                   help="Start prefix inclusive (hex, e.g. '000') for range-based parallelism")
+    p.add_argument("--prefix-end",
+                   help="End prefix inclusive (hex, e.g. '3ff') for range-based parallelism")
 
     args = p.parse_args()
     build_id_index(args)
