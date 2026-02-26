@@ -747,7 +747,7 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
         try:
             row = con.execute(
                 f"SELECT COUNT(*) as cnt, "
-                f"SUM(LENGTH(id) + 4*4)::BIGINT as est_size "
+                f"COUNT(*) * (16 + 4*4) as est_size "
                 f"FROM read_parquet('{path}')"
             ).fetchone()
             if row and row[0] > 0:
