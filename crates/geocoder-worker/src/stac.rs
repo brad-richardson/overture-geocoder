@@ -730,7 +730,8 @@ impl<'a> ShardLoader<'a> {
         );
 
         // Step 5: Fetch row group data (may already be in our tail buffer)
-        let rg_bytes = if rg_start >= tail_offset {
+        let rg_bytes = if rg_start >= tail_offset && rg_end <= tail_offset + tail_bytes.len() as u64
+        {
             // Row group is within our already-fetched tail (small file or last row group)
             let local_start = (rg_start - tail_offset) as usize;
             tail_bytes.slice(local_start..local_start + rg_length as usize)

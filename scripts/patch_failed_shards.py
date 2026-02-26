@@ -116,8 +116,8 @@ def main():
     t0 = time.time()
 
     for staging_prefix in staging_prefixes:
-        output_prefixes = [f"{staging_prefix}{c:x}" for c in range(16)]
-        print(f"\nRebuilding staging prefix {staging_prefix} -> {output_prefixes[0]}-{output_prefixes[-1]}")
+        output_prefixes = [staging_prefix]
+        print(f"\nRebuilding staging prefix {staging_prefix}")
 
         # Download registry staging partition locally
         registry_r2 = (
@@ -181,7 +181,7 @@ def main():
                 COPY (
                     SELECT * FROM ({union_query}) ORDER BY id
                 ) TO '{r2_dest}'
-                (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
+                (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
             """)
 
             print(f"  {prefix}: {count:,} records -> R2")
