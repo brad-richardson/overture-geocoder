@@ -495,23 +495,23 @@ def _upload_to_r2(local_path, r2_key, retries=3):
     return result.stderr[:200]
 
 
-def _worker_build_r2(args_tuple):
-    """Multiprocessing worker: read staging parquet, merge/sort, write final snappy parquet to R2."""
-    prefix, r2_config, version, release_files, staging_prefix_len = args_tuple
+def _worker_build_r2_batch(args_tuple):
+    """Worker: download one staging prefix locally, write all sub-prefix shards to R2.
+
+    Downloads the registry staging partition once to local disk, then iterates
+    over output sub-prefixes (e.g. 16 4-char prefixes per 3-char staging prefix),
+    reading from local data and writing each output shard to R2. This avoids
+    redundant R2 reads when output prefix-len > staging prefix-len.
+
+    Release files are pre-downloaded locally by the caller and passed as local
+    paths. All reads are local; only output writes go to R2.
+    """
+    staging_prefix, output_prefixes, r2_config, version, release_files = args_tuple
 
     bucket = r2_config['bucket']
-
-    # Map output prefix to staging prefix (e.g. 4-char "0a3f" -> 3-char "0a3")
-    staging_prefix = prefix[:staging_prefix_len]
-    needs_filter = len(prefix) > staging_prefix_len
-    registry_path = (
-        f"s3://{bucket}/{version}/staging/id-partitioned/prefix={staging_prefix}/*.parquet"
-    )
-
-    # ID filter for sub-prefix sharding (e.g. WHERE id::VARCHAR LIKE '0a3f%')
-    id_filter = f"AND id::VARCHAR LIKE '{prefix}%'" if needs_filter else ""
-
+    results = []
     t0 = time.time()
+
     try:
         con = duckdb.connect()
         con.execute("SET memory_limit = '2GB';")
@@ -528,74 +528,101 @@ def _worker_build_r2(args_tuple):
             );
         """)
 
-        # Build UNION ALL: registry (direct path) + release files (filtered by prefix)
-        sources = []
+        # Download registry staging partition locally (one R2 read instead of N)
+        registry_r2 = (
+            f"s3://{bucket}/{version}/staging/id-partitioned/"
+            f"prefix={staging_prefix}/*.parquet"
+        )
+        local_registry = f"/tmp/build-reg-{staging_prefix}-{os.getpid()}.parquet"
+        has_registry = False
 
-        # Registry: one partition directory per staging prefix
         try:
-            row = con.execute(
-                f"SELECT 1 FROM read_parquet('{registry_path}') "
-                f"WHERE 1=1 {id_filter} LIMIT 1"
-            ).fetchone()
-            if row:
-                sources.append(
-                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-                    f"FROM read_parquet('{registry_path}') "
-                    f"WHERE 1=1 {id_filter}"
-                )
+            con.execute(f"""
+                COPY (
+                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+                    FROM read_parquet('{registry_r2}')
+                ) TO '{local_registry}' (FORMAT PARQUET);
+            """)
+            has_registry = True
         except Exception:
             pass
 
-        # Release: single file per type, filter on stored prefix column
-        for release_path in release_files:
+        for prefix in output_prefixes:
+            needs_filter = len(prefix) > len(staging_prefix)
+            id_filter = f"AND id::VARCHAR LIKE '{prefix}%'" if needs_filter else ""
+
+            sources = []
+
+            # Registry: read from LOCAL file
+            if has_registry:
+                sources.append(
+                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                    f"FROM read_parquet('{local_registry}') WHERE 1=1 {id_filter}"
+                )
+
+            # Release: read from local files with prefix filter
+            for release_path in release_files:
+                try:
+                    row = con.execute(
+                        f"SELECT 1 FROM read_parquet('{release_path}') "
+                        f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
+                    ).fetchone()
+                    if row:
+                        sources.append(
+                            f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                            f"FROM read_parquet('{release_path}') "
+                            f"WHERE prefix = '{staging_prefix}' {id_filter}"
+                        )
+                except Exception:
+                    pass
+
+            if not sources:
+                results.append((prefix, 0, 0, None))
+                continue
+
+            union_query = " UNION ALL ".join(sources)
+
+            # Count locally (fast, avoids R2 read-back)
+            count = con.execute(
+                f"SELECT COUNT(*) FROM ({union_query})"
+            ).fetchone()[0]
+            if count == 0:
+                results.append((prefix, 0, 0, None))
+                continue
+
+            # Sort and write to R2
+            r2_dest = f"s3://{bucket}/{version}/id-index/{prefix}.parquet"
+            con.execute(f"""
+                COPY (
+                    SELECT * FROM ({union_query}) ORDER BY id
+                ) TO '{r2_dest}'
+                (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
+            """)
+
+            size = count * (16 + 4 * 4)
+            results.append((prefix, count, size, None))
+
+        # Cleanup
+        if has_registry:
             try:
-                row = con.execute(
-                    f"SELECT 1 FROM read_parquet('{release_path}') "
-                    f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
-                ).fetchone()
-                if row:
-                    sources.append(
-                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-                        f"FROM read_parquet('{release_path}') "
-                        f"WHERE prefix = '{staging_prefix}' {id_filter}"
-                    )
+                os.unlink(local_registry)
             except Exception:
                 pass
-
-        if not sources:
-            con.close()
-            return (prefix, 0, 0, None)
-
-        union_query = " UNION ALL ".join(sources)
-
-        # Sort and write directly to R2 via S3
-        r2_dest = f"s3://{bucket}/{version}/id-index/{prefix}.parquet"
-        con.execute(f"""
-            COPY (
-                SELECT * FROM ({union_query}) ORDER BY id
-            ) TO '{r2_dest}'
-            (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
-        """)
-
-        count = con.execute(
-            f"SELECT COUNT(*) FROM read_parquet('{r2_dest}')"
-        ).fetchone()[0]
         con.close()
 
-        # Estimate size: 16 bytes UUID + 4x4 bytes floats per record
-        size = count * (16 + 4 * 4)
-
-        if count == 0:
-            return (prefix, 0, 0, None)
-
         elapsed = time.time() - t0
-        if elapsed > 5:
-            print(f"    [build] {prefix}: {count:,} records ({elapsed:.1f}s)", flush=True)
+        total_records = sum(r[1] for r in results)
+        shards_written = sum(1 for r in results if r[1] > 0)
+        print(
+            f"    [build] {staging_prefix}: {shards_written} shards, "
+            f"{total_records:,} records ({elapsed:.1f}s)",
+            flush=True,
+        )
 
-        return (prefix, count, size, None)
+        return results
 
     except Exception as e:
-        return (prefix, 0, 0, str(e))
+        return [(p, 0, 0, str(e)) for p in output_prefixes]
 
 
 def _run_pool(worker_fn, work_items, total_label, workers):
@@ -728,10 +755,85 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
     if staging_prefix_len != prefix_len:
         print(f"  Staging prefix-len: {staging_prefix_len} -> output prefix-len: {prefix_len}")
 
-    work = [(p, r2_config, version, release_files, staging_prefix_len) for p in prefixes]
+    # Download release files locally, sorted by (prefix, id) for fast sequential access
+    local_release_files = []
+    if release_files:
+        print(f"  Downloading and sorting {len(release_files)} release files locally...")
+        dl_con = _r2_con(r2_config)
+        dl_con.execute("SET memory_limit = '4GB';")
+        for rf in release_files:
+            name = rf.split("/staging/")[-1].split("/")[0]
+            local_path = f"/tmp/build-release-{name}.parquet"
+            try:
+                t_dl = time.time()
+                dl_con.execute(f"""
+                    COPY (
+                        SELECT * FROM read_parquet('{rf}')
+                        ORDER BY prefix, id
+                    ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
+                size_mb = os.path.getsize(local_path) / 1024 / 1024
+                print(f"    {name}: {size_mb:.0f} MB ({time.time() - t_dl:.0f}s)")
+                local_release_files.append(local_path)
+            except Exception as e:
+                print(f"    WARNING: Failed to download {name}: {e}")
+        dl_con.close()
 
-    print(f"  Processing {len(prefixes)} prefixes ({workers} workers)...")
-    results = _run_pool(_worker_build_r2, work, "checked", workers)
+    # Group output prefixes by staging prefix for batched local processing
+    from collections import defaultdict
+    groups = defaultdict(list)
+    for p in prefixes:
+        sp = p[:staging_prefix_len]
+        groups[sp].append(p)
+
+    staging_prefixes = sorted(groups.keys())
+    work = [
+        (sp, sorted(groups[sp]), r2_config, version, local_release_files)
+        for sp in staging_prefixes
+    ]
+
+    print(f"  Processing {len(prefixes)} output shards from "
+          f"{len(staging_prefixes)} staging prefixes ({workers} workers)...")
+
+    # Run batch workers (each processes one staging prefix -> N output shards)
+    _ensure_httpfs_installed()
+    results = []
+    t0 = time.time()
+    progress_interval = 10 if len(work) > 100 else 5
+
+    with multiprocessing.Pool(workers) as pool:
+        for i, batch_results in enumerate(
+            pool.imap_unordered(_worker_build_r2_batch, work)
+        ):
+            results.extend(batch_results)
+            done = i + 1
+            if done % progress_interval == 0 or done == len(work):
+                built = sum(1 for r in results if r[1] > 0)
+                records = sum(r[1] for r in results)
+                elapsed = time.time() - t0
+                rate = done / elapsed if elapsed > 0 else 0
+                if rate > 0 and done < len(work) and done >= len(work) // 10:
+                    remaining = (len(work) - done) / rate
+                    mins_r, secs_r = divmod(int(remaining), 60)
+                    eta = f", ~{mins_r}m{secs_r:02d}s remaining"
+                else:
+                    eta = ""
+                mins_e, secs_e = divmod(int(elapsed), 60)
+                output_done = len(results)
+                print(
+                    f"    {done}/{len(work)} staging prefixes "
+                    f"({output_done}/{len(prefixes)} shards), "
+                    f"{built} with data, {records:,} records"
+                    f" ({mins_e}m{secs_e:02d}s elapsed{eta})",
+                    flush=True,
+                )
+
+    # Cleanup local release files
+    for lf in local_release_files:
+        try:
+            os.unlink(lf)
+        except Exception:
+            pass
 
     # Add empty results for skipped prefixes (for metadata accuracy)
     if len(prefixes) < shard_count:

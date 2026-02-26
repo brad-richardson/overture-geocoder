@@ -448,6 +448,11 @@ jobs:
           - prefix_start: "c000"
             prefix_end: "ffff"
     steps:
+      - name: Free disk space
+        uses: jlumbroso/free-disk-space@main
+        with:
+          tool-cache: false
+
       - uses: actions/checkout@v4
 
       - name: Setup Python
@@ -468,10 +473,12 @@ jobs:
 
       - name: Monitor resources
         run: |
+          echo "=== Initial disk space ==="
+          df -h / /tmp
           (while true; do
             echo "--- $(date -u +%H:%M:%S) ---"
             free -m | grep Mem | awk '{printf "Memory: %dMB used / %dMB total (%.0f%%)\n", $3, $2, $3/$2*100}'
-            df -h /tmp | tail -1 | awk '{printf "Disk /tmp: %s used / %s total (%s)\n", $3, $2, $5}'
+            df -h / | tail -1 | awk '{printf "Disk: %s used / %s total (%s)\n", $3, $2, $5}'
             echo "Processes: $(ps aux | wc -l)"
             sleep 30
           done) &
