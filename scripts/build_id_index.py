@@ -11,6 +11,10 @@ Pipeline (R2 staging):
 Each phase writes a _SUCCESS marker on completion and skips if the marker
 already exists, making the pipeline idempotent and resumable.
 
+Supports range-based parallelism via --prefix-start/--prefix-end for
+splitting stage-registry and build across multiple CI jobs. Each range
+gets its own success marker (e.g. id-partitioned-000-3ff/_SUCCESS).
+
 Indexes ALL GERS IDs with bounding boxes from the Overture registry
 and release themes (base). No type or release filtering —
 any valid GERS ID resolves to a bbox.
@@ -26,6 +30,10 @@ Usage:
     python scripts/build_id_index.py --phase build                 # Only build shards
     python scripts/build_id_index.py --phase metadata              # Regenerate metadata
     python scripts/build_id_index.py --phase stage-registry,build  # Multiple phases
+
+    # Range-based parallelism (CI matrix):
+    python scripts/build_id_index.py --phase stage-registry --prefix-start 000 --prefix-end 3ff
+    python scripts/build_id_index.py --phase build --prefix-start 000 --prefix-end 3ff
 
 Environment:
     R2_ACCESS_KEY_ID      S3 API key for DuckDB R2 access
@@ -214,11 +222,6 @@ def _read_staging_marker(r2_config, version, staging_dir):
     return None
 
 
-def _r2_staging_exists(r2_config, version):
-    """Check if completed R2 staging data exists for this version."""
-    return _read_staging_marker(r2_config, version, "id-partitioned") is not None
-
-
 def _id_query_for_prefix(prefix, limit=None):
     """Return a SELECT for a single prefix, filtering by id LIKE '{prefix}%'.
 
@@ -331,8 +334,6 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None, workers=4)
         raise RuntimeError(f"Registry partitioning failed: {len(errors)} prefix errors")
 
     print(f"  [registry] Done: {wrote} prefixes with data in {mins}m{secs:02d}s")
-
-    _write_staging_marker(r2_config, version, "id-partitioned", shard_count)
 
 
 def _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=None):
@@ -665,8 +666,12 @@ def _discover_staging_prefixes(r2_config, version):
     return sorted(prefixes), release_files
 
 
-def phase_build_r2(prefix_len, r2_config, version, workers):
-    """Build parquet shards from R2 staging, upload to R2."""
+def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
+    """Build parquet shards from R2 staging, upload to R2.
+
+    If prefixes is provided, only build those specific prefixes (for parallel
+    range-based builds). Otherwise, discover from staging or build all.
+    """
     # Pre-install httpfs so workers only need LOAD
     con = duckdb.connect()
     con.execute("INSTALL httpfs;")
@@ -678,14 +683,19 @@ def phase_build_r2(prefix_len, r2_config, version, workers):
     shard_count = 16 ** prefix_len
     all_prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
 
-    # Discover which prefixes actually have staging data to avoid
-    # checking all 4096 shards via HTTP when most are empty (e.g. --smoke-test)
-    staged, release_files = _discover_staging_prefixes(r2_config, version)
-    if staged and len(staged) < shard_count:
-        print(f"  Found {len(staged)}/{shard_count} prefixes with staging data")
-        prefixes = staged
+    if prefixes is not None:
+        # Range-based build: use provided prefixes directly, discover release files
+        con = _r2_con(r2_config)
+        release_files = _discover_release_staging_files(con, r2_config, version)
+        con.close()
     else:
-        prefixes = all_prefixes
+        # Full build: discover which prefixes have staging data
+        staged, release_files = _discover_staging_prefixes(r2_config, version)
+        if staged and len(staged) < shard_count:
+            print(f"  Found {len(staged)}/{shard_count} prefixes with staging data")
+            prefixes = staged
+        else:
+            prefixes = all_prefixes
 
     if release_files:
         print(f"  Release files: {len(release_files)}")
@@ -840,6 +850,24 @@ def build_id_index(args):
     if smoke:
         print(f"  Mode: smoke test")
 
+    # Compute prefix range for parallelism
+    all_prefixes = [format(i, f'0{args.prefix_len}x') for i in range(shard_count)]
+    if bool(args.prefix_start) != bool(args.prefix_end):
+        print("ERROR: --prefix-start and --prefix-end must be provided together")
+        sys.exit(1)
+    if args.prefix_start and args.prefix_end:
+        start_idx = int(args.prefix_start, 16)
+        end_idx = int(args.prefix_end, 16)
+        if start_idx > end_idx:
+            print(f"ERROR: --prefix-start ({args.prefix_start}) must be <= --prefix-end ({args.prefix_end})")
+            sys.exit(1)
+        range_prefixes = [p for p in all_prefixes if start_idx <= int(p, 16) <= end_idx]
+        print(f"  Prefix range: {args.prefix_start}-{args.prefix_end} ({len(range_prefixes)} prefixes)")
+    else:
+        range_prefixes = None
+
+    range_suffix = f"-{args.prefix_start}-{args.prefix_end}" if args.prefix_start else ""
+
     # Smoke test: pick ~5 evenly-spaced prefixes for registry staging
     smoke_prefixes = None
     smoke_release_limit = None
@@ -856,13 +884,17 @@ def build_id_index(args):
 
     # === Stage registry ===
     if run_all or "stage-registry" in phases:
-        if _r2_staging_exists(r2_config, version):
-            print(f"\nStage registry: Skipped (registry staging complete for {version})")
+        staging_marker_key = f"id-partitioned{range_suffix}"
+        if _read_staging_marker(r2_config, version, staging_marker_key) is not None:
+            print(f"\nStage registry: Skipped ({staging_marker_key} complete for {version})")
         else:
             print(f"\nStage registry: Partition registry")
             t0 = time.time()
+            stage_prefixes = smoke_prefixes or range_prefixes
             phase_partition_r2(args.prefix_len, r2_config, version,
-                               prefixes=smoke_prefixes, workers=args.workers)
+                               prefixes=stage_prefixes, workers=args.workers)
+            _write_staging_marker(r2_config, version, staging_marker_key,
+                                  len(stage_prefixes) if stage_prefixes else shard_count)
             phase_times["Stage registry"] = time.time() - t0
 
     # === Stage base (release themes) ===
@@ -881,14 +913,16 @@ def build_id_index(args):
     # === Build shards ===
     results = None
     if run_all or "build" in phases:
-        marker = _read_staging_marker(r2_config, version, "build")
+        build_marker_key = f"build{range_suffix}"
+        marker = _read_staging_marker(r2_config, version, build_marker_key)
         if marker is not None:
-            print(f"\nBuild: Skipped (build complete for {version})")
+            print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
             print(f"\nBuild: Build parquet shards")
             t0 = time.time()
             results = phase_build_r2(
                 args.prefix_len, r2_config, version, args.workers,
+                prefixes=range_prefixes,
             )
             elapsed_p2 = time.time() - t0
             phase_times["Build"] = elapsed_p2
@@ -905,7 +939,7 @@ def build_id_index(args):
                         print(f"    {r[0]}: {r[3]}")
                 raise RuntimeError(f"Build failed: {errs} shard errors")
 
-            _write_staging_marker(r2_config, version, "build", built,
+            _write_staging_marker(r2_config, version, build_marker_key, built,
                                   extra={"records": records})
 
     # === Metadata ===
@@ -978,6 +1012,10 @@ def main():
     # Pipeline control
     p.add_argument("--phase",
                    help="Run specific phase(s): stage-registry, stage-base, build, metadata, or all (comma-separated)")
+    p.add_argument("--prefix-start",
+                   help="Start prefix inclusive (hex, e.g. '000') for range-based parallelism")
+    p.add_argument("--prefix-end",
+                   help="End prefix inclusive (hex, e.g. '3ff') for range-based parallelism")
 
     args = p.parse_args()
     build_id_index(args)
