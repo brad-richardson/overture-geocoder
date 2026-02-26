@@ -155,18 +155,6 @@ struct StacCollection {
     /// e.g., {"CN": ["CN-GD", "CN-BJ", ...], "IN": [...]}
     #[serde(default)]
     region_sharded: std::collections::HashMap<String, Vec<String>>,
-    /// Collection summaries (includes prefix_len for ID index)
-    #[serde(default)]
-    summaries: Option<StacSummaries>,
-}
-
-#[derive(Debug, Deserialize)]
-struct StacSummaries {
-    #[allow(dead_code)]
-    #[serde(default)]
-    shard_count: Option<u64>,
-    #[serde(default)]
-    prefix_len: Option<u32>,
 }
 
 /// Legacy STAC item format (for backward compatibility with old catalogs)
