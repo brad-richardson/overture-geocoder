@@ -100,10 +100,20 @@ jobs:
       - name: Install wrangler
         run: npm install -g wrangler
 
+      - name: Monitor resources
+        run: |
+          (while true; do
+            echo "--- $(date -u +%H:%M:%S) ---"
+            free -m | grep Mem | awk '{printf "Memory: %dMB used / %dMB total (%.0f%%)\n", $3, $2, $3/$2*100}'
+            df -h /tmp | tail -1 | awk '{printf "Disk /tmp: %s used / %s total (%s)\n", $3, $2, $5}'
+            echo "Processes: $(ps aux | wc -l)"
+            sleep 30
+          done) &
+
       - name: "Build: ${{ matrix.prefix_start }}-${{ matrix.prefix_end }}"
         run: |
           python -u scripts/build_id_index.py \
-            --phase build --prefix-len 3 --workers 8 \
+            --phase build --prefix-len 3 --workers 4 \
             --version ${{ inputs.version }} \
             --prefix-start ${{ matrix.prefix_start }} \
             --prefix-end ${{ matrix.prefix_end }}

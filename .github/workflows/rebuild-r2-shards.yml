@@ -469,7 +469,7 @@ jobs:
       - name: "Build: ${{ matrix.prefix_start }}-${{ matrix.prefix_end }}"
         run: |
           python -u scripts/build_id_index.py \
-            --phase build --prefix-len 3 --workers 8 \
+            --phase build --prefix-len 3 --workers 4 \
             --version ${{ needs.id-prep.outputs.version }} \
             --prefix-start ${{ matrix.prefix_start }} \
             --prefix-end ${{ matrix.prefix_end }}

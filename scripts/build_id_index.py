@@ -506,6 +506,7 @@ def _worker_build_r2(args_tuple):
 
     try:
         con = duckdb.connect()
+        con.execute("SET memory_limit = '2GB';")
         con.execute("LOAD httpfs;")
         con.execute(f"""
             CREATE SECRET r2 (
@@ -557,15 +558,6 @@ def _worker_build_r2(args_tuple):
 
         union_query = " UNION ALL ".join(sources)
 
-        # Count rows
-        count = con.execute(
-            f"SELECT COUNT(*) FROM ({union_query})"
-        ).fetchone()[0]
-
-        if count == 0:
-            con.close()
-            return (prefix, 0, 0, None)
-
         # Sort and write — UUID + FLOAT types already set in staging
         local_path = f"{tmp_dir}/{prefix}.parquet"
         con.execute(f"""
@@ -574,9 +566,17 @@ def _worker_build_r2(args_tuple):
             ) TO '{local_path}'
             (FORMAT PARQUET, COMPRESSION SNAPPY, ROW_GROUP_SIZE 100000);
         """)
+
+        count = con.execute(
+            f"SELECT COUNT(*) FROM read_parquet('{local_path}')"
+        ).fetchone()[0]
         con.close()
 
         size = os.path.getsize(local_path)
+
+        if count == 0:
+            os.unlink(local_path)
+            return (prefix, 0, 0, None)
 
         r2_key = f"geocoder-shards/{version}/id-index/{prefix}.parquet"
         err = _upload_to_r2(local_path, r2_key)
