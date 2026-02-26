@@ -170,10 +170,17 @@ def dry_run(prefix_len):
 # Stage: Partition registry + release data to R2
 # ---------------------------------------------------------------------------
 
+def _ensure_httpfs_installed():
+    """Install httpfs extension once so worker processes can just LOAD it."""
+    con = duckdb.connect()
+    con.execute("INSTALL httpfs;")
+    con.close()
+
+
 def _r2_con(r2_config):
     """Create a DuckDB connection with R2 credentials configured."""
     con = duckdb.connect()
-    con.execute("INSTALL httpfs; LOAD httpfs;")
+    con.execute("LOAD httpfs;")
     con.execute(f"""
         CREATE SECRET r2 (
             TYPE S3,
@@ -298,6 +305,7 @@ def phase_partition_r2(prefix_len, r2_config, version, prefixes=None, workers=4)
 
     print(f"  [registry] Writing {len(prefixes)} prefixes ({workers} workers)...")
 
+    _ensure_httpfs_installed()
     work = [(p, r2_config, version) for p in prefixes]
     t0 = time.time()
     wrote = 0
@@ -498,7 +506,7 @@ def _worker_build_r2(args_tuple):
 
     try:
         con = duckdb.connect()
-        con.execute("INSTALL httpfs; LOAD httpfs;")
+        con.execute("LOAD httpfs;")
         con.execute(f"""
             CREATE SECRET r2 (
                 TYPE S3,
@@ -584,6 +592,7 @@ def _worker_build_r2(args_tuple):
 
 def _run_pool(worker_fn, work_items, total_label, workers):
     """Run multiprocessing pool with progress reporting."""
+    _ensure_httpfs_installed()
     total = len(work_items)
     results = []
     t0 = time.time()
