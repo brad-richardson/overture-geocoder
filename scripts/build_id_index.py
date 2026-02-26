@@ -498,7 +498,7 @@ def _worker_build_r2(args_tuple):
 
     try:
         con = duckdb.connect()
-        con.execute("LOAD httpfs;")
+        con.execute("INSTALL httpfs; LOAD httpfs;")
         con.execute(f"""
             CREATE SECRET r2 (
                 TYPE S3,
