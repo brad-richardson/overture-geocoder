@@ -17,11 +17,11 @@ on:
         type: number
         required: false
         default: 100000
-      version_suffix:
-        description: 'Version suffix (0 = default, 1/2/3 = same-day rebuilds)'
+      version:
+        description: 'Version override (YYYY-MM-DD.N, e.g. 2026-02-25.0). Leave empty for today.'
         type: string
         required: false
-        default: '0'
+        default: ''
       build_type:
         description: 'What to build'
         type: choice
@@ -92,7 +92,9 @@ jobs:
         if: github.event.inputs.build_type != 'reverse'
         run: |
           ARGS="--head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            ARGS="$ARGS --version ${{ github.event.inputs.version }}"
+          fi
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
@@ -102,7 +104,9 @@ jobs:
         if: github.event.inputs.build_type != 'forward'
         run: |
           ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          ARGS="$ARGS --version-suffix ${{ github.event.inputs.version_suffix || '0' }}"
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            ARGS="$ARGS --version ${{ github.event.inputs.version }}"
+          fi
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
@@ -356,11 +360,19 @@ jobs:
       - name: Compute version
         id: version
         run: |
-          SUFFIX="${{ github.event.inputs.version_suffix || '0' }}"
-          VERSION=$(python3 -c "
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            if ! echo "$INPUT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+              echo "::error::Invalid version format '$INPUT'. Expected YYYY-MM-DD.N (e.g. 2026-02-25.0)"
+              exit 1
+            fi
+            VERSION="$INPUT"
+          else
+            VERSION=$(python3 -c "
           from datetime import datetime, timezone
-          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.${SUFFIX}')
+          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.0')
           ")
+          fi
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "ID index version: $VERSION"
 
