@@ -610,15 +610,6 @@ def _worker_build_r2_batch(args_tuple):
                 pass
         con.close()
 
-        elapsed = time.time() - t0
-        total_records = sum(r[1] for r in results)
-        shards_written = sum(1 for r in results if r[1] > 0)
-        print(
-            f"    [build] {staging_prefix}: {shards_written} shards, "
-            f"{total_records:,} records ({elapsed:.1f}s)",
-            flush=True,
-        )
-
         return results
 
     except Exception as e:
