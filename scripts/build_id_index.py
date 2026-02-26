@@ -865,10 +865,19 @@ def build_id_index(args):
 
     # Compute prefix range for parallelism
     all_prefixes = [format(i, f'0{args.prefix_len}x') for i in range(shard_count)]
-    if bool(args.prefix_start) != bool(args.prefix_end):
+    if args.prefixes:
+        # Explicit individual prefixes (for patching failed runs)
+        range_prefixes = [p.strip() for p in args.prefixes.split(",")]
+        invalid = [p for p in range_prefixes if p not in all_prefixes]
+        if invalid:
+            print(f"ERROR: invalid prefixes: {', '.join(invalid)}")
+            sys.exit(1)
+        print(f"  Explicit prefixes: {', '.join(range_prefixes)} ({len(range_prefixes)} prefixes)")
+        range_suffix = ""  # no implicit range suffix; use --marker-ranges instead
+    elif bool(args.prefix_start) != bool(args.prefix_end):
         print("ERROR: --prefix-start and --prefix-end must be provided together")
         sys.exit(1)
-    if args.prefix_start and args.prefix_end:
+    elif args.prefix_start and args.prefix_end:
         start_idx = int(args.prefix_start, 16)
         end_idx = int(args.prefix_end, 16)
         if start_idx > end_idx:
@@ -876,10 +885,10 @@ def build_id_index(args):
             sys.exit(1)
         range_prefixes = [p for p in all_prefixes if start_idx <= int(p, 16) <= end_idx]
         print(f"  Prefix range: {args.prefix_start}-{args.prefix_end} ({len(range_prefixes)} prefixes)")
+        range_suffix = f"-{args.prefix_start}-{args.prefix_end}"
     else:
         range_prefixes = None
-
-    range_suffix = f"-{args.prefix_start}-{args.prefix_end}" if args.prefix_start else ""
+        range_suffix = ""
 
     # Smoke test: pick ~5 evenly-spaced prefixes for registry staging
     smoke_prefixes = None
@@ -897,8 +906,13 @@ def build_id_index(args):
 
     # === Stage registry ===
     if run_all or "stage-registry" in phases:
+        marker_ranges = None
+        if getattr(args, 'marker_ranges', None):
+            marker_ranges = [r.strip() for r in args.marker_ranges.split(",")]
+
         staging_marker_key = f"id-partitioned{range_suffix}"
-        if _read_staging_marker(r2_config, version, staging_marker_key) is not None:
+        # When patching with --prefixes + --marker-ranges, skip the marker check
+        if marker_ranges is None and _read_staging_marker(r2_config, version, staging_marker_key) is not None:
             print(f"\nStage registry: Skipped ({staging_marker_key} complete for {version})")
         else:
             print(f"\nStage registry: Partition registry")
@@ -906,8 +920,17 @@ def build_id_index(args):
             stage_prefixes = smoke_prefixes or range_prefixes
             phase_partition_r2(args.prefix_len, r2_config, version,
                                prefixes=stage_prefixes, workers=args.workers)
-            _write_staging_marker(r2_config, version, staging_marker_key,
-                                  len(stage_prefixes) if stage_prefixes else shard_count)
+
+            # Write markers for explicit ranges (patching) or the computed range
+            if marker_ranges:
+                for mr in marker_ranges:
+                    mk = f"id-partitioned-{mr}"
+                    _write_staging_marker(r2_config, version, mk,
+                                          len(stage_prefixes) if stage_prefixes else shard_count)
+                    print(f"  Wrote marker: {mk}")
+            else:
+                _write_staging_marker(r2_config, version, staging_marker_key,
+                                      len(stage_prefixes) if stage_prefixes else shard_count)
             phase_times["Stage registry"] = time.time() - t0
 
     # === Stage base (release themes) ===
@@ -1029,6 +1052,10 @@ def main():
                    help="Start prefix inclusive (hex, e.g. '000') for range-based parallelism")
     p.add_argument("--prefix-end",
                    help="End prefix inclusive (hex, e.g. '3ff') for range-based parallelism")
+    p.add_argument("--prefixes",
+                   help="Comma-separated individual prefixes to process (e.g. '001,401,801')")
+    p.add_argument("--marker-ranges",
+                   help="Comma-separated ranges to write _SUCCESS markers for (e.g. '000-3ff,400-7ff')")
 
     args = p.parse_args()
     build_id_index(args)
