@@ -610,12 +610,7 @@ impl<'a> ShardLoader<'a> {
 
     /// Attempt ID lookup against a specific version.
     async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<Option<IdLookupResult>> {
-        let id_collection = self.load_id_collection(version).await?;
-        let prefix_len = id_collection
-            .summaries
-            .as_ref()
-            .and_then(|s| s.prefix_len)
-            .unwrap_or(3) as usize;
+        let prefix_len = self.load_id_prefix_len(version).await?;
 
         // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
@@ -625,19 +620,13 @@ impl<'a> ShardLoader<'a> {
 
         let prefix = &hex_id[..prefix_len];
 
-        // Check if shard exists in collection
-        let item = match id_collection.items.get(prefix) {
-            Some(item) => item,
+        // Compute shard key directly (predictable naming: id-index/{prefix}.parquet)
+        let shard_key = format!("{}/id-index/{}.parquet", version, prefix);
+
+        let shard_bytes = match self.cached_get(&shard_key, SHARD_CACHE_TTL).await? {
+            Some(bytes) => bytes,
             None => return Ok(None),
         };
-
-        // Load the parquet shard
-        let shard_key = format!("{}/{}", version, item.href.trim_start_matches("./"));
-
-        let shard_bytes = self
-            .cached_get(&shard_key, SHARD_CACHE_TTL)
-            .await?
-            .ok_or_else(|| Error::RustError(format!("ID index shard {} not found", shard_key)))?;
 
         console_log!(
             "Loading ID index shard {} ({} bytes)",
@@ -649,16 +638,38 @@ impl<'a> ShardLoader<'a> {
             .map_err(|e| Error::RustError(format!("Parquet lookup failed: {}", e)))
     }
 
-    /// Load the ID index collection for a given version.
-    async fn load_id_collection(&self, version: &str) -> Result<StacCollection> {
-        let key = format!("{}/id-collection.json", version);
-        let text = self
-            .cached_get_text(&key, COLLECTION_CACHE_TTL)
-            .await?
-            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+    /// Load the ID index prefix_len from a small metadata file.
+    /// Falls back to id-collection.json summaries if id-meta.json doesn't exist.
+    async fn load_id_prefix_len(&self, version: &str) -> Result<usize> {
+        // Try tiny metadata file first (avoids loading multi-MB collection)
+        let meta_key = format!("{}/id-meta.json", version);
+        if let Some(text) = self.cached_get_text(&meta_key, COLLECTION_CACHE_TTL).await? {
+            #[derive(Deserialize)]
+            struct IdMeta {
+                #[serde(default)]
+                prefix_len: Option<u32>,
+            }
+            if let Ok(meta) = serde_json::from_str::<IdMeta>(&text) {
+                if let Some(n) = meta.prefix_len {
+                    return Ok(n as usize);
+                }
+            }
+        }
 
-        serde_json::from_str(&text)
-            .map_err(|e| Error::RustError(format!("Failed to parse ID collection: {}", e)))
+        // Fallback: load id-collection.json and extract prefix_len via string search
+        let key = format!("{}/id-collection.json", version);
+        if let Some(text) = self.cached_get_text(&key, COLLECTION_CACHE_TTL).await? {
+            if let Some(pos) = text.find("\"prefix_len\"") {
+                let rest = &text[pos + "\"prefix_len\"".len()..];
+                let rest = rest.trim_start().strip_prefix(':').unwrap_or(rest).trim_start();
+                let num_end = rest.find(|c: char| !c.is_ascii_digit()).unwrap_or(rest.len());
+                if let Ok(n) = rest[..num_end].parse::<usize>() {
+                    return Ok(n);
+                }
+            }
+        }
+
+        Ok(3) // default
     }
 
     /// Load the reverse collection for a given version.
