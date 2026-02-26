@@ -5,7 +5,7 @@ Discovers all id-index/*.parquet shards in R2 via glob, builds the STAC
 collection metadata, and uploads it via wrangler.
 
 Usage:
-    python scripts/gen_id_collection.py --version 2026-02-26.0 --prefix-len 4
+    python scripts/gen_id_collection.py --version 2026-02-26.0 --prefix-len 3
 """
 
 import argparse
@@ -69,7 +69,7 @@ def r2_con(r2_config):
 def main():
     parser = argparse.ArgumentParser(description="Generate id-collection.json")
     parser.add_argument("--version", required=True)
-    parser.add_argument("--prefix-len", type=int, default=4)
+    parser.add_argument("--prefix-len", type=int, default=3)
     parser.add_argument("--bucket", default="geocoder-shards")
     args = parser.parse_args()
 
@@ -144,6 +144,23 @@ def main():
         print(f"  ERROR uploading: {result.stderr[:200]}")
         sys.exit(1)
     print(f"  Uploaded id-collection.json to R2 ({r2_key})")
+
+    # Upload id-meta.json (tiny metadata for fast worker prefix_len lookup)
+    meta = {"prefix_len": args.prefix_len, "shard_count": len(shard_infos)}
+    tmp_meta = Path("tmp-id-meta.json")
+    with open(tmp_meta, "w") as f:
+        json.dump(meta, f)
+    meta_key = f"geocoder-shards/{version}/id-meta.json"
+    result = subprocess.run(
+        ["wrangler", "r2", "object", "put", meta_key,
+         "--file", str(tmp_meta), "--remote"],
+        capture_output=True, text=True, timeout=120,
+    )
+    tmp_meta.unlink(missing_ok=True)
+    if result.returncode != 0:
+        print(f"  ERROR uploading: {result.stderr[:200]}")
+        sys.exit(1)
+    print(f"  Uploaded id-meta.json to R2 ({meta_key})")
 
     con.close()
 

@@ -21,7 +21,7 @@ scripts/
 ## Key Architecture
 
 - **Forward/Reverse geocoding**: SQLite shards per country/region, FTS5 search, stored in R2
-- **ID lookup**: Sorted parquet shards (UUID + FLOAT bbox), snappy compressed, 4096 shards (3 hex prefix)
+- **ID lookup**: Sorted parquet shards (UUID + FLOAT bbox), uncompressed, 4096 shards (3 hex prefix), range-read via R2
 - **Worker runtime**: wasm32, Cloudflare Workers. Dependencies must compile to wasm32-unknown-unknown
   - `parquet` crate: only `snap` feature (zstd does NOT compile to wasm32)
   - `rusqlite`: uses Workers' built-in SQLite via `from_bytes`/`deserialize`

@@ -73,14 +73,14 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - prefix_start: "0000"
-            prefix_end: "3fff"
-          - prefix_start: "4000"
-            prefix_end: "7fff"
-          - prefix_start: "8000"
-            prefix_end: "bfff"
-          - prefix_start: "c000"
-            prefix_end: "ffff"
+          - prefix_start: "000"
+            prefix_end: "3ff"
+          - prefix_start: "400"
+            prefix_end: "7ff"
+          - prefix_start: "800"
+            prefix_end: "bff"
+          - prefix_start: "c00"
+            prefix_end: "fff"
     steps:
       - name: Free disk space
         uses: jlumbroso/free-disk-space@main
@@ -120,7 +120,7 @@ jobs:
       - name: "Build: ${{ matrix.prefix_start }}-${{ matrix.prefix_end }}"
         run: |
           python -u scripts/build_id_index.py \
-            --phase build --prefix-len 4 --staging-prefix-len 3 --workers 8 \
+            --phase build --prefix-len 3 --workers 8 \
             --version ${{ inputs.version }} \
             --prefix-start ${{ matrix.prefix_start }} \
             --prefix-end ${{ matrix.prefix_end }}
@@ -151,7 +151,7 @@ jobs:
       - name: Build ID metadata
         run: |
           python -u scripts/build_id_index.py \
-            --phase metadata --prefix-len 4 \
+            --phase metadata --prefix-len 3 \
             --version ${{ inputs.version }}
 
       - name: Summary
