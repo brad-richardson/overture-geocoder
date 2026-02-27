@@ -19,7 +19,10 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
     // Detect HEAD requests: convert to GET for routing, strip body later
     let is_head = req.method() == Method::Head;
     let req = if is_head {
-        Request::new_with_init(req.url()?.as_str(), RequestInit::new().with_method(Method::Get))?
+        Request::new_with_init(
+            req.url()?.as_str(),
+            RequestInit::new().with_method(Method::Get),
+        )?
     } else {
         req
     };
