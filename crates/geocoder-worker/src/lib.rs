@@ -16,8 +16,13 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return preflight_response();
     }
 
-    // Detect HEAD requests: process as GET, strip body later
+    // Detect HEAD requests: convert to GET for routing, strip body later
     let is_head = req.method() == Method::Head;
+    let req = if is_head {
+        Request::new_with_init(req.url()?.as_str(), RequestInit::new().with_method(Method::Get))?
+    } else {
+        req
+    };
 
     // Rate limiting: 60 requests per minute per IP
     let ip = req

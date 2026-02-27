@@ -168,15 +168,21 @@ pub async fn handle_health(_req: Request, ctx: RouteContext<()>) -> Result<Respo
     let loader = crate::stac::ShardLoader::new(&ctx.env)?;
     match loader.check_health().await {
         Ok(version) => {
-            let body = format!(r#"{{"status":"ok","version":"{}"}}"#, version);
-            let mut resp = Response::ok(body)?;
+            let json = serde_json::json!({
+                "status": "ok",
+                "version": version,
+            });
+            let mut resp = Response::from_json(&json)?;
             resp.headers_mut()
                 .set("Content-Type", "application/json; charset=utf-8")?;
             Ok(resp)
         }
         Err(e) => {
-            let body = format!(r#"{{"status":"error","error":"{}"}}"#, e);
-            let mut resp = Response::ok(body)?;
+            let json = serde_json::json!({
+                "status": "error",
+                "error": e.to_string(),
+            });
+            let mut resp = Response::from_json(&json)?;
             resp = resp.with_status(503);
             resp.headers_mut()
                 .set("Content-Type", "application/json; charset=utf-8")?;
