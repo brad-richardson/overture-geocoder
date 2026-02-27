@@ -163,6 +163,28 @@ pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Re
     }
 }
 
+/// Health check handler: verifies catalog and version availability.
+pub async fn handle_health(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+    let loader = crate::stac::ShardLoader::new(&ctx.env)?;
+    match loader.check_health().await {
+        Ok(version) => {
+            let body = format!(r#"{{"status":"ok","version":"{}"}}"#, version);
+            let mut resp = Response::ok(body)?;
+            resp.headers_mut()
+                .set("Content-Type", "application/json; charset=utf-8")?;
+            Ok(resp)
+        }
+        Err(e) => {
+            let body = format!(r#"{{"status":"error","error":"{}"}}"#, e);
+            let mut resp = Response::ok(body)?;
+            resp = resp.with_status(503);
+            resp.headers_mut()
+                .set("Content-Type", "application/json; charset=utf-8")?;
+            Ok(resp)
+        }
+    }
+}
+
 #[derive(Serialize)]
 struct ResultItem {
     gers_id: String,
