@@ -16,6 +16,17 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         return preflight_response();
     }
 
+    // Detect HEAD requests: convert to GET for routing, strip body later
+    let is_head = req.method() == Method::Head;
+    let req = if is_head {
+        Request::new_with_init(
+            req.url()?.as_str(),
+            RequestInit::new().with_method(Method::Get),
+        )?
+    } else {
+        req
+    };
+
     // Rate limiting: 60 requests per minute per IP
     let ip = req
         .headers()
@@ -37,11 +48,11 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
 
     let router = Router::new();
 
-    let response = router
+    let mut response = router
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
         .get_async("/id/:gers_id", handlers::handle_id_lookup)
-        .get("/health", |_, _| Response::ok("ok"))
+        .get_async("/health", handlers::handle_health)
         .get("/", |_, _| {
             Response::ok(
                 r#"{"name":"overture-geocoder","version":"0.3.0","endpoints":["/search","/reverse","/id/:id"]}"#,
@@ -50,11 +61,22 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         .run(req, env)
         .await?;
 
-    // Add CORS header to existing response headers (don't replace)
-    let mut response = response;
+    // Add CORS header
     response
         .headers_mut()
         .set("Access-Control-Allow-Origin", "*")?;
+
+    // For HEAD requests, return empty body with same status and headers
+    if is_head {
+        let status = response.status_code();
+        let headers = response.headers().clone();
+        let mut head_resp = Response::empty()?.with_status(status);
+        for (key, value) in headers.entries() {
+            head_resp.headers_mut().set(&key, &value)?;
+        }
+        return Ok(head_resp);
+    }
+
     Ok(response)
 }
 
@@ -63,7 +85,7 @@ fn preflight_response() -> Result<Response> {
     let headers = Headers::new();
     headers.set("Access-Control-Allow-Origin", "*").unwrap();
     headers
-        .set("Access-Control-Allow-Methods", "GET, OPTIONS")
+        .set("Access-Control-Allow-Methods", "GET, HEAD, OPTIONS")
         .unwrap();
     headers
         .set("Access-Control-Allow-Headers", "Content-Type")
