@@ -247,6 +247,16 @@ impl<'a> ShardLoader<'a> {
         Ok(Self { env, bucket, cache })
     }
 
+    /// Lightweight health check: verify catalog loads and latest version exists.
+    pub async fn check_health(&self) -> Result<String> {
+        let catalog = self.load_catalog().await?;
+        let versions = get_ordered_versions(&catalog);
+        if versions.is_empty() {
+            return Err(Error::RustError("No versions found in catalog".into()));
+        }
+        Ok(versions[0].clone())
+    }
+
     /// Fetch from R2 with edge caching via Cache API.
     ///
     /// Caches both positive results (with the caller's TTL) and negative results
