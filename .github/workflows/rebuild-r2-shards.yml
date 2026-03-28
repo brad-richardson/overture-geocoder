@@ -90,12 +90,12 @@ jobs:
           mkdir -p shards
           if wrangler r2 object get geocoder-shards/catalog.json --remote --pipe > shards/catalog.json 2>/dev/null; then
             echo "Seeded shards/catalog.json from R2"
-            cat shards/catalog.json | python3 -c "
+            python3 -c "
           import json, sys
           catalog = json.load(sys.stdin)
           versions = [l['href'].split('/')[1] for l in catalog.get('links', []) if l.get('rel') == 'child']
           print(f'  Existing versions: {versions}')
-          "
+          " < shards/catalog.json
           else
             echo "No existing catalog in R2 (first deploy)"
           fi
