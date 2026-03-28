@@ -73,7 +73,7 @@ jobs:
           duckdb --version
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -407,7 +407,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -461,7 +461,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -503,7 +503,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
