@@ -78,7 +78,7 @@ if _env_path.exists():
 REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
 RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
-RELEASE_THEMES = ["base"]
+RELEASE_THEMES = ["addresses", "base"]
 
 
 def get_version(suffix="0"):
