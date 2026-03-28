@@ -180,7 +180,7 @@ def _ensure_httpfs_installed():
 def _r2_con(r2_config):
     """Create a DuckDB connection with R2 credentials configured."""
     con = duckdb.connect()
-    con.execute("LOAD httpfs;")
+    con.execute("INSTALL httpfs; LOAD httpfs;")
     con.execute(f"""
         CREATE SECRET r2 (
             TYPE S3,
