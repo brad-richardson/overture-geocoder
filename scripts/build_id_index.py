@@ -433,6 +433,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     in parallel. Each type writes a single file to its own staging
     path so there are no conflicts.
     """
+    _ensure_httpfs_installed()
     print(f"  [release] Discovering release types...")
     types = _discover_release_types(release_version)
     if not types:
