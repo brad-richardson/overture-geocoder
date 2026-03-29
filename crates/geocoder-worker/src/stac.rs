@@ -329,6 +329,81 @@ impl<'a> ShardLoader<'a> {
         }
     }
 
+    /// Fetch parquet suffix (footer) from R2 with edge caching.
+    ///
+    /// Returns (file_size, tail_bytes) on success, None if the object doesn't exist.
+    /// The cache value is: 8 bytes (file_size as u64 LE) + raw suffix bytes.
+    async fn cached_suffix_read(
+        &self,
+        key: &str,
+        suffix_size: u64,
+    ) -> Result<Option<(u64, Bytes)>> {
+        let cache_key = format!("{}{}__suffix", CACHE_PREFIX, key);
+
+        // Try cache first
+        let request = Request::new(&cache_key, Method::Get)?;
+        if let Some(mut response) = self.cache.get(&request, false).await? {
+            let bytes = response.bytes().await?;
+            if bytes.is_empty() {
+                console_log!("Cache HIT (negative suffix): {}", key);
+                return Ok(None);
+            }
+            if bytes.len() > 8 {
+                let file_size = u64::from_le_bytes(bytes[..8].try_into().unwrap());
+                let tail_bytes = Bytes::from(bytes[8..].to_vec());
+                console_log!("Cache HIT suffix: {} ({}B)", key, tail_bytes.len());
+                return Ok(Some((file_size, tail_bytes)));
+            }
+        }
+
+        console_log!("Cache MISS suffix: {}", key);
+
+        // Fetch suffix from R2
+        let obj = self
+            .bucket
+            .get(key)
+            .range(worker::Range::Suffix {
+                suffix: suffix_size,
+            })
+            .execute()
+            .await?;
+        let obj = match obj {
+            Some(o) => o,
+            None => {
+                // Negative cache
+                let neg_headers = Headers::new();
+                neg_headers
+                    .set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
+                neg_headers.set("Content-Type", "application/octet-stream")?;
+                let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
+                let neg_request = Request::new(&cache_key, Method::Get)?;
+                let _ = self.cache.put(&neg_request, neg_response).await;
+                return Ok(None);
+            }
+        };
+        let file_size = obj.size();
+        let body = obj
+            .body()
+            .ok_or_else(|| Error::RustError("Empty body on suffix read".into()))?;
+        let tail_bytes = Bytes::from(body.bytes().await?);
+
+        // Store in cache: 8 bytes file_size + suffix bytes
+        let mut cache_bytes = Vec::with_capacity(8 + tail_bytes.len());
+        cache_bytes.extend_from_slice(&file_size.to_le_bytes());
+        cache_bytes.extend_from_slice(&tail_bytes);
+
+        let headers = Headers::new();
+        headers.set("Cache-Control", &format!("s-maxage={}", SHARD_CACHE_TTL))?;
+        headers.set("Content-Type", "application/octet-stream")?;
+        let cache_response = Response::from_bytes(cache_bytes)?.with_headers(headers);
+        let cache_request = Request::new(&cache_key, Method::Get)?;
+        if let Err(e) = self.cache.put(&cache_request, cache_response).await {
+            console_log!("Cache PUT failed for suffix {}: {:?}", key, e);
+        }
+
+        Ok(Some((file_size, tail_bytes)))
+    }
+
     /// Search across HEAD and nearby shards based on user location.
     /// Falls back to older versions if the latest version's shards are unavailable.
     pub async fn search(
@@ -630,26 +705,15 @@ impl<'a> ShardLoader<'a> {
             None => return Ok(None),
         };
 
-        // Step 1: Suffix read to get footer + file size in one R2 call.
-        // 32 KB covers any reasonable footer (~10 row groups × 5 columns ≈ 12 KB metadata).
+        // Step 1: Suffix read to get footer + file size (cached at edge for 1hr).
         const FOOTER_SUFFIX_SIZE: u64 = 32768;
-        let obj = self
-            .bucket
-            .get(&shard_key)
-            .range(worker::Range::Suffix {
-                suffix: FOOTER_SUFFIX_SIZE,
-            })
-            .execute()
-            .await?;
-        let obj = match obj {
-            Some(o) => o,
+        let (file_size, tail_bytes) = match self
+            .cached_suffix_read(&shard_key, FOOTER_SUFFIX_SIZE)
+            .await?
+        {
+            Some(result) => result,
             None => return Ok(None),
         };
-        let file_size = obj.size();
-        let body = obj
-            .body()
-            .ok_or_else(|| Error::RustError("Empty body on suffix read".into()))?;
-        let tail_bytes = Bytes::from(body.bytes().await?);
         let tail_len = tail_bytes.len() as u64;
         let tail_offset = file_size - tail_len;
 
