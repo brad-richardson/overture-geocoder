@@ -372,8 +372,7 @@ impl<'a> ShardLoader<'a> {
             None => {
                 // Negative cache
                 let neg_headers = Headers::new();
-                neg_headers
-                    .set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
+                neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
                 neg_headers.set("Content-Type", "application/octet-stream")?;
                 let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
                 let neg_request = Request::new(&cache_key, Method::Get)?;
