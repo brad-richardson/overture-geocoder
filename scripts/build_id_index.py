@@ -493,6 +493,10 @@ def _upload_to_r2(local_path, r2_key, retries=3):
         )
         if result.returncode == 0:
             return None
+        if attempt < retries - 1:
+            wait = 5 * (2 ** attempt)  # 5s, 10s, 20s
+            print(f"    Upload retry {attempt + 1}/{retries} for {r2_key}, waiting {wait}s...")
+            time.sleep(wait)
     return result.stderr[:200]
 
 
@@ -591,12 +595,14 @@ def _worker_build_r2_batch(args_tuple):
 
             # Sort and write to R2
             r2_dest = f"s3://{bucket}/{version}/id-index/{prefix}.parquet"
-            con.execute(f"""
-                COPY (
-                    SELECT * FROM ({union_query}) ORDER BY id
-                ) TO '{r2_dest}'
-                (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
-            """)
+            def _do_copy():
+                con.execute(f"""
+                    COPY (
+                        SELECT * FROM ({union_query}) ORDER BY id
+                    ) TO '{r2_dest}'
+                    (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
+                """)
+            _retry_transient(_do_copy)()
 
             size = count * (16 + 4 * 4)
             results.append((prefix, count, size, None))
