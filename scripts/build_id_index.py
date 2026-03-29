@@ -485,19 +485,24 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
 
 def _upload_to_r2(local_path, r2_key, retries=3):
     """Upload a file to R2 via wrangler with retries."""
+    last_err = "unknown error"
     for attempt in range(retries):
-        result = subprocess.run(
-            ["wrangler", "r2", "object", "put", r2_key,
-             "--file", str(local_path), "--remote"],
-            capture_output=True, text=True, timeout=120,
-        )
-        if result.returncode == 0:
-            return None
+        try:
+            result = subprocess.run(
+                ["wrangler", "r2", "object", "put", r2_key,
+                 "--file", str(local_path), "--remote"],
+                capture_output=True, text=True, timeout=120,
+            )
+            if result.returncode == 0:
+                return None
+            last_err = result.stderr[:200]
+        except subprocess.TimeoutExpired:
+            last_err = "upload timed out after 120s"
         if attempt < retries - 1:
             wait = 5 * (2 ** attempt)  # 5s, 10s, 20s
             print(f"    Upload retry {attempt + 1}/{retries} for {r2_key}, waiting {wait}s...")
             time.sleep(wait)
-    return result.stderr[:200]
+    return last_err
 
 
 def _worker_build_r2_batch(args_tuple):

@@ -333,11 +333,9 @@ impl<'a> ShardLoader<'a> {
     ///
     /// Returns (file_size, tail_bytes) on success, None if the object doesn't exist.
     /// The cache value is: 8 bytes (file_size as u64 LE) + raw suffix bytes.
-    async fn cached_suffix_read(
-        &self,
-        key: &str,
-        suffix_size: u64,
-    ) -> Result<Option<(u64, Bytes)>> {
+    /// Always reads FOOTER_SUFFIX_SIZE (32KB) which covers any reasonable parquet footer.
+    async fn cached_suffix_read(&self, key: &str) -> Result<Option<(u64, Bytes)>> {
+        const FOOTER_SUFFIX_SIZE: u64 = 32768;
         let cache_key = format!("{}{}__suffix", CACHE_PREFIX, key);
 
         // Try cache first
@@ -363,7 +361,7 @@ impl<'a> ShardLoader<'a> {
             .bucket
             .get(key)
             .range(worker::Range::Suffix {
-                suffix: suffix_size,
+                suffix: FOOTER_SUFFIX_SIZE,
             })
             .execute()
             .await?;
@@ -705,11 +703,7 @@ impl<'a> ShardLoader<'a> {
         };
 
         // Step 1: Suffix read to get footer + file size (cached at edge for 1hr).
-        const FOOTER_SUFFIX_SIZE: u64 = 32768;
-        let (file_size, tail_bytes) = match self
-            .cached_suffix_read(&shard_key, FOOTER_SUFFIX_SIZE)
-            .await?
-        {
+        let (file_size, tail_bytes) = match self.cached_suffix_read(&shard_key).await? {
             Some(result) => result,
             None => return Ok(None),
         };
