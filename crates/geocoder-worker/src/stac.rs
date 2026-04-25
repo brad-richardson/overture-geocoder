@@ -703,9 +703,18 @@ impl<'a> ShardLoader<'a> {
         };
 
         // Step 1: Suffix read to get footer + file size (cached at edge for 1hr).
+        // Missing shard is reported as a retriable error (not Ok(None)) so the
+        // version-fallback macro retries the prior version. This handles the
+        // window where catalog.json points at a new version whose id-index
+        // parquets haven't finished uploading yet.
         let (file_size, tail_bytes) = match self.cached_suffix_read(&shard_key).await? {
             Some(result) => result,
-            None => return Ok(None),
+            None => {
+                return Err(Error::RustError(format!(
+                    "id-index shard {} not found",
+                    shard_key
+                )))
+            }
         };
         let tail_len = tail_bytes.len() as u64;
         let tail_offset = file_size - tail_len;
@@ -1257,6 +1266,13 @@ mod tests {
         assert!(is_retriable_error(&e));
 
         let e = Error::RustError("Item 2026-02-25.0/items/US.json not found".into());
+        assert!(is_retriable_error(&e));
+
+        // The id-lookup path raises this when a version's id-index parquet
+        // hasn't been uploaded yet — it must be retriable so the version
+        // fallback macro tries the prior version's index.
+        let e =
+            Error::RustError("id-index shard 2026-04-25.0/id-index/abc.parquet not found".into());
         assert!(is_retriable_error(&e));
     }
 
