@@ -168,11 +168,19 @@ pub fn match_quality(primary_name: &str, query: &str) -> f64 {
         };
     }
 
+    // Partial-overlap credit requires a meaningful shared prefix. Without
+    // the floor, a 2-char accident ("ge") lets Gelsenkirchen outscore
+    // Deutschland for the query "germany" (alt-name matches legitimately
+    // score 0 here and must win on importance instead).
+    const MIN_MEANINGFUL_LCP: usize = 3;
     let lcp = display
         .chars()
         .zip(query.chars())
         .take_while(|(a, b)| a == b)
         .count();
+    if lcp < MIN_MEANINGFUL_LCP {
+        return 0.0;
+    }
     0.8 * lcp as f64 / query.chars().count() as f64
 }
 
