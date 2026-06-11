@@ -84,6 +84,11 @@ COPY (
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division_area/*',
             hive_partitioning = true
         )
+        -- Match the divisions CTE's subtype filter BEFORE the window
+        -- function: without it, geometry/area is computed and sorted for
+        -- millions of locality/neighborhood polygons that the final join
+        -- discards anyway - that working set is what OOMed DuckDB 1.5.
+        WHERE subtype IN ('country', 'region', 'county')
     ),
     areas AS (
         SELECT division_id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area

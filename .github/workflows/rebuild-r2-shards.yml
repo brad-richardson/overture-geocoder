@@ -139,11 +139,11 @@ jobs:
 
       - name: Install DuckDB CLI
         run: |
-          # Deliberately NOT matched to the Python duckdb version: 1.5.x
-          # OOMs on the reverse divisions spatial join (large polygon
-          # geometries in scalar ops, unspillable) where 1.1.3 completes it
-          # within the 16GB runner. Revisit when upgrading the download SQL.
-          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-aarch64.zip
+          # Pinned to the same version as the Python duckdb package below.
+          # Do NOT downgrade below 1.5: older duckdb writes id-index parquet
+          # the worker's positional/stats-based reader can't use (the reason
+          # for the original 1.5.1 pin in 6ada977).
+          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.5.1/duckdb_cli-linux-arm64.zip
           unzip duckdb.zip
           sudo mv duckdb /usr/local/bin/
           duckdb --version
