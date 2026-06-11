@@ -20,7 +20,10 @@ LOAD spatial;
 
 -- Configure S3 for anonymous access (Overture is public)
 SET s3_region = 'us-west-2';
-SET memory_limit = '8GB';
+SET memory_limit = '12GB';
+-- Output row order is irrelevant (shard builds re-query); preserving
+-- insertion order is the main memory amplifier in COPY under DuckDB 1.5.
+SET preserve_insertion_order = false;
 
 .timer on
 

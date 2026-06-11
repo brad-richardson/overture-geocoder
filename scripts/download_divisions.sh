@@ -47,7 +47,9 @@ if [ ! -f "$PROJECT_DIR/exports/divisions-global.parquet" ]; then
     exit 1
 fi
 
-ROW_COUNT=$(duckdb -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/divisions-global.parquet')" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+# -csv -noheader: the default box output includes the column type ("int64"),
+# which a naive first-number grep matches instead of the count.
+ROW_COUNT=$(duckdb -csv -noheader -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/divisions-global.parquet')" 2>/dev/null | tr -d '[:space:]')
 if [ -z "$ROW_COUNT" ] || [ "$ROW_COUNT" -eq 0 ]; then
     echo "ERROR: No data returned - release $RELEASE may be expired (data removed after 90 days)"
     exit 1
@@ -65,7 +67,7 @@ if [ ! -f "$PROJECT_DIR/exports/divisions-reverse.parquet" ]; then
     exit 1
 fi
 
-REVERSE_COUNT=$(duckdb -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/divisions-reverse.parquet')" 2>/dev/null | grep -oE '[0-9]+' | head -1)
+REVERSE_COUNT=$(duckdb -csv -noheader -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/divisions-reverse.parquet')" 2>/dev/null | tr -d '[:space:]')
 echo "Reverse geocoding: exports/divisions-reverse.parquet ($REVERSE_COUNT rows)"
 
 echo "Done!"

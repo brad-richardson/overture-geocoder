@@ -227,6 +227,11 @@ def partition_by_country(
         GROUP BY country
     """).fetchall())
 
+    # Partitioned COPY keeps a write buffer per country; row order within
+    # partitions is irrelevant (shard builds re-query), and preserving
+    # insertion order is the main memory amplifier in COPY.
+    con.execute("SET preserve_insertion_order = false;")
+
     # WRITE_PARTITION_COLUMNS keeps the country column in the data files so
     # downstream shard builders see the exact same schema as the global file.
     con.execute(f"""

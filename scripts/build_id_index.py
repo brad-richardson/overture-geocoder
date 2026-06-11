@@ -370,26 +370,36 @@ def phase_partition_r2(prefix_len, r2_config, version,
     bucket = r2_config["bucket"]
     dest = f"s3://{bucket}/{version}/staging/id-partitioned"
 
+    # A partitioned COPY keeps a write buffer per active partition. With up
+    # to 1024 partitions per range job that OOMs the runner, so each range
+    # is split into sub-ranges (~SUB_RANGE_PARTITIONS partitions per COPY).
+    SUB_RANGE_PARTITIONS = 128
+
     if prefixes is not None:
         # Explicit prefix list (smoke test / patching): prefix-LIKE filters
         # keep predicate pushdown on the sorted registry parquet.
         like_filters = " OR ".join(f"id LIKE '{p}%'" for p in prefixes)
-        range_filter = f"AND ({like_filters})"
-        label = f"{len(prefixes)} explicit prefixes"
+        sub_ranges = [(f"({like_filters})", f"{len(prefixes)} explicit prefixes")]
+        label = sub_ranges[0][1]
     elif prefix_start and prefix_end:
         # IDs are lowercase hex UUID strings; for prefix_len <= 8 the first
         # prefix_len chars precede the first hyphen, so plain string bounds
         # cover the range (and push down to row-group stats).
-        cond = f"id >= '{prefix_start}'"
-        upper_idx = int(prefix_end, 16) + 1
-        if upper_idx < 16 ** prefix_len:
-            upper = format(upper_idx, f'0{prefix_len}x')
-            cond += f" AND id < '{upper}'"
-        range_filter = f"AND {cond}"
-        label = f"range {prefix_start}-{prefix_end}"
+        lo, hi = int(prefix_start, 16), int(prefix_end, 16)
+        sub_ranges = []
+        for sub_lo in range(lo, hi + 1, SUB_RANGE_PARTITIONS):
+            sub_hi = min(sub_lo + SUB_RANGE_PARTITIONS - 1, hi)
+            cond = f"id >= '{format(sub_lo, f'0{prefix_len}x')}'"
+            upper_idx = sub_hi + 1
+            if upper_idx < 16 ** prefix_len:
+                upper = format(upper_idx, f'0{prefix_len}x')
+                cond += f" AND id < '{upper}'"
+            sub_ranges.append(
+                (cond, f"{format(sub_lo, f'0{prefix_len}x')}-{format(sub_hi, f'0{prefix_len}x')}")
+            )
+        label = f"range {prefix_start}-{prefix_end} ({len(sub_ranges)} sub-ranges)"
     else:
-        range_filter = ""
-        label = "all prefixes"
+        raise ValueError("registry staging requires --prefixes or a prefix range")
 
     # Re-run safety: remove leftovers from a previous partial attempt
     _clear_staged_registry(r2_config, version, prefix_len,
@@ -400,26 +410,31 @@ def phase_partition_r2(prefix_len, r2_config, version,
     t0 = time.time()
 
     con = _r2_con(r2_config)
-    con.execute("SET memory_limit = '8GB';")
+    con.execute("SET memory_limit = '10GB';")
+    # Staged file order is irrelevant (the build phase re-sorts), and
+    # preserving insertion order is the main memory amplifier in COPY.
+    con.execute("SET preserve_insertion_order = false;")
     con.execute("SET s3_region = 'us-west-2';")
 
-    def _do_copy():
-        con.execute(f"""
-            COPY (
-                SELECT
-                    id::UUID as id,
-                    bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
-                    bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
-                    lower(left(replace(id, '-', ''), {prefix_len})) as prefix
-                FROM read_parquet('{REGISTRY_S3}*')
-                WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
-                {range_filter}
-            ) TO '{dest}'
-            (FORMAT PARQUET, COMPRESSION ZSTD,
-             PARTITION_BY (prefix), OVERWRITE_OR_IGNORE true);
-        """)
+    for sub_filter, sub_label in sub_ranges:
+        def _do_copy(sub_filter=sub_filter):
+            con.execute(f"""
+                COPY (
+                    SELECT
+                        id::UUID as id,
+                        bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
+                        bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
+                        lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+                    FROM read_parquet('{REGISTRY_S3}*')
+                    WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+                    AND {sub_filter}
+                ) TO '{dest}'
+                (FORMAT PARQUET, COMPRESSION ZSTD,
+                 PARTITION_BY (prefix), OVERWRITE_OR_IGNORE true);
+            """)
 
-    _retry_transient(_do_copy)()
+        _retry_transient(_do_copy)()
+        print(f"  [registry]   sub-range {sub_label} done")
     con.close()
 
     elapsed = time.time() - t0
