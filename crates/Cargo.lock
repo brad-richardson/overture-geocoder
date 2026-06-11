@@ -290,7 +290,7 @@ dependencies = [
 
 [[package]]
 name = "geocoder-cli"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "anyhow",
  "geocoder-core",
@@ -299,9 +299,8 @@ dependencies = [
 
 [[package]]
 name = "geocoder-core"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
- "js-sys",
  "pretty_assertions",
  "rusqlite",
  "serde",
@@ -311,7 +310,7 @@ dependencies = [
 
 [[package]]
 name = "geocoder-worker"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "bytes",
  "console_error_panic_hook",

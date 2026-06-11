@@ -1,13 +1,16 @@
 //! Request handlers for geocoding endpoints.
 
-use geocoder_core::{GeocoderQuery, GeocoderResult, LocationBias};
+use geocoder_core::{GeocoderQuery, GeocoderResult, LocationBias, ReverseResult};
 use serde::Serialize;
 use worker::*;
 
-use crate::stac::{SearchDebugInfo, ShardLoader, UserLocation};
+use crate::stac::{SearchDebugInfo, ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
 
 /// Search request handler.
-pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn handle_search(
+    req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
     let url = req.url()?;
     let params: std::collections::HashMap<String, String> = url
         .query_pairs()
@@ -77,7 +80,7 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
         .with_bias(bias);
 
     // Load shards and search
-    let loader = ShardLoader::new(&ctx.env)?;
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let search_result = loader.search(&query, &user_location, include_debug).await?;
 
     // Format response
@@ -88,7 +91,10 @@ pub async fn handle_search(req: Request, ctx: RouteContext<()>) -> Result<Respon
 }
 
 /// Reverse geocoding handler.
-pub async fn handle_reverse(req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn handle_reverse(
+    req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
     let url = req.url()?;
     let params: std::collections::HashMap<String, String> = url
         .query_pairs()
@@ -107,28 +113,36 @@ pub async fn handle_reverse(req: Request, ctx: RouteContext<()>) -> Result<Respo
         None => return Response::error("Missing or invalid parameter: lon", 400),
     };
 
+    let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
+
     // Get country from Cloudflare headers
     let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
 
     // Load shards and reverse geocode
-    let loader = ShardLoader::new(&ctx.env)?;
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let result = loader
         .reverse_geocode(lat, lon, cf_country.as_deref())
         .await?;
 
     match result {
-        Some(r) => {
-            let mut resp = Response::from_json(&r)?;
-            resp.headers_mut()
-                .set("Content-Type", "application/json; charset=utf-8")?;
-            Ok(resp)
-        }
+        Some(r) => match format {
+            "geojson" => reverse_to_geojson_response(&r),
+            _ => {
+                let mut resp = Response::from_json(&r)?;
+                resp.headers_mut()
+                    .set("Content-Type", "application/json; charset=utf-8")?;
+                Ok(resp)
+            }
+        },
         None => Response::error("No results found for coordinates", 404),
     }
 }
 
 /// GERS ID lookup handler.
-pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
+pub async fn handle_id_lookup(
+    _req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
     let gers_id = ctx
         .param("gers_id")
         .ok_or_else(|| Error::RustError("Missing gers_id parameter".into()))?
@@ -139,7 +153,7 @@ pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Re
         return Response::error("Invalid GERS ID: must be 2-64 characters", 400);
     }
 
-    let loader = ShardLoader::new(&ctx.env)?;
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let result = loader.lookup_id(&gers_id).await;
 
     match result {
@@ -153,9 +167,10 @@ pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Re
         }
         Ok(None) => Response::error("GERS ID not found", 404),
         Err(e) => {
-            // If id-collection.json is not found, the feature isn't deployed yet
+            // All versions exhausted with the index/metadata missing: the
+            // id-index isn't deployed. 503 tells clients to retry later.
             let err_msg = format!("{:?}", e);
-            if err_msg.contains("id-collection.json not found") {
+            if err_msg.contains(NOT_FOUND_SENTINEL) && err_msg.contains("id-index") {
                 return Response::error("ID index not available", 503);
             }
             Err(e)
@@ -164,8 +179,11 @@ pub async fn handle_id_lookup(_req: Request, ctx: RouteContext<()>) -> Result<Re
 }
 
 /// Health check handler: verifies catalog and version availability.
-pub async fn handle_health(_req: Request, ctx: RouteContext<()>) -> Result<Response> {
-    let loader = crate::stac::ShardLoader::new(&ctx.env)?;
+pub async fn handle_health(
+    _req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     match loader.check_health().await {
         Ok(version) => {
             let json = serde_json::json!({
@@ -220,7 +238,9 @@ fn to_json_response(
             lat: r.lat,
             lon: r.lon,
             bbox: r.bbox,
-            importance: r.importance,
+            // Importance is unclamped through the ranking pipeline so bias
+            // can reorder saturated results; clamp to 0-1 for the API.
+            importance: r.importance.clamp(0.0, 1.0),
             country: r.country.clone(),
             region: r.region.clone(),
         })
@@ -256,7 +276,7 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
                     "gers_id": r.gers_id,
                     "name": r.primary_name,
                     "type": r.division_type,
-                    "importance": r.importance,
+                    "importance": r.importance.clamp(0.0, 1.0),
                     "country": r.country,
                     "region": r.region,
                 },
@@ -268,6 +288,33 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
     let geojson = serde_json::json!({
         "type": "FeatureCollection",
         "features": features
+    });
+
+    let mut resp = Response::from_json(&geojson)?;
+    resp.headers_mut()
+        .set("Content-Type", "application/geo+json; charset=utf-8")?;
+    Ok(resp)
+}
+
+fn reverse_to_geojson_response(result: &ReverseResult) -> Result<Response> {
+    let geojson = serde_json::json!({
+        "type": "FeatureCollection",
+        "features": [{
+            "type": "Feature",
+            "geometry": {
+                "type": "Point",
+                "coordinates": [result.lon, result.lat]
+            },
+            "properties": {
+                "gers_id": result.gers_id,
+                "name": result.primary_name,
+                "subtype": result.subtype,
+                "distance_km": result.distance_km,
+                "confidence": result.confidence,
+                "hierarchy": result.hierarchy,
+            },
+            "bbox": result.bbox
+        }]
     });
 
     let mut resp = Response::from_json(&geojson)?;

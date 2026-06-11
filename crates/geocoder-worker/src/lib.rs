@@ -8,7 +8,7 @@ mod handlers;
 mod stac;
 
 #[event(fetch)]
-async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
+async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     console_error_panic_hook::set_once();
 
     // Handle CORS preflight requests
@@ -46,20 +46,34 @@ async fn fetch(req: Request, env: Env, _ctx: Context) -> Result<Response> {
         }
     }
 
-    let router = Router::new();
+    // Context rides along as router data so handlers can schedule
+    // background cache writes via waitUntil.
+    let router = Router::with_data(std::rc::Rc::new(ctx));
 
-    let mut response = router
+    let result = router
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
         .get_async("/id/:gers_id", handlers::handle_id_lookup)
         .get_async("/health", handlers::handle_health)
         .get("/", |_, _| {
-            Response::ok(
-                r#"{"name":"overture-geocoder","version":"0.3.0","endpoints":["/search","/reverse","/id/:id"]}"#,
-            )
+            Response::ok(concat!(
+                r#"{"name":"overture-geocoder","version":""#,
+                env!("CARGO_PKG_VERSION"),
+                r#"","endpoints":["/search","/reverse","/id/:id"]}"#,
+            ))
         })
         .run(req, env)
-        .await?;
+        .await;
+
+    // Handler errors become 500s here (rather than via `?`) so browser
+    // clients still get the CORS header instead of an opaque CORS failure.
+    let mut response = match result {
+        Ok(response) => response,
+        Err(e) => {
+            console_error!("Unhandled error: {:?}", e);
+            Response::error("Internal error", 500)?
+        }
+    };
 
     // Add CORS header
     response

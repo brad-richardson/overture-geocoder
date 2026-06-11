@@ -1,7 +1,12 @@
 //! STAC catalog loading and shard management with edge caching.
 
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
+
 use bytes::Bytes;
 use geocoder_core::{
+    geo::haversine_distance,
     query::{apply_exact_match_bonus, apply_location_bias},
     Database, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias, ReverseResult,
 };
@@ -12,8 +17,9 @@ use worker::*;
 
 // Cache TTLs for different resource types
 const CATALOG_CACHE_TTL: u64 = 300; // 5 minutes - need fresh version pointers
-const COLLECTION_CACHE_TTL: u64 = 300; // 5 minutes - contains shard list
-const SHARD_CACHE_TTL: u64 = 3600; // 1 hour - versioned paths = natural invalidation
+                                    // Everything under a {version}/ prefix is immutable (versioned paths =
+                                    // natural invalidation), so cache it at the edge for a week.
+const IMMUTABLE_CACHE_TTL: u64 = 7 * 24 * 3600;
 
 // Cache key prefix (uses custom domain for Cache API to work)
 const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
@@ -23,6 +29,35 @@ const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
 const MAX_LOCATION_SHARDS: usize = 4; // Max shards to load (excluding HEAD)
 const MAX_VERSION_ATTEMPTS: usize = 3; // Max versions to try (latest + fallbacks)
 const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for missing objects
+
+// Isolate-level (in-memory) cache limits. Workers isolates persist across
+// requests; keeping deserialized shard databases in memory lets warm
+// requests skip the Cache API round trip and the SQLite deserialize copy.
+const DB_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+const DB_CACHE_MAX_ENTRIES: usize = 4;
+// Catalog/collection JSON memo TTL. Short: this bounds how stale the
+// version pointer can be within one isolate.
+const TEXT_MEMO_TTL_MS: u64 = 60_000;
+
+thread_local! {
+    /// Deserialized shard databases keyed by versioned R2 key (immutable
+    /// content). Vec ordered LRU-last; evicted by byte budget + entry count.
+    static DB_CACHE: RefCell<Vec<(String, Rc<Database>, usize)>> =
+        const { RefCell::new(Vec::new()) };
+    /// Small JSON texts (catalog/collections/id-meta) with expiry timestamps.
+    static TEXT_MEMO: RefCell<HashMap<String, (Option<String>, u64)>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Sentinel marking missing-resource errors. Version fallback and the
+/// handlers' 503 mapping key off this exact marker rather than matching
+/// arbitrary error prose (which risked false positives/negatives).
+pub const NOT_FOUND_SENTINEL: &str = "[not-found]";
+
+/// Build a missing-resource error that triggers version fallback.
+fn not_found(what: impl std::fmt::Display) -> Error {
+    Error::RustError(format!("{} {}", NOT_FOUND_SENTINEL, what))
+}
 
 /// User location derived from Cloudflare request headers.
 #[derive(Debug, Clone, Default)]
@@ -103,11 +138,12 @@ pub struct SearchResult {
 }
 
 /// Loads and caches shards from R2 with edge caching via Cache API.
-pub struct ShardLoader<'a> {
-    #[allow(dead_code)]
-    env: &'a Env,
+pub struct ShardLoader {
     bucket: Bucket,
     cache: Cache,
+    /// Execution context for background cache writes via waitUntil.
+    /// When absent, cache writes happen inline (slower, but correct).
+    ctx: Option<Rc<Context>>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -188,12 +224,12 @@ struct StacAsset {
 
 /// Check if an error indicates a missing resource that should trigger version fallback.
 ///
-/// Only "not found" errors are retriable — these indicate a version whose data hasn't
-/// been fully deployed yet. Operational errors (database corruption, query failures,
-/// parse errors) are surfaced immediately to avoid silently serving stale data.
+/// Only missing-resource errors (built via [`not_found`]) are retriable — these
+/// indicate a version whose data hasn't been fully deployed yet. Operational
+/// errors (database corruption, query failures, parse errors) are surfaced
+/// immediately to avoid silently serving stale data.
 fn is_retriable_error(e: &Error) -> bool {
-    let msg = format!("{:?}", e);
-    msg.contains("not found")
+    format!("{:?}", e).contains(NOT_FOUND_SENTINEL)
 }
 
 /// Run an async operation with version fallback.
@@ -240,11 +276,44 @@ macro_rules! with_version_fallback {
     }};
 }
 
-impl<'a> ShardLoader<'a> {
-    pub fn new(env: &'a Env) -> Result<Self> {
+impl ShardLoader {
+    pub fn new(env: &Env) -> Result<Self> {
         let bucket = env.bucket("SHARDS_BUCKET")?;
         let cache = Cache::default();
-        Ok(Self { env, bucket, cache })
+        Ok(Self {
+            bucket,
+            cache,
+            ctx: None,
+        })
+    }
+
+    /// Create a loader that performs cache writes in the background via
+    /// `waitUntil`, keeping multi-MB cache.put calls off the critical path.
+    pub fn with_context(env: &Env, ctx: Rc<Context>) -> Result<Self> {
+        let mut loader = Self::new(env)?;
+        loader.ctx = Some(ctx);
+        Ok(loader)
+    }
+
+    /// Write a response to the edge cache, off the critical path via
+    /// `waitUntil` when an execution context is available (best effort
+    /// either way; inline await otherwise).
+    async fn cache_put_background(&self, cache_key: String, response: Response) {
+        let put = async move {
+            let cache = Cache::default();
+            match Request::new(&cache_key, Method::Get) {
+                Ok(request) => {
+                    if let Err(e) = cache.put(&request, response).await {
+                        console_log!("Cache PUT failed for {}: {:?}", cache_key, e);
+                    }
+                }
+                Err(e) => console_log!("Cache PUT request build failed: {:?}", e),
+            }
+        };
+        match &self.ctx {
+            Some(ctx) => ctx.wait_until(put),
+            None => put.await,
+        }
     }
 
     /// Lightweight health check: verify catalog loads and latest version exists.
@@ -287,18 +356,11 @@ impl<'a> ShardLoader<'a> {
                 .ok_or_else(|| Error::RustError("Empty object".into()))?;
             let bytes = body.bytes().await?;
 
-            // Store in cache with TTL (non-blocking via waitUntil would be ideal, but for now inline)
             let headers = Headers::new();
             headers.set("Cache-Control", &format!("s-maxage={}", ttl))?;
             headers.set("Content-Type", "application/octet-stream")?;
-
             let cache_response = Response::from_bytes(bytes.clone())?.with_headers(headers);
-            let cache_request = Request::new(&cache_key, Method::Get)?;
-
-            // Put in cache (best effort, don't fail the request if caching fails)
-            if let Err(e) = self.cache.put(&cache_request, cache_response).await {
-                console_log!("Cache PUT failed for {}: {:?}", key, e);
-            }
+            self.cache_put_background(cache_key, cache_response).await;
 
             return Ok(Some(bytes));
         }
@@ -309,12 +371,86 @@ impl<'a> ShardLoader<'a> {
         neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
         neg_headers.set("Content-Type", "application/octet-stream")?;
         let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
-        let neg_request = Request::new(&cache_key, Method::Get)?;
-        if let Err(e) = self.cache.put(&neg_request, neg_response).await {
-            console_log!("Negative cache PUT failed for {}: {:?}", key, e);
-        }
+        self.cache_put_background(cache_key, neg_response).await;
 
         Ok(None)
+    }
+
+    /// Range-read part of an R2 object with edge caching (immutable TTL).
+    /// Used for parquet row groups, which are re-read often by ID lookups.
+    async fn cached_range_read(
+        &self,
+        key: &str,
+        offset: u64,
+        length: u64,
+    ) -> Result<Option<Bytes>> {
+        let cache_key = format!("{}{}__r{}-{}", CACHE_PREFIX, key, offset, length);
+
+        let request = Request::new(&cache_key, Method::Get)?;
+        if let Some(mut response) = self.cache.get(&request, false).await? {
+            let bytes = response.bytes().await?;
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            console_log!("Cache HIT range: {} ({}..{})", key, offset, offset + length);
+            return Ok(Some(Bytes::from(bytes)));
+        }
+
+        let obj = self
+            .bucket
+            .get(key)
+            .range(worker::Range::OffsetWithLength { offset, length })
+            .execute()
+            .await?;
+        let Some(obj) = obj else {
+            let neg_headers = Headers::new();
+            neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
+            let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
+            self.cache_put_background(cache_key, neg_response).await;
+            return Ok(None);
+        };
+        let body = obj
+            .body()
+            .ok_or_else(|| Error::RustError("Empty range body".into()))?;
+        let bytes = body.bytes().await?;
+
+        let headers = Headers::new();
+        headers.set(
+            "Cache-Control",
+            &format!("s-maxage={}", IMMUTABLE_CACHE_TTL),
+        )?;
+        headers.set("Content-Type", "application/octet-stream")?;
+        let cache_response = Response::from_bytes(bytes.clone())?.with_headers(headers);
+        self.cache_put_background(cache_key, cache_response).await;
+
+        Ok(Some(Bytes::from(bytes)))
+    }
+
+    /// Fetch small JSON text with an isolate-level memo in front of the edge
+    /// cache. Saves a Cache API round trip per request for catalog/collection
+    /// metadata; the memo TTL bounds staleness within an isolate.
+    async fn memoized_get_text(&self, key: &str, ttl: u64) -> Result<Option<String>> {
+        let now = Date::now().as_millis();
+        let memoized = TEXT_MEMO.with(|memo| {
+            memo.borrow()
+                .get(key)
+                .filter(|(_, expires)| *expires > now)
+                .map(|(text, _)| text.clone())
+        });
+        if let Some(text) = memoized {
+            return Ok(text);
+        }
+
+        let text = self.cached_get_text(key, ttl).await?;
+        TEXT_MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            // Bound the memo: drop expired entries when it grows.
+            if memo.len() > 64 {
+                memo.retain(|_, (_, expires)| *expires > now);
+            }
+            memo.insert(key.to_string(), (text.clone(), now + TEXT_MEMO_TTL_MS));
+        });
+        Ok(text)
     }
 
     /// Fetch text from R2 with caching.
@@ -333,10 +469,14 @@ impl<'a> ShardLoader<'a> {
     ///
     /// Returns (file_size, tail_bytes) on success, None if the object doesn't exist.
     /// The cache value is: 8 bytes (file_size as u64 LE) + raw suffix bytes.
-    /// Always reads FOOTER_SUFFIX_SIZE (32KB) which covers any reasonable parquet footer.
-    async fn cached_suffix_read(&self, key: &str) -> Result<Option<(u64, Bytes)>> {
-        const FOOTER_SUFFIX_SIZE: u64 = 32768;
-        let cache_key = format!("{}{}__suffix", CACHE_PREFIX, key);
+    /// `suffix_size` defaults to 32KB which covers typical parquet footers;
+    /// callers retry with a larger size when the footer overflows it.
+    async fn cached_suffix_read(
+        &self,
+        key: &str,
+        suffix_size: u64,
+    ) -> Result<Option<(u64, Bytes)>> {
+        let cache_key = format!("{}{}__suffix{}", CACHE_PREFIX, key, suffix_size);
 
         // Try cache first
         let request = Request::new(&cache_key, Method::Get)?;
@@ -361,7 +501,7 @@ impl<'a> ShardLoader<'a> {
             .bucket
             .get(key)
             .range(worker::Range::Suffix {
-                suffix: FOOTER_SUFFIX_SIZE,
+                suffix: suffix_size,
             })
             .execute()
             .await?;
@@ -373,8 +513,7 @@ impl<'a> ShardLoader<'a> {
                 neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
                 neg_headers.set("Content-Type", "application/octet-stream")?;
                 let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
-                let neg_request = Request::new(&cache_key, Method::Get)?;
-                let _ = self.cache.put(&neg_request, neg_response).await;
+                self.cache_put_background(cache_key, neg_response).await;
                 return Ok(None);
             }
         };
@@ -390,13 +529,13 @@ impl<'a> ShardLoader<'a> {
         cache_bytes.extend_from_slice(&tail_bytes);
 
         let headers = Headers::new();
-        headers.set("Cache-Control", &format!("s-maxage={}", SHARD_CACHE_TTL))?;
+        headers.set(
+            "Cache-Control",
+            &format!("s-maxage={}", IMMUTABLE_CACHE_TTL),
+        )?;
         headers.set("Content-Type", "application/octet-stream")?;
         let cache_response = Response::from_bytes(cache_bytes)?.with_headers(headers);
-        let cache_request = Request::new(&cache_key, Method::Get)?;
-        if let Err(e) = self.cache.put(&cache_request, cache_response).await {
-            console_log!("Cache PUT failed for suffix {}: {:?}", key, e);
-        }
+        self.cache_put_background(cache_key, cache_response).await;
 
         Ok(Some((file_size, tail_bytes)))
     }
@@ -425,34 +564,34 @@ impl<'a> ShardLoader<'a> {
     ) -> Result<SearchResult> {
         let collection = self.load_collection(version).await?;
 
-        // Track loaded shards for debug
-        let mut shards_loaded = Vec::new();
-
-        // Query HEAD shard (required - fail triggers version fallback)
-        let (head_results, head_info) = self
-            .query_shard_with_info(version, "HEAD", &collection, query)
-            .await?;
-        let mut all_results = head_results;
-        if include_debug {
-            shards_loaded.push(head_info);
-        }
-
         // Select nearby shards based on user location
         let nearby_shards = self.select_nearby_shards(&collection, user_location);
         console_log!("Selected shards: {:?}", nearby_shards);
 
-        // Query each nearby shard (non-fatal failures)
-        for shard_id in nearby_shards {
-            match self
-                .query_shard_with_info(version, &shard_id, &collection, query)
-                .await
-            {
+        // Load and query HEAD + nearby shards concurrently so the network
+        // fetches overlap instead of summing (the SQLite queries themselves
+        // are CPU work and serialize naturally on the single wasm thread).
+        let mut shard_ids = vec!["HEAD".to_string()];
+        shard_ids.extend(nearby_shards);
+        let outcomes = futures::future::join_all(
+            shard_ids
+                .iter()
+                .map(|shard_id| self.query_shard_with_info(version, shard_id, &collection, query)),
+        )
+        .await;
+
+        let mut all_results = Vec::new();
+        let mut shards_loaded = Vec::new();
+        for (shard_id, outcome) in shard_ids.iter().zip(outcomes) {
+            match outcome {
                 Ok((results, info)) => {
                     all_results.extend(results);
                     if include_debug {
                         shards_loaded.push(info);
                     }
                 }
+                // HEAD shard is required - failure triggers version fallback
+                Err(e) if shard_id == "HEAD" => return Err(e),
                 Err(e) => {
                     console_log!("Warning: shard {} unavailable: {:?}", shard_id, e);
                 }
@@ -624,6 +763,57 @@ impl<'a> ShardLoader<'a> {
             .await
     }
 
+    /// Load a shard database, preferring the isolate-level cache, then the
+    /// edge cache, then R2. Returns the database and its serialized size.
+    async fn load_shard_db(&self, shard_key: &str) -> Result<(Rc<Database>, usize)> {
+        let cached = DB_CACHE.with(|c| {
+            let mut cache = c.borrow_mut();
+            cache
+                .iter()
+                .position(|(k, _, _)| k == shard_key)
+                .map(|pos| {
+                    // Move to MRU position (end of the Vec)
+                    let entry = cache.remove(pos);
+                    let hit = (Rc::clone(&entry.1), entry.2);
+                    cache.push(entry);
+                    hit
+                })
+        });
+        if let Some((db, size)) = cached {
+            console_log!("DB cache HIT: {}", shard_key);
+            return Ok((db, size));
+        }
+
+        let shard_bytes = self
+            .cached_get(shard_key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(format!("shard {}", shard_key)))?;
+        let size = shard_bytes.len();
+
+        let db = Rc::new(Database::from_bytes(&shard_bytes).map_err(|e| {
+            Error::RustError(format!(
+                "Failed to open shard database {}: {}",
+                shard_key, e
+            ))
+        })?);
+        drop(shard_bytes);
+
+        DB_CACHE.with(|c| {
+            let mut cache = c.borrow_mut();
+            cache.push((shard_key.to_string(), Rc::clone(&db), size));
+            // Evict from the LRU end; always keep the entry just inserted.
+            while cache.len() > 1
+                && (cache.len() > DB_CACHE_MAX_ENTRIES
+                    || cache.iter().map(|(_, _, s)| *s).sum::<usize>() > DB_CACHE_MAX_BYTES)
+            {
+                let (evicted, _, _) = cache.remove(0);
+                console_log!("DB cache evict: {}", evicted);
+            }
+        });
+
+        Ok((db, size))
+    }
+
     async fn query_reverse_shard(
         &self,
         version: &str,
@@ -633,35 +823,13 @@ impl<'a> ShardLoader<'a> {
         lon: f64,
     ) -> Result<Option<ReverseResult>> {
         // Get item metadata from embedded items in reverse-collection.json
-        let (shard_href, record_count) =
-            if let Some(item) = self.get_embedded_item(collection, shard_id) {
-                (item.href.clone(), item.record_count)
-            } else {
-                return Err(Error::RustError(format!(
-                    "Reverse shard {} not found in collection",
-                    shard_id
-                )));
-            };
+        let shard_href = self
+            .get_embedded_item(collection, shard_id)
+            .map(|item| item.href.clone())
+            .ok_or_else(|| not_found(format!("reverse shard {} in collection", shard_id)))?;
 
-        // Load the actual reverse shard database (cached)
         let shard_key = format!("{}/{}", version, shard_href.trim_start_matches("./"));
-
-        let shard_bytes = self
-            .cached_get(&shard_key, SHARD_CACHE_TTL)
-            .await?
-            .ok_or_else(|| Error::RustError(format!("Reverse shard {} not found", shard_key)))?;
-
-        console_log!(
-            "Loading reverse shard {} ({} bytes, {} records)",
-            shard_id,
-            shard_bytes.len(),
-            record_count
-        );
-
-        // Open the SQLite database from bytes and query it
-        let db = Database::from_bytes(&shard_bytes).map_err(|e| {
-            Error::RustError(format!("Failed to open reverse shard database: {}", e))
-        })?;
+        let (db, _) = self.load_shard_db(&shard_key).await?;
 
         let result = db
             .reverse_geocode(lat, lon)
@@ -702,22 +870,19 @@ impl<'a> ShardLoader<'a> {
             None => return Ok(None),
         };
 
-        // Step 1: Suffix read to get footer + file size (cached at edge for 1hr).
+        // Step 1: Suffix read to get footer + file size (cached at edge).
         // Missing shard is reported as a retriable error (not Ok(None)) so the
         // version-fallback macro retries the prior version. This handles the
         // window where catalog.json points at a new version whose id-index
         // parquets haven't finished uploading yet.
-        let (file_size, tail_bytes) = match self.cached_suffix_read(&shard_key).await? {
+        const FOOTER_SUFFIX_SIZE: u64 = 32768;
+        let (file_size, mut tail_bytes) = match self
+            .cached_suffix_read(&shard_key, FOOTER_SUFFIX_SIZE)
+            .await?
+        {
             Some(result) => result,
-            None => {
-                return Err(Error::RustError(format!(
-                    "id-index shard {} not found",
-                    shard_key
-                )))
-            }
+            None => return Err(not_found(format!("id-index shard {}", shard_key))),
         };
-        let tail_len = tail_bytes.len() as u64;
-        let tail_offset = file_size - tail_len;
 
         // Step 2: Parse parquet footer from the tail bytes
         if tail_bytes.len() < 8 {
@@ -734,12 +899,31 @@ impl<'a> ShardLoader<'a> {
                 .unwrap(),
         ) as usize;
         if metadata_len + 8 > tail_bytes.len() {
-            return Err(Error::RustError(format!(
-                "Footer too large ({} bytes), only fetched {}",
+            // Footer larger than the default suffix window: re-read with the
+            // exact size (cached under a size-specific key).
+            console_log!(
+                "Footer {}B exceeds {}B window for {}, re-reading",
                 metadata_len + 8,
-                tail_bytes.len()
-            )));
+                tail_bytes.len(),
+                shard_key
+            );
+            tail_bytes = match self
+                .cached_suffix_read(&shard_key, (metadata_len + 8) as u64)
+                .await?
+            {
+                Some((_, bytes)) => bytes,
+                None => return Err(not_found(format!("id-index shard {}", shard_key))),
+            };
+            if metadata_len + 8 > tail_bytes.len() {
+                return Err(Error::RustError(format!(
+                    "Footer too large ({} bytes), fetched {}",
+                    metadata_len + 8,
+                    tail_bytes.len()
+                )));
+            }
         }
+        let tail_len = tail_bytes.len() as u64;
+        let tail_offset = file_size - tail_len;
         let metadata_start = tail_bytes.len() - 8 - metadata_len;
         let metadata = parquet::file::metadata::ParquetMetaDataReader::decode_metadata(
             &tail_bytes[metadata_start..metadata_start + metadata_len],
@@ -800,21 +984,11 @@ impl<'a> ShardLoader<'a> {
             let local_start = (rg_start - tail_offset) as usize;
             tail_bytes.slice(local_start..local_start + rg_length as usize)
         } else {
-            // Range read just this row group from R2
-            let obj = self
-                .bucket
-                .get(&shard_key)
-                .range(worker::Range::OffsetWithLength {
-                    offset: rg_start,
-                    length: rg_length,
-                })
-                .execute()
+            // Range read just this row group, edge-cached: bulk ID resolvers
+            // hit the same row group repeatedly and shouldn't re-pay R2.
+            self.cached_range_read(&shard_key, rg_start, rg_length)
                 .await?
-                .ok_or_else(|| Error::RustError("Row group fetch failed".into()))?;
-            let body = obj
-                .body()
-                .ok_or_else(|| Error::RustError("Empty row group body".into()))?;
-            Bytes::from(body.bytes().await?)
+                .ok_or_else(|| not_found(format!("id-index shard {}", shard_key)))?
         };
 
         // Step 6: Build a RangeChunkReader backed by our pre-fetched ranges,
@@ -836,6 +1010,10 @@ impl<'a> ShardLoader<'a> {
             let id_bytes = row
                 .get_bytes(0)
                 .map_err(|e| Error::RustError(format!("Bad UUID column: {}", e)))?;
+            // Rows are sorted by UUID; once past the target it can't appear.
+            if id_bytes.data() > target.as_slice() {
+                return Ok(None);
+            }
             if id_bytes.data() == target.as_slice() {
                 let bbox_xmin = row
                     .get_float(1)
@@ -873,7 +1051,7 @@ impl<'a> ShardLoader<'a> {
         // Try tiny metadata file first (avoids loading multi-MB collection)
         let meta_key = format!("{}/id-meta.json", version);
         if let Some(text) = self
-            .cached_get_text(&meta_key, COLLECTION_CACHE_TTL)
+            .memoized_get_text(&meta_key, IMMUTABLE_CACHE_TTL)
             .await?
         {
             #[derive(Deserialize)]
@@ -890,7 +1068,7 @@ impl<'a> ShardLoader<'a> {
 
         // Fallback: load id-collection.json and extract prefix_len via string search
         let key = format!("{}/id-collection.json", version);
-        if let Some(text) = self.cached_get_text(&key, COLLECTION_CACHE_TTL).await? {
+        if let Some(text) = self.memoized_get_text(&key, IMMUTABLE_CACHE_TTL).await? {
             if let Some(pos) = text.find("\"prefix_len\"") {
                 let rest = &text[pos + "\"prefix_len\"".len()..];
                 let rest = rest
@@ -907,16 +1085,22 @@ impl<'a> ShardLoader<'a> {
             }
         }
 
-        Ok(3) // default
+        // Both metadata files missing: the id-index isn't deployed for this
+        // version. Surface a retriable not-found (so version fallback engages)
+        // rather than guessing a shard layout and returning clean 404s.
+        Err(not_found(format!(
+            "id-index metadata for version {}",
+            version
+        )))
     }
 
     /// Load the reverse collection for a given version.
     async fn load_reverse_collection(&self, version: &str) -> Result<StacCollection> {
         let key = format!("{}/reverse-collection.json", version);
         let text = self
-            .cached_get_text(&key, COLLECTION_CACHE_TTL)
+            .memoized_get_text(&key, IMMUTABLE_CACHE_TTL)
             .await?
-            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+            .ok_or_else(|| not_found(&key))?;
 
         serde_json::from_str(&text)
             .map_err(|e| Error::RustError(format!("Failed to parse reverse collection: {}", e)))
@@ -924,9 +1108,9 @@ impl<'a> ShardLoader<'a> {
 
     async fn load_catalog(&self) -> Result<StacCatalog> {
         let text = self
-            .cached_get_text("catalog.json", CATALOG_CACHE_TTL)
+            .memoized_get_text("catalog.json", CATALOG_CACHE_TTL)
             .await?
-            .ok_or_else(|| Error::RustError("catalog.json not found".into()))?;
+            .ok_or_else(|| not_found("catalog.json"))?;
 
         serde_json::from_str(&text)
             .map_err(|e| Error::RustError(format!("Failed to parse catalog: {}", e)))
@@ -936,9 +1120,9 @@ impl<'a> ShardLoader<'a> {
     async fn load_collection(&self, version: &str) -> Result<StacCollection> {
         let key = format!("{}/collection.json", version);
         let text = self
-            .cached_get_text(&key, COLLECTION_CACHE_TTL)
+            .memoized_get_text(&key, IMMUTABLE_CACHE_TTL)
             .await?
-            .ok_or_else(|| Error::RustError(format!("{} not found", key)))?;
+            .ok_or_else(|| not_found(&key))?;
 
         serde_json::from_str(&text)
             .map_err(|e| Error::RustError(format!("Failed to parse collection: {}", e)))
@@ -981,9 +1165,9 @@ impl<'a> ShardLoader<'a> {
                 // Legacy: load from separate item file
                 let item_key = format!("{}/items/{}.json", version, shard_id);
                 let item_text = self
-                    .cached_get_text(&item_key, SHARD_CACHE_TTL)
+                    .cached_get_text(&item_key, IMMUTABLE_CACHE_TTL)
                     .await?
-                    .ok_or_else(|| Error::RustError(format!("Item {} not found", item_key)))?;
+                    .ok_or_else(|| not_found(format!("item {}", item_key)))?;
 
                 let item: StacItem = serde_json::from_str(&item_text)
                     .map_err(|e| Error::RustError(format!("Failed to parse item: {}", e)))?;
@@ -991,26 +1175,9 @@ impl<'a> ShardLoader<'a> {
                 (item.assets.data.href.clone(), item.properties.record_count)
             };
 
-        // Load the actual shard database (cached)
+        // Load the shard database (isolate cache -> edge cache -> R2)
         let shard_key = format!("{}/{}", version, shard_href.trim_start_matches("./"));
-
-        let shard_bytes = self
-            .cached_get(&shard_key, SHARD_CACHE_TTL)
-            .await?
-            .ok_or_else(|| Error::RustError(format!("Shard {} not found", shard_key)))?;
-
-        let shard_size = shard_bytes.len();
-
-        console_log!(
-            "Loading shard {} ({} bytes, {} records)",
-            shard_id,
-            shard_size,
-            record_count
-        );
-
-        // Open the SQLite database from bytes and query it
-        let db = Database::from_bytes(&shard_bytes)
-            .map_err(|e| Error::RustError(format!("Failed to open shard database: {}", e)))?;
+        let (db, shard_size) = self.load_shard_db(&shard_key).await?;
 
         let results = db
             .search(query)
@@ -1149,22 +1316,6 @@ fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
     haversine_distance(lat, lon, closest_lat, closest_lon)
 }
 
-/// Calculate the haversine distance between two points in kilometers.
-fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const EARTH_RADIUS_KM: f64 = 6371.0;
-
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
-
-    let a = (delta_lat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().asin();
-
-    EARTH_RADIUS_KM * c
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1259,26 +1410,22 @@ mod tests {
 
     #[test]
     fn test_is_retriable_error_not_found() {
-        let e = Error::RustError("2026-02-25.0/collection.json not found".into());
-        assert!(is_retriable_error(&e));
-
-        let e = Error::RustError("Shard 2026-02-25.0/HEAD.db not found".into());
-        assert!(is_retriable_error(&e));
-
-        let e = Error::RustError("Item 2026-02-25.0/items/US.json not found".into());
-        assert!(is_retriable_error(&e));
-
-        // The id-lookup path raises this when a version's id-index parquet
-        // hasn't been uploaded yet — it must be retriable so the version
-        // fallback macro tries the prior version's index.
-        let e =
-            Error::RustError("id-index shard 2026-04-25.0/id-index/abc.parquet not found".into());
-        assert!(is_retriable_error(&e));
+        // Anything built via not_found() must trigger version fallback —
+        // including the id-index case, where a version's parquet hasn't
+        // been uploaded yet.
+        assert!(is_retriable_error(&not_found(
+            "2026-02-25.0/collection.json"
+        )));
+        assert!(is_retriable_error(&not_found("shard 2026-02-25.0/HEAD.db")));
+        assert!(is_retriable_error(&not_found(
+            "id-index shard 2026-04-25.0/id-index/abc.parquet"
+        )));
     }
 
     #[test]
     fn test_is_retriable_error_operational() {
-        // Operational errors should NOT be retriable
+        // Operational errors should NOT be retriable — even when their
+        // prose happens to contain "not found".
         let e = Error::RustError("Failed to open shard database: corrupt header".into());
         assert!(!is_retriable_error(&e));
 
@@ -1288,7 +1435,7 @@ mod tests {
         let e = Error::RustError("Failed to parse collection: invalid JSON".into());
         assert!(!is_retriable_error(&e));
 
-        let e = Error::RustError("Reverse geocode failed: query error".into());
+        let e = Error::RustError("R2 backend error: object not found in cache tier".into());
         assert!(!is_retriable_error(&e));
     }
 
