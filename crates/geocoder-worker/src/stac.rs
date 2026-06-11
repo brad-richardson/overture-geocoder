@@ -26,7 +26,11 @@ const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
 
 // Shard selection constants
 const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
-const MAX_LOCATION_SHARDS: usize = 4; // Max shards to load (excluding HEAD)
+                                        // Max shards to load (excluding HEAD). Capped at 2: the user's own location
+                                        // shard is always the closest, and every extra shard multiplies the
+                                        // worst-case first-touch cost (R2 fetch + deserialize of a multi-MB file)
+                                        // that dominates tail latency.
+const MAX_LOCATION_SHARDS: usize = 2;
 const MAX_VERSION_ATTEMPTS: usize = 3; // Max versions to try (latest + fallbacks)
 const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for missing objects
 
