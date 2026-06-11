@@ -10,10 +10,10 @@ use rusqlite::{params, Connection, OpenFlags};
 use crate::error::Result;
 use crate::geo::haversine_distance;
 use crate::query::{
-    calculate_boosted_score, match_quality, prepare_fts_query, BM25_TIEBREAK_WEIGHT,
-    REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_SQL,
-    SEARCH_DIVISIONS_SQL, SEARCH_DIVISIONS_SQL_NO_MATH, SEARCH_DIVISIONS_SQL_WEIGHTED,
-    STATIC_IMPORTANCE_WEIGHT,
+    alt_name_quality, calculate_boosted_score, match_quality, prepare_fts_query,
+    BM25_TIEBREAK_WEIGHT, REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL,
+    REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL, SEARCH_DIVISIONS_SQL_NO_MATH,
+    SEARCH_DIVISIONS_SQL_WEIGHTED, STATIC_IMPORTANCE_WEIGHT,
 };
 use crate::types::{
     DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
@@ -213,6 +213,7 @@ impl Database {
 
         let rows = stmt.query_map(params![fts_query, fetch_limit], |row| {
             let population: Option<i64> = row.get(10)?;
+            let search_name: Option<String> = if static_path { row.get(15)? } else { None };
             let (static_importance, text_score) = if static_path {
                 // New schema: precomputed importance column + weighted bm25.
                 (row.get::<_, f64>(13)?, row.get::<_, f64>(14)?)
@@ -244,6 +245,7 @@ impl Database {
                 region: row.get(12)?,
                 text_score,
                 static_importance,
+                search_name,
             })
         })?;
 
@@ -269,7 +271,14 @@ impl Database {
                 } else {
                     0.0 // degenerate: no negative scores to normalize against
                 };
-                let quality = match_quality(&row.primary_name, &query.text);
+                // Best of the display-name ladder and the alternate-name rung
+                // (exonyms like "moscow" for Москва live in search_name).
+                let quality = match_quality(&row.primary_name, &query.text).max(
+                    row.search_name
+                        .as_deref()
+                        .map(|names| alt_name_quality(names, &query.text))
+                        .unwrap_or(0.0),
+                );
                 let importance = quality
                     + STATIC_IMPORTANCE_WEIGHT * row.static_importance
                     + BM25_TIEBREAK_WEIGHT * bm25_norm;
@@ -629,6 +638,29 @@ mod tests {
             order,
             vec!["paris", "paris-township", "parisville"],
             "exact > word-boundary prefix > bare prefix"
+        );
+    }
+
+    /// New path: an exonym query ("moscow" for Москва) must reach the famous
+    /// city through its alternate names instead of losing to an exact-named
+    /// small homonym (Moscow, ID).
+    #[test]
+    fn test_new_schema_exonym_beats_homonym() {
+        let mut setup = String::from(NEW_FORWARD_SCHEMA);
+        setup.push_str(
+            "INSERT INTO divisions VALUES (1, 'moscow-ru', 'locality', 'Москва, RU',
+             55.75, 37.62, 37, 55, 38, 56, 13000000, 'RU', NULL, 0.92,
+             'москва moscow moskva', '', 'Russia RU');\n",
+        );
+        insert_new_schema_row(&mut setup, 2, "moscow-id", "Moscow", 0.12);
+        setup.push_str(NEW_FTS_SYNC);
+        let db = db_with(&setup);
+
+        let results = db.search(&GeocoderQuery::new("moscow")).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0].gers_id, "moscow-ru",
+            "alt-name rung (0.95) + high importance must beat exact homonym"
         );
     }
 

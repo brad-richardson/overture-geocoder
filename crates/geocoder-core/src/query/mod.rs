@@ -47,7 +47,8 @@ pub const SEARCH_DIVISIONS_SQL_WEIGHTED: &str = r#"
     SELECT d.rowid, d.gers_id, d.type, d.primary_name, d.lat, d.lon,
            d.bbox_xmin, d.bbox_ymin, d.bbox_xmax, d.bbox_ymax,
            d.population, d.country, d.region, d.importance,
-           bm25(divisions_fts, 4.0, 2.0, 1.0) AS text_score
+           bm25(divisions_fts, 4.0, 2.0, 1.0) AS text_score,
+           d.search_name
     FROM divisions_fts JOIN divisions d ON divisions_fts.rowid = d.rowid
     WHERE divisions_fts MATCH ?1
     ORDER BY text_score - 5.0 * d.importance
@@ -142,17 +143,43 @@ pub fn calculate_boosted_score(bm25_score: f64, population: Option<i64>) -> f64 
 /// "Zürich" matches "zurich". Multi-char foldings (e.g. ß → ss) are not
 /// applied; old shards porter-stem the index but `primary_name` is raw, so
 /// this comparison is best-effort for such names.
-pub fn match_quality(primary_name: &str, query: &str) -> f64 {
-    fn normalize(s: &str) -> String {
-        s.trim()
-            .chars()
-            .flat_map(char::to_lowercase)
-            .map(fold_latin_diacritic)
-            .collect()
+fn normalize_for_match(s: &str) -> String {
+    s.trim()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .map(fold_latin_diacritic)
+        .collect()
+}
+
+/// Match quality against alternate/translated names (the `search_name`
+/// column: primary + short/common/official names, space-joined).
+///
+/// Exonym queries ("moscow" for Москва, "cairo" for القاهرة) score 0 on the
+/// display-name ladder; without this rung they lose to exact-named homonyms
+/// (Moscow, ID). Capped below display-exact (1.0) so the local name still
+/// wins ties between same-named places.
+pub fn alt_name_quality(search_name: &str, query: &str) -> f64 {
+    let names = normalize_for_match(search_name);
+    let query = normalize_for_match(query);
+    if names.is_empty() || query.is_empty() {
+        return 0.0;
     }
 
-    let display = normalize(primary_name.split(',').next().unwrap_or(""));
-    let query = normalize(query);
+    let padded = format!(" {} ", names);
+    // Whole word/phrase appears among the names
+    if padded.contains(&format!(" {} ", query)) {
+        return 0.95;
+    }
+    // A name word starts with the query (autocomplete-style)
+    if names.starts_with(&query) || padded.contains(&format!(" {}", query)) {
+        return 0.85;
+    }
+    0.0
+}
+
+pub fn match_quality(primary_name: &str, query: &str) -> f64 {
+    let display = normalize_for_match(primary_name.split(',').next().unwrap_or(""));
+    let query = normalize_for_match(query);
 
     if query.is_empty() || display.is_empty() {
         return 0.0;

@@ -117,6 +117,9 @@ pub struct DivisionRow {
     /// `importance` column. Legacy shards: derived from the population-boosted
     /// BM25 score (`(-score / 50).max(0)`).
     pub static_importance: f64,
+    /// Space-joined searchable names (primary + alternates/exonyms), used by
+    /// the alt-name match-quality rung. New shards only; None on legacy.
+    pub search_name: Option<String>,
 }
 
 impl DivisionRow {
