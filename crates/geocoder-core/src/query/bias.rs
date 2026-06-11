@@ -13,11 +13,12 @@ use crate::types::{GeocoderResult, LocationBias};
 /// Importance boost for results in the same country (country-only bias).
 /// Applied when using `LocationBias::Country`.
 ///
-/// Deliberately small: the full population-boost range between a small town
-/// and a megacity is only ~0.23 importance, so a country boost above that
-/// guarantees any same-named local town outranks a world-famous city for
-/// in-country users ("paris" -> Paris, TX). 0.1 breaks ties between
-/// comparable places without overpowering global prominence.
+/// Deliberately small relative to the composed score's match-quality ladder
+/// (0.8-1.0) and weighted static importance (up to 0.5): a country boost
+/// large enough to span those would guarantee any same-named local town
+/// outranks a world-famous city for in-country users ("paris" -> Paris, TX).
+/// 0.1 breaks ties between comparable places without overpowering global
+/// prominence.
 const COUNTRY_ONLY_BOOST: f64 = 0.1;
 
 /// Importance boost for results in the same country (combined with coordinates).
@@ -32,52 +33,6 @@ const MAX_DISTANCE_BOOST: f64 = 0.2;
 /// Results within this distance receive significant proximity boost.
 /// The boost halves at this distance from the bias point.
 const DISTANCE_DECAY_REFERENCE_KM: f64 = 100.0;
-
-/// Bonus for exact name matches (when query token exactly matches start of name).
-/// Helps "paris" match "Paris, FR" better than "Jefferson Parish, LA".
-const EXACT_MATCH_BONUS: f64 = 0.1;
-
-/// Apply exact match bonus to search results.
-///
-/// Boosts results where the query tokens match the start of the name exactly
-/// (not just as a prefix). This helps distinguish "Paris" from "Parish".
-pub fn apply_exact_match_bonus(results: &mut [GeocoderResult], query: &str) {
-    let query_lower = query.to_lowercase();
-    // Split on whitespace and common punctuation
-    let tokens: Vec<&str> = query_lower
-        .split(|c: char| c.is_whitespace() || c == ',')
-        .filter(|s| !s.is_empty())
-        .collect();
-
-    if tokens.is_empty() {
-        return;
-    }
-
-    for result in results.iter_mut() {
-        let name_lower = result.primary_name.to_lowercase();
-
-        // Check if any query token matches the start of the name exactly.
-        // strip_prefix is byte-position-correct for multi-byte names
-        // (chars().nth(token.len()) would index by chars and misfire).
-        for token in &tokens {
-            if let Some(rest) = name_lower.strip_prefix(token) {
-                // Token must be followed by a word boundary (space, comma, end)
-                let next_char = rest.chars().next();
-                if next_char.is_none() || next_char == Some(',') || next_char == Some(' ') {
-                    result.importance += EXACT_MATCH_BONUS;
-                    break; // Only apply bonus once per result
-                }
-            }
-        }
-    }
-
-    // Re-sort by adjusted importance (descending)
-    results.sort_by(|a, b| {
-        b.importance
-            .partial_cmp(&a.importance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
-}
 
 /// Apply location bias to search results.
 ///
@@ -159,7 +114,9 @@ mod tests {
             lon,
             // GeoJSON bbox: [min_lon, min_lat, max_lon, max_lat]
             bbox: [lon - 0.1, lat - 0.1, lon + 0.1, lat + 0.1],
-            importance: 0.5,
+            // Composed-scale importance: an exact-match candidate with
+            // middling static prominence (match_quality 1.0 + ~0.5 * 0.2).
+            importance: 1.1,
             division_type: "locality".to_string(),
             country: country.map(String::from),
             region: None,

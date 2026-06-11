@@ -73,9 +73,12 @@ pub struct GeocoderResult {
     /// Bounding box in GeoJSON order: [min_lon, min_lat, max_lon, max_lat].
     #[serde(rename = "boundingbox")]
     pub bbox: [f64; 4],
-    /// Importance score (higher is more important). Nominally 0-1, but kept
-    /// unclamped through the bias/merge pipeline so bonuses can still reorder
-    /// saturated results; clamp at serialization time for display.
+    /// Composed ranking score (higher is better):
+    /// `match_quality + 0.5 * static_importance + 0.2 * bm25_norm`,
+    /// nominally 0-1.7 before location bias (which adds up to ~0.3 more).
+    /// Kept unclamped through the bias/merge pipeline so bonuses can still
+    /// reorder saturated results; serializers scale by 1/2 and clamp to 0-1
+    /// for display.
     pub importance: f64,
     /// Division type (locality, county, etc.).
     #[serde(rename = "type")]
@@ -107,13 +110,18 @@ pub struct DivisionRow {
     pub population: Option<i64>,
     pub country: Option<String>,
     pub region: Option<String>,
-    /// BM25 + population boosted score (lower is better).
-    pub boosted_score: f64,
+    /// Text relevance score from FTS (lower / more negative is better).
+    /// New shards: weighted `bm25()`. Legacy shards: population-boosted BM25.
+    pub text_score: f64,
+    /// Static prominence on a nominal 0-1 scale. New shards: the precomputed
+    /// `importance` column. Legacy shards: derived from the population-boosted
+    /// BM25 score (`(-score / 50).max(0)`).
+    pub static_importance: f64,
 }
 
 impl DivisionRow {
-    /// Convert to a geocoder result.
-    pub fn into_result(self) -> GeocoderResult {
+    /// Convert to a geocoder result with the given composed importance score.
+    pub fn into_result(self, importance: f64) -> GeocoderResult {
         GeocoderResult {
             gers_id: self.gers_id,
             primary_name: self.primary_name,
@@ -126,11 +134,7 @@ impl DivisionRow {
                 self.bbox_xmax,
                 self.bbox_ymax,
             ],
-            // Convert boosted score to importance (nominal 0-1 scale).
-            // More negative score = higher importance. Only the lower bound
-            // is clamped: capping at 1.0 here would erase ordering among
-            // strong matches before bias bonuses are applied.
-            importance: (-self.boosted_score / 50.0).max(0.0),
+            importance,
             division_type: self.division_type,
             country: self.country,
             region: self.region,

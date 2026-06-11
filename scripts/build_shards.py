@@ -39,10 +39,12 @@ For reverse geocoding (--reverse):
 import argparse
 import json
 import hashlib
+import math
 import re
 import shutil
 import sqlite3
 import sys
+import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -65,7 +67,12 @@ REGION_SPLIT_RECORD_THRESHOLD = 400_000
 # FTS5 prefix index lengths (higher values improve autocomplete at ~5-10% per extra level)
 FTS5_PREFIX_LENGTHS = '2 3 4'
 
-# Bidirectional abbreviation pairs for search text enrichment
+# FTS5 tokenizer. NO porter stemmer: porter stems "france" -> "franc", which
+# prefix-matches "francisco"; nobody stems toponyms (docs/ranking-research.md, P0).
+FTS5_TOKENIZER = 'unicode61 remove_diacritics 2'
+
+# Bidirectional abbreviation pairs for search alias generation
+# (Placeholder's lib/analysis.js set, see docs/ranking-research.md P5)
 ABBREVIATION_PAIRS = [
     ("saint", "st"), ("sainte", "ste"),
     ("fort", "ft"), ("mount", "mt"),
@@ -74,66 +81,222 @@ ABBREVIATION_PAIRS = [
     ("port", "pt"), ("point", "pt"),
 ]
 
+# One-directional aliases: the right side is emitted when the left side
+# appears as a token, but not vice versa ("&" never survives unicode61
+# tokenization, so the reverse mapping would index nothing).
+ONE_WAY_ALIASES = {
+    "&": {"and"},
+}
+
+# German-convention foldings emitted as alias variants ("münchen" -> "muenchen").
+# remove_diacritics 2 already folds "ü" -> "u", so the plain-ASCII form matches
+# without help; these cover the ue/oe/ae/ss spellings users actually type.
+UMLAUT_FOLDINGS = [("ü", "ue"), ("ö", "oe"), ("ä", "ae"), ("ß", "ss")]
+
+# Apostrophe characters stripped to form alias variants ("john's" -> "johns")
+APOSTROPHE_CHARS = "'’"
+
+# Designation-strip patterns (Placeholder lib/analysis.js): when the primary
+# name matches, the bare name is emitted as an alias ("Cook County" -> "cook").
+DESIGNATION_PATTERNS = [
+    re.compile(r"^city of (.+)$", re.IGNORECASE),
+    re.compile(r"^county of (.+)$", re.IGNORECASE),
+    re.compile(r"^(.+) county$", re.IGNORECASE),
+]
+
 # Fallback region suffix for records with null region codes
 FALLBACK_REGION_SUFFIX = "XX"
 
+# ---------------------------------------------------------------------------
+# Ranking constants for the precomputed static `importance` column in [0, 1].
+# See docs/ranking-research.md (P1 wikidata importance, P2 type prior +
+# dampened population). importance = min(1.0, type_prior + 0.5*wiki +
+# pop_component + capital_bonus); the worker ranks bm25 - k*importance.
+# ---------------------------------------------------------------------------
 
-def enrich_search_text(search_text: str) -> str:
+# Static prior by Overture subtype (Photon searchPrio shape: city above
+# county/state - do NOT copy Nominatim's county-above-city address ranks)
+TYPE_PRIOR = {
+    "country": 0.30,
+    "region": 0.18,
+    "county": 0.10,
+    "localadmin": 0.08,
+    "macrohood": 0.05,
+    "neighborhood": 0.04,
+}
+
+# Localities are further split by Overture's `class` enum
+LOCALITY_CLASS_PRIOR = {
+    "megacity": 0.30,
+    "city": 0.22,
+    "town": 0.14,
+    "village": 0.06,
+    "hamlet": 0.04,
+}
+LOCALITY_DEFAULT_PRIOR = 0.10  # locality with null/unknown class
+
+# Subtypes not listed above (dependency, microhood, ...)
+DEFAULT_TYPE_PRIOR = 0.05
+
+# wiki_component = WIKI_IMPORTANCE_WEIGHT * wiki_importance (0 when unmatched)
+WIKI_IMPORTANCE_WEIGHT = 0.5
+
+# pop_component = min(CAP, COEFF * log10(1 + population)), halved for the
+# coarse subtypes below (population should only differentiate within-type)
+POP_COMPONENT_CAP = 0.2
+POP_COMPONENT_COEFF = 0.03
+POP_HALF_WEIGHT_SUBTYPES = {"country", "dependency", "region", "county", "localadmin"}
+
+# Capital bonus from Overture's capital_of_divisions
+CAPITAL_COUNTRY_BONUS = 0.08
+CAPITAL_REGION_BONUS = 0.03
+
+# Nominatim's published QID-keyed wikimedia importance file (P1). Despite the
+# .csv name it is tab-separated with a header:
+#   language, type, title, importance, wikidata_id
+# importance is in [0, 1] (log-of-inbound-links, normalized).
+WIKIMEDIA_IMPORTANCE_URL = "https://nominatim.org/data/wikimedia-importance.csv.gz"
+
+# nominatim.org returns 403 for default curl/wget user agents
+DOWNLOAD_USER_AGENT = "overture-geocoder/1.0 (shard build pipeline)"
+
+# HEAD shard also includes famous-but-small places (wiki_importance >= this)
+HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.5
+
+
+def build_search_alias(name: str, search_name: str) -> str | None:
     """
-    Enrich search_text with compact aliases and abbreviation variants.
+    Build the search_alias column from a division's primary name and its
+    search_name tokens (docs/ranking-research.md P4/P5).
 
-    Appends:
-    - Pairwise adjacent concatenations: "new"+"york" → "newyork"
-    - Full concatenation (2-4 word names): "new york city" → "newyorkcity"
-    - Abbreviation variants: "saint" ↔ "st", "fort" ↔ "ft", etc.
+    Emits (space-separated, deduplicated):
+    - Pairwise adjacent concatenations of the primary name: "new york" -> "newyork"
+    - Full concatenations of 2-4 word name prefixes: "new york city" -> "newyorkcity"
+    - Abbreviation variants of search_name tokens: "saint" <-> "st", "&" -> "and"
+    - Umlaut/eszett foldings: "münchen" -> "muenchen", "gießen" -> "giessen"
+    - Apostrophe-stripped variants: "john's" -> "johns"
+    - Designation-stripped names: "Cook County" -> "cook", "City of X" -> "x"
+
+    Returns None when there is nothing to add.
     """
-    if not search_text:
-        return search_text
+    name = (name or "").strip()
+    search_name = (search_name or "").strip()
+    name_words = name.lower().split()
+    tokens = search_name.lower().split()
+    if not tokens and not name_words:
+        return None
 
-    words = search_text.lower().split()
-    if not words:
-        return search_text
+    extras: list[str] = []
+    seen = set(tokens)
 
-    extras = []
+    def add(token: str):
+        if token and token not in seen:
+            extras.append(token)
+            seen.add(token)
 
-    # Build lookup maps for abbreviation expansion (both directions)
-    abbrev_from = {}
-    for long, short in ABBREVIATION_PAIRS:
-        abbrev_from.setdefault(long, set()).add(short)
-        abbrev_from.setdefault(short, set()).add(long)
+    # --- Designation strips on the primary name ---
+    for pattern in DESIGNATION_PATTERNS:
+        m = pattern.match(name)
+        if m:
+            for word in m.group(1).lower().split():
+                if word and word not in extras:
+                    extras.append(word)
+                    seen.add(word)
+            break
 
-    # --- Concatenated forms from the primary name portion ---
-    # Primary name is typically the first few tokens before geographic hierarchy.
-    # Use up to the first 4 words for concatenation (covers most place names).
-    primary_words = [w for w in words[:4] if w.isalpha()]
+    # --- Concatenated forms from the primary name ---
+    primary_words = [w for w in name_words[:4] if w.isalpha()]
+    if not primary_words:
+        # Fall back to leading search_name tokens (legacy behavior)
+        primary_words = [w for w in tokens[:4] if w.isalpha()]
 
     # Pairwise adjacent concatenations
     for i in range(len(primary_words) - 1):
         concat = primary_words[i] + primary_words[i + 1]
         if 4 <= len(concat) <= 30:
-            extras.append(concat)
+            add(concat)
 
     # Full concatenations for 2-4 word prefixes
     if len(primary_words) >= 2:
         max_len = min(4, len(primary_words))
         for n in range(2, max_len + 1):
             full = "".join(primary_words[:n])
-            if 4 <= len(full) <= 30 and full not in extras:
-                extras.append(full)
+            if 4 <= len(full) <= 30:
+                add(full)
 
-    # --- Abbreviation variants ---
-    seen_words = set(words)
-    for word in words:
+    # --- Abbreviation variants (bidirectional + one-way) ---
+    abbrev_from: dict[str, set[str]] = {}
+    for long, short in ABBREVIATION_PAIRS:
+        abbrev_from.setdefault(long, set()).add(short)
+        abbrev_from.setdefault(short, set()).add(long)
+    for source, variants in ONE_WAY_ALIASES.items():
+        abbrev_from.setdefault(source, set()).update(variants)
+
+    for word in tokens:
         if word in abbrev_from:
             for variant in sorted(abbrev_from[word]):
-                if variant not in seen_words:
-                    extras.append(variant)
-                    seen_words.add(variant)
+                add(variant)
+
+    # --- Character-level variants of every name token ---
+    for word in tokens:
+        # Umlaut/eszett foldings (German-convention spellings)
+        folded = word
+        for char, repl in UMLAUT_FOLDINGS:
+            folded = folded.replace(char, repl)
+        if folded != word:
+            add(folded)
+
+        # Apostrophe-stripped variants
+        stripped = word
+        for char in APOSTROPHE_CHARS:
+            stripped = stripped.replace(char, "")
+        if stripped != word and len(stripped) >= 2:
+            add(stripped)
 
     if not extras:
-        return search_text
+        return None
+    return " ".join(extras)
 
-    return search_text + " " + " ".join(extras)
+
+def compute_importance(
+    subtype: str,
+    class_: str | None = None,
+    population: int | None = None,
+    wiki_importance: float | None = None,
+    is_country_capital: bool = False,
+    is_region_capital: bool = False,
+) -> float:
+    """
+    Precompute the static prominence score in [0, 1] for a division.
+
+    importance = min(1.0, type_prior + wiki_component + pop_component +
+    capital_bonus). Constants above; rationale in docs/ranking-research.md
+    (P1/P2). The query side ranks with `bm25(...) - k * importance`.
+    """
+    if subtype == "locality":
+        prior = LOCALITY_CLASS_PRIOR.get(class_, LOCALITY_DEFAULT_PRIOR)
+    else:
+        prior = TYPE_PRIOR.get(subtype, DEFAULT_TYPE_PRIOR)
+
+    wiki_component = 0.0
+    if wiki_importance is not None:
+        wiki_component = WIKI_IMPORTANCE_WEIGHT * max(0.0, min(1.0, wiki_importance))
+
+    pop_component = 0.0
+    if population is not None and population > 0:
+        pop_component = min(
+            POP_COMPONENT_CAP, POP_COMPONENT_COEFF * math.log10(1 + population)
+        )
+        if subtype in POP_HALF_WEIGHT_SUBTYPES:
+            pop_component *= 0.5
+
+    capital_bonus = 0.0
+    if is_country_capital:
+        capital_bonus = CAPITAL_COUNTRY_BONUS
+    elif is_region_capital:
+        capital_bonus = CAPITAL_REGION_BONUS
+
+    return min(1.0, prior + wiki_component + pop_component + capital_bonus)
 
 
 def validate_country_code(code: str) -> str:
@@ -165,6 +328,10 @@ EXPORTS_DIR = Path("exports")
 SHARDS_DIR = Path("shards")
 DIVISIONS_PARQUET = EXPORTS_DIR / "divisions-global.parquet"
 DIVISIONS_REVERSE_PARQUET = EXPORTS_DIR / "divisions-reverse.parquet"
+
+# Local cache for the Nominatim wikimedia importance file (a few hundred MB;
+# the download is skipped when this file already exists)
+WIKIMEDIA_IMPORTANCE_FILE = EXPORTS_DIR / "wikimedia-importance.csv.gz"
 
 # HEAD shard includes countries, regions, and localities with pop >= threshold
 DEFAULT_HEAD_THRESHOLD = 100_000
@@ -278,6 +445,166 @@ def get_regions_for_country(parquet_path: Path, country_code: str) -> list[tuple
     return [(r[0], r[1]) for r in result]
 
 
+def ensure_wiki_importance_file(
+    dest: Path = WIKIMEDIA_IMPORTANCE_FILE,
+    url: str = WIKIMEDIA_IMPORTANCE_URL,
+) -> Path:
+    """
+    Download Nominatim's wikimedia importance file unless already cached.
+
+    Fails loudly on any download error (use --no-wiki-importance to build
+    without wikidata importance).
+    """
+    if dest.exists() and dest.stat().st_size > 0:
+        print(f"Using cached wikimedia importance file: {dest}")
+        return dest
+
+    print(f"Downloading wikimedia importance file from {url} ...")
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = dest.with_suffix(dest.suffix + ".tmp")
+    request = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
+    try:
+        with urllib.request.urlopen(request) as response, open(tmp_path, "wb") as f:
+            shutil.copyfileobj(response, f, length=1024 * 1024)
+        tmp_path.rename(dest)
+    except BaseException:
+        tmp_path.unlink(missing_ok=True)
+        raise
+    print(f"Downloaded {dest} ({dest.stat().st_size / 1024 / 1024:.1f} MB)")
+    return dest
+
+
+def enrich_parquet_with_wiki_importance(
+    parquet_path: Path,
+    output_path: Path,
+    importance_file: Path | None,
+) -> Path:
+    """
+    LEFT JOIN the wikimedia importance file onto the divisions parquet by
+    wikidata QID, producing a `wiki_importance DOUBLE` column (NULL when
+    unmatched). With importance_file=None the column is added as all-NULL so
+    downstream shard builds see a uniform schema.
+    """
+    parquet_str = str(parquet_path.resolve())
+    output_str = str(output_path.resolve())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    con = duckdb.connect()
+    con.execute("SET preserve_insertion_order = false;")
+    if importance_file is None:
+        con.execute(f"""
+            COPY (
+                SELECT *, CAST(NULL AS DOUBLE) AS wiki_importance
+                FROM read_parquet('{parquet_str}')
+            ) TO '{output_str}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """)
+    else:
+        importance_str = str(importance_file.resolve())
+        # Tab-separated despite the .csv name; quote='' because titles can
+        # contain double quotes. One row per (language, title): aggregate to
+        # the best importance per QID.
+        con.execute(f"""
+            COPY (
+                SELECT d.*, w.wiki_importance
+                FROM read_parquet('{parquet_str}') d
+                LEFT JOIN (
+                    SELECT wikidata_id, MAX(importance) AS wiki_importance
+                    FROM read_csv(
+                        '{importance_str}',
+                        delim='\t', header=true, quote='',
+                        columns={{
+                            'language': 'VARCHAR',
+                            'type': 'VARCHAR',
+                            'title': 'VARCHAR',
+                            'importance': 'DOUBLE',
+                            'wikidata_id': 'VARCHAR'
+                        }}
+                    )
+                    WHERE wikidata_id IS NOT NULL AND wikidata_id != ''
+                    GROUP BY wikidata_id
+                ) w ON d.wikidata = w.wikidata_id
+            ) TO '{output_str}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """)
+    con.close()
+    return output_path
+
+
+# Columns selected from the (wiki-enriched) parquet for forward shard builds.
+# Order matters: prepare_division_rows() unpacks positionally.
+FORWARD_SHARD_SELECT = """
+        gers_id,
+        version,
+        subtype as type,
+        name,
+        primary_name,
+        lat,
+        lon,
+        bbox_xmin,
+        bbox_ymin,
+        bbox_xmax,
+        bbox_ymax,
+        population,
+        country,
+        region,
+        search_name,
+        search_context,
+        class,
+        wiki_importance,
+        is_country_capital,
+        is_region_capital
+"""
+
+# Index of the bbox_xmin column within FORWARD_SHARD_SELECT
+BBOX_XMIN_INDEX = 7
+
+DIVISIONS_INSERT_SQL = """
+    INSERT INTO divisions (
+        gers_id, version, type, primary_name, lat, lon,
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+        population, country, region,
+        search_name, search_alias, search_context, importance
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+"""
+
+
+def prepare_division_rows(rows: list[tuple]) -> list[tuple]:
+    """
+    Transform FORWARD_SHARD_SELECT rows into divisions-table insert tuples:
+    derives search_alias (concatenations/abbreviations/designation strips)
+    and the precomputed importance column.
+    """
+    prepared = []
+    for row in rows:
+        (gers_id, version, type_, name, primary_name, lat, lon,
+         bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+         population, country, region,
+         search_name, search_context, class_, wiki_importance,
+         is_country_capital, is_region_capital) = row
+
+        search_name = search_name or (name or primary_name).lower()
+        search_alias = build_search_alias(name, search_name)
+        # Coerce to float: DuckDB may surface DECIMAL for these, which the
+        # sqlite3 driver cannot bind
+        lat, lon = float(lat), float(lon)
+        bbox_xmin, bbox_ymin = float(bbox_xmin), float(bbox_ymin)
+        bbox_xmax, bbox_ymax = float(bbox_xmax), float(bbox_ymax)
+        importance = compute_importance(
+            type_,
+            class_=class_,
+            population=population,
+            wiki_importance=wiki_importance,
+            is_country_capital=bool(is_country_capital),
+            is_region_capital=bool(is_region_capital),
+        )
+        prepared.append((
+            gers_id, version, type_, primary_name, lat, lon,
+            bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+            population, country, region,
+            search_name, search_alias, search_context, importance,
+        ))
+    return prepared
+
+
 def build_region_shard(
     parquet_path: Path,
     country_code: str,
@@ -322,21 +649,7 @@ def build_region_shard(
 
     # Query divisions for this region
     cursor = con.execute(f"""
-        SELECT
-            gers_id,
-            version,
-            subtype as type,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            population,
-            country,
-            region,
-            search_text
+        SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}' AND {region_filter}
     """)
@@ -353,22 +666,17 @@ def build_region_shard(
 
         # Update bbox from this batch
         for row in rows:
-            bbox[0] = min(bbox[0], row[6])  # bbox_xmin
-            bbox[1] = min(bbox[1], row[7])  # bbox_ymin
-            bbox[2] = max(bbox[2], row[8])  # bbox_xmax
-            bbox[3] = max(bbox[3], row[9])  # bbox_ymax
+            b = BBOX_XMIN_INDEX
+            bbox[0] = min(bbox[0], float(row[b]))      # bbox_xmin
+            bbox[1] = min(bbox[1], float(row[b + 1]))  # bbox_ymin
+            bbox[2] = max(bbox[2], float(row[b + 2]))  # bbox_xmax
+            bbox[3] = max(bbox[3], float(row[b + 3]))  # bbox_ymax
 
-        # Enrich search_text (column 13) with compact aliases
-        enriched = [row[:13] + (enrich_search_text(row[13]),) for row in rows]
+        # Derive search_alias and precomputed importance
+        prepared = prepare_division_rows(rows)
 
-        db.executemany("""
-            INSERT INTO divisions (
-                gers_id, version, type, primary_name, lat, lon,
-                bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                population, country, region, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, enriched)
-        count += len(enriched)
+        db.executemany(DIVISIONS_INSERT_SQL, prepared)
+        count += len(prepared)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
@@ -421,32 +729,40 @@ def build_shard_schema(db: sqlite3.Connection):
             population INTEGER,
             country TEXT,
             region TEXT,
-            search_text TEXT NOT NULL
+            search_name TEXT NOT NULL,
+            search_alias TEXT,
+            search_context TEXT,
+            importance REAL NOT NULL
         );
 
+        -- Weighted FTS columns (P4): the query side passes per-column weights
+        -- via bm25(divisions_fts, 4.0, 2.0, 1.0) so name hits outrank alias
+        -- hits outrank context hits.
         CREATE VIRTUAL TABLE IF NOT EXISTS divisions_fts USING fts5(
-            search_text,
-            content=divisions,
-            content_rowid=rowid,
-            tokenize='porter unicode61 remove_diacritics 1',
+            search_name,
+            search_alias,
+            search_context,
+            content='divisions',
+            content_rowid='rowid',
+            tokenize='{FTS5_TOKENIZER}',
             prefix='{FTS5_PREFIX_LENGTHS}'
         );
 
         CREATE TRIGGER IF NOT EXISTS divisions_ai AFTER INSERT ON divisions BEGIN
-            INSERT INTO divisions_fts(rowid, search_text)
-            VALUES (new.rowid, new.search_text);
+            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)
+            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);
         END;
 
         CREATE TRIGGER IF NOT EXISTS divisions_ad AFTER DELETE ON divisions BEGIN
-            INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, old.search_text);
+            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)
+            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);
         END;
 
         CREATE TRIGGER IF NOT EXISTS divisions_au AFTER UPDATE ON divisions BEGIN
-            INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, old.search_text);
-            INSERT INTO divisions_fts(rowid, search_text)
-            VALUES (new.rowid, new.search_text);
+            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)
+            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);
+            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)
+            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);
         END;
     """)
 
@@ -475,21 +791,7 @@ def build_country_shard(
     # Query divisions for this country
     # Note: DuckDB requires file paths in the query string, but country_code is validated above
     cursor = con.execute(f"""
-        SELECT
-            gers_id,
-            version,
-            subtype as type,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            population,
-            country,
-            region,
-            search_text
+        SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}'
     """)
@@ -506,22 +808,17 @@ def build_country_shard(
 
         # Update bbox from this batch
         for row in rows:
-            bbox[0] = min(bbox[0], row[6])  # bbox_xmin
-            bbox[1] = min(bbox[1], row[7])  # bbox_ymin
-            bbox[2] = max(bbox[2], row[8])  # bbox_xmax
-            bbox[3] = max(bbox[3], row[9])  # bbox_ymax
+            b = BBOX_XMIN_INDEX
+            bbox[0] = min(bbox[0], float(row[b]))      # bbox_xmin
+            bbox[1] = min(bbox[1], float(row[b + 1]))  # bbox_ymin
+            bbox[2] = max(bbox[2], float(row[b + 2]))  # bbox_xmax
+            bbox[3] = max(bbox[3], float(row[b + 3]))  # bbox_ymax
 
-        # Enrich search_text (column 13) with compact aliases
-        enriched = [row[:13] + (enrich_search_text(row[13]),) for row in rows]
+        # Derive search_alias and precomputed importance
+        prepared = prepare_division_rows(rows)
 
-        db.executemany("""
-            INSERT INTO divisions (
-                gers_id, version, type, primary_name, lat, lon,
-                bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                population, country, region, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, enriched)
-        count += len(enriched)
+        db.executemany(DIVISIONS_INSERT_SQL, prepared)
+        count += len(prepared)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
@@ -566,32 +863,16 @@ def build_head_shard(
 
     build_shard_schema(db)
 
-    # HEAD shard query: countries, regions, and high-population localities
-    # We need to query Overture directly for countries/regions since they're
-    # not in the divisions-global.parquet (which filters to localities etc.)
-
-    # For now, just include high-population localities from the existing parquet
-    # TODO: Add countries and regions from a separate query
+    # HEAD shard query: countries, regions, high-population localities, and
+    # famous-but-small places (high wikimedia importance) so they are globally
+    # searchable without loading a country shard.
     # Note: population_threshold is validated as integer above
     cursor = con.execute(f"""
-        SELECT
-            gers_id,
-            version,
-            subtype as type,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            population,
-            country,
-            region,
-            search_text
+        SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
         WHERE population >= {population_threshold}
-           OR subtype IN ('county')
+           OR subtype IN ('country', 'region')
+           OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}
     """)
 
     # Stream rows in chunks to avoid loading entire dataset into memory
@@ -603,17 +884,11 @@ def build_head_shard(
         if not rows:
             break
 
-        # Enrich search_text (column 13) with compact aliases
-        enriched = [row[:13] + (enrich_search_text(row[13]),) for row in rows]
+        # Derive search_alias and precomputed importance
+        prepared = prepare_division_rows(rows)
 
-        db.executemany("""
-            INSERT INTO divisions (
-                gers_id, version, type, primary_name, lat, lon,
-                bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                population, country, region, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, enriched)
-        count += len(enriched)
+        db.executemany(DIVISIONS_INSERT_SQL, prepared)
+        count += len(prepared)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
@@ -987,6 +1262,20 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
     print(f"HEAD threshold: {args.head_threshold:,}")
     print()
 
+    # P1: produce a working parquet with wiki_importance joined in by QID
+    # (all-NULL column with --no-wiki-importance, so the schema is uniform)
+    if args.no_wiki_importance:
+        print("Building without wikidata importance (--no-wiki-importance)")
+        importance_file = None
+    else:
+        importance_file = ensure_wiki_importance_file(args.wiki_importance_file)
+    print("Joining wikimedia importance into working parquet...")
+    parquet = enrich_parquet_with_wiki_importance(
+        args.parquet,
+        args.parquet.with_name(args.parquet.stem + "-wiki" + args.parquet.suffix),
+        importance_file,
+    )
+
     shard_infos = {}
 
     # Build HEAD shard
@@ -994,7 +1283,7 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         print("Building HEAD shard...")
         head_path = shards_subdir / "HEAD.db"
         head_info = build_head_shard(
-            args.parquet, head_path, version, args.head_threshold
+            parquet, head_path, version, args.head_threshold
         )
         shard_infos["HEAD"] = head_info
         print(f"  HEAD: {head_info['record_count']:,} records, "
@@ -1016,7 +1305,7 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         print("\nPartitioning divisions by country (single pass)...")
         partition_dir = PARTITIONS_DIR / "forward"
         counts = partition_by_country(
-            args.parquet, partition_dir, countries=explicit_countries
+            parquet, partition_dir, countries=explicit_countries
         )
 
         if explicit_countries:
@@ -1048,7 +1337,7 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
             # the global parquet so an empty shard is still produced.
             source = (
                 country_partition_glob(partition_dir, country)
-                if record_count > 0 else args.parquet
+                if record_count > 0 else parquet
             )
             output_path = shards_subdir / f"{country}.db"
             info = build_country_shard(source, country, output_path, version)
@@ -1225,6 +1514,14 @@ def main():
                         help=f"Input parquet file (default: {DIVISIONS_PARQUET})")
     parser.add_argument("--reverse", action="store_true",
                         help="Build reverse geocoding shards (bbox-indexed, no FTS)")
+    parser.add_argument("--no-wiki-importance", action="store_true",
+                        help="Build without the wikimedia importance join "
+                             "(importance falls back to type prior + population)")
+    parser.add_argument("--wiki-importance-file", type=Path,
+                        default=WIKIMEDIA_IMPORTANCE_FILE,
+                        help="Local cache path for the wikimedia importance file "
+                             f"(default: {WIKIMEDIA_IMPORTANCE_FILE}; downloaded "
+                             "from nominatim.org when missing)")
     args = parser.parse_args()
 
     if not args.reverse and not args.parquet.exists():

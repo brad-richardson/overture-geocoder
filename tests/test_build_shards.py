@@ -1,5 +1,7 @@
 """Tests for build_shards.py functions."""
 
+import gzip
+import sqlite3
 import sys
 from pathlib import Path
 
@@ -9,13 +11,67 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 from build_shards import (
-    enrich_search_text,
-    validate_country_code,
-    validate_region_code,
-    validate_population_threshold,
-    SHARD_SIZE_THRESHOLD_BYTES,
+    CAPITAL_COUNTRY_BONUS,
+    CAPITAL_REGION_BONUS,
+    DIVISIONS_INSERT_SQL,
     FALLBACK_REGION_SUFFIX,
+    SHARD_SIZE_THRESHOLD_BYTES,
+    WIKI_IMPORTANCE_WEIGHT,
+    build_country_shard,
+    build_head_shard,
+    build_search_alias,
+    build_shard_schema,
+    compute_importance,
+    enrich_parquet_with_wiki_importance,
+    validate_country_code,
+    validate_population_threshold,
+    validate_region_code,
 )
+
+import duckdb
+
+
+def fts_query(query: str, autocomplete: bool = True) -> str:
+    """
+    Replicate geocoder-core's prepare_fts_query output format: every token
+    double-quoted, the last token suffixed with * when autocomplete.
+    e.g. ("boston ma", True) -> '"boston" "ma"*'
+    """
+    tokens = [t for t in query.lower().replace(",", " ").split() if t]
+    parts = [f'"{t}"' for t in tokens]
+    if autocomplete and parts:
+        parts[-1] += "*"
+    return " ".join(parts)
+
+
+def make_shard_db() -> sqlite3.Connection:
+    db = sqlite3.connect(":memory:")
+    build_shard_schema(db)
+    return db
+
+
+def insert_division(
+    db: sqlite3.Connection,
+    gers_id: str,
+    search_name: str,
+    search_alias: str | None = None,
+    search_context: str | None = None,
+    importance: float = 0.5,
+    type_: str = "locality",
+):
+    db.execute(DIVISIONS_INSERT_SQL, (
+        gers_id, 0, type_, gers_id, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+        None, "US", None, search_name, search_alias, search_context, importance,
+    ))
+
+
+WEIGHTED_BM25_QUERY = """
+    SELECT d.gers_id, bm25(divisions_fts, 4.0, 2.0, 1.0) AS score
+    FROM divisions_fts
+    JOIN divisions d ON d.rowid = divisions_fts.rowid
+    WHERE divisions_fts MATCH ?
+    ORDER BY score
+"""
 
 
 class TestValidateCountryCode:
@@ -72,69 +128,400 @@ class TestValidatePopulationThreshold:
             validate_population_threshold(100_000_000_000)
 
 
-class TestEnrichSearchText:
+class TestBuildSearchAlias:
     def test_concatenated_pairwise(self):
-        result = enrich_search_text("new york city nyc ny")
-        tokens = result.split()
+        alias = build_search_alias("New York City", "new york city nyc")
+        tokens = alias.split()
         assert "newyork" in tokens
         assert "yorkcity" in tokens
 
     def test_concatenated_full(self):
-        result = enrich_search_text("new york city nyc ny")
-        tokens = result.split()
-        assert "newyorkcity" in tokens
+        alias = build_search_alias("New York City", "new york city nyc")
+        assert "newyorkcity" in alias.split()
 
     def test_abbreviation_saint_to_st(self):
-        result = enrich_search_text("saint louis missouri")
-        assert " st " in f" {result} "
+        alias = build_search_alias("Saint Louis", "saint louis")
+        assert "st" in alias.split()
 
     def test_abbreviation_st_to_saint(self):
-        result = enrich_search_text("st louis missouri")
-        assert "saint" in result
+        alias = build_search_alias("St Louis", "st louis")
+        assert "saint" in alias.split()
 
     def test_abbreviation_fort_to_ft(self):
-        result = enrich_search_text("fort worth texas")
-        assert " ft " in f" {result} "
+        alias = build_search_alias("Fort Worth", "fort worth")
+        assert "ft" in alias.split()
 
     def test_abbreviation_ft_to_fort(self):
-        result = enrich_search_text("ft worth texas")
-        assert "fort" in result
+        alias = build_search_alias("Ft Worth", "ft worth")
+        assert "fort" in alias.split()
 
     def test_abbreviation_mount_to_mt(self):
-        result = enrich_search_text("mount vernon virginia")
-        assert " mt " in f" {result} "
+        alias = build_search_alias("Mount Vernon", "mount vernon")
+        assert "mt" in alias.split()
 
     def test_abbreviation_directional(self):
-        result = enrich_search_text("north charleston south carolina")
-        assert " n " in f" {result} "
-        assert " s " in f" {result} "
+        alias = build_search_alias("North Charleston", "north charleston")
+        assert "n" in alias.split()
 
-    def test_single_word_no_concatenation(self):
-        result = enrich_search_text("boston")
-        # Single word should not produce concatenations
-        assert result == "boston"
+    def test_ampersand_to_and(self):
+        alias = build_search_alias("Town & Country", "town & country")
+        assert "and" in alias.split()
+
+    def test_and_does_not_emit_ampersand(self):
+        # "&" never survives unicode61 tokenization, so the reverse mapping
+        # would index nothing
+        alias = build_search_alias("Up and Over", "up and over") or ""
+        assert "&" not in alias.split()
+
+    def test_umlaut_folding(self):
+        alias = build_search_alias("München", "münchen")
+        assert "muenchen" in alias.split()
+
+    def test_eszett_folding(self):
+        alias = build_search_alias("Gießen", "gießen")
+        assert "giessen" in alias.split()
+
+    def test_apostrophe_stripped(self):
+        alias = build_search_alias("Coeur d'Alene", "coeur d'alene")
+        assert "dalene" in alias.split()
+
+    def test_designation_strip_x_county(self):
+        alias = build_search_alias("Cook County", "cook county")
+        assert "cook" in alias.split()
+
+    def test_designation_strip_city_of(self):
+        alias = build_search_alias("City of London", "city of london")
+        assert "london" in alias.split()
+
+    def test_designation_strip_county_of(self):
+        alias = build_search_alias("County of Cork", "county of cork")
+        assert "cork" in alias.split()
+
+    def test_single_word_no_alias(self):
+        # Single plain word should produce nothing
+        assert build_search_alias("Boston", "boston") is None
 
     def test_empty_input(self):
-        assert enrich_search_text("") == ""
+        assert build_search_alias("", "") is None
 
-    def test_no_duplicates_in_abbreviations(self):
-        # If "st" is already in the text, don't add it again
-        result = enrich_search_text("saint louis st louis")
-        count = result.split().count("st")
-        # "st" appears once in original, should not be added again
-        assert count == 1
+    def test_no_duplicates(self):
+        alias = build_search_alias("Saint Louis", "saint louis st louis")
+        # "st" already present in search_name, must not be re-emitted
+        assert alias is None or alias.split().count("st") == 0
 
     def test_short_concat_skipped(self):
         # Pairwise concatenation of very short words (< 4 chars) should be skipped
-        result = enrich_search_text("a bc rest of text")
-        extras = result.split()[5:]  # Skip original words
-        # "abc" (3 chars) should not appear as its own token
-        assert "abc" not in extras
+        alias = build_search_alias("A Bc", "a bc") or ""
+        assert "abc" not in alias.split()
 
-    def test_preserves_original_text(self):
-        original = "boston massachusetts united states"
-        result = enrich_search_text(original)
-        assert result.startswith(original)
+
+class TestComputeImportance:
+    def test_in_unit_range(self):
+        cases = [
+            ("country", None, 1_400_000_000, 1.0, True, False),
+            ("locality", "megacity", 30_000_000, 1.0, True, False),
+            ("locality", "hamlet", None, None, False, False),
+            ("neighborhood", None, None, None, False, False),
+            ("region", None, 50_000_000, 0.5, False, True),
+        ]
+        for subtype, cls, pop, wiki, cap_c, cap_r in cases:
+            imp = compute_importance(subtype, cls, pop, wiki, cap_c, cap_r)
+            assert 0.0 <= imp <= 1.0, (subtype, imp)
+
+    def test_megacity_above_village(self):
+        megacity = compute_importance("locality", class_="megacity")
+        village = compute_importance("locality", class_="village")
+        assert megacity > village
+
+    def test_type_prior_ordering(self):
+        # Photon searchPrio shape: city above county/state-like types
+        country = compute_importance("country")
+        region = compute_importance("region")
+        city = compute_importance("locality", class_="city")
+        county = compute_importance("county")
+        neighborhood = compute_importance("neighborhood")
+        assert country > city > region > county > neighborhood
+
+    def test_locality_null_class_default(self):
+        plain = compute_importance("locality")
+        town = compute_importance("locality", class_="town")
+        village = compute_importance("locality", class_="village")
+        assert village < plain < town
+
+    def test_wiki_component(self):
+        without = compute_importance("locality", class_="city")
+        with_wiki = compute_importance("locality", class_="city", wiki_importance=0.8)
+        assert with_wiki == pytest.approx(without + WIKI_IMPORTANCE_WEIGHT * 0.8)
+
+    def test_null_population_no_component(self):
+        assert compute_importance("locality", class_="town") == \
+            compute_importance("locality", class_="town", population=None)
+
+    def test_population_component_capped(self):
+        small = compute_importance("locality", class_="city", population=10_000)
+        huge = compute_importance("locality", class_="city", population=50_000_000)
+        assert huge > small
+        # Cap: 0.22 prior + 0.2 max pop component
+        assert huge == pytest.approx(0.22 + 0.2)
+
+    def test_population_half_weight_for_coarse_types(self):
+        # Same population contributes half for a county vs a locality
+        loc = compute_importance("locality", class_=None, population=1_000_000)
+        county = compute_importance("county", population=1_000_000)
+        loc_pop = loc - compute_importance("locality", class_=None)
+        county_pop = county - compute_importance("county")
+        assert county_pop == pytest.approx(loc_pop / 2)
+
+    def test_capital_bonuses(self):
+        base = compute_importance("locality", class_="city")
+        country_cap = compute_importance(
+            "locality", class_="city", is_country_capital=True)
+        region_cap = compute_importance(
+            "locality", class_="city", is_region_capital=True)
+        assert country_cap == pytest.approx(base + CAPITAL_COUNTRY_BONUS)
+        assert region_cap == pytest.approx(base + CAPITAL_REGION_BONUS)
+
+    def test_clamped_to_one(self):
+        # 0.30 megacity + 0.5 wiki + 0.2 capped pop + 0.08 capital = 1.08 -> 1.0
+        imp = compute_importance(
+            "locality", class_="megacity", population=37_000_000,
+            wiki_importance=1.0, is_country_capital=True)
+        assert imp == 1.0
+
+
+class TestShardSchema:
+    def test_fts_has_three_columns_no_porter(self):
+        db = make_shard_db()
+        (sql,) = db.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'divisions_fts'"
+        ).fetchone()
+        assert "porter" not in sql
+        assert "remove_diacritics 2" in sql
+        assert "search_name" in sql
+        assert "search_alias" in sql
+        assert "search_context" in sql
+
+    def test_divisions_has_new_columns_not_search_text(self):
+        db = make_shard_db()
+        cols = {r[1] for r in db.execute("PRAGMA table_info(divisions)")}
+        assert {"search_name", "search_alias", "search_context", "importance"} <= cols
+        assert "search_text" not in cols
+
+    def test_importance_not_null(self):
+        db = make_shard_db()
+        with pytest.raises(sqlite3.IntegrityError):
+            db.execute(DIVISIONS_INSERT_SQL, (
+                "x", 0, "locality", "X", 0.0, 0.0, 0.0, 0.0, 0.0, 0.0,
+                None, "US", None, "x", None, None, None,
+            ))
+
+    def test_triggers_sync_fts(self):
+        db = make_shard_db()
+        insert_division(db, "a", "boston", None, "us massachusetts")
+        count = db.execute("SELECT COUNT(*) FROM divisions_fts").fetchone()[0]
+        assert count == 1
+
+    def test_france_does_not_match_san_francisco(self):
+        # P0 regression: porter stemmed "france" -> "franc" which
+        # prefix-matched "francisco". Without the stemmer the autocomplete
+        # query '"france"*' must not match a doc named "San Francisco".
+        db = make_shard_db()
+        insert_division(db, "sf", "san francisco", None, "us-ca us california")
+        assert fts_query("france") == '"france"*'
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("france"),)).fetchall()
+        assert rows == []
+        # Genuine prefixes still match
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("san franc"),)).fetchall()
+        assert [r[0] for r in rows] == ["sf"]
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("san francisco"),)).fetchall()
+        assert [r[0] for r in rows] == ["sf"]
+
+    def test_diacritics_folded(self):
+        db = make_shard_db()
+        insert_division(db, "muc", "münchen")
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("munchen"),)).fetchall()
+        assert [r[0] for r in rows] == ["muc"]
+
+    def test_weighted_bm25_name_beats_context(self):
+        # bm25(divisions_fts, 4.0, 2.0, 1.0): a search_name hit must outrank
+        # a search_context hit for the same token.
+        db = make_shard_db()
+        insert_division(db, "name-hit", "york", None, "us pennsylvania")
+        insert_division(db, "context-hit", "springfield", None, "york county us")
+        rows = db.execute(
+            WEIGHTED_BM25_QUERY, (fts_query("york", autocomplete=False),)
+        ).fetchall()
+        assert [r[0] for r in rows] == ["name-hit", "context-hit"]
+        # bm25 is lower-is-better (negative)
+        assert rows[0][1] < rows[1][1]
+
+    def test_alias_hit_between_name_and_context(self):
+        db = make_shard_db()
+        insert_division(db, "alias-hit", "new york city", "newyork", "us")
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("newyork"),)).fetchall()
+        assert [r[0] for r in rows] == ["alias-hit"]
+
+
+def write_test_parquet(path: Path):
+    """Synthetic divisions parquet matching download_divisions_global.sql output."""
+    con = duckdb.connect()
+    con.execute(f"""
+        COPY (
+            SELECT
+                gers_id, version, name, subtype, class, country, region,
+                population, wikidata, is_country_capital, is_region_capital,
+                CAST(lon AS DOUBLE) AS lon, CAST(lat AS DOUBLE) AS lat,
+                CAST(bbox_xmin AS DOUBLE) AS bbox_xmin,
+                CAST(bbox_ymin AS DOUBLE) AS bbox_ymin,
+                CAST(bbox_xmax AS DOUBLE) AS bbox_xmax,
+                CAST(bbox_ymax AS DOUBLE) AS bbox_ymax,
+                primary_name, search_name, search_context
+            FROM (VALUES
+                ('nyc-001', 1, 'New York City', 'locality', 'megacity', 'US', 'US-NY',
+                 8336817, 'Q60', false, false,
+                 -74.0060, 40.7128, -74.2591, 40.4774, -73.7004, 40.9176,
+                 'New York City, NY', 'new york city nyc new york',
+                 'us-ny us new york united states'),
+                ('sf-001', 1, 'San Francisco', 'locality', 'city', 'US', 'US-CA',
+                 873965, 'Q62', false, false,
+                 -122.4194, 37.7749, -122.5151, 37.7034, -122.3568, 37.8324,
+                 'San Francisco, CA', 'san francisco sf',
+                 'us-ca us california united states'),
+                ('tiny-001', 1, 'Tinyville', 'locality', 'village', 'US', 'US-NY',
+                 950, NULL, false, false,
+                 -75.0, 43.0, -75.1, 42.9, -74.9, 43.1,
+                 'Tinyville, NY', 'tinyville',
+                 'us-ny us new york united states'),
+                ('famous-001', 1, 'Gettysburg', 'locality', 'village', 'US', 'US-PA',
+                 2600, 'Q999', false, false,
+                 -77.2311, 39.8309, -77.3, 39.8, -77.2, 39.9,
+                 'Gettysburg, PA', 'gettysburg',
+                 'us-pa us pennsylvania united states'),
+                ('region-ny', 1, 'New York', 'region', NULL, 'US', 'US-NY',
+                 NULL, 'Q1384', false, false,
+                 -75.0, 43.0, -79.8, 40.5, -71.9, 45.0,
+                 'New York', 'new york',
+                 'us-ny us united states')
+            ) AS t(gers_id, version, name, subtype, class, country, region,
+                   population, wikidata, is_country_capital, is_region_capital,
+                   lon, lat, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                   primary_name, search_name, search_context)
+        ) TO '{path}' (FORMAT PARQUET);
+    """)
+    con.close()
+
+
+def write_test_importance_file(path: Path):
+    """Tiny QID-keyed importance file in Nominatim's published format."""
+    with gzip.open(path, "wt") as f:
+        f.write("language\ttype\ttitle\timportance\twikidata_id\n")
+        f.write("en\ta\tNew_York_City\t0.91\tQ60\n")
+        f.write("fr\ta\tNew_York\t0.88\tQ60\n")
+        f.write("en\ta\tSan_Francisco\t0.84\tQ62\n")
+        f.write("en\ta\tGettysburg\t0.80\tQ999\n")
+
+
+@pytest.fixture
+def enriched_parquet(tmp_path):
+    base = tmp_path / "divisions.parquet"
+    write_test_parquet(base)
+    importance = tmp_path / "wikimedia-importance.csv.gz"
+    write_test_importance_file(importance)
+    out = tmp_path / "divisions-wiki.parquet"
+    enrich_parquet_with_wiki_importance(base, out, importance)
+    return out
+
+
+class TestWikiImportanceJoin:
+    def test_join_by_qid(self, enriched_parquet):
+        con = duckdb.connect()
+        rows = dict(con.execute(f"""
+            SELECT gers_id, wiki_importance
+            FROM read_parquet('{enriched_parquet}')
+        """).fetchall())
+        con.close()
+        assert rows["nyc-001"] == pytest.approx(0.91)  # MAX over languages
+        assert rows["sf-001"] == pytest.approx(0.84)
+        assert rows["tiny-001"] is None  # no wikidata QID
+
+    def test_null_column_without_importance_file(self, tmp_path):
+        base = tmp_path / "divisions.parquet"
+        write_test_parquet(base)
+        out = tmp_path / "divisions-nowiki.parquet"
+        enrich_parquet_with_wiki_importance(base, out, None)
+        con = duckdb.connect()
+        rows = con.execute(
+            f"SELECT wiki_importance FROM read_parquet('{out}')"
+        ).fetchall()
+        con.close()
+        assert all(r[0] is None for r in rows)
+
+
+class TestEndToEndShardBuild:
+    def test_build_and_query_shard(self, enriched_parquet, tmp_path):
+        shard_path = tmp_path / "US.db"
+        info = build_country_shard(enriched_parquet, "US", shard_path, "test")
+        assert info["record_count"] == 5
+
+        db = sqlite3.connect(shard_path)
+
+        # Alias column contains concatenations
+        (alias,) = db.execute(
+            "SELECT search_alias FROM divisions WHERE gers_id = 'nyc-001'"
+        ).fetchone()
+        tokens = alias.split()
+        assert "newyork" in tokens
+        assert "newyorkcity" in tokens
+
+        # Context column contains parent codes/names
+        (context,) = db.execute(
+            "SELECT search_context FROM divisions WHERE gers_id = 'nyc-001'"
+        ).fetchone()
+        assert "us-ny" in context
+        assert "united states" in context
+
+        # Importance populated, in [0, 1], megacity > village
+        importances = dict(db.execute(
+            "SELECT gers_id, importance FROM divisions"
+        ).fetchall())
+        assert all(0.0 <= v <= 1.0 for v in importances.values())
+        assert importances["nyc-001"] > importances["tiny-001"]
+        # NYC: 0.30 megacity prior + 0.5*0.91 wiki + 0.2 capped pop
+        assert importances["nyc-001"] == pytest.approx(0.955)
+
+        # The exact query shape the Rust side uses: weighted bm25 + MATCH
+        rows = db.execute(
+            WEIGHTED_BM25_QUERY, (fts_query("new york"),)
+        ).fetchall()
+        ids = [r[0] for r in rows]
+        assert "nyc-001" in ids
+        assert all(isinstance(r[1], float) for r in rows)
+
+        # P0: "france" autocomplete must not match San Francisco
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("france"),)).fetchall()
+        assert rows == []
+
+        # Concatenation alias is searchable
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("newyork"),)).fetchall()
+        assert "nyc-001" in [r[0] for r in rows]
+
+        db.close()
+
+    def test_head_shard_includes_wiki_famous(self, enriched_parquet, tmp_path):
+        head_path = tmp_path / "HEAD.db"
+        info = build_head_shard(
+            enriched_parquet, head_path, "test", population_threshold=1_000_000
+        )
+        db = sqlite3.connect(head_path)
+        ids = {r[0] for r in db.execute("SELECT gers_id FROM divisions")}
+        db.close()
+
+        assert "nyc-001" in ids        # population >= threshold
+        assert "region-ny" in ids      # subtype region
+        assert "famous-001" in ids     # wiki_importance 0.80 >= 0.5
+        assert "tiny-001" not in ids   # small, not famous
+        assert "sf-001" in ids         # wiki_importance 0.84 >= 0.5
+        assert info["record_count"] == len(ids)
 
 
 class TestConstants:

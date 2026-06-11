@@ -7,7 +7,7 @@
 # Example: ./scripts/download_divisions.sh 2025-12-17.0
 #
 # Outputs:
-#   exports/divisions-global.parquet  - Forward geocoding data (with FTS search_text)
+#   exports/divisions-global.parquet  - Forward geocoding data (FTS search_name/search_context)
 #   exports/divisions-reverse.parquet - Reverse geocoding data (with bbox/H3 cells)
 
 set -e

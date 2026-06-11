@@ -238,9 +238,10 @@ fn to_json_response(
             lat: r.lat,
             lon: r.lon,
             bbox: r.bbox,
-            // Importance is unclamped through the ranking pipeline so bias
-            // can reorder saturated results; clamp to 0-1 for the API.
-            importance: r.importance.clamp(0.0, 1.0),
+            // Importance is the composed ranking score (~0-2 with bias) and
+            // is unclamped through the pipeline so bias can reorder saturated
+            // results; scale by 1/2 and clamp to 0-1 for the API.
+            importance: (r.importance / 2.0).clamp(0.0, 1.0),
             country: r.country.clone(),
             region: r.region.clone(),
         })
@@ -276,7 +277,8 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
                     "gers_id": r.gers_id,
                     "name": r.primary_name,
                     "type": r.division_type,
-                    "importance": r.importance.clamp(0.0, 1.0),
+                    // Composed score scaled to 0-1 for display (see ResultItem).
+                    "importance": (r.importance / 2.0).clamp(0.0, 1.0),
                     "country": r.country,
                     "region": r.region,
                 },

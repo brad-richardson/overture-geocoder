@@ -10,7 +10,7 @@
 -- Example: sed "s|__OVERTURE_RELEASE__|2025-01-01.0|g" ... | duckdb
 --
 -- TODO: Future iteration - download raw data first, then filter/transform in a
--- separate step. This would avoid re-downloading when tweaking search_text logic.
+-- separate step. This would avoid re-downloading when tweaking search column logic.
 
 -- Install and load required extensions
 INSTALL httpfs;
@@ -39,7 +39,7 @@ SET threads = 2;
 --
 -- Country/region name lookups:
 -- We join with country and region divisions to get their full names for search.
--- This allows "cambridge uk" to match Cambridge, GB-ENG because search_text
+-- This allows "cambridge uk" to match Cambridge, GB-ENG because search_context
 -- includes "united kingdom" and "england", not just the codes "gb" and "gb-eng".
 COPY (
     WITH
@@ -87,6 +87,13 @@ COPY (
         d.country,
         d.region,
         d.population,
+        -- Wikidata QID (e.g., "Q60") - joined against the Nominatim wikimedia
+        -- importance file at shard build time (docs/ranking-research.md, P1)
+        d.wikidata,
+        -- Capital flags from capital_of_divisions (STRUCT(division_id, subtype)[]):
+        -- used for the capital bonus in the precomputed importance (P2)
+        COALESCE(len(list_filter(d.capital_of_divisions, x -> x.subtype = 'country')) > 0, false) as is_country_capital,
+        COALESCE(len(list_filter(d.capital_of_divisions, x -> x.subtype = 'region')) > 0, false) as is_region_capital,
         ST_X(d.geometry) as lon,
         ST_Y(d.geometry) as lat,
         d.bbox.xmin as bbox_xmin,
@@ -105,9 +112,9 @@ COPY (
             ELSE
                 CONCAT(d.names.primary, ', ', d.country)
         END as primary_name,
-        -- Search text for FTS - focused on key searchable terms
-        -- Includes: primary, short names (NYC), English common/alternate, region, country
-        -- Also includes parent division names (country name, region name) for hierarchy search
+        -- search_name: tokens that name THIS place (FTS column 1, weighted
+        -- highest - docs/ranking-research.md P0/P4).
+        -- Includes: primary, short names (NYC), English common/official/alternate
         -- Excludes: multilingual translations to keep BM25 scoring balanced
         -- TODO: Consider language-specific shards for full multilingual search
         LOWER(ARRAY_TO_STRING(
@@ -142,15 +149,28 @@ COPY (
                                     x -> x.value
                                 ),
                                 ' '
-                            ), ''),
-                            -- Region code (e.g., "MA" for US)
-                            CASE WHEN d.country = 'US' AND d.region IS NOT NULL
-                                THEN REPLACE(d.region, 'US-', '')
-                                ELSE d.region
-                            END,
+                            ), '')
+                        ), ' '
+                    ),
+                    x -> x IS NOT NULL AND x != ''
+                )
+            ), ' '
+        )) as search_name,
+        -- search_context: parent names + region/country codes (FTS column 3,
+        -- weighted lowest). Enables "cambridge uk" / "boston ma" searches
+        -- without letting context hits score like name hits.
+        -- Note: raw region codes ("US-MA") tokenize to "us" + "ma" under
+        -- unicode61, so both code forms are searchable.
+        NULLIF(LOWER(ARRAY_TO_STRING(
+            LIST_DISTINCT(
+                LIST_FILTER(
+                    STRING_SPLIT(
+                        CONCAT_WS(' ',
+                            -- Region code (e.g., "US-MA")
+                            d.region,
                             -- Country code
                             d.country,
-                            -- Parent division names (NEW - enables "cambridge uk" searches)
+                            -- Parent division names (enables "cambridge uk" searches)
                             cn.country_name,   -- e.g., "United Kingdom", "United States"
                             cn.country_common, -- e.g., "United Kingdom", "United States" (from common.en)
                             cn.country_short,  -- e.g., "UK", "USA", "U.S." (from short names)
@@ -160,7 +180,7 @@ COPY (
                     x -> x IS NOT NULL AND x != ''
                 )
             ), ' '
-        )) as search_text
+        )), '') as search_context
     FROM read_parquet(
         's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
         hive_partitioning = true

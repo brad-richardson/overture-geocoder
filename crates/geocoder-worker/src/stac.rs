@@ -6,9 +6,8 @@ use std::rc::Rc;
 
 use bytes::Bytes;
 use geocoder_core::{
-    geo::haversine_distance,
-    query::{apply_exact_match_bonus, apply_location_bias},
-    Database, GeocoderQuery, GeocoderResult, IdLookupResult, LocationBias, ReverseResult,
+    geo::haversine_distance, query::apply_location_bias, Database, GeocoderQuery, GeocoderResult,
+    IdLookupResult, LocationBias, ReverseResult,
 };
 use parquet::file::reader::{ChunkReader, FileReader, Length, SerializedFileReader};
 use parquet::record::RowAccessor;
@@ -602,7 +601,9 @@ impl ShardLoader {
             }
         }
 
-        // Sort by importance before deduplication
+        // Sort by composed importance before deduplication. Match quality
+        // ("Paris" above "Parish") is already part of the per-result score
+        // computed in Database::search, so no separate exact-match bonus.
         all_results.sort_by(|a, b| {
             b.importance
                 .partial_cmp(&a.importance)
@@ -612,9 +613,6 @@ impl ShardLoader {
         // Deduplicate by gers_id (keep highest importance)
         let mut seen = std::collections::HashSet::new();
         all_results.retain(|r| seen.insert(r.gers_id.clone()));
-
-        // Apply exact match bonus (helps "Paris" rank above "Parish")
-        apply_exact_match_bonus(&mut all_results, &query.text);
 
         // Apply location bias (can elevate results from country shard)
         if !matches!(query.bias, LocationBias::None) {

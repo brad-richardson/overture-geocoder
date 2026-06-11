@@ -11,16 +11,31 @@ Output:
 """
 
 import sqlite3
+import sys
 from pathlib import Path
+
+# Reuse the production schema + ranking helpers so fixtures cannot drift
+sys.path.insert(0, str(Path(__file__).parent))
+from build_shards import (  # noqa: E402
+    DIVISIONS_INSERT_SQL,
+    build_search_alias,
+    build_shard_schema,
+    compute_importance,
+)
 
 
 # Test data for divisions (matches what tests expect)
-# search_text includes hierarchy to match production data format
+# search_name/search_context follow the production split (P0/P4):
+#   search_name    = tokens naming THIS place (primary + short/common names)
+#   search_context = parent names + region/country codes
+# search_alias and importance are derived via build_shards helpers.
 DIVISIONS_DATA = [
     # Boston - locality with high population (should rank first for "boston")
     {
         "gers_id": "5df2793f-5a0a-4fcf-bd3c-7edb8cc495d8",
         "type": "locality",
+        "class": "city",
+        "name": "Boston",
         "primary_name": "Boston, MA",
         "lat": 42.3601,
         "lon": -71.0589,
@@ -31,12 +46,17 @@ DIVISIONS_DATA = [
         "population": 675647,
         "country": "US",
         "region": "US-MA",
-        "search_text": "boston massachusetts united states ma us suffolk county",
+        "search_name": "boston",
+        "search_context": "us-ma us massachusetts united states suffolk county",
+        "wiki_importance": 0.72,
+        "is_region_capital": True,
     },
     # Cambridge, MA - locality (for disambiguation with Cambridge UK)
     {
         "gers_id": "e66a9243-9cc5-40a8-a44e-363f9721113f",
         "type": "locality",
+        "class": "city",
+        "name": "Cambridge",
         "primary_name": "Cambridge, MA",
         "lat": 42.3736,
         "lon": -71.1097,
@@ -47,12 +67,15 @@ DIVISIONS_DATA = [
         "population": 105162,
         "country": "US",
         "region": "US-MA",
-        "search_text": "cambridge massachusetts united states ma us middlesex county",
+        "search_name": "cambridge",
+        "search_context": "us-ma us massachusetts united states middlesex county",
+        "wiki_importance": 0.63,
     },
     # Worcester County - higher population than city
     {
         "gers_id": "5fc7bdb6-37b6-4759-94df-e94fef6571fa",
         "type": "county",
+        "name": "Worcester County",
         "primary_name": "Worcester County, MA",
         "lat": 42.3500,
         "lon": -71.9000,
@@ -63,12 +86,15 @@ DIVISIONS_DATA = [
         "population": 862111,
         "country": "US",
         "region": "US-MA",
-        "search_text": "worcester county massachusetts united states ma us",
+        "search_name": "worcester county",
+        "search_context": "us-ma us massachusetts united states",
     },
     # Worcester City - lower population than county
     {
         "gers_id": "a1b2c3d4-5678-90ab-cdef-1234567890ab",
         "type": "locality",
+        "class": "city",
+        "name": "Worcester",
         "primary_name": "Worcester, MA",
         "lat": 42.2626,
         "lon": -71.8023,
@@ -79,12 +105,15 @@ DIVISIONS_DATA = [
         "population": 206518,
         "country": "US",
         "region": "US-MA",
-        "search_text": "worcester massachusetts united states ma us",
+        "search_name": "worcester",
+        "search_context": "us-ma us massachusetts united states",
+        "wiki_importance": 0.45,
     },
     # Boston neighborhoods (macrohood)
     {
         "gers_id": "b1234567-89ab-cdef-0123-456789abcdef",
         "type": "macrohood",
+        "name": "South Boston",
         "primary_name": "South Boston, MA",
         "lat": 42.3381,
         "lon": -71.0476,
@@ -95,11 +124,13 @@ DIVISIONS_DATA = [
         "population": None,
         "country": "US",
         "region": "US-MA",
-        "search_text": "south boston southie massachusetts united states ma us southboston s",
+        "search_name": "south boston southie",
+        "search_context": "us-ma us massachusetts united states",
     },
     {
         "gers_id": "c2345678-90ab-cdef-1234-567890abcdef",
         "type": "macrohood",
+        "name": "East Boston",
         "primary_name": "East Boston, MA",
         "lat": 42.3750,
         "lon": -71.0350,
@@ -110,13 +141,16 @@ DIVISIONS_DATA = [
         "population": None,
         "country": "US",
         "region": "US-MA",
-        "search_text": "east boston eastie massachusetts united states ma us eastboston e",
+        "search_name": "east boston eastie",
+        "search_context": "us-ma us massachusetts united states",
     },
     # === International cities ===
     # Paris, France
     {
         "gers_id": "paris-france-001",
         "type": "locality",
+        "class": "megacity",
+        "name": "Paris",
         "primary_name": "Paris",
         "lat": 48.8566,
         "lon": 2.3522,
@@ -127,12 +161,17 @@ DIVISIONS_DATA = [
         "population": 2161000,
         "country": "FR",
         "region": None,
-        "search_text": "paris france île-de-france fr europe",
+        "search_name": "paris",
+        "search_context": "fr france île-de-france",
+        "wiki_importance": 0.95,
+        "is_country_capital": True,
     },
     # New York City (with alternate names)
     {
         "gers_id": "nyc-001",
         "type": "locality",
+        "class": "megacity",
+        "name": "New York City",
         "primary_name": "New York City, NY",
         "lat": 40.7128,
         "lon": -74.0060,
@@ -143,12 +182,16 @@ DIVISIONS_DATA = [
         "population": 8336817,
         "country": "US",
         "region": "US-NY",
-        "search_text": "new york city nyc ny new york united states us big apple manhattan newyork yorkcity newyorkcity",
+        "search_name": "new york city nyc new york big apple",
+        "search_context": "us-ny us new york united states",
+        "wiki_importance": 0.98,
     },
     # London, UK
     {
         "gers_id": "london-uk-001",
         "type": "locality",
+        "class": "megacity",
+        "name": "London",
         "primary_name": "London",
         "lat": 51.5074,
         "lon": -0.1278,
@@ -159,12 +202,17 @@ DIVISIONS_DATA = [
         "population": 8982000,
         "country": "GB",
         "region": None,
-        "search_text": "london england united kingdom uk gb great britain",
+        "search_name": "london",
+        "search_context": "gb united kingdom uk great britain england",
+        "wiki_importance": 0.97,
+        "is_country_capital": True,
     },
     # Tokyo, Japan
     {
         "gers_id": "tokyo-001",
         "type": "locality",
+        "class": "megacity",
+        "name": "Tokyo",
         "primary_name": "Tokyo",
         "lat": 35.6762,
         "lon": 139.6503,
@@ -175,12 +223,17 @@ DIVISIONS_DATA = [
         "population": 13960000,
         "country": "JP",
         "region": None,
-        "search_text": "tokyo japan jp 東京",
+        "search_name": "tokyo 東京",
+        "search_context": "jp japan",
+        "wiki_importance": 0.93,
+        "is_country_capital": True,
     },
     # Cambridge, UK (for disambiguation with Cambridge MA)
     {
         "gers_id": "cambridge-uk-001",
         "type": "locality",
+        "class": "city",
+        "name": "Cambridge",
         "primary_name": "Cambridge",
         "lat": 52.2053,
         "lon": 0.1218,
@@ -191,12 +244,16 @@ DIVISIONS_DATA = [
         "population": 145700,
         "country": "GB",
         "region": None,
-        "search_text": "cambridge england united kingdom uk gb cambridgeshire",
+        "search_name": "cambridge",
+        "search_context": "gb united kingdom uk great britain england cambridgeshire",
+        "wiki_importance": 0.71,
     },
     # Saint Louis, MO (for abbreviation testing: "saint" ↔ "st")
     {
         "gers_id": "stlouis-001",
         "type": "locality",
+        "class": "city",
+        "name": "Saint Louis",
         "primary_name": "Saint Louis, MO",
         "lat": 38.6270,
         "lon": -90.1994,
@@ -207,12 +264,16 @@ DIVISIONS_DATA = [
         "population": 301578,
         "country": "US",
         "region": "US-MO",
-        "search_text": "saint louis missouri united states mo us st saintlouis",
+        "search_name": "saint louis",
+        "search_context": "us-mo us missouri united states",
+        "wiki_importance": 0.62,
     },
     # Fort Worth, TX (for abbreviation testing: "fort" ↔ "ft")
     {
         "gers_id": "ftworth-001",
         "type": "locality",
+        "class": "city",
+        "name": "Fort Worth",
         "primary_name": "Fort Worth, TX",
         "lat": 32.7555,
         "lon": -97.3308,
@@ -223,7 +284,9 @@ DIVISIONS_DATA = [
         "population": 958692,
         "country": "US",
         "region": "US-TX",
-        "search_text": "fort worth texas united states tx us ft fortworth",
+        "search_name": "fort worth",
+        "search_context": "us-tx us texas united states",
+        "wiki_importance": 0.55,
     },
 ]
 
@@ -295,75 +358,28 @@ def create_divisions_fixture(output_dir: Path) -> bool:
         output_db.unlink()
 
     db = sqlite3.connect(output_db)
-    db.execute("PRAGMA journal_mode=DELETE")
 
-    # Create divisions table (same schema as build_shards.py)
-    db.execute("""
-        CREATE TABLE divisions (
-            rowid INTEGER PRIMARY KEY,
-            gers_id TEXT NOT NULL UNIQUE,
-            version INTEGER NOT NULL DEFAULT 0,
-            type TEXT NOT NULL,
-            primary_name TEXT NOT NULL,
-            lat REAL NOT NULL,
-            lon REAL NOT NULL,
-            bbox_xmin REAL NOT NULL,
-            bbox_ymin REAL NOT NULL,
-            bbox_xmax REAL NOT NULL,
-            bbox_ymax REAL NOT NULL,
-            population INTEGER,
-            country TEXT,
-            region TEXT,
-            search_text TEXT NOT NULL
-        )
-    """)
+    # Same schema, FTS5 table, and triggers as production shards
+    build_shard_schema(db)
 
-    # Create FTS5 virtual table
-    db.execute("""
-        CREATE VIRTUAL TABLE divisions_fts USING fts5(
-            search_text,
-            content=divisions,
-            content_rowid=rowid,
-            tokenize='porter unicode61 remove_diacritics 1',
-            prefix='2 3 4'
-        )
-    """)
-
-    # Create triggers for FTS sync
-    db.execute("""
-        CREATE TRIGGER divisions_ai AFTER INSERT ON divisions BEGIN
-            INSERT INTO divisions_fts(rowid, search_text)
-            VALUES (new.rowid, new.search_text);
-        END
-    """)
-    db.execute("""
-        CREATE TRIGGER divisions_ad AFTER DELETE ON divisions BEGIN
-            INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, old.search_text);
-        END
-    """)
-    db.execute("""
-        CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN
-            INSERT INTO divisions_fts(divisions_fts, rowid, search_text)
-            VALUES ('delete', old.rowid, old.search_text);
-            INSERT INTO divisions_fts(rowid, search_text)
-            VALUES (new.rowid, new.search_text);
-        END
-    """)
-
-    # Insert divisions
+    # Insert divisions (search_alias and importance derived exactly like
+    # build_shards.prepare_division_rows does)
     for div in DIVISIONS_DATA:
-        db.execute("""
-            INSERT INTO divisions (
-                gers_id, version, type, primary_name, lat, lon,
-                bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                population, country, region, search_text
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, (
+        search_alias = build_search_alias(div["name"], div["search_name"])
+        importance = compute_importance(
+            div["type"],
+            class_=div.get("class"),
+            population=div["population"],
+            wiki_importance=div.get("wiki_importance"),
+            is_country_capital=div.get("is_country_capital", False),
+            is_region_capital=div.get("is_region_capital", False),
+        )
+        db.execute(DIVISIONS_INSERT_SQL, (
             div["gers_id"], 0, div["type"], div["primary_name"],
             div["lat"], div["lon"],
             div["bbox_xmin"], div["bbox_ymin"], div["bbox_xmax"], div["bbox_ymax"],
-            div["population"], div["country"], div["region"], div["search_text"]
+            div["population"], div["country"], div["region"],
+            div["search_name"], search_alias, div["search_context"], importance,
         ))
 
     # Create indexes

@@ -10,9 +10,10 @@ use rusqlite::{params, Connection, OpenFlags};
 use crate::error::Result;
 use crate::geo::haversine_distance;
 use crate::query::{
-    calculate_boosted_score, prepare_fts_query, REVERSE_CANDIDATES_PER_SUBTYPE,
-    REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL,
-    SEARCH_DIVISIONS_SQL_NO_MATH,
+    calculate_boosted_score, match_quality, prepare_fts_query, BM25_TIEBREAK_WEIGHT,
+    REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_SQL,
+    SEARCH_DIVISIONS_SQL, SEARCH_DIVISIONS_SQL_NO_MATH, SEARCH_DIVISIONS_SQL_WEIGHTED,
+    STATIC_IMPORTANCE_WEIGHT,
 };
 use crate::types::{
     DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
@@ -33,6 +34,9 @@ pub struct Database {
     has_math_fns: OnceCell<bool>,
     /// Whether the reverse shard has the `divisions_reverse_rtree` index.
     has_rtree: OnceCell<bool>,
+    /// Whether the forward shard carries a precomputed `importance` column
+    /// (new schema with weighted multi-column FTS).
+    has_static_importance: OnceCell<bool>,
 }
 
 impl Database {
@@ -61,6 +65,7 @@ impl Database {
             conn,
             has_math_fns: OnceCell::new(),
             has_rtree: OnceCell::new(),
+            has_static_importance: OnceCell::new(),
         })
     }
 
@@ -113,6 +118,18 @@ impl Database {
         })
     }
 
+    /// Whether the forward shard has the precomputed `importance` column
+    /// (new schema: static prominence + weighted multi-column FTS). Probed
+    /// by preparing a statement against the column; legacy shards fail the
+    /// prepare and take the population-boost path.
+    fn has_static_importance(&self) -> bool {
+        *self.has_static_importance.get_or_init(|| {
+            self.conn
+                .prepare("SELECT importance FROM divisions LIMIT 0")
+                .is_ok()
+        })
+    }
+
     /// Whether the reverse shard contains the R*Tree spatial index.
     fn has_rtree(&self) -> bool {
         *self.has_rtree.get_or_init(|| {
@@ -159,17 +176,30 @@ impl Database {
         Ok(results)
     }
 
-    /// Execute an FTS5 search and return scored results.
+    /// Execute an FTS5 search and return results scored with the composed
+    /// ranking: `match_quality + 0.5 * static_importance + 0.2 * bm25_norm`.
+    ///
+    /// The SQL is schema-detected per shard:
+    /// - New shards (precomputed `importance` column + weighted multi-column
+    ///   FTS): blend text score with static importance in the ORDER BY.
+    /// - Legacy shards: population boost in the ORDER BY when the build has
+    ///   math functions, else raw BM25 with the boost applied in Rust.
+    ///
+    /// Either way the in-SQL blend only protects the fetch LIMIT; the final
+    /// ordering is the composed score computed here.
     fn execute_fts_search(
         &self,
         fts_query: &str,
         query: &GeocoderQuery,
     ) -> Result<Vec<GeocoderResult>> {
-        // Population boost is applied inside the SQL ORDER BY when the build
-        // has math functions, so high-population matches can't be cut off by
-        // the fetch LIMIT before the boost is applied.
-        let in_sql_boost = self.has_math_fns();
-        let sql = if in_sql_boost {
+        let static_path = self.has_static_importance();
+        // Legacy path: population boost applied inside the SQL ORDER BY when
+        // the build has math functions, so high-population matches can't be
+        // cut off by the fetch LIMIT before the boost is applied.
+        let in_sql_boost = !static_path && self.has_math_fns();
+        let sql = if static_path {
+            SEARCH_DIVISIONS_SQL_WEIGHTED
+        } else if in_sql_boost {
             SEARCH_DIVISIONS_SQL
         } else {
             SEARCH_DIVISIONS_SQL_NO_MATH
@@ -183,11 +213,19 @@ impl Database {
 
         let rows = stmt.query_map(params![fts_query, fetch_limit], |row| {
             let population: Option<i64> = row.get(10)?;
-            let score: f64 = row.get(13)?;
-            let boosted_score = if in_sql_boost {
-                score
+            let (static_importance, text_score) = if static_path {
+                // New schema: precomputed importance column + weighted bm25.
+                (row.get::<_, f64>(13)?, row.get::<_, f64>(14)?)
             } else {
-                calculate_boosted_score(score, population)
+                // Legacy schema: derive static prominence from the
+                // population-boosted BM25 score (the historical formula).
+                let score: f64 = row.get(13)?;
+                let boosted_score = if in_sql_boost {
+                    score
+                } else {
+                    calculate_boosted_score(score, population)
+                };
+                ((-boosted_score / 50.0).max(0.0), boosted_score)
             };
 
             Ok(DivisionRow {
@@ -204,20 +242,42 @@ impl Database {
                 population,
                 country: row.get(11)?,
                 region: row.get(12)?,
-                boosted_score,
+                text_score,
+                static_importance,
             })
         })?;
 
         // Collect rows, propagating any SQLite errors instead of silently dropping them
         let division_rows: Vec<DivisionRow> = rows.collect::<std::result::Result<Vec<_>, _>>()?;
 
-        // Convert to results and re-sort by boosted score (population boost affects ordering)
+        // BM25-style scores are negative (more negative = better); normalize
+        // by the best (most negative) score in this shard's result set so the
+        // tiebreaker is comparable across shards with different IDF stats.
+        let best_text_score = division_rows
+            .iter()
+            .map(|r| r.text_score)
+            .fold(f64::INFINITY, f64::min);
+
+        // Compose the final score per result (P3): match quality dominates,
+        // static importance disambiguates same-name places, normalized BM25
+        // is a small tiebreaker.
         let mut results: Vec<GeocoderResult> = division_rows
             .into_iter()
-            .map(|row| row.into_result())
+            .map(|row| {
+                let bm25_norm = if best_text_score.is_finite() && best_text_score < 0.0 {
+                    (row.text_score / best_text_score).clamp(0.0, 1.0)
+                } else {
+                    0.0 // degenerate: no negative scores to normalize against
+                };
+                let quality = match_quality(&row.primary_name, &query.text);
+                let importance = quality
+                    + STATIC_IMPORTANCE_WEIGHT * row.static_importance
+                    + BM25_TIEBREAK_WEIGHT * bm25_norm;
+                row.into_result(importance)
+            })
             .collect();
 
-        // Sort by importance (descending) since population boost changes ranking
+        // Sort by composed importance (descending)
         results.sort_by(|a, b| {
             b.importance
                 .partial_cmp(&a.importance)
@@ -421,6 +481,32 @@ mod tests {
         );
     "#;
 
+    /// New forward shard schema: precomputed static `importance` column plus
+    /// the weighted three-column FTS index (see the schema contract in
+    /// scripts/build_shards.py).
+    const NEW_FORWARD_SCHEMA: &str = r#"
+        CREATE TABLE divisions (
+            rowid INTEGER PRIMARY KEY,
+            gers_id TEXT, type TEXT, primary_name TEXT,
+            lat REAL, lon REAL,
+            bbox_xmin REAL, bbox_ymin REAL, bbox_xmax REAL, bbox_ymax REAL,
+            population INTEGER, country TEXT, region TEXT,
+            importance REAL NOT NULL,
+            search_name TEXT, search_alias TEXT, search_context TEXT
+        );
+        CREATE VIRTUAL TABLE divisions_fts USING fts5(
+            search_name, search_alias, search_context,
+            content='divisions', content_rowid='rowid',
+            tokenize='unicode61 remove_diacritics 2',
+            prefix='2 3 4'
+        );
+    "#;
+
+    /// Populate the new-schema FTS index from the content table.
+    const NEW_FTS_SYNC: &str =
+        "INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)
+         SELECT rowid, search_name, search_alias, search_context FROM divisions;";
+
     const REVERSE_SCHEMA: &str = r#"
         CREATE TABLE divisions_reverse (
             rowid INTEGER PRIMARY KEY,
@@ -464,6 +550,85 @@ mod tests {
         assert_eq!(
             results[0].gers_id, "id-29",
             "high-population match should rank first"
+        );
+        // Legacy path end-to-end: composed score = match_quality (1.0 for an
+        // exact name match) + derived static importance + bm25 tiebreaker.
+        assert!(
+            results[0].importance >= 1.0,
+            "exact match should carry full match quality, got {}",
+            results[0].importance
+        );
+    }
+
+    /// Schema detection: the `importance` probe must distinguish old shards
+    /// (no column) from new shards (precomputed static importance).
+    #[test]
+    fn test_static_importance_schema_detection() {
+        let old = db_with(FORWARD_SCHEMA);
+        assert!(
+            !old.has_static_importance(),
+            "legacy schema must take the population-boost path"
+        );
+
+        let new = db_with(NEW_FORWARD_SCHEMA);
+        assert!(
+            new.has_static_importance(),
+            "new schema must take the static-importance path"
+        );
+    }
+
+    fn insert_new_schema_row(
+        setup: &mut String,
+        rowid: i64,
+        gers_id: &str,
+        name: &str,
+        importance: f64,
+    ) {
+        setup.push_str(&format!(
+            "INSERT INTO divisions VALUES ({rowid}, '{gers_id}', 'locality', '{name}',
+             0.0, 0.0, -1, -1, 1, 1, NULL, 'US', NULL, {importance},
+             '{name}', '', 'United States US');\n",
+        ));
+    }
+
+    /// New path: with identical names (equal match quality), precomputed
+    /// static importance decides the order.
+    #[test]
+    fn test_new_schema_static_importance_ordering() {
+        let mut setup = String::from(NEW_FORWARD_SCHEMA);
+        // Low-importance Paris first so raw insertion order can't pass the test.
+        insert_new_schema_row(&mut setup, 1, "paris-low", "Paris", 0.15);
+        insert_new_schema_row(&mut setup, 2, "paris-high", "Paris", 0.92);
+        setup.push_str(NEW_FTS_SYNC);
+        let db = db_with(&setup);
+
+        let results = db.search(&GeocoderQuery::new("paris")).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0].gers_id, "paris-high",
+            "higher static importance must win between identical names"
+        );
+        assert!(results[0].importance > results[1].importance);
+    }
+
+    /// New path: the match-quality ladder orders exact match above
+    /// word-boundary prefix above bare prefix, given equal importance.
+    #[test]
+    fn test_new_schema_match_quality_ladder() {
+        let mut setup = String::from(NEW_FORWARD_SCHEMA);
+        // Insert in reverse of the expected order.
+        insert_new_schema_row(&mut setup, 1, "parisville", "Parisville", 0.4);
+        insert_new_schema_row(&mut setup, 2, "paris-township", "Paris Township", 0.4);
+        insert_new_schema_row(&mut setup, 3, "paris", "Paris", 0.4);
+        setup.push_str(NEW_FTS_SYNC);
+        let db = db_with(&setup);
+
+        let results = db.search(&GeocoderQuery::new("paris")).unwrap();
+        let order: Vec<&str> = results.iter().map(|r| r.gers_id.as_str()).collect();
+        assert_eq!(
+            order,
+            vec!["paris", "paris-township", "parisville"],
+            "exact > word-boundary prefix > bare prefix"
         );
     }
 

@@ -4,13 +4,24 @@ mod bias;
 mod fts;
 mod merge;
 
-pub use bias::{apply_exact_match_bonus, apply_location_bias};
+pub use bias::apply_location_bias;
 pub use fts::prepare_fts_query;
 pub use merge::merge_results;
 
 // =============================================================================
 // Scoring constants
 // =============================================================================
+
+/// Weight of precomputed static importance (0-1) in the composed score.
+/// Kept below 1.0 so importance can never outvote a full match-quality
+/// ladder step (exact vs prefix vs partial): a world-famous "Paris" should
+/// not beat an exact-match "Paris Township" query for "paris township".
+pub const STATIC_IMPORTANCE_WEIGHT: f64 = 0.5;
+
+/// Weight of the per-shard-normalized BM25 score in the composed score.
+/// Deliberately small: raw BM25 embeds per-shard IDF/doc-length statistics
+/// and is not comparable across shards, so it acts as a tiebreaker only.
+pub const BM25_TIEBREAK_WEIGHT: f64 = 0.2;
 
 /// Multiplier for the natural log of population in boosted score calculation.
 /// Higher values increase the ranking advantage of high-population places.
@@ -21,6 +32,27 @@ pub const POPULATION_BOOST_MULTIPLIER: f64 = 2.0;
 /// This gives a slight advantage to places with known population over unknowns.
 /// Set to match the boost a place with population=1 would receive (ln(2) * 2.0 ≈ 1.4).
 pub const MISSING_POPULATION_PENALTY: f64 = 2.0;
+
+/// SQL query for searching divisions in shards that carry a precomputed
+/// `importance` column (static prominence: type prior + wikidata + capped
+/// population) and the three-column FTS index
+/// (`search_name`, `search_alias`, `search_context`).
+///
+/// The bm25() column weights (name 4.0, alias 2.0, context 1.0) make a
+/// primary-name hit outrank an alias hit, which outranks a context (parent
+/// region/country) hit. The ORDER BY blends text relevance with static
+/// importance so high-prominence matches can't be cut off by the fetch
+/// LIMIT; the final ordering is recomputed in Rust (composed score).
+pub const SEARCH_DIVISIONS_SQL_WEIGHTED: &str = r#"
+    SELECT d.rowid, d.gers_id, d.type, d.primary_name, d.lat, d.lon,
+           d.bbox_xmin, d.bbox_ymin, d.bbox_xmax, d.bbox_ymax,
+           d.population, d.country, d.region, d.importance,
+           bm25(divisions_fts, 4.0, 2.0, 1.0) AS text_score
+    FROM divisions_fts JOIN divisions d ON divisions_fts.rowid = d.rowid
+    WHERE divisions_fts MATCH ?1
+    ORDER BY text_score - 5.0 * d.importance
+    LIMIT ?2
+"#;
 
 /// SQL query for searching divisions, with the population boost applied
 /// in SQL so `ORDER BY ... LIMIT` ranks on the final score. Computing the
@@ -90,6 +122,73 @@ pub fn calculate_boosted_score(bm25_score: f64, population: Option<i64>) -> f64 
             bm25_score - ((pop as f64 + 1.0).ln() * POPULATION_BOOST_MULTIPLIER)
         }
         _ => bm25_score - MISSING_POPULATION_PENALTY,
+    }
+}
+
+/// Match quality between the query and a result's display name
+/// (Photon's `QueryReranker` ladder).
+///
+/// Compares the lowercased, comma-truncated display name (the part of
+/// `primary_name` before the first comma, so "Boston, MA" compares as
+/// "boston") against the lowercased query:
+///
+/// - exact equality: **1.0**
+/// - query is a prefix of the name ending at a word boundary: **0.9**
+///   ("paris" vs "Paris Township")
+/// - bare prefix: **0.8** ("paris" vs "Parisville")
+/// - otherwise: `0.8 * (longest common prefix chars / query chars)`
+///
+/// Both sides get a cheap one-to-one fold of common Latin diacritics so
+/// "Zürich" matches "zurich". Multi-char foldings (e.g. ß → ss) are not
+/// applied; old shards porter-stem the index but `primary_name` is raw, so
+/// this comparison is best-effort for such names.
+pub fn match_quality(primary_name: &str, query: &str) -> f64 {
+    fn normalize(s: &str) -> String {
+        s.trim()
+            .chars()
+            .flat_map(char::to_lowercase)
+            .map(fold_latin_diacritic)
+            .collect()
+    }
+
+    let display = normalize(primary_name.split(',').next().unwrap_or(""));
+    let query = normalize(query);
+
+    if query.is_empty() || display.is_empty() {
+        return 0.0;
+    }
+    if display == query {
+        return 1.0;
+    }
+    if let Some(rest) = display.strip_prefix(&query) {
+        // strip_prefix is byte-correct for multi-byte names.
+        return match rest.chars().next() {
+            Some(c) if !c.is_alphanumeric() => 0.9, // word boundary
+            _ => 0.8,                               // bare prefix
+        };
+    }
+
+    let lcp = display
+        .chars()
+        .zip(query.chars())
+        .take_while(|(a, b)| a == b)
+        .count();
+    0.8 * lcp as f64 / query.chars().count() as f64
+}
+
+/// Fold common Latin diacritics to their base letter (lowercase input).
+/// One-to-one mappings only; anything else passes through unchanged.
+fn fold_latin_diacritic(c: char) -> char {
+    match c {
+        'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+        'è' | 'é' | 'ê' | 'ë' => 'e',
+        'ì' | 'í' | 'î' | 'ï' => 'i',
+        'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => 'o',
+        'ù' | 'ú' | 'û' | 'ü' => 'u',
+        'ç' => 'c',
+        'ñ' => 'n',
+        'ý' | 'ÿ' => 'y',
+        _ => c,
     }
 }
 
@@ -164,3 +263,53 @@ pub const REVERSE_GEOCODE_SQL: &str = r#"
     WHERE rn <= ?3
     ORDER BY area ASC
 "#;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_match_quality_ladder() {
+        // Exact match (comma-truncated display name)
+        assert_eq!(match_quality("Paris", "paris"), 1.0);
+        assert_eq!(match_quality("Boston, MA", "boston"), 1.0);
+        // Prefix at word boundary
+        assert_eq!(match_quality("Paris Township", "paris"), 0.9);
+        // Bare prefix
+        assert_eq!(match_quality("Parisville", "paris"), 0.8);
+        // Partial: coverage-scaled
+        let q = match_quality("Paradise", "paris");
+        assert!((q - 0.8 * 3.0 / 5.0).abs() < 1e-9, "got {q}");
+        // No overlap
+        assert_eq!(match_quality("London", "paris"), 0.0);
+    }
+
+    #[test]
+    fn test_match_quality_diacritics_and_case() {
+        assert_eq!(match_quality("Zürich", "zurich"), 1.0);
+        assert_eq!(match_quality("São Paulo", "sao paulo"), 1.0);
+        assert_eq!(match_quality("PARIS", "Paris"), 1.0);
+    }
+
+    #[test]
+    fn test_match_quality_multiword_prefix() {
+        // Query covering the first words of a longer name = word-boundary prefix
+        assert_eq!(match_quality("New York City, NY", "new york"), 0.9);
+    }
+
+    #[test]
+    fn test_match_quality_empty() {
+        assert_eq!(match_quality("Paris", ""), 0.0);
+        assert_eq!(match_quality("", "paris"), 0.0);
+    }
+
+    #[test]
+    fn test_calculate_boosted_score() {
+        // Population lowers (improves) the score; missing population gets
+        // the flat penalty offset.
+        let with_pop = calculate_boosted_score(-1.0, Some(1_000_000));
+        let no_pop = calculate_boosted_score(-1.0, None);
+        assert!(with_pop < no_pop);
+        assert!((no_pop - (-1.0 - MISSING_POPULATION_PENALTY)).abs() < 1e-9);
+    }
+}

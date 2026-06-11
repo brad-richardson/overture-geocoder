@@ -149,11 +149,10 @@ fn cmd_search(args: &[String]) -> Result<()> {
         .with_autocomplete(opts.autocomplete)
         .with_bias(bias.clone());
 
-    // Execute search (returns more results than limit to allow bias to elevate)
+    // Execute search (returns more results than limit to allow bias to
+    // elevate). Match quality ("Paris" above "Parish") is already part of
+    // the composed score computed in Database::search.
     let mut results = db.search(&query)?;
-
-    // Apply exact match bonus (helps "Paris" rank above "Parish")
-    geocoder_core::query::apply_exact_match_bonus(&mut results, query_text);
 
     // Apply location bias (re-ranks results)
     if !matches!(bias, LocationBias::None) {
@@ -163,9 +162,10 @@ fn cmd_search(args: &[String]) -> Result<()> {
     // Truncate to requested limit after bias is applied
     results.truncate(opts.limit);
 
-    // Importance is unclamped through the ranking pipeline; clamp for output.
+    // Importance is the composed ranking score (~0-2 with bias), unclamped
+    // through the pipeline; scale by 1/2 and clamp to 0-1 for output.
     for r in &mut results {
-        r.importance = r.importance.clamp(0.0, 1.0);
+        r.importance = (r.importance / 2.0).clamp(0.0, 1.0);
     }
 
     if opts.json_output {
