@@ -8,14 +8,6 @@ pub type Result<T> = std::result::Result<T, Error>;
 /// Geocoder error types.
 #[derive(Debug, Error)]
 pub enum Error {
-    /// Database error.
-    #[error("database error: {0}")]
-    Database(String),
-
-    /// Query preparation error.
-    #[error("invalid query: {0}")]
-    InvalidQuery(String),
-
     /// SQLite error.
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),

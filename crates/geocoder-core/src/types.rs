@@ -73,7 +73,9 @@ pub struct GeocoderResult {
     /// Bounding box in GeoJSON order: [min_lon, min_lat, max_lon, max_lat].
     #[serde(rename = "boundingbox")]
     pub bbox: [f64; 4],
-    /// Importance score (0-1, higher is more important).
+    /// Importance score (higher is more important). Nominally 0-1, but kept
+    /// unclamped through the bias/merge pipeline so bonuses can still reorder
+    /// saturated results; clamp at serialization time for display.
     pub importance: f64,
     /// Division type (locality, county, etc.).
     #[serde(rename = "type")]
@@ -124,9 +126,11 @@ impl DivisionRow {
                 self.bbox_xmax,
                 self.bbox_ymax,
             ],
-            // Convert boosted score to importance (0-1 scale).
-            // More negative score = higher importance.
-            importance: (-self.boosted_score / 50.0).clamp(0.0, 1.0),
+            // Convert boosted score to importance (nominal 0-1 scale).
+            // More negative score = higher importance. Only the lower bound
+            // is clamped: capping at 1.0 here would erase ordering among
+            // strong matches before bias bonuses are applied.
+            importance: (-self.boosted_score / 50.0).max(0.0),
             division_type: self.division_type,
             country: self.country,
             region: self.region,

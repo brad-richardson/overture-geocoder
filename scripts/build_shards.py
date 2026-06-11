@@ -603,9 +603,12 @@ def build_reverse_shard_schema(db: sqlite3.Connection):
             region TEXT
         );
 
-        -- Bbox index for reverse geocoding queries
-        CREATE INDEX IF NOT EXISTS idx_bbox ON divisions_reverse(
-            bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax
+        -- R*Tree spatial index for reverse geocoding point-in-bbox queries.
+        -- The reader (geocoder-core) detects this table and uses it; legacy
+        -- shards without it fall back to a bbox range scan. Populated after
+        -- data load by populate_reverse_rtree().
+        CREATE VIRTUAL TABLE IF NOT EXISTS divisions_reverse_rtree USING rtree(
+            id, xmin, xmax, ymin, ymax
         );
 
         -- Index for deduplication of antimeridian splits
@@ -613,6 +616,16 @@ def build_reverse_shard_schema(db: sqlite3.Connection):
 
         -- Area index for sorting by specificity
         CREATE INDEX IF NOT EXISTS idx_area ON divisions_reverse(area);
+    """)
+
+
+def populate_reverse_rtree(db: sqlite3.Connection):
+    """Fill the R*Tree from divisions_reverse rows. Call after data load."""
+    db.executescript("""
+        DELETE FROM divisions_reverse_rtree;
+        INSERT INTO divisions_reverse_rtree
+            SELECT rowid, bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax
+            FROM divisions_reverse;
     """)
 
 
@@ -718,6 +731,8 @@ def build_reverse_country_shard(
         """, processed_rows)
         count += len(processed_rows)
 
+    populate_reverse_rtree(db)
+
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('country', ?)", (country_code,))
@@ -801,6 +816,8 @@ def build_reverse_head_shard(
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, processed_rows)
         count += len(processed_rows)
+
+    populate_reverse_rtree(db)
 
     # Store metadata
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))

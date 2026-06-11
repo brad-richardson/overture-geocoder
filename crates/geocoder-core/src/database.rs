@@ -2,13 +2,17 @@
 //!
 //! Provides a high-level interface for querying SQLite geocoding shards.
 
+use std::cell::OnceCell;
 use std::path::Path;
 
 use rusqlite::{params, Connection, OpenFlags};
 
 use crate::error::Result;
+use crate::geo::haversine_distance;
 use crate::query::{
-    calculate_boosted_score, prepare_fts_query, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL,
+    calculate_boosted_score, prepare_fts_query, REVERSE_CANDIDATES_PER_SUBTYPE,
+    REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL,
+    SEARCH_DIVISIONS_SQL_NO_MATH,
 };
 use crate::types::{
     DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
@@ -16,22 +20,50 @@ use crate::types::{
 
 use std::collections::HashSet;
 
+/// When tie-breaking reverse geocode candidates by centroid distance, only
+/// consider candidates whose area is within this factor of the smallest.
+/// Prevents a distant-but-slightly-larger division from displacing a
+/// genuinely containing one, while still correcting bbox-overlap false hits.
+const REVERSE_TIEBREAK_AREA_FACTOR: f64 = 4.0;
+
 /// A SQLite database connection for geocoding queries.
 pub struct Database {
     conn: Connection,
-    /// Temp file path to clean up on drop (only used by `from_bytes`).
-    temp_file: Option<std::path::PathBuf>,
-}
-
-impl Drop for Database {
-    fn drop(&mut self) {
-        if let Some(path) = &self.temp_file {
-            let _ = std::fs::remove_file(path);
-        }
-    }
+    /// Whether the build supports SQL math functions (`ln`); probed lazily.
+    has_math_fns: OnceCell<bool>,
+    /// Whether the reverse shard has the `divisions_reverse_rtree` index.
+    has_rtree: OnceCell<bool>,
 }
 
 impl Database {
+    fn new(conn: Connection) -> Result<Self> {
+        // The bundled SQLite is compiled without SQLITE_ENABLE_MATH_FUNCTIONS,
+        // so register ln() as a Rust scalar function (matching SQLite's
+        // semantics: NULL for x <= 0). The boost-in-SQL search path depends
+        // on it, on native and wasm32 alike.
+        let has_native_ln = conn.query_row("SELECT ln(1.0)", [], |_| Ok(())).is_ok();
+        if !has_native_ln {
+            use rusqlite::functions::FunctionFlags;
+            conn.create_scalar_function(
+                "ln",
+                1,
+                FunctionFlags::SQLITE_UTF8
+                    | FunctionFlags::SQLITE_DETERMINISTIC
+                    | FunctionFlags::SQLITE_INNOCUOUS,
+                |ctx| {
+                    let x: f64 = ctx.get(0)?;
+                    Ok(if x > 0.0 { Some(x.ln()) } else { None })
+                },
+            )?;
+        }
+
+        Ok(Self {
+            conn,
+            has_math_fns: OnceCell::new(),
+            has_rtree: OnceCell::new(),
+        })
+    }
+
     /// Open a database from a file path.
     pub fn open(path: impl AsRef<Path>) -> Result<Self> {
         let conn = Connection::open_with_flags(
@@ -46,54 +78,20 @@ impl Database {
              PRAGMA temp_store = MEMORY;",
         )?;
 
-        Ok(Self {
-            conn,
-            temp_file: None,
-        })
+        Self::new(conn)
     }
 
     /// Open a database from bytes.
     ///
-    /// On native: creates a temp file (cleaned up when dropped).
-    /// On WASM: uses SQLite's in-memory deserialize.
-    #[cfg(not(target_arch = "wasm32"))]
-    pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
-        // Write bytes to a temp file (cleaned up on Drop)
-        let temp_path = std::env::temp_dir().join(format!("geocoder-{}.db", uuid_v4()));
-        std::fs::write(&temp_path, bytes)?;
-
-        let conn = Connection::open_with_flags(
-            &temp_path,
-            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
-        )?;
-
-        // Configure for read-only performance
-        conn.execute_batch(
-            "PRAGMA cache_size = -64000; -- 64MB
-             PRAGMA mmap_size = 268435456; -- 256MB
-             PRAGMA temp_store = MEMORY;",
-        )?;
-
-        Ok(Self {
-            conn,
-            temp_file: Some(temp_path),
-        })
-    }
-
-    /// Open a database from bytes (WASM version).
-    ///
-    /// Uses rusqlite's deserialize API to load the database from bytes.
-    /// Note: The database must NOT be in WAL mode (use journal_mode=DELETE when building).
-    #[cfg(target_arch = "wasm32")]
+    /// Uses rusqlite's deserialize API (sqlite3_deserialize) on all targets,
+    /// so the shard is served entirely from memory — no temp file.
+    /// Note: The database must NOT be in WAL mode (use journal_mode=DELETE
+    /// when building).
     pub fn from_bytes(bytes: &[u8]) -> Result<Self> {
         use rusqlite::MAIN_DB;
         use std::io::Cursor;
 
-        // Open an in-memory database first
         let mut conn = Connection::open_in_memory()?;
-
-        // Deserialize the bytes into this connection
-        // This uses rusqlite's serialize feature which wraps sqlite3_deserialize
         conn.deserialize_read_exact(
             MAIN_DB,
             Cursor::new(bytes),
@@ -101,12 +99,30 @@ impl Database {
             true, // read_only
         )?;
 
-        // Configure for read-only performance
         conn.execute_batch("PRAGMA temp_store = MEMORY;")?;
 
-        Ok(Self {
-            conn,
-            temp_file: None,
+        Self::new(conn)
+    }
+
+    /// Whether this SQLite build provides math functions (`ln` etc.).
+    fn has_math_fns(&self) -> bool {
+        *self.has_math_fns.get_or_init(|| {
+            self.conn
+                .query_row("SELECT ln(1.0)", [], |_| Ok(()))
+                .is_ok()
+        })
+    }
+
+    /// Whether the reverse shard contains the R*Tree spatial index.
+    fn has_rtree(&self) -> bool {
+        *self.has_rtree.get_or_init(|| {
+            self.conn
+                .query_row(
+                    "SELECT 1 FROM sqlite_master WHERE name = 'divisions_reverse_rtree'",
+                    [],
+                    |_| Ok(()),
+                )
+                .is_ok()
         })
     }
 
@@ -149,16 +165,30 @@ impl Database {
         fts_query: &str,
         query: &GeocoderQuery,
     ) -> Result<Vec<GeocoderResult>> {
-        let mut stmt = self.conn.prepare_cached(SEARCH_DIVISIONS_SQL)?;
+        // Population boost is applied inside the SQL ORDER BY when the build
+        // has math functions, so high-population matches can't be cut off by
+        // the fetch LIMIT before the boost is applied.
+        let in_sql_boost = self.has_math_fns();
+        let sql = if in_sql_boost {
+            SEARCH_DIVISIONS_SQL
+        } else {
+            SEARCH_DIVISIONS_SQL_NO_MATH
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
 
         // Fetch more results than the final limit to allow bias to elevate
-        // results that wouldn't otherwise make the cut.
-        let fetch_limit = (query.limit * 10).max(100) as i64;
+        // results that wouldn't otherwise make the cut. Re-clamp limit here:
+        // the field is public, so `with_limit`'s clamp can be bypassed.
+        let fetch_limit = (query.limit.clamp(1, 40) * 10).max(100) as i64;
 
         let rows = stmt.query_map(params![fts_query, fetch_limit], |row| {
             let population: Option<i64> = row.get(10)?;
-            let bm25_score: f64 = row.get(13)?;
-            let boosted_score = calculate_boosted_score(bm25_score, population);
+            let score: f64 = row.get(13)?;
+            let boosted_score = if in_sql_boost {
+                score
+            } else {
+                calculate_boosted_score(score, population)
+            };
 
             Ok(DivisionRow {
                 rowid: row.get(0)?,
@@ -227,12 +257,18 @@ impl Database {
     /// a hierarchy of parent divisions.
     ///
     /// This method expects a reverse geocoding shard (divisions_reverse table).
+    /// Shards built with the `divisions_reverse_rtree` spatial index use an
+    /// indexed lookup; legacy shards fall back to a bbox range scan.
     pub fn reverse_geocode(&self, lat: f64, lon: f64) -> Result<Option<ReverseResult>> {
-        let mut stmt = self.conn.prepare_cached(REVERSE_GEOCODE_SQL)?;
+        let sql = if self.has_rtree() {
+            REVERSE_GEOCODE_RTREE_SQL
+        } else {
+            REVERSE_GEOCODE_SQL
+        };
+        let mut stmt = self.conn.prepare_cached(sql)?;
 
-        // Query for divisions whose bbox contains this point
         // lon is ?1, lat is ?2 (matching the SQL parameter order)
-        let rows = stmt.query_map([lon, lat], |row| {
+        let rows = stmt.query_map(params![lon, lat, REVERSE_CANDIDATES_PER_SUBTYPE], |row| {
             Ok(ReverseDivisionRow {
                 gers_id: row.get(0)?,
                 subtype: row.get(1)?,
@@ -244,9 +280,6 @@ impl Database {
                 bbox_xmax: row.get(7)?,
                 bbox_ymax: row.get(8)?,
                 area: row.get(9)?,
-                population: row.get(10)?,
-                country: row.get(11)?,
-                region: row.get(12)?,
             })
         })?;
 
@@ -257,19 +290,45 @@ impl Database {
             return Ok(None);
         }
 
-        // Deduplicate by gers_id (for antimeridian-split divisions)
+        // Deduplicate by gers_id (for antimeridian-split divisions);
+        // rows are sorted by area ascending.
         let mut seen_ids = HashSet::new();
         let deduped: Vec<ReverseDivisionRow> = division_rows
             .into_iter()
             .filter(|row| seen_ids.insert(row.gers_id.clone()))
             .collect();
 
-        // First row is the most specific (smallest area) due to ORDER BY area ASC
-        let most_specific = &deduped[0];
+        // Bbox containment is not polygon containment: in dense areas many
+        // sibling divisions' bboxes overlap the point. Instead of blindly
+        // taking the smallest bbox, tie-break candidates of the same subtype
+        // and comparable area by centroid distance to the query point.
+        let smallest = &deduped[0];
+        let most_specific = deduped
+            .iter()
+            .filter(|row| {
+                row.subtype == smallest.subtype
+                    && row.area <= smallest.area * REVERSE_TIEBREAK_AREA_FACTOR
+            })
+            .min_by(|a, b| {
+                let da = haversine_distance(lat, lon, a.lat, a.lon);
+                let db = haversine_distance(lat, lon, b.lat, b.lon);
+                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+            })
+            .unwrap_or(smallest);
 
-        // Build hierarchy by collecting one of each subtype
+        // Build hierarchy: the chosen division for its own subtype, plus the
+        // smallest-area division of every other subtype.
         let mut hierarchy = Vec::new();
         let mut seen_subtypes = HashSet::new();
+
+        if let Some(div_type) = DivisionType::parse(&most_specific.subtype) {
+            seen_subtypes.insert(div_type);
+            hierarchy.push(HierarchyEntry {
+                gers_id: most_specific.gers_id.clone(),
+                subtype: most_specific.subtype.clone(),
+                name: most_specific.primary_name.clone(),
+            });
+        }
 
         for row in &deduped {
             if let Some(div_type) = DivisionType::parse(&row.subtype) {
@@ -334,41 +393,135 @@ struct ReverseDivisionRow {
     bbox_xmax: f64,
     bbox_ymax: f64,
     area: f64,
-    #[allow(dead_code)]
-    population: Option<i64>,
-    #[allow(dead_code)]
-    country: Option<String>,
-    #[allow(dead_code)]
-    region: Option<String>,
-}
-
-/// Calculate distance between two points using Haversine formula.
-fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const EARTH_RADIUS_KM: f64 = 6371.0;
-
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-    let delta_lat = (lat2 - lat1).to_radians();
-    let delta_lon = (lon2 - lon1).to_radians();
-
-    let a = (delta_lat / 2.0).sin().powi(2)
-        + lat1_rad.cos() * lat2_rad.cos() * (delta_lon / 2.0).sin().powi(2);
-    let c = 2.0 * a.sqrt().atan2((1.0 - a).sqrt());
-
-    EARTH_RADIUS_KM * c
-}
-
-/// Generate a simple UUID v4 for temp file names.
-fn uuid_v4() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    let timestamp = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap()
-        .as_nanos();
-
-    format!("{:032x}", timestamp)
 }
 
 // Integration tests for Database are in crates/geocoder-core/tests/
 // They require built shards: python scripts/build_shards.py --countries US
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn db_with(schema_and_data: &str) -> Database {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(schema_and_data).unwrap();
+        Database::new(conn).unwrap()
+    }
+
+    const FORWARD_SCHEMA: &str = r#"
+        CREATE TABLE divisions (
+            rowid INTEGER PRIMARY KEY,
+            gers_id TEXT, type TEXT, primary_name TEXT,
+            lat REAL, lon REAL,
+            bbox_xmin REAL, bbox_ymin REAL, bbox_xmax REAL, bbox_ymax REAL,
+            population INTEGER, country TEXT, region TEXT
+        );
+        CREATE VIRTUAL TABLE divisions_fts USING fts5(
+            primary_name, content='divisions', content_rowid='rowid'
+        );
+    "#;
+
+    const REVERSE_SCHEMA: &str = r#"
+        CREATE TABLE divisions_reverse (
+            rowid INTEGER PRIMARY KEY,
+            gers_id TEXT NOT NULL, subtype TEXT NOT NULL, primary_name TEXT NOT NULL,
+            lat REAL NOT NULL, lon REAL NOT NULL,
+            bbox_xmin REAL NOT NULL, bbox_ymin REAL NOT NULL,
+            bbox_xmax REAL NOT NULL, bbox_ymax REAL NOT NULL,
+            area REAL NOT NULL, population INTEGER, country TEXT, region TEXT
+        );
+    "#;
+
+    /// The deployed query path depends on SQL math functions; if the bundled
+    /// SQLite ever drops them, we want a test failure, not a fallback surprise.
+    #[test]
+    fn test_math_functions_available() {
+        let db = db_with(FORWARD_SCHEMA);
+        assert!(
+            db.has_math_fns(),
+            "bundled SQLite lacks ln(); the boost-in-SQL search path is disabled"
+        );
+    }
+
+    /// A high-population city must outrank low-population matches even when
+    /// raw BM25 scores are identical — the boost has to happen before LIMIT.
+    #[test]
+    fn test_population_boost_in_sql_ordering() {
+        let mut setup = String::from(FORWARD_SCHEMA);
+        // Many identical-BM25 rows; only one has a large population.
+        for i in 0..30 {
+            setup.push_str(&format!(
+                "INSERT INTO divisions VALUES ({i}, 'id-{i}', 'locality', 'Springfield',
+                 0.0, 0.0, -1, -1, 1, 1, {pop}, 'US', NULL);\n",
+                pop = if i == 29 { 1_000_000 } else { 100 }
+            ));
+        }
+        setup.push_str("INSERT INTO divisions_fts(rowid, primary_name) SELECT rowid, primary_name FROM divisions;");
+        let db = db_with(&setup);
+
+        let query = GeocoderQuery::new("springfield").with_limit(5);
+        let results = db.search(&query).unwrap();
+        assert_eq!(
+            results[0].gers_id, "id-29",
+            "high-population match should rank first"
+        );
+    }
+
+    fn insert_reverse_rows(extra: &str) -> String {
+        // Two overlapping neighborhoods: "wrong" has the smaller bbox but its
+        // centroid is far from the query point (0.05, 0.05); "right" contains
+        // the point with a nearby centroid and comparable area.
+        // Plus locality/region/country parents.
+        format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'n-wrong', 'neighborhood', 'Wrongville', 0.30, 0.30, 0.0, 0.0, 0.32, 0.32, 0.010, NULL, 'US', NULL),
+              (2, 'n-right', 'neighborhood', 'Rightville', 0.06, 0.06, 0.0, 0.0, 0.40, 0.40, 0.012, NULL, 'US', NULL),
+              (3, 'loc-1', 'locality', 'Big City', 0.2, 0.2, -0.5, -0.5, 0.5, 0.5, 1.0, NULL, 'US', NULL),
+              (4, 'reg-1', 'region', 'Stateland', 0.0, 0.0, -5.0, -5.0, 5.0, 5.0, 100.0, NULL, 'US', NULL),
+              (5, 'c-1', 'country', 'Countryland', 0.0, 0.0, -20.0, -20.0, 20.0, 20.0, 1600.0, NULL, 'US', NULL);
+            {extra}"#
+        )
+    }
+
+    #[test]
+    fn test_reverse_geocode_legacy_scan() {
+        let db = db_with(&insert_reverse_rows(""));
+        assert!(!db.has_rtree());
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        // Distance tie-break should pick Rightville despite Wrongville's
+        // slightly smaller bbox.
+        assert_eq!(result.gers_id, "n-right");
+        // Hierarchy must include all parent levels (old LIMIT 50 could drop them).
+        let subtypes: Vec<&str> = result
+            .hierarchy
+            .iter()
+            .map(|h| h.subtype.as_str())
+            .collect();
+        assert_eq!(
+            subtypes,
+            vec!["neighborhood", "locality", "region", "country"]
+        );
+        assert_eq!(result.hierarchy[0].gers_id, "n-right");
+    }
+
+    #[test]
+    fn test_reverse_geocode_rtree_path() {
+        let extra = r#"
+            CREATE VIRTUAL TABLE divisions_reverse_rtree USING rtree(
+                id, xmin, xmax, ymin, ymax
+            );
+            INSERT INTO divisions_reverse_rtree
+                SELECT rowid, bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax
+                FROM divisions_reverse;
+        "#;
+        let db = db_with(&insert_reverse_rows(extra));
+        assert!(db.has_rtree());
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(result.gers_id, "n-right");
+        assert_eq!(result.hierarchy.len(), 4);
+
+        // A point outside everything returns None.
+        assert!(db.reverse_geocode(60.0, 60.0).unwrap().is_none());
+    }
+}

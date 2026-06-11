@@ -2,6 +2,8 @@
 //!
 //! Applies country and/or proximity-based boosting to search results.
 
+pub use crate::geo::haversine_distance;
+
 use crate::types::{GeocoderResult, LocationBias};
 
 // =============================================================================
@@ -48,13 +50,15 @@ pub fn apply_exact_match_bonus(results: &mut [GeocoderResult], query: &str) {
     for result in results.iter_mut() {
         let name_lower = result.primary_name.to_lowercase();
 
-        // Check if any query token matches the start of the name exactly
+        // Check if any query token matches the start of the name exactly.
+        // strip_prefix is byte-position-correct for multi-byte names
+        // (chars().nth(token.len()) would index by chars and misfire).
         for token in &tokens {
-            if name_lower.starts_with(token) {
+            if let Some(rest) = name_lower.strip_prefix(token) {
                 // Token must be followed by a word boundary (space, comma, end)
-                let next_char = name_lower.chars().nth(token.len());
+                let next_char = rest.chars().next();
                 if next_char.is_none() || next_char == Some(',') || next_char == Some(' ') {
-                    result.importance = (result.importance + EXACT_MATCH_BONUS).clamp(0.0, 1.0);
+                    result.importance += EXACT_MATCH_BONUS;
                     break; // Only apply bonus once per result
                 }
             }
@@ -78,9 +82,11 @@ pub fn apply_location_bias(results: &mut [GeocoderResult], bias: &LocationBias) 
         return;
     }
 
+    // Importance is intentionally not clamped here: clamping mid-pipeline
+    // pins saturated results at 1.0, making bias unable to reorder them.
+    // Callers clamp once at serialization time.
     for result in results.iter_mut() {
-        let boost = calculate_bias_boost(result, bias);
-        result.importance = (result.importance + boost).clamp(0.0, 1.0);
+        result.importance += calculate_bias_boost(result, bias);
     }
 
     // Re-sort by adjusted importance (descending)
@@ -133,24 +139,6 @@ fn distance_decay(distance_km: f64) -> f64 {
     // Decay factor: closer = higher boost
     // Results within DISTANCE_DECAY_REFERENCE_KM get most of the boost
     MAX_DISTANCE_BOOST / (1.0 + distance_km / DISTANCE_DECAY_REFERENCE_KM)
-}
-
-/// Calculate the haversine distance between two points in kilometers.
-pub fn haversine_distance(lat1: f64, lon1: f64, lat2: f64, lon2: f64) -> f64 {
-    const EARTH_RADIUS_KM: f64 = 6371.0;
-
-    let d_lat = (lat2 - lat1).to_radians();
-    let d_lon = (lon2 - lon1).to_radians();
-
-    let lat1_rad = lat1.to_radians();
-    let lat2_rad = lat2.to_radians();
-
-    let a =
-        (d_lat / 2.0).sin().powi(2) + lat1_rad.cos() * lat2_rad.cos() * (d_lon / 2.0).sin().powi(2);
-
-    let c = 2.0 * a.sqrt().asin();
-
-    EARTH_RADIUS_KM * c
 }
 
 #[cfg(test)]

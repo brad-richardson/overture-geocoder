@@ -5,6 +5,7 @@
 
 pub mod database;
 pub mod error;
+pub mod geo;
 pub mod query;
 pub mod types;
 
