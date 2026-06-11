@@ -75,3 +75,4 @@ crates/target/
 # Shard outputs (generated, large)
 shards/
 data/
+.playwright-mcp/

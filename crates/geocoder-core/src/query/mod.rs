@@ -168,20 +168,22 @@ pub fn match_quality(primary_name: &str, query: &str) -> f64 {
         };
     }
 
-    // Partial-overlap credit requires a meaningful shared prefix. Without
-    // the floor, a 2-char accident ("ge") lets Gelsenkirchen outscore
-    // Deutschland for the query "germany" (alt-name matches legitimately
-    // score 0 here and must win on importance instead).
-    const MIN_MEANINGFUL_LCP: usize = 3;
+    // Partial-overlap credit requires a meaningful shared prefix: at least
+    // 3 chars AND at least half the query. Without it, accidents like
+    // "ge"/"ger" let Gelsenkirchen or Gera outscore Deutschland for the
+    // query "germany" (alt-name matches legitimately score 0 on the
+    // display-name ladder and must win on importance instead).
+    let query_chars = query.chars().count();
+    let min_meaningful_lcp = 3.max(query_chars.div_ceil(2));
     let lcp = display
         .chars()
         .zip(query.chars())
         .take_while(|(a, b)| a == b)
         .count();
-    if lcp < MIN_MEANINGFUL_LCP {
+    if lcp < min_meaningful_lcp {
         return 0.0;
     }
-    0.8 * lcp as f64 / query.chars().count() as f64
+    0.8 * lcp as f64 / query_chars as f64
 }
 
 /// Fold common Latin diacritics to their base letter (lowercase input).
