@@ -4,9 +4,9 @@ build-backend = "hatchling.build"
 
 [project]
 name = "overture-geocoder"
-version = "0.1.0"
-description = "Forward geocoder using Overture Maps data with Nominatim-compatible API"
-readme = { text = "Forward geocoder using Overture Maps data with Nominatim-compatible API", content-type = "text/plain" }
+version = "0.2.0"
+description = "Forward and reverse geocoder using Overture Maps data"
+readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
 authors = [

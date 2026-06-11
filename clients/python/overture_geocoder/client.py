@@ -1,13 +1,14 @@
 """Overture Geocoder Python Client.
 
-Forward geocoder using Overture Maps data with Nominatim-compatible API.
+Forward and reverse geocoder using Overture Maps data.
 """
 
 from __future__ import annotations
 
+import random
 import time
 from dataclasses import dataclass, field
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 
 import httpx
 
@@ -15,6 +16,9 @@ __all__ = [
     "OvertureGeocoder",
     "GeocoderResult",
     "ReverseGeocoderResult",
+    "HierarchyEntry",
+    "IdLookupResult",
+    "BBox",
     "GeocoderError",
     "GeocoderTimeoutError",
     "GeocoderNetworkError",
@@ -28,8 +32,9 @@ __all__ = [
 
 DEFAULT_BASE_URL = "https://geocoder.bradr.dev"
 DEFAULT_TIMEOUT = 30.0
-DEFAULT_RETRIES = 0
+DEFAULT_RETRIES = 2
 DEFAULT_RETRY_DELAY = 1.0
+MAX_RETRY_AFTER_SECONDS = 30.0
 
 T = TypeVar("T")
 
@@ -74,7 +79,20 @@ class GeocoderNetworkError(GeocoderError):
 
 @dataclass
 class GeocoderResult:
-    """A geocoding result."""
+    """A forward geocoding result.
+
+    Attributes:
+        gers_id: GERS ID of the matched division
+        primary_name: Display name (the worker's ``name`` field)
+        lat: Latitude of the representative point
+        lon: Longitude of the representative point
+        boundingbox: ``[min_lon, min_lat, max_lon, max_lat]`` (the worker's
+            ``bbox`` field)
+        importance: Relative importance score
+        type: Division subtype (e.g. ``"locality"``)
+        country: ISO country code (e.g. ``"US"``), when available
+        region: ISO region code (e.g. ``"US-MA"``), when available
+    """
 
     gers_id: str
     primary_name: str
@@ -83,6 +101,8 @@ class GeocoderResult:
     boundingbox: list[float]
     importance: float
     type: Optional[str] = None
+    country: Optional[str] = None
+    region: Optional[str] = None
     _geocoder: Optional["OvertureGeocoder"] = field(default=None, repr=False)
 
     def get_geometry(self) -> Optional[dict[str, Any]]:
@@ -103,7 +123,19 @@ class HierarchyEntry:
 
 @dataclass
 class ReverseGeocoderResult:
-    """A reverse geocoding result."""
+    """A reverse geocoding result.
+
+    Attributes:
+        gers_id: GERS ID of the matched division
+        primary_name: Display name of the division
+        subtype: Division subtype (e.g. ``"county"``, ``"locality"``)
+        lat: Latitude of the division's representative point
+        lon: Longitude of the division's representative point
+        boundingbox: ``[min_lon, min_lat, max_lon, max_lat]``
+        distance_km: Distance from the query point in kilometers
+        confidence: One of ``"high"``, ``"medium"``, or ``"low"``
+        hierarchy: Administrative hierarchy from most to least specific
+    """
 
     gers_id: str
     primary_name: str
@@ -112,7 +144,7 @@ class ReverseGeocoderResult:
     lon: float
     boundingbox: list[float]
     distance_km: float
-    confidence: str  # "exact", "bbox", or "approximate"
+    confidence: str  # "high", "medium", or "low"
     hierarchy: Optional[list[HierarchyEntry]] = None
     _geocoder: Optional["OvertureGeocoder"] = field(default=None, repr=False)
 
@@ -156,6 +188,24 @@ class ReverseGeocoderResult:
 
 
 @dataclass
+class BBox:
+    """A bounding box in lon/lat coordinates."""
+
+    xmin: float
+    ymin: float
+    xmax: float
+    ymax: float
+
+
+@dataclass
+class IdLookupResult:
+    """Result of a GERS ID lookup."""
+
+    id: str
+    bbox: BBox
+
+
+@dataclass
 class GeoJSONFeature:
     """GeoJSON Feature representation."""
 
@@ -180,19 +230,20 @@ class GeoJSONFeatureCollection:
 
 
 class OvertureGeocoder:
-    """Forward geocoder using Overture Maps address data.
+    """Forward and reverse geocoder using Overture Maps division data.
 
     Args:
         base_url: API base URL (default: 'https://geocoder.bradr.dev')
         timeout: Request timeout in seconds (default: 30.0)
-        retries: Number of retry attempts for failed requests (default: 0)
-        retry_delay: Delay between retries in seconds (default: 1.0)
+        retries: Number of retry attempts for failed requests (default: 2)
+        retry_delay: Base delay between retries in seconds (default: 1.0).
+            Retries use exponential backoff with jitter.
         headers: Custom headers to include in all requests
         http_client: Custom httpx.Client instance
 
     Example:
-        >>> client = OvertureGeocoder(base_url="https://api.example.com")
-        >>> results = client.search("123 Main St, Boston, MA")
+        >>> client = OvertureGeocoder()
+        >>> results = client.search("Boston, MA")
         >>> for r in results:
         ...     print(f"{r.primary_name}: ({r.lat}, {r.lon})")
     """
@@ -223,29 +274,35 @@ class OvertureGeocoder:
         query: str,
         *,
         limit: int = 10,
-        format: str = "jsonv2",
+        autocomplete: Optional[bool] = None,
+        lat: Optional[float] = None,
+        lon: Optional[float] = None,
     ) -> list[GeocoderResult]:
         """Search for divisions matching the query.
 
         Args:
             query: Free-form search string
             limit: Maximum results (1-40, default: 10)
-            format: Response format ('json', 'jsonv2', 'geojson')
+            autocomplete: Enable prefix matching for partial queries
+            lat: Optional latitude to bias result ranking
+            lon: Optional longitude to bias result ranking
 
         Returns:
             List of GeocoderResult objects
         """
         params: dict[str, Any] = {
             "q": query,
-            "format": format,
             "limit": min(max(1, limit), 40),
         }
+        if autocomplete is not None:
+            params["autocomplete"] = 1 if autocomplete else 0
+        if lat is not None:
+            params["lat"] = lat
+        if lon is not None:
+            params["lon"] = lon
 
         response = self._request_with_retry(f"{self.base_url}/search", params=params)
         data = response.json()
-
-        if format == "geojson":
-            return data  # type: ignore
 
         return self._parse_results(data, include_geocoder=True)
 
@@ -262,7 +319,7 @@ class OvertureGeocoder:
             limit: Maximum results (1-40, default: 10)
 
         Returns:
-            GeoJSON FeatureCollection dict
+            GeoJSON FeatureCollection dict with Point features
         """
         params: dict[str, Any] = {
             "q": query,
@@ -277,34 +334,35 @@ class OvertureGeocoder:
         self,
         lat: float,
         lon: float,
-        *,
-        format: str = "jsonv2",
     ) -> list[ReverseGeocoderResult]:
-        """Reverse geocode coordinates to divisions.
+        """Reverse geocode coordinates to the containing division.
 
-        Returns divisions (localities, neighborhoods, counties, etc.) that
-        contain the given coordinate. Results are sorted by specificity
-        (smallest/most specific first).
+        The worker returns a single best match (with its administrative
+        hierarchy); for API stability this is returned as a list with zero
+        or one element.
 
         Args:
             lat: Latitude (-90 to 90)
             lon: Longitude (-180 to 180)
-            format: Response format ('jsonv2', 'geojson')
 
         Returns:
-            List of ReverseGeocoderResult objects, most specific first
+            List with one ReverseGeocoderResult, or an empty list if no
+            division contains the point (HTTP 404 from the worker).
         """
         params: dict[str, Any] = {
             "lat": lat,
             "lon": lon,
-            "format": format,
         }
 
-        response = self._request_with_retry(f"{self.base_url}/reverse", params=params)
+        try:
+            response = self._request_with_retry(
+                f"{self.base_url}/reverse", params=params
+            )
+        except GeocoderError as e:
+            if e.status == 404:
+                return []
+            raise
         data = response.json()
-
-        if format == "geojson":
-            return data  # type: ignore
 
         return self._parse_reverse_results(data)
 
@@ -313,14 +371,18 @@ class OvertureGeocoder:
         lat: float,
         lon: float,
     ) -> dict[str, Any]:
-        """Reverse geocode and return results as GeoJSON FeatureCollection.
+        """Reverse geocode and return the raw GeoJSON response.
+
+        Note: ``format=geojson`` on ``/reverse`` requires a current worker
+        version; older deployments ignore the parameter and return the plain
+        JSON object instead of GeoJSON. The response is returned as-is.
 
         Args:
             lat: Latitude (-90 to 90)
             lon: Longitude (-180 to 180)
 
         Returns:
-            GeoJSON FeatureCollection dict
+            The JSON response dict (GeoJSON on current worker versions)
         """
         params: dict[str, Any] = {
             "lat": lat,
@@ -330,6 +392,69 @@ class OvertureGeocoder:
 
         response = self._request_with_retry(f"{self.base_url}/reverse", params=params)
         return response.json()
+
+    def lookup_id(self, gers_id: str) -> Optional[IdLookupResult]:
+        """Look up a GERS ID in the ID index.
+
+        Args:
+            gers_id: The GERS ID (UUID) to look up
+
+        Returns:
+            IdLookupResult with the ID and its bounding box, or None if the
+            ID is unknown (HTTP 404).
+
+        Raises:
+            GeocoderError: With ``status=503`` if the ID index is unavailable,
+                or for other HTTP errors.
+        """
+        try:
+            response = self._request_with_retry(f"{self.base_url}/id/{gers_id}")
+        except GeocoderError as e:
+            if e.status == 404:
+                return None
+            raise
+
+        data = response.json()
+        bbox = data["bbox"]
+        return IdLookupResult(
+            id=data["id"],
+            bbox=BBox(
+                xmin=float(bbox["xmin"]),
+                ymin=float(bbox["ymin"]),
+                xmax=float(bbox["xmax"]),
+                ymax=float(bbox["ymax"]),
+            ),
+        )
+
+    def health(self) -> dict[str, Any]:
+        """Check service health.
+
+        Returns the health JSON body, e.g. ``{"status": "ok", "version": ...}``.
+        The worker responds with HTTP 503 and ``{"status": "error", ...}`` when
+        unhealthy; that body is returned rather than raising, so callers can
+        always inspect ``status``.
+
+        Returns:
+            Health status dict
+        """
+        try:
+            response = self._http.get(f"{self.base_url}/health")
+        except httpx.TimeoutException as e:
+            raise GeocoderTimeoutError(
+                f"Health check timed out after {self.timeout}s"
+            ) from e
+        except httpx.RequestError as e:
+            raise GeocoderNetworkError(f"Network error: {e}", cause=e) from e
+
+        try:
+            return response.json()
+        except ValueError as e:
+            raise GeocoderError(
+                f"Health check returned non-JSON response: "
+                f"{response.status_code} {response.reason_phrase}",
+                status=response.status_code,
+                response=response,
+            ) from e
 
     def get_geometry(self, gers_id: str) -> Optional[dict[str, Any]]:
         """Fetch full geometry from Overture S3 via the overturemaps-py library.
@@ -367,7 +492,6 @@ class OvertureGeocoder:
         import json
 
         try:
-            import shapely
             from shapely import from_wkb, to_geojson
         except ImportError:
             raise ImportError(
@@ -417,18 +541,52 @@ class OvertureGeocoder:
     # Private methods
     # =========================================================================
 
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff delay with jitter for the given attempt."""
+        delay = self.retry_delay * (2**attempt)
+        return delay + random.uniform(0, delay * 0.25)
+
+    def _retry_after_delay(self, response: httpx.Response, attempt: int) -> float:
+        """Delay before retrying a 429, honoring Retry-After (capped)."""
+        retry_after = response.headers.get("Retry-After")
+        if retry_after is not None:
+            try:
+                return min(float(retry_after), MAX_RETRY_AFTER_SECONDS)
+            except ValueError:
+                pass
+        return self._backoff_delay(attempt)
+
     def _request_with_retry(
         self,
         url: str,
         params: Optional[dict[str, Any]] = None,
         attempt: int = 0,
     ) -> httpx.Response:
-        """Make HTTP request with retry logic."""
+        """Make HTTP request with retry logic.
+
+        - 429 responses are retried, honoring the Retry-After header
+          (capped at 30 seconds).
+        - 5xx responses, timeouts, and network errors are retried with
+          exponential backoff plus jitter (retry_delay * 2^attempt).
+        - Other 4xx responses are not retried.
+        """
         try:
             response = self._http.get(url, params=params)
 
             if not response.is_success:
-                # Don't retry client errors (4xx)
+                # Rate limited: retry, honoring Retry-After
+                if response.status_code == 429:
+                    if attempt < self.retries:
+                        time.sleep(self._retry_after_delay(response, attempt))
+                        return self._request_with_retry(url, params, attempt + 1)
+                    raise GeocoderError(
+                        f"Rate limited after {attempt + 1} attempts: "
+                        f"429 {response.reason_phrase}",
+                        status=429,
+                        response=response,
+                    )
+
+                # Don't retry other client errors (4xx)
                 if 400 <= response.status_code < 500:
                     raise GeocoderError(
                         f"Request failed: {response.status_code} {response.reason_phrase}",
@@ -438,7 +596,7 @@ class OvertureGeocoder:
 
                 # Retry server errors (5xx)
                 if attempt < self.retries:
-                    time.sleep(self.retry_delay)
+                    time.sleep(self._backoff_delay(attempt))
                     return self._request_with_retry(url, params, attempt + 1)
 
                 raise GeocoderError(
@@ -454,51 +612,71 @@ class OvertureGeocoder:
             raise
         except httpx.TimeoutException as e:
             if attempt < self.retries:
-                time.sleep(self.retry_delay)
+                time.sleep(self._backoff_delay(attempt))
                 return self._request_with_retry(url, params, attempt + 1)
             raise GeocoderTimeoutError(
                 f"Request timed out after {self.timeout}s ({attempt + 1} attempts)"
             ) from e
         except httpx.RequestError as e:
             if attempt < self.retries:
-                time.sleep(self.retry_delay)
+                time.sleep(self._backoff_delay(attempt))
                 return self._request_with_retry(url, params, attempt + 1)
             raise GeocoderNetworkError(
                 f"Network error after {attempt + 1} attempts: {e}", cause=e
             ) from e
 
     def _parse_results(
-        self, data: list[dict[str, Any]], include_geocoder: bool = False
+        self, data: Any, include_geocoder: bool = False
     ) -> list[GeocoderResult]:
-        """Parse API response into GeocoderResult objects."""
-        if not isinstance(data, list):
+        """Parse /search API response into GeocoderResult objects.
+
+        The canonical worker response is ``{"results": [...]}``; a bare list
+        is tolerated defensively. Each entry has ``name``, ``bbox``, ``type``,
+        ``lat``, ``lon``, ``importance`` and optional ``country``/``region``.
+        """
+        if isinstance(data, dict):
+            entries = data.get("results", [])
+        elif isinstance(data, list):
+            entries = data
+        else:
+            return []
+
+        if not isinstance(entries, list):
             return []
 
         results = []
-        for r in data:
+        for r in entries:
             result = GeocoderResult(
                 gers_id=r["gers_id"],
-                primary_name=r["primary_name"],
-                lat=r["lat"],  # Server now returns numbers
-                lon=r["lon"],  # Server now returns numbers
-                boundingbox=r["boundingbox"],  # Server now returns numbers
-                importance=r.get("importance", 0),
+                primary_name=r["name"],
+                lat=float(r["lat"]),
+                lon=float(r["lon"]),
+                boundingbox=[float(b) for b in r["bbox"]],
+                importance=float(r.get("importance", 0)),
                 type=r.get("type"),
+                country=r.get("country"),
+                region=r.get("region"),
                 _geocoder=self if include_geocoder else None,
             )
             results.append(result)
 
         return results
 
-    def _parse_reverse_results(
-        self, data: list[dict[str, Any]]
-    ) -> list[ReverseGeocoderResult]:
-        """Parse reverse geocoding API response into ReverseGeocoderResult objects."""
-        if not isinstance(data, list):
+    def _parse_reverse_results(self, data: Any) -> list[ReverseGeocoderResult]:
+        """Parse /reverse API response into ReverseGeocoderResult objects.
+
+        The worker returns a single JSON object; it is wrapped in a list for
+        API stability. A list is tolerated defensively.
+        """
+        if isinstance(data, dict):
+            entries = [data]
+        elif isinstance(data, list):
+            entries = data
+        else:
             return []
 
         results = []
-        for r in data:
+        for r in entries:
             hierarchy = None
             if "hierarchy" in r and r["hierarchy"]:
                 hierarchy = [
@@ -555,7 +733,7 @@ def reverse_geocode(lat: float, lon: float, **kwargs: Any) -> list[ReverseGeocod
         **kwargs: Additional arguments passed to reverse()
 
     Returns:
-        List of ReverseGeocoderResult objects
+        List of ReverseGeocoderResult objects (empty if no match)
     """
     with OvertureGeocoder() as client:
         return client.reverse(lat, lon, **kwargs)

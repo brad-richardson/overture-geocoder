@@ -5,6 +5,8 @@ from .client import (
     GeocoderResult,
     ReverseGeocoderResult,
     HierarchyEntry,
+    IdLookupResult,
+    BBox,
     GeocoderError,
     GeocoderTimeoutError,
     GeocoderNetworkError,
@@ -12,12 +14,14 @@ from .client import (
     reverse_geocode,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     "OvertureGeocoder",
     "GeocoderResult",
     "ReverseGeocoderResult",
     "HierarchyEntry",
+    "IdLookupResult",
+    "BBox",
     "GeocoderError",
     "GeocoderTimeoutError",
     "GeocoderNetworkError",
