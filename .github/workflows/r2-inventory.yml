@@ -1,0 +1,59 @@
+name: R2 Inventory
+
+# Read-only report of what's in the geocoder-shards bucket: object count and
+# total size per top-level prefix (version), plus which versions catalog.json
+# actually references. Useful for spotting orphaned versions and staging
+# leftovers between monthly rebuilds.
+
+on:
+  workflow_dispatch:
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  BUCKET: geocoder-shards
+
+jobs:
+  inventory:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Inventory bucket
+        run: |
+          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+
+          echo "== Versions referenced by catalog.json =="
+          aws s3 cp "s3://$BUCKET/catalog.json" - --endpoint-url "$ENDPOINT" --region auto \
+            | python3 -c "
+          import json, sys
+          catalog = json.load(sys.stdin)
+          for link in catalog.get('links', []):
+              if link.get('rel') == 'child':
+                  print(f\"  {link['href']}  latest={link.get('latest', False)}\")
+          "
+
+          echo ""
+          echo "== Top-level prefixes =="
+          aws s3 ls "s3://$BUCKET/" --endpoint-url "$ENDPOINT" --region auto
+
+          echo ""
+          echo "== Per-prefix object count and size =="
+          for prefix in $(aws s3 ls "s3://$BUCKET/" --endpoint-url "$ENDPOINT" --region auto \
+                          | awk '/PRE/ {print $2}'); do
+            summary=$(aws s3 ls "s3://$BUCKET/$prefix" --recursive --summarize \
+                        --endpoint-url "$ENDPOINT" --region auto | tail -2)
+            objects=$(echo "$summary" | awk '/Total Objects/ {print $3}')
+            bytes=$(echo "$summary" | awk '/Total Size/ {print $3}')
+            gib=$(python3 -c "print(f'{$bytes/2**30:.2f}')")
+            echo "$prefix  objects=$objects  size=${gib}GiB"
+            # Break out staging separately, the old pipeline never cleaned it
+            staging=$(aws s3 ls "s3://$BUCKET/${prefix}staging/" --recursive --summarize \
+                        --endpoint-url "$ENDPOINT" --region auto 2>/dev/null | tail -2)
+            s_objects=$(echo "$staging" | awk '/Total Objects/ {print $3}')
+            s_bytes=$(echo "$staging" | awk '/Total Size/ {print $3}')
+            if [ -n "$s_objects" ] && [ "$s_objects" != "0" ]; then
+              s_gib=$(python3 -c "print(f'{$s_bytes/2**30:.2f}')")
+              echo "    └─ staging/  objects=$s_objects  size=${s_gib}GiB"
+            fi
+          done
