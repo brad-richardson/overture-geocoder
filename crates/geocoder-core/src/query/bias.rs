@@ -12,11 +12,17 @@ use crate::types::{GeocoderResult, LocationBias};
 
 /// Importance boost for results in the same country (country-only bias).
 /// Applied when using `LocationBias::Country`.
-const COUNTRY_ONLY_BOOST: f64 = 0.35;
+///
+/// Deliberately small: the full population-boost range between a small town
+/// and a megacity is only ~0.23 importance, so a country boost above that
+/// guarantees any same-named local town outranks a world-famous city for
+/// in-country users ("paris" -> Paris, TX). 0.1 breaks ties between
+/// comparable places without overpowering global prominence.
+const COUNTRY_ONLY_BOOST: f64 = 0.1;
 
 /// Importance boost for results in the same country (combined with coordinates).
 /// Lower than `COUNTRY_ONLY_BOOST` since distance also contributes.
-const COUNTRY_WITH_COORDS_BOOST: f64 = 0.25;
+const COUNTRY_WITH_COORDS_BOOST: f64 = 0.08;
 
 /// Maximum importance boost from proximity.
 /// Applied to results at the exact bias coordinates.
