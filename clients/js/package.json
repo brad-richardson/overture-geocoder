@@ -1,6 +1,6 @@
 {
   "name": "@bradrichardson/overture-geocoder",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "Forward geocoder using Overture Maps data with Nominatim-compatible API",
   "type": "module",
   "main": "./dist/index.cjs",
@@ -50,10 +50,16 @@
   "publishConfig": {
     "access": "public"
   },
-  "dependencies": {
+  "peerDependencies": {
     "@bradrichardson/overturemaps": "^0.3.3"
   },
+  "peerDependenciesMeta": {
+    "@bradrichardson/overturemaps": {
+      "optional": true
+    }
+  },
   "devDependencies": {
+    "@bradrichardson/overturemaps": "^0.3.3",
     "@types/node": "^20.10.0",
     "tsup": "^8.5.1",
     "typescript": "^5.3.3",

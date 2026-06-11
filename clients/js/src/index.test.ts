@@ -7,27 +7,54 @@ import {
   geocode,
 } from "./index";
 
-// Mock response data - using numbers to match actual server responses
-const mockSearchResults = [
-  {
-    gers_id: "abc-123",
-    primary_name: "Boston",
-    lat: 42.3601,
-    lon: -71.0589,
-    boundingbox: [42.227, 42.397, -71.191, -70.923],
-    importance: 0.85,
-    type: "locality",
-  },
-  {
-    gers_id: "def-456",
-    primary_name: "Cambridge",
-    lat: 42.3736,
-    lon: -71.1097,
-    boundingbox: [42.352, 42.404, -71.161, -71.064],
-    importance: 0.75,
-    type: "locality",
-  },
-];
+// ============================================================================
+// Mock fixtures matching the REAL worker response shapes
+// ============================================================================
+
+// GET /search -> { results: [...] } with name/bbox (NOT primary_name/boundingbox)
+const mockSearchResponse = {
+  results: [
+    {
+      gers_id: "abc-123",
+      name: "Boston",
+      type: "locality",
+      lat: 42.3601,
+      lon: -71.0589,
+      bbox: [-71.191, 42.227, -70.923, 42.397],
+      importance: 0.85,
+      country: "US",
+      region: "US-MA",
+    },
+    {
+      gers_id: "def-456",
+      name: "Cambridge",
+      type: "locality",
+      lat: 42.3736,
+      lon: -71.1097,
+      bbox: [-71.161, 42.352, -71.064, 42.404],
+      importance: 0.75,
+    },
+  ],
+};
+
+// GET /reverse -> SINGLE object (not an array)
+const mockReverseResponse = {
+  gers_id: "div-123",
+  primary_name: "Back Bay",
+  subtype: "neighborhood",
+  lat: 42.3501,
+  lon: -71.0789,
+  boundingbox: [42.34, 42.36, -71.09, -71.07],
+  distance_km: 0.1,
+  confidence: "medium",
+  hierarchy: [{ gers_id: "div-456", subtype: "locality", name: "Boston" }],
+};
+
+// GET /id/{gers_id}
+const mockIdLookupResponse = {
+  id: "0123abcd-0000-4000-8000-000000000000",
+  bbox: { xmin: -71.191, ymin: 42.227, xmax: -70.923, ymax: 42.397 },
+};
 
 const mockGeoJSONResponse = {
   type: "FeatureCollection",
@@ -37,11 +64,11 @@ const mockGeoJSONResponse = {
       id: "abc-123",
       properties: {
         gers_id: "abc-123",
-        primary_name: "Boston",
+        name: "Boston",
         importance: 0.85,
         type: "locality",
       },
-      bbox: [42.227, 42.397, -71.191, -70.923],
+      bbox: [-71.191, 42.227, -70.923, 42.397],
       geometry: {
         type: "Point",
         coordinates: [-71.0589, 42.3601],
@@ -50,16 +77,42 @@ const mockGeoJSONResponse = {
   ],
 };
 
-// Helper to create mock fetch
-function createMockFetch(responseData: unknown, options: { status?: number; ok?: boolean } = {}) {
-  const { status = 200, ok = true } = options;
-  return vi.fn().mockResolvedValue({
+// ============================================================================
+// Helpers
+// ============================================================================
+
+interface MockResponseOptions {
+  status?: number;
+  ok?: boolean;
+  headers?: Record<string, string>;
+}
+
+function mockResponse(responseData: unknown, options: MockResponseOptions = {}) {
+  const { status = 200, ok = status < 400, headers = {} } = options;
+  return {
     ok,
     status,
     statusText: ok ? "OK" : "Error",
-    json: vi.fn().mockResolvedValue(responseData),
-  });
+    headers: {
+      get: (name: string) => headers[name] ?? headers[name.toLowerCase()] ?? null,
+    },
+    json: () => Promise.resolve(responseData),
+  };
 }
+
+function createMockFetch(responseData: unknown, options: MockResponseOptions = {}) {
+  return vi.fn().mockResolvedValue(mockResponse(responseData, options));
+}
+
+afterEach(() => {
+  vi.restoreAllMocks();
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+// ============================================================================
+// Tests
+// ============================================================================
 
 describe("OvertureGeocoder", () => {
   describe("constructor", () => {
@@ -82,8 +135,8 @@ describe("OvertureGeocoder", () => {
   });
 
   describe("search", () => {
-    it("should search with query only", async () => {
-      const mockFetch = createMockFetch(mockSearchResults);
+    it("should search with query only and parse wrapped results", async () => {
+      const mockFetch = createMockFetch(mockSearchResponse);
       const client = new OvertureGeocoder({ fetch: mockFetch });
 
       const results = await client.search("123 Main St");
@@ -97,12 +150,29 @@ describe("OvertureGeocoder", () => {
 
       expect(results).toHaveLength(2);
       expect(results[0].gers_id).toBe("abc-123");
+      expect(results[0].primary_name).toBe("Boston"); // mapped from "name"
       expect(results[0].lat).toBe(42.3601);
       expect(results[0].lon).toBe(-71.0589);
+      expect(results[0].boundingbox).toEqual([-71.191, 42.227, -70.923, 42.397]); // mapped from "bbox"
+      expect(results[0].importance).toBe(0.85);
+      expect(results[0].type).toBe("locality");
+    });
+
+    it("should plumb through country and region when present", async () => {
+      const mockFetch = createMockFetch(mockSearchResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const results = await client.search("Boston");
+
+      expect(results[0].country).toBe("US");
+      expect(results[0].region).toBe("US-MA");
+      // Second result omits them
+      expect(results[1].country).toBeUndefined();
+      expect(results[1].region).toBeUndefined();
     });
 
     it("should search with limit option", async () => {
-      const mockFetch = createMockFetch(mockSearchResults);
+      const mockFetch = createMockFetch(mockSearchResponse);
       const client = new OvertureGeocoder({ fetch: mockFetch });
 
       const results = await client.search("Boston", {
@@ -116,7 +186,7 @@ describe("OvertureGeocoder", () => {
     });
 
     it("should clamp limit to 1-40 range", async () => {
-      const mockFetch = createMockFetch([]);
+      const mockFetch = createMockFetch({ results: [] });
       const client = new OvertureGeocoder({ fetch: mockFetch });
 
       await client.search("test", { limit: 100 });
@@ -129,8 +199,20 @@ describe("OvertureGeocoder", () => {
       expect(mockFetch.mock.calls[2][0]).toContain("limit=1");
     });
 
+    it("should return a FeatureCollection for format geojson", async () => {
+      const mockFetch = createMockFetch(mockGeoJSONResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const result = await client.search("Boston", { format: "geojson" });
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain("format=geojson");
+      expect(result.type).toBe("FeatureCollection");
+      expect(result.features).toHaveLength(1);
+    });
+
     it("should include custom headers", async () => {
-      const mockFetch = createMockFetch([]);
+      const mockFetch = createMockFetch({ results: [] });
       const client = new OvertureGeocoder({
         fetch: mockFetch,
         headers: {
@@ -166,9 +248,188 @@ describe("OvertureGeocoder", () => {
     });
   });
 
+  describe("reverse", () => {
+    it("should normalize the single response object into an array", async () => {
+      const mockFetch = createMockFetch(mockReverseResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const results = await client.reverse(42.3501, -71.0789);
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain("/reverse?");
+      expect(url).toContain("lat=42.3501");
+      expect(url).toContain("lon=-71.0789");
+
+      expect(results).toHaveLength(1);
+      expect(results[0].gers_id).toBe("div-123");
+      expect(results[0].primary_name).toBe("Back Bay");
+      expect(results[0].subtype).toBe("neighborhood");
+      expect(results[0].distance_km).toBe(0.1);
+      expect(results[0].confidence).toBe("medium");
+    });
+
+    it("should always provide hierarchy (non-optional)", async () => {
+      const mockFetch = createMockFetch(mockReverseResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const results = await client.reverse(42.3501, -71.0789);
+
+      expect(results[0].hierarchy).toEqual([
+        { gers_id: "div-456", subtype: "locality", name: "Boston" },
+      ]);
+
+      // Even if the server omitted it, hierarchy should be an empty array
+      const { hierarchy: _omitted, ...withoutHierarchy } = mockReverseResponse;
+      const client2 = new OvertureGeocoder({ fetch: createMockFetch(withoutHierarchy) });
+      const results2 = await client2.reverse(42.3501, -71.0789);
+      expect(results2[0].hierarchy).toEqual([]);
+    });
+
+    it.each(["high", "medium", "low"] as const)(
+      "should pass through confidence value %s",
+      async (confidence) => {
+        const mockFetch = createMockFetch({ ...mockReverseResponse, confidence });
+        const client = new OvertureGeocoder({ fetch: mockFetch });
+
+        const results = await client.reverse(42.3501, -71.0789);
+        expect(results[0].confidence).toBe(confidence);
+      }
+    );
+
+    it("should return an empty array on 404 (nothing found)", async () => {
+      const mockFetch = createMockFetch({ error: "Not found" }, { status: 404 });
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const results = await client.reverse(0, 0);
+      expect(results).toEqual([]);
+    });
+
+    it("should upgrade confidence to high when geometry is verified", async () => {
+      const mockFetch = createMockFetch(mockReverseResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+      vi.spyOn(client, "verifyContainsPoint").mockResolvedValue(true);
+
+      const results = await client.reverse(42.3501, -71.0789, {
+        verifyGeometry: true,
+      });
+
+      expect(client.verifyContainsPoint).toHaveBeenCalledWith(
+        "div-123",
+        42.3501,
+        -71.0789
+      );
+      expect(results).toHaveLength(1);
+      expect(results[0].confidence).toBe("high");
+    });
+
+    it("should drop results when geometry verification rejects the point", async () => {
+      const mockFetch = createMockFetch(mockReverseResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+      vi.spyOn(client, "verifyContainsPoint").mockResolvedValue(false);
+
+      const results = await client.reverse(42.3501, -71.0789, {
+        verifyGeometry: true,
+      });
+
+      expect(results).toHaveLength(0);
+    });
+
+    it("should return results without verification when verifyGeometry is false", async () => {
+      const mockFetch = createMockFetch(mockReverseResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const results = await client.reverse(42.3501, -71.0789, {
+        verifyGeometry: false,
+        verifyLimit: 5,
+      });
+
+      expect(results).toHaveLength(1);
+      expect(results[0].confidence).toBe("medium");
+    });
+  });
+
+  describe("lookupId", () => {
+    it("should return the lookup result on success", async () => {
+      const mockFetch = createMockFetch(mockIdLookupResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const result = await client.lookupId(mockIdLookupResponse.id);
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe(
+        `https://geocoder.bradr.dev/id/${mockIdLookupResponse.id}`
+      );
+      expect(result).not.toBeNull();
+      expect(result!.id).toBe(mockIdLookupResponse.id);
+      expect(result!.bbox).toEqual({
+        xmin: -71.191,
+        ymin: 42.227,
+        xmax: -70.923,
+        ymax: 42.397,
+      });
+    });
+
+    it("should return null on 404 (unknown ID)", async () => {
+      const mockFetch = createMockFetch({ error: "Not found" }, { status: 404 });
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const result = await client.lookupId("ffffffff-0000-4000-8000-000000000000");
+      expect(result).toBeNull();
+    });
+
+    it("should throw with status on 503 (index unavailable)", async () => {
+      const mockFetch = createMockFetch(
+        { error: "ID index unavailable" },
+        { status: 503 }
+      );
+      const client = new OvertureGeocoder({ fetch: mockFetch, retries: 0 });
+
+      await expect(client.lookupId("abc")).rejects.toMatchObject({
+        name: "GeocoderError",
+        status: 503,
+      });
+    });
+
+    it("should URL-encode the GERS ID", async () => {
+      const mockFetch = createMockFetch(mockIdLookupResponse);
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      await client.lookupId("weird/id?x");
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://geocoder.bradr.dev/id/weird%2Fid%3Fx");
+    });
+  });
+
+  describe("health", () => {
+    it("should return health status", async () => {
+      const mockFetch = createMockFetch({ status: "ok", version: "2026-02-25.0" });
+      const client = new OvertureGeocoder({ fetch: mockFetch });
+
+      const result = await client.health();
+
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe("https://geocoder.bradr.dev/health");
+      expect(result.status).toBe("ok");
+      expect(result.version).toBe("2026-02-25.0");
+    });
+
+    it("should return the error payload when service is unhealthy", async () => {
+      const mockFetch = createMockFetch(
+        { status: "error", error: "catalog unavailable" },
+        { status: 503 }
+      );
+      const client = new OvertureGeocoder({ fetch: mockFetch, retries: 0 });
+
+      const result = await client.health();
+      expect(result.status).toBe("error");
+      expect(result.error).toBe("catalog unavailable");
+    });
+  });
+
   describe("error handling", () => {
     it("should throw GeocoderError on 4xx response", async () => {
-      const mockFetch = createMockFetch({ error: "Bad request" }, { status: 400, ok: false });
+      const mockFetch = createMockFetch({ error: "Bad request" }, { status: 400 });
       const client = new OvertureGeocoder({ fetch: mockFetch });
 
       await expect(client.search("test")).rejects.toThrow(GeocoderError);
@@ -179,7 +440,7 @@ describe("OvertureGeocoder", () => {
     });
 
     it("should throw GeocoderError on 5xx response without retries", async () => {
-      const mockFetch = createMockFetch({ error: "Server error" }, { status: 500, ok: false });
+      const mockFetch = createMockFetch({ error: "Server error" }, { status: 500 });
       const client = new OvertureGeocoder({ fetch: mockFetch, retries: 0 });
 
       await expect(client.search("test")).rejects.toThrow(GeocoderError);
@@ -208,17 +469,9 @@ describe("OvertureGeocoder", () => {
       const mockFetch = vi.fn().mockImplementation(() => {
         callCount++;
         if (callCount < 3) {
-          return Promise.resolve({
-            ok: false,
-            status: 500,
-            statusText: "Internal Server Error",
-          });
+          return Promise.resolve(mockResponse(null, { status: 500 }));
         }
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(mockSearchResults),
-        });
+        return Promise.resolve(mockResponse(mockSearchResponse));
       });
 
       const client = new OvertureGeocoder({
@@ -234,7 +487,7 @@ describe("OvertureGeocoder", () => {
     });
 
     it("should not retry on 4xx errors", async () => {
-      const mockFetch = createMockFetch({ error: "Not found" }, { status: 404, ok: false });
+      const mockFetch = createMockFetch({ error: "Not found" }, { status: 400 });
       const client = new OvertureGeocoder({
         fetch: mockFetch,
         retries: 3,
@@ -252,11 +505,7 @@ describe("OvertureGeocoder", () => {
         if (callCount < 2) {
           return Promise.reject(new Error("Network error"));
         }
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () => Promise.resolve(mockSearchResults),
-        });
+        return Promise.resolve(mockResponse(mockSearchResponse));
       });
 
       const client = new OvertureGeocoder({
@@ -271,19 +520,80 @@ describe("OvertureGeocoder", () => {
       expect(results).toHaveLength(2);
     });
 
-    it("should respect retryDelay between attempts", async () => {
-      const delays: number[] = [];
-      let lastCallTime = Date.now();
-
+    it("should retry 429 honoring Retry-After", async () => {
+      vi.useFakeTimers();
+      let callCount = 0;
       const mockFetch = vi.fn().mockImplementation(() => {
-        const now = Date.now();
-        delays.push(now - lastCallTime);
-        lastCallTime = now;
-        return Promise.resolve({
-          ok: false,
-          status: 500,
-          statusText: "Error",
-        });
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve(
+            mockResponse(null, { status: 429, headers: { "Retry-After": "2" } })
+          );
+        }
+        return Promise.resolve(mockResponse(mockSearchResponse));
+      });
+
+      const client = new OvertureGeocoder({
+        fetch: mockFetch,
+        retries: 1,
+        retryDelay: 999999, // would stall the test if Retry-After were ignored
+      });
+
+      const promise = client.search("test");
+      // Not retried before Retry-After elapses
+      await vi.advanceTimersByTimeAsync(1500);
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+
+      await vi.advanceTimersByTimeAsync(600);
+      const results = await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(results).toHaveLength(2);
+    });
+
+    it("should cap Retry-After delay at 30 seconds", async () => {
+      vi.useFakeTimers();
+      let callCount = 0;
+      const mockFetch = vi.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve(
+            mockResponse(null, { status: 429, headers: { "Retry-After": "120" } })
+          );
+        }
+        return Promise.resolve(mockResponse(mockSearchResponse));
+      });
+
+      const client = new OvertureGeocoder({ fetch: mockFetch, retries: 1 });
+
+      const promise = client.search("test");
+      // Should retry after at most 30s despite Retry-After: 120
+      await vi.advanceTimersByTimeAsync(30000);
+      const results = await promise;
+
+      expect(mockFetch).toHaveBeenCalledTimes(2);
+      expect(results).toHaveLength(2);
+    });
+
+    it("should not retry 429 when no retries remain", async () => {
+      const mockFetch = createMockFetch(null, {
+        status: 429,
+        headers: { "Retry-After": "60" },
+      });
+      const client = new OvertureGeocoder({ fetch: mockFetch, retries: 0 });
+
+      await expect(client.search("test")).rejects.toMatchObject({
+        name: "GeocoderError",
+        status: 429,
+      });
+      expect(mockFetch).toHaveBeenCalledTimes(1);
+    });
+
+    it("should use exponential backoff with jitter between 5xx attempts", async () => {
+      const callTimes: number[] = [];
+      const mockFetch = vi.fn().mockImplementation(() => {
+        callTimes.push(Date.now());
+        return Promise.resolve(mockResponse(null, { status: 500 }));
       });
 
       const client = new OvertureGeocoder({
@@ -293,16 +603,21 @@ describe("OvertureGeocoder", () => {
       });
 
       await expect(client.search("test")).rejects.toThrow();
+      expect(mockFetch).toHaveBeenCalledTimes(3);
 
-      // First call should be immediate, subsequent calls should have ~50ms delay
-      expect(delays[1]).toBeGreaterThanOrEqual(40);
-      expect(delays[2]).toBeGreaterThanOrEqual(40);
+      // attempt 0 backoff: jittered 25-50ms, attempt 1 backoff: jittered 50-100ms
+      const delay1 = callTimes[1] - callTimes[0];
+      const delay2 = callTimes[2] - callTimes[1];
+      expect(delay1).toBeGreaterThanOrEqual(20);
+      expect(delay1).toBeLessThan(150);
+      expect(delay2).toBeGreaterThanOrEqual(45);
+      expect(delay2).toBeLessThan(250);
     });
   });
 
   describe("interceptors", () => {
     it("should call onRequest interceptor", async () => {
-      const mockFetch = createMockFetch([]);
+      const mockFetch = createMockFetch({ results: [] });
       const onRequest = vi.fn((url: string, init: RequestInit) => ({
         ...init,
         headers: { ...init.headers, "X-Intercepted": "true" },
@@ -323,18 +638,12 @@ describe("OvertureGeocoder", () => {
     });
 
     it("should call onResponse interceptor", async () => {
-      const originalResponse = {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve(mockSearchResults),
-      };
+      const originalResponse = mockResponse(mockSearchResponse);
       const mockFetch = vi.fn().mockResolvedValue(originalResponse);
 
-      const modifiedResponse = {
-        ok: true,
-        status: 200,
-        json: () => Promise.resolve([{ ...mockSearchResults[0], modified: true }]),
-      };
+      const modifiedResponse = mockResponse({
+        results: [{ ...mockSearchResponse.results[0], modified: true }],
+      });
       const onResponse = vi.fn().mockReturnValue(modifiedResponse);
 
       const client = new OvertureGeocoder({ fetch: mockFetch, onResponse });
@@ -346,7 +655,7 @@ describe("OvertureGeocoder", () => {
     });
 
     it("should support async interceptors", async () => {
-      const mockFetch = createMockFetch(mockSearchResults);
+      const mockFetch = createMockFetch(mockSearchResponse);
       const onRequest = vi.fn(async (url: string, init: RequestInit) => {
         await new Promise((r) => setTimeout(r, 10));
         return { ...init, headers: { ...init.headers, "X-Async": "true" } };
@@ -395,7 +704,7 @@ describe("OvertureGeocoder", () => {
 
 describe("convenience functions", () => {
   it("geocode should use default client", async () => {
-    const mockFetch = createMockFetch(mockSearchResults);
+    const mockFetch = createMockFetch(mockSearchResponse);
     vi.stubGlobal("fetch", mockFetch);
 
     const results = await geocode("123 Main St");
@@ -406,75 +715,25 @@ describe("convenience functions", () => {
   });
 });
 
-describe("getFullGeometry and close", () => {
-  it("should close DuckDB resources", async () => {
+describe("optional geometry dependency", () => {
+  it("close should be a no-op when the geometry module was never loaded", async () => {
     const client = new OvertureGeocoder();
 
-    // close() should not throw even if DuckDB was never initialized
     await expect(client.close()).resolves.not.toThrow();
   });
 
-  // Note: getFullGeometry tests for STAC behavior are now in the
-  // @bradrichardson/overturemaps package which handles the STAC lookup
-});
-
-// Mock reverse results for testing
-const mockReverseResults = [
-  {
-    gers_id: "div-123",
-    primary_name: "Back Bay",
-    subtype: "neighborhood",
-    lat: 42.3501,
-    lon: -71.0789,
-    boundingbox: [42.34, 42.36, -71.09, -71.07],
-    distance_km: 0.1,
-    confidence: "bbox" as const,
-    hierarchy: [
-      { gers_id: "div-456", subtype: "locality", name: "Boston, MA" },
-    ],
-  },
-  {
-    gers_id: "div-456",
-    primary_name: "Boston, MA",
-    subtype: "locality",
-    lat: 42.3601,
-    lon: -71.0589,
-    boundingbox: [42.227, 42.397, -71.191, -70.923],
-    distance_km: 0.5,
-    confidence: "bbox" as const,
-  },
-];
-
-describe("reverse with verifyGeometry", () => {
-  it("should return results without verification when verifyGeometry is false", async () => {
-    const mockFetch = createMockFetch(mockReverseResults);
-    const client = new OvertureGeocoder({ fetch: mockFetch });
-
-    const results = await client.reverse(42.3501, -71.0789, {
-      verifyGeometry: false,
-    });
-
-    expect(results).toHaveLength(2);
-    expect(results[0].confidence).toBe("bbox");
-  });
-
-  it("should include verifyGeometry in ReverseOptions", async () => {
-    const mockFetch = createMockFetch(mockReverseResults);
-    const client = new OvertureGeocoder({ fetch: mockFetch });
-
-    // This should compile and run without error
-    const results = await client.reverse(42.3501, -71.0789, {
-      verifyGeometry: false,
-      verifyLimit: 5,
-    });
-
-    expect(results).toHaveLength(2);
+  it("should expose the geometry methods", () => {
+    const client = new OvertureGeocoder();
+    expect(typeof client.getFullGeometry).toBe("function");
+    expect(typeof client.verifyContainsPoint).toBe("function");
+    expect(typeof client.getNearbyPlaces).toBe("function");
+    expect(typeof client.getNearbyAddresses).toBe("function");
   });
 });
 
 describe("reverseAndRefine", () => {
   it("should call reverse with correct parameters", async () => {
-    const mockFetch = createMockFetch(mockReverseResults);
+    const mockFetch = createMockFetch(mockReverseResponse);
     const client = new OvertureGeocoder({ fetch: mockFetch });
 
     // Mock the getNearbyPlaces and getNearbyAddresses to return empty arrays
@@ -488,13 +747,13 @@ describe("reverseAndRefine", () => {
       includeAddresses: true,
     });
 
-    expect(result.divisions).toHaveLength(2);
+    expect(result.divisions).toHaveLength(1);
     expect(result.places).toEqual([]);
     expect(result.addresses).toEqual([]);
   });
 
   it("should skip places when includePlaces is false", async () => {
-    const mockFetch = createMockFetch(mockReverseResults);
+    const mockFetch = createMockFetch(mockReverseResponse);
     const client = new OvertureGeocoder({ fetch: mockFetch });
 
     vi.spyOn(client, "getNearbyPlaces").mockResolvedValue([]);
@@ -506,14 +765,14 @@ describe("reverseAndRefine", () => {
       includeAddresses: true,
     });
 
-    expect(result.divisions).toHaveLength(2);
+    expect(result.divisions).toHaveLength(1);
     expect(result.places).toBeUndefined();
     expect(result.addresses).toEqual([]);
     expect(client.getNearbyPlaces).not.toHaveBeenCalled();
   });
 
   it("should skip addresses when includeAddresses is false", async () => {
-    const mockFetch = createMockFetch(mockReverseResults);
+    const mockFetch = createMockFetch(mockReverseResponse);
     const client = new OvertureGeocoder({ fetch: mockFetch });
 
     vi.spyOn(client, "getNearbyPlaces").mockResolvedValue([]);
@@ -525,41 +784,10 @@ describe("reverseAndRefine", () => {
       includeAddresses: false,
     });
 
-    expect(result.divisions).toHaveLength(2);
+    expect(result.divisions).toHaveLength(1);
     expect(result.places).toEqual([]);
     expect(result.addresses).toBeUndefined();
     expect(client.getNearbyAddresses).not.toHaveBeenCalled();
-  });
-});
-
-describe("getNearbyPlaces", () => {
-  it("should have the getNearbyPlaces method", () => {
-    const client = new OvertureGeocoder();
-    expect(typeof client.getNearbyPlaces).toBe("function");
-  });
-
-  it("should accept NearbySearchOptions", () => {
-    const client = new OvertureGeocoder();
-    // Verify the method signature accepts the expected options
-    expect(async () => {
-      // This will fail at runtime without DuckDB, but verifies types compile
-      try {
-        await client.getNearbyPlaces(42.35, -71.08, {
-          radiusKm: 0.5,
-          limit: 5,
-          category: "restaurant",
-        });
-      } catch {
-        // Expected to fail without actual DuckDB/S3 access
-      }
-    }).not.toThrow();
-  });
-});
-
-describe("getNearbyAddresses", () => {
-  it("should have the getNearbyAddresses method", () => {
-    const client = new OvertureGeocoder();
-    expect(typeof client.getNearbyAddresses).toBe("function");
   });
 });
 
@@ -608,20 +836,14 @@ describe("haversineDistance calculation", () => {
 });
 
 describe("type exports", () => {
-  it("should export all new types", async () => {
-    // Import types to verify they're exported
+  it("should expose client methods", async () => {
     const module = await import("./index");
 
-    // Verify the new methods exist on the class
     const client = new module.OvertureGeocoder();
+    expect(typeof client.lookupId).toBe("function");
+    expect(typeof client.health).toBe("function");
     expect(typeof client.getNearbyPlaces).toBe("function");
     expect(typeof client.getNearbyAddresses).toBe("function");
     expect(typeof client.reverseAndRefine).toBe("function");
-  });
-
-  it("should export readByBbox and readByBboxAll from overturemaps", async () => {
-    const module = await import("./index");
-    expect(module.readByBbox).toBeDefined();
-    expect(module.readByBboxAll).toBeDefined();
   });
 });

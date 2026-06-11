@@ -4,26 +4,47 @@
  * Forward geocoder using Overture Maps data with Nominatim-compatible API.
  */
 
-import {
-  getFeatureByGersId,
-  closeDb,
-  readByBboxAll,
-} from "@bradrichardson/overturemaps";
-import type { Feature, BoundingBox } from "@bradrichardson/overturemaps";
-
-// Re-export STAC utilities from overturemaps for advanced usage
-export {
-  getStacCatalog,
-  getLatestRelease,
-  clearCache as clearCatalogCache,
-  readByBbox,
-  readByBboxAll,
-} from "@bradrichardson/overturemaps";
-export type { StacCatalog, StacLink, BoundingBox, OvertureType, Feature } from "@bradrichardson/overturemaps";
+// NOTE: @bradrichardson/overturemaps is an OPTIONAL peer dependency.
+// It pulls in DuckDB-WASM + Apache Arrow, so it is only loaded on demand
+// (via dynamic import) by the geometry methods that need it:
+// getFullGeometry, getNearbyPlaces, getNearbyAddresses, verifyContainsPoint,
+// and reverse(..., { verifyGeometry: true }).
+// There must be NO top-level/static import of it in this file so bundlers
+// can tree-shake it away for users that only need the HTTP API.
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/** Bounding box in Overture convention. */
+export interface BoundingBox {
+  xmin: number;
+  ymin: number;
+  xmax: number;
+  ymax: number;
+}
+
+/**
+ * Minimal structural type for the optional @bradrichardson/overturemaps
+ * module. Kept local so the published type declarations do not reference
+ * the optional package.
+ */
+interface OvertureMapsModule {
+  getFeatureByGersId(gersId: string): Promise<OvertureFeatureLike | null>;
+  closeDb(): Promise<void>;
+  readByBboxAll(
+    type: string,
+    bbox: BoundingBox,
+    options?: { limit?: number }
+  ): Promise<OvertureFeatureLike[]>;
+}
+
+interface OvertureFeatureLike {
+  id?: unknown;
+  properties: Record<string, unknown>;
+  bbox?: number[];
+  geometry: { type: string; coordinates: unknown };
+}
 
 export interface GeocoderResult {
   gers_id: string;
@@ -33,6 +54,10 @@ export interface GeocoderResult {
   boundingbox: [number, number, number, number];
   importance: number;
   type: string;
+  /** ISO country code (e.g. "US"), when known */
+  country?: string;
+  /** Region code (e.g. "US-MA"), when known */
+  region?: string;
 }
 
 export interface SearchOptions {
@@ -66,6 +91,9 @@ export interface HierarchyEntry {
   name: string;
 }
 
+/** Confidence levels returned by the reverse geocoder. */
+export type Confidence = "high" | "medium" | "low";
+
 export interface ReverseGeocoderResult {
   gers_id: string;
   primary_name: string;
@@ -74,8 +102,22 @@ export interface ReverseGeocoderResult {
   lon: number;
   boundingbox: [number, number, number, number];
   distance_km: number;
-  confidence: "exact" | "bbox" | "approximate";
-  hierarchy?: HierarchyEntry[];
+  confidence: Confidence;
+  /** Containing division hierarchy (always present; may be empty). */
+  hierarchy: HierarchyEntry[];
+}
+
+/** Result of an ID lookup via GET /id/{gers_id}. */
+export interface IdLookupResult {
+  id: string;
+  bbox: BoundingBox;
+}
+
+/** Response from GET /health. */
+export interface HealthStatus {
+  status: string;
+  version?: string;
+  error?: string;
 }
 
 
@@ -260,6 +302,12 @@ const DEFAULT_BASE_URL = "https://geocoder.bradr.dev";
 const DEFAULT_TIMEOUT = 30000;
 const DEFAULT_RETRIES = 0;
 const DEFAULT_RETRY_DELAY = 1000;
+/** Maximum backoff/Retry-After delay between attempts (ms). */
+const MAX_RETRY_DELAY = 30000;
+
+const OVERTUREMAPS_INSTALL_HINT =
+  "npm install @bradrichardson/overturemaps to use geometry features " +
+  "(getFullGeometry, getNearbyPlaces, getNearbyAddresses, verifyGeometry)";
 
 // ============================================================================
 // Client
@@ -274,6 +322,8 @@ export class OvertureGeocoder {
   private readonly fetchFn: typeof globalThis.fetch;
   private readonly onRequest?: OvertureGeocoderConfig["onRequest"];
   private readonly onResponse?: OvertureGeocoderConfig["onResponse"];
+  /** Lazily-loaded optional @bradrichardson/overturemaps module. */
+  private overtureMaps?: Promise<OvertureMapsModule>;
 
   constructor(config: OvertureGeocoderConfig = {}) {
     this.baseUrl = (config.baseUrl || DEFAULT_BASE_URL).replace(/\/$/, "");
@@ -288,9 +338,23 @@ export class OvertureGeocoder {
   }
 
   /**
-   * Search for addresses matching the query.
+   * Search for places matching the query.
+   *
+   * With `format: "geojson"` the worker returns a GeoJSON FeatureCollection,
+   * so the return type changes accordingly (or use {@link searchGeoJSON}).
    */
-  async search(query: string, options: SearchOptions = {}): Promise<GeocoderResult[]> {
+  async search(
+    query: string,
+    options?: Omit<SearchOptions, "format"> & { format?: "json" | "jsonv2" }
+  ): Promise<GeocoderResult[]>;
+  async search(
+    query: string,
+    options: Omit<SearchOptions, "format"> & { format: "geojson" }
+  ): Promise<GeoJSONFeatureCollection>;
+  async search(
+    query: string,
+    options: SearchOptions = {}
+  ): Promise<GeocoderResult[] | GeoJSONFeatureCollection> {
     const params = new URLSearchParams({
       q: query,
       format: options.format || "jsonv2",
@@ -302,7 +366,7 @@ export class OvertureGeocoder {
     const data = await response.json();
 
     if (options.format === "geojson") {
-      return data as unknown as GeocoderResult[];
+      return data as GeoJSONFeatureCollection;
     }
 
     return this.parseResults(data);
@@ -336,14 +400,36 @@ export class OvertureGeocoder {
    * @param lat Latitude
    * @param lon Longitude
    * @param options Reverse geocoding options
+   * The worker returns a single best-match object; this method normalizes
+   * it into an array. Returns an empty array when nothing is found (404).
+   *
+   * NOTE: `format: "geojson"` is currently IGNORED by the deployed worker
+   * for /reverse (a server-side fix is in flight); until then the geojson
+   * overload may receive a plain JSON object instead of a FeatureCollection.
+   *
+   * @param lat Latitude
+   * @param lon Longitude
+   * @param options Reverse geocoding options
    * @param options.verifyGeometry If true, fetches full polygons from S3 and filters
-   *                               to only results where point is inside the polygon
+   *                               to only results where point is inside the polygon.
+   *                               Requires the optional @bradrichardson/overturemaps
+   *                               peer dependency.
    */
   async reverse(
     lat: number,
     lon: number,
+    options?: Omit<ReverseOptions, "format"> & { format?: "jsonv2" }
+  ): Promise<ReverseGeocoderResult[]>;
+  async reverse(
+    lat: number,
+    lon: number,
+    options: Omit<ReverseOptions, "format"> & { format: "geojson" }
+  ): Promise<GeoJSONFeatureCollection>;
+  async reverse(
+    lat: number,
+    lon: number,
     options: ReverseOptions = {}
-  ): Promise<ReverseGeocoderResult[]> {
+  ): Promise<ReverseGeocoderResult[] | GeoJSONFeatureCollection> {
     const params = new URLSearchParams({
       lat: String(lat),
       lon: String(lon),
@@ -351,11 +437,24 @@ export class OvertureGeocoder {
     });
 
     const url = `${this.baseUrl}/reverse?${params}`;
-    const response = await this.fetchWithRetry(url);
+    let response: Response;
+    try {
+      response = await this.fetchWithRetry(url);
+    } catch (error) {
+      // The worker returns 404 when no division contains the point.
+      if (
+        error instanceof GeocoderError &&
+        error.status === 404 &&
+        options.format !== "geojson"
+      ) {
+        return [];
+      }
+      throw error;
+    }
     const data = await response.json();
 
     if (options.format === "geojson") {
-      return data as unknown as ReverseGeocoderResult[];
+      return data as GeoJSONFeatureCollection;
     }
 
     let results = this.parseReverseResults(data);
@@ -375,7 +474,7 @@ export class OvertureGeocoder {
   /**
    * Verify which reverse geocode results actually contain the point.
    * Fetches full geometry from S3 and performs point-in-polygon checks.
-   * Updates confidence to "exact" for verified results.
+   * Updates confidence to "high" for verified results.
    */
   private async verifyResultsGeometry(
     results: ReverseGeocoderResult[],
@@ -401,10 +500,10 @@ export class OvertureGeocoder {
       if (contains) {
         verified.push({
           ...result,
-          confidence: "exact", // Upgraded from bbox
+          confidence: "high", // Upgraded: point verified inside polygon
         });
       } else if (!wasVerified) {
-        // Geometry fetch failed, keep original result with bbox confidence
+        // Geometry fetch failed, keep original result with original confidence
         verified.push(result);
       }
       // If verified but not contains, exclude from results (false positive)
@@ -415,6 +514,10 @@ export class OvertureGeocoder {
 
   /**
    * Reverse geocode and return results as GeoJSON FeatureCollection.
+   *
+   * NOTE: requires an updated worker — the currently deployed worker
+   * ignores `format=geojson` on /reverse and returns a plain JSON object
+   * (a server-side fix is in flight).
    */
   async reverseGeoJSON(
     lat: number,
@@ -466,14 +569,58 @@ export class OvertureGeocoder {
   }
 
   /**
+   * Look up a GERS ID's bounding box via the worker's parquet ID index.
+   *
+   * @param gersId The GERS ID (UUID) to look up
+   * @returns The lookup result, or null if the ID is unknown (404).
+   * @throws GeocoderError with status 503 when the ID index is unavailable.
+   */
+  async lookupId(gersId: string): Promise<IdLookupResult | null> {
+    const url = `${this.baseUrl}/id/${encodeURIComponent(gersId)}`;
+    try {
+      const response = await this.fetchWithRetry(url);
+      return (await response.json()) as IdLookupResult;
+    } catch (error) {
+      if (error instanceof GeocoderError && error.status === 404) {
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Check the health of the geocoder service.
+   *
+   * Returns the health payload even when the service reports unhealthy
+   * (non-2xx with a JSON body); throws on network/timeout failures.
+   */
+  async health(): Promise<HealthStatus> {
+    const url = `${this.baseUrl}/health`;
+    try {
+      const response = await this.fetchWithRetry(url);
+      return (await response.json()) as HealthStatus;
+    } catch (error) {
+      if (error instanceof GeocoderError && error.response) {
+        try {
+          return (await error.response.json()) as HealthStatus;
+        } catch {
+          // Body wasn't JSON; fall through to rethrow
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
    * Fetch full geometry for a GERS ID directly from Overture S3.
    *
-   * Uses the @bradrichardson/overturemaps package for efficient lookup.
+   * Requires the optional @bradrichardson/overturemaps peer dependency.
    *
    * @param gersId The GERS ID to look up
    * @returns GeoJSON Feature with full geometry, or null if not found
    */
   async getFullGeometry(gersId: string): Promise<GeoJSONFeature | null> {
+    const { getFeatureByGersId } = await this.loadOvertureMaps();
     const feature = await getFeatureByGersId(gersId);
     if (!feature) return null;
 
@@ -489,14 +636,40 @@ export class OvertureGeocoder {
   /**
    * Close DuckDB connection and release resources.
    * Call this when done with geometry/place/address fetching to free memory.
+   * No-op if the optional geometry module was never loaded.
    */
   async close(): Promise<void> {
-    await closeDb();
+    if (this.overtureMaps) {
+      const { closeDb } = await this.overtureMaps;
+      await closeDb();
+    }
   }
 
   // ==========================================================================
   // Overture S3 Direct Query Methods (Places, Addresses)
   // ==========================================================================
+
+  /**
+   * Dynamically load the optional @bradrichardson/overturemaps peer
+   * dependency. Throws a clear GeocoderError if it is not installed.
+   */
+  private loadOvertureMaps(): Promise<OvertureMapsModule> {
+    if (!this.overtureMaps) {
+      this.overtureMaps = import("@bradrichardson/overturemaps").then(
+        (mod) => mod as unknown as OvertureMapsModule,
+        (error: unknown) => {
+          // Don't cache the failure; a later install/retry may succeed
+          this.overtureMaps = undefined;
+          throw new GeocoderError(
+            `Optional dependency @bradrichardson/overturemaps is not available: ` +
+              `${OVERTUREMAPS_INSTALL_HINT} ` +
+              `(${error instanceof Error ? error.message : String(error)})`
+          );
+        }
+      );
+    }
+    return this.overtureMaps;
+  }
 
   /**
    * Get nearby places from Overture S3.
@@ -521,6 +694,8 @@ export class OvertureGeocoder {
 
     // Convert km to approximate degrees for bounding box
     const bbox = this.radiusToBbox(lat, lon, radiusKm);
+
+    const { readByBboxAll } = await this.loadOvertureMaps();
 
     try {
       // Fetch more than needed since we'll filter by exact distance
@@ -580,6 +755,8 @@ export class OvertureGeocoder {
 
     // Convert km to approximate degrees for bounding box
     const bbox = this.radiusToBbox(lat, lon, radiusKm);
+
+    const { readByBboxAll } = await this.loadOvertureMaps();
 
     try {
       // Fetch more than needed since we'll filter by exact distance
@@ -678,7 +855,13 @@ export class OvertureGeocoder {
       const response = await this.doFetch(url);
 
       if (!response.ok) {
-        // Don't retry client errors (4xx)
+        // 429: rate limited - honor Retry-After when retries remain
+        if (response.status === 429 && attempt < this.retries) {
+          await this.delay(this.retryAfterDelay(response, attempt));
+          return this.fetchWithRetry(url, attempt + 1);
+        }
+
+        // Don't retry other client errors (4xx)
         if (response.status >= 400 && response.status < 500) {
           throw new GeocoderError(
             `Request failed: ${response.status} ${response.statusText}`,
@@ -687,9 +870,9 @@ export class OvertureGeocoder {
           );
         }
 
-        // Retry server errors (5xx)
+        // Retry server errors (5xx) with exponential backoff + jitter
         if (attempt < this.retries) {
-          await this.delay(this.retryDelay);
+          await this.delay(this.backoffDelay(attempt));
           return this.fetchWithRetry(url, attempt + 1);
         }
 
@@ -704,11 +887,11 @@ export class OvertureGeocoder {
     } catch (error) {
       if (error instanceof GeocoderError) throw error;
 
-      // Handle timeout and network errors
+      // Handle timeout and network errors with exponential backoff + jitter
       if (error instanceof Error) {
         if (error.name === "AbortError") {
           if (attempt < this.retries) {
-            await this.delay(this.retryDelay);
+            await this.delay(this.backoffDelay(attempt));
             return this.fetchWithRetry(url, attempt + 1);
           }
           throw new GeocoderTimeoutError(
@@ -717,7 +900,7 @@ export class OvertureGeocoder {
         }
 
         if (attempt < this.retries) {
-          await this.delay(this.retryDelay);
+          await this.delay(this.backoffDelay(attempt));
           return this.fetchWithRetry(url, attempt + 1);
         }
 
@@ -729,6 +912,35 @@ export class OvertureGeocoder {
 
       throw error;
     }
+  }
+
+  /**
+   * Exponential backoff with jitter: retryDelay * 2^attempt, capped at
+   * MAX_RETRY_DELAY, with the final delay jittered to 50-100% of the base.
+   */
+  private backoffDelay(attempt: number): number {
+    const base = Math.min(this.retryDelay * 2 ** attempt, MAX_RETRY_DELAY);
+    return base / 2 + Math.random() * (base / 2);
+  }
+
+  /**
+   * Delay for a 429 response: honor the Retry-After header (seconds or
+   * HTTP-date), capped at MAX_RETRY_DELAY. Falls back to exponential
+   * backoff when the header is missing or unparseable.
+   */
+  private retryAfterDelay(response: Response, attempt: number): number {
+    const header = response.headers?.get?.("Retry-After");
+    if (header) {
+      const seconds = Number(header);
+      if (Number.isFinite(seconds) && seconds >= 0) {
+        return Math.min(seconds * 1000, MAX_RETRY_DELAY);
+      }
+      const date = Date.parse(header);
+      if (!Number.isNaN(date)) {
+        return Math.min(Math.max(date - Date.now(), 0), MAX_RETRY_DELAY);
+      }
+    }
+    return this.backoffDelay(attempt);
   }
 
   private async doFetch(url: string): Promise<Response> {
@@ -775,7 +987,7 @@ export class OvertureGeocoder {
       // Handle both 'bbox' (API) and 'boundingbox' (legacy) field names
       const bbox = (record.bbox as [number, number, number, number]) ||
         (record.boundingbox as [number, number, number, number]);
-      return {
+      const result: GeocoderResult = {
         gers_id: record.gers_id as string,
         primary_name: name,
         lat: record.lat as number,
@@ -784,6 +996,9 @@ export class OvertureGeocoder {
         importance: (record.importance as number) || 0,
         type: (record.division_type as string) || (record.type as string) || "unknown",
       };
+      if (typeof record.country === "string") result.country = record.country;
+      if (typeof record.region === "string") result.region = record.region;
+      return result;
     });
   }
 
@@ -801,8 +1016,8 @@ export class OvertureGeocoder {
         lon: record.lon as number,
         boundingbox: record.boundingbox as [number, number, number, number],
         distance_km: record.distance_km as number,
-        confidence: record.confidence as "exact" | "bbox" | "approximate",
-        hierarchy: record.hierarchy as HierarchyEntry[] | undefined,
+        confidence: record.confidence as Confidence,
+        hierarchy: (record.hierarchy as HierarchyEntry[] | undefined) ?? [],
       };
     });
   }
@@ -878,7 +1093,7 @@ export class OvertureGeocoder {
  */
 export async function geocode(
   query: string,
-  options?: SearchOptions
+  options?: Omit<SearchOptions, "format"> & { format?: "json" | "jsonv2" }
 ): Promise<GeocoderResult[]> {
   const client = new OvertureGeocoder();
   return client.search(query, options);
@@ -890,7 +1105,7 @@ export async function geocode(
 export async function reverseGeocode(
   lat: number,
   lon: number,
-  options?: ReverseOptions
+  options?: Omit<ReverseOptions, "format"> & { format?: "jsonv2" }
 ): Promise<ReverseGeocoderResult[]> {
   const client = new OvertureGeocoder();
   return client.reverse(lat, lon, options);
