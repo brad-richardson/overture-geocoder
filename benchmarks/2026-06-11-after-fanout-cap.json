@@ -1,0 +1,673 @@
+{
+  "meta": {
+    "timestamp": "2026-06-11T20:29:31+00:00",
+    "base_url": "https://geocoder.bradr.dev",
+    "git_sha": "77b2784",
+    "data_version": "2026-05-25.0",
+    "interval_s": 1.2,
+    "warm_repeats": 2
+  },
+  "summary": {
+    "health/warm": {
+      "n": 1,
+      "mean": 221.6,
+      "p50": 221.6,
+      "p95": 221.6,
+      "min": 221.6,
+      "max": 221.6
+    },
+    "id/cold": {
+      "n": 6,
+      "mean": 1983.8,
+      "p50": 724.1,
+      "p95": 6469.1,
+      "min": 69.8,
+      "max": 6469.1
+    },
+    "id/warm": {
+      "n": 11,
+      "mean": 479.6,
+      "p50": 129.6,
+      "p95": 3707.8,
+      "min": 85.5,
+      "max": 3707.8
+    },
+    "reverse/cold": {
+      "n": 8,
+      "mean": 1866.3,
+      "p50": 150.2,
+      "p95": 13804.6,
+      "min": 16.0,
+      "max": 13804.6
+    },
+    "reverse/warm": {
+      "n": 16,
+      "mean": 71.2,
+      "p50": 28.4,
+      "p95": 299.9,
+      "min": 11.7,
+      "max": 299.9
+    },
+    "search/cold": {
+      "n": 7,
+      "mean": 88.4,
+      "p50": 57.0,
+      "p95": 263.2,
+      "min": 20.3,
+      "max": 263.2
+    },
+    "search/warm": {
+      "n": 16,
+      "mean": 776.4,
+      "p50": 62.9,
+      "p95": 8394.1,
+      "min": 19.0,
+      "max": 8394.1
+    }
+  },
+  "samples": [
+    {
+      "endpoint": "health",
+      "phase": "warm",
+      "target": "-",
+      "path": "/health",
+      "status": 200,
+      "ms": 221.6,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "bhutan",
+      "path": "/search?q=Thimphu&lat=27.4716&lon=89.6386",
+      "status": 200,
+      "ms": 132.3,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "bhutan",
+      "path": "/reverse?lat=27.4716&lon=89.6386",
+      "status": 200,
+      "ms": 59.9,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "suriname",
+      "path": "/search?q=Paramaribo&lat=5.852&lon=-55.2038",
+      "status": 200,
+      "ms": 71.8,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "suriname",
+      "path": "/reverse?lat=5.852&lon=-55.2038",
+      "status": 200,
+      "ms": 148.7,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "iceland",
+      "path": "/search?q=Reykjavik&lat=64.1466&lon=-21.9426",
+      "status": 200,
+      "ms": 57.0,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "iceland",
+      "path": "/reverse?lat=64.1466&lon=-21.9426",
+      "status": 200,
+      "ms": 16.7,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "madagascar",
+      "path": "/search?q=Antananarivo&lat=-18.8792&lon=47.5079",
+      "status": 200,
+      "ms": 20.3,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "madagascar",
+      "path": "/reverse?lat=-18.8792&lon=47.5079",
+      "status": 200,
+      "ms": 404.5,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "mongolia",
+      "path": "/search?q=Ulaanbaatar&lat=47.8864&lon=106.9057",
+      "status": null,
+      "ms": 20021.0,
+      "error": "HTTPSConnectionPool(host='geocoder.bradr.dev', port=443): Read timed out. (read timeout=20.0)"
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "mongolia",
+      "path": "/reverse?lat=47.8864&lon=106.9057",
+      "status": 200,
+      "ms": 13804.6,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "namibia",
+      "path": "/search?q=Windhoek&lat=-22.5609&lon=17.0658",
+      "status": 200,
+      "ms": 263.2,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "namibia",
+      "path": "/reverse?lat=-22.5609&lon=17.0658",
+      "status": 200,
+      "ms": 151.7,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "georgia",
+      "path": "/search?q=Tbilisi&lat=41.7151&lon=44.8271",
+      "status": 200,
+      "ms": 31.3,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "georgia",
+      "path": "/reverse?lat=41.7151&lon=44.8271",
+      "status": 200,
+      "ms": 328.5,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "cold",
+      "target": "us-east",
+      "path": "/search?q=New%20York&lat=40.7128&lon=-74.006",
+      "status": 200,
+      "ms": 42.8,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "cold",
+      "target": "us-east",
+      "path": "/reverse?lat=40.7128&lon=-74.006",
+      "status": 200,
+      "ms": 16.0,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "bhutan",
+      "path": "/search?q=Thimphu&lat=27.4716&lon=89.6386",
+      "status": 200,
+      "ms": 28.3,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "bhutan",
+      "path": "/reverse?lat=27.4716&lon=89.6386",
+      "status": 200,
+      "ms": 11.7,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "suriname",
+      "path": "/search?q=Paramaribo&lat=5.852&lon=-55.2038",
+      "status": 200,
+      "ms": 70.0,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "suriname",
+      "path": "/reverse?lat=5.852&lon=-55.2038",
+      "status": 200,
+      "ms": 299.9,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "iceland",
+      "path": "/search?q=Reykjavik&lat=64.1466&lon=-21.9426",
+      "status": 200,
+      "ms": 60.8,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "iceland",
+      "path": "/reverse?lat=64.1466&lon=-21.9426",
+      "status": 200,
+      "ms": 13.2,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "madagascar",
+      "path": "/search?q=Antananarivo&lat=-18.8792&lon=47.5079",
+      "status": 200,
+      "ms": 24.3,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "madagascar",
+      "path": "/reverse?lat=-18.8792&lon=47.5079",
+      "status": 200,
+      "ms": 110.0,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "mongolia",
+      "path": "/search?q=Ulaanbaatar&lat=47.8864&lon=106.9057",
+      "status": 200,
+      "ms": 65.1,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "mongolia",
+      "path": "/reverse?lat=47.8864&lon=106.9057",
+      "status": 200,
+      "ms": 29.1,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "namibia",
+      "path": "/search?q=Windhoek&lat=-22.5609&lon=17.0658",
+      "status": 200,
+      "ms": 8394.1,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "namibia",
+      "path": "/reverse?lat=-22.5609&lon=17.0658",
+      "status": 200,
+      "ms": 138.1,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "georgia",
+      "path": "/search?q=Tbilisi&lat=41.7151&lon=44.8271",
+      "status": 200,
+      "ms": 140.6,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "georgia",
+      "path": "/reverse?lat=41.7151&lon=44.8271",
+      "status": 200,
+      "ms": 27.6,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "us-east",
+      "path": "/search?q=New%20York&lat=40.7128&lon=-74.006",
+      "status": 200,
+      "ms": 295.8,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "us-east",
+      "path": "/reverse?lat=40.7128&lon=-74.006",
+      "status": 200,
+      "ms": 15.9,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "bhutan",
+      "path": "/search?q=Thimphu&lat=27.4716&lon=89.6386",
+      "status": 200,
+      "ms": 186.3,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "bhutan",
+      "path": "/reverse?lat=27.4716&lon=89.6386",
+      "status": 200,
+      "ms": 12.6,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "suriname",
+      "path": "/search?q=Paramaribo&lat=5.852&lon=-55.2038",
+      "status": 200,
+      "ms": 21.8,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "suriname",
+      "path": "/reverse?lat=5.852&lon=-55.2038",
+      "status": 200,
+      "ms": 106.7,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "iceland",
+      "path": "/search?q=Reykjavik&lat=64.1466&lon=-21.9426",
+      "status": 200,
+      "ms": 46.0,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "iceland",
+      "path": "/reverse?lat=64.1466&lon=-21.9426",
+      "status": 200,
+      "ms": 13.2,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "madagascar",
+      "path": "/search?q=Antananarivo&lat=-18.8792&lon=47.5079",
+      "status": 200,
+      "ms": 23.5,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "madagascar",
+      "path": "/reverse?lat=-18.8792&lon=47.5079",
+      "status": 200,
+      "ms": 127.9,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "mongolia",
+      "path": "/search?q=Ulaanbaatar&lat=47.8864&lon=106.9057",
+      "status": 200,
+      "ms": 68.0,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "mongolia",
+      "path": "/reverse?lat=47.8864&lon=106.9057",
+      "status": 200,
+      "ms": 26.5,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "namibia",
+      "path": "/search?q=Windhoek&lat=-22.5609&lon=17.0658",
+      "status": 200,
+      "ms": 19.0,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "namibia",
+      "path": "/reverse?lat=-22.5609&lon=17.0658",
+      "status": 200,
+      "ms": 124.5,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "georgia",
+      "path": "/search?q=Tbilisi&lat=41.7151&lon=44.8271",
+      "status": 200,
+      "ms": 2943.1,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "georgia",
+      "path": "/reverse?lat=41.7151&lon=44.8271",
+      "status": 200,
+      "ms": 69.3,
+      "error": null
+    },
+    {
+      "endpoint": "search",
+      "phase": "warm",
+      "target": "us-east",
+      "path": "/search?q=New%20York&lat=40.7128&lon=-74.006",
+      "status": 200,
+      "ms": 35.2,
+      "error": null
+    },
+    {
+      "endpoint": "reverse",
+      "phase": "warm",
+      "target": "us-east",
+      "path": "/reverse?lat=40.7128&lon=-74.006",
+      "status": 200,
+      "ms": 12.6,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "cold",
+      "target": "b7f203ba",
+      "path": "/id/b7f203ba-0d49-462c-9df5-aff89b67a910",
+      "status": 200,
+      "ms": 6469.1,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "cold",
+      "target": "b00eadee",
+      "path": "/id/b00eadee-d35e-4628-8001-ca388befe614",
+      "status": 200,
+      "ms": 3838.5,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "cold",
+      "target": "bc4247c1",
+      "path": "/id/bc4247c1-deba-438e-bb36-788fec678333",
+      "status": 200,
+      "ms": 77.2,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "cold",
+      "target": "042b2e4e",
+      "path": "/id/042b2e4e-d916-4b85-a0eb-b6d514e0a4e8",
+      "status": 200,
+      "ms": 77.5,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "cold",
+      "target": "130d00c8",
+      "path": "/id/130d00c8-b680-4c36-8795-868cf8f73651",
+      "status": 200,
+      "ms": 1370.7,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "cold",
+      "target": "8333c0ed",
+      "path": "/id/8333c0ed-4977-4dde-b9d4-3682429d0297",
+      "status": 200,
+      "ms": 69.8,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "b7f203ba",
+      "path": "/id/b7f203ba-0d49-462c-9df5-aff89b67a910",
+      "status": 200,
+      "ms": 101.6,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "b00eadee",
+      "path": "/id/b00eadee-d35e-4628-8001-ca388befe614",
+      "status": 200,
+      "ms": 3707.8,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "bc4247c1",
+      "path": "/id/bc4247c1-deba-438e-bb36-788fec678333",
+      "status": 200,
+      "ms": 85.5,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "042b2e4e",
+      "path": "/id/042b2e4e-d916-4b85-a0eb-b6d514e0a4e8",
+      "status": null,
+      "ms": 20008.7,
+      "error": "HTTPSConnectionPool(host='geocoder.bradr.dev', port=443): Read timed out. (read timeout=20.0)"
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "130d00c8",
+      "path": "/id/130d00c8-b680-4c36-8795-868cf8f73651",
+      "status": 200,
+      "ms": 476.6,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "8333c0ed",
+      "path": "/id/8333c0ed-4977-4dde-b9d4-3682429d0297",
+      "status": 200,
+      "ms": 132.4,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "b7f203ba",
+      "path": "/id/b7f203ba-0d49-462c-9df5-aff89b67a910",
+      "status": 200,
+      "ms": 111.4,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "b00eadee",
+      "path": "/id/b00eadee-d35e-4628-8001-ca388befe614",
+      "status": 200,
+      "ms": 154.6,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "bc4247c1",
+      "path": "/id/bc4247c1-deba-438e-bb36-788fec678333",
+      "status": 200,
+      "ms": 171.1,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "042b2e4e",
+      "path": "/id/042b2e4e-d916-4b85-a0eb-b6d514e0a4e8",
+      "status": 200,
+      "ms": 95.2,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "130d00c8",
+      "path": "/id/130d00c8-b680-4c36-8795-868cf8f73651",
+      "status": 200,
+      "ms": 110.2,
+      "error": null
+    },
+    {
+      "endpoint": "id",
+      "phase": "warm",
+      "target": "8333c0ed",
+      "path": "/id/8333c0ed-4977-4dde-b9d4-3682429d0297",
+      "status": 200,
+      "ms": 129.6,
+      "error": null
+    }
+  ]
+}
