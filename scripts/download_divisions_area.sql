@@ -24,6 +24,11 @@ SET memory_limit = '12GB';
 -- Output row order is irrelevant (shard builds re-query); preserving
 -- insertion order is the main memory amplifier in COPY under DuckDB 1.5.
 SET preserve_insertion_order = false;
+-- The CLI session is in-memory, which disables spilling by default;
+-- without a temp_directory the big spatial join OOMs instead of going
+-- out-of-core. Fewer threads also bounds parallel pipeline buffers.
+SET temp_directory = '/tmp/duckdb_spill.tmp';
+SET threads = 2;
 
 .timer on
 
