@@ -60,7 +60,6 @@ jobs:
                   kept.append(link)
           catalog['links'] = kept
           children = [l for l in kept if l.get('rel') == 'child']
-          assert removed, "nothing pruned - aborting (already clean?)"
           assert len(children) >= 3, f"would leave only {len(children)} versions"
           assert any(l.get('latest') for l in children), "no latest flag would remain"
           print(f"removed {removed}, {len(children)} children remain")
@@ -68,17 +67,26 @@ jobs:
               json.dump(catalog, f, indent=2)
           EOF
 
-          S3 s3 cp /tmp/catalog-new.json "s3://$BUCKET/catalog.json" \
-            --content-type application/json
-          # Readback must match what we wrote
-          S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-readback.json
-          python3 -c "
+          if python3 -c "
+          import json
+          a = json.load(open('/tmp/catalog.json'))
+          b = json.load(open('/tmp/catalog-new.json'))
+          raise SystemExit(0 if a == b else 1)
+          "; then
+            echo "catalog already clean, nothing to prune"
+          else
+            S3 s3 cp /tmp/catalog-new.json "s3://$BUCKET/catalog.json" \
+              --content-type application/json
+            # Readback must match what we wrote
+            S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-readback.json
+            python3 -c "
           import json
           a = json.load(open('/tmp/catalog-new.json'))
           b = json.load(open('/tmp/catalog-readback.json'))
           assert a == b, 'catalog readback mismatch'
           print('catalog updated and verified')
           "
+          fi
 
       - name: Verify live worker before deleting
         run: |
