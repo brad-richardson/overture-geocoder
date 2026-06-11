@@ -1,0 +1,149 @@
+name: R2 One-Time Cleanup
+
+# One-time purge of accumulated debris (2026-06): staging leftovers the old
+# pipeline never deleted, an orphaned partial version, and two catalog
+# versions beyond the worker's MAX_VERSION_ATTEMPTS=3 fallback window.
+# Deletes only an explicit allowlist, catalog-first, with guards.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: 'Type CLEANUP to confirm deletion'
+        required: true
+      wipe_latest_staging:
+        description: 'Also delete 2026-05-25.0/staging/ (phase 2)'
+        type: boolean
+        default: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  BUCKET: geocoder-shards
+  # Versions removed from the catalog and then fully deleted
+  PRUNE_VERSIONS: "2026-02-26.0 2026-03-25.0"
+  # Orphan prefix never referenced by the catalog
+  ORPHAN_PREFIXES: "2026-02-24.0"
+  # Kept versions whose staging/ (pipeline-only data) is deleted
+  STAGING_ONLY: "2026-03-28.0 2026-04-25.0"
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.inputs.confirm == 'CLEANUP'
+    steps:
+      - name: Prune catalog and verify
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+
+          S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog.json
+          # Keep a timestamped backup in the bucket before editing
+          S3 s3 cp /tmp/catalog.json "s3://$BUCKET/backups/catalog-$(date -u +%Y%m%dT%H%M%S).json"
+
+          python3 - "$PRUNE_VERSIONS" <<'EOF'
+          import json, sys
+          prune = set(sys.argv[1].split())
+          with open('/tmp/catalog.json') as f:
+              catalog = json.load(f)
+          before = len(catalog['links'])
+          kept, removed = [], []
+          for link in catalog['links']:
+              version = link.get('href', '').strip('./').split('/')[0]
+              if link.get('rel') == 'child' and version in prune:
+                  assert not link.get('latest'), f"refusing to prune latest: {version}"
+                  removed.append(version)
+              else:
+                  kept.append(link)
+          catalog['links'] = kept
+          children = [l for l in kept if l.get('rel') == 'child']
+          assert removed, "nothing pruned - aborting (already clean?)"
+          assert len(children) >= 3, f"would leave only {len(children)} versions"
+          assert any(l.get('latest') for l in children), "no latest flag would remain"
+          print(f"removed {removed}, {len(children)} children remain")
+          with open('/tmp/catalog-new.json', 'w') as f:
+              json.dump(catalog, f, indent=2)
+          EOF
+
+          S3 s3 cp /tmp/catalog-new.json "s3://$BUCKET/catalog.json" \
+            --content-type application/json
+          # Readback must match what we wrote
+          S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-readback.json
+          python3 -c "
+          import json
+          a = json.load(open('/tmp/catalog-new.json'))
+          b = json.load(open('/tmp/catalog-readback.json'))
+          assert a == b, 'catalog readback mismatch'
+          print('catalog updated and verified')
+          "
+
+      - name: Verify live worker before deleting
+        run: |
+          set -euo pipefail
+          for path in "/health" "/search?q=boston" "/reverse?lat=42.36&lon=-71.06"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://geocoder.bradr.dev$path")
+            echo "$path -> $code"
+            [ "$code" = "200" ] || { echo "::error::live check failed: $path"; exit 1; }
+          done
+
+      - name: Delete pruned and orphaned prefixes
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+
+          S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-live.json
+          for version in $PRUNE_VERSIONS $ORPHAN_PREFIXES; do
+            # Guard: never delete anything the live catalog still references
+            if grep -q "$version" /tmp/catalog-live.json; then
+              echo "::error::$version still referenced by catalog.json - aborting"
+              exit 1
+            fi
+            echo "Deleting s3://$BUCKET/$version/ ..."
+            S3 s3 rm "s3://$BUCKET/$version/" --recursive --only-show-errors
+          done
+
+          for version in $STAGING_ONLY; do
+            # Guard: staging only - the version itself must stay
+            echo "Deleting s3://$BUCKET/$version/staging/ ..."
+            S3 s3 rm "s3://$BUCKET/$version/staging/" --recursive --only-show-errors
+            # The version's served data must still exist afterwards
+            S3 s3 ls "s3://$BUCKET/$version/collection.json" >/dev/null \
+              || { echo "::error::$version/collection.json missing after staging delete"; exit 1; }
+          done
+
+      - name: Phase 2 - wipe latest staging
+        if: github.event.inputs.wipe_latest_staging == 'true'
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          echo "Deleting s3://$BUCKET/2026-05-25.0/staging/ ..."
+          S3 s3 rm "s3://$BUCKET/2026-05-25.0/staging/" --recursive --only-show-errors
+          S3 s3 ls "s3://$BUCKET/2026-05-25.0/collection.json" >/dev/null \
+            || { echo "::error::2026-05-25.0/collection.json missing"; exit 1; }
+
+      - name: Verify live worker and final inventory
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          for path in "/health" "/search?q=boston" "/reverse?lat=42.36&lon=-71.06" "/id/08b2a100-d664-7fff-0200-a44bcea04b76"; do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 30 "https://geocoder.bradr.dev$path")
+            echo "$path -> $code"
+            case "$code" in 200|404) ;; *) echo "::error::live check failed: $path"; exit 1;; esac
+          done
+
+          echo ""
+          echo "== Remaining per-prefix inventory =="
+          for prefix in $(aws s3 ls "s3://$BUCKET/" --endpoint-url "$ENDPOINT" --region auto \
+                          | awk '/PRE/ {print $2}'); do
+            summary=$(aws s3 ls "s3://$BUCKET/$prefix" --recursive --summarize \
+                        --endpoint-url "$ENDPOINT" --region auto | tail -2)
+            objects=$(echo "$summary" | awk '/Total Objects/ {print $3}')
+            bytes=$(echo "$summary" | awk '/Total Size/ {print $3}')
+            gib=$(python3 -c "print(f'{$bytes/2**30:.2f}')")
+            echo "$prefix  objects=$objects  size=${gib}GiB"
+          done
