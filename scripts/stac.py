@@ -10,15 +10,33 @@ Usage:
 import argparse
 import json
 import sys
+import time
 from urllib.request import urlopen
 
 STAC_ROOT = "https://stac.overturemaps.org/catalog.json"
 
+FETCH_TIMEOUT_SECONDS = 30
+FETCH_RETRIES = 3
+
 
 def get_catalog(url: str) -> dict:
-    """Fetch and parse a STAC catalog."""
-    with urlopen(url) as response:
-        return json.load(response)
+    """Fetch and parse a STAC catalog (with timeout and transient-error retry)."""
+    last_exc = None
+    for attempt in range(FETCH_RETRIES):
+        try:
+            with urlopen(url, timeout=FETCH_TIMEOUT_SECONDS) as response:
+                return json.load(response)
+        except Exception as exc:
+            last_exc = exc
+            if attempt < FETCH_RETRIES - 1:
+                wait = 5 * (2 ** attempt)
+                print(
+                    f"STAC fetch failed (attempt {attempt + 1}/{FETCH_RETRIES}): "
+                    f"{exc}; retrying in {wait}s...",
+                    file=sys.stderr,
+                )
+                time.sleep(wait)
+    raise RuntimeError(f"Failed to fetch STAC catalog {url}: {last_exc}") from last_exc
 
 
 def get_latest_release() -> str:

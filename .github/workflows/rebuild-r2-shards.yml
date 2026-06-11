@@ -51,12 +51,84 @@ env:
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  # R2 S3-compatibility: only compute checksums when the operation needs them
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
 
 jobs:
-  rebuild-shards:
+  # Compute the build version and Overture release exactly once so every job
+  # (forward, reverse, id-index) writes to the same version directory and
+  # reads the same release, even if the build crosses UTC midnight.
+  prep:
     runs-on: ubuntu-24.04-arm
     # Run if: scheduled OR manual with REBUILD confirmation
     if: github.event_name == 'schedule' || github.event.inputs.confirm == 'REBUILD'
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      release: ${{ steps.release.outputs.release }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Discover Overture release
+        id: release
+        run: |
+          RELEASE=$(python3 scripts/stac.py | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
+          if [ -z "$RELEASE" ]; then
+            echo "::error::Failed to discover latest Overture release from STAC"
+            exit 1
+          fi
+          echo "release=$RELEASE" >> $GITHUB_OUTPUT
+          echo "Overture release: $RELEASE"
+
+      - name: Compute version
+        id: version
+        run: |
+          INPUT="${{ github.event.inputs.version }}"
+          if [ -n "$INPUT" ]; then
+            if ! echo "$INPUT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+              echo "::error::Invalid version format '$INPUT'. Expected YYYY-MM-DD.N (e.g. 2026-02-25.0)"
+              exit 1
+            fi
+            VERSION="$INPUT"
+          else
+            # Read the published catalog so a same-day re-run bumps the .N
+            # suffix instead of mutating a live, already-published version.
+            export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+            export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+            aws s3 cp "s3://geocoder-shards/catalog.json" /tmp/catalog.json \
+              --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+              --region auto 2>/dev/null || echo '{}' > /tmp/catalog.json
+            VERSION=$(python3 -c "
+          import json
+          from datetime import datetime, timezone
+          date = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+          try:
+              with open('/tmp/catalog.json') as f:
+                  catalog = json.load(f)
+          except Exception:
+              catalog = {}
+          existing = {
+              l['href'].split('/')[1]
+              for l in catalog.get('links', [])
+              if l.get('rel') == 'child' and '/' in l.get('href', '')
+          }
+          n = 0
+          while f'{date}.{n}' in existing:
+              n += 1
+          print(f'{date}.{n}')
+          ")
+          fi
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "Build version: $VERSION"
+
+  rebuild-shards:
+    runs-on: ubuntu-24.04-arm
+    needs: prep
     steps:
       - uses: actions/checkout@v4
 
@@ -67,7 +139,8 @@ jobs:
 
       - name: Install DuckDB CLI
         run: |
-          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-aarch64.zip
+          # Pinned to the same version as the Python duckdb package below
+          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.5.1/duckdb_cli-linux-arm64.zip
           unzip duckdb.zip
           sudo mv duckdb /usr/local/bin/
           duckdb --version
@@ -101,15 +174,13 @@ jobs:
           fi
 
       - name: Download divisions data
-        run: ./scripts/download_divisions.sh
+        run: ./scripts/download_divisions.sh "${{ needs.prep.outputs.release }}"
 
       - name: Build forward geocoding shards
         if: github.event.inputs.build_type != 'reverse'
         run: |
-          ARGS="--head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            ARGS="$ARGS --version ${{ github.event.inputs.version }}"
-          fi
+          ARGS="--version ${{ needs.prep.outputs.version }}"
+          ARGS="$ARGS --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
@@ -118,42 +189,29 @@ jobs:
       - name: Build reverse geocoding shards
         if: github.event.inputs.build_type != 'forward'
         run: |
-          ARGS="--reverse --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          if [ -n "${{ github.event.inputs.version }}" ]; then
-            ARGS="$ARGS --version ${{ github.event.inputs.version }}"
-          fi
+          ARGS="--reverse --version ${{ needs.prep.outputs.version }}"
+          ARGS="$ARGS --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
           if [ -n "${{ github.event.inputs.countries }}" ]; then
             ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
           fi
           python scripts/build_shards.py $ARGS
 
-      - name: Get version
-        id: version
-        run: |
-          VERSION=$(ls -1 shards/ | grep -E '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' | sort -r | head -1)
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "Built version: $VERSION"
-
+      # Upload order is deliberate (atomic publication): shard databases
+      # first, then collection.json files, then verification, and only after
+      # everything is in place is catalog.json (the sole discovery pointer)
+      # uploaded in the final publish step.
       - name: Upload forward shards to R2
         if: github.event.inputs.build_type != 'reverse'
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.prep.outputs.version }}"
           PROGRESS_DIR=$(mktemp -d)
           ERRORS_DIR=$(mktemp -d)
-
-          # Upload catalog (log output to catch local vs remote)
-          echo "Uploading catalog.json..."
-          wrangler r2 object put geocoder-shards/catalog.json \
-            --file shards/catalog.json --remote
-          echo "Uploading ${VERSION}/collection.json..."
-          wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
-            --file "shards/${VERSION}/collection.json" --remote
 
           # Count total database files
           TOTAL_DB=$(find "shards/${VERSION}/shards" -name "*.db" | wc -l)
           echo "Uploading ${TOTAL_DB} forward shard databases..."
 
-          # Upload function with progress tracking
+          # Upload function with retry and progress tracking
           upload_file() {
             local file="$1"
             local version="$2"
@@ -162,17 +220,25 @@ jobs:
             local errors_dir="$5"
             local filename=$(basename "$file")
             local r2_path="${version}/${subdir}/${filename}"
+            local attempt output
 
-            if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
-              # Check for accidental local storage
-              if echo "$output" | grep -q "Resource location: local"; then
-                echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+            for attempt in 1 2 3; do
+              if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
+                # Check for accidental local storage (retrying won't help)
+                if echo "$output" | grep -q "Resource location: local"; then
+                  echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+                else
+                  rm -f "${errors_dir}/${filename}.log"
+                fi
+                touch "${progress_dir}/${filename}"
+                return 0
               fi
-              touch "${progress_dir}/${filename}"
-            else
               echo "$output" > "${errors_dir}/${filename}.log"
-              touch "${progress_dir}/${filename}"
-            fi
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 10))
+              fi
+            done
+            touch "${progress_dir}/${filename}"
           }
           export -f upload_file
           export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
@@ -180,15 +246,18 @@ jobs:
           # Upload databases with progress (16 parallel — network-bound)
           find "shards/${VERSION}/shards" -name "*.db" | \
             xargs -P 16 -I {} bash -c "upload_file '{}' '${VERSION}' 'shards' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
+          UPLOAD_PID=$!
 
-          # Show progress while uploading
-          while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_DB" ]; do
+          # Show progress while the uploader is alive (bounded: exits with
+          # the background pid instead of spinning until the job timeout)
+          while kill -0 "$UPLOAD_PID" 2>/dev/null; do
             DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
             printf "\r  Progress: %d/%d databases" "$DONE" "$TOTAL_DB"
-            sleep 1
+            sleep 5
           done
-          wait
-          printf "\r  Progress: %d/%d databases ✓\n" "$TOTAL_DB" "$TOTAL_DB"
+          wait "$UPLOAD_PID" || true
+          DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
+          printf "\r  Progress: %d/%d databases\n" "$DONE" "$TOTAL_DB"
 
           # Check for errors
           if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
@@ -196,19 +265,33 @@ jobs:
             cat "$ERRORS_DIR"/*.log
             exit 1
           fi
+          if [ "$DONE" -lt "$TOTAL_DB" ]; then
+            echo "::error::Upload incomplete: ${DONE}/${TOTAL_DB} databases uploaded"
+            exit 1
+          fi
+
+          # Shards are in place; now upload collection metadata (with retry)
+          echo "Uploading ${VERSION}/collection.json..."
+          for attempt in 1 2 3; do
+            if wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
+              --file "shards/${VERSION}/collection.json" --remote; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to upload collection.json after 3 attempts"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
 
           rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
 
       - name: Upload reverse shards to R2
         if: github.event.inputs.build_type != 'forward'
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.prep.outputs.version }}"
           PROGRESS_DIR=$(mktemp -d)
           ERRORS_DIR=$(mktemp -d)
-
-          echo "Uploading ${VERSION}/reverse-collection.json..."
-          wrangler r2 object put "geocoder-shards/${VERSION}/reverse-collection.json" \
-            --file "shards/${VERSION}/reverse-collection.json" --remote
 
           # Count total database files
           TOTAL_DB=$(find "shards/${VERSION}/reverse" -name "*.db" | wc -l)
@@ -222,58 +305,78 @@ jobs:
             local errors_dir="$5"
             local filename=$(basename "$file")
             local r2_path="${version}/${subdir}/${filename}"
+            local attempt output
 
-            if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
-              if echo "$output" | grep -q "Resource location: local"; then
-                echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+            for attempt in 1 2 3; do
+              if output=$(wrangler r2 object put "geocoder-shards/${r2_path}" --file "$file" --remote 2>&1); then
+                if echo "$output" | grep -q "Resource location: local"; then
+                  echo "ERROR: $filename uploaded to LOCAL not REMOTE" > "${errors_dir}/${filename}.log"
+                else
+                  rm -f "${errors_dir}/${filename}.log"
+                fi
+                touch "${progress_dir}/${filename}"
+                return 0
               fi
-              touch "${progress_dir}/${filename}"
-            else
               echo "$output" > "${errors_dir}/${filename}.log"
-              touch "${progress_dir}/${filename}"
-            fi
+              if [ "$attempt" -lt 3 ]; then
+                sleep $((attempt * 10))
+              fi
+            done
+            touch "${progress_dir}/${filename}"
           }
           export -f upload_file
           export CLOUDFLARE_API_TOKEN CLOUDFLARE_ACCOUNT_ID
 
           find "shards/${VERSION}/reverse" -name "*.db" | \
             xargs -P 16 -I {} bash -c "upload_file '{}' '${VERSION}' 'reverse' '${PROGRESS_DIR}' '${ERRORS_DIR}'" &
+          UPLOAD_PID=$!
 
-          while [ $(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l) -lt "$TOTAL_DB" ]; do
+          while kill -0 "$UPLOAD_PID" 2>/dev/null; do
             DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
             printf "\r  Progress: %d/%d databases" "$DONE" "$TOTAL_DB"
-            sleep 1
+            sleep 5
           done
-          wait
-          printf "\r  Progress: %d/%d databases ✓\n" "$TOTAL_DB" "$TOTAL_DB"
+          wait "$UPLOAD_PID" || true
+          DONE=$(find "$PROGRESS_DIR" -type f 2>/dev/null | wc -l)
+          printf "\r  Progress: %d/%d databases\n" "$DONE" "$TOTAL_DB"
 
           if [ "$(ls -A $ERRORS_DIR 2>/dev/null)" ]; then
             echo "::error::Some uploads failed:"
             cat "$ERRORS_DIR"/*.log
             exit 1
           fi
+          if [ "$DONE" -lt "$TOTAL_DB" ]; then
+            echo "::error::Upload incomplete: ${DONE}/${TOTAL_DB} databases uploaded"
+            exit 1
+          fi
+
+          # Shards are in place; now upload collection metadata (with retry)
+          echo "Uploading ${VERSION}/reverse-collection.json..."
+          for attempt in 1 2 3; do
+            if wrangler r2 object put "geocoder-shards/${VERSION}/reverse-collection.json" \
+              --file "shards/${VERSION}/reverse-collection.json" --remote; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to upload reverse-collection.json after 3 attempts"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
 
           rm -rf "$PROGRESS_DIR" "$ERRORS_DIR"
 
       - name: Verify R2 uploads
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.prep.outputs.version }}"
           BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
           FAILED=0
 
           echo "Verifying R2 uploads for version ${VERSION}..."
 
-          # Verify catalog.json exists
           if [ "$BUILD_TYPE" = "forward" ] || [ "$BUILD_TYPE" = "both" ]; then
-            if wrangler r2 object get geocoder-shards/catalog.json --remote --pipe > /dev/null 2>&1; then
-              echo "  ✓ catalog.json"
-            else
-              echo "::error::catalog.json NOT FOUND in R2 after upload"
-              FAILED=1
-            fi
-
             if wrangler r2 object get "geocoder-shards/${VERSION}/collection.json" --remote --pipe > /dev/null 2>&1; then
-              echo "  ✓ ${VERSION}/collection.json"
+              echo "  ok: ${VERSION}/collection.json"
             else
               echo "::error::${VERSION}/collection.json NOT FOUND in R2 after upload"
               FAILED=1
@@ -281,7 +384,7 @@ jobs:
 
             # Spot-check HEAD shard
             if wrangler r2 object get "geocoder-shards/${VERSION}/shards/HEAD.db" --remote --pipe > /dev/null 2>&1; then
-              echo "  ✓ ${VERSION}/shards/HEAD.db"
+              echo "  ok: ${VERSION}/shards/HEAD.db"
             else
               echo "::error::${VERSION}/shards/HEAD.db NOT FOUND in R2 after upload"
               FAILED=1
@@ -290,7 +393,7 @@ jobs:
 
           if [ "$BUILD_TYPE" = "reverse" ] || [ "$BUILD_TYPE" = "both" ]; then
             if wrangler r2 object get "geocoder-shards/${VERSION}/reverse-collection.json" --remote --pipe > /dev/null 2>&1; then
-              echo "  ✓ ${VERSION}/reverse-collection.json"
+              echo "  ok: ${VERSION}/reverse-collection.json"
             else
               echo "::error::${VERSION}/reverse-collection.json NOT FOUND in R2 after upload"
               FAILED=1
@@ -298,7 +401,7 @@ jobs:
 
             # Spot-check reverse HEAD shard
             if wrangler r2 object get "geocoder-shards/${VERSION}/reverse/HEAD.db" --remote --pipe > /dev/null 2>&1; then
-              echo "  ✓ ${VERSION}/reverse/HEAD.db"
+              echo "  ok: ${VERSION}/reverse/HEAD.db"
             else
               echo "::error::${VERSION}/reverse/HEAD.db NOT FOUND in R2 after upload"
               FAILED=1
@@ -311,6 +414,32 @@ jobs:
           fi
           echo "All R2 verification checks passed."
 
+      # catalog.json is the only discovery pointer: publishing it LAST means
+      # a failed run leaves the new version invisible rather than half-live.
+      - name: Publish catalog.json
+        if: github.event.inputs.build_type != 'reverse'
+        run: |
+          echo "Publishing catalog.json (final step of atomic publication)..."
+          for attempt in 1 2 3; do
+            if wrangler r2 object put geocoder-shards/catalog.json \
+              --file shards/catalog.json --remote; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to upload catalog.json after 3 attempts"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
+          # Verify readback
+          if wrangler r2 object get geocoder-shards/catalog.json --remote --pipe > /dev/null 2>&1; then
+            echo "  ok: catalog.json published"
+          else
+            echo "::error::catalog.json NOT FOUND in R2 after publish"
+            exit 1
+          fi
+
       - name: Cleanup old versions (90+ days)
         if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
         run: |
@@ -318,55 +447,70 @@ jobs:
           CUTOFF=$(date -d '-90 days' +%Y-%m-%d)
           echo "Cutoff date: $CUTOFF"
 
-          # List all version directories in R2 by parsing catalog.json
-          CATALOG=$(wrangler r2 object get geocoder-shards/catalog.json --remote 2>/dev/null || echo '{}')
-          VERSIONS=$(echo "$CATALOG" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | sort -u || true)
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-          DELETED_COUNT=0
-          DELETED_VERSIONS=""
+          # List version directories in R2 by parsing catalog.json
+          aws s3 cp "s3://geocoder-shards/catalog.json" /tmp/catalog.json \
+            --endpoint-url "$ENDPOINT" --region auto 2>/dev/null || echo '{}' > /tmp/catalog.json
+          VERSIONS=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/catalog.json | sort -u || true)
+
+          OLD_VERSIONS=""
           for VERSION in $VERSIONS; do
-            VERSION_DATE="${VERSION%.*}"  # Remove .0 suffix
+            VERSION_DATE="${VERSION%.*}"  # Remove .N suffix
             if [[ "$VERSION_DATE" < "$CUTOFF" ]]; then
-              echo "Deleting old version: $VERSION"
-              # List and delete all objects with this version prefix
-              # Note: wrangler doesn't have recursive delete, so we list and delete individually
-              OBJECTS=$(wrangler r2 object list geocoder-shards --prefix "${VERSION}/" --remote 2>/dev/null | grep -oE '"key": "[^"]+' | sed 's/"key": "//' || true)
-              for OBJ in $OBJECTS; do
-                wrangler r2 object delete "geocoder-shards/${OBJ}" --remote 2>/dev/null || true
-              done
-              DELETED_COUNT=$((DELETED_COUNT + 1))
-              DELETED_VERSIONS="$DELETED_VERSIONS $VERSION"
+              OLD_VERSIONS="$OLD_VERSIONS $VERSION"
             fi
           done
 
-          echo "Deleted $DELETED_COUNT old versions"
+          if [ -z "${OLD_VERSIONS// /}" ]; then
+            echo "No versions older than $CUTOFF"
+            exit 0
+          fi
+          echo "Old versions to delete:$OLD_VERSIONS"
 
-          # Re-upload catalog.json with pruned versions removed
-          if [ "$DELETED_COUNT" -gt 0 ]; then
-            echo "Updating catalog.json to remove pruned versions..."
-            echo "$CATALOG" | python3 -c "
-          import json, sys
-          deleted = set('$DELETED_VERSIONS'.split())
-          catalog = json.load(sys.stdin)
+          # 1) Prune catalog.json FIRST so a mid-cleanup crash can never
+          #    leave the catalog pointing at deleted versions.
+          echo "Updating catalog.json to remove pruned versions..."
+          python3 -c "
+          import json
+          deleted = set('$OLD_VERSIONS'.split())
+          with open('/tmp/catalog.json') as f:
+              catalog = json.load(f)
           catalog['links'] = [
               l for l in catalog.get('links', [])
               if l.get('rel') != 'child' or l['href'].split('/')[1] not in deleted
           ]
-          json.dump(catalog, sys.stdout, indent=2)
-          " > /tmp/catalog-pruned.json
-            wrangler r2 object put geocoder-shards/catalog.json \
-              --file /tmp/catalog-pruned.json --remote
-            echo "Updated catalog.json in R2"
-          fi
+          with open('/tmp/catalog-pruned.json', 'w') as f:
+              json.dump(catalog, f, indent=2)
+          "
+          aws s3 cp /tmp/catalog-pruned.json "s3://geocoder-shards/catalog.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json
+          echo "Updated catalog.json in R2"
+
+          # 2) Delete objects via the S3 API (paginated batch deletes —
+          #    handles arbitrarily many objects, unlike the old per-object
+          #    wrangler loop over an unpaginated listing).
+          DELETED_COUNT=0
+          for VERSION in $OLD_VERSIONS; do
+            echo "Deleting old version: $VERSION"
+            aws s3 rm "s3://geocoder-shards/${VERSION}/" --recursive \
+              --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+            DELETED_COUNT=$((DELETED_COUNT + 1))
+          done
+          echo "Deleted $DELETED_COUNT old versions"
 
       - name: Summary
         run: |
-          VERSION="${{ steps.version.outputs.version }}"
+          VERSION="${{ needs.prep.outputs.version }}"
           BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
 
           echo "## R2 Shards Rebuild Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Overture release:** ${{ needs.prep.outputs.release }}" >> $GITHUB_STEP_SUMMARY
           echo "**Build type:** ${BUILD_TYPE}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
@@ -384,36 +528,10 @@ jobs:
             echo "**Size:** $(du -sh shards/${VERSION}/reverse/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
           fi
 
-  id-prep:
-    runs-on: ubuntu-24.04-arm
-    if: |
-      (github.event_name == 'schedule' || github.event.inputs.confirm == 'REBUILD') &&
-      (github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false')
-    outputs:
-      version: ${{ steps.version.outputs.version }}
-    steps:
-      - name: Compute version
-        id: version
-        run: |
-          INPUT="${{ github.event.inputs.version }}"
-          if [ -n "$INPUT" ]; then
-            if ! echo "$INPUT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
-              echo "::error::Invalid version format '$INPUT'. Expected YYYY-MM-DD.N (e.g. 2026-02-25.0)"
-              exit 1
-            fi
-            VERSION="$INPUT"
-          else
-            VERSION=$(python3 -c "
-          from datetime import datetime, timezone
-          print(datetime.now(timezone.utc).strftime('%Y-%m-%d') + '.0')
-          ")
-          fi
-          echo "version=$VERSION" >> $GITHUB_OUTPUT
-          echo "ID index version: $VERSION"
-
   id-stage:
     runs-on: ubuntu-24.04-arm
-    needs: id-prep
+    needs: prep
+    if: github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false'
     strategy:
       fail-fast: false
       matrix:
@@ -464,12 +582,13 @@ jobs:
         run: |
           python -u scripts/build_id_index.py \
             --phase ${{ matrix.phase }} --prefix-len 3 --workers 8 \
-            --version ${{ needs.id-prep.outputs.version }} \
+            --version ${{ needs.prep.outputs.version }} \
+            --release ${{ needs.prep.outputs.release }} \
             ${{ matrix.extra_args }}
 
   id-build:
     runs-on: ubuntu-24.04-arm
-    needs: [id-prep, id-stage]
+    needs: [prep, id-stage]
     strategy:
       fail-fast: false
       matrix:
@@ -522,13 +641,14 @@ jobs:
         run: |
           python -u scripts/build_id_index.py \
             --phase build --prefix-len 3 --workers 8 \
-            --version ${{ needs.id-prep.outputs.version }} \
+            --version ${{ needs.prep.outputs.version }} \
+            --release ${{ needs.prep.outputs.release }} \
             --prefix-start ${{ matrix.prefix_start }} \
             --prefix-end ${{ matrix.prefix_end }}
 
   id-post:
     runs-on: ubuntu-24.04-arm
-    needs: [id-prep, id-build]
+    needs: [prep, id-build]
     steps:
       - uses: actions/checkout@v4
 
@@ -552,11 +672,12 @@ jobs:
         run: |
           python -u scripts/build_id_index.py \
             --phase metadata --prefix-len 3 \
-            --version ${{ needs.id-prep.outputs.version }}
+            --version ${{ needs.prep.outputs.version }} \
+            --release ${{ needs.prep.outputs.release }}
 
       - name: Verify R2 uploads
         run: |
-          VERSION="${{ needs.id-prep.outputs.version }}"
+          VERSION="${{ needs.prep.outputs.version }}"
           echo "Verifying version: ${VERSION}"
 
           if wrangler r2 object get "geocoder-shards/${VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
@@ -575,11 +696,26 @@ jobs:
           done
           echo "R2 verification passed."
 
+      # Staging data is several GB per version and is never read again once
+      # the build is verified; delete it via paginated S3 batch deletes.
+      - name: Cleanup staging data
+        run: |
+          VERSION="${{ needs.prep.outputs.version }}"
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          echo "Deleting ${VERSION}/staging/ from R2..."
+          aws s3 rm "s3://geocoder-shards/${VERSION}/staging/" --recursive \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          echo "Staging data deleted."
+
       - name: Summary
         if: always()
         run: |
-          VERSION="${{ needs.id-prep.outputs.version }}"
+          VERSION="${{ needs.prep.outputs.version }}"
           echo "## ID Index Rebuild" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Overture release:** ${{ needs.prep.outputs.release }}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY

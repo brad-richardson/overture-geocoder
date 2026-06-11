@@ -14,18 +14,21 @@ set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
-FALLBACK_RELEASE="2025-12-17.0"
 
-# Use provided release or fetch latest from STAC
+# Use provided release or fetch latest from STAC.
+# No hardcoded fallback: Overture purges releases after 90 days, so any
+# pinned fallback is guaranteed to break eventually. Fail fast instead.
 if [ -n "$1" ]; then
     RELEASE="$1"
     echo "Using provided Overture release: $RELEASE"
 else
     echo "Fetching latest Overture release from STAC..."
-    RELEASE=$(python3 scripts/stac.py 2>/dev/null | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+') || {
-        echo "Warning: Failed to fetch latest release, using fallback: $FALLBACK_RELEASE"
-        RELEASE="$FALLBACK_RELEASE"
-    }
+    RELEASE=$(python3 "$SCRIPT_DIR/stac.py" | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1 || true)
+    if [ -z "$RELEASE" ]; then
+        echo "ERROR: Failed to fetch latest Overture release from STAC catalog." >&2
+        echo "Pass a release explicitly: ./scripts/download_divisions.sh YYYY-MM-DD.N" >&2
+        exit 1
+    fi
     echo "Using Overture release: $RELEASE"
 fi
 

@@ -71,6 +71,8 @@ def main():
     parser.add_argument("--version", required=True)
     parser.add_argument("--prefix-len", type=int, default=3)
     parser.add_argument("--bucket", default="geocoder-shards")
+    parser.add_argument("--release",
+                        help="Overture release version (default: discover latest from STAC)")
     args = parser.parse_args()
 
     r2_config = get_r2_config()
@@ -78,9 +80,13 @@ def main():
     version = args.version
     bucket = r2_config["bucket"]
 
-    print("Discovering latest Overture release...")
-    release_version = get_latest_release()
-    print(f"  Release: {release_version}")
+    if args.release:
+        release_version = args.release
+        print(f"Using provided Overture release: {release_version}")
+    else:
+        print("Discovering latest Overture release...")
+        release_version = get_latest_release()
+        print(f"  Release: {release_version}")
 
     con = r2_con(r2_config)
 
@@ -133,7 +139,7 @@ def main():
     print(f"  Generated {tmp} ({len(shard_infos)} items)")
 
     # Upload via wrangler
-    r2_key = f"geocoder-shards/{version}/id-collection.json"
+    r2_key = f"{bucket}/{version}/id-collection.json"
     result = subprocess.run(
         ["wrangler", "r2", "object", "put", r2_key,
          "--file", str(tmp), "--remote"],
@@ -150,7 +156,7 @@ def main():
     tmp_meta = Path("tmp-id-meta.json")
     with open(tmp_meta, "w") as f:
         json.dump(meta, f)
-    meta_key = f"geocoder-shards/{version}/id-meta.json"
+    meta_key = f"{bucket}/{version}/id-meta.json"
     result = subprocess.run(
         ["wrangler", "r2", "object", "put", meta_key,
          "--file", str(tmp_meta), "--remote"],

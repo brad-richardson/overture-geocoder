@@ -16,6 +16,9 @@ from pathlib import Path
 
 import duckdb
 
+sys.path.insert(0, str(Path(__file__).parent))
+from build_id_index import _assert_shard_schema
+
 # Load .env
 _env_path = Path(__file__).resolve().parent.parent / ".env"
 if _env_path.exists():
@@ -183,6 +186,9 @@ def main():
                 ) TO '{r2_dest}'
                 (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
             """)
+
+            # Verify footer (worker reads columns positionally)
+            _assert_shard_schema(con, r2_dest)
 
             print(f"  {prefix}: {count:,} records -> R2")
             total_shards += 1

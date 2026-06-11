@@ -40,6 +40,7 @@ import argparse
 import json
 import hashlib
 import re
+import shutil
 import sqlite3
 import sys
 from datetime import datetime, timezone
@@ -53,6 +54,13 @@ REGION_CODE_PATTERN = re.compile(r'^[A-Z]{2}-[A-Z0-9]{1,3}$')
 
 # Shard size threshold for region splitting (50MB to stay under 128MB CF worker limit)
 SHARD_SIZE_THRESHOLD_BYTES = 50 * 1024 * 1024  # 50MB
+
+# Countries with at least this many records are routed straight to region
+# shards without building the country shard first. Deliberately conservative
+# (even at a low ~150 bytes/record with FTS, 400k records exceeds the 50MB
+# size threshold) so borderline countries still get the authoritative
+# build-then-measure treatment and shard layout is unchanged.
+REGION_SPLIT_RECORD_THRESHOLD = 400_000
 
 # FTS5 prefix index lengths (higher values improve autocomplete at ~5-10% per extra level)
 FTS5_PREFIX_LENGTHS = '2 3 4'
@@ -161,9 +169,9 @@ DIVISIONS_REVERSE_PARQUET = EXPORTS_DIR / "divisions-reverse.parquet"
 # HEAD shard includes countries, regions, and localities with pop >= threshold
 DEFAULT_HEAD_THRESHOLD = 100_000
 
-# Antimeridian-crossing divisions have bboxes spanning > 180 degrees
-# DuckDB normalizes these to [-180, 180] so we detect by width
-ANTIMERIDIAN_WIDTH_THRESHOLD = 180.0
+# Local scratch directory for country-partitioned parquet (one global pass
+# instead of one full parquet scan per country)
+PARTITIONS_DIR = EXPORTS_DIR / "partitions"
 
 
 def get_version(suffix: str = "0") -> str:
@@ -184,6 +192,59 @@ def get_countries(parquet_path: Path) -> list[str]:
     """).fetchall()
     con.close()
     return [r[0] for r in result]
+
+
+def partition_by_country(
+    parquet_path: Path,
+    partition_dir: Path,
+    countries: list[str] | None = None,
+) -> dict[str, int]:
+    """
+    Partition the global parquet by country in a single pass.
+
+    Writes hive-partitioned parquet (country=XX/data_0.parquet) to
+    partition_dir so per-country shard builds read only their own
+    partition instead of re-scanning the global file per country.
+
+    Returns dict of country code -> record count (used to route obviously
+    oversized countries straight to region builds).
+    """
+    parquet_str = str(parquet_path.resolve())
+    if partition_dir.exists():
+        shutil.rmtree(partition_dir)
+    partition_dir.mkdir(parents=True, exist_ok=True)
+
+    where = "country IS NOT NULL"
+    if countries:
+        codes = ", ".join(f"'{validate_country_code(c)}'" for c in countries)
+        where += f" AND country IN ({codes})"
+
+    con = duckdb.connect()
+    counts = dict(con.execute(f"""
+        SELECT country, COUNT(*)
+        FROM read_parquet('{parquet_str}')
+        WHERE {where}
+        GROUP BY country
+    """).fetchall())
+
+    # WRITE_PARTITION_COLUMNS keeps the country column in the data files so
+    # downstream shard builders see the exact same schema as the global file.
+    con.execute(f"""
+        COPY (
+            SELECT * FROM read_parquet('{parquet_str}')
+            WHERE {where}
+        ) TO '{str(partition_dir.resolve())}'
+        (FORMAT PARQUET, PARTITION_BY (country),
+         WRITE_PARTITION_COLUMNS true, OVERWRITE_OR_IGNORE true);
+    """)
+    con.close()
+    return counts
+
+
+def country_partition_glob(partition_dir: Path, country_code: str) -> Path:
+    """Glob path for a single country's partitioned parquet files."""
+    country_code = validate_country_code(country_code)
+    return partition_dir / f"country={country_code}" / "*.parquet"
 
 
 def get_regions_for_country(parquet_path: Path, country_code: str) -> list[tuple[str, int]]:
@@ -629,38 +690,6 @@ def populate_reverse_rtree(db: sqlite3.Connection):
     """)
 
 
-def maybe_split_antimeridian(row: tuple) -> list[tuple]:
-    """
-    Split divisions that cross the antimeridian into two rows.
-
-    DuckDB normalizes antimeridian-crossing bboxes to span [-180, 180].
-    We detect these by checking if the bbox width exceeds 180 degrees.
-
-    Returns 1 or 2 rows depending on whether splitting is needed.
-    """
-    # Row structure from parquet query:
-    # (gers_id, subtype, primary_name, lat, lon, bbox_xmin, bbox_ymin,
-    #  bbox_xmax, bbox_ymax, area, population, country, region)
-    bbox_xmin = row[5]
-    bbox_xmax = row[8]
-    width = bbox_xmax - bbox_xmin
-
-    if width > ANTIMERIDIAN_WIDTH_THRESHOLD:
-        # This division likely crosses the antimeridian
-        # Split into eastern (bbox_xmin to 180) and western (-180 to bbox_xmax) halves
-
-        # Eastern half: from original xmin to +180
-        eastern = row[:5] + (row[5], row[6], 180.0, row[8]) + row[9:]
-        # Actually we need to reconsider: if the bbox is already [-180, 180],
-        # splitting doesn't help because we don't know the actual split point.
-        #
-        # For now, just pass through and let area ranking handle it.
-        # A proper fix would require the original polygon geometry.
-        return [row]
-
-    return [row]
-
-
 def build_reverse_country_shard(
     parquet_path: Path,
     country_code: str,
@@ -711,16 +740,12 @@ def build_reverse_country_shard(
         if not rows:
             break
 
-        # Process rows (potential antimeridian splitting)
-        processed_rows = []
         for row in rows:
-            for split_row in maybe_split_antimeridian(row):
-                processed_rows.append(split_row)
-                # Update bbox
-                bbox[0] = min(bbox[0], split_row[5])  # bbox_xmin
-                bbox[1] = min(bbox[1], split_row[6])  # bbox_ymin
-                bbox[2] = max(bbox[2], split_row[7])  # bbox_xmax
-                bbox[3] = max(bbox[3], split_row[8])  # bbox_ymax
+            # Update bbox
+            bbox[0] = min(bbox[0], row[5])  # bbox_xmin
+            bbox[1] = min(bbox[1], row[6])  # bbox_ymin
+            bbox[2] = max(bbox[2], row[7])  # bbox_xmax
+            bbox[3] = max(bbox[3], row[8])  # bbox_ymax
 
         db.executemany("""
             INSERT INTO divisions_reverse (
@@ -728,8 +753,8 @@ def build_reverse_country_shard(
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 area, population, country, region
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, processed_rows)
-        count += len(processed_rows)
+        """, rows)
+        count += len(rows)
 
     populate_reverse_rtree(db)
 
@@ -803,19 +828,14 @@ def build_reverse_head_shard(
         if not rows:
             break
 
-        processed_rows = []
-        for row in rows:
-            for split_row in maybe_split_antimeridian(row):
-                processed_rows.append(split_row)
-
         db.executemany("""
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 area, population, country, region
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, processed_rows)
-        count += len(processed_rows)
+        """, rows)
+        count += len(rows)
 
     populate_reverse_rtree(db)
 
@@ -982,11 +1002,22 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         print("\nHead-only mode, skipping country shards")
     else:
         # Get list of countries
+        explicit_countries = None
         if args.countries:
-            countries = [c.strip().upper() for c in args.countries.split(",")]
+            explicit_countries = [c.strip().upper() for c in args.countries.split(",")]
+
+        # Single pass over the global parquet: partition by country locally,
+        # then build every shard from its own (small) partition.
+        print("\nPartitioning divisions by country (single pass)...")
+        partition_dir = PARTITIONS_DIR / "forward"
+        counts = partition_by_country(
+            args.parquet, partition_dir, countries=explicit_countries
+        )
+
+        if explicit_countries:
+            countries = explicit_countries
         else:
-            print("\nDiscovering countries...")
-            countries = get_countries(args.parquet)
+            countries = sorted(counts)
             print(f"Found {len(countries)} countries")
 
         # PASS 1: Build country shards
@@ -994,12 +1025,30 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         oversized_countries = []
 
         for i, country in enumerate(countries, 1):
+            record_count = counts.get(country, 0)
+            pct = 100 * i / len(countries)
+            threshold_mb = SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024
+
+            # Route obviously oversized countries straight to region builds:
+            # building the full country shard (FTS index + VACUUM) only to
+            # delete it again is wasted work.
+            if record_count >= REGION_SPLIT_RECORD_THRESHOLD:
+                oversized_countries.append(country)
+                print(f"  [{i}/{len(countries)} {pct:.0f}%] {country}: "
+                      f"{record_count:,} records, "
+                      f"routing straight to region shards")
+                continue
+
+            # Countries absent from the partition (zero records) fall back to
+            # the global parquet so an empty shard is still produced.
+            source = (
+                country_partition_glob(partition_dir, country)
+                if record_count > 0 else args.parquet
+            )
             output_path = shards_subdir / f"{country}.db"
-            info = build_country_shard(args.parquet, country, output_path, version)
+            info = build_country_shard(source, country, output_path, version)
 
             size_mb = info['size_bytes'] / 1024 / 1024
-            threshold_mb = SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024
-            pct = 100 * i / len(countries)
 
             if info['size_bytes'] > SHARD_SIZE_THRESHOLD_BYTES:
                 oversized_countries.append(country)
@@ -1017,13 +1066,14 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
             print(f"\nPass 2: Splitting {len(oversized_countries)} oversized countries into regions...")
 
             for country in oversized_countries:
-                # Delete the oversized country shard
+                # Delete the oversized country shard (if it was built)
                 country_shard_path = shards_subdir / f"{country}.db"
                 if country_shard_path.exists():
                     country_shard_path.unlink()
 
-                # Get regions for this country
-                regions = get_regions_for_country(args.parquet, country)
+                # Get regions for this country (from its local partition)
+                source = country_partition_glob(partition_dir, country)
+                regions = get_regions_for_country(source, country)
                 print(f"\n  {country}: Splitting into {len(regions)} regions...")
 
                 region_sharded[country] = []
@@ -1031,7 +1081,7 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
                 for region_code, record_count in regions:
                     output_path = shards_subdir / f"{region_code}.db"
                     info = build_region_shard(
-                        args.parquet, country, region_code, output_path, version
+                        source, country, region_code, output_path, version
                     )
                     shard_infos[region_code] = info
                     region_sharded[country].append(region_code)
@@ -1043,6 +1093,9 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
                     else:
                         print(f"    {region_code}: {info['record_count']:,} records, "
                               f"{size_mb:.1f} MB")
+
+        # Free local scratch space (partitions can be several GB)
+        shutil.rmtree(partition_dir, ignore_errors=True)
 
     # Calculate hashes for all shards
     print("\nCalculating shard hashes...")
@@ -1099,24 +1152,41 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
         print("\nHead-only mode, skipping country shards")
     else:
         # Get list of countries from reverse parquet
+        explicit_countries = None
         if args.countries:
-            countries = [c.strip().upper() for c in args.countries.split(",")]
+            explicit_countries = [c.strip().upper() for c in args.countries.split(",")]
+
+        # Single pass over the reverse parquet: partition by country locally
+        print("\nPartitioning reverse divisions by country (single pass)...")
+        partition_dir = PARTITIONS_DIR / "reverse"
+        counts = partition_by_country(
+            parquet_path, partition_dir, countries=explicit_countries
+        )
+
+        if explicit_countries:
+            countries = explicit_countries
         else:
-            print("\nDiscovering countries...")
-            countries = get_countries(parquet_path)
+            countries = sorted(counts)
             print(f"Found {len(countries)} countries")
 
         # Build country shards
         print(f"\nBuilding {len(countries)} reverse country shards...")
 
         for i, country in enumerate(countries, 1):
+            source = (
+                country_partition_glob(partition_dir, country)
+                if counts.get(country, 0) > 0 else parquet_path
+            )
             output_path = reverse_subdir / f"{country}.db"
-            info = build_reverse_country_shard(parquet_path, country, output_path, version)
+            info = build_reverse_country_shard(source, country, output_path, version)
             shard_infos[country] = info
             pct = 100 * i / len(countries)
             print(f"  [{i}/{len(countries)} {pct:.0f}%] {country}: "
                   f"{info['record_count']:,} records, "
                   f"{info['size_bytes'] / 1024 / 1024:.1f} MB")
+
+        # Free local scratch space
+        shutil.rmtree(partition_dir, ignore_errors=True)
 
     # Calculate hashes for all reverse shards
     print("\nCalculating shard hashes...")

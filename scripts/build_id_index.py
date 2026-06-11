@@ -3,7 +3,8 @@
 Build GERS ID -> bbox index as UUID-prefix-sharded parquet files.
 
 Pipeline (R2 staging):
-  stage-registry: DuckDB streams Overture S3 registry -> R2 staging (per-prefix)
+  stage-registry: DuckDB partitions Overture S3 registry -> R2 staging
+                  (single COPY ... PARTITION_BY (prefix) pass per range job)
   stage-base:     DuckDB streams Overture S3 release themes -> R2 staging (per-type)
   build:          Merge, sort, and write final parquet shards to R2
   metadata:       Generate id-collection.json, upload to R2
@@ -117,21 +118,56 @@ def get_r2_config(args):
 # ---------------------------------------------------------------------------
 # Retry helper
 # ---------------------------------------------------------------------------
+
+# DuckDB exception types that indicate transient network/IO trouble
+# (HTTP 5xx, connection resets, S3 hiccups). Guarded with getattr so this
+# keeps working across duckdb versions.
+TRANSIENT_DUCKDB_ERRORS = tuple(
+    exc for exc in (
+        getattr(duckdb, "HTTPException", None),
+        getattr(duckdb, "IOException", None),
+        getattr(duckdb, "ConnectionException", None),
+    )
+    if exc is not None
+)
+
+
+def _is_transient(exc):
+    """True if exc looks like a transient network/IO error worth retrying."""
+    if not isinstance(exc, TRANSIENT_DUCKDB_ERRORS):
+        return False
+    # "No files found" IOExceptions mean genuine absence, not flakiness
+    if "No files found" in str(exc):
+        return False
+    return True
+
+
 def _retry_transient(fn, retries=3, backoff=30):
-    """Wrap fn to retry on transient HTTP errors (502, 503, etc.)."""
+    """Wrap fn to retry on transient HTTP/IO errors (502, 503, resets, etc.)."""
     def _wrapped():
         for attempt in range(retries):
             try:
                 return fn()
-            except duckdb.HTTPException as exc:
-                if attempt < retries - 1:
+            except Exception as exc:
+                if _is_transient(exc) and attempt < retries - 1:
                     wait = backoff * (2 ** attempt)
-                    print(f"    Transient HTTP error (attempt {attempt + 1}/{retries}): {exc}")
+                    print(f"    Transient error (attempt {attempt + 1}/{retries}): {exc}")
                     print(f"    Retrying in {wait}s...")
                     time.sleep(wait)
                 else:
                     raise
     return _wrapped
+
+
+def _glob_files(con, pattern):
+    """List files matching a glob; empty list when none match (not an error)."""
+    try:
+        rows = con.execute(f"SELECT file FROM glob('{pattern}')").fetchall()
+    except duckdb.Error as exc:
+        if "No files found" in str(exc):
+            return []
+        raise
+    return sorted(r[0] for r in rows)
 
 
 # ---------------------------------------------------------------------------
@@ -206,142 +242,189 @@ def _write_staging_marker(r2_config, version, staging_dir, partition_count, extr
         marker.update(extra)
     tmp = Path(f"tmp-staging-marker-{staging_dir}-{os.getpid()}.json")
     write_json(tmp, marker)
-    r2_key = f"geocoder-shards/{version}/staging/{staging_dir}/_SUCCESS"
+    r2_key = f"{r2_config['bucket']}/{version}/staging/{staging_dir}/_SUCCESS"
     err = _upload_to_r2(tmp, r2_key)
     tmp.unlink(missing_ok=True)
     if err:
         print(f"  WARNING: Failed to write staging marker: {err}")
 
 
-def _read_staging_marker(r2_config, version, staging_dir):
-    """Check if a _SUCCESS marker exists for this staging path."""
-    try:
-        result = subprocess.run(
-            ["wrangler", "r2", "object", "get",
-             f"geocoder-shards/{version}/staging/{staging_dir}/_SUCCESS",
-             "--remote", "--pipe"],
-            capture_output=True, text=True, timeout=30,
-        )
-        if result.returncode == 0:
-            return json.loads(result.stdout)
-    except Exception:
-        pass
-    return None
+# Substrings in wrangler errors that mean "object genuinely absent"
+_R2_ABSENT_MARKERS = ("does not exist", "not found", "404", "10007")
 
 
-def _id_query_for_prefix(prefix, limit=None):
-    """Return a SELECT for a single prefix, filtering by id LIKE '{prefix}%'.
+def _read_staging_marker(r2_config, version, staging_dir, retries=3):
+    """Read a _SUCCESS marker from R2 staging.
 
-    On sorted registry parquet, DuckDB can use row group min/max stats
-    to skip irrelevant data (predicate pushdown).
+    Returns the parsed marker dict, or None only when the object is
+    genuinely absent. Transient read errors are retried, then raised, so a
+    network blip can never silently restart a completed phase (or worse,
+    skip one).
     """
-    limit_clause = f"LIMIT {int(limit)}" if limit else ""
-    return f"""
-        SELECT
-            id::UUID as id,
-            bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
-            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax
-        FROM read_parquet('{REGISTRY_S3}*')
-        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
-          AND id::VARCHAR LIKE '{prefix}%'
-        {limit_clause}
+    r2_key = f"{r2_config['bucket']}/{version}/staging/{staging_dir}/_SUCCESS"
+    last_err = None
+    for attempt in range(retries):
+        try:
+            result = subprocess.run(
+                ["wrangler", "r2", "object", "get", r2_key,
+                 "--remote", "--pipe"],
+                capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            last_err = "wrangler r2 object get timed out"
+        else:
+            if result.returncode == 0:
+                return json.loads(result.stdout)
+            err_text = f"{result.stderr or ''} {result.stdout or ''}".strip()
+            if any(s in err_text.lower() for s in _R2_ABSENT_MARKERS):
+                return None  # genuinely absent
+            last_err = err_text[:300]
+        if attempt < retries - 1:
+            wait = 10 * (attempt + 1)
+            print(f"    Marker read retry {attempt + 1}/{retries} "
+                  f"for {r2_key}: {last_err}")
+            time.sleep(wait)
+    raise RuntimeError(f"Failed to read staging marker {r2_key}: {last_err}")
+
+
+def _delete_r2_keys(r2_config, keys):
+    """Batch-delete objects from R2 via the S3 API (aws CLI, 1000 keys/call)."""
+    if not keys:
+        return
+    env = os.environ.copy()
+    env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
+    env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
+    env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
+    env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
+    endpoint = f"https://{r2_config['endpoint']}"
+
+    for i in range(0, len(keys), 1000):
+        batch = keys[i:i + 1000]
+        payload = json.dumps({"Objects": [{"Key": k} for k in batch], "Quiet": True})
+        try:
+            result = subprocess.run(
+                ["aws", "s3api", "delete-objects",
+                 "--bucket", r2_config["bucket"],
+                 "--delete", payload,
+                 "--endpoint-url", endpoint, "--region", "auto"],
+                capture_output=True, text=True, timeout=300, env=env,
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "aws CLI is required to delete stale staged objects"
+            ) from None
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to batch-delete R2 objects: {result.stderr[:300]}")
+
+
+def _clear_staged_registry(r2_config, version, prefix_len,
+                           prefixes=None, prefix_start=None, prefix_end=None):
+    """Delete staged registry files for the targeted prefixes.
+
+    A failed partitioned COPY can leave per-partition files behind; a re-run
+    may write fewer files per partition than the failed attempt, so stale
+    extras would silently duplicate data in the final shards. Clearing first
+    makes re-runs exact.
     """
-
-
-def _worker_partition_prefix(args):
-    """Worker: partition a single registry prefix to R2 staging."""
-    prefix, r2_config, version = args
-    staging = f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned"
-    dest = f"{staging}/prefix={prefix}/data_0.parquet"
-    query = _id_query_for_prefix(prefix)
-    retries = 3
-    con = None
-
+    bucket = r2_config["bucket"]
+    con = _r2_con(r2_config)
     try:
-        con = _r2_con(r2_config)
-        con.execute("SET memory_limit = '2GB';")
-        con.execute("SET s3_region = 'us-west-2';")
-
-        for attempt in range(retries):
-            try:
-                row = con.execute(f"SELECT 1 FROM ({query}) LIMIT 1").fetchone()
-                if row is None:
-                    return (prefix, 0, None)
-
-                # Single-file COPY TO on S3/R2 is an atomic PUT; naturally
-                # overwrites if the file exists from a previous partial run.
-                con.execute(f"""
-                    COPY ({query})
-                    TO '{dest}'
-                    (FORMAT PARQUET, COMPRESSION ZSTD);
-                """)
-                return (prefix, 1, None)
-            except duckdb.HTTPException as exc:
-                if attempt < retries - 1:
-                    wait = 30 * (2 ** attempt)
-                    print(f"    [registry] Transient error on prefix {prefix} "
-                          f"(attempt {attempt + 1}/{retries}): {exc}")
-                    time.sleep(wait)
-                else:
-                    return (prefix, 0, str(exc))
-    except Exception as exc:
-        return (prefix, 0, str(exc))
+        files = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{bucket}/{version}/staging/id-partitioned/prefix=*/*.parquet",
+        ))()
     finally:
-        if con:
-            con.close()
+        con.close()
+    if not files:
+        return
+
+    if prefixes is not None:
+        wanted = set(prefixes)
+    elif prefix_start and prefix_end:
+        lo, hi = int(prefix_start, 16), int(prefix_end, 16)
+        wanted = {format(i, f'0{prefix_len}x') for i in range(lo, hi + 1)}
+    else:
+        wanted = None  # full run: clear everything
+
+    keys = []
+    for f in files:
+        prefix = f.split("prefix=", 1)[-1].split("/", 1)[0]
+        if wanted is None or prefix in wanted:
+            keys.append(f.split(f"s3://{bucket}/", 1)[-1])
+
+    if keys:
+        print(f"  [registry] Clearing {len(keys)} stale staged files...")
+        _delete_r2_keys(r2_config, keys)
 
 
-def phase_partition_r2(prefix_len, r2_config, version, prefixes=None, workers=4):
-    """Scan Overture S3 registry per-prefix, writing each partition to R2.
+def phase_partition_r2(prefix_len, r2_config, version,
+                       prefixes=None, prefix_start=None, prefix_end=None):
+    """Partition the Overture registry into per-prefix staging files on R2.
 
-    Iterates over hex prefixes individually, using id LIKE '{prefix}%' to
-    leverage predicate pushdown on sorted registry parquet. Each prefix is
-    independently retryable; reruns will reprocess and overwrite existing
-    staged data for that prefix.
+    Single COPY ... PARTITION_BY (prefix) pass over the registry per range
+    job (instead of one full registry scan per prefix). The hive layout
+    (prefix=XXX/data_*.parquet) is unchanged, so the build phase and
+    patch tooling read it exactly as before.
     """
-    shard_count = 16 ** prefix_len
-    if prefixes is None:
-        prefixes = [format(i, f'0{prefix_len}x') for i in range(shard_count)]
+    bucket = r2_config["bucket"]
+    dest = f"s3://{bucket}/{version}/staging/id-partitioned"
 
-    print(f"  [registry] Writing {len(prefixes)} prefixes ({workers} workers)...")
+    if prefixes is not None:
+        # Explicit prefix list (smoke test / patching): prefix-LIKE filters
+        # keep predicate pushdown on the sorted registry parquet.
+        like_filters = " OR ".join(f"id LIKE '{p}%'" for p in prefixes)
+        range_filter = f"AND ({like_filters})"
+        label = f"{len(prefixes)} explicit prefixes"
+    elif prefix_start and prefix_end:
+        # IDs are lowercase hex UUID strings; for prefix_len <= 8 the first
+        # prefix_len chars precede the first hyphen, so plain string bounds
+        # cover the range (and push down to row-group stats).
+        cond = f"id >= '{prefix_start}'"
+        upper_idx = int(prefix_end, 16) + 1
+        if upper_idx < 16 ** prefix_len:
+            upper = format(upper_idx, f'0{prefix_len}x')
+            cond += f" AND id < '{upper}'"
+        range_filter = f"AND {cond}"
+        label = f"range {prefix_start}-{prefix_end}"
+    else:
+        range_filter = ""
+        label = "all prefixes"
 
-    _ensure_httpfs_installed()
-    work = [(p, r2_config, version) for p in prefixes]
+    # Re-run safety: remove leftovers from a previous partial attempt
+    _clear_staged_registry(r2_config, version, prefix_len,
+                           prefixes=prefixes,
+                           prefix_start=prefix_start, prefix_end=prefix_end)
+
+    print(f"  [registry] Partitioning registry ({label})...")
     t0 = time.time()
-    wrote = 0
-    errors = []
 
-    with multiprocessing.Pool(workers) as pool:
-        for i, result in enumerate(pool.imap_unordered(_worker_partition_prefix, work)):
-            prefix, count, err = result
-            wrote += count
-            if err:
-                errors.append((prefix, err))
+    con = _r2_con(r2_config)
+    con.execute("SET memory_limit = '8GB';")
+    con.execute("SET s3_region = 'us-west-2';")
 
-            done = i + 1
-            if done % 100 == 0 or done == len(prefixes):
-                elapsed = time.time() - t0
-                mins, secs = divmod(int(elapsed), 60)
-                rate = done / elapsed if elapsed > 0 else 0
-                if rate > 0 and done < len(prefixes) and done >= len(prefixes) // 10:
-                    remaining = (len(prefixes) - done) / rate
-                    mins_r, secs_r = divmod(int(remaining), 60)
-                    eta = f", ~{mins_r}m{secs_r:02d}s remaining"
-                else:
-                    eta = ""
-                print(f"    [registry] {done}/{len(prefixes)} prefixes "
-                      f"({wrote} written) [{mins:02d}:{secs:02d}{eta}]")
+    def _do_copy():
+        con.execute(f"""
+            COPY (
+                SELECT
+                    id::UUID as id,
+                    bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
+                    bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
+                    lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+                FROM read_parquet('{REGISTRY_S3}*')
+                WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+                {range_filter}
+            ) TO '{dest}'
+            (FORMAT PARQUET, COMPRESSION ZSTD,
+             PARTITION_BY (prefix), OVERWRITE_OR_IGNORE true);
+        """)
+
+    _retry_transient(_do_copy)()
+    con.close()
 
     elapsed = time.time() - t0
     mins, secs = divmod(int(elapsed), 60)
-
-    if errors:
-        print(f"  [registry] {len(errors)} errors:")
-        for prefix, err in errors[:10]:
-            print(f"    {prefix}: {err}")
-        raise RuntimeError(f"Registry partitioning failed: {len(errors)} prefix errors")
-
-    print(f"  [registry] Done: {wrote} prefixes with data in {mins}m{secs:02d}s")
+    print(f"  [registry] Done ({label}) in {mins}m{secs:02d}s")
 
 
 def _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=None):
@@ -369,27 +452,52 @@ def _r2_release_staging_exists(r2_config, version):
     return _read_staging_marker(r2_config, version, "id-release") is not None
 
 
-def _discover_release_types(release_version):
-    """Discover type= sub-directories under each release theme from S3."""
+def _discover_release_types(release_version, retries=3):
+    """Discover type= sub-directories under each release theme from S3.
+
+    Retries transient listing failures and hard-fails if any theme comes
+    back empty: a transient AWS CLI failure must never silently drop a
+    whole theme (addresses/base) from the index.
+    """
     types = set()
     for theme in RELEASE_THEMES:
         prefix = f"release/{release_version}/theme={theme}/type="
-        try:
-            result = subprocess.run(
-                ["aws", "s3", "ls", f"s3://overturemaps-us-west-2/{prefix}",
-                 "--no-sign-request", "--region", "us-west-2"],
-                capture_output=True, text=True, timeout=30,
-            )
-            if result.returncode == 0:
-                for line in result.stdout.strip().splitlines():
-                    # aws s3 ls output: "                           PRE type=land/"
-                    part = line.strip().removeprefix("PRE ").rstrip("/")
-                    if part.startswith("type="):
-                        type_name = part[len("type="):]
-                        if type_name:
-                            types.add((theme, type_name))
-        except Exception:
-            pass
+        theme_types = set()
+        last_err = None
+        for attempt in range(retries):
+            try:
+                result = subprocess.run(
+                    ["aws", "s3", "ls", f"s3://overturemaps-us-west-2/{prefix}",
+                     "--no-sign-request", "--region", "us-west-2"],
+                    capture_output=True, text=True, timeout=60,
+                )
+            except (subprocess.TimeoutExpired, OSError) as exc:
+                last_err = str(exc)
+            else:
+                if result.returncode == 0:
+                    for line in result.stdout.strip().splitlines():
+                        # aws s3 ls output: "                           PRE type=land/"
+                        part = line.strip().removeprefix("PRE ").rstrip("/")
+                        if part.startswith("type="):
+                            type_name = part[len("type="):]
+                            if type_name:
+                                theme_types.add((theme, type_name))
+                    if theme_types:
+                        break
+                    last_err = "listing succeeded but returned no types"
+                else:
+                    last_err = (result.stderr or "")[:300]
+            if attempt < retries - 1:
+                wait = 10 * (attempt + 1)
+                print(f"    [release] Type discovery retry "
+                      f"{attempt + 1}/{retries} for theme={theme}: {last_err}")
+                time.sleep(wait)
+
+        if not theme_types:
+            raise RuntimeError(
+                f"Failed to discover release types for theme={theme} "
+                f"(release {release_version}): {last_err}")
+        types.update(theme_types)
     return sorted(types)
 
 
@@ -435,10 +543,8 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     """
     _ensure_httpfs_installed()
     print(f"  [release] Discovering release types...")
+    # Raises if discovery fails or any theme comes back empty
     types = _discover_release_types(release_version)
-    if not types:
-        print(f"  [release] No release types found, skipping")
-        return
 
     print(f"  [release] Found {len(types)} types: "
           f"{', '.join(f'{t}/{n}' for t, n in types)}")
@@ -505,6 +611,40 @@ def _upload_to_r2(local_path, r2_key, retries=3):
     return last_err
 
 
+# Expected output shard columns, in order. The worker reads these
+# positionally: col 0 must be the 16-byte UUID, cols 1-4 the FLOAT bbox.
+EXPECTED_SHARD_COLUMNS = [
+    ("id", "FIXED_LEN_BYTE_ARRAY"),
+    ("bbox_xmin", "FLOAT"),
+    ("bbox_ymin", "FLOAT"),
+    ("bbox_xmax", "FLOAT"),
+    ("bbox_ymax", "FLOAT"),
+]
+
+
+def _assert_shard_schema(con, path):
+    """Assert a written shard's parquet footer matches the worker's layout.
+
+    The worker reads columns positionally, so a silent column reorder or
+    type change would break every ID lookup. Raises RuntimeError on
+    mismatch; call before writing any _SUCCESS marker.
+    """
+    rows = con.execute(f"""
+        SELECT name, type, type_length
+        FROM parquet_schema('{path}')
+        WHERE type IS NOT NULL
+    """).fetchall()
+    actual = [(r[0], str(r[1])) for r in rows]
+    if actual != EXPECTED_SHARD_COLUMNS:
+        raise RuntimeError(
+            f"Shard schema mismatch for {path}: "
+            f"got {actual}, expected {EXPECTED_SHARD_COLUMNS}")
+    uuid_len = str(rows[0][2])
+    if uuid_len != "16":
+        raise RuntimeError(
+            f"Shard {path}: uuid column type_length {uuid_len} != 16")
+
+
 def _worker_build_r2_batch(args_tuple):
     """Worker: download one staging prefix locally, write one output shard to R2.
 
@@ -536,24 +676,28 @@ def _worker_build_r2_batch(args_tuple):
             );
         """)
 
-        # Download registry staging partition locally (one R2 read instead of N)
+        # Download registry staging partition locally (one R2 read instead of N).
+        # Distinguish "no staged data for this prefix" (acceptable: probe via
+        # a cheap glob listing) from read errors (retried, then propagated as
+        # a per-prefix error so the build phase fails loudly).
         registry_r2 = (
             f"s3://{bucket}/{version}/staging/id-partitioned/"
             f"prefix={staging_prefix}/*.parquet"
         )
         local_registry = f"/tmp/build-reg-{staging_prefix}-{os.getpid()}.parquet"
-        has_registry = False
 
-        try:
-            con.execute(f"""
-                COPY (
-                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
-                    FROM read_parquet('{registry_r2}')
-                ) TO '{local_registry}' (FORMAT PARQUET);
-            """)
-            has_registry = True
-        except Exception:
-            pass
+        has_registry = bool(
+            _retry_transient(lambda: _glob_files(con, registry_r2))()
+        )
+        if has_registry:
+            def _download_registry():
+                con.execute(f"""
+                    COPY (
+                        SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+                        FROM read_parquet('{registry_r2}')
+                    ) TO '{local_registry}' (FORMAT PARQUET);
+                """)
+            _retry_transient(_download_registry)()
 
         for prefix in output_prefixes:
             needs_filter = len(prefix) > len(staging_prefix)
@@ -568,21 +712,20 @@ def _worker_build_r2_batch(args_tuple):
                     f"FROM read_parquet('{local_registry}') WHERE 1=1 {id_filter}"
                 )
 
-            # Release: read from local files with prefix filter
+            # Release: probe local files with prefix filter. These are local
+            # reads of files we downloaded ourselves; any error here is real
+            # (e.g. corrupt download) and must propagate, not be swallowed.
             for release_path in release_files:
-                try:
-                    row = con.execute(
-                        f"SELECT 1 FROM read_parquet('{release_path}') "
-                        f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
-                    ).fetchone()
-                    if row:
-                        sources.append(
-                            f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-                            f"FROM read_parquet('{release_path}') "
-                            f"WHERE prefix = '{staging_prefix}' {id_filter}"
-                        )
-                except Exception:
-                    pass
+                row = con.execute(
+                    f"SELECT 1 FROM read_parquet('{release_path}') "
+                    f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
+                ).fetchone()
+                if row:
+                    sources.append(
+                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                        f"FROM read_parquet('{release_path}') "
+                        f"WHERE prefix = '{staging_prefix}' {id_filter}"
+                    )
 
             if not sources:
                 results.append((prefix, 0, 0, None))
@@ -609,6 +752,10 @@ def _worker_build_r2_batch(args_tuple):
                 """)
             _retry_transient(_do_copy)()
 
+            # Verify the written footer before this shard can count toward
+            # a _SUCCESS marker (the worker reads columns positionally)
+            _retry_transient(lambda: _assert_shard_schema(con, r2_dest))()
+
             size = count * (16 + 4 * 4)
             results.append((prefix, count, size, None))
 
@@ -626,57 +773,17 @@ def _worker_build_r2_batch(args_tuple):
         return [(p, 0, 0, str(e)) for p in output_prefixes]
 
 
-def _run_pool(worker_fn, work_items, total_label, workers):
-    """Run multiprocessing pool with progress reporting."""
-    _ensure_httpfs_installed()
-    total = len(work_items)
-    results = []
-    t0 = time.time()
-    # More frequent progress for large sets
-    progress_interval = 50 if total > 500 else (10 if total > 50 else 5)
-
-    with multiprocessing.Pool(workers) as pool:
-        for i, result in enumerate(pool.imap_unordered(worker_fn, work_items)):
-            results.append(result)
-            done = i + 1
-            if done % progress_interval == 0 or done == total:
-                built = sum(1 for r in results if r[1] > 0)
-                records = sum(r[1] for r in results)
-                elapsed = time.time() - t0
-                rate = done / elapsed if elapsed > 0 else 0
-                if rate > 0 and done < total and done >= total // 10:
-                    remaining = (total - done) / rate
-                    mins_r, secs_r = divmod(int(remaining), 60)
-                    eta = f", ~{mins_r}m{secs_r:02d}s remaining"
-                else:
-                    eta = ""
-                mins_e, secs_e = divmod(int(elapsed), 60)
-                print(
-                    f"    {done}/{total} {total_label}, {built} with data"
-                    f", {records:,} records"
-                    f" ({mins_e}m{secs_e:02d}s elapsed{eta})",
-                    flush=True,
-                )
-    return results
-
-
 def _discover_release_staging_files(con, r2_config, version):
     """Discover all id-release-* staging files in R2.
 
     Returns a list of S3 paths to single-file release staging parquets.
+    An empty listing is acceptable (no release staging yet); transient
+    errors are retried and real errors propagate.
     """
     bucket = r2_config["bucket"]
     staging_base = f"s3://{bucket}/{version}/staging"
-    files = []
-    try:
-        rows = con.execute(f"""
-            SELECT file
-            FROM glob('{staging_base}/id-release-*/data.parquet')
-        """).fetchall()
-        files = [row[0] for row in rows]
-    except Exception:
-        pass
-    return sorted(files)
+    return _retry_transient(lambda: _glob_files(
+        con, f"{staging_base}/id-release-*/data.parquet"))()
 
 
 def _discover_staging_prefixes(r2_config, version):
@@ -686,30 +793,26 @@ def _discover_staging_prefixes(r2_config, version):
     # Find release staging files (single file per type)
     release_files = _discover_release_staging_files(con, r2_config, version)
 
-    # Get registry prefixes
+    # Get registry prefixes (empty listing is fine; real errors propagate)
     prefixes = set()
-    try:
-        rows = con.execute(f"""
-            SELECT DISTINCT
-                regexp_extract(file, 'prefix=([^/]+)', 1) as prefix
-            FROM glob(
-                's3://{r2_config["bucket"]}/{version}/staging/id-partitioned/prefix=*/*.parquet'
-            )
-        """).fetchall()
-        prefixes.update(r[0] for r in rows if r[0])
-    except Exception:
-        pass
+    registry_files = _retry_transient(lambda: _glob_files(
+        con,
+        f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned/prefix=*/*.parquet",
+    ))()
+    for path in registry_files:
+        prefix = path.split("prefix=", 1)[-1].split("/", 1)[0]
+        if prefix:
+            prefixes.add(prefix)
 
     # Also include prefixes from release staging files (release-only IDs)
     for release_path in release_files:
-        try:
-            rows = con.execute(f"""
+        def _distinct_prefixes(path=release_path):
+            return con.execute(f"""
                 SELECT DISTINCT prefix
-                FROM read_parquet('{release_path}')
+                FROM read_parquet('{path}')
             """).fetchall()
-            prefixes.update(r[0] for r in rows if r[0])
-        except Exception:
-            pass
+        rows = _retry_transient(_distinct_prefixes)()
+        prefixes.update(r[0] for r in rows if r[0])
 
     con.close()
     return sorted(prefixes), release_files
@@ -756,19 +859,22 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
         for rf in release_files:
             name = rf.split("/staging/")[-1].split("/")[0]
             local_path = f"/tmp/build-release-{name}.parquet"
-            try:
-                t_dl = time.time()
+            t_dl = time.time()
+
+            # Hard-fail if a release file cannot be downloaded: skipping it
+            # would silently drop its IDs from the index.
+            def _download_release(rf=rf, local_path=local_path):
                 dl_con.execute(f"""
                     COPY (
                         SELECT * FROM read_parquet('{rf}')
                         ORDER BY prefix, id
                     ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """)
-                size_mb = os.path.getsize(local_path) / 1024 / 1024
-                print(f"    {name}: {size_mb:.0f} MB ({time.time() - t_dl:.0f}s)")
-                local_release_files.append(local_path)
-            except Exception as e:
-                print(f"    WARNING: Failed to download {name}: {e}")
+            _retry_transient(_download_release)()
+
+            size_mb = os.path.getsize(local_path) / 1024 / 1024
+            print(f"    {name}: {size_mb:.0f} MB ({time.time() - t_dl:.0f}s)")
+            local_release_files.append(local_path)
         dl_con.close()
 
     # Each prefix maps 1:1 to a staging prefix (same prefix-len)
@@ -835,42 +941,81 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     """Discover existing R2 shards via glob (for metadata-only runs).
 
     Only checks which shards exist — does not read individual files for
-    record counts. Returns (prefix, 1, 0, None) for each shard found.
+    record counts. Returns (prefix, None, 0, None) for each shard found;
+    a None count means "exists, count unknown" (real totals come from the
+    per-range build _SUCCESS markers — see _sum_build_marker_records).
     """
     print("  Discovering existing R2 shards...")
     con = _r2_con(r2_config)
 
     bucket = r2_config["bucket"]
     glob_path = f"s3://{bucket}/{version}/id-index/*.parquet"
-    try:
-        rows = con.execute(f"SELECT file FROM glob('{glob_path}')").fetchall()
-        shard_files = [row[0] for row in rows]
-    except Exception:
-        shard_files = []
+    # Real listing errors must propagate: silently publishing an empty
+    # collection would break every ID lookup for this version.
+    shard_files = _retry_transient(lambda: _glob_files(con, glob_path))()
 
     con.close()
 
     results = []
     for path in shard_files:
         prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
-        results.append((prefix, 1, 0, None))
+        results.append((prefix, None, 0, None))
 
     print(f"  Found {len(results)} shards")
     return results
+
+
+def _sum_build_marker_records(r2_config, version):
+    """Sum real record counts from per-range build _SUCCESS markers.
+
+    Returns the total, or None if no build markers with record counts exist.
+    """
+    bucket = r2_config["bucket"]
+    con = _r2_con(r2_config)
+    try:
+        marker_files = _retry_transient(lambda: _glob_files(
+            con, f"s3://{bucket}/{version}/staging/build*/_SUCCESS"))()
+        total = 0
+        found = False
+        for marker_path in marker_files:
+            def _read_marker(path=marker_path):
+                return con.execute(
+                    f"SELECT content FROM read_text('{path}')").fetchone()[0]
+            content = _retry_transient(_read_marker)()
+            data = json.loads(content)
+            if "records" in data:
+                total += int(data["records"])
+                found = True
+        return total if found else None
+    finally:
+        con.close()
 
 
 def phase_metadata(results, prefix_len, version, release_version, r2_config):
     """Generate id-collection.json and upload to R2."""
     shard_infos = {}
     total_records = 0
+    counts_known = True
     errors = []
 
     for prefix, count, size, err in results:
         if err:
             errors.append((prefix, err))
+        elif count is None:
+            # Shard exists but per-shard count unknown (metadata-only run)
+            shard_infos[prefix] = {}
+            counts_known = False
         elif count > 0:
             shard_infos[prefix] = {"record_count": count, "size_bytes": size}
             total_records += count
+
+    # When run standalone, recover the real totals from the per-range build
+    # markers instead of fabricating per-shard counts.
+    if not counts_known:
+        marker_total = _sum_build_marker_records(r2_config, version)
+        if marker_total is not None:
+            total_records = marker_total
+            print(f"  Total records from build markers: {total_records:,}")
 
     if errors:
         print(f"  {len(errors)} shard errors:")
@@ -892,7 +1037,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
         "summaries": {
             "shard_count": len(shard_infos),
             "total_records": total_records,
-            "total_size_bytes": sum(s["size_bytes"] for s in shard_infos.values()),
+            "total_size_bytes": sum(s.get("size_bytes", 0) for s in shard_infos.values()),
             "prefix_len": prefix_len,
             "overture_release": release_version,
         },
@@ -913,9 +1058,10 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
         ],
     }
 
+    bucket = r2_config["bucket"]
     tmp = Path("tmp-id-collection.json")
     write_json(tmp, collection)
-    err = _upload_to_r2(tmp, f"geocoder-shards/{version}/id-collection.json")
+    err = _upload_to_r2(tmp, f"{bucket}/{version}/id-collection.json")
     tmp.unlink(missing_ok=True)
     if err:
         print(f"  ERROR uploading id-collection.json: {err}")
@@ -926,7 +1072,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
     meta = {"prefix_len": prefix_len, "shard_count": len(shard_infos)}
     tmp_meta = Path("tmp-id-meta.json")
     write_json(tmp_meta, meta)
-    err = _upload_to_r2(tmp_meta, f"geocoder-shards/{version}/id-meta.json")
+    err = _upload_to_r2(tmp_meta, f"{bucket}/{version}/id-meta.json")
     tmp_meta.unlink(missing_ok=True)
     if err:
         print(f"  ERROR uploading id-meta.json: {err}")
@@ -946,9 +1092,20 @@ def build_id_index(args):
     else:
         version = get_version(args.version_suffix)
 
-    print("Discovering latest Overture release...")
-    release_version = get_latest_release()
-    print(f"  Release: {release_version}")
+    smoke = getattr(args, 'smoke_test', False)
+    # Smoke tests must never write into (or leave _SUCCESS markers under) a
+    # real version: force a distinct suffix unless one is already present.
+    if smoke and "smoke" not in version:
+        version = f"{version}-smoke"
+        print(f"Smoke test: using isolated version {version}")
+
+    if args.release:
+        release_version = args.release
+        print(f"Using provided Overture release: {release_version}")
+    else:
+        print("Discovering latest Overture release...")
+        release_version = get_latest_release()
+        print(f"  Release: {release_version}")
 
     shard_count = 16 ** args.prefix_len
     print(f"  Sharding: {args.prefix_len} hex = {shard_count} shards")
@@ -964,7 +1121,6 @@ def build_id_index(args):
         print("  Set R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY, CLOUDFLARE_ACCOUNT_ID")
         sys.exit(1)
 
-    smoke = getattr(args, 'smoke_test', False)
     print(f"\n  Workers: {args.workers}")
     if smoke:
         print(f"  Mode: smoke test")
@@ -1024,8 +1180,17 @@ def build_id_index(args):
             print(f"\nStage registry: Partition registry")
             t0 = time.time()
             stage_prefixes = smoke_prefixes or range_prefixes
-            phase_partition_r2(args.prefix_len, r2_config, version,
-                               prefixes=stage_prefixes, workers=args.workers)
+            if smoke_prefixes is not None or args.prefixes:
+                # Explicit prefix list (smoke test / patching)
+                phase_partition_r2(args.prefix_len, r2_config, version,
+                                   prefixes=stage_prefixes)
+            elif args.prefix_start and args.prefix_end:
+                # Contiguous range (CI matrix job)
+                phase_partition_r2(args.prefix_len, r2_config, version,
+                                   prefix_start=args.prefix_start,
+                                   prefix_end=args.prefix_end)
+            else:
+                phase_partition_r2(args.prefix_len, r2_config, version)
 
             # Write markers for explicit ranges (patching) or the computed range
             if marker_ranges:
@@ -1106,8 +1271,8 @@ def build_id_index(args):
             _write_staging_marker(r2_config, version, "metadata", len(shard_infos),
                                   extra={"records": total_records})
 
-            total_size = sum(s["size_bytes"] for s in shard_infos.values())
-            max_shard = max((s["size_bytes"] for s in shard_infos.values()), default=0)
+            total_size = sum(s.get("size_bytes", 0) for s in shard_infos.values())
+            max_shard = max((s.get("size_bytes", 0) for s in shard_infos.values()), default=0)
 
             print(f"  Shards: {len(shard_infos)} / {shard_count}")
             print(f"  Records: {total_records:,}")
@@ -1136,6 +1301,8 @@ def main():
     p = argparse.ArgumentParser(description="Build GERS ID -> bbox index")
     p.add_argument("--version", help="Version string (default: date-based)")
     p.add_argument("--version-suffix", default="0", help="Version suffix")
+    p.add_argument("--release",
+                   help="Overture release version (default: discover latest from STAC)")
     p.add_argument("--prefix-len", type=int, default=3,
                    help="Hex prefix length for output shards (default: 3 = 4096 shards)")
     p.add_argument("--dry-run", action="store_true", help="Count records only")
