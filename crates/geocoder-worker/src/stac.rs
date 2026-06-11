@@ -30,7 +30,8 @@ const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
                                         // worst-case first-touch cost (R2 fetch + deserialize of a multi-MB file)
                                         // that dominates tail latency.
 const MAX_LOCATION_SHARDS: usize = 2;
-const MAX_VERSION_ATTEMPTS: usize = 3; // Max versions to try (latest + fallbacks)
+const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
+                                       // the newest complete id-index reachable while fresher versions still build
 const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for missing objects
 
 // Isolate-level (in-memory) cache limits. Workers isolates persist across
