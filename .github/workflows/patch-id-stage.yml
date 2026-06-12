@@ -8,13 +8,20 @@ on:
         type: string
         required: true
       prefixes:
-        description: 'Comma-separated failed prefixes (e.g., 001,401,801,804,c03,c04,c05)'
+        description: 'Comma-separated failed prefixes (e.g., 001,401,801); empty = skip registry patching'
         type: string
-        required: true
+        required: false
+        default: ''
       marker_ranges:
-        description: 'Comma-separated ranges to mark complete (e.g., 000-3ff,400-7ff,800-bff,c00-fff)'
+        description: 'Comma-separated ranges to mark complete (e.g., 000-3ff,c00-fff)'
         type: string
-        required: true
+        required: false
+        default: ''
+      run_stage_base:
+        description: 'Run the release (base/addresses) staging phase (resumes past completed types)'
+        type: boolean
+        required: false
+        default: false
       run_build:
         description: 'Run build phase after patching staging'
         type: boolean
@@ -44,7 +51,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -55,6 +62,7 @@ jobs:
         run: npm install -g wrangler
 
       - name: Patch failed prefixes
+        if: inputs.prefixes != ''
         run: |
           echo "Patching prefixes: ${{ inputs.prefixes }}"
           echo "Will mark ranges complete: ${{ inputs.marker_ranges }}"
@@ -64,6 +72,13 @@ jobs:
             --version ${{ inputs.version }} \
             --prefixes "${{ inputs.prefixes }}" \
             --marker-ranges "${{ inputs.marker_ranges }}"
+
+      - name: Stage release themes
+        if: inputs.run_stage_base
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase stage-base --prefix-len 3 \
+            --version ${{ inputs.version }}
 
   build:
     runs-on: ubuntu-24.04-arm
@@ -95,7 +110,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -138,7 +153,7 @@ jobs:
           python-version: '3.11'
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
