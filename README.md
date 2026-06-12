@@ -110,6 +110,39 @@ graph LR
     R2 --> Parquet[Parquet ID Index]
 ```
 
+## Performance
+
+Measured 2026-06-12 against production from a single US-East client
+(`scripts/benchmark_latency.py`, paced under the 60 req/min rate limit;
+"cold" targets low-traffic shards likely absent from the edge cache,
+"warm" repeats the same requests):
+
+| endpoint | warm p50 | warm p95 | cold p50 |
+|---|---|---|---|
+| `/search` | 156ms | 4,822ms* | 274ms |
+| `/reverse` | 36ms | 689ms | 192ms |
+| `/id/{gers_id}` | 119ms | 5,749ms* | 465ms |
+
+\* tail samples are first-touch loads of multi-MB shards on a fresh
+isolate or evicted edge cache; warm-isolate requests typically answer
+in 30-160ms. Run-to-run p50s vary roughly 2x with colo and cache state.
+
+Result quality vs other open geocoders on the
+[geocoder-tester](https://github.com/geocoders/geocoder-tester) global
+city cases (`scripts/benchmark_geocoders.py`, 2026-06-11):
+
+| | Overture | Nominatim | Photon |
+|---|---|---|---|
+| Top-1 name match | **80%** | 67% | 67% |
+| p50 latency | 77ms | 65ms | 479ms |
+
+Reproduce with:
+
+```bash
+python scripts/benchmark_latency.py --output run.json --compare benchmarks/2026-06-11-baseline.json
+python scripts/benchmark_geocoders.py --limit 40 --warmup 1
+```
+
 ## Development
 
 ### Prerequisites
