@@ -49,6 +49,7 @@ import multiprocessing
 import os
 import subprocess
 import sys
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
@@ -127,6 +128,9 @@ TRANSIENT_DUCKDB_ERRORS = tuple(
         getattr(duckdb, "HTTPException", None),
         getattr(duckdb, "IOException", None),
         getattr(duckdb, "ConnectionException", None),
+        # Raised when the sub-range watchdog interrupts a wedged COPY;
+        # retrying is exactly the desired response.
+        getattr(duckdb, "InterruptException", None),
     )
     if exc is not None
 )
@@ -217,6 +221,12 @@ def _r2_con(r2_config):
     """Create a DuckDB connection with R2 credentials configured."""
     con = duckdb.connect()
     con.execute("INSTALL httpfs; LOAD httpfs;")
+    # Guard against hung S3 sockets: a staging range job once wedged for
+    # 2.5h (siblings: ~40min) on a stalled read. Bound each HTTP request
+    # and retry; disable keep-alive so stale pooled connections can't hang.
+    con.execute("SET http_timeout = 120000;")  # ms
+    con.execute("SET http_retries = 5;")
+    con.execute("SET http_keep_alive = false;")
     con.execute(f"""
         CREATE SECRET r2 (
             TYPE S3,
@@ -374,6 +384,10 @@ def phase_partition_r2(prefix_len, r2_config, version,
     # to 1024 partitions per range job that OOMs the runner, so each range
     # is split into sub-ranges (~SUB_RANGE_PARTITIONS partitions per COPY).
     SUB_RANGE_PARTITIONS = 128
+    # A sub-range COPY normally takes ~5 min; interrupt anything past this
+    # so the transient-retry wrapper can take over (a wedged S3 read once
+    # hung a range job for 2.5h).
+    SUBRANGE_COPY_TIMEOUT_S = 20 * 60
 
     if prefixes is not None:
         # Explicit prefix list (smoke test / patching): prefix-LIKE filters
@@ -418,20 +432,29 @@ def phase_partition_r2(prefix_len, r2_config, version,
 
     for sub_filter, sub_label in sub_ranges:
         def _do_copy(sub_filter=sub_filter):
-            con.execute(f"""
-                COPY (
-                    SELECT
-                        id::UUID as id,
-                        bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
-                        bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
-                        lower(left(replace(id, '-', ''), {prefix_len})) as prefix
-                    FROM read_parquet('{REGISTRY_S3}*')
-                    WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
-                    AND {sub_filter}
-                ) TO '{dest}'
-                (FORMAT PARQUET, COMPRESSION ZSTD,
-                 PARTITION_BY (prefix), OVERWRITE_OR_IGNORE true);
-            """)
+            # Watchdog: a sub-range COPY normally finishes in ~5 minutes; a
+            # range job once wedged for hours on a stalled read despite HTTP
+            # timeouts. Interrupt the query past the deadline so
+            # _retry_transient can retry it instead of hanging the job.
+            watchdog = threading.Timer(SUBRANGE_COPY_TIMEOUT_S, con.interrupt)
+            watchdog.start()
+            try:
+                con.execute(f"""
+                    COPY (
+                        SELECT
+                            id::UUID as id,
+                            bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
+                            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
+                            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+                        FROM read_parquet('{REGISTRY_S3}*')
+                        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+                        AND {sub_filter}
+                    ) TO '{dest}'
+                    (FORMAT PARQUET, COMPRESSION ZSTD,
+                     PARTITION_BY (prefix), OVERWRITE_OR_IGNORE true);
+                """)
+            finally:
+                watchdog.cancel()
 
         _retry_transient(_do_copy)()
         print(f"  [registry]   sub-range {sub_label} done")
@@ -567,7 +590,10 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     t0 = time.time()
     errors = []
 
-    with ThreadPoolExecutor(max_workers=min(len(types), 6)) as executor:
+    # Capped at 3: each worker connection carries a 4GB DuckDB memory limit,
+    # and 6 workers on a 16GB runner plausibly host-OOMed the stage-base job
+    # (the runner died with no logs). 3 x 4GB leaves comfortable headroom.
+    with ThreadPoolExecutor(max_workers=min(len(types), 3)) as executor:
         futures = {}
         for theme, type_name in types:
             f = executor.submit(
