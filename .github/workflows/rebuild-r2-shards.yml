@@ -41,7 +41,7 @@ on:
         required: false
         default: true
       cleanup_old_versions:
-        description: 'Delete versions older than 90 days'
+        description: 'Prune old versions to the retention window (latest ~30 days or 2, whichever is more)'
         type: boolean
         required: false
         default: true
@@ -443,59 +443,75 @@ jobs:
             exit 1
           fi
 
-      - name: Cleanup old versions (90+ days)
+      - name: Prune to retention window (latest month or 2 versions)
         if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
         run: |
-          echo "Checking for old versions to clean up..."
-          CUTOFF=$(date -d '-90 days' +%Y-%m-%d)
-          echo "Cutoff date: $CUTOFF"
+          # Retention policy: keep every version published within RETAIN_DAYS,
+          # but never fewer than MIN_VERSIONS (always at least one fallback).
+          # Whichever is MORE wins. catalog.json is pruned FIRST, then the
+          # dropped versions' objects are deleted.
+          RETAIN_DAYS=30
+          MIN_VERSIONS=2
+          CUTOFF=$(date -d "-${RETAIN_DAYS} days" +%Y-%m-%d)
+          CURRENT="${{ needs.prep.outputs.version }}"
+          echo "Keep newest >= $MIN_VERSIONS versions and everything since $CUTOFF (current build: $CURRENT)"
 
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-          # List version directories in R2 by parsing catalog.json
           aws s3 cp "s3://geocoder-shards/catalog.json" /tmp/catalog.json \
             --endpoint-url "$ENDPOINT" --region auto 2>/dev/null || echo '{}' > /tmp/catalog.json
-          VERSIONS=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/catalog.json | sort -u || true)
 
-          OLD_VERSIONS=""
-          for VERSION in $VERSIONS; do
-            VERSION_DATE="${VERSION%.*}"  # Remove .N suffix
-            if [[ "$VERSION_DATE" < "$CUTOFF" ]]; then
-              OLD_VERSIONS="$OLD_VERSIONS $VERSION"
-            fi
+          # Catalog versions, newest first.
+          VERSIONS=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/catalog.json | sort -ur || true)
+
+          # Count versions inside the retention window (they are the newest ones).
+          WITHIN=0
+          for V in $VERSIONS; do
+            [[ "${V%.*}" < "$CUTOFF" ]] || WITHIN=$((WITHIN + 1))
           done
+          KEEP=$WITHIN
+          [ "$KEEP" -lt "$MIN_VERSIONS" ] && KEEP=$MIN_VERSIONS
+          echo "$(echo $VERSIONS | wc -w) version(s) total; $WITHIN within window; keeping newest $KEEP"
 
+          OLD_VERSIONS=$(echo "$VERSIONS" | tail -n +$((KEEP + 1)) | tr '\n' ' ')
           if [ -z "${OLD_VERSIONS// /}" ]; then
-            echo "No versions older than $CUTOFF"
+            echo "Nothing to prune."
             exit 0
           fi
-          echo "Old versions to delete:$OLD_VERSIONS"
+          # Safety: the version built this run is the newest and must never be pruned.
+          for V in $OLD_VERSIONS; do
+            if [ "$V" = "$CURRENT" ]; then
+              echo "::error::refusing to prune the current build version $CURRENT"
+              exit 1
+            fi
+          done
+          echo "Pruning:$OLD_VERSIONS"
 
-          # 1) Prune catalog.json FIRST so a mid-cleanup crash can never
-          #    leave the catalog pointing at deleted versions.
-          echo "Updating catalog.json to remove pruned versions..."
+          # 1) Prune catalog.json FIRST so a mid-cleanup crash can never leave the
+          #    catalog pointing at deleted versions. Guarded against over-pruning.
           python3 -c "
           import json
           deleted = set('$OLD_VERSIONS'.split())
           with open('/tmp/catalog.json') as f:
               catalog = json.load(f)
-          catalog['links'] = [
+          kept = [
               l for l in catalog.get('links', [])
               if l.get('rel') != 'child' or l['href'].split('/')[1] not in deleted
           ]
+          children = [l for l in kept if l.get('rel') == 'child']
+          assert len(children) >= $MIN_VERSIONS, 'refusing to leave %d version(s)' % len(children)
+          assert any(l.get('latest') for l in children), 'no latest version would remain'
+          catalog['links'] = kept
           with open('/tmp/catalog-pruned.json', 'w') as f:
               json.dump(catalog, f, indent=2)
           "
           aws s3 cp /tmp/catalog-pruned.json "s3://geocoder-shards/catalog.json" \
-            --endpoint-url "$ENDPOINT" --region auto \
-            --content-type application/json
-          echo "Updated catalog.json in R2"
+            --endpoint-url "$ENDPOINT" --region auto --content-type application/json
+          echo "catalog.json pruned"
 
-          # 2) Delete objects via the S3 API (paginated batch deletes —
-          #    handles arbitrarily many objects, unlike the old per-object
-          #    wrangler loop over an unpaginated listing).
+          # 2) Delete the dropped versions' objects (paginated S3 batch deletes).
           DELETED_COUNT=0
           for VERSION in $OLD_VERSIONS; do
             echo "Deleting old version: $VERSION"
@@ -503,7 +519,7 @@ jobs:
               --endpoint-url "$ENDPOINT" --region auto --only-show-errors
             DELETED_COUNT=$((DELETED_COUNT + 1))
           done
-          echo "Deleted $DELETED_COUNT old versions"
+          echo "Pruned $DELETED_COUNT version(s)"
 
       - name: Sweep stray staging and orphaned prefixes
         if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
@@ -522,7 +538,10 @@ jobs:
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
 
-          CUTOFF=$(date -d '-90 days' +%Y-%m-%d)
+          # Matches the version retention window above. An in-flight build is
+          # always recent (and the current build is skipped outright), so an
+          # orphan older than this is a dead/abandoned build, safe to remove.
+          CUTOFF=$(date -d '-30 days' +%Y-%m-%d)
           CURRENT="${{ needs.prep.outputs.version }}"
           echo "Cutoff: $CUTOFF   current version (always skipped): $CURRENT"
 
