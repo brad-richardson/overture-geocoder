@@ -111,7 +111,16 @@ jobs:
             export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
             export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
             ./scripts/r2_catalog_fetch.sh /tmp/catalog.json
-            [ -f /tmp/catalog.json ] || echo '{}' > /tmp/catalog.json
+            # This deployment is long past first-deploy: an absent catalog
+            # here is a misclassified outage, and computing a version from
+            # {} reuses a live version number and republishes it as latest
+            # (this happened 2026-07-02: a spurious R2 404 made a rebuild
+            # compute .0 over a live .2). For a genuine first deploy, pass
+            # an explicit version input instead.
+            if [ ! -f /tmp/catalog.json ]; then
+              echo "::error::catalog.json reported absent from R2 — refusing to auto-number a version. If this is truly a first deploy, dispatch with an explicit version input."
+              exit 1
+            fi
             VERSION=$(python3 -c "
           import json
           from datetime import datetime, timezone
@@ -189,7 +198,11 @@ jobs:
           print(f'  Existing versions: {versions}')
           " < shards/catalog.json
           else
-            echo "No existing catalog in R2 (first deploy)"
+            # Past first-deploy an absent catalog is a misclassified outage;
+            # publishing a catalog seeded from empty would drop every live
+            # version reference (see the Compute version guard).
+            echo "::error::catalog.json reported absent from R2 — refusing to seed an empty catalog past first deploy."
+            exit 1
           fi
 
       - name: Download divisions data
