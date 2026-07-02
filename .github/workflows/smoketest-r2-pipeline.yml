@@ -9,6 +9,14 @@ on:
       - '.github/workflows/rebuild-r2-shards.yml'
   workflow_dispatch:
 
+# Smoke tests share the fixed "smoketest" R2 version prefix: two concurrent
+# runs (e.g. back-to-back pushes touching scripts/) would read each other's
+# staging markers and skip phases, or race one run's cleanup against the
+# other's build. Queue instead.
+concurrency:
+  group: smoketest-r2-pipeline
+  cancel-in-progress: false
+
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
