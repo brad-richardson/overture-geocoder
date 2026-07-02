@@ -2,7 +2,8 @@ name: R2 One-Time Cleanup
 
 # One-time purge of accumulated debris (2026-06): staging leftovers the old
 # pipeline never deleted, an orphaned partial version, and two catalog
-# versions beyond the worker's MAX_VERSION_ATTEMPTS=3 fallback window.
+# versions beyond the worker's MAX_VERSION_ATTEMPTS fallback window (3 at
+# the time of this cleanup; widened to 4 since).
 # Deletes only an explicit allowlist, catalog-first, with guards.
 
 on:

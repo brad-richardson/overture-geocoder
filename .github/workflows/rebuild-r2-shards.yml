@@ -41,10 +41,17 @@ on:
         required: false
         default: true
       cleanup_old_versions:
-        description: 'Prune old versions to the retention window (latest ~30 days or 2, whichever is more)'
+        description: 'Prune old versions to the retention window (latest ~30 days or 3, whichever is more)'
         type: boolean
         required: false
         default: true
+
+# Overlapping runs (scheduled + a manual re-trigger) would compute the same
+# {date}.{n} version from the same published catalog, interleave uploads into
+# one prefix, and clobber each other's catalog publish. Queue instead.
+concurrency:
+  group: rebuild-r2-shards
+  cancel-in-progress: false
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -98,11 +105,13 @@ jobs:
           else
             # Read the published catalog so a same-day re-run bumps the .N
             # suffix instead of mutating a live, already-published version.
+            # A transient fetch failure must abort (not fall back to {}):
+            # assuming an empty catalog here reuses a live version number and
+            # rebuilds it in place under the worker.
             export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
             export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-            aws s3 cp "s3://geocoder-shards/catalog.json" /tmp/catalog.json \
-              --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-              --region auto 2>/dev/null || echo '{}' > /tmp/catalog.json
+            ./scripts/r2_catalog_fetch.sh /tmp/catalog.json
+            [ -f /tmp/catalog.json ] || echo '{}' > /tmp/catalog.json
             VERSION=$(python3 -c "
           import json
           from datetime import datetime, timezone
@@ -163,8 +172,15 @@ jobs:
 
       - name: Seed catalog from R2
         run: |
+          # A transient fetch failure must abort (not seed an empty catalog):
+          # the seeded file is what build_shards.py extends and the publish
+          # step uploads, so starting from empty would drop every existing
+          # version reference from the published catalog.
           mkdir -p shards
-          if wrangler r2 object get geocoder-shards/catalog.json --remote --pipe > shards/catalog.json 2>/dev/null; then
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ./scripts/r2_catalog_fetch.sh shards/catalog.json
+          if [ -f shards/catalog.json ]; then
             echo "Seeded shards/catalog.json from R2"
             python3 -c "
           import json, sys
@@ -443,15 +459,20 @@ jobs:
             exit 1
           fi
 
-      - name: Prune to retention window (latest month or 2 versions)
+      - name: Prune to retention window (latest month or 3 versions)
         if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
         run: |
           # Retention policy: keep every version published within RETAIN_DAYS,
-          # but never fewer than MIN_VERSIONS (always at least one fallback).
-          # Whichever is MORE wins. catalog.json is pruned FIRST, then the
-          # dropped versions' objects are deleted.
+          # but never fewer than MIN_VERSIONS. Whichever is MORE wins.
+          # catalog.json is pruned FIRST, then the dropped versions' objects
+          # are deleted. MIN_VERSIONS is 3 because this step runs while the
+          # current version's id-index is still building in the parallel
+          # id-build job: /id requests fall back to older versions
+          # (MAX_VERSION_ATTEMPTS=4 in the worker), and if last month's
+          # id-index was itself broken the worker may be serving /id from two
+          # versions back — which a floor of 2 would delete right here.
           RETAIN_DAYS=30
-          MIN_VERSIONS=2
+          MIN_VERSIONS=3
           CUTOFF=$(date -d "-${RETAIN_DAYS} days" +%Y-%m-%d)
           CURRENT="${{ needs.prep.outputs.version }}"
           echo "Keep newest >= $MIN_VERSIONS versions and everything since $CUTOFF (current build: $CURRENT)"
@@ -460,11 +481,14 @@ jobs:
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
 
-          aws s3 cp "s3://geocoder-shards/catalog.json" /tmp/catalog.json \
-            --endpoint-url "$ENDPOINT" --region auto 2>/dev/null || echo '{}' > /tmp/catalog.json
+          # Abort on transient fetch failure: an empty catalog here would
+          # look like "nothing within the window" and prune real versions.
+          ./scripts/r2_catalog_fetch.sh /tmp/catalog.json
+          [ -f /tmp/catalog.json ] || { echo "No catalog; nothing to prune."; exit 0; }
 
-          # Catalog versions, newest first.
-          VERSIONS=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/catalog.json | sort -ur || true)
+          # Catalog versions, newest first. -V so 2026-02-25.10 > 2026-02-25.9
+          # (lexicographic sort would misorder double-digit .N suffixes).
+          VERSIONS=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/catalog.json | sort -u -V -r || true)
 
           # Count versions inside the retention window (they are the newest ones).
           WITHIN=0
@@ -545,8 +569,10 @@ jobs:
           CURRENT="${{ needs.prep.outputs.version }}"
           echo "Cutoff: $CUTOFF   current version (always skipped): $CURRENT"
 
-          S3 s3 cp "s3://geocoder-shards/catalog.json" /tmp/sweep-catalog.json 2>/dev/null \
-            || echo '{}' > /tmp/sweep-catalog.json
+          # Abort on transient fetch failure: an empty catalog here would mark
+          # every referenced live version as an orphan and delete it.
+          ./scripts/r2_catalog_fetch.sh /tmp/sweep-catalog.json
+          [ -f /tmp/sweep-catalog.json ] || { echo "No catalog; skipping sweep."; exit 0; }
           REFERENCED=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/sweep-catalog.json | sort -u || true)
 
           PREFIXES=$(S3 s3 ls "s3://geocoder-shards/" | awk '/PRE/{print $2}' || true)
@@ -567,6 +593,14 @@ jobs:
             if echo "$REFERENCED" | grep -qx "$V"; then
               # Referenced version: keep it, strip only a stray staging/.
               if S3 s3 ls "s3://geocoder-shards/$V/staging/" >/dev/null 2>&1; then
+                # Guard 3: staging written in the last 2 days may belong to an
+                # in-flight patch-id-stage run for this version; leave it.
+                RECENT=$(S3 s3 ls "s3://geocoder-shards/$V/staging/" --recursive \
+                  | awk -v cutoff="$(date -d '-2 days' +%Y-%m-%d)" '$1 >= cutoff' | head -1)
+                if [ -n "$RECENT" ]; then
+                  echo "skip staging strip (modified within 2 days, possible in-flight patch): $V/staging/"
+                  continue
+                fi
                 echo "strip stray staging: $V/staging/"
                 S3 s3 rm "s3://geocoder-shards/$V/staging/" --recursive --only-show-errors
                 S3 s3 ls "s3://geocoder-shards/$V/collection.json" >/dev/null \
