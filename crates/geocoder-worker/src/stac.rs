@@ -16,9 +16,16 @@ use worker::*;
 
 // Cache TTLs for different resource types
 const CATALOG_CACHE_TTL: u64 = 300; // 5 minutes - need fresh version pointers
-                                    // Everything under a {version}/ prefix is immutable (versioned paths =
-                                    // natural invalidation), so cache it at the edge for a week.
+                                    // SQLite shards and collection JSON under a {version}/ prefix are never
+                                    // rewritten (versioned paths = natural invalidation), so cache them at
+                                    // the edge for a week.
 const IMMUTABLE_CACHE_TTL: u64 = 7 * 24 * 3600;
+// The id-index is NOT immutable: patch-id-stage rebuilds
+// {version}/id-index/*.parquet and re-uploads id-meta.json in place with no
+// cache purge. A stale cached footer combined with a rewritten file yields
+// garbage range reads (non-retriable 500s), so bound the exposure to an
+// hour instead of a week.
+const ID_INDEX_CACHE_TTL: u64 = 3600;
 
 // Cache key prefix (uses custom domain for Cache API to work)
 const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
@@ -31,7 +38,10 @@ const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
                                         // that dominates tail latency.
 const MAX_LOCATION_SHARDS: usize = 2;
 const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
-                                       // the newest complete id-index reachable while fresher versions still build
+                                       // the newest complete id-index reachable while fresher versions still
+                                       // build. Retention (rebuild-r2-shards.yml) keeps at least 3 versions,
+                                       // so attempts beyond that usually have no candidates — the headroom
+                                       // only pays off when extra versions exist (e.g. same-day rebuilds).
 const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for missing objects
 
 // Isolate-level (in-memory) cache limits. Workers isolates persist across
@@ -68,6 +78,10 @@ fn not_found(what: impl std::fmt::Display) -> Error {
 pub struct UserLocation {
     pub country: Option<String>,
     pub region: Option<String>,
+    /// ISO 3166-2 region code (CF-Region-Code), e.g. "GD" for Guangdong.
+    /// Region shard IDs are "{country}-{region_code}", so this picks the
+    /// user's own shard for region-sharded countries.
+    pub region_code: Option<String>,
     pub lat: Option<f64>,
     pub lon: Option<f64>,
 }
@@ -79,6 +93,7 @@ impl UserLocation {
         Self {
             country: headers.get("CF-IPCountry").ok().flatten(),
             region: headers.get("CF-Region").ok().flatten(),
+            region_code: headers.get("CF-Region-Code").ok().flatten(),
             lat: headers
                 .get("CF-IPLatitude")
                 .ok()
@@ -299,19 +314,24 @@ impl ShardLoader {
         Ok(loader)
     }
 
-    /// Write a response to the edge cache, off the critical path via
-    /// `waitUntil` when an execution context is available (best effort
-    /// either way; inline await otherwise).
-    async fn cache_put_background(&self, cache_key: String, response: Response) {
+    /// Write bytes to the edge cache, off the critical path via `waitUntil`
+    /// when an execution context is available (best effort either way;
+    /// inline await otherwise). Takes `Bytes` so the caller only pays a
+    /// refcount bump: the full body copy a `Response` requires happens
+    /// inside the deferred future, not before returning to the user.
+    async fn cache_put_bytes_background(&self, cache_key: String, bytes: Bytes, ttl: u64) {
         let put = async move {
-            let cache = Cache::default();
-            match Request::new(&cache_key, Method::Get) {
-                Ok(request) => {
-                    if let Err(e) = cache.put(&request, response).await {
-                        console_log!("Cache PUT failed for {}: {:?}", cache_key, e);
-                    }
-                }
-                Err(e) => console_log!("Cache PUT request build failed: {:?}", e),
+            let result: Result<()> = async {
+                let headers = Headers::new();
+                headers.set("Cache-Control", &format!("s-maxage={}", ttl))?;
+                headers.set("Content-Type", "application/octet-stream")?;
+                let response = Response::from_bytes(bytes.to_vec())?.with_headers(headers);
+                let request = Request::new(&cache_key, Method::Get)?;
+                Cache::default().put(&request, response).await
+            }
+            .await;
+            if let Err(e) = result {
+                console_log!("Cache PUT failed for {}: {:?}", cache_key, e);
             }
         };
         match &self.ctx {
@@ -334,7 +354,7 @@ impl ShardLoader {
     ///
     /// Caches both positive results (with the caller's TTL) and negative results
     /// (object not found, with a short TTL) to avoid hammering R2 during deployments.
-    async fn cached_get(&self, key: &str, ttl: u64) -> Result<Option<Vec<u8>>> {
+    async fn cached_get(&self, key: &str, ttl: u64) -> Result<Option<Bytes>> {
         let cache_key = format!("{}{}", CACHE_PREFIX, key);
 
         // Try cache first
@@ -347,7 +367,7 @@ impl ShardLoader {
                 return Ok(None);
             }
             console_log!("Cache HIT: {}", key);
-            return Ok(Some(bytes));
+            return Ok(Some(Bytes::from(bytes)));
         }
 
         console_log!("Cache MISS: {}", key);
@@ -358,29 +378,24 @@ impl ShardLoader {
             let body = obj
                 .body()
                 .ok_or_else(|| Error::RustError("Empty object".into()))?;
-            let bytes = body.bytes().await?;
-
-            let headers = Headers::new();
-            headers.set("Cache-Control", &format!("s-maxage={}", ttl))?;
-            headers.set("Content-Type", "application/octet-stream")?;
-            let cache_response = Response::from_bytes(bytes.clone())?.with_headers(headers);
-            self.cache_put_background(cache_key, cache_response).await;
-
+            // Bytes: the cache write below only bumps a refcount here; the
+            // multi-MB body copy happens inside the deferred future.
+            let bytes = Bytes::from(body.bytes().await?);
+            self.cache_put_bytes_background(cache_key, bytes.clone(), ttl)
+                .await;
             return Ok(Some(bytes));
         }
 
         // Cache the negative result (empty body sentinel) with a short TTL to avoid
         // repeated R2 GETs for objects that don't exist yet during deployments
-        let neg_headers = Headers::new();
-        neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
-        neg_headers.set("Content-Type", "application/octet-stream")?;
-        let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
-        self.cache_put_background(cache_key, neg_response).await;
+        self.cache_put_bytes_background(cache_key, Bytes::new(), NEGATIVE_CACHE_TTL)
+            .await;
 
         Ok(None)
     }
 
-    /// Range-read part of an R2 object with edge caching (immutable TTL).
+    /// Range-read part of an R2 object with edge caching (id-index TTL:
+    /// patch runs can rewrite these files in place).
     /// Used for parquet row groups, which are re-read often by ID lookups.
     async fn cached_range_read(
         &self,
@@ -407,27 +422,18 @@ impl ShardLoader {
             .execute()
             .await?;
         let Some(obj) = obj else {
-            let neg_headers = Headers::new();
-            neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
-            let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
-            self.cache_put_background(cache_key, neg_response).await;
+            self.cache_put_bytes_background(cache_key, Bytes::new(), NEGATIVE_CACHE_TTL)
+                .await;
             return Ok(None);
         };
         let body = obj
             .body()
             .ok_or_else(|| Error::RustError("Empty range body".into()))?;
-        let bytes = body.bytes().await?;
+        let bytes = Bytes::from(body.bytes().await?);
+        self.cache_put_bytes_background(cache_key, bytes.clone(), ID_INDEX_CACHE_TTL)
+            .await;
 
-        let headers = Headers::new();
-        headers.set(
-            "Cache-Control",
-            &format!("s-maxage={}", IMMUTABLE_CACHE_TTL),
-        )?;
-        headers.set("Content-Type", "application/octet-stream")?;
-        let cache_response = Response::from_bytes(bytes.clone())?.with_headers(headers);
-        self.cache_put_background(cache_key, cache_response).await;
-
-        Ok(Some(Bytes::from(bytes)))
+        Ok(Some(bytes))
     }
 
     /// Fetch small JSON text with an isolate-level memo in front of the edge
@@ -461,9 +467,9 @@ impl ShardLoader {
     async fn cached_get_text(&self, key: &str, ttl: u64) -> Result<Option<String>> {
         match self.cached_get(key, ttl).await? {
             Some(bytes) => {
-                let text = String::from_utf8(bytes)
+                let text = std::str::from_utf8(&bytes)
                     .map_err(|e| Error::RustError(format!("Invalid UTF-8: {}", e)))?;
-                Ok(Some(text))
+                Ok(Some(text.to_owned()))
             }
             None => Ok(None),
         }
@@ -513,11 +519,8 @@ impl ShardLoader {
             Some(o) => o,
             None => {
                 // Negative cache
-                let neg_headers = Headers::new();
-                neg_headers.set("Cache-Control", &format!("s-maxage={}", NEGATIVE_CACHE_TTL))?;
-                neg_headers.set("Content-Type", "application/octet-stream")?;
-                let neg_response = Response::from_bytes(vec![])?.with_headers(neg_headers);
-                self.cache_put_background(cache_key, neg_response).await;
+                self.cache_put_bytes_background(cache_key, Bytes::new(), NEGATIVE_CACHE_TTL)
+                    .await;
                 return Ok(None);
             }
         };
@@ -531,15 +534,8 @@ impl ShardLoader {
         let mut cache_bytes = Vec::with_capacity(8 + tail_bytes.len());
         cache_bytes.extend_from_slice(&file_size.to_le_bytes());
         cache_bytes.extend_from_slice(&tail_bytes);
-
-        let headers = Headers::new();
-        headers.set(
-            "Cache-Control",
-            &format!("s-maxage={}", IMMUTABLE_CACHE_TTL),
-        )?;
-        headers.set("Content-Type", "application/octet-stream")?;
-        let cache_response = Response::from_bytes(cache_bytes)?.with_headers(headers);
-        self.cache_put_background(cache_key, cache_response).await;
+        self.cache_put_bytes_background(cache_key, Bytes::from(cache_bytes), ID_INDEX_CACHE_TTL)
+            .await;
 
         Ok(Some((file_size, tail_bytes)))
     }
@@ -653,7 +649,11 @@ impl ShardLoader {
 
         // Fallback: use country code if available
         if let Some(country) = &user_location.country {
-            return self.select_shards_for_country(collection, country);
+            return self.select_shards_for_country(
+                collection,
+                country,
+                user_location.region_code.as_deref(),
+            );
         }
 
         // No location info - return empty (only HEAD will be queried)
@@ -702,10 +702,25 @@ impl ShardLoader {
     }
 
     /// Select shards for a country (fallback when no coordinates available).
-    fn select_shards_for_country(&self, collection: &StacCollection, country: &str) -> Vec<String> {
+    fn select_shards_for_country(
+        &self,
+        collection: &StacCollection,
+        country: &str,
+        region_code: Option<&str>,
+    ) -> Vec<String> {
         // Check if country is region-sharded
         if let Some(regions) = collection.region_sharded.get(country) {
-            // Country is split into regions - load all of them (up to limit)
+            // Prefer the user's own region shard: the region list is build
+            // order, so taking the first N without this would load ~2 of
+            // ~30 arbitrary regions and miss the user's own almost always.
+            if let Some(code) = region_code {
+                let want = format!("{}-{}", country, code);
+                if let Some(shard) = regions.iter().find(|r| **r == want) {
+                    return vec![shard.clone()];
+                }
+            }
+            // Region unknown: load the first shards up to the cap (HEAD
+            // still covers prominent places).
             return regions.iter().take(MAX_LOCATION_SHARDS).cloned().collect();
         }
 
@@ -803,14 +818,19 @@ impl ShardLoader {
 
         DB_CACHE.with(|c| {
             let mut cache = c.borrow_mut();
-            cache.push((shard_key.to_string(), Rc::clone(&db), size));
-            // Evict from the LRU end; always keep the entry just inserted.
-            while cache.len() > 1
-                && (cache.len() > DB_CACHE_MAX_ENTRIES
-                    || cache.iter().map(|(_, _, s)| *s).sum::<usize>() > DB_CACHE_MAX_BYTES)
-            {
-                let (evicted, _, _) = cache.remove(0);
-                console_log!("DB cache evict: {}", evicted);
+            // A concurrent request that missed at the same time may have
+            // inserted this key while we awaited the fetch; a duplicate
+            // entry would double-count against the byte budget.
+            if !cache.iter().any(|(k, _, _)| k == shard_key) {
+                cache.push((shard_key.to_string(), Rc::clone(&db), size));
+                // Evict from the LRU end; always keep the entry just inserted.
+                while cache.len() > 1
+                    && (cache.len() > DB_CACHE_MAX_ENTRIES
+                        || cache.iter().map(|(_, _, s)| *s).sum::<usize>() > DB_CACHE_MAX_BYTES)
+                {
+                    let (evicted, _, _) = cache.remove(0);
+                    console_log!("DB cache evict: {}", evicted);
+                }
             }
         });
 
@@ -859,12 +879,14 @@ impl ShardLoader {
     async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<Option<IdLookupResult>> {
         let prefix_len = self.load_id_prefix_len(version).await?;
 
-        // Compute shard prefix from GERS ID (remove hyphens, take first N hex chars)
+        // Compute shard prefix from GERS ID (remove hyphens, take first N hex
+        // chars). get() rather than slicing: a multi-byte character in the
+        // path param would otherwise panic on a non-char boundary and abort
+        // the whole wasm isolate.
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
-        if hex_id.len() < prefix_len {
+        let Some(prefix) = hex_id.get(..prefix_len) else {
             return Ok(None);
-        }
-        let prefix = &hex_id[..prefix_len];
+        };
         let shard_key = format!("{}/id-index/{}.parquet", version, prefix);
 
         // Parse target UUID early so we can fail fast
@@ -901,6 +923,16 @@ impl ShardLoader {
                 .try_into()
                 .unwrap(),
         ) as usize;
+        // Sanity-cap before acting on the length: a corrupt (or stale-cached)
+        // 4-byte footer field of up to ~4 GB would otherwise trigger a
+        // whole-file suffix fetch, buffered in memory and edge-cached.
+        const MAX_FOOTER_SIZE: usize = 16 * 1024 * 1024;
+        if metadata_len > MAX_FOOTER_SIZE || (metadata_len + 8) as u64 > file_size {
+            return Err(Error::RustError(format!(
+                "Implausible parquet footer length {}B for {} ({}B file)",
+                metadata_len, shard_key, file_size
+            )));
+        }
         if metadata_len + 8 > tail_bytes.len() {
             // Footer larger than the default suffix window: re-read with the
             // exact size (cached under a size-specific key).
@@ -1051,10 +1083,11 @@ impl ShardLoader {
     /// Load the ID index prefix_len from a small metadata file.
     /// Falls back to id-collection.json summaries if id-meta.json doesn't exist.
     async fn load_id_prefix_len(&self, version: &str) -> Result<usize> {
-        // Try tiny metadata file first (avoids loading multi-MB collection)
+        // Try tiny metadata file first (avoids loading multi-MB collection).
+        // id-index TTL: patch runs re-upload these files in place.
         let meta_key = format!("{}/id-meta.json", version);
         if let Some(text) = self
-            .memoized_get_text(&meta_key, IMMUTABLE_CACHE_TTL)
+            .memoized_get_text(&meta_key, ID_INDEX_CACHE_TTL)
             .await?
         {
             #[derive(Deserialize)]
@@ -1071,7 +1104,7 @@ impl ShardLoader {
 
         // Fallback: load id-collection.json and extract prefix_len via string search
         let key = format!("{}/id-collection.json", version);
-        if let Some(text) = self.memoized_get_text(&key, IMMUTABLE_CACHE_TTL).await? {
+        if let Some(text) = self.memoized_get_text(&key, ID_INDEX_CACHE_TTL).await? {
             if let Some(pos) = text.find("\"prefix_len\"") {
                 let rest = &text[pos + "\"prefix_len\"".len()..];
                 let rest = rest
@@ -1225,8 +1258,10 @@ fn get_ordered_versions(catalog: &StacCatalog) -> Vec<String> {
         }
     }
 
-    // Sort non-latest versions descending (date-based strings sort naturally)
-    others.sort_unstable_by(|a, b| b.cmp(a));
+    // Sort non-latest versions descending. The .N suffix compares
+    // numerically: plain string order would rank 2026-02-25.9 above
+    // 2026-02-25.10.
+    others.sort_unstable_by(|a, b| version_sort_key(b).cmp(&version_sort_key(a)));
 
     let mut versions = Vec::new();
     if let Some(v) = latest {
@@ -1235,6 +1270,19 @@ fn get_ordered_versions(catalog: &StacCatalog) -> Vec<String> {
     versions.extend(others);
     versions.truncate(MAX_VERSION_ATTEMPTS);
     versions
+}
+
+/// Sort key for "{YYYY-MM-DD}.{N}" version strings: ISO date part compares
+/// lexicographically, the .N suffix numerically. Version strings without a
+/// numeric suffix compare whole-string with suffix 0.
+fn version_sort_key(version: &str) -> (&str, u64) {
+    match version.rsplit_once('.') {
+        Some((date, n)) => match n.parse::<u64>() {
+            Ok(n) => (date, n),
+            Err(_) => (version, 0),
+        },
+        None => (version, 0),
+    }
 }
 
 /// Parse a GERS ID string into 16 UUID bytes.
@@ -1549,6 +1597,27 @@ mod tests {
 
         let versions = get_ordered_versions(&catalog);
         assert_eq!(versions, vec!["2026-02-25.0"]);
+    }
+
+    #[test]
+    fn test_get_ordered_versions_numeric_suffix_order() {
+        // Lexicographic order would rank .9 above .10.
+        let catalog = StacCatalog {
+            links: ["./2026-02-25.9/x", "./2026-02-25.10/x", "./2026-02-25.2/x"]
+                .iter()
+                .map(|href| StacLink {
+                    rel: "child".to_string(),
+                    href: href.to_string(),
+                    latest: false,
+                })
+                .collect(),
+        };
+
+        let versions = get_ordered_versions(&catalog);
+        assert_eq!(
+            versions,
+            vec!["2026-02-25.10", "2026-02-25.9", "2026-02-25.2"]
+        );
     }
 
     #[test]
