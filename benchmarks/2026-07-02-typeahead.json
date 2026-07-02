@@ -1,0 +1,1181 @@
+{
+ "metadata": {
+  "top_k": 5,
+  "min_prefix": 3,
+  "tolerance_km": 50.0,
+  "engines": [
+   "Overture",
+   "Photon",
+   "Nominatim"
+  ],
+  "n_cases": 16
+ },
+ "summaries": {
+  "Overture": {
+   "cases": 16,
+   "full_query_top1": 12,
+   "typeahead_cases": 15,
+   "resolved_before_full_query": 10,
+   "median_keystrokes_to_top1": 3,
+   "unresolved_top1": 4,
+   "latency_p50_ms": 56.4
+  },
+  "Photon": {
+   "cases": 16,
+   "full_query_top1": 13,
+   "typeahead_cases": 15,
+   "resolved_before_full_query": 12,
+   "median_keystrokes_to_top1": 4.0,
+   "unresolved_top1": 3,
+   "latency_p50_ms": 473.4
+  },
+  "Nominatim": {
+   "cases": 16,
+   "full_query_top1": 1,
+   "typeahead_cases": 15,
+   "resolved_before_full_query": 1,
+   "median_keystrokes_to_top1": 4,
+   "unresolved_top1": 14,
+   "latency_p50_ms": 1427.9
+  }
+ },
+ "results": {
+  "Overture": {
+   "engine": "Overture",
+   "cases": [
+    {
+     "query": "london",
+     "target": "London",
+     "note": "",
+     "ranks": {
+      "3": 3,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      52.09804201149382,
+      62.1277499885764,
+      64.98900000588037,
+      62.24045899580233
+     ],
+     "errors": 0
+    },
+    {
+     "query": "paris",
+     "target": "Paris",
+     "note": "",
+     "ranks": {
+      "3": 2,
+      "4": 1,
+      "5": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      52.35312497825362,
+      50.44987500878051,
+      53.044666012283415
+     ],
+     "errors": 0
+    },
+    {
+     "query": "tokyo",
+     "target": "Tokyo",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      53.238124994095415,
+      53.82391600869596,
+      63.08237498160452
+     ],
+     "errors": 0
+    },
+    {
+     "query": "berlin",
+     "target": "Berlin",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      58.21141600608826,
+      51.899207988753915,
+      54.35608298284933,
+      51.463167008478194
+     ],
+     "errors": 0
+    },
+    {
+     "query": "sao paulo",
+     "target": "S\u00e3o Paulo",
+     "note": "",
+     "ranks": {
+      "3": 2,
+      "4": 2,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1
+     },
+     "keystrokes_to_top1": 5,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      60.277291981037706,
+      60.67891701241024,
+      62.7069579786621,
+      58.3794999984093,
+      51.26420900342055,
+      63.21975000901148,
+      52.39416699623689
+     ],
+     "errors": 0
+    },
+    {
+     "query": "beijing",
+     "target": "Beijing",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      50.71108401170932,
+      52.18958397745155,
+      55.90729200048372,
+      61.00649997824803,
+      65.0284580187872
+     ],
+     "errors": 0
+    },
+    {
+     "query": "mexico city",
+     "target": "Mexico City",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null,
+      "11": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      58.53337500593625,
+      64.74266698933206,
+      50.81662500742823,
+      56.484750006347895,
+      55.88808300672099,
+      55.95020897453651,
+      56.50341699947603,
+      68.54816700797528,
+      59.71141700865701
+     ],
+     "errors": 0
+    },
+    {
+     "query": "amsterdam",
+     "target": "Amsterdam",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      57.606083020800725,
+      58.32412501331419,
+      56.41708301845938,
+      55.49100000644103,
+      52.23087500780821,
+      54.053333995398134,
+      46.86483400291763
+     ],
+     "errors": 0
+    },
+    {
+     "query": "new york",
+     "target": "New York",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      57.4368340021465,
+      57.10483298753388,
+      54.13945799227804,
+      67.328582983464,
+      67.92233299347572,
+      57.89195801480673
+     ],
+     "errors": 0
+    },
+    {
+     "query": "san francisco",
+     "target": "San Francisco",
+     "note": "",
+     "ranks": {
+      "3": 3,
+      "4": 3,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 2,
+      "10": 2,
+      "11": 2,
+      "12": 1,
+      "13": 1
+     },
+     "keystrokes_to_top1": 5,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      49.20245800167322,
+      47.025624982779846,
+      54.81724999845028,
+      57.815375010250136,
+      62.81254201894626,
+      48.39420900680125,
+      63.10299999313429,
+      58.68262500735,
+      59.385707980254665,
+      60.828792018583044,
+      55.35245899227448
+     ],
+     "errors": 0
+    },
+    {
+     "query": "gettysburg",
+     "target": "Gettysburg",
+     "note": "famous-small",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1,
+      "10": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      60.96229198738001,
+      44.414542004233226,
+      54.8503749887459,
+      61.197333998279646,
+      54.47883400483988,
+      53.89470898080617,
+      64.05737501336262,
+      69.17529201018624
+     ],
+     "errors": 0
+    },
+    {
+     "query": "moscow",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "exonym",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      55.90200002188794,
+      57.6224579999689,
+      56.10341700958088,
+      49.44299999624491
+     ],
+     "errors": 0
+    },
+    {
+     "query": "france",
+     "target": "France",
+     "note": "P0 stemmer regression",
+     "ranks": {
+      "3": 2,
+      "4": 2,
+      "5": 2,
+      "6": 1
+     },
+     "keystrokes_to_top1": 6,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      66.87158299610019,
+      59.96225000126287,
+      55.00437502632849,
+      56.564041995443404
+     ],
+     "errors": 0
+    },
+    {
+     "query": "germany",
+     "target": "Germany",
+     "note": "partial-credit regression",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      50.11687500518747,
+      54.13737500202842,
+      58.85908400523476,
+      55.40558398934081,
+      59.17741701705381
+     ],
+     "errors": 0
+    },
+    {
+     "query": "york",
+     "target": "York",
+     "note": "alt-name rung regression",
+     "ranks": {
+      "3": 1,
+      "4": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      52.58083398803137,
+      52.26512500667013
+     ],
+     "errors": 0
+    },
+    {
+     "query": "boston, ma",
+     "target": "Boston",
+     "note": "comma query",
+     "ranks": {
+      "10": 1
+     },
+     "keystrokes_to_top1": 10,
+     "keystrokes_to_top3": 10,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      55.02558298758231
+     ],
+     "errors": 0
+    }
+   ]
+  },
+  "Photon": {
+   "engine": "Photon",
+   "cases": [
+    {
+     "query": "london",
+     "target": "London",
+     "note": "",
+     "ranks": {
+      "3": 2,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      586.5563330007717,
+      652.1327499940526,
+      555.6515410135034,
+      473.30750001128763
+     ],
+     "errors": 0
+    },
+    {
+     "query": "paris",
+     "target": "Paris",
+     "note": "",
+     "ranks": {
+      "3": 2,
+      "4": 1,
+      "5": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      511.69720897451043,
+      498.0898329813499,
+      468.38479200960137
+     ],
+     "errors": 0
+    },
+    {
+     "query": "tokyo",
+     "target": "Tokyo",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": 2,
+      "5": 2
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 2,
+     "latencies_ms": [
+      553.2637080177665,
+      471.7956660024356,
+      460.20783300627954
+     ],
+     "errors": 0
+    },
+    {
+     "query": "berlin",
+     "target": "Berlin",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      494.888416986214,
+      499.6024169959128,
+      462.4545419937931,
+      460.3340410103556
+     ],
+     "errors": 0
+    },
+    {
+     "query": "sao paulo",
+     "target": "S\u00e3o Paulo",
+     "note": "",
+     "ranks": {
+      "3": 2,
+      "4": 2,
+      "5": 1,
+      "6": 2,
+      "7": 3,
+      "8": 5,
+      "9": 1
+     },
+     "keystrokes_to_top1": 5,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      456.1547919875011,
+      454.90866602631286,
+      489.5116249972489,
+      460.4361660021823,
+      480.7226250122767,
+      463.5623329959344,
+      489.79770799633116
+     ],
+     "errors": 0
+    },
+    {
+     "query": "beijing",
+     "target": "Beijing",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      457.60395799879916,
+      466.25887497793883,
+      460.7526249892544,
+      485.17558301682584,
+      468.6937909864355
+     ],
+     "errors": 0
+    },
+    {
+     "query": "mexico city",
+     "target": "Mexico City",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 2,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      455.24925002246164,
+      458.3326670108363,
+      463.722249987768,
+      556.407666997984,
+      477.1529999852646,
+      473.47579200868495,
+      462.0135409932118,
+      656.7050000012387,
+      455.1662500016391
+     ],
+     "errors": 0
+    },
+    {
+     "query": "amsterdam",
+     "target": "Amsterdam",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      469.5092919864692,
+      469.1295830125455,
+      463.02758299862035,
+      484.7359170089476,
+      501.99979200260714,
+      498.7090830109082,
+      527.1717919968069
+     ],
+     "errors": 0
+    },
+    {
+     "query": "new york",
+     "target": "New York",
+     "note": "",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      570.6693330139387,
+      504.8245840007439,
+      475.88295899913646,
+      457.1271250024438,
+      494.73291702452116,
+      461.7440000001807
+     ],
+     "errors": 0
+    },
+    {
+     "query": "san francisco",
+     "target": "San Francisco",
+     "note": "",
+     "ranks": {
+      "3": 2,
+      "4": 2,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1,
+      "10": 1,
+      "11": 1,
+      "12": 1,
+      "13": 1
+     },
+     "keystrokes_to_top1": 5,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      482.72529200767167,
+      482.1375839819666,
+      498.9263339957688,
+      478.3659999957308,
+      495.18966700998135,
+      480.7378750119824,
+      472.58620901266113,
+      473.45866699470207,
+      472.5650830077939,
+      455.17316699260846,
+      463.9735840028152
+     ],
+     "errors": 0
+    },
+    {
+     "query": "gettysburg",
+     "target": "Gettysburg",
+     "note": "famous-small",
+     "ranks": {
+      "3": 5,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": 1,
+      "9": 1,
+      "10": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      461.5730840014294,
+      458.5176659747958,
+      471.5820419951342,
+      516.2772499897983,
+      560.6386250001378,
+      484.99150000861846,
+      448.9927920221817,
+      466.94633300649
+     ],
+     "errors": 0
+    },
+    {
+     "query": "moscow",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "exonym",
+     "ranks": {
+      "3": 4,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      473.3844999864232,
+      472.29395899921656,
+      469.92174998740666,
+      479.2684999993071
+     ],
+     "errors": 0
+    },
+    {
+     "query": "france",
+     "target": "France",
+     "note": "P0 stemmer regression",
+     "ranks": {
+      "3": 2,
+      "4": 2,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 5,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      479.4614590064157,
+      469.62795898434706,
+      473.88629100169055,
+      464.82591700623743
+     ],
+     "errors": 0
+    },
+    {
+     "query": "germany",
+     "target": "Germany",
+     "note": "partial-credit regression",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      462.5866249843966,
+      465.5545410059858,
+      514.6435420028865,
+      473.80958299618214,
+      454.98987499740906
+     ],
+     "errors": 0
+    },
+    {
+     "query": "york",
+     "target": "York",
+     "note": "alt-name rung regression",
+     "ranks": {
+      "3": 1,
+      "4": 1
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      543.0983749974985,
+      485.41558400029317
+     ],
+     "errors": 0
+    },
+    {
+     "query": "boston, ma",
+     "target": "Boston",
+     "note": "comma query",
+     "ranks": {
+      "10": 1
+     },
+     "keystrokes_to_top1": 10,
+     "keystrokes_to_top3": 10,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      464.5431670069229
+     ],
+     "errors": 0
+    }
+   ]
+  },
+  "Nominatim": {
+   "engine": "Nominatim",
+   "cases": [
+    {
+     "query": "london",
+     "target": "London",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      529.0285419905558,
+      321.0660420008935,
+      367.1443749917671,
+      487.0977090031374
+     ],
+     "errors": 0
+    },
+    {
+     "query": "paris",
+     "target": "Paris",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": 1,
+      "5": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      451.50762499542907,
+      460.8819580171257,
+      665.9827089752071
+     ],
+     "errors": 0
+    },
+    {
+     "query": "tokyo",
+     "target": "Tokyo",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      506.8845420028083,
+      193.15308300429024,
+      422.59916599141434
+     ],
+     "errors": 0
+    },
+    {
+     "query": "berlin",
+     "target": "Berlin",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1262.4935829953756,
+      1500.2717080060393,
+      1427.9450419999193,
+      1303.8495830260217
+     ],
+     "errors": 4
+    },
+    {
+     "query": "sao paulo",
+     "target": "S\u00e3o Paulo",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1420.5148339970037,
+      1136.6822090058122,
+      1770.5832079809625,
+      1612.8382089955267,
+      1460.7610420207493,
+      1409.4024579972029,
+      1892.3033750033937
+     ],
+     "errors": 7
+    },
+    {
+     "query": "beijing",
+     "target": "Beijing",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1353.8299170031678,
+      1312.758166983258,
+      1099.554790998809,
+      1936.6455409908667,
+      1678.8202500029001
+     ],
+     "errors": 5
+    },
+    {
+     "query": "mexico city",
+     "target": "Mexico City",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null,
+      "11": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1270.9013749845326,
+      1193.222333007725,
+      1233.2176670024637,
+      2132.187334005721,
+      1348.468457988929,
+      1505.148124997504,
+      1905.4124169924762,
+      1871.1923329974525,
+      1548.0717919999734
+     ],
+     "errors": 9
+    },
+    {
+     "query": "amsterdam",
+     "target": "Amsterdam",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1570.7629169919528,
+      1172.646374994656,
+      1607.7343329961877,
+      1483.85375001817,
+      1212.266082991846,
+      1659.5258330053184,
+      1646.7010409978684
+     ],
+     "errors": 7
+    },
+    {
+     "query": "new york",
+     "target": "New York",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1765.00629200018,
+      1124.8008749971632,
+      1816.394291992765,
+      1509.233666001819,
+      1214.9411250138655,
+      1767.0108749880455
+     ],
+     "errors": 6
+    },
+    {
+     "query": "san francisco",
+     "target": "San Francisco",
+     "note": "",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null,
+      "11": null,
+      "12": null,
+      "13": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1202.3133750190027,
+      1828.1640420027543,
+      1085.1527500199154,
+      1198.4606249898206,
+      1867.5903330149595,
+      1536.8455830030143,
+      1449.3615419778507,
+      1388.486665993696,
+      2006.6967500024475,
+      1784.9640420172364,
+      1446.2272089731414
+     ],
+     "errors": 11
+    },
+    {
+     "query": "gettysburg",
+     "target": "Gettysburg",
+     "note": "famous-small",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1135.7992920093238,
+      1084.7455420007464,
+      1834.1650840011425,
+      2058.029833016917,
+      1687.9787920042872,
+      1131.0079579998273,
+      1860.9709169832058,
+      1641.448207985377
+     ],
+     "errors": 8
+    },
+    {
+     "query": "moscow",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "exonym",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1380.1707079983316,
+      1517.0313330017962,
+      1391.2024580058642,
+      1420.2217499841936
+     ],
+     "errors": 4
+    },
+    {
+     "query": "france",
+     "target": "France",
+     "note": "P0 stemmer regression",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1993.8177080184687,
+      1293.5107090161182,
+      1149.3016669992357,
+      1737.3281249892898
+     ],
+     "errors": 4
+    },
+    {
+     "query": "germany",
+     "target": "Germany",
+     "note": "partial-credit regression",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1536.432374996366,
+      1436.239333008416,
+      1912.084625015268,
+      1279.8995829944033,
+      1249.913166015176
+     ],
+     "errors": 5
+    },
+    {
+     "query": "york",
+     "target": "York",
+     "note": "alt-name rung regression",
+     "ranks": {
+      "3": null,
+      "4": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1818.4697499964386,
+      1547.83879200113
+     ],
+     "errors": 2
+    },
+    {
+     "query": "boston, ma",
+     "target": "Boston",
+     "note": "comma query",
+     "ranks": {
+      "10": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      1349.4892500166316
+     ],
+     "errors": 1
+    }
+   ]
+  }
+ }
+}
