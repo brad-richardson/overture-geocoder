@@ -53,6 +53,19 @@ jobs:
       - name: Install wrangler
         run: npm install -g wrangler
 
+      # Stale staging markers from a previous run would make the ID phases
+      # below silently skip (they're marker-resumable), turning the smoke
+      # test into a no-op. Start from a clean slate.
+      - name: Pre-clean stale smoketest data
+        run: |
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+          export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+          aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto | tail -1 || true
+
       # --- Shard pipeline (forward + reverse for a tiny country) ---
 
       - name: Download divisions data
@@ -158,21 +171,18 @@ jobs:
 
       - name: Cleanup test data from R2
         if: always()
+        # NOTE: `wrangler r2 object list` no longer exists — the old
+        # wrangler-based cleanup silently deleted nothing for months and
+        # stale markers made every later smoke test skip its ID phases.
         run: |
           echo "Cleaning up smoke test data from R2..."
-
-          # List all objects under the smoketest prefix and delete them
-          OBJECTS=$(wrangler r2 object list geocoder-shards \
-            --prefix "${SMOKE_VERSION}/" --remote 2>/dev/null \
-            | grep -oE '"key": "[^"]+' | sed 's/"key": "//' || true)
-
-          COUNT=0
-          for OBJ in $OBJECTS; do
-            wrangler r2 object delete "geocoder-shards/${OBJ}" --remote 2>/dev/null || true
-            COUNT=$((COUNT + 1))
-          done
-
-          echo "Deleted $COUNT objects from R2."
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+          export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+          aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto | wc -l | xargs -I{} echo "Deleted {} objects from R2."
 
       - name: Summary
         if: always()
