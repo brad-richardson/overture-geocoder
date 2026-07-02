@@ -187,7 +187,12 @@ COPY (
     ) d
     LEFT JOIN country_names cn ON d.country = cn.country_code
     LEFT JOIN region_names rn ON d.region = rn.region_code
-    WHERE (d.subtype IN ('country', 'region') OR (d.subtype = 'locality' AND d.population > 10000))
+    -- Localities: population bar, OR any wikidata QID. The QID rows are
+    -- over-fetched on purpose — famous-but-small places (Gettysburg) have
+    -- no population signal here; enrich_parquet_with_wiki_importance joins
+    -- their wikimedia importance and prunes the non-famous ones.
+    WHERE (d.subtype IN ('country', 'region')
+           OR (d.subtype = 'locality' AND (d.population > 10000 OR d.wikidata IS NOT NULL)))
       AND d.names.primary IS NOT NULL
 )
 TO 'exports/divisions-global.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);

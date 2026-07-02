@@ -387,10 +387,15 @@ def write_test_parquet(path: Path):
                  -122.4194, 37.7749, -122.5151, 37.7034, -122.3568, 37.8324,
                  'San Francisco, CA', 'san francisco sf',
                  'us-ca us california united states'),
-                ('tiny-001', 1, 'Tinyville', 'locality', 'village', 'US', 'US-NY',
-                 950, NULL, false, false,
+                ('tiny-001', 1, 'Tinyville', 'locality', 'town', 'US', 'US-NY',
+                 15000, NULL, false, false,
                  -75.0, 43.0, -75.1, 42.9, -74.9, 43.1,
                  'Tinyville, NY', 'tinyville',
+                 'us-ny us new york united states'),
+                ('obscure-001', 1, 'Obscureville', 'locality', 'village', 'US', 'US-NY',
+                 500, 'Q777', false, false,
+                 -75.5, 43.5, -75.6, 43.4, -75.4, 43.6,
+                 'Obscureville, NY', 'obscureville',
                  'us-ny us new york united states'),
                 ('famous-001', 1, 'Gettysburg', 'locality', 'village', 'US', 'US-PA',
                  2600, 'Q999', false, false,
@@ -419,6 +424,7 @@ def write_test_importance_file(path: Path):
         f.write("fr\ta\tNew_York\t0.88\tQ60\n")
         f.write("en\ta\tSan_Francisco\t0.84\tQ62\n")
         f.write("en\ta\tGettysburg\t0.80\tQ999\n")
+        f.write("en\ta\tObscureville\t0.20\tQ777\n")
 
 
 @pytest.fixture
@@ -442,7 +448,10 @@ class TestWikiImportanceJoin:
         con.close()
         assert rows["nyc-001"] == pytest.approx(0.91)  # MAX over languages
         assert rows["sf-001"] == pytest.approx(0.84)
-        assert rows["tiny-001"] is None  # no wikidata QID
+        assert rows["tiny-001"] is None  # no wikidata QID (over population bar)
+        # Famous small locality survives the prune; obscure one does not.
+        assert rows["famous-001"] == pytest.approx(0.80)
+        assert "obscure-001" not in rows
 
     def test_null_column_without_importance_file(self, tmp_path):
         base = tmp_path / "divisions.parquet"
@@ -450,11 +459,16 @@ class TestWikiImportanceJoin:
         out = tmp_path / "divisions-nowiki.parquet"
         enrich_parquet_with_wiki_importance(base, out, None)
         con = duckdb.connect()
-        rows = con.execute(
-            f"SELECT wiki_importance FROM read_parquet('{out}')"
-        ).fetchall()
+        rows = dict(con.execute(
+            f"SELECT gers_id, wiki_importance FROM read_parquet('{out}')"
+        ).fetchall())
         con.close()
-        assert all(r[0] is None for r in rows)
+        assert all(v is None for v in rows.values())
+        # Without importance data, small QID localities cannot prove fame
+        # and are pruned like before the wikidata over-fetch.
+        assert "famous-001" not in rows
+        assert "obscure-001" not in rows
+        assert {"nyc-001", "sf-001", "tiny-001", "region-ny"} <= set(rows)
 
 
 class TestEndToEndShardBuild:
@@ -522,6 +536,21 @@ class TestEndToEndShardBuild:
         assert "tiny-001" not in ids   # small, not famous
         assert "sf-001" in ids         # wiki_importance 0.84 >= 0.5
         assert info["record_count"] == len(ids)
+
+
+class TestVersionSortKey:
+    def test_numeric_suffix_order(self):
+        from build_shards import version_sort_key
+
+        versions = ["2026-02-25.9", "2026-02-25.10", "2026-02-25.2", "2026-03-25.0"]
+        ordered = sorted(versions, key=version_sort_key, reverse=True)
+        # Lexicographic order would rank .9 above .10
+        assert ordered == [
+            "2026-03-25.0",
+            "2026-02-25.10",
+            "2026-02-25.9",
+            "2026-02-25.2",
+        ]
 
 
 class TestConstants:

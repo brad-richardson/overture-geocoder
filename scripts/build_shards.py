@@ -44,6 +44,7 @@ import re
 import shutil
 import sqlite3
 import sys
+import tempfile
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -347,6 +348,32 @@ def get_version(suffix: str = "0") -> str:
     return f"{date}.{suffix}"
 
 
+def version_sort_key(version: str) -> tuple[str, int]:
+    """Sort key for '{YYYY-MM-DD}.{N}' versions: date part lexicographic,
+    .N suffix numeric (plain string order ranks .9 above .10)."""
+    date, _, n = version.rpartition(".")
+    if date and n.isdigit():
+        return (date, int(n))
+    return (version, 0)
+
+
+def spill_safe_connect(memory_limit: str = "10GB") -> "duckdb.DuckDBPyConnection":
+    """In-memory DuckDB connection hardened for the CI runner.
+
+    In-memory sessions disable disk spill by default, so a big join or
+    aggregation OOMs instead of going out-of-core (the DuckDB 1.5 failure
+    mode the download SQL scripts guard against). Cap memory, provide a
+    spill directory, and bound parallel pipeline buffers — mirroring the
+    settings in download_divisions_global.sql.
+    """
+    con = duckdb.connect()
+    con.execute(f"SET memory_limit = '{memory_limit}';")
+    spill_dir = Path(tempfile.gettempdir()) / "duckdb_spill.tmp"
+    con.execute(f"SET temp_directory = '{spill_dir}';")
+    con.execute("SET threads = 2;")
+    return con
+
+
 def get_countries(parquet_path: Path) -> list[str]:
     """Get list of unique country codes from parquet file."""
     parquet_str = str(parquet_path.resolve())
@@ -386,14 +413,7 @@ def partition_by_country(
         codes = ", ".join(f"'{validate_country_code(c)}'" for c in countries)
         where += f" AND country IN ({codes})"
 
-    con = duckdb.connect()
-    counts = dict(con.execute(f"""
-        SELECT country, COUNT(*)
-        FROM read_parquet('{parquet_str}')
-        WHERE {where}
-        GROUP BY country
-    """).fetchall())
-
+    con = spill_safe_connect()
     # Partitioned COPY keeps a write buffer per country; row order within
     # partitions is irrelevant (shard builds re-query), and preserving
     # insertion order is the main memory amplifier in COPY.
@@ -409,6 +429,19 @@ def partition_by_country(
         (FORMAT PARQUET, PARTITION_BY (country),
          WRITE_PARTITION_COLUMNS true, OVERWRITE_OR_IGNORE true);
     """)
+
+    # Count from the written partitions (near metadata-only) instead of a
+    # second full decompress pass over the global file.
+    try:
+        counts = dict(con.execute(f"""
+            SELECT country, COUNT(*)
+            FROM read_parquet('{str(partition_dir.resolve())}/country=*/*.parquet')
+            GROUP BY country
+        """).fetchall())
+    except duckdb.Error as exc:
+        if "No files found" not in str(exc):
+            raise
+        counts = {}  # selection matched no rows; no partitions written
     con.close()
     return counts
 
@@ -464,7 +497,9 @@ def ensure_wiki_importance_file(
     tmp_path = dest.with_suffix(dest.suffix + ".tmp")
     request = urllib.request.Request(url, headers={"User-Agent": DOWNLOAD_USER_AGENT})
     try:
-        with urllib.request.urlopen(request) as response, open(tmp_path, "wb") as f:
+        # Socket timeout per read: a hung nominatim.org connection would
+        # otherwise stall the monthly build until the 6h Actions limit.
+        with urllib.request.urlopen(request, timeout=60) as response, open(tmp_path, "wb") as f:
             shutil.copyfileobj(response, f, length=1024 * 1024)
         tmp_path.rename(dest)
     except BaseException:
@@ -484,18 +519,33 @@ def enrich_parquet_with_wiki_importance(
     wikidata QID, producing a `wiki_importance DOUBLE` column (NULL when
     unmatched). With importance_file=None the column is added as all-NULL so
     downstream shard builds see a uniform schema.
+
+    Also prunes small localities that aren't famous: the download SQL
+    over-fetches every locality with a wikidata QID (population alone would
+    exclude famous-but-small places like Gettysburg), and this is the single
+    chokepoint where importance is known. Kept rows: non-localities,
+    localities over the download's population bar, and localities at or
+    above HEAD_WIKI_IMPORTANCE_THRESHOLD.
     """
     parquet_str = str(parquet_path.resolve())
     output_str = str(output_path.resolve())
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    con = duckdb.connect()
+    prune = (
+        "subtype != 'locality' "
+        "OR population > 10000 "
+        f"OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}"
+    )
+
+    con = spill_safe_connect()
     con.execute("SET preserve_insertion_order = false;")
     if importance_file is None:
         con.execute(f"""
             COPY (
-                SELECT *, CAST(NULL AS DOUBLE) AS wiki_importance
-                FROM read_parquet('{parquet_str}')
+                SELECT * FROM (
+                    SELECT *, CAST(NULL AS DOUBLE) AS wiki_importance
+                    FROM read_parquet('{parquet_str}')
+                ) WHERE {prune}
             ) TO '{output_str}' (FORMAT PARQUET, COMPRESSION ZSTD);
         """)
     else:
@@ -505,26 +555,42 @@ def enrich_parquet_with_wiki_importance(
         # the best importance per QID.
         con.execute(f"""
             COPY (
-                SELECT d.*, w.wiki_importance
-                FROM read_parquet('{parquet_str}') d
-                LEFT JOIN (
-                    SELECT wikidata_id, MAX(importance) AS wiki_importance
-                    FROM read_csv(
-                        '{importance_str}',
-                        delim='\t', header=true, quote='',
-                        columns={{
-                            'language': 'VARCHAR',
-                            'type': 'VARCHAR',
-                            'title': 'VARCHAR',
-                            'importance': 'DOUBLE',
-                            'wikidata_id': 'VARCHAR'
-                        }}
-                    )
-                    WHERE wikidata_id IS NOT NULL AND wikidata_id != ''
-                    GROUP BY wikidata_id
-                ) w ON d.wikidata = w.wikidata_id
+                SELECT * FROM (
+                    SELECT d.*, w.wiki_importance
+                    FROM read_parquet('{parquet_str}') d
+                    LEFT JOIN (
+                        SELECT wikidata_id, MAX(importance) AS wiki_importance
+                        FROM read_csv(
+                            '{importance_str}',
+                            delim='\t', header=true, quote='',
+                            columns={{
+                                'language': 'VARCHAR',
+                                'type': 'VARCHAR',
+                                'title': 'VARCHAR',
+                                'importance': 'DOUBLE',
+                                'wikidata_id': 'VARCHAR'
+                            }}
+                        )
+                        WHERE wikidata_id IS NOT NULL AND wikidata_id != ''
+                        GROUP BY wikidata_id
+                    ) w ON d.wikidata = w.wikidata_id
+                ) WHERE {prune}
             ) TO '{output_str}' (FORMAT PARQUET, COMPRESSION ZSTD);
         """)
+
+        # The read_csv column mapping is positional: a silent upstream
+        # format change would leave every wiki_importance NULL and quietly
+        # regress ranking fleet-wide. Fail loudly instead.
+        matched = con.execute(f"""
+            SELECT COUNT(*) FROM read_parquet('{output_str}')
+            WHERE wiki_importance IS NOT NULL
+        """).fetchone()[0]
+        if matched == 0:
+            raise RuntimeError(
+                f"Wiki importance join matched 0 rows from {importance_file} — "
+                "upstream format drift? Rerun with --no-wiki-importance to "
+                "build without wikidata importance."
+            )
     con.close()
     return output_path
 
@@ -1229,7 +1295,7 @@ def generate_stac_catalog(versions: list[str], latest: str) -> dict:
             "title": f"Geocoder shards {v}",
             **({"latest": True} if v == latest else {}),
         }
-        for v in sorted(versions, reverse=True)
+        for v in sorted(versions, key=version_sort_key, reverse=True)
     ]
 
     return {
