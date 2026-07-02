@@ -72,8 +72,17 @@ def test_sub_ranges_explicit_prefixes():
     assert len(sub_ranges) == 1
     cond, _, clear_kwargs = sub_ranges[0]
     assert "id LIKE '001%'" in cond and "id LIKE '4a2%'" in cond
+    # Bounding range for zone-map pushdown (OR-of-LIKEs alone may not push)
+    assert "id >= '001'" in cond and "id < '4a3'" in cond
     assert clear_kwargs == {"prefixes": ["001", "4a2"]}
     assert "2 explicit prefixes" in label
+
+
+def test_sub_ranges_explicit_prefixes_at_end_have_no_upper_bound():
+    sub_ranges, _ = bii._registry_sub_ranges(3, prefixes=["ffe", "fff"])
+    cond = sub_ranges[0][0]
+    assert "id >= 'ffe'" in cond
+    assert "id < " not in cond  # fff is the last prefix; no upper raw-id bound
 
 
 # ---------------------------------------------------------------------------

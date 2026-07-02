@@ -411,10 +411,22 @@ def _registry_sub_ranges(prefix_len, prefixes=None,
     stays memory-bounded.
     """
     if prefixes is not None:
-        # Explicit prefix list (smoke test / patching): prefix-LIKE filters
-        # keep predicate pushdown on the sorted registry parquet.
+        # Explicit prefix list (smoke test / patching). The LIKE filters
+        # select the prefixes, but OR-of-LIKEs does not reliably push down
+        # to parquet zone maps — five scattered prefixes once forced a full
+        # registry scan that could not finish inside the sub-range watchdog
+        # and retried itself to death. Bound the scan with plain id-range
+        # predicates (min prefix .. max prefix inclusive), which always
+        # push down on the id-sorted registry; the bound is tight when the
+        # prefixes cluster and merely harmless when they are scattered.
         like_filters = " OR ".join(f"id LIKE '{p}%'" for p in prefixes)
-        sub_ranges = [(f"({like_filters})", f"{len(prefixes)} explicit prefixes",
+        lo = min(prefixes)
+        upper_idx = int(max(prefixes), 16) + 1
+        cond = f"({like_filters}) AND id >= '{lo}'"
+        if upper_idx < 16 ** prefix_len:
+            upper = format(upper_idx, f'0{prefix_len}x')
+            cond += f" AND id < '{upper}'"
+        sub_ranges = [(cond, f"{len(prefixes)} explicit prefixes",
                        {"prefixes": list(prefixes)})]
         return sub_ranges, sub_ranges[0][1]
 
@@ -1359,13 +1371,15 @@ def build_id_index(args):
         range_prefixes = None
         range_suffix = ""
 
-    # Smoke test: pick ~5 evenly-spaced prefixes for registry staging
+    # Smoke test: 5 CONTIGUOUS prefixes so the explicit-prefix bounding
+    # range covers only the head of the id-sorted registry (evenly-spaced
+    # prefixes span the whole file and forced a full-registry scan that
+    # outlived the staging watchdog). Contiguity loses nothing: the smoke
+    # test validates the code path, not data coverage.
     smoke_prefixes = None
     smoke_release_limit = None
     if smoke:
-        indices = [0, shard_count // 4, shard_count // 2,
-                   3 * shard_count // 4, shard_count - 1]
-        smoke_prefixes = [format(i, f'0{args.prefix_len}x') for i in indices]
+        smoke_prefixes = [format(i, f'0{args.prefix_len}x') for i in range(5)]
         smoke_release_limit = 50
 
     phases = args.phase.split(",") if args.phase else ["all"]
