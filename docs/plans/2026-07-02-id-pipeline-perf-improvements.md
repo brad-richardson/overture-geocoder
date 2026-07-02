@@ -105,8 +105,10 @@ shards (3 prefixes, 8 lookups each):
 | 50k     | 21           | 8.7 KB  | 1.67 MB  | ~198 ms  |
 | 100k    | 11           | 4.7 KB  | 3.24 MB  | ~245 ms  |
 
-Default changed to 25,000: 3.7x smaller cold reads, better tail, footer
-still single-suffix-read. Takes effect on the next id-index build.
+Default changed to 50,000: ~2x smaller cold reads than the old 100k with
+the same measured p50 as 25k, and the 8.7 KB footer leaves ~3.7x shard
+growth headroom inside the 32 KB suffix window (25k would leave only ~2x
+for no measured latency gain). Takes effect on the next id-index build.
 
 100k rows ≈ 2.4-3 MB per row group; every cold lookup range-reads a full
 row group. Halving row-group size halves the cold read, at the cost of a

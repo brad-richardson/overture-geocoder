@@ -84,14 +84,15 @@ RELEASE_THEMES = ["addresses", "base"]
 
 # Rows per parquet row group in output shards. Every cold /id lookup
 # range-reads one full row group, so this bounds the cold-read size.
-# 25k measured best in the 2026-07-02 rowgroup_experiment.py run against
-# live shards: 0.88 MB cold read vs 3.24 MB at the previous 100k default
-# (3.7x), p50 ~197 ms vs ~245 ms, and the ~16.4 KB footer still fits the
-# worker's single 32 KB suffix read (FOOTER_SUFFIX_SIZE, stac.rs). If this
-# shrinks further, re-check the footer against that 32 KB window — more
-# row groups means a bigger footer and past it every lookup pays a second
+# 50k chosen from the 2026-07-02 rowgroup_experiment.py run against live
+# shards: 1.67 MB cold read vs 3.24 MB at the old 100k default, p50
+# ~198 ms vs ~245 ms — and its ~8.7 KB footer leaves ~3.7x growth headroom
+# inside the worker's single 32 KB suffix read (FOOTER_SUFFIX_SIZE,
+# stac.rs). 25k measured the same p50 with smaller reads (0.88 MB) but
+# only ~2x footer headroom; not worth camping near the window for zero
+# measured latency gain. Past the window every lookup pays a second
 # round-trip.
-ROW_GROUP_SIZE = 25_000
+ROW_GROUP_SIZE = 50_000
 
 
 def get_version(suffix="0"):
@@ -655,6 +656,12 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
     con.execute("SET s3_region = 'us-west-2';")
 
     query = _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=limit)
+
+    # Re-run safety: a cancelled run can leave marker-less partial staging
+    # (including legacy single-file data.parquet from older code) that the
+    # build's dual-layout discovery would double-count alongside fresh
+    # buckets. Clear anything unmarked before writing.
+    _clear_release_staging(r2_config, version, staging_dir)
 
     def _do_copy():
         con.execute(f"""
