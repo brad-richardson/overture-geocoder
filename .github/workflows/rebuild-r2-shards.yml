@@ -41,7 +41,7 @@ on:
         required: false
         default: true
       cleanup_old_versions:
-        description: 'Prune old versions to the retention window (latest ~30 days or 3, whichever is more)'
+        description: 'Prune old versions to the retention window (latest ~30 days or 2, whichever is more)'
         type: boolean
         required: false
         default: true
@@ -459,20 +459,23 @@ jobs:
             exit 1
           fi
 
-      - name: Prune to retention window (latest month or 3 versions)
+      - name: Prune to retention window (latest month or 2 versions)
         if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
         run: |
           # Retention policy: keep every version published within RETAIN_DAYS,
-          # but never fewer than MIN_VERSIONS. Whichever is MORE wins.
-          # catalog.json is pruned FIRST, then the dropped versions' objects
-          # are deleted. MIN_VERSIONS is 3 because this step runs while the
-          # current version's id-index is still building in the parallel
-          # id-build job: /id requests fall back to older versions
-          # (MAX_VERSION_ATTEMPTS=4 in the worker), and if last month's
-          # id-index was itself broken the worker may be serving /id from two
-          # versions back — which a floor of 2 would delete right here.
+          # but never fewer than MIN_VERSIONS (always at least one fallback).
+          # Whichever is MORE wins. catalog.json is pruned FIRST, then the
+          # dropped versions' objects are deleted.
+          #
+          # Known tradeoff of MIN_VERSIONS=2 (each version is ~$2.5/mo of R2):
+          # this step runs while the current version's id-index is still
+          # building, so /id falls back to the previous version. If THAT
+          # version's id-index was itself broken (the case patch-id-stage
+          # exists for), the version two back that could have served /id is
+          # pruned here — /id then 5xxs until id-post finishes. Patch the
+          # prior id-index promptly rather than relying on deep fallback.
           RETAIN_DAYS=30
-          MIN_VERSIONS=3
+          MIN_VERSIONS=2
           CUTOFF=$(date -d "-${RETAIN_DAYS} days" +%Y-%m-%d)
           CURRENT="${{ needs.prep.outputs.version }}"
           echo "Keep newest >= $MIN_VERSIONS versions and everything since $CUTOFF (current build: $CURRENT)"

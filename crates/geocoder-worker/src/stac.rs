@@ -39,9 +39,10 @@ const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
 const MAX_LOCATION_SHARDS: usize = 2;
 const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
                                        // the newest complete id-index reachable while fresher versions still
-                                       // build. Retention (rebuild-r2-shards.yml) keeps at least 3 versions,
-                                       // so attempts beyond that usually have no candidates — the headroom
-                                       // only pays off when extra versions exist (e.g. same-day rebuilds).
+                                       // build. Retention (rebuild-r2-shards.yml) keeps only 2 versions on
+                                       // the monthly cadence, so attempts beyond that usually have no
+                                       // candidates — the headroom only pays off when extra versions exist
+                                       // (e.g. same-day rebuilds).
 const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for missing objects
 
 // Isolate-level (in-memory) cache limits. Workers isolates persist across
