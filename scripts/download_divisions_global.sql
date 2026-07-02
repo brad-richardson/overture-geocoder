@@ -112,50 +112,43 @@ COPY (
             ELSE
                 CONCAT(d.names.primary, ', ', d.country)
         END as primary_name,
-        -- search_name: tokens that name THIS place (FTS column 1, weighted
-        -- highest - docs/ranking-research.md P0/P4).
+        -- search_name: the distinct names of THIS place, ';'-separated so
+        -- name boundaries survive (FTS column 1, weighted highest -
+        -- docs/ranking-research.md P0/P4). Keeping multi-word alternate
+        -- names intact ("mexico city" for Ciudad de México) lets the
+        -- worker's alt-name ladder phrase-match them; a flattened token bag
+        -- can never hit the exact/prefix rungs. The FTS unicode61 tokenizer
+        -- treats ';' as a separator, so indexing is unchanged.
         -- Includes: primary, short names (NYC), English common/official/alternate
         -- Excludes: multilingual translations to keep BM25 scoring balanced
         -- TODO: Consider language-specific shards for full multilingual search
-        LOWER(ARRAY_TO_STRING(
+        ARRAY_TO_STRING(
             LIST_DISTINCT(
-                LIST_FILTER(
-                    STRING_SPLIT(
-                        CONCAT_WS(' ',
-                            -- Primary name (the main searchable name)
-                            d.names.primary,
-                            -- Short names with null language (e.g., "NYC", "LA")
-                            COALESCE(ARRAY_TO_STRING(
-                                list_transform(
-                                    list_filter(d.names.rules, x -> x.variant = 'short' AND x.language IS NULL),
-                                    x -> x.value
-                                ),
-                                ' '
-                            ), ''),
-                            -- English common name (names.common is MAP<language, value>)
-                            COALESCE(list_extract(map_extract(d.names.common, 'en'), 1), ''),
-                            -- Official names with null language (e.g., "New York" for NYC)
-                            COALESCE(ARRAY_TO_STRING(
-                                list_transform(
-                                    list_filter(d.names.rules, x -> x.variant = 'official' AND x.language IS NULL),
-                                    x -> x.value
-                                ),
-                                ' '
-                            ), ''),
-                            -- Alternate names with null/English language (e.g., "New York City", "Big Apple")
-                            COALESCE(ARRAY_TO_STRING(
-                                list_transform(
-                                    list_filter(d.names.rules, x -> x.variant = 'alternate' AND (x.language IS NULL OR x.language LIKE 'en%')),
-                                    x -> x.value
-                                ),
-                                ' '
-                            ), '')
-                        ), ' '
+                LIST_TRANSFORM(
+                    LIST_FILTER(
+                        -- Primary name (the main searchable name)
+                        [d.names.primary]
+                        -- Short names with null language (e.g., "NYC", "LA")
+                        || COALESCE(list_transform(
+                               list_filter(d.names.rules, x -> x.variant = 'short' AND x.language IS NULL),
+                               x -> x.value), [])
+                        -- English common name (names.common is MAP<language, value>)
+                        || [list_extract(map_extract(d.names.common, 'en'), 1)]
+                        -- Official names with null language (e.g., "New York" for NYC)
+                        || COALESCE(list_transform(
+                               list_filter(d.names.rules, x -> x.variant = 'official' AND x.language IS NULL),
+                               x -> x.value), [])
+                        -- Alternate names with null/English language (e.g., "New York City", "Big Apple")
+                        || COALESCE(list_transform(
+                               list_filter(d.names.rules, x -> x.variant = 'alternate' AND (x.language IS NULL OR x.language LIKE 'en%')),
+                               x -> x.value), []),
+                        x -> x IS NOT NULL AND TRIM(x) != ''
                     ),
-                    x -> x IS NOT NULL AND x != ''
+                    -- ';' is the name separator; scrub it from name text
+                    x -> REPLACE(LOWER(x), ';', ' ')
                 )
-            ), ' '
-        )) as search_name,
+            ), ';'
+        ) as search_name,
         -- search_context: parent names + region/country codes (FTS column 3,
         -- weighted lowest). Enables "cambridge uk" / "boston ma" searches
         -- without letting context hits score like name hits.

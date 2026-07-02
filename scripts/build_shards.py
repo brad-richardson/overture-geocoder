@@ -193,7 +193,9 @@ def build_search_alias(name: str, search_name: str) -> str | None:
     name = (name or "").strip()
     search_name = (search_name or "").strip()
     name_words = name.lower().split()
-    tokens = search_name.lower().split()
+    # search_name separates distinct alt names with ';' (older data is a
+    # plain token bag); alias variants operate on individual words either way.
+    tokens = search_name.lower().replace(";", " ").split()
     if not tokens and not name_words:
         return None
 
@@ -601,6 +603,105 @@ def enrich_parquet_with_wiki_importance(
                 "upstream format drift? Rerun with --no-wiki-importance to "
                 "build without wikidata importance."
             )
+    con.close()
+    return output_path
+
+
+# Same-name localities in the same country+region within this distance are
+# collapsed to one record (Overture ships duplicate GERS entities: Kissimmee
+# FL x4, Randburg, Hoover... see docs/overture-data-feedback-2026-07-02.md).
+# Genuinely distinct same-named places (Rosario PH x2, 74 km apart) sit far
+# beyond this radius and are kept.
+DEDUP_RADIUS_KM = 15.0
+
+
+def dedup_localities(parquet_path: Path, output_path: Path) -> Path:
+    """
+    Collapse duplicate locality records: same (name, country, region) within
+    DEDUP_RADIUS_KM of the group's leader (highest wiki importance, then
+    population, then gers_id for determinism). The leader absorbs the
+    cluster's max population, the union of its bboxes, and the union of its
+    search_name segments; dropped GERS IDs are logged for auditability.
+    """
+    parquet_str = str(parquet_path.resolve())
+    output_str = str(output_path.resolve())
+
+    con = spill_safe_connect()
+    con.execute("SET preserve_insertion_order = false;")
+    con.execute(f"""
+        CREATE TEMP TABLE ranked AS
+        SELECT gers_id, lower(name) AS gname, country,
+               coalesce(region, '') AS gregion,
+               lat, lon, population, bbox_xmin, bbox_ymin, bbox_xmax,
+               bbox_ymax, search_name,
+               ROW_NUMBER() OVER (
+                   PARTITION BY lower(name), country, coalesce(region, '')
+                   ORDER BY coalesce(wiki_importance, 0) DESC,
+                            coalesce(population, 0) DESC, gers_id
+               ) AS rn
+        FROM read_parquet('{parquet_str}')
+        WHERE subtype = 'locality';
+    """)
+    # Duplicates: non-leaders within the radius of their group's leader.
+    con.execute(f"""
+        CREATE TEMP TABLE dupes AS
+        SELECT r.gers_id, r.gname, r.country, r.gregion,
+               l.gers_id AS leader_id
+        FROM ranked r
+        JOIN ranked l ON l.rn = 1 AND r.gname = l.gname
+            AND r.country = l.country AND r.gregion = l.gregion
+        WHERE r.rn > 1
+          AND 2 * 6371 * ASIN(SQRT(
+                POW(SIN(RADIANS(r.lat - l.lat) / 2), 2)
+                + COS(RADIANS(l.lat)) * COS(RADIANS(r.lat))
+                  * POW(SIN(RADIANS(r.lon - l.lon) / 2), 2)
+              )) <= {DEDUP_RADIUS_KM};
+    """)
+    dropped = con.execute(
+        "SELECT gname, country, gregion, gers_id, leader_id FROM dupes ORDER BY gname"
+    ).fetchall()
+    if dropped:
+        print(f"  Deduplicating {len(dropped)} duplicate locality record(s):")
+        for gname, country, gregion, gers_id, leader_id in dropped:
+            print(f"    {gname} ({country}/{gregion or '-'}): "
+                  f"dropping {gers_id} (kept {leader_id})")
+
+    # Leaders absorb their cluster: max population, bbox union, and the
+    # union of ';'-separated search_name segments.
+    con.execute(f"""
+        CREATE TEMP TABLE merged AS
+        SELECT d.leader_id,
+               MAX(GREATEST(coalesce(r.population, 0),
+                            coalesce(l.population, 0))) AS population,
+               LEAST(MIN(r.bbox_xmin), MIN(l.bbox_xmin)) AS bbox_xmin,
+               LEAST(MIN(r.bbox_ymin), MIN(l.bbox_ymin)) AS bbox_ymin,
+               GREATEST(MAX(r.bbox_xmax), MAX(l.bbox_xmax)) AS bbox_xmax,
+               GREATEST(MAX(r.bbox_ymax), MAX(l.bbox_ymax)) AS bbox_ymax,
+               ARRAY_TO_STRING(LIST_DISTINCT(FLATTEN(
+                   LIST(STRING_SPLIT(r.search_name, ';'))
+                   || LIST(STRING_SPLIT(l.search_name, ';'))
+               )), ';') AS search_name
+        FROM dupes d
+        JOIN ranked r ON r.gers_id = d.gers_id
+        JOIN ranked l ON l.gers_id = d.leader_id
+        GROUP BY d.leader_id;
+    """)
+    con.execute(f"""
+        COPY (
+            SELECT src.* REPLACE (
+                CASE WHEN m.population > 0 THEN m.population
+                     ELSE src.population END AS population,
+                coalesce(m.bbox_xmin, src.bbox_xmin) AS bbox_xmin,
+                coalesce(m.bbox_ymin, src.bbox_ymin) AS bbox_ymin,
+                coalesce(m.bbox_xmax, src.bbox_xmax) AS bbox_xmax,
+                coalesce(m.bbox_ymax, src.bbox_ymax) AS bbox_ymax,
+                coalesce(m.search_name, src.search_name) AS search_name
+            )
+            FROM read_parquet('{parquet_str}') src
+            LEFT JOIN merged m ON src.gers_id = m.leader_id
+            WHERE src.gers_id NOT IN (SELECT gers_id FROM dupes)
+        ) TO '{output_str}' (FORMAT PARQUET, COMPRESSION ZSTD);
+    """)
     con.close()
     return output_path
 
@@ -1350,6 +1451,12 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         args.parquet,
         args.parquet.with_name(args.parquet.stem + "-wiki" + args.parquet.suffix),
         importance_file,
+    )
+
+    print("Deduplicating same-name locality clusters...")
+    parquet = dedup_localities(
+        parquet,
+        parquet.with_name(parquet.stem + "-dedup" + parquet.suffix),
     )
 
     shard_infos = {}

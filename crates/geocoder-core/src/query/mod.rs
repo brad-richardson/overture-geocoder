@@ -166,20 +166,24 @@ impl NormalizedQuery {
 }
 
 /// Match quality against alternate/translated names (the `search_name`
-/// column: primary + short/common/official names, space-joined).
+/// column: primary + short/common/official names, `;`-separated).
 ///
 /// Exonym queries ("moscow" for Москва, "cairo" for القاهرة) score 0 on the
 /// display-name ladder; without this rung they lose to exact-named homonyms
 /// (Moscow, ID). Capped below display-exact (1.0) so the local name still
 /// wins ties between same-named places.
 ///
-/// `search_name` is a deduplicated token BAG — name boundaries are lost, so
-/// every word of a multi-word primary name appears as a standalone token.
-/// Matching one of those is not matching an alternate name: without the
-/// primary-name exclusion, "york" would score 0.95 against New York City
-/// (only 0.05 below a true exact match) and its importance would let it
-/// bury the exact-named York. The display ladder ([`match_quality`]) is
-/// authoritative for anything that appears in the primary name.
+/// New shards separate distinct alternate names with `;` so multi-word alt
+/// names stay intact and can phrase-match ("mexico city" hits the "mexico
+/// city" segment of Ciudad de México's search_name). Old shards flattened
+/// everything into one deduplicated token bag — no `;` — and evaluate as a
+/// single segment, which preserves their historical behavior exactly.
+///
+/// Matching a word of the *primary* name is not matching an alternate name:
+/// without the primary-name exclusion, "york" would score 0.95 against New
+/// York City (only 0.05 below a true exact match) and its importance would
+/// let it bury the exact-named York. The display ladder ([`match_quality`])
+/// is authoritative for anything that appears in the primary name.
 pub fn alt_name_quality(search_name: &str, primary_name: &str, query: &NormalizedQuery) -> f64 {
     if query.is_empty() || search_name.is_empty() {
         return 0.0;
@@ -192,16 +196,22 @@ pub fn alt_name_quality(search_name: &str, primary_name: &str, query: &Normalize
         return 0.0;
     }
 
-    let padded = format!(" {} ", normalize_for_match(search_name));
-    // Whole word/phrase appears among the names
-    if padded.contains(&query.padded) {
-        return 0.95;
+    let mut best = 0.0_f64;
+    for segment in search_name.split(';') {
+        if segment.is_empty() {
+            continue;
+        }
+        let padded = format!(" {} ", normalize_for_match(segment));
+        // Whole word/phrase appears within this name
+        if padded.contains(&query.padded) {
+            return 0.95;
+        }
+        // A name word starts with the query (autocomplete-style)
+        if padded.contains(&query.prefixed) {
+            best = 0.85;
+        }
     }
-    // A name word starts with the query (autocomplete-style)
-    if padded.contains(&query.prefixed) {
-        return 0.85;
-    }
-    0.0
+    best
 }
 
 pub fn match_quality(primary_name: &str, query: &NormalizedQuery) -> f64 {
@@ -394,8 +404,8 @@ mod tests {
 
     #[test]
     fn test_alt_name_quality_ignores_primary_name_tokens() {
-        // search_name is a token bag, so every word of a multi-word primary
-        // name appears standalone. Those must not earn alt credit: "york"
+        // Legacy token-bag shards: every word of a multi-word primary name
+        // appears standalone. Those must not earn alt credit: "york"
         // scoring 0.95 against NYC would bury the exact-named York.
         assert_eq!(alt("new york city nyc", "New York City", "york"), 0.0);
         assert_eq!(alt("los angeles la", "Los Angeles", "angeles"), 0.0);
@@ -404,6 +414,36 @@ mod tests {
         assert_eq!(alt("san francisco sf", "San Francisco", "franc"), 0.0);
         // A genuine alternate name ("nyc") still gets the rung
         assert_eq!(alt("new york city nyc", "New York City", "nyc"), 0.95);
+    }
+
+    #[test]
+    fn test_alt_name_quality_segmented_phrase_match() {
+        // ';'-separated shards keep name boundaries: a multi-word alternate
+        // name is phrase-matchable (the "mexico city" regression). The
+        // token-bag form of the same data could never reach this rung
+        // because the words are unordered.
+        let cdmx = "ciudad de méxico;cdmx;mexico city;méxico d.f.";
+        assert_eq!(alt(cdmx, "Ciudad de México", "mexico city"), 0.95);
+        // Same phrase against the legacy bag (words reordered by dedup)
+        assert_eq!(
+            alt(
+                "cd. d.f. city mexico cdmx méxico de ciudad",
+                "Ciudad de México",
+                "mexico city"
+            ),
+            0.0
+        );
+        // Word-prefix within a segment still earns the autocomplete rung
+        assert_eq!(alt(cdmx, "Ciudad de México", "mexico ci"), 0.85);
+        // Segments don't leak into each other: no false phrase across ';'
+        assert_eq!(alt("alpha beta;gamma", "Unrelated", "beta gamma"), 0.0);
+        // Primary-name exclusion still wins over segment matches
+        assert_eq!(alt("new york;nyc;big apple", "New York City", "york"), 0.0);
+        // Whole-word match inside one segment
+        assert_eq!(
+            alt("new york;nyc;big apple", "New York City", "apple"),
+            0.95
+        );
     }
 
     #[test]

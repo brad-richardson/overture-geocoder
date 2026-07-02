@@ -22,6 +22,7 @@ from build_shards import (
     build_search_alias,
     build_shard_schema,
     compute_importance,
+    dedup_localities,
     enrich_parquet_with_wiki_importance,
     validate_country_code,
     validate_population_threshold,
@@ -380,12 +381,12 @@ def write_test_parquet(path: Path):
                 ('nyc-001', 1, 'New York City', 'locality', 'megacity', 'US', 'US-NY',
                  8336817, 'Q60', false, false,
                  -74.0060, 40.7128, -74.2591, 40.4774, -73.7004, 40.9176,
-                 'New York City, NY', 'new york city nyc new york',
+                 'New York City, NY', 'new york city;nyc;new york',
                  'us-ny us new york united states'),
                 ('sf-001', 1, 'San Francisco', 'locality', 'city', 'US', 'US-CA',
                  873965, 'Q62', false, false,
                  -122.4194, 37.7749, -122.5151, 37.7034, -122.3568, 37.8324,
-                 'San Francisco, CA', 'san francisco sf',
+                 'San Francisco, CA', 'san francisco;sf',
                  'us-ca us california united states'),
                 ('tiny-001', 1, 'Tinyville', 'locality', 'town', 'US', 'US-NY',
                  15000, NULL, false, false,
@@ -442,6 +443,88 @@ def enriched_parquet(tmp_path):
     out = tmp_path / "divisions-wiki.parquet"
     enrich_parquet_with_wiki_importance(base, out, importance)
     return out
+
+
+def write_dedup_test_parquet(path: Path):
+    """Post-enrichment parquet (has wiki_importance) with duplicate clusters."""
+    con = duckdb.connect()
+    con.execute(f"""
+        COPY (
+            SELECT gers_id, name, subtype, country, region, population,
+                   CAST(wiki_importance AS DOUBLE) AS wiki_importance,
+                   CAST(lon AS DOUBLE) AS lon, CAST(lat AS DOUBLE) AS lat,
+                   CAST(bbox_xmin AS DOUBLE) AS bbox_xmin,
+                   CAST(bbox_ymin AS DOUBLE) AS bbox_ymin,
+                   CAST(bbox_xmax AS DOUBLE) AS bbox_xmax,
+                   CAST(bbox_ymax AS DOUBLE) AS bbox_ymax,
+                   search_name
+            FROM (VALUES
+                -- Duplicate pair ~0.1 km apart: twin-1 leads (higher wiki
+                -- importance) but twin-2 has the larger population.
+                ('twin-1', 'Twinsburg', 'locality', 'US', 'US-OH', 50000, 0.6,
+                 -81.0, 41.0, -81.10, 40.90, -80.90, 41.10,
+                 'twinsburg;twin city'),
+                ('twin-2', 'Twinsburg', 'locality', 'US', 'US-OH', 60000, NULL,
+                 -81.001, 41.001, -81.20, 40.95, -80.95, 41.20,
+                 'twinsburg;tburg'),
+                -- Same name, same region, ~100 km apart: genuinely distinct
+                ('far-1', 'Springfield', 'locality', 'US', 'US-MO', 40000, NULL,
+                 -93.3, 37.2, -93.4, 37.1, -93.2, 37.3, 'springfield'),
+                ('far-2', 'Springfield', 'locality', 'US', 'US-MO', 30000, NULL,
+                 -92.2, 37.5, -92.3, 37.4, -92.1, 37.6, 'springfield'),
+                -- Same name, different region: kept
+                ('other-region', 'Twinsburg', 'locality', 'US', 'US-PA', 20000, NULL,
+                 -81.0, 41.0, -81.1, 40.9, -80.9, 41.1, 'twinsburg'),
+                -- Non-locality with a colliding name: untouched
+                ('region-tw', 'Twinsburg', 'region', 'US', 'US-OH', NULL, NULL,
+                 -81.0, 41.0, -82.0, 40.0, -80.0, 42.0, 'twinsburg')
+            ) AS t(gers_id, name, subtype, country, region, population,
+                   wiki_importance, lon, lat, bbox_xmin, bbox_ymin,
+                   bbox_xmax, bbox_ymax, search_name)
+        ) TO '{path}' (FORMAT PARQUET);
+    """)
+    con.close()
+
+
+class TestDedupLocalities:
+    @pytest.fixture
+    def deduped(self, tmp_path):
+        base = tmp_path / "enriched.parquet"
+        write_dedup_test_parquet(base)
+        out = tmp_path / "deduped.parquet"
+        dedup_localities(base, out)
+        con = duckdb.connect()
+        cur = con.execute(f"SELECT * FROM read_parquet('{out}')")
+        cols = [d[0] for d in cur.description]
+        rows = {r[cols.index("gers_id")]: dict(zip(cols, r)) for r in cur.fetchall()}
+        con.close()
+        return rows
+
+    def test_duplicate_dropped_leader_kept(self, deduped):
+        assert "twin-1" in deduped
+        assert "twin-2" not in deduped
+
+    def test_distinct_same_name_places_kept(self, deduped):
+        assert "far-1" in deduped and "far-2" in deduped
+        assert "other-region" in deduped
+        assert "region-tw" in deduped
+        assert len(deduped) == 5
+
+    def test_leader_absorbs_cluster(self, deduped):
+        leader = deduped["twin-1"]
+        # Max population across the cluster
+        assert leader["population"] == 60000
+        # Bbox union
+        assert leader["bbox_xmin"] == -81.20
+        assert leader["bbox_ymax"] == 41.20
+        # search_name segment union (order-independent)
+        assert set(leader["search_name"].split(";")) == {
+            "twinsburg", "twin city", "tburg"}
+
+    def test_untouched_rows_pass_through(self, deduped):
+        far = deduped["far-1"]
+        assert far["population"] == 40000
+        assert far["search_name"] == "springfield"
 
 
 class TestWikiImportanceJoin:
