@@ -7,6 +7,10 @@ on:
         description: 'Version string (e.g., 2026-02-26.0)'
         type: string
         required: true
+      release:
+        description: 'Overture release the version was built from (e.g., 2026-01-21.0). Must match the original build — discovering "latest" here could mix releases within one version.'
+        type: string
+        required: true
       prefixes:
         description: 'Comma-separated failed prefixes (e.g., 001,401,801); empty = skip registry patching'
         type: string
@@ -70,6 +74,7 @@ jobs:
             --phase stage-registry \
             --prefix-len 3 --workers 8 \
             --version ${{ inputs.version }} \
+            --release ${{ inputs.release }} \
             --prefixes "${{ inputs.prefixes }}" \
             --marker-ranges "${{ inputs.marker_ranges }}"
 
@@ -78,12 +83,49 @@ jobs:
         run: |
           python -u scripts/build_id_index.py \
             --phase stage-base --prefix-len 3 \
-            --version ${{ inputs.version }}
+            --version ${{ inputs.version }} \
+            --release ${{ inputs.release }}
 
-  build:
+  # Patched prefixes are rebuilt directly (--prefixes bypasses the per-range
+  # build markers). The range-matrix job below would skip any range whose
+  # marker exists — i.e., exactly the ranges containing the patched shards.
+  build-patched:
     runs-on: ubuntu-24.04-arm
     needs: patch-stage
-    if: inputs.run_build
+    if: inputs.run_build && inputs.prefixes != ''
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb==1.5.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: "Build patched prefixes"
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase build --prefix-len 3 --workers 8 \
+            --version ${{ inputs.version }} \
+            --release ${{ inputs.release }} \
+            --prefixes "${{ inputs.prefixes }}"
+
+  # Full range-matrix build: for resuming a failed build with no specific
+  # prefixes to patch. Ranges whose _SUCCESS marker exists are skipped.
+  build-ranges:
+    runs-on: ubuntu-24.04-arm
+    needs: patch-stage
+    if: inputs.run_build && inputs.prefixes == ''
     strategy:
       fail-fast: false
       matrix:
@@ -137,13 +179,21 @@ jobs:
           python -u scripts/build_id_index.py \
             --phase build --prefix-len 3 --workers 8 \
             --version ${{ inputs.version }} \
+            --release ${{ inputs.release }} \
             --prefix-start ${{ matrix.prefix_start }} \
             --prefix-end ${{ matrix.prefix_end }}
 
   metadata:
     runs-on: ubuntu-24.04-arm
-    needs: build
-    if: inputs.run_metadata
+    needs: [patch-stage, build-patched, build-ranges]
+    # Run when requested even if both build jobs were skipped (run_build=false)
+    # — the implicit success() would otherwise skip this job whenever a
+    # dependency is skipped. Never run past a failed stage or build.
+    if: >-
+      ${{ !cancelled() && inputs.run_metadata
+          && needs.patch-stage.result == 'success'
+          && needs.build-patched.result != 'failure'
+          && needs.build-ranges.result != 'failure' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -167,12 +217,14 @@ jobs:
         run: |
           python -u scripts/build_id_index.py \
             --phase metadata --prefix-len 3 \
-            --version ${{ inputs.version }}
+            --version ${{ inputs.version }} \
+            --release ${{ inputs.release }}
 
       - name: Summary
         run: |
           echo "## Patch ID Stage Complete" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${{ inputs.version }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Overture release:** ${{ inputs.release }}" >> $GITHUB_STEP_SUMMARY
           echo "**Patched prefixes:** ${{ inputs.prefixes }}" >> $GITHUB_STEP_SUMMARY
           echo "**Marked ranges:** ${{ inputs.marker_ranges }}" >> $GITHUB_STEP_SUMMARY

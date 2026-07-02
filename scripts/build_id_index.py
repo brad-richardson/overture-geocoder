@@ -146,8 +146,12 @@ def _is_transient(exc):
     return True
 
 
-def _retry_transient(fn, retries=3, backoff=30):
-    """Wrap fn to retry on transient HTTP/IO errors (502, 503, resets, etc.)."""
+def _retry_transient(fn, retries=3, backoff=30, on_retry=None):
+    """Wrap fn to retry on transient HTTP/IO errors (502, 503, resets, etc.).
+
+    on_retry, if given, runs before each retry (not before the first
+    attempt) — used to clean up partial output from the failed attempt.
+    """
     def _wrapped():
         for attempt in range(retries):
             try:
@@ -157,6 +161,8 @@ def _retry_transient(fn, retries=3, backoff=30):
                     wait = backoff * (2 ** attempt)
                     print(f"    Transient error (attempt {attempt + 1}/{retries}): {exc}")
                     print(f"    Retrying in {wait}s...")
+                    if on_retry:
+                        on_retry()
                     time.sleep(wait)
                 else:
                     raise
@@ -368,6 +374,67 @@ def _clear_staged_registry(r2_config, version, prefix_len,
         _delete_r2_keys(r2_config, keys)
 
 
+# A partitioned COPY keeps a write buffer per active partition. With up
+# to 1024 partitions per range job that OOMs the runner, so each range
+# is split into sub-ranges (~SUB_RANGE_PARTITIONS partitions per COPY).
+SUB_RANGE_PARTITIONS = 128
+
+
+def _registry_sub_ranges(prefix_len, prefixes=None,
+                         prefix_start=None, prefix_end=None):
+    """Build the sub-range plan for registry staging.
+
+    Returns (sub_ranges, label) where each sub-range is a
+    (filter_sql, sub_label, clear_kwargs) tuple; clear_kwargs are the
+    _clear_staged_registry arguments that target exactly that sub-range's
+    partitions, so a retry after an interrupted COPY can remove partial
+    output from the failed attempt.
+
+    With neither prefixes nor a range, covers the whole prefix space
+    through the same sub-ranged path a CI range job uses, so each COPY
+    stays memory-bounded.
+    """
+    if prefixes is not None:
+        # Explicit prefix list (smoke test / patching): prefix-LIKE filters
+        # keep predicate pushdown on the sorted registry parquet.
+        like_filters = " OR ".join(f"id LIKE '{p}%'" for p in prefixes)
+        sub_ranges = [(f"({like_filters})", f"{len(prefixes)} explicit prefixes",
+                       {"prefixes": list(prefixes)})]
+        return sub_ranges, sub_ranges[0][1]
+
+    if not (prefix_start and prefix_end):
+        prefix_start = format(0, f'0{prefix_len}x')
+        prefix_end = format(16 ** prefix_len - 1, f'0{prefix_len}x')
+
+    # IDs are lowercase hex UUID strings; for prefix_len <= 8 the first
+    # prefix_len chars precede the first hyphen, so plain string bounds
+    # cover the range (and push down to row-group stats).
+    lo, hi = int(prefix_start, 16), int(prefix_end, 16)
+    sub_ranges = []
+    for sub_lo in range(lo, hi + 1, SUB_RANGE_PARTITIONS):
+        sub_hi = min(sub_lo + SUB_RANGE_PARTITIONS - 1, hi)
+        sub_lo_hex = format(sub_lo, f'0{prefix_len}x')
+        sub_hi_hex = format(sub_hi, f'0{prefix_len}x')
+        cond = f"id >= '{sub_lo_hex}'"
+        upper_idx = sub_hi + 1
+        if upper_idx < 16 ** prefix_len:
+            upper = format(upper_idx, f'0{prefix_len}x')
+            cond += f" AND id < '{upper}'"
+        # Also bound the partition key itself: the raw-id bounds above
+        # assume lowercase hex. A non-lowercase ID string-sorts between
+        # '9zz' and 'a00', so without this it would be staged under a
+        # partition owned by a PARALLEL range job, racing that job's
+        # clear/write cycle.
+        cond += (f" AND lower(left(replace(id, '-', ''), {prefix_len}))"
+                 f" BETWEEN '{sub_lo_hex}' AND '{sub_hi_hex}'")
+        sub_ranges.append(
+            (cond, f"{sub_lo_hex}-{sub_hi_hex}",
+             {"prefix_start": sub_lo_hex, "prefix_end": sub_hi_hex})
+        )
+    label = f"range {prefix_start}-{prefix_end} ({len(sub_ranges)} sub-ranges)"
+    return sub_ranges, label
+
+
 def phase_partition_r2(prefix_len, r2_config, version,
                        prefixes=None, prefix_start=None, prefix_end=None):
     """Partition the Overture registry into per-prefix staging files on R2.
@@ -380,40 +447,14 @@ def phase_partition_r2(prefix_len, r2_config, version,
     bucket = r2_config["bucket"]
     dest = f"s3://{bucket}/{version}/staging/id-partitioned"
 
-    # A partitioned COPY keeps a write buffer per active partition. With up
-    # to 1024 partitions per range job that OOMs the runner, so each range
-    # is split into sub-ranges (~SUB_RANGE_PARTITIONS partitions per COPY).
-    SUB_RANGE_PARTITIONS = 128
     # A sub-range COPY normally takes ~5 min; interrupt anything past this
     # so the transient-retry wrapper can take over (a wedged S3 read once
     # hung a range job for 2.5h).
     SUBRANGE_COPY_TIMEOUT_S = 20 * 60
 
-    if prefixes is not None:
-        # Explicit prefix list (smoke test / patching): prefix-LIKE filters
-        # keep predicate pushdown on the sorted registry parquet.
-        like_filters = " OR ".join(f"id LIKE '{p}%'" for p in prefixes)
-        sub_ranges = [(f"({like_filters})", f"{len(prefixes)} explicit prefixes")]
-        label = sub_ranges[0][1]
-    elif prefix_start and prefix_end:
-        # IDs are lowercase hex UUID strings; for prefix_len <= 8 the first
-        # prefix_len chars precede the first hyphen, so plain string bounds
-        # cover the range (and push down to row-group stats).
-        lo, hi = int(prefix_start, 16), int(prefix_end, 16)
-        sub_ranges = []
-        for sub_lo in range(lo, hi + 1, SUB_RANGE_PARTITIONS):
-            sub_hi = min(sub_lo + SUB_RANGE_PARTITIONS - 1, hi)
-            cond = f"id >= '{format(sub_lo, f'0{prefix_len}x')}'"
-            upper_idx = sub_hi + 1
-            if upper_idx < 16 ** prefix_len:
-                upper = format(upper_idx, f'0{prefix_len}x')
-                cond += f" AND id < '{upper}'"
-            sub_ranges.append(
-                (cond, f"{format(sub_lo, f'0{prefix_len}x')}-{format(sub_hi, f'0{prefix_len}x')}")
-            )
-        label = f"range {prefix_start}-{prefix_end} ({len(sub_ranges)} sub-ranges)"
-    else:
-        raise ValueError("registry staging requires --prefixes or a prefix range")
+    sub_ranges, label = _registry_sub_ranges(
+        prefix_len, prefixes=prefixes,
+        prefix_start=prefix_start, prefix_end=prefix_end)
 
     # Re-run safety: remove leftovers from a previous partial attempt
     _clear_staged_registry(r2_config, version, prefix_len,
@@ -430,7 +471,7 @@ def phase_partition_r2(prefix_len, r2_config, version,
     con.execute("SET preserve_insertion_order = false;")
     con.execute("SET s3_region = 'us-west-2';")
 
-    for sub_filter, sub_label in sub_ranges:
+    for sub_filter, sub_label, sub_target in sub_ranges:
         def _do_copy(sub_filter=sub_filter):
             # Watchdog: a sub-range COPY normally finishes in ~5 minutes; a
             # range job once wedged for hours on a stalled read despite HTTP
@@ -456,7 +497,14 @@ def phase_partition_r2(prefix_len, r2_config, version,
             finally:
                 watchdog.cancel()
 
-        _retry_transient(_do_copy)()
+        def _clear_partial(sub_target=sub_target):
+            # An interrupted COPY may already have flushed some partition
+            # files, and the retry can write fewer files per partition —
+            # stale extras from the failed attempt would silently duplicate
+            # rows in the final shards. Clear this sub-range before retrying.
+            _clear_staged_registry(r2_config, version, prefix_len, **sub_target)
+
+        _retry_transient(_do_copy, on_retry=_clear_partial)()
         print(f"  [registry]   sub-range {sub_label} done")
     con.close()
 
@@ -705,6 +753,13 @@ def _worker_build_r2_batch(args_tuple):
         con = duckdb.connect()
         con.execute("SET memory_limit = '2GB';")
         con.execute("LOAD httpfs;")
+        # Same hung-socket guards as _r2_con: without them a wedged R2
+        # read/write in a pool worker hangs the whole build job until the
+        # 6h Actions limit (the exact failure the staging phase was
+        # hardened against).
+        con.execute("SET http_timeout = 120000;")  # ms
+        con.execute("SET http_retries = 5;")
+        con.execute("SET http_keep_alive = false;")
         con.execute(f"""
             CREATE SECRET r2 (
                 TYPE S3,
@@ -1214,8 +1269,13 @@ def build_id_index(args):
             marker_ranges = [r.strip() for r in args.marker_ranges.split(",")]
 
         staging_marker_key = f"id-partitioned{range_suffix}"
-        # When patching with --prefixes + --marker-ranges, skip the marker check
-        if marker_ranges is None and _read_staging_marker(r2_config, version, staging_marker_key) is not None:
+        # Explicit-prefix patch runs never consult run-level markers: the
+        # whole point of a patch is to re-stage those prefixes, and the
+        # suffix-less full-run marker must be neither read (it would skip
+        # the patch) nor written (it would make every later patch a no-op).
+        skip = (not args.prefixes and marker_ranges is None
+                and _read_staging_marker(r2_config, version, staging_marker_key) is not None)
+        if skip:
             print(f"\nStage registry: Skipped ({staging_marker_key} complete for {version})")
         else:
             print(f"\nStage registry: Partition registry")
@@ -1233,14 +1293,16 @@ def build_id_index(args):
             else:
                 phase_partition_r2(args.prefix_len, r2_config, version)
 
-            # Write markers for explicit ranges (patching) or the computed range
+            # Write markers for explicit ranges (patching) or the computed
+            # range. A --prefixes run without --marker-ranges writes NO
+            # marker: it only re-staged a subset, so no range is complete.
             if marker_ranges:
                 for mr in marker_ranges:
                     mk = f"id-partitioned-{mr}"
                     _write_staging_marker(r2_config, version, mk,
                                           len(stage_prefixes) if stage_prefixes else shard_count)
                     print(f"  Wrote marker: {mk}")
-            else:
+            elif not args.prefixes:
                 _write_staging_marker(r2_config, version, staging_marker_key,
                                       len(stage_prefixes) if stage_prefixes else shard_count)
             phase_times["Stage registry"] = time.time() - t0
@@ -1262,7 +1324,12 @@ def build_id_index(args):
     results = None
     if run_all or "build" in phases:
         build_marker_key = f"build{range_suffix}"
-        marker = _read_staging_marker(r2_config, version, build_marker_key)
+        # Explicit-prefix patch builds bypass markers entirely: they must
+        # re-run unconditionally, and a suffix-less "build" marker would both
+        # block future patch builds and corrupt _sum_build_marker_records
+        # (its build*/_SUCCESS glob would double-count the patched prefixes).
+        marker = (None if args.prefixes
+                  else _read_staging_marker(r2_config, version, build_marker_key))
         if marker is not None:
             print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
@@ -1287,12 +1354,19 @@ def build_id_index(args):
                         print(f"    {r[0]}: {r[3]}")
                 raise RuntimeError(f"Build failed: {errs} shard errors")
 
-            _write_staging_marker(r2_config, version, build_marker_key, built,
-                                  extra={"records": records})
+            if not args.prefixes:
+                _write_staging_marker(r2_config, version, build_marker_key, built,
+                                      extra={"records": records})
 
     # === Metadata ===
     if run_all or "metadata" in phases:
-        meta_marker = _read_staging_marker(r2_config, version, "metadata")
+        # An explicitly requested metadata phase always regenerates (it is
+        # idempotent and cheap): after a patch build the existing marker
+        # describes stale metadata. The marker only short-circuits resumed
+        # full-pipeline runs.
+        explicit_metadata = "metadata" in phases
+        meta_marker = (None if explicit_metadata
+                       else _read_staging_marker(r2_config, version, "metadata"))
         if meta_marker is not None:
             print(f"\nMetadata: Skipped (metadata complete for {version})")
         else:
