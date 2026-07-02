@@ -10,10 +10,9 @@ use rusqlite::{params, Connection, OpenFlags};
 use crate::error::Result;
 use crate::geo::haversine_distance;
 use crate::query::{
-    alt_name_quality, calculate_boosted_score, match_quality, prepare_fts_query,
-    BM25_TIEBREAK_WEIGHT, REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL,
-    REVERSE_GEOCODE_SQL, SEARCH_DIVISIONS_SQL, SEARCH_DIVISIONS_SQL_NO_MATH,
-    SEARCH_DIVISIONS_SQL_WEIGHTED, STATIC_IMPORTANCE_WEIGHT,
+    alt_name_quality, match_quality, prepare_fts_query, NormalizedQuery, BM25_TIEBREAK_WEIGHT,
+    REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_SQL,
+    SEARCH_DIVISIONS_SQL, SEARCH_DIVISIONS_SQL_WEIGHTED, STATIC_IMPORTANCE_WEIGHT,
 };
 use crate::types::{
     DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
@@ -30,8 +29,6 @@ const REVERSE_TIEBREAK_AREA_FACTOR: f64 = 4.0;
 /// A SQLite database connection for geocoding queries.
 pub struct Database {
     conn: Connection,
-    /// Whether the build supports SQL math functions (`ln`); probed lazily.
-    has_math_fns: OnceCell<bool>,
     /// Whether the reverse shard has the `divisions_reverse_rtree` index.
     has_rtree: OnceCell<bool>,
     /// Whether the forward shard carries a precomputed `importance` column
@@ -63,7 +60,6 @@ impl Database {
 
         Ok(Self {
             conn,
-            has_math_fns: OnceCell::new(),
             has_rtree: OnceCell::new(),
             has_static_importance: OnceCell::new(),
         })
@@ -109,15 +105,6 @@ impl Database {
         Self::new(conn)
     }
 
-    /// Whether this SQLite build provides math functions (`ln` etc.).
-    fn has_math_fns(&self) -> bool {
-        *self.has_math_fns.get_or_init(|| {
-            self.conn
-                .query_row("SELECT ln(1.0)", [], |_| Ok(()))
-                .is_ok()
-        })
-    }
-
     /// Whether the forward shard has the precomputed `importance` column
     /// (new schema: static prominence + weighted multi-column FTS). Probed
     /// by preparing a statement against the column; legacy shards fail the
@@ -161,7 +148,8 @@ impl Database {
         // retry with prefix wildcard to match compact aliases (e.g., "newyork" → "newyork"*)
         if results.is_empty() {
             let tokens: Vec<&str> = query.text.split_whitespace().collect();
-            if tokens.len() == 1 && tokens[0].len() >= 6 {
+            // chars, not bytes: a 2-3 char CJK/Cyrillic query is not "long"
+            if tokens.len() == 1 && tokens[0].chars().count() >= 6 {
                 let fallback_query = prepare_fts_query(&query.text, true);
                 if fallback_query != fts_query {
                     let mut fallback = self.execute_fts_search(&fallback_query, query)?;
@@ -182,8 +170,9 @@ impl Database {
     /// The SQL is schema-detected per shard:
     /// - New shards (precomputed `importance` column + weighted multi-column
     ///   FTS): blend text score with static importance in the ORDER BY.
-    /// - Legacy shards: population boost in the ORDER BY when the build has
-    ///   math functions, else raw BM25 with the boost applied in Rust.
+    /// - Legacy shards: population boost in the ORDER BY (`ln` is registered
+    ///   as a Rust scalar function in [`Database::new`] when the build lacks
+    ///   it, so the in-SQL boost is always available).
     ///
     /// Either way the in-SQL blend only protects the fetch LIMIT; the final
     /// ordering is the composed score computed here.
@@ -193,16 +182,10 @@ impl Database {
         query: &GeocoderQuery,
     ) -> Result<Vec<GeocoderResult>> {
         let static_path = self.has_static_importance();
-        // Legacy path: population boost applied inside the SQL ORDER BY when
-        // the build has math functions, so high-population matches can't be
-        // cut off by the fetch LIMIT before the boost is applied.
-        let in_sql_boost = !static_path && self.has_math_fns();
         let sql = if static_path {
             SEARCH_DIVISIONS_SQL_WEIGHTED
-        } else if in_sql_boost {
-            SEARCH_DIVISIONS_SQL
         } else {
-            SEARCH_DIVISIONS_SQL_NO_MATH
+            SEARCH_DIVISIONS_SQL
         };
         let mut stmt = self.conn.prepare_cached(sql)?;
 
@@ -220,13 +203,11 @@ impl Database {
             } else {
                 // Legacy schema: derive static prominence from the
                 // population-boosted BM25 score (the historical formula).
-                let score: f64 = row.get(13)?;
-                let boosted_score = if in_sql_boost {
-                    score
-                } else {
-                    calculate_boosted_score(score, population)
-                };
-                ((-boosted_score / 50.0).max(0.0), boosted_score)
+                // Clamped to the documented nominal 0-1 scale: the popboost
+                // alone can push -score/50 past 1.0 for mega-cities, which
+                // would let the 0.5-weighted static term exceed its ceiling.
+                let boosted_score: f64 = row.get(13)?;
+                ((-boosted_score / 50.0).clamp(0.0, 1.0), boosted_score)
             };
 
             Ok(DivisionRow {
@@ -262,7 +243,9 @@ impl Database {
 
         // Compose the final score per result (P3): match quality dominates,
         // static importance disambiguates same-name places, normalized BM25
-        // is a small tiebreaker.
+        // is a small tiebreaker. Query normalization is hoisted out of the
+        // per-row loop (hundreds of rows per shard).
+        let normalized_query = NormalizedQuery::new(&query.text);
         let mut results: Vec<GeocoderResult> = division_rows
             .into_iter()
             .map(|row| {
@@ -273,10 +256,10 @@ impl Database {
                 };
                 // Best of the display-name ladder and the alternate-name rung
                 // (exonyms like "moscow" for Москва live in search_name).
-                let quality = match_quality(&row.primary_name, &query.text).max(
+                let quality = match_quality(&row.primary_name, &normalized_query).max(
                     row.search_name
                         .as_deref()
-                        .map(|names| alt_name_quality(names, &query.text))
+                        .map(|names| alt_name_quality(names, &row.primary_name, &normalized_query))
                         .unwrap_or(0.0),
                 );
                 let importance = quality
@@ -527,15 +510,17 @@ mod tests {
         );
     "#;
 
-    /// The deployed query path depends on SQL math functions; if the bundled
-    /// SQLite ever drops them, we want a test failure, not a fallback surprise.
+    /// The legacy query path applies the population boost via ln() in SQL;
+    /// Database::new registers ln() when the bundled SQLite lacks it. If
+    /// that ever breaks we want a test failure, not a runtime surprise.
     #[test]
     fn test_math_functions_available() {
         let db = db_with(FORWARD_SCHEMA);
-        assert!(
-            db.has_math_fns(),
-            "bundled SQLite lacks ln(); the boost-in-SQL search path is disabled"
-        );
+        let ln2: f64 = db
+            .conn
+            .query_row("SELECT ln(2.0)", [], |row| row.get(0))
+            .expect("ln() must be available (native or registered)");
+        assert!((ln2 - 2.0_f64.ln()).abs() < 1e-12);
     }
 
     /// A high-population city must outrank low-population matches even when
@@ -661,6 +646,30 @@ mod tests {
         assert_eq!(
             results[0].gers_id, "moscow-ru",
             "alt-name rung (0.95) + high importance must beat exact homonym"
+        );
+    }
+
+    /// A world-famous multi-word city must NOT capture a query for one of
+    /// its constituent words: search_name is a token bag, and before the
+    /// primary-name exclusion "york" scored 0.95 against New York City,
+    /// whose importance then buried the exact-named York.
+    #[test]
+    fn test_new_schema_primary_word_does_not_beat_exact_name() {
+        let mut setup = String::from(NEW_FORWARD_SCHEMA);
+        setup.push_str(
+            "INSERT INTO divisions VALUES (1, 'nyc', 'locality', 'New York City',
+             40.7, -74.0, -75, 40, -73, 41, 8500000, 'US', NULL, 0.95,
+             'new york city nyc', '', 'United States US');\n",
+        );
+        insert_new_schema_row(&mut setup, 2, "york-uk", "York", 0.55);
+        setup.push_str(NEW_FTS_SYNC);
+        let db = db_with(&setup);
+
+        let results = db.search(&GeocoderQuery::new("york")).unwrap();
+        assert_eq!(results.len(), 2);
+        assert_eq!(
+            results[0].gers_id, "york-uk",
+            "exact-named York must beat NYC's token-bag hit for 'york'"
         );
     }
 
