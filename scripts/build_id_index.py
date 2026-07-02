@@ -82,6 +82,14 @@ RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
 RELEASE_THEMES = ["addresses", "base"]
 
+# Rows per parquet row group in output shards. Every cold /id lookup
+# range-reads one full row group, so this bounds the cold-read size
+# (~100k rows ≈ 2.4-3 MB). Chosen deliberately (f78a6a0): ~10 groups per
+# shard, and sorted UUIDs + row-group stats already skip ~90% of data per
+# lookup. If this shrinks, the worker's FOOTER_SUFFIX_SIZE (stac.rs) must
+# grow in the same change — more row groups means a bigger footer.
+ROW_GROUP_SIZE = 100_000
+
 
 def get_version(suffix="0"):
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
@@ -520,8 +528,13 @@ def phase_partition_r2(prefix_len, r2_config, version,
 def _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=None):
     """Query for release IDs from a specific theme/type.
 
-    Includes a computed `prefix` column so the build phase can filter
-    on it with predicate pushdown (stored column vs computed expression).
+    Includes a computed `prefix` column so the build phase can filter on it
+    with predicate pushdown (stored column vs computed expression), and a
+    `bucket` column (first hex char) used as the staging partition key: 16
+    buckets means at most 16 live write buffers during the partitioned COPY,
+    far below the 128 the registry staging sustains, regardless of how large
+    release themes grow. (Per-prefix PARTITION_BY — 4,096 buffers — OOMed
+    the runners and was retired; see the perf plan doc.)
     """
     source = f"'{RELEASE_S3}{release_version}/theme={theme}/type={type_name}/**/*.parquet'"
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
@@ -530,7 +543,8 @@ def _release_id_query_for_type(prefix_len, release_version, theme, type_name, li
             id::UUID as id,
             bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
             bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
-            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+            lower(left(replace(id, '-', ''), {prefix_len})) as prefix,
+            lower(left(replace(id, '-', ''), 1)) as bucket
         FROM read_parquet({source}, union_by_name=true)
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
         {limit_clause}
@@ -591,9 +605,38 @@ def _discover_release_types(release_version, retries=3):
     return sorted(types)
 
 
+def _clear_release_staging(r2_config, version, staging_dir):
+    """Delete staged release files for one theme/type staging dir.
+
+    A failed partitioned COPY can leave per-bucket files behind; a re-run
+    may write differently-named files, so stale extras would silently
+    duplicate data in the final shards. Clearing first makes retries exact.
+    """
+    bucket = r2_config["bucket"]
+    con = _r2_con(r2_config)
+    try:
+        files = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{bucket}/{version}/staging/{staging_dir}/**/*.parquet",
+        ))()
+    finally:
+        con.close()
+    keys = [f.split(f"s3://{bucket}/", 1)[-1] for f in files]
+    if keys:
+        print(f"    [release] Clearing {len(keys)} stale staged files "
+              f"from {staging_dir}...")
+        _delete_r2_keys(r2_config, keys)
+
+
 def _partition_release_type(theme, type_name, prefix_len, release_version,
                             r2_config, version, limit=None):
-    """Stage a single release theme/type as one parquet file on R2."""
+    """Stage a single release theme/type to R2, partitioned into 16 buckets.
+
+    PARTITION_BY the first hex char of the prefix: build range jobs then
+    read only their own buckets (000-3ff -> buckets 0..3) with real
+    pushdown, and per-job disk spill stays proportional to a quarter of one
+    theme no matter how large the themes grow.
+    """
     staging_dir = f"id-release-{theme}-{type_name}"
 
     # Skip if this type already completed
@@ -602,7 +645,7 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
         print(f"    [release] {theme}/{type_name} already complete, skipping")
         return (theme, type_name)
 
-    dest = f"s3://{r2_config['bucket']}/{version}/staging/{staging_dir}/data.parquet"
+    dest = f"s3://{r2_config['bucket']}/{version}/staging/{staging_dir}"
 
     con = _r2_con(r2_config)
     con.execute("SET memory_limit = '4GB';")
@@ -614,13 +657,16 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
         con.execute(f"""
             COPY ({query})
             TO '{dest}'
-            (FORMAT PARQUET, COMPRESSION ZSTD);
+            (FORMAT PARQUET, COMPRESSION ZSTD, PARTITION_BY (bucket));
         """)
 
-    _retry_transient(_do_copy)()
+    _retry_transient(
+        _do_copy,
+        on_retry=lambda: _clear_release_staging(r2_config, version, staging_dir),
+    )()
     con.close()
 
-    _write_staging_marker(r2_config, version, staging_dir, 1)
+    _write_staging_marker(r2_config, version, staging_dir, 16)
     return (theme, type_name)
 
 
@@ -747,7 +793,8 @@ def _worker_build_r2_batch(args_tuple):
     Release files are pre-downloaded locally by the caller and passed as local
     paths. All reads are local; only output writes go to R2.
     """
-    staging_prefix, output_prefixes, r2_config, version, release_files = args_tuple
+    (staging_prefix, output_prefixes, r2_config, version, release_files,
+     row_group_size) = args_tuple
 
     bucket = r2_config['bucket']
     results = []
@@ -848,7 +895,8 @@ def _worker_build_r2_batch(args_tuple):
                     COPY (
                         SELECT * FROM ({union_query}) ORDER BY id
                     ) TO '{r2_dest}'
-                    (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
+                    (FORMAT PARQUET, COMPRESSION UNCOMPRESSED,
+                     ROW_GROUP_SIZE {int(row_group_size)});
                 """)
             _retry_transient(_do_copy)()
 
@@ -876,14 +924,41 @@ def _worker_build_r2_batch(args_tuple):
 def _discover_release_staging_files(con, r2_config, version):
     """Discover all id-release-* staging files in R2.
 
-    Returns a list of S3 paths to single-file release staging parquets.
-    An empty listing is acceptable (no release staging yet); transient
-    errors are retried and real errors propagate.
+    Handles both layouts: bucketed (`id-release-*/bucket=X/*.parquet`, the
+    current 16-bucket staging) and legacy single-file
+    (`id-release-*/data.parquet`, pre-bucketing versions — kept so patch
+    runs against older versions still work). An empty listing is acceptable
+    (no release staging yet); transient errors are retried and real errors
+    propagate.
     """
     bucket = r2_config["bucket"]
     staging_base = f"s3://{bucket}/{version}/staging"
-    return _retry_transient(lambda: _glob_files(
+    bucketed = _retry_transient(lambda: _glob_files(
+        con, f"{staging_base}/id-release-*/bucket=*/*.parquet"))()
+    legacy = _retry_transient(lambda: _glob_files(
         con, f"{staging_base}/id-release-*/data.parquet"))()
+    return bucketed + legacy
+
+
+def _release_files_for_prefixes(release_files, prefixes):
+    """Filter staged release files to the buckets covering `prefixes`.
+
+    Bucketed files (`/bucket=X/`) are kept only when X is the first hex
+    char of some target prefix — this is the read-side payoff of bucketed
+    staging (a 000-3ff range job reads 4 of 16 buckets per theme). Legacy
+    single-file paths carry every bucket and are always kept.
+    """
+    if not prefixes:
+        return list(release_files)
+    buckets = {p[0] for p in prefixes}
+    kept = []
+    for f in release_files:
+        if "/bucket=" in f:
+            bucket_char = f.split("/bucket=", 1)[-1].split("/", 1)[0]
+            if bucket_char not in buckets:
+                continue
+        kept.append(f)
+    return kept
 
 
 def _discover_staging_prefixes(r2_config, version):
@@ -904,12 +979,16 @@ def _discover_staging_prefixes(r2_config, version):
         if prefix:
             prefixes.add(prefix)
 
-    # Also include prefixes from release staging files (release-only IDs)
-    for release_path in release_files:
-        def _distinct_prefixes(path=release_path):
+    # Also include prefixes from release staging files (release-only IDs).
+    # One query over the whole file list (bucketed staging has ~16 files
+    # per theme/type; per-file queries would multiply round-trips).
+    if release_files:
+        file_list = ", ".join(f"'{p}'" for p in release_files)
+
+        def _distinct_prefixes():
             return con.execute(f"""
                 SELECT DISTINCT prefix
-                FROM read_parquet('{path}')
+                FROM read_parquet([{file_list}], union_by_name=true)
             """).fetchall()
         rows = _retry_transient(_distinct_prefixes)()
         prefixes.update(r[0] for r in rows if r[0])
@@ -918,7 +997,8 @@ def _discover_staging_prefixes(r2_config, version):
     return sorted(prefixes), release_files
 
 
-def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
+def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
+                   row_group_size=ROW_GROUP_SIZE):
     """Build parquet shards from R2 staging, upload to R2.
 
     If prefixes is provided, only build those specific prefixes (for parallel
@@ -947,49 +1027,56 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
         else:
             prefixes = all_prefixes
 
+    # Filter to the buckets this job actually needs (bucketed staging), then
+    # download and merge everything into ONE local file sorted by
+    # (prefix, id). One file means one probe per prefix in the workers
+    # instead of one per theme/type, and one sorted dataset to range-scan.
+    release_files = _release_files_for_prefixes(release_files, prefixes)
     if release_files:
-        print(f"  Release files: {len(release_files)}")
+        print(f"  Release files (after bucket filter): {len(release_files)}")
 
-    # Download release files locally, sorted by (prefix, id) for fast sequential access
     local_release_files = []
     if release_files:
-        print(f"  Downloading and sorting {len(release_files)} release files locally...")
-        # Only this job's prefixes: a range job needs a quarter of each
-        # release file, and the ORDER BY's disk spill is proportional to
-        # input — sorting the full addresses file once filled a runner's
+        print(f"  Downloading and merging release staging locally...")
+        # Only this job's prefixes: a range job needs a quarter of the
+        # release data, and the ORDER BY's disk spill is proportional to
+        # input — sorting the full addresses theme once filled a runner's
         # 46 GB and killed the job. For explicit prefix lists the bounds
         # are a superset (harmless; workers re-filter per prefix).
         release_where = ""
         if prefixes:
             lo, hi = min(prefixes), max(prefixes)
             release_where = f"WHERE prefix >= '{lo}' AND prefix <= '{hi}'"
+        local_path = f"/tmp/build-release-merged-{os.getpid()}.parquet"
+        file_list = ", ".join(f"'{p}'" for p in release_files)
+        t_dl = time.time()
         dl_con = _r2_con(r2_config)
         dl_con.execute("SET memory_limit = '4GB';")
-        for rf in release_files:
-            name = rf.split("/staging/")[-1].split("/")[0]
-            local_path = f"/tmp/build-release-{name}.parquet"
-            t_dl = time.time()
 
-            # Hard-fail if a release file cannot be downloaded: skipping it
-            # would silently drop its IDs from the index.
-            def _download_release(rf=rf, local_path=local_path):
-                dl_con.execute(f"""
-                    COPY (
-                        SELECT * FROM read_parquet('{rf}')
-                        {release_where}
-                        ORDER BY prefix, id
-                    ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-                """)
-            _retry_transient(_download_release)()
-
-            size_mb = os.path.getsize(local_path) / 1024 / 1024
-            print(f"    {name}: {size_mb:.0f} MB ({time.time() - t_dl:.0f}s)")
-            local_release_files.append(local_path)
+        # Hard-fail if the release data cannot be downloaded: skipping it
+        # would silently drop its IDs from the index. Legacy single-file
+        # staging carries a `bucket` column that bucketed files store in
+        # the path instead; select the shared columns explicitly.
+        def _download_release():
+            dl_con.execute(f"""
+                COPY (
+                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                           prefix
+                    FROM read_parquet([{file_list}], union_by_name=true)
+                    {release_where}
+                    ORDER BY prefix, id
+                ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+            """)
+        _retry_transient(_download_release)()
         dl_con.close()
+
+        size_mb = os.path.getsize(local_path) / 1024 / 1024
+        print(f"    merged: {size_mb:.0f} MB ({time.time() - t_dl:.0f}s)")
+        local_release_files.append(local_path)
 
     # Each prefix maps 1:1 to a staging prefix (same prefix-len)
     work = [
-        (p, [p], r2_config, version, local_release_files)
+        (p, [p], r2_config, version, local_release_files, row_group_size)
         for p in prefixes
     ]
 
@@ -1352,6 +1439,7 @@ def build_id_index(args):
             results = phase_build_r2(
                 args.prefix_len, r2_config, version, args.workers,
                 prefixes=range_prefixes,
+                row_group_size=getattr(args, "row_group_size", ROW_GROUP_SIZE),
             )
             elapsed_p2 = time.time() - t0
             phase_times["Build"] = elapsed_p2
@@ -1458,6 +1546,10 @@ def main():
                    help="Comma-separated individual prefixes to process (e.g. '001,401,801')")
     p.add_argument("--marker-ranges",
                    help="Comma-separated ranges to write _SUCCESS markers for (e.g. '000-3ff,400-7ff')")
+    p.add_argument("--row-group-size", type=int, default=ROW_GROUP_SIZE,
+                   help=f"Rows per parquet row group in output shards "
+                        f"(default: {ROW_GROUP_SIZE}); bounds the cold /id "
+                        f"read size. See ROW_GROUP_SIZE doc before changing.")
 
     args = p.parse_args()
     build_id_index(args)

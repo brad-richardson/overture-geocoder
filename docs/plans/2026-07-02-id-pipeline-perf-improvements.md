@@ -1,7 +1,8 @@
 # ID index pipeline — proposed performance improvements
 
 Date: 2026-07-02
-Status: proposed (nothing below is implemented except "already landed")
+Status: proposals 1 and 2 IMPLEMENTED later the same day (see below);
+proposal 3 has experiment tooling in place; proposal 4 stays deferred.
 Context: written after the 2026-07-02.0 test rebuild, where `id-build`
 range jobs `000-3ff` and `400-7ff` died with disk exhaustion sorting the
 addresses release file. Companion history: `docs/superpowers/plans/`,
@@ -44,6 +45,14 @@ it with prefix-len.**
 
 ## Proposal 1 — 16-bucket release staging (primary; removes the disk ceiling)
 
+**Status: IMPLEMENTED 2026-07-02** — `_partition_release_type` stages
+`PARTITION_BY (bucket)` (first hex char, 16 buffers), build jobs filter to
+their buckets via `_release_files_for_prefixes`, and the per-theme local
+downloads merged into ONE sorted local file (proposal 2's read-side half:
+one probe per prefix instead of one per theme/type). Legacy single-file
+staging remains readable for patch runs against older versions. Validated
+by the smoketest-r2-pipeline run on the landing commit.
+
 Stage each release theme/type `PARTITION_BY` the **first hex char** of the
 prefix: 16 buckets → 16 write buffers, far below the 128 the registry
 already sustains, and independent of data growth.
@@ -82,6 +91,13 @@ exists to avoid 16 redundant R2 reads per prefix; bucketed staging keeps
 that read locality, so it supersedes rather than regresses it.
 
 ## Proposal 3 — Tune ROW_GROUP_SIZE for /id cold latency
+
+**Status: experiment tooling landed 2026-07-02** — `--row-group-size` is
+threaded through the build, and `scripts/rowgroup_experiment.py` (dispatch
+via the Row-Group Size Experiment workflow) rebuilds a few live shards at
+25k/50k/100k and measures the worker's exact cold path (32 KB suffix read +
+one row-group range read) against R2. Adopt a new default only with those
+numbers in hand, bumping FOOTER_SUFFIX_SIZE in the same change if needed.
 
 100k rows ≈ 2.4-3 MB per row group; every cold lookup range-reads a full
 row group. Halving row-group size halves the cold read, at the cost of a

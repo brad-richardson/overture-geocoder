@@ -1,0 +1,73 @@
+name: Row-Group Size Experiment
+
+# Measures /id cold-read latency at different ROW_GROUP_SIZE values using
+# real shards from a live version (perf plan, proposal 3). Uploads go to a
+# scratch prefix (rg-experiment/) and are deleted at the end of the run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Live version whose id-index shards to sample (e.g. 2026-07-02.2)'
+        type: string
+        required: true
+      prefixes:
+        description: 'Comma-separated shard prefixes to sample'
+        type: string
+        required: false
+        default: '0a1,7f2,e3c'
+      sizes:
+        description: 'Comma-separated ROW_GROUP_SIZE values to compare'
+        type: string
+        required: false
+        default: '25000,50000,100000'
+
+env:
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+
+jobs:
+  experiment:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install duckdb boto3
+
+      - name: Run experiment
+        run: |
+          python -u scripts/rowgroup_experiment.py \
+            --version "${{ inputs.version }}" \
+            --prefixes "${{ inputs.prefixes }}" \
+            --sizes "${{ inputs.sizes }}" \
+            --output rowgroup-results.json
+
+      - name: Upload results artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: rowgroup-results
+          path: rowgroup-results.json
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Row-group experiment (${{ inputs.version }})" >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          python -c "
+          import json
+          d = json.load(open('rowgroup-results.json'))
+          rows = d['results']
+          print(f'{\"prefix\":>7} {\"rg size\":>8} {\"groups\":>7} {\"footer KB\":>10} {\"cold MB\":>8} {\"cold ms\":>8}')
+          for r in rows:
+              print(f'{r[\"prefix\"]:>7} {r[\"row_group_size\"]:>8} {r[\"row_groups\"]:>7} '
+                    f'{r[\"footer_bytes\"]/1024:>10.1f} {r[\"cold_read_bytes_p50\"]/1e6:>8.2f} '
+                    f'{r[\"total_ms_p50\"]:>8.1f}')
+          " >> $GITHUB_STEP_SUMMARY || true
+          echo '```' >> $GITHUB_STEP_SUMMARY

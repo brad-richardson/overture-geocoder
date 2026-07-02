@@ -77,6 +77,44 @@ def test_sub_ranges_explicit_prefixes():
 
 
 # ---------------------------------------------------------------------------
+# Bucketed release staging
+# ---------------------------------------------------------------------------
+
+def test_release_query_includes_bucket_partition_key():
+    q = bii._release_id_query_for_type(3, "2026-01-01.0", "addresses", "address")
+    assert "lower(left(replace(id, '-', ''), 1)) as bucket" in q
+    assert "lower(left(replace(id, '-', ''), 3)) as prefix" in q
+
+
+BUCKETED = [
+    "s3://b/v/staging/id-release-addresses-address/bucket=0/data_0.parquet",
+    "s3://b/v/staging/id-release-addresses-address/bucket=3/data_0.parquet",
+    "s3://b/v/staging/id-release-addresses-address/bucket=7/data_0.parquet",
+    "s3://b/v/staging/id-release-base-water/bucket=0/data_0.parquet",
+]
+LEGACY = ["s3://b/v/staging/id-release-base-land/data.parquet"]
+
+
+def test_release_files_filtered_to_range_buckets():
+    # A 000-3ff range job needs buckets 0..3 only
+    prefixes = [format(i, '03x') for i in range(0x000, 0x400)]
+    kept = bii._release_files_for_prefixes(BUCKETED + LEGACY, prefixes)
+    assert [f for f in kept if "/bucket=" in f] == BUCKETED[:2] + [BUCKETED[3]]
+    # Legacy single-file staging carries all buckets: always kept
+    assert LEGACY[0] in kept
+
+
+def test_release_files_explicit_prefixes_pick_their_buckets():
+    kept = bii._release_files_for_prefixes(BUCKETED + LEGACY, ["7a2"])
+    assert [f for f in kept if "/bucket=" in f] == [BUCKETED[2]]
+    assert LEGACY[0] in kept
+
+
+def test_release_files_no_prefixes_keeps_everything():
+    assert bii._release_files_for_prefixes(BUCKETED + LEGACY, None) == BUCKETED + LEGACY
+
+
+# ---------------------------------------------------------------------------
 # _retry_transient
 # ---------------------------------------------------------------------------
 
