@@ -161,8 +161,18 @@ WIKIMEDIA_IMPORTANCE_URL = "https://nominatim.org/data/wikimedia-importance.csv.
 # nominatim.org returns 403 for default curl/wget user agents
 DOWNLOAD_USER_AGENT = "overture-geocoder/1.0 (shard build pipeline)"
 
-# HEAD shard also includes famous-but-small places (wiki_importance >= this)
-HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.5
+# Small localities (at or below the download's population bar) survive the
+# enrichment prune when their wiki importance reaches this; they land in
+# their country/region shard. Measured on the 2026-07-02.0 build: ~60k
+# localities clear 0.5.
+WIKI_LOCALITY_KEEP_THRESHOLD = 0.5
+
+# HEAD additionally includes famous-but-small places (wiki_importance >=
+# this). HEAD is loaded on EVERY search and lives in the worker's 64 MB
+# shard cache, so this bar is deliberately much higher than the keep
+# threshold: 0.65 admits ~2.4k world-famous places (Gettysburg is 0.80),
+# where 0.5 admitted ~60k and tripled HEAD's size.
+HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.65
 
 
 def build_search_alias(name: str, search_name: str) -> str | None:
@@ -525,7 +535,7 @@ def enrich_parquet_with_wiki_importance(
     exclude famous-but-small places like Gettysburg), and this is the single
     chokepoint where importance is known. Kept rows: non-localities,
     localities over the download's population bar, and localities at or
-    above HEAD_WIKI_IMPORTANCE_THRESHOLD.
+    above WIKI_LOCALITY_KEEP_THRESHOLD.
     """
     parquet_str = str(parquet_path.resolve())
     output_str = str(output_path.resolve())
@@ -534,7 +544,7 @@ def enrich_parquet_with_wiki_importance(
     prune = (
         "subtype != 'locality' "
         "OR population > 10000 "
-        f"OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}"
+        f"OR wiki_importance >= {WIKI_LOCALITY_KEEP_THRESHOLD}"
     )
 
     con = spill_safe_connect()

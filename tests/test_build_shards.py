@@ -397,6 +397,11 @@ def write_test_parquet(path: Path):
                  -75.5, 43.5, -75.6, 43.4, -75.4, 43.6,
                  'Obscureville, NY', 'obscureville',
                  'us-ny us new york united states'),
+                ('known-001', 1, 'Knownburg', 'locality', 'village', 'US', 'US-NY',
+                 3000, 'Q888', false, false,
+                 -76.0, 44.0, -76.1, 43.9, -75.9, 44.1,
+                 'Knownburg, NY', 'knownburg',
+                 'us-ny us new york united states'),
                 ('famous-001', 1, 'Gettysburg', 'locality', 'village', 'US', 'US-PA',
                  2600, 'Q999', false, false,
                  -77.2311, 39.8309, -77.3, 39.8, -77.2, 39.9,
@@ -425,6 +430,7 @@ def write_test_importance_file(path: Path):
         f.write("en\ta\tSan_Francisco\t0.84\tQ62\n")
         f.write("en\ta\tGettysburg\t0.80\tQ999\n")
         f.write("en\ta\tObscureville\t0.20\tQ777\n")
+        f.write("en\ta\tKnownburg\t0.55\tQ888\n")
 
 
 @pytest.fixture
@@ -452,6 +458,8 @@ class TestWikiImportanceJoin:
         # Famous small locality survives the prune; obscure one does not.
         assert rows["famous-001"] == pytest.approx(0.80)
         assert "obscure-001" not in rows
+        # Mid-tier fame clears the keep threshold (0.5) into country shards
+        assert rows["known-001"] == pytest.approx(0.55)
 
     def test_null_column_without_importance_file(self, tmp_path):
         base = tmp_path / "divisions.parquet"
@@ -468,6 +476,7 @@ class TestWikiImportanceJoin:
         # and are pruned like before the wikidata over-fetch.
         assert "famous-001" not in rows
         assert "obscure-001" not in rows
+        assert "known-001" not in rows
         assert {"nyc-001", "sf-001", "tiny-001", "region-ny"} <= set(rows)
 
 
@@ -475,7 +484,7 @@ class TestEndToEndShardBuild:
     def test_build_and_query_shard(self, enriched_parquet, tmp_path):
         shard_path = tmp_path / "US.db"
         info = build_country_shard(enriched_parquet, "US", shard_path, "test")
-        assert info["record_count"] == 5
+        assert info["record_count"] == 6
 
         db = sqlite3.connect(shard_path)
 
@@ -532,9 +541,12 @@ class TestEndToEndShardBuild:
 
         assert "nyc-001" in ids        # population >= threshold
         assert "region-ny" in ids      # subtype region
-        assert "famous-001" in ids     # wiki_importance 0.80 >= 0.5
+        assert "famous-001" in ids     # wiki_importance 0.80 >= HEAD bar
         assert "tiny-001" not in ids   # small, not famous
-        assert "sf-001" in ids         # wiki_importance 0.84 >= 0.5
+        assert "sf-001" in ids         # wiki_importance 0.84 >= HEAD bar
+        # Mid-tier fame (0.55): in its country shard, but below the HEAD
+        # bar — HEAD is loaded on every search and must stay small.
+        assert "known-001" not in ids
         assert info["record_count"] == len(ids)
 
 
