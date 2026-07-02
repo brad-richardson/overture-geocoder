@@ -116,6 +116,19 @@ def test_retry_transient_no_files_found_is_not_transient():
         bii._retry_transient(absent, backoff=0)()
 
 
+def test_retry_transient_disk_full_is_not_transient():
+    attempts = []
+
+    def full():
+        attempts.append(1)
+        raise duckdb.IOException(
+            'IO Error: Could not write file ".tmp/x.tmp": No space left on device')
+
+    with pytest.raises(duckdb.IOException):
+        bii._retry_transient(full, backoff=0)()
+    assert len(attempts) == 1  # fail fast, no pointless retries
+
+
 # ---------------------------------------------------------------------------
 # Pipeline marker semantics
 # ---------------------------------------------------------------------------

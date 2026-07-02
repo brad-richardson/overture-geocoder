@@ -143,6 +143,10 @@ def _is_transient(exc):
     # "No files found" IOExceptions mean genuine absence, not flakiness
     if "No files found" in str(exc):
         return False
+    # A full disk will not empty itself between attempts; fail fast so the
+    # job surfaces the real problem instead of burning retry backoff.
+    if "No space left on device" in str(exc):
+        return False
     return True
 
 
@@ -950,6 +954,15 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
     local_release_files = []
     if release_files:
         print(f"  Downloading and sorting {len(release_files)} release files locally...")
+        # Only this job's prefixes: a range job needs a quarter of each
+        # release file, and the ORDER BY's disk spill is proportional to
+        # input — sorting the full addresses file once filled a runner's
+        # 46 GB and killed the job. For explicit prefix lists the bounds
+        # are a superset (harmless; workers re-filter per prefix).
+        release_where = ""
+        if prefixes:
+            lo, hi = min(prefixes), max(prefixes)
+            release_where = f"WHERE prefix >= '{lo}' AND prefix <= '{hi}'"
         dl_con = _r2_con(r2_config)
         dl_con.execute("SET memory_limit = '4GB';")
         for rf in release_files:
@@ -963,6 +976,7 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None):
                 dl_con.execute(f"""
                     COPY (
                         SELECT * FROM read_parquet('{rf}')
+                        {release_where}
                         ORDER BY prefix, id
                     ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
                 """)
