@@ -83,12 +83,15 @@ RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 RELEASE_THEMES = ["addresses", "base"]
 
 # Rows per parquet row group in output shards. Every cold /id lookup
-# range-reads one full row group, so this bounds the cold-read size
-# (~100k rows ≈ 2.4-3 MB). Chosen deliberately (f78a6a0): ~10 groups per
-# shard, and sorted UUIDs + row-group stats already skip ~90% of data per
-# lookup. If this shrinks, the worker's FOOTER_SUFFIX_SIZE (stac.rs) must
-# grow in the same change — more row groups means a bigger footer.
-ROW_GROUP_SIZE = 100_000
+# range-reads one full row group, so this bounds the cold-read size.
+# 25k measured best in the 2026-07-02 rowgroup_experiment.py run against
+# live shards: 0.88 MB cold read vs 3.24 MB at the previous 100k default
+# (3.7x), p50 ~197 ms vs ~245 ms, and the ~16.4 KB footer still fits the
+# worker's single 32 KB suffix read (FOOTER_SUFFIX_SIZE, stac.rs). If this
+# shrinks further, re-check the footer against that 32 KB window — more
+# row groups means a bigger footer and past it every lookup pays a second
+# round-trip.
+ROW_GROUP_SIZE = 25_000
 
 
 def get_version(suffix="0"):

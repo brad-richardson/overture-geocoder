@@ -92,12 +92,21 @@ that read locality, so it supersedes rather than regresses it.
 
 ## Proposal 3 — Tune ROW_GROUP_SIZE for /id cold latency
 
-**Status: experiment tooling landed 2026-07-02** — `--row-group-size` is
+**Status: MEASURED AND ADOPTED 2026-07-02** — `--row-group-size` is
 threaded through the build, and `scripts/rowgroup_experiment.py` (dispatch
-via the Row-Group Size Experiment workflow) rebuilds a few live shards at
-25k/50k/100k and measures the worker's exact cold path (32 KB suffix read +
-one row-group range read) against R2. Adopt a new default only with those
-numbers in hand, bumping FOOTER_SUFFIX_SIZE in the same change if needed.
+via the Row-Group Size Experiment workflow) rebuilds live shards at
+candidate sizes and measures the worker's exact cold path (32 KB suffix
+read + one row-group range read) against R2. Results on 2026-07-02.1
+shards (3 prefixes, 8 lookups each):
+
+| rg size | groups/shard | footer | cold read | cold p50 |
+|---------|--------------|--------|-----------|----------|
+| 25k     | 40           | 16.4 KB | 0.88 MB  | ~197 ms  |
+| 50k     | 21           | 8.7 KB  | 1.67 MB  | ~198 ms  |
+| 100k    | 11           | 4.7 KB  | 3.24 MB  | ~245 ms  |
+
+Default changed to 25,000: 3.7x smaller cold reads, better tail, footer
+still single-suffix-read. Takes effect on the next id-index build.
 
 100k rows ≈ 2.4-3 MB per row group; every cold lookup range-reads a full
 row group. Halving row-group size halves the cold read, at the cost of a
