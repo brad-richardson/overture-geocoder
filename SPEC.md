@@ -146,7 +146,7 @@ GET /reverse?lat={lat}&lon={lon}
 ]
 ```
 
-**Note:** Reverse geocoding uses bounding box filtering. Results include all divisions whose bounding box contains the query point.
+**Note:** Reverse geocoding uses bounding box filtering. Results include all eligible divisions whose bounding box contains the query point: countries, regions, counties, and populated localities (initially population >= 50,000). Bbox containment is an approximation, not exact polygon containment.
 
 ## Indexing Pipeline
 
