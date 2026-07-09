@@ -1049,9 +1049,14 @@ def build_head_shard(
     cursor = con.execute(f"""
         SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
-        WHERE population >= {population_threshold}
-           OR subtype IN ('country', 'region')
-           OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}
+        WHERE subtype IN ('country', 'region')
+           OR (
+               subtype = 'locality'
+               AND (
+                   population >= {population_threshold}
+                   OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}
+               )
+           )
     """)
 
     # Stream rows in chunks to avoid loading entire dataset into memory

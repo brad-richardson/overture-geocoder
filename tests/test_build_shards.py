@@ -422,12 +422,12 @@ def write_test_parquet(path: Path):
                 -- Administrative records are intentionally unfiltered by
                 -- population and belong only to their country shard.
                 ('county-cook', 1, 'Cook County', 'county', NULL, 'US', 'US-IL',
-                 NULL, NULL, false, false,
+                 NULL, 'Q999', false, false,
                  -87.75, 41.85, -88.30, 41.45, -87.20, 42.20,
                  'Cook County, IL', 'cook county',
                  'us-il us illinois united states'),
                 ('localadmin-manhattan', 1, 'Manhattan', 'localadmin', NULL, 'US', 'US-NY',
-                 NULL, NULL, false, false,
+                 2000000, NULL, false, false,
                  -73.97, 40.78, -74.05, 40.68, -73.90, 40.88,
                  'Manhattan, NY', 'manhattan',
                  'us-ny us new york united states')
@@ -655,8 +655,10 @@ class TestEndToEndShardBuild:
         # Mid-tier fame (0.55): in its country shard, but below the HEAD
         # bar — HEAD is loaded on every search and must stay small.
         assert "known-001" not in ids
-        assert "county-cook" not in ids
-        assert "localadmin-manhattan" not in ids
+        # Admin tiers stay country-only even when a record would independently
+        # clear HEAD's Wikimedia or population bar.
+        assert "county-cook" not in ids  # wiki_importance 0.80
+        assert "localadmin-manhattan" not in ids  # population 2,000,000
         assert info["record_count"] == len(ids)
 
 
