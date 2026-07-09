@@ -18,6 +18,10 @@ Base URL: `https://geocoder.bradr.dev`
 
 ### Forward Geocoding (Search)
 
+Forward shards include countries, regions, counties, local-admin divisions,
+and localities. Counties and local-admin divisions are kept in their
+country/region shards rather than the globally loaded `HEAD` shard.
+
 **Endpoint:** `GET /search`
 
 | Parameter | Type | Default | Description |

@@ -75,6 +75,12 @@ WEIGHTED_BM25_QUERY = """
 """
 
 
+class TestForwardExtraction:
+    def test_includes_county_and_localadmin(self):
+        sql = (Path(__file__).parent.parent / "scripts" / "download_divisions_global.sql").read_text()
+        assert "d.subtype IN ('country', 'region', 'county', 'localadmin')" in sql
+
+
 class TestValidateCountryCode:
     def test_valid_codes(self):
         assert validate_country_code("US") == "US"
@@ -412,7 +418,19 @@ def write_test_parquet(path: Path):
                  NULL, 'Q1384', false, false,
                  -75.0, 43.0, -79.8, 40.5, -71.9, 45.0,
                  'New York', 'new york',
-                 'us-ny us united states')
+                 'us-ny us united states'),
+                -- Administrative records are intentionally unfiltered by
+                -- population and belong only to their country shard.
+                ('county-cook', 1, 'Cook County', 'county', NULL, 'US', 'US-IL',
+                 NULL, NULL, false, false,
+                 -87.75, 41.85, -88.30, 41.45, -87.20, 42.20,
+                 'Cook County, IL', 'cook county',
+                 'us-il us illinois united states'),
+                ('localadmin-manhattan', 1, 'Manhattan', 'localadmin', NULL, 'US', 'US-NY',
+                 NULL, NULL, false, false,
+                 -73.97, 40.78, -74.05, 40.68, -73.90, 40.88,
+                 'Manhattan, NY', 'manhattan',
+                 'us-ny us new york united states')
             ) AS t(gers_id, version, name, subtype, class, country, region,
                    population, wikidata, is_country_capital, is_region_capital,
                    lon, lat, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
@@ -567,7 +585,7 @@ class TestEndToEndShardBuild:
     def test_build_and_query_shard(self, enriched_parquet, tmp_path):
         shard_path = tmp_path / "US.db"
         info = build_country_shard(enriched_parquet, "US", shard_path, "test")
-        assert info["record_count"] == 6
+        assert info["record_count"] == 8
 
         db = sqlite3.connect(shard_path)
 
@@ -611,6 +629,13 @@ class TestEndToEndShardBuild:
         rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("newyork"),)).fetchall()
         assert "nyc-001" in [r[0] for r in rows]
 
+        # Counties and local-admin divisions are searchable from the country
+        # shard even without a population or Wikidata record.
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("cook county"),)).fetchall()
+        assert [r[0] for r in rows] == ["county-cook"]
+        rows = db.execute(WEIGHTED_BM25_QUERY, (fts_query("manhattan"),)).fetchall()
+        assert [r[0] for r in rows] == ["localadmin-manhattan"]
+
         db.close()
 
     def test_head_shard_includes_wiki_famous(self, enriched_parquet, tmp_path):
@@ -630,6 +655,8 @@ class TestEndToEndShardBuild:
         # Mid-tier fame (0.55): in its country shard, but below the HEAD
         # bar — HEAD is loaded on every search and must stay small.
         assert "known-001" not in ids
+        assert "county-cook" not in ids
+        assert "localadmin-manhattan" not in ids
         assert info["record_count"] == len(ids)
 
 

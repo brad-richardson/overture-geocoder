@@ -346,7 +346,9 @@ DIVISIONS_REVERSE_PARQUET = EXPORTS_DIR / "divisions-reverse.parquet"
 # the download is skipped when this file already exists)
 WIKIMEDIA_IMPORTANCE_FILE = EXPORTS_DIR / "wikimedia-importance.csv.gz"
 
-# HEAD shard includes countries, regions, and localities with pop >= threshold
+# HEAD shard includes countries, regions, and localities with pop >= threshold.
+# Counties and local-admin divisions remain country/region-shard only so the
+# globally loaded HEAD shard stays small.
 DEFAULT_HEAD_THRESHOLD = 100_000
 
 # Local scratch directory for country-partitioned parquet (one global pass
