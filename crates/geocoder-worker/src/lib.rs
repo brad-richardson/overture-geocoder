@@ -2,6 +2,8 @@
 //!
 //! Serves geocoding requests using R2-stored SQLite shards with edge caching.
 
+use std::time::Instant;
+
 use worker::*;
 
 mod handlers;
@@ -9,11 +11,19 @@ mod stac;
 
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
+    let started_at = Instant::now();
     console_error_panic_hook::set_once();
+
+    // Log only a fixed endpoint class. Avoiding the raw path keeps query
+    // strings, GERS IDs, IP-derived location, and explicit coordinates out of
+    // request logs.
+    let endpoint = request_endpoint(req.url()?.path());
 
     // Handle CORS preflight requests
     if req.method() == Method::Options {
-        return preflight_response();
+        let mut response = preflight_response()?;
+        add_timing(&mut response, endpoint, started_at)?;
+        return Ok(response);
     }
 
     // Detect HEAD requests: convert to GET for routing, strip body later
@@ -41,6 +51,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 let mut resp = Response::error("Rate limit exceeded", 429)?;
                 resp.headers_mut().set("Access-Control-Allow-Origin", "*")?;
                 resp.headers_mut().set("Retry-After", "60")?;
+                add_timing(&mut resp, endpoint, started_at)?;
                 return Ok(resp);
             }
         }
@@ -80,6 +91,8 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
         .headers_mut()
         .set("Access-Control-Allow-Origin", "*")?;
 
+    add_timing(&mut response, endpoint, started_at)?;
+
     // For HEAD requests, return empty body with same status and headers
     if is_head {
         let status = response.status_code();
@@ -94,6 +107,44 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     Ok(response)
 }
 
+/// Return a fixed, privacy-safe endpoint label for request timing logs.
+fn request_endpoint(path: &str) -> &'static str {
+    match path {
+        "/search" => "search",
+        "/reverse" => "reverse",
+        "/health" => "health",
+        "/" => "root",
+        path if path.starts_with("/id/") => "id",
+        _ => "other",
+    }
+}
+
+/// Add a standard request-duration metric without modifying response bodies.
+///
+/// `Server-Timing` lets clients distinguish application time from transport
+/// time. The accompanying worker log intentionally contains no request data:
+/// it is useful for endpoint-level latency monitoring without recording IDs,
+/// query strings, client IPs, or coordinates.
+fn add_timing(response: &mut Response, endpoint: &str, started_at: Instant) -> Result<()> {
+    let total_ms = started_at.elapsed().as_secs_f64() * 1_000.0;
+    response
+        .headers_mut()
+        .set("Server-Timing", &format_server_timing(total_ms))?;
+    console_log!(
+        "request endpoint={} status={} total_ms={:.1}",
+        endpoint,
+        response.status_code(),
+        total_ms
+    );
+    Ok(())
+}
+
+fn format_server_timing(total_ms: f64) -> String {
+    // A single decimal is adequate for edge-request monitoring and prevents
+    // needlessly variable header values from fragmenting downstream caches.
+    format!("total;dur={total_ms:.1}")
+}
+
 /// Response for CORS preflight (OPTIONS) requests.
 fn preflight_response() -> Result<Response> {
     let headers = Headers::new();
@@ -106,4 +157,22 @@ fn preflight_response() -> Result<Response> {
         .unwrap();
     headers.set("Access-Control-Max-Age", "86400").unwrap();
     Ok(Response::empty()?.with_status(204).with_headers(headers))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{format_server_timing, request_endpoint};
+
+    #[test]
+    fn classifies_known_endpoints_without_retaining_path_parameters() {
+        assert_eq!(request_endpoint("/search"), "search");
+        assert_eq!(request_endpoint("/reverse"), "reverse");
+        assert_eq!(request_endpoint("/id/abc-123"), "id");
+        assert_eq!(request_endpoint("/unexpected"), "other");
+    }
+
+    #[test]
+    fn formats_standard_total_duration_metric() {
+        assert_eq!(format_server_timing(12.34), "total;dur=12.3");
+    }
 }
