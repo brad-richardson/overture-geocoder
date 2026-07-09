@@ -146,7 +146,7 @@ GET /reverse?lat={lat}&lon={lon}
 ]
 ```
 
-**Note:** Reverse geocoding uses bounding box filtering. Results include all divisions whose bounding box contains the query point.
+**Note:** Reverse geocoding selects a country shard from the requested coordinate only when one collection bbox is unambiguous, then uses bounding box filtering. Overlapping bboxes and legacy metadata fall back to the caller's IP country; without either, the service uses `HEAD`. Results remain bbox-confidence estimates, not exact polygon containment.
 
 ## Indexing Pipeline
 
