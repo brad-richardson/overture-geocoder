@@ -2,8 +2,6 @@
 //!
 //! Serves geocoding requests using R2-stored SQLite shards with edge caching.
 
-use std::time::Instant;
-
 use worker::*;
 
 mod handlers;
@@ -11,7 +9,7 @@ mod stac;
 
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
-    let started_at = Instant::now();
+    let started_at = Date::now().as_millis();
     console_error_panic_hook::set_once();
 
     // Log only a fixed endpoint class. Avoiding the raw path keeps query
@@ -125,8 +123,8 @@ fn request_endpoint(path: &str) -> &'static str {
 /// time. The accompanying worker log intentionally contains no request data:
 /// it is useful for endpoint-level latency monitoring without recording IDs,
 /// query strings, client IPs, or coordinates.
-fn add_timing(response: &mut Response, endpoint: &str, started_at: Instant) -> Result<()> {
-    let total_ms = started_at.elapsed().as_secs_f64() * 1_000.0;
+fn add_timing(response: &mut Response, endpoint: &str, started_at_ms: u64) -> Result<()> {
+    let total_ms = Date::now().as_millis().saturating_sub(started_at_ms) as f64;
     response
         .headers_mut()
         .set("Server-Timing", &format_server_timing(total_ms))?;
