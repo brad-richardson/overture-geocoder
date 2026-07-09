@@ -349,6 +349,11 @@ WIKIMEDIA_IMPORTANCE_FILE = EXPORTS_DIR / "wikimedia-importance.csv.gz"
 # HEAD shard includes countries, regions, and localities with pop >= threshold
 DEFAULT_HEAD_THRESHOLD = 100_000
 
+# Reverse data includes populated localities at this threshold. Keep this in
+# sync with download_divisions_area.sql: the build summary makes the impact of
+# changing that extraction bar visible before publishing a new release.
+REVERSE_LOCALITY_POPULATION_THRESHOLD = 50_000
+
 # Local scratch directory for country-partitioned parquet (one global pass
 # instead of one full parquet scan per country)
 PARTITIONS_DIR = EXPORTS_DIR / "partitions"
@@ -398,6 +403,76 @@ def get_countries(parquet_path: Path) -> list[str]:
     """).fetchall()
     con.close()
     return [r[0] for r in result]
+
+
+def get_reverse_input_metrics(
+    parquet_path: Path,
+    locality_population_threshold: int = REVERSE_LOCALITY_POPULATION_THRESHOLD,
+) -> dict[str, int]:
+    """Return the reverse input's division and stored-area-component counts.
+
+    A reverse parquet row represents one candidate area component. This is
+    deliberately different from the number of divisions: multipart cities,
+    islands, and antimeridian splits yield multiple rows for one GERS ID.
+    Reporting both prevents a population-threshold change from being judged
+    only by its division count while silently multiplying R*Tree entries.
+    """
+    locality_population_threshold = validate_population_threshold(
+        locality_population_threshold
+    )
+    parquet_str = str(parquet_path.resolve())
+    con = duckdb.connect()
+    metrics = con.execute(f"""
+        WITH rows AS MATERIALIZED (
+            SELECT gers_id, subtype, population
+            FROM read_parquet('{parquet_str}')
+        ),
+        components AS (
+            SELECT gers_id, COUNT(*) AS component_count
+            FROM rows
+            GROUP BY gers_id
+        )
+        SELECT
+            COUNT(*) AS area_components,
+            COUNT(DISTINCT gers_id) AS candidate_divisions,
+            COUNT(*) FILTER (
+                WHERE subtype = 'locality'
+                  AND COALESCE(population, 0) >= {locality_population_threshold}
+            ) AS eligible_locality_components,
+            COUNT(DISTINCT gers_id) FILTER (
+                WHERE subtype = 'locality'
+                  AND COALESCE(population, 0) >= {locality_population_threshold}
+            ) AS eligible_localities,
+            COUNT(DISTINCT gers_id) FILTER (WHERE component_count > 1)
+                AS multipart_divisions
+        FROM rows
+        JOIN components USING (gers_id)
+    """).fetchone()
+    con.close()
+    return {
+        "area_components": metrics[0],
+        "candidate_divisions": metrics[1],
+        "eligible_locality_components": metrics[2],
+        "eligible_localities": metrics[3],
+        "multipart_divisions": metrics[4],
+    }
+
+
+def print_reverse_input_metrics(
+    metrics: dict[str, int],
+    locality_population_threshold: int = REVERSE_LOCALITY_POPULATION_THRESHOLD,
+):
+    """Print reverse-input counts used to evaluate locality coverage and cost."""
+    print("Reverse input summary:")
+    print(f"  Candidate divisions: {metrics['candidate_divisions']:,}")
+    print(f"  Stored area components: {metrics['area_components']:,}")
+    print(f"  Multipart divisions: {metrics['multipart_divisions']:,}")
+    print(
+        "  Eligible populated localities "
+        f"(population >= {locality_population_threshold:,}): "
+        f"{metrics['eligible_localities']:,} divisions, "
+        f"{metrics['eligible_locality_components']:,} area components"
+    )
 
 
 def partition_by_country(
@@ -1607,6 +1682,48 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
     return shard_infos
 
 
+def print_reverse_shard_summary(shard_infos: dict[str, dict]):
+    """Print a size-focused summary after a reverse shard build.
+
+    Reverse country shards are currently not split by region, so an oversized
+    shard is a release-risk warning rather than something this build can fix
+    automatically. The largest-shard list makes locality threshold changes
+    comparable across releases without inspecting every country log line.
+    """
+    if not shard_infos:
+        print("Reverse shard summary: no shards built")
+        return
+
+    threshold_mb = SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024
+    total_records = sum(info["record_count"] for info in shard_infos.values())
+    total_bytes = sum(info["size_bytes"] for info in shard_infos.values())
+    oversized = [
+        (shard_id, info) for shard_id, info in shard_infos.items()
+        if info["size_bytes"] > SHARD_SIZE_THRESHOLD_BYTES
+    ]
+
+    print("\nReverse shard summary:")
+    print(
+        f"  {len(shard_infos):,} shards, {total_records:,} stored components, "
+        f"{total_bytes / 1024 / 1024:.1f} MB total"
+    )
+    print("  Largest shards:")
+    for shard_id, info in sorted(
+        shard_infos.items(), key=lambda item: item[1]["size_bytes"], reverse=True
+    )[:5]:
+        print(
+            f"    {shard_id}: {info['record_count']:,} components, "
+            f"{info['size_bytes'] / 1024 / 1024:.1f} MB"
+        )
+
+    if oversized:
+        labels = ", ".join(shard_id for shard_id, _ in oversized)
+        print(
+            f"  WARNING: {len(oversized)} reverse shard(s) exceed "
+            f"{threshold_mb:.0f} MB: {labels}"
+        )
+
+
 def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
     """Build bbox-based reverse-geocoding shards, including populated localities."""
     reverse_subdir = version_dir / "reverse"
@@ -1627,6 +1744,9 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
     print(f"HEAD threshold: {args.head_threshold:,}")
     print()
 
+    print_reverse_input_metrics(get_reverse_input_metrics(parquet_path))
+    print()
+
     shard_infos = {}
 
     # Build HEAD shard for reverse
@@ -1637,8 +1757,13 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
             parquet_path, head_path, version, args.head_threshold
         )
         shard_infos["HEAD"] = head_info
+        head_size_mb = head_info['size_bytes'] / 1024 / 1024
+        head_warning = (
+            f" (WARNING: exceeds {SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024:.0f} MB)"
+            if head_info['size_bytes'] > SHARD_SIZE_THRESHOLD_BYTES else ""
+        )
         print(f"  HEAD: {head_info['record_count']:,} records, "
-              f"{head_info['size_bytes'] / 1024 / 1024:.1f} MB")
+              f"{head_size_mb:.1f} MB{head_warning}")
 
     if args.head_only:
         print("\nHead-only mode, skipping country shards")
@@ -1673,12 +1798,18 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
             info = build_reverse_country_shard(source, country, output_path, version)
             shard_infos[country] = info
             pct = 100 * i / len(countries)
+            size_mb = info['size_bytes'] / 1024 / 1024
+            warning = (
+                f" (WARNING: exceeds {SHARD_SIZE_THRESHOLD_BYTES / 1024 / 1024:.0f} MB)"
+                if info['size_bytes'] > SHARD_SIZE_THRESHOLD_BYTES else ""
+            )
             print(f"  [{i}/{len(countries)} {pct:.0f}%] {country}: "
-                  f"{info['record_count']:,} records, "
-                  f"{info['size_bytes'] / 1024 / 1024:.1f} MB")
+                  f"{info['record_count']:,} records, {size_mb:.1f} MB{warning}")
 
         # Free local scratch space
         shutil.rmtree(partition_dir, ignore_errors=True)
+
+    print_reverse_shard_summary(shard_infos)
 
     # Calculate hashes for all reverse shards
     print("\nCalculating shard hashes...")
