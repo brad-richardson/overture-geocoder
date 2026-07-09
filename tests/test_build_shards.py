@@ -24,6 +24,9 @@ from build_shards import (
     compute_importance,
     dedup_localities,
     enrich_parquet_with_wiki_importance,
+    get_reverse_input_metrics,
+    print_reverse_input_metrics,
+    print_reverse_shard_summary,
     validate_country_code,
     validate_population_threshold,
     validate_region_code,
@@ -631,6 +634,48 @@ class TestEndToEndShardBuild:
         # bar — HEAD is loaded on every search and must stay small.
         assert "known-001" not in ids
         assert info["record_count"] == len(ids)
+
+
+class TestReverseBuildMetrics:
+    def test_counts_localities_and_area_components(self, tmp_path, capsys):
+        source = tmp_path / "reverse.parquet"
+        duckdb.sql(f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    ('city-1', 'locality', 50000),
+                    ('city-1', 'locality', 50000),
+                    ('town-1', 'locality', 49999),
+                    ('county-1', 'county', 100000),
+                    ('country-1', 'country', NULL)
+                ) AS t(gers_id, subtype, population)
+            ) TO '{source}' (FORMAT PARQUET)
+        """)
+
+        metrics = get_reverse_input_metrics(source)
+        assert metrics == {
+            "area_components": 5,
+            "candidate_divisions": 4,
+            "eligible_locality_components": 2,
+            "eligible_localities": 1,
+            "multipart_divisions": 1,
+        }
+
+        print_reverse_input_metrics(metrics)
+        output = capsys.readouterr().out
+        assert "Candidate divisions: 4" in output
+        assert "Stored area components: 5" in output
+        assert "population >= 50,000): 1 divisions, 2 area components" in output
+
+    def test_reports_largest_and_oversized_reverse_shards(self, capsys):
+        print_reverse_shard_summary({
+            "HEAD": {"record_count": 5, "size_bytes": 4 * 1024 * 1024},
+            "US": {"record_count": 50, "size_bytes": 51 * 1024 * 1024},
+            "CA": {"record_count": 20, "size_bytes": 8 * 1024 * 1024},
+        })
+        output = capsys.readouterr().out
+        assert "3 shards, 75 stored components, 63.0 MB total" in output
+        assert "US: 50 components, 51.0 MB" in output
+        assert "WARNING: 1 reverse shard(s) exceed 50 MB: US" in output
 
 
 class TestVersionSortKey:
