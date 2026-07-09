@@ -2,7 +2,9 @@
 -- Run with: ./scripts/download_divisions.sh (fetches latest release automatically)
 --
 -- Output: exports/divisions-global.parquet
--- Expected: ~500 records (country/region/locality with population >1M)
+-- Contents: countries, regions, all counties/local-admin divisions, and
+-- localities with population >10k or a Wikidata ID (the latter are pruned by
+-- the shard build when they lack sufficient Wikimedia importance).
 --
 -- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
 -- The download_divisions.sh script fetches the latest release version from the
@@ -32,7 +34,7 @@ SET threads = 2;
 
 .timer on
 
--- Extract global divisions (cities, towns, neighborhoods, counties)
+-- Extract global divisions for forward place and administrative-area search.
 -- Subtypes: country, dependency, region, county, localadmin, locality,
 --           macrohood, neighborhood, microhood
 -- Note: version field increments each Overture release when feature changes
@@ -180,11 +182,14 @@ COPY (
     ) d
     LEFT JOIN country_names cn ON d.country = cn.country_code
     LEFT JOIN region_names rn ON d.region = rn.region_code
-    -- Localities: population bar, OR any wikidata QID. The QID rows are
-    -- over-fetched on purpose — famous-but-small places (Gettysburg) have
-    -- no population signal here; enrich_parquet_with_wiki_importance joins
-    -- their wikimedia importance and prunes the non-famous ones.
-    WHERE (d.subtype IN ('country', 'region')
+    -- Administrative divisions are intentionally unfiltered: counties and
+    -- local-admin areas are a comparatively small, useful search tier and
+    -- their type prior keeps them below a similarly matched city. Localities
+    -- use a population bar, OR any Wikidata QID. The QID rows are over-fetched
+    -- on purpose — famous-but-small places (Gettysburg) have no population
+    -- signal here; enrich_parquet_with_wiki_importance joins their Wikimedia
+    -- importance and prunes the non-famous ones.
+    WHERE (d.subtype IN ('country', 'region', 'county', 'localadmin')
            OR (d.subtype = 'locality' AND (d.population > 10000 OR d.wikidata IS NOT NULL)))
       AND d.names.primary IS NOT NULL
 )

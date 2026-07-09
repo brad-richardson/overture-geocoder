@@ -346,7 +346,9 @@ DIVISIONS_REVERSE_PARQUET = EXPORTS_DIR / "divisions-reverse.parquet"
 # the download is skipped when this file already exists)
 WIKIMEDIA_IMPORTANCE_FILE = EXPORTS_DIR / "wikimedia-importance.csv.gz"
 
-# HEAD shard includes countries, regions, and localities with pop >= threshold
+# HEAD shard includes countries, regions, and localities with pop >= threshold.
+# Counties and local-admin divisions remain country/region-shard only so the
+# globally loaded HEAD shard stays small.
 DEFAULT_HEAD_THRESHOLD = 100_000
 
 # Reverse data includes populated localities at this threshold. Keep this in
@@ -1122,9 +1124,14 @@ def build_head_shard(
     cursor = con.execute(f"""
         SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
-        WHERE population >= {population_threshold}
-           OR subtype IN ('country', 'region')
-           OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}
+        WHERE subtype IN ('country', 'region')
+           OR (
+               subtype = 'locality'
+               AND (
+                   population >= {population_threshold}
+                   OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}
+               )
+           )
     """)
 
     # Stream rows in chunks to avoid loading entire dataset into memory
