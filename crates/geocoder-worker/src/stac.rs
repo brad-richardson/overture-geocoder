@@ -645,7 +645,7 @@ impl ShardLoader {
     ) -> Vec<String> {
         // If we have coordinates, use proximity-based selection
         if let (Some(lat), Some(lon)) = (user_location.lat, user_location.lon) {
-            return self.select_shards_by_proximity(collection, lat, lon);
+            return Self::select_shards_by_proximity(collection, lat, lon);
         }
 
         // Fallback: use country code if available
@@ -662,12 +662,7 @@ impl ShardLoader {
     }
 
     /// Select shards by proximity to coordinates.
-    fn select_shards_by_proximity(
-        &self,
-        collection: &StacCollection,
-        lat: f64,
-        lon: f64,
-    ) -> Vec<String> {
+    fn select_shards_by_proximity(collection: &StacCollection, lat: f64, lon: f64) -> Vec<String> {
         // Collect all shards with their distances
         let mut candidates: Vec<(String, f64)> = collection
             .items
@@ -692,7 +687,11 @@ impl ShardLoader {
             .collect();
 
         // Sort by distance (closest first) - ensures user's actual location is never excluded
-        candidates.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+        candidates.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
 
         // Take closest shards up to limit
         candidates
@@ -726,11 +725,32 @@ impl ShardLoader {
         }
 
         // Country has a single shard
-        if self.collection_has_shard(collection, country) {
+        if Self::collection_has_shard(collection, country) {
             return vec![country.to_string()];
         }
 
         Vec::new()
+    }
+
+    /// Select a reverse country shard from the requested coordinates when its
+    /// collection bbox is unambiguous. Overlapping country bboxes cannot prove
+    /// containment, so those cases retain the caller's IP-country fallback
+    /// until a polygon/H3 country-routing index exists.
+    fn select_reverse_shards(
+        collection: &StacCollection,
+        lat: f64,
+        lon: f64,
+        cf_country: Option<&str>,
+    ) -> Vec<String> {
+        let coordinate_shards = Self::select_shards_by_proximity(collection, lat, lon);
+        if coordinate_shards.len() == 1 {
+            return coordinate_shards;
+        }
+
+        cf_country
+            .filter(|country| Self::collection_has_shard(collection, country))
+            .map(|country| vec![country.to_string()])
+            .unwrap_or_default()
     }
 
     /// Reverse geocode a lat/lon coordinate.
@@ -757,10 +777,12 @@ impl ShardLoader {
     ) -> Result<Option<ReverseResult>> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
-        // Try country shard first if available (more specific data)
-        if let Some(country) = cf_country {
+        // Use a coordinate-selected shard only when its bbox is unambiguous.
+        // Overlap and legacy-metadata cases fall back to the caller's country,
+        // then HEAD, until country polygons/H3 covers are available.
+        for country in Self::select_reverse_shards(&reverse_collection, lat, lon, cf_country) {
             match self
-                .query_reverse_shard(version, country, &reverse_collection, lat, lon)
+                .query_reverse_shard(version, &country, &reverse_collection, lat, lon)
                 .await
             {
                 Ok(Some(result)) => return Ok(Some(result)),
@@ -1165,7 +1187,7 @@ impl ShardLoader {
             .map_err(|e| Error::RustError(format!("Failed to parse collection: {}", e)))
     }
 
-    fn collection_has_shard(&self, collection: &StacCollection, shard_id: &str) -> bool {
+    fn collection_has_shard(collection: &StacCollection, shard_id: &str) -> bool {
         // Check embedded items first (new format)
         if collection.items.contains_key(shard_id) {
             return true;
@@ -1371,6 +1393,64 @@ fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn collection_with_bboxes(rows: &[(&str, Option<[f64; 4]>)]) -> StacCollection {
+        let items = rows
+            .iter()
+            .map(|(id, bbox)| {
+                (
+                    (*id).to_string(),
+                    EmbeddedItem {
+                        record_count: 0,
+                        size_bytes: 0,
+                        sha256: None,
+                        href: format!("reverse/{}.db", id),
+                        bbox: *bbox,
+                        parent_country: None,
+                    },
+                )
+            })
+            .collect();
+
+        StacCollection {
+            id: "test".to_string(),
+            items,
+            links: vec![],
+            region_sharded: std::collections::HashMap::new(),
+        }
+    }
+
+    #[test]
+    fn test_reverse_selection_prefers_request_coordinates_to_ip_country() {
+        let collection = collection_with_bboxes(&[
+            ("JP", Some([122.0, 20.0, 154.0, 46.0])),
+            ("US", Some([-125.0, 24.0, -66.0, 50.0])),
+        ]);
+
+        let shards = ShardLoader::select_reverse_shards(&collection, 35.68, 139.65, Some("US"));
+        assert_eq!(shards, vec!["JP"]);
+    }
+
+    #[test]
+    fn test_reverse_selection_falls_back_to_ip_country_without_bboxes() {
+        let collection = collection_with_bboxes(&[("US", None)]);
+
+        let shards = ShardLoader::select_reverse_shards(&collection, 35.68, 139.65, Some("US"));
+        assert_eq!(shards, vec!["US"]);
+    }
+
+    #[test]
+    fn test_overlapping_country_bboxes_do_not_override_ip_country() {
+        let collection = collection_with_bboxes(&[
+            ("CA", Some([-141.0, 41.0, -52.0, 83.0])),
+            ("US", Some([-125.0, 24.0, -66.0, 50.0])),
+        ]);
+
+        let fallback = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, Some("US"));
+        assert_eq!(fallback, vec!["US"]);
+
+        assert!(ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None).is_empty());
+    }
 
     #[test]
     fn test_haversine_distance() {
