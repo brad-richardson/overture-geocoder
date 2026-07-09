@@ -1478,8 +1478,7 @@ mod tests {
         // New York is within 200 km of Canada's broad bbox, but only the US
         // bbox actually contains it. Reverse routing must not fall back to an
         // unrelated caller IP in this case.
-        let shards =
-            ShardLoader::select_reverse_shards(&collection, 40.7128, -74.0060, Some("JP"));
+        let shards = ShardLoader::select_reverse_shards(&collection, 40.7128, -74.0060, Some("JP"));
         assert_eq!(shards, vec!["US"]);
     }
 
