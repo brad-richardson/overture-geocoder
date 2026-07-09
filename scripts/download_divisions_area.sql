@@ -1,4 +1,10 @@
--- Download Overture Maps divisions for reverse geocoding
+-- Download Overture Maps divisions for reverse geocoding.
+--
+-- Includes populated localities (cities and towns) alongside broad
+-- administrative containers. The initial 50k population bar gives useful
+-- city coverage while avoiding the millions of small locality/neighborhood
+-- polygons that do not fit the build runner's memory envelope.
+--
 -- JOINs division (point) with division_area (polygon)
 -- Run with: ./scripts/download_divisions.sh (uses same shell wrapper)
 --
@@ -37,7 +43,7 @@ SET threads = 2;
 --   division -> lat/lon (curated point), names, population, version
 --   division_area -> bbox, H3 cells, area (from polygon geometry)
 COPY (
-    WITH divisions AS (
+    WITH divisions AS MATERIALIZED (
         SELECT
             id as gers_id,
             version,
@@ -65,35 +71,30 @@ COPY (
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
             hive_partitioning = true
         )
-        WHERE subtype IN ('country', 'region', 'county')
-          AND names.primary IS NOT NULL
+        WHERE names.primary IS NOT NULL
+          AND (
+              subtype IN ('country', 'region', 'county')
+              OR (subtype = 'locality' AND COALESCE(population, 0) >= 50000)
+          )
     ),
     areas_all AS (
         SELECT
-            division_id,
+            a.division_id,
             -- Bbox from polygon geometry (more accurate than division's pre-computed bbox)
-            ST_XMin(geometry) as bbox_xmin,
-            ST_YMin(geometry) as bbox_ymin,
-            ST_XMax(geometry) as bbox_xmax,
-            ST_YMax(geometry) as bbox_ymax,
+            ST_XMin(a.geometry) as bbox_xmin,
+            ST_YMin(a.geometry) as bbox_ymin,
+            ST_XMax(a.geometry) as bbox_xmax,
+            ST_YMax(a.geometry) as bbox_ymax,
             -- Area for ranking (smaller = more specific)
-            ST_Area(geometry) as area,
-            -- Pick one area per division (prefer smallest/most specific)
-            ROW_NUMBER() OVER (PARTITION BY division_id ORDER BY ST_Area(geometry) ASC) as rn
+            ST_Area(a.geometry) as area
         FROM read_parquet(
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division_area/*',
             hive_partitioning = true
-        )
-        -- Match the divisions CTE's subtype filter BEFORE the window
-        -- function: without it, geometry/area is computed and sorted for
-        -- millions of locality/neighborhood polygons that the final join
-        -- discards anyway - that working set is what OOMed DuckDB 1.5.
-        WHERE subtype IN ('country', 'region', 'county')
-    ),
-    areas AS (
-        SELECT division_id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
-        FROM areas_all
-        WHERE rn = 1
+        ) a
+        JOIN divisions d ON a.division_id = d.gers_id
+        -- The materialized eligible-ID join happens before spatial work, so
+        -- excluded locality/neighborhood polygons never enter the window.
+        WHERE a.subtype IN ('country', 'region', 'county', 'locality')
     )
     SELECT
         d.gers_id,
@@ -111,7 +112,7 @@ COPY (
         a.bbox_ymax,
         a.area
     FROM divisions d
-    JOIN areas a ON d.gers_id = a.division_id
+    JOIN areas_all a ON d.gers_id = a.division_id
 )
 TO 'exports/divisions-reverse.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
 

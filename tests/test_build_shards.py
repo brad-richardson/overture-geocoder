@@ -19,6 +19,8 @@ from build_shards import (
     WIKI_IMPORTANCE_WEIGHT,
     build_country_shard,
     build_head_shard,
+    build_reverse_country_shard,
+    build_reverse_head_shard,
     build_search_alias,
     build_shard_schema,
     compute_importance,
@@ -634,6 +636,56 @@ class TestEndToEndShardBuild:
         # bar — HEAD is loaded on every search and must stay small.
         assert "known-001" not in ids
         assert info["record_count"] == len(ids)
+
+
+class TestReverseShardBuild:
+    def test_keeps_city_and_disjoint_area_components(self, tmp_path):
+        """Reverse shards preserve city rows and every stored bbox component."""
+        source = tmp_path / "reverse.parquet"
+        duckdb.sql(f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    ('city-1', 1, 'locality', 'Test City', 10.0, 10.0, 50000,
+                     'US', 'US-TS', 9.8, 9.8, 10.2, 10.2, 0.16),
+                    ('city-1', 1, 'locality', 'Test City', 10.0, 10.0, 50000,
+                     'US', 'US-TS', 20.0, 20.0, 20.2, 20.2, 0.04),
+                    ('county-1', 1, 'county', 'Test County', 10.0, 10.0, 100000,
+                     'US', 'US-TS', 9.0, 9.0, 21.0, 21.0, 144.0)
+                ) AS t(
+                    gers_id, version, subtype, primary_name, lat, lon, population,
+                    country, region, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
+                )
+            ) TO '{source}' (FORMAT PARQUET)
+        """)
+
+        country_path = tmp_path / "US.db"
+        info = build_reverse_country_shard(source, "US", country_path, "test")
+        assert info["record_count"] == 3
+
+        db = sqlite3.connect(country_path)
+        city_components = db.execute(
+            "SELECT COUNT(*) FROM divisions_reverse WHERE gers_id = 'city-1'"
+        ).fetchone()[0]
+        rtree_rows = db.execute("SELECT COUNT(*) FROM divisions_reverse_rtree").fetchone()[0]
+        db.close()
+        assert city_components == 2
+        assert rtree_rows == info["record_count"]
+
+        # A city appears in HEAD only after it crosses the configured threshold;
+        # broad administrative containers remain present at every threshold.
+        low_head_path = tmp_path / "HEAD-low.db"
+        build_reverse_head_shard(source, low_head_path, "test", population_threshold=75_000)
+        low_head = sqlite3.connect(low_head_path)
+        low_ids = {row[0] for row in low_head.execute("SELECT gers_id FROM divisions_reverse")}
+        low_head.close()
+        assert low_ids == {"county-1"}
+
+        city_head_path = tmp_path / "HEAD-city.db"
+        build_reverse_head_shard(source, city_head_path, "test", population_threshold=50_000)
+        city_head = sqlite3.connect(city_head_path)
+        city_ids = {row[0] for row in city_head.execute("SELECT gers_id FROM divisions_reverse")}
+        city_head.close()
+        assert city_ids == {"city-1", "county-1"}
 
 
 class TestReverseBuildMetrics:
