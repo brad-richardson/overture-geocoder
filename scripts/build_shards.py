@@ -1147,6 +1147,19 @@ def populate_reverse_rtree(db: sqlite3.Connection):
     """)
 
 
+def prepare_reverse_rows(rows: list[tuple]) -> list[tuple]:
+    """Coerce DuckDB numeric values to SQLite-compatible Python primitives."""
+    prepared = []
+    for row in rows:
+        prepared.append((
+            row[0], row[1], row[2],
+            *(float(value) for value in row[3:10]),
+            int(row[10]) if row[10] is not None else None,
+            row[11], row[12],
+        ))
+    return prepared
+
+
 def build_reverse_country_shard(
     parquet_path: Path,
     country_code: str,
@@ -1197,7 +1210,8 @@ def build_reverse_country_shard(
         if not rows:
             break
 
-        for row in rows:
+        prepared_rows = prepare_reverse_rows(rows)
+        for row in prepared_rows:
             # Update bbox
             bbox[0] = min(bbox[0], row[5])  # bbox_xmin
             bbox[1] = min(bbox[1], row[6])  # bbox_ymin
@@ -1210,7 +1224,7 @@ def build_reverse_country_shard(
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 area, population, country, region
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
+        """, prepared_rows)
         count += len(rows)
 
     populate_reverse_rtree(db)
@@ -1285,13 +1299,14 @@ def build_reverse_head_shard(
         if not rows:
             break
 
+        prepared_rows = prepare_reverse_rows(rows)
         db.executemany("""
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                 area, population, country, region
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """, rows)
+        """, prepared_rows)
         count += len(rows)
 
     populate_reverse_rtree(db)
@@ -1593,7 +1608,7 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
 
 
 def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
-    """Build reverse geocoding shards (bbox-based)."""
+    """Build bbox-based reverse-geocoding shards, including populated localities."""
     reverse_subdir = version_dir / "reverse"
 
     # Use reverse parquet if available, otherwise error
@@ -1677,7 +1692,10 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
     collection = generate_stac_collection(version, shard_infos, shard_hashes, "reverse")
     collection["id"] = f"geocoder-reverse-shards-{version}"
     collection["title"] = f"Overture Reverse Geocoder Shards {version}"
-    collection["description"] = "Pre-built SQLite shards for reverse geocoding Overture Maps divisions data"
+    collection["description"] = (
+        "Pre-built SQLite shards for bbox-based reverse geocoding of Overture "
+        "administrative divisions and populated localities"
+    )
     write_json(version_dir / "reverse-collection.json", collection)
 
     return shard_infos
