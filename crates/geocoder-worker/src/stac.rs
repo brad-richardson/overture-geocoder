@@ -742,7 +742,23 @@ impl ShardLoader {
         lon: f64,
         cf_country: Option<&str>,
     ) -> Vec<String> {
-        let coordinate_shards = Self::select_shards_by_proximity(collection, lat, lon);
+        // Reverse routing needs containment, not the forward-search notion of
+        // "nearby". Reusing select_shards_by_proximity here made a country up
+        // to 200 km away count as an overlapping bbox and needlessly forced an
+        // IP-country fallback even when exactly one bbox contained the point.
+        let coordinate_shards: Vec<String> = collection
+            .items
+            .iter()
+            .filter_map(|(shard_id, item)| {
+                if shard_id == "HEAD" {
+                    return None;
+                }
+                item.bbox
+                    .as_ref()
+                    .filter(|bbox| distance_to_bbox(lat, lon, bbox) == 0.0)
+                    .map(|_| shard_id.clone())
+            })
+            .collect();
         if coordinate_shards.len() == 1 {
             return coordinate_shards;
         }
@@ -1450,6 +1466,21 @@ mod tests {
         assert_eq!(fallback, vec!["US"]);
 
         assert!(ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None).is_empty());
+    }
+
+    #[test]
+    fn test_nearby_noncontaining_bbox_does_not_create_false_ambiguity() {
+        let collection = collection_with_bboxes(&[
+            ("CA", Some([-141.0, 41.0, -52.0, 83.0])),
+            ("US", Some([-125.0, 24.0, -66.0, 50.0])),
+        ]);
+
+        // New York is within 200 km of Canada's broad bbox, but only the US
+        // bbox actually contains it. Reverse routing must not fall back to an
+        // unrelated caller IP in this case.
+        let shards =
+            ShardLoader::select_reverse_shards(&collection, 40.7128, -74.0060, Some("JP"));
+        assert_eq!(shards, vec!["US"]);
     }
 
     #[test]
