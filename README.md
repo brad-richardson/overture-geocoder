@@ -8,7 +8,7 @@ A high-performance forward and reverse geocoder built on [Overture Maps](https:/
 - **Serverless Architecture**: Runs entirely on Cloudflare Workers with zero persistent server management.
 - **Cost-Effective**: Uses SQLite shards stored in R2 to bypass database storage limits and minimize costs.
 - **Fast Search**: Full-Text Search (FTS5) with prefix matching for autocomplete.
-- **Reverse Geocoding**: Routes from requested coordinates when one country bbox is unambiguous, then performs bbox-based hierarchical lookup. Overlapping or legacy metadata falls back to IP country.
+- **Reverse Geocoding**: Routes from requested coordinates when one country bbox is unambiguous, then performs bbox-based hierarchical lookup over countries, regions, counties, and populated localities. Overlapping or legacy metadata falls back to IP country; results are bbox-confidence estimates, with exact polygon containment left as future work.
 - **GERS ID Lookup**: Resolve any Overture GERS ID to its bounding box via UUID-prefix-sharded parquet index.
 - **Zero Egress**: Client-side libraries can fetch full geometry directly from Overture's S3 buckets.
 
