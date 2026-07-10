@@ -32,11 +32,13 @@ const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
 
 // Shard selection constants
 const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
-                                        // Max shards to load (excluding HEAD). Capped at 2: the user's own location
-                                        // shard is always the closest, and every extra shard multiplies the
-                                        // worst-case first-touch cost (R2 fetch + deserialize of a multi-MB file)
-                                        // that dominates tail latency.
 const MAX_LOCATION_SHARDS: usize = 2;
+const MAX_ROUTER_SHARDS: usize = 2;
+// Total extra shards beyond HEAD. Previously HEAD+2 (nearby only); now
+// HEAD+3 to accommodate suffix + router + nearby while still bounding
+// worst-case first-touch cost (additional R2 fetch + deserialize). Tail
+// latency increase is acceptable for the recall improvement.
+const MAX_EXTRA_SHARDS: usize = 3;
 const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
                                        // the newest complete id-index reachable while fresher versions still
                                        // build. Retention (rebuild-r2-shards.yml) keeps only the newest 2
@@ -62,6 +64,8 @@ thread_local! {
     /// Small JSON texts (catalog/collections/id-meta) with expiry timestamps.
     static TEXT_MEMO: RefCell<HashMap<String, (Option<String>, u64)>> =
         RefCell::new(HashMap::new());
+    static ROUTER_CACHE: RefCell<Vec<(String, Rc<RouterDb>, usize)>> =
+        const { RefCell::new(Vec::new()) };
 }
 
 /// Sentinel marking missing-resource errors. Version fallback and the
@@ -240,6 +244,104 @@ struct StacAssets {
 #[derive(Debug, Deserialize)]
 struct StacAsset {
     href: String,
+}
+
+pub struct RouterDb {
+    conn: rusqlite::Connection,
+}
+
+impl RouterDb {
+    pub fn from_bytes(bytes: &[u8]) -> std::result::Result<Self, String> {
+        use rusqlite::MAIN_DB;
+        use std::io::Cursor;
+        let mut conn = rusqlite::Connection::open_in_memory().map_err(|e| e.to_string())?;
+        conn.deserialize_read_exact(MAIN_DB, Cursor::new(bytes), bytes.len(), true)
+            .map_err(|e| e.to_string())?;
+        conn.execute_batch("PRAGMA temp_store = MEMORY;")
+            .map_err(|e| e.to_string())?;
+        Ok(Self { conn })
+    }
+
+    fn fold_diacritic(c: char) -> char {
+        match c {
+            'à' | 'á' | 'â' | 'ã' | 'ä' | 'å' => 'a',
+            'è' | 'é' | 'ê' | 'ë' => 'e',
+            'ì' | 'í' | 'î' | 'ï' => 'i',
+            'ò' | 'ó' | 'ô' | 'õ' | 'ö' | 'ø' => 'o',
+            'ù' | 'ú' | 'û' | 'ü' => 'u',
+            'ç' => 'c',
+            'ñ' => 'n',
+            'ý' | 'ÿ' => 'y',
+            _ => c,
+        }
+    }
+
+    fn normalize_token(s: &str) -> String {
+        s.trim()
+            .chars()
+            .flat_map(char::to_lowercase)
+            .map(Self::fold_diacritic)
+            .collect()
+    }
+
+    fn tokenize_query(query: &str) -> Vec<String> {
+        let normalized = Self::normalize_token(query);
+        normalized
+            .split(|c: char| !c.is_alphanumeric())
+            .filter(|t| t.chars().count() >= 3)
+            .filter(|t| t.chars().any(|c| c.is_alphabetic()))
+            .map(|s| s.to_string())
+            .collect()
+    }
+
+    pub fn lookup_shards(&self, query: &str) -> Vec<String> {
+        let tokens = Self::tokenize_query(query);
+        if tokens.is_empty() {
+            return Vec::new();
+        }
+        let mut scores: std::collections::HashMap<String, f64> = std::collections::HashMap::new();
+        let total = tokens.len() as f64;
+        for (idx, token) in tokens.iter().enumerate() {
+            let weight = 1.0 + (idx as f64 / total) * 0.5;
+            if let Ok(mut stmt) = self.conn.prepare(
+                "SELECT shard_id, max_importance FROM router WHERE token = ?1 ORDER BY max_importance DESC LIMIT 4",
+            ) {
+                if let Ok(rows) = stmt.query_map([token], |row| {
+                    Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+                }) {
+                    for row in rows.flatten() {
+                        let (shard_id, imp) = row;
+                        *scores.entry(shard_id).or_insert(0.0) += imp * weight;
+                    }
+                }
+            }
+        }
+        if scores.is_empty() {
+            for (idx, token) in tokens.iter().enumerate() {
+                let weight = 1.0 + (idx as f64 / total) * 0.5;
+                let pattern = format!("{}%", token);
+                if let Ok(mut stmt) = self.conn.prepare(
+                    "SELECT shard_id, max_importance FROM router WHERE token LIKE ?1 ORDER BY max_importance DESC LIMIT 3",
+                ) {
+                    if let Ok(rows) = stmt.query_map([pattern], |row| {
+                        Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
+                    }) {
+                        for row in rows.flatten() {
+                            let (shard_id, imp) = row;
+                            *scores.entry(shard_id).or_insert(0.0) += imp * weight * 0.8;
+                        }
+                    }
+                }
+            }
+        }
+        let mut ranked: Vec<(String, f64)> = scores.into_iter().collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        ranked
+            .into_iter()
+            .take(MAX_ROUTER_SHARDS)
+            .map(|(id, _)| id)
+            .collect()
+    }
 }
 
 /// Check if an error indicates a missing resource that should trigger version fallback.
@@ -611,6 +713,138 @@ impl ShardLoader {
         })
     }
 
+    fn country_name_to_code(name: &str) -> Option<&'static str> {
+        match name {
+            "afghanistan" => Some("AF"),
+            "albania" => Some("AL"),
+            "algeria" => Some("DZ"),
+            "argentina" => Some("AR"),
+            "australia" => Some("AU"),
+            "austria" => Some("AT"),
+            "bangladesh" => Some("BD"),
+            "belgium" => Some("BE"),
+            "brazil" => Some("BR"),
+            "bulgaria" => Some("BG"),
+            "canada" => Some("CA"),
+            "chile" => Some("CL"),
+            "china" => Some("CN"),
+            "colombia" => Some("CO"),
+            "croatia" => Some("HR"),
+            "czech" => Some("CZ"),
+            "czechia" => Some("CZ"),
+            "denmark" => Some("DK"),
+            "egypt" => Some("EG"),
+            "finland" => Some("FI"),
+            "france" => Some("FR"),
+            "germany" => Some("DE"),
+            "deutschland" => Some("DE"),
+            "greece" => Some("GR"),
+            "hungary" => Some("HU"),
+            "india" => Some("IN"),
+            "indonesia" => Some("ID"),
+            "iran" => Some("IR"),
+            "iraq" => Some("IQ"),
+            "ireland" => Some("IE"),
+            "israel" => Some("IL"),
+            "italy" => Some("IT"),
+            "italia" => Some("IT"),
+            "japan" => Some("JP"),
+            "mexico" => Some("MX"),
+            "netherlands" => Some("NL"),
+            "norway" => Some("NO"),
+            "pakistan" => Some("PK"),
+            "poland" => Some("PL"),
+            "portugal" => Some("PT"),
+            "russia" => Some("RU"),
+            "spain" => Some("ES"),
+            "sweden" => Some("SE"),
+            "switzerland" => Some("CH"),
+            "turkey" => Some("TR"),
+            "uk" => Some("GB"),
+            "britain" => Some("GB"),
+            "united kingdom" => Some("GB"),
+            "usa" => Some("US"),
+            "america" => Some("US"),
+            "united states" => Some("US"),
+            _ => None,
+        }
+    }
+
+    fn select_shards_by_country_suffix(
+        query_text: &str,
+        collection: &StacCollection,
+    ) -> Vec<String> {
+        let lower = query_text.to_lowercase();
+        let candidate = if let Some(pos) = lower.rfind(',') {
+            lower[pos + 1..].trim().to_string()
+        } else {
+            lower
+                .split_whitespace()
+                .last()
+                .unwrap_or("")
+                .trim()
+                .to_string()
+        };
+        if candidate.is_empty() {
+            return Vec::new();
+        }
+        let code_opt = if candidate.len() == 2 && candidate.chars().all(|c| c.is_ascii_alphabetic())
+        {
+            Some(candidate.to_uppercase())
+        } else {
+            Self::country_name_to_code(&candidate).map(|s| s.to_string())
+        };
+        if let Some(code) = code_opt {
+            if Self::collection_has_shard(collection, &code) {
+                return vec![code];
+            }
+            if let Some(regions) = collection.region_sharded.get(&code) {
+                return vec![regions.first().cloned().unwrap_or(code)];
+            }
+        }
+        Vec::new()
+    }
+
+    fn select_shards_from_router(
+        &self,
+        router: &RouterDb,
+        query_text: &str,
+        collection: &StacCollection,
+    ) -> Vec<String> {
+        let raw = router.lookup_shards(query_text);
+        let mut filtered: Vec<String> = Vec::new();
+        for sid in raw {
+            if sid == "HEAD" {
+                continue;
+            }
+            if Self::collection_has_shard(collection, &sid) {
+                if !filtered.contains(&sid) {
+                    filtered.push(sid);
+                }
+            } else if let Some(regions) = collection.region_sharded.get(&sid) {
+                if let Some(first) = regions.first() {
+                    if !filtered.contains(first) {
+                        filtered.push(first.clone());
+                    }
+                }
+            } else if let Some((country, _)) = sid.split_once('-') {
+                if Self::collection_has_shard(collection, country) {
+                    let cs = country.to_string();
+                    if !filtered.contains(&cs) {
+                        filtered.push(cs);
+                    }
+                } else if let Some(regions) = collection.region_sharded.get(country) {
+                    if let Some(first) = regions.first() {
+                        if !filtered.contains(first) {
+                            filtered.push(first.clone());
+                        }
+                    }
+                }
+            }
+        }
+        filtered
+    }
+
     /// Attempt search against a specific version.
     async fn try_search(
         &self,
@@ -621,15 +855,62 @@ impl ShardLoader {
     ) -> Result<SearchResult> {
         let collection = self.load_collection(version).await?;
 
-        // Select nearby shards based on user location
-        let nearby_shards = self.select_nearby_shards(&collection, user_location);
-        console_log!("Selected shards: {:?}", nearby_shards);
+        let suffix_shards = Self::select_shards_by_country_suffix(&query.text, &collection);
+        if !suffix_shards.is_empty() {
+            console_log!(
+                "Suffix heuristic selected: {:?} for query {:?}",
+                suffix_shards,
+                query.text
+            );
+        }
 
-        // Load and query HEAD + nearby shards concurrently so the network
-        // fetches overlap instead of summing (the SQLite queries themselves
-        // are CPU work and serialize naturally on the single wasm thread).
+        let router_shards = match self.load_router_db(version).await {
+            Ok(Some(router)) => {
+                let shards = self.select_shards_from_router(&router, &query.text, &collection);
+                if !shards.is_empty() {
+                    console_log!(
+                        "Router selected shards: {:?} for query {:?}",
+                        shards,
+                        query.text
+                    );
+                }
+                shards
+            }
+            Ok(None) => {
+                console_log!(
+                    "Router DB not available for version {}, using suffix only",
+                    version
+                );
+                Vec::new()
+            }
+            Err(e) => {
+                console_log!("Router load failed: {:?}, using suffix only", e);
+                Vec::new()
+            }
+        };
+
+        let nearby_shards = self.select_nearby_shards(&collection, user_location);
+        console_log!("Nearby shards: {:?}", nearby_shards);
+
+        let mut seen = std::collections::HashSet::new();
+        seen.insert("HEAD".to_string());
+        let mut extra: Vec<String> = Vec::new();
+        for sid in suffix_shards
+            .iter()
+            .chain(router_shards.iter())
+            .chain(nearby_shards.iter())
+        {
+            if seen.insert(sid.clone()) {
+                extra.push(sid.clone());
+                if extra.len() >= MAX_EXTRA_SHARDS {
+                    break;
+                }
+            }
+        }
+        console_log!("Final extra shards: {:?}", extra);
+
         let mut shard_ids = vec!["HEAD".to_string()];
-        shard_ids.extend(nearby_shards);
+        shard_ids.extend(extra);
         let outcomes = futures::future::join_all(
             shard_ids
                 .iter()
@@ -930,6 +1211,49 @@ impl ShardLoader {
         });
 
         Ok((db, size))
+    }
+
+    async fn load_router_db(&self, version: &str) -> Result<Option<Rc<RouterDb>>> {
+        for key in [
+            format!("{}/router.db", version),
+            format!("{}/shards/router.db", version),
+        ] {
+            let cached = ROUTER_CACHE.with(|c| {
+                let mut cache = c.borrow_mut();
+                cache.iter().position(|(k, _, _)| k == &key).map(|pos| {
+                    let entry = cache.remove(pos);
+                    let hit = Rc::clone(&entry.1);
+                    cache.push(entry);
+                    hit
+                })
+            });
+            if let Some(db) = cached {
+                console_log!("Router cache HIT: {}", key);
+                return Ok(Some(db));
+            }
+
+            if let Some(bytes) = self.cached_get(&key, IMMUTABLE_CACHE_TTL).await? {
+                let size = bytes.len();
+                let router = Rc::new(RouterDb::from_bytes(&bytes).map_err(|e| {
+                    Error::RustError(format!("Failed to open router {}: {}", key, e))
+                })?);
+                drop(bytes);
+                ROUTER_CACHE.with(|c| {
+                    let mut cache = c.borrow_mut();
+                    if !cache.iter().any(|(k, _, _)| k == &key) {
+                        cache.push((key.clone(), Rc::clone(&router), size));
+                        while cache.len() > 2 {
+                            let (evicted, _, _) = cache.remove(0);
+                            console_log!("Router cache evict: {}", evicted);
+                        }
+                    }
+                });
+                console_log!("Router DB loaded: {} ({}B)", key, size);
+                return Ok(Some(router));
+            }
+        }
+        console_log!("Router DB not found for version {}", version);
+        Ok(None)
     }
 
     async fn query_reverse_shard(
@@ -1799,5 +2123,76 @@ mod tests {
 
         let versions = get_ordered_versions(&catalog);
         assert!(versions.is_empty());
+    }
+
+    fn build_test_router() -> RouterDb {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE router(token TEXT NOT NULL, shard_id TEXT NOT NULL, max_importance REAL NOT NULL, PRIMARY KEY(token, shard_id));",
+        )
+        .unwrap();
+        let data = vec![
+            ("toulouse", "FR", 0.8),
+            ("toulouse", "US-TX", 0.2),
+            ("france", "FR", 0.9),
+            ("berlin", "DE", 0.85),
+            ("guangzhou", "CN-GD", 0.7),
+        ];
+        for (token, shard, imp) in data {
+            conn.execute(
+                "INSERT INTO router VALUES (?1, ?2, ?3)",
+                rusqlite::params![token, shard, imp],
+            )
+            .unwrap();
+        }
+        RouterDb { conn }
+    }
+
+    #[test]
+    fn test_router_lookup_exact_token() {
+        let router = build_test_router();
+        let shards = router.lookup_shards("Toulouse");
+        assert!(shards.contains(&"FR".to_string()));
+    }
+
+    #[test]
+    fn test_router_lookup_qualified_query() {
+        let router = build_test_router();
+        let shards = router.lookup_shards("Toulouse, France");
+        assert_eq!(shards[0], "FR");
+    }
+
+    #[test]
+    fn test_router_lookup_prefix() {
+        let router = build_test_router();
+        let shards = router.lookup_shards("toulou");
+        assert!(shards.contains(&"FR".to_string()));
+    }
+
+    #[test]
+    fn test_country_suffix_parsing() {
+        let collection = collection_with_bboxes(&[
+            ("FR", Some([-5.0, 41.0, 9.0, 51.0])),
+            ("DE", Some([5.0, 47.0, 15.0, 55.0])),
+        ]);
+        let shards = ShardLoader::select_shards_by_country_suffix("Paris, France", &collection);
+        assert_eq!(shards, vec!["FR"]);
+        let shards2 = ShardLoader::select_shards_by_country_suffix("Berlin, DE", &collection);
+        assert_eq!(shards2, vec!["DE"]);
+    }
+
+    #[test]
+    fn test_router_shard_filtering() {
+        let collection = collection_with_bboxes(&[
+            ("FR", Some([-5.0, 41.0, 9.0, 51.0])),
+            ("US-TX", Some([-106.0, 25.0, -93.0, 36.0])),
+        ]);
+        let router = build_test_router();
+        let raw = router.lookup_shards("Toulouse");
+        let filtered: Vec<String> = raw
+            .into_iter()
+            .filter(|sid| ShardLoader::collection_has_shard(&collection, sid))
+            .collect();
+        assert!(filtered.contains(&"FR".to_string()));
     }
 }

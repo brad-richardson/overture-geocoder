@@ -318,6 +318,7 @@ dependencies = [
  "geocoder-core",
  "getrandom 0.2.16",
  "parquet",
+ "rusqlite",
  "serde",
  "serde_json",
  "wasm-bindgen-test",

@@ -45,6 +45,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import unicodedata
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -173,6 +174,200 @@ WIKI_LOCALITY_KEEP_THRESHOLD = 0.5
 # threshold: 0.65 admits ~2.4k world-famous places (Gettysburg is 0.80),
 # where 0.5 admitted ~60k and tripled HEAD's size.
 HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.65
+
+# Router constants
+ROUTER_TOKEN_MIN_LEN = 3
+ROUTER_MAX_SHARDS_PER_TOKEN = 3
+
+
+def _router_normalize(s: str) -> str:
+    return ''.join(
+        c for c in unicodedata.normalize('NFD', s) if not unicodedata.combining(c)
+    ).lower()
+
+
+def _router_tokenize(text: str | None) -> set[str]:
+    if not text:
+        return set()
+    normalized = _router_normalize(text).replace(';', ' ')
+    tokens: set[str] = set()
+    cur: list[str] = []
+    for ch in normalized:
+        if ch.isalnum():
+            cur.append(ch)
+        else:
+            if cur:
+                tok = ''.join(cur)
+                if len(tok) >= ROUTER_TOKEN_MIN_LEN and any(c.isalpha() for c in tok):
+                    tokens.add(tok)
+                cur = []
+    if cur:
+        tok = ''.join(cur)
+        if len(tok) >= ROUTER_TOKEN_MIN_LEN and any(c.isalpha() for c in tok):
+            tokens.add(tok)
+    return tokens
+
+
+def build_global_router(
+    parquet_path: Path,
+    output_path: Path,
+    head_threshold: int = 100_000,
+    version: str = "dev",
+) -> dict:
+    parquet_str = str(parquet_path.resolve())
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        output_path.unlink()
+
+    token_map: dict[str, dict[str, float]] = {}
+
+    con = duckdb.connect()
+
+    try:
+        cursor = con.execute(f"""
+            SELECT
+                subtype, class, population, wiki_importance,
+                is_country_capital, is_region_capital,
+                primary_name, search_name, country, region
+            FROM read_parquet('{parquet_str}')
+        """)
+        enriched = True
+    except Exception:
+        print("  Router: enriched columns not found, falling back to raw parquet schema")
+        cursor = con.execute(f"""
+            SELECT
+                subtype, class, population,
+                CAST(NULL AS DOUBLE) AS wiki_importance,
+                CAST(NULL AS BOOLEAN) AS is_country_capital,
+                CAST(NULL AS BOOLEAN) AS is_region_capital,
+                COALESCE(primary_name, name) AS primary_name,
+                COALESCE(CAST(search_text AS VARCHAR), '') AS search_name,
+                country, region
+            FROM read_parquet('{parquet_str}')
+        """)
+        enriched = False
+
+    FETCH_SIZE = 50000
+    total_rows = 0
+    kept_rows = 0
+
+    while True:
+        rows = cursor.fetchmany(FETCH_SIZE)
+        if not rows:
+            break
+        for row in rows:
+            total_rows += 1
+            (subtype, class_, population, wiki_importance,
+             is_country_capital, is_region_capital,
+             primary_name, search_name, country, region) = row
+
+            if subtype in ('country', 'region'):
+                continue
+
+            is_head_locality = False
+            if subtype == 'locality':
+                pop = population or 0
+                wiki = wiki_importance or 0.0
+                if pop >= head_threshold or wiki >= HEAD_WIKI_IMPORTANCE_THRESHOLD:
+                    is_head_locality = True
+
+            if is_head_locality:
+                continue
+
+            shard_ids: list[str] = []
+            if region and not region.endswith(f"-{FALLBACK_REGION_SUFFIX}"):
+                shard_ids.append(region)
+            if country:
+                if not shard_ids or country != region:
+                    shard_ids.append(country)
+
+            if not shard_ids:
+                continue
+
+            importance = compute_importance(
+                subtype or "",
+                class_=class_,
+                population=population,
+                wiki_importance=wiki_importance,
+                is_country_capital=bool(is_country_capital),
+                is_region_capital=bool(is_region_capital),
+            )
+
+            if importance < 0.10:
+                continue
+
+            if subtype == 'locality':
+                pop = population or 0
+                if pop < 1000 and importance < 0.15:
+                    continue
+
+            kept_rows += 1
+
+            tokens = _router_tokenize(primary_name)
+            if importance >= 0.30 and search_name:
+                tokens |= _router_tokenize(search_name)
+
+            if country:
+                tokens.add(country.lower())
+            if region:
+                tokens.add(region.lower())
+                if '-' in region:
+                    parts = region.lower().split('-')
+                    if len(parts[-1]) >= 2:
+                        tokens.add(parts[-1])
+
+            for token in tokens:
+                shard_dict = token_map.setdefault(token, {})
+                for sid in shard_ids:
+                    prev = shard_dict.get(sid)
+                    if prev is None or importance > prev:
+                        shard_dict[sid] = importance
+
+    print(f"  Router: scanned {total_rows:,} rows, kept {kept_rows:,} for routing")
+    print(f"  Router: {len(token_map):,} unique tokens before pruning")
+
+    for token in list(token_map.keys()):
+        shards = token_map[token]
+        if len(shards) > ROUTER_MAX_SHARDS_PER_TOKEN:
+            top = sorted(shards.items(), key=lambda x: x[1], reverse=True)[:ROUTER_MAX_SHARDS_PER_TOKEN]
+            token_map[token] = dict(top)
+
+    total_pairs = sum(len(v) for v in token_map.values())
+    print(f"  Router: {total_pairs:,} token->shard pairs after per-token top-{ROUTER_MAX_SHARDS_PER_TOKEN} pruning")
+
+    con.close()
+
+    db = sqlite3.connect(output_path)
+    db.execute("PRAGMA journal_mode=DELETE;")
+    db.execute("PRAGMA synchronous=NORMAL;")
+    db.executescript("""
+        CREATE TABLE router(
+            token TEXT NOT NULL,
+            shard_id TEXT NOT NULL,
+            max_importance REAL NOT NULL,
+            PRIMARY KEY(token, shard_id)
+        );
+    """)
+
+    batch = []
+    for token, shard_dict in token_map.items():
+        for sid, imp in shard_dict.items():
+            batch.append((token, sid, imp))
+
+    db.executemany("INSERT INTO router VALUES (?, ?, ?)", batch)
+    db.execute("CREATE INDEX idx_token ON router(token);")
+    db.commit()
+    db.execute("VACUUM")
+    db.close()
+
+    size_bytes = output_path.stat().st_size
+    print(f"  Router: wrote {output_path} ({size_bytes / 1024 / 1024:.2f} MB)")
+    return {
+        "size_bytes": size_bytes,
+        "token_count": len(token_map),
+        "pair_count": total_pairs,
+        "version": version,
+    }
 
 
 def build_search_alias(name: str, search_name: str) -> str | None:
@@ -1686,6 +1881,31 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
     )
     write_json(version_dir / "collection.json", collection)
 
+    if getattr(args, 'no_router', False):
+        print("\nSkipping global router build (--no-router)")
+    elif args.head_only:
+        print("\nSkipping global router in head-only mode")
+    else:
+        print("\nBuilding global token router...")
+        router_path = version_dir / "router.db"
+        router_info = build_global_router(
+            parquet, router_path, args.head_threshold, version
+        )
+        router_hash = hash_file(router_path)
+        print(f"  Router hash: {router_hash[:12]}...")
+        collection_path = version_dir / "collection.json"
+        if collection_path.exists():
+            with open(collection_path) as f:
+                existing = json.load(f)
+            existing["router"] = {
+                "href": "./router.db",
+                "size_bytes": router_info["size_bytes"],
+                "sha256": router_hash,
+                "token_count": router_info["token_count"],
+                "pair_count": router_info["pair_count"],
+            }
+            write_json(collection_path, existing)
+
     return shard_infos
 
 
@@ -1856,6 +2076,8 @@ def main():
     parser.add_argument("--no-wiki-importance", action="store_true",
                         help="Build without the wikimedia importance join "
                              "(importance falls back to type prior + population)")
+    parser.add_argument("--no-router", action="store_true",
+                        help="Skip building global token router (router.db)")
     parser.add_argument("--wiki-importance-file", type=Path,
                         default=WIKIMEDIA_IMPORTANCE_FILE,
                         help="Local cache path for the wikimedia importance file "
