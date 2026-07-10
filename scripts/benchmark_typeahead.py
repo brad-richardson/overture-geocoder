@@ -22,6 +22,9 @@ instances — latency numbers are indicative, rank quality is the signal.
 Usage:
     python scripts/benchmark_typeahead.py                     # console table
     python scripts/benchmark_typeahead.py --output benchmarks/typeahead.json
+    # Third-language exonym set (skip Nominatim: rate-limited, not autocomplete):
+    python scripts/benchmark_typeahead.py --cases multilingual --skip nominatim \
+        --output benchmarks/multilingual-typeahead.json
 """
 
 import argparse
@@ -100,6 +103,62 @@ CASES = [
     Case("boston, ma", "Boston", 42.3601, -71.0589, note="comma query",
          full_only=True),
 ]
+
+
+# Third-language exonym queries: the user types a place name in a language that
+# is neither the place's local language nor English. Today `search_name` only
+# carries primary + short + English common/official/alternate names, so these
+# should mostly MISS on Overture while resolving on Photon (which ingests the
+# full OSM `name:<lang>` set). This set quantifies that gap to decide whether
+# language-specific shards / a names_i18n table are worth building
+# (docs/plans/2026-07-02-future-work.md, section 2).
+#
+# alt_targets deliberately span the local/native name, the English exonym, and
+# the query-language form so a coordinate-correct hit counts no matter which
+# name form the engine surfaces; the 50 km tolerance still disambiguates
+# same-named decoys (Pekin IL vs Beijing, Londres AR vs London GB).
+MULTILINGUAL_CASES = [
+    # French exonyms
+    Case("moscou", "Москва", 55.7558, 37.6173, note="multilingual",
+         alt_targets=("Moscow", "Moskau", "Moscou", "Moskva")),
+    Case("londres", "London", 51.5074, -0.1278, note="multilingual",
+         alt_targets=("Londres",)),
+    Case("venise", "Venezia", 45.4372, 12.3346, note="multilingual",
+         alt_targets=("Venice", "Venise", "Venedig")),
+    # German exonyms
+    Case("moskau", "Москва", 55.7558, 37.6173, note="multilingual",
+         alt_targets=("Moscow", "Moskau", "Moscou", "Moskva")),
+    Case("tokio", "東京都", 35.6762, 139.6503, note="multilingual",
+         alt_targets=("Tokyo", "東京", "Tokio")),
+    # Spanish exonyms (unaccented, as typed)
+    Case("nueva york", "New York", 40.7128, -74.0060, note="multilingual",
+         alt_targets=("Nueva York",)),
+    Case("florencia", "Firenze", 43.7698, 11.2556, note="multilingual",
+         alt_targets=("Florence", "Florencia", "Florenz")),
+    Case("atenas", "Αθήνα", 37.9756, 23.7348, note="multilingual",
+         alt_targets=("Athens", "Atenas", "Athina")),
+    # Polish exonym
+    Case("kolonia", "Köln", 50.9384, 6.9600, note="multilingual",
+         alt_targets=("Cologne", "Kolonia", "Koln")),
+    # Shared across several Romance/Slavic languages (es/it/pl "Prague")
+    Case("praga", "Praha", 50.0875, 14.4213, note="multilingual",
+         alt_targets=("Prague", "Praga")),
+    # fr/es "Beijing" — unaccented, as typed
+    Case("pekin", "北京市", 39.9042, 116.4074, note="multilingual",
+         alt_targets=("Beijing", "北京", "Pekin", "Pekín", "Pékin")),
+    # Non-Latin-script queries
+    Case("モスクワ", "Москва", 55.7558, 37.6173, note="multilingual",
+         alt_targets=("Moscow", "モスクワ", "Moskva")),  # Japanese katakana
+    Case("варшава", "Warszawa", 52.2320, 21.0067, note="multilingual",
+         alt_targets=("Warsaw", "Варшава", "Warschau")),  # Russian Cyrillic
+]
+
+
+CASE_SETS = {
+    "standard": CASES,
+    "multilingual": MULTILINGUAL_CASES,
+    "all": CASES + MULTILINGUAL_CASES,
+}
 
 
 def haversine_km(lat1, lon1, lat2, lon2) -> float:
@@ -285,7 +344,14 @@ def main():
     parser.add_argument("--quiet", action="store_true")
     parser.add_argument("--overture-url", default="https://geocoder.bradr.dev")
     parser.add_argument("--skip", default="", help="Comma-separated engines to skip")
+    parser.add_argument(
+        "--cases", choices=sorted(CASE_SETS), default="standard",
+        help="Which case set to run: standard (default), multilingual "
+             "(third-language exonyms), or all",
+    )
     args = parser.parse_args()
+
+    cases = CASE_SETS[args.cases]
 
     skip = {s.strip().lower() for s in args.skip.split(",") if s.strip()}
     engines = [e for e in (Overture(args.overture_url), Photon(), Nominatim())
@@ -293,10 +359,10 @@ def main():
 
     all_results = {}
     for engine in engines:
-        n_queries = sum(len(prefixes_for(c)) for c in CASES)
+        n_queries = sum(len(prefixes_for(c)) for c in cases)
         print(f"\n=== {engine.name} ({n_queries} queries, "
               f"~{n_queries * engine.rate_limit_delay:.0f}s) ===")
-        all_results[engine.name] = run_engine(engine, CASES, args.quiet)
+        all_results[engine.name] = run_engine(engine, cases, args.quiet)
 
     print("\n=== Summary ===")
     summaries = {name: summarize(r) for name, r in all_results.items()}
@@ -316,7 +382,8 @@ def main():
                 "min_prefix": MIN_PREFIX,
                 "tolerance_km": TOLERANCE_KM,
                 "engines": list(all_results),
-                "n_cases": len(CASES),
+                "case_set": args.cases,
+                "n_cases": len(cases),
             },
             "summaries": summaries,
             "results": all_results,
