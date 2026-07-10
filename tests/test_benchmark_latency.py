@@ -48,6 +48,16 @@ def test_reverse_quality_accepts_context_suffix_and_accents():
     assert quality["reason"] is None
 
 
+def test_reverse_quality_accepts_native_script_variant():
+    quality = benchmark_latency.evaluate_reverse_quality(
+        {"primary_name": "Улаанбаатар, MN", "subtype": "locality"},
+        {"reverse_name": "Ulaanbaatar", "reverse_alt_names": ["Улаанбаатар"]},
+    )
+
+    assert quality["passed"] is True
+    assert quality["reason"] is None
+
+
 def test_reverse_quality_rejects_county_with_matching_city_name():
     quality = benchmark_latency.evaluate_reverse_quality(
         {"primary_name": "New York, NY", "subtype": "county"},

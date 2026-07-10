@@ -58,11 +58,11 @@ TARGETS = [
     {"name": "madagascar", "q": "Antananarivo", "lat": -18.8792, "lon": 47.5079,
      "reverse_name": "Antananarivo"},
     {"name": "mongolia", "q": "Ulaanbaatar", "lat": 47.8864, "lon": 106.9057,
-     "reverse_name": "Ulaanbaatar"},
+     "reverse_name": "Ulaanbaatar", "reverse_alt_names": ["Улаанбаатар"]},
     {"name": "namibia", "q": "Windhoek", "lat": -22.5609, "lon": 17.0658,
      "reverse_name": "Windhoek"},
     {"name": "georgia", "q": "Tbilisi", "lat": 41.7151, "lon": 44.8271,
-     "reverse_name": "Tbilisi"},
+     "reverse_name": "Tbilisi", "reverse_alt_names": ["თბილისი"]},
     {"name": "us-east", "q": "New York", "lat": 40.7128, "lon": -74.0060,
      "reverse_name": "New York"},
 ]
@@ -95,9 +95,13 @@ def evaluate_reverse_quality(body: dict | None, target: dict) -> dict:
 
     observed_name = body.get("primary_name")
     observed_subtype = body.get("subtype")
-    name_matches = (
-        isinstance(observed_name, str)
-        and normalize_name(observed_name).startswith(normalize_name(expected_name))
+    # Accept the English expectation or any native/local-script variant so a
+    # coordinate-correct locality with a non-English primary name (Ulaanbaatar
+    # -> Улаанбаатар, Tbilisi -> თბილისი) is not scored as a name failure.
+    accepted_names = (expected_name, *target.get("reverse_alt_names", ()))
+    name_matches = isinstance(observed_name, str) and any(
+        normalize_name(observed_name).startswith(normalize_name(candidate))
+        for candidate in accepted_names
     )
     subtype_matches = observed_subtype == "locality"
     checks = []

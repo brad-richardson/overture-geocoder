@@ -71,10 +71,13 @@ and worker timing have landed. Items below are intentionally still open.
 - [ ] Measure demand for multilingual forward search, then choose localized
   shard families or a separate names table rather than putting every language
   into one FTS field. See `docs/plans/2026-07-02-future-work.md`.
-- [ ] Improve benchmark scoring/display-name handling for local-script primary
+- [x] Improve benchmark scoring/display-name handling for local-script primary
   names. Coordinate-correct results such as Tokyo, Beijing, and Germany should
   not be counted as name failures solely because the benchmark expects an
-  English exonym; see `benchmarks/2026-07-02-report.md`.
+  English exonym; see `benchmarks/2026-07-02-report.md`. (Done 2026-07-09,
+  ci-hygiene-and-benchmark-scoring: `Case.alt_targets` variant set in
+  benchmark_typeahead + `reverse_alt_names` in benchmark_latency; distance
+  tolerance unchanged.)
 - [ ] Decide whether to ingest the Overture `places` theme (POIs/landmarks:
   "Golden Gate Bridge", "Times Square") into forward search. Nothing in the
   repo has scoped this yet — today's search is divisions-only, and landmark
