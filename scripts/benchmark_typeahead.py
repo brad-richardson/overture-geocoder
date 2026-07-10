@@ -62,17 +62,24 @@ class Case:
     # cases where the regression is about the NAME winning, and location
     # bias legitimately picks the nearest same-named place)
     name_only: bool = False
+    # Additional accepted primary-name variants (native / local-script names).
+    # A result counts if its name matches `target` OR any of these, so a
+    # coordinate-correct result whose primary name is the native form
+    # (Tokyo -> 東京都, Germany -> Deutschland) is not scored as a name failure
+    # solely because the benchmark query is an English exonym.
+    alt_targets: tuple[str, ...] = ()
 
 
 CASES = [
     # Global type-ahead: famous places a user expects after few keystrokes
     Case("london", "London", 51.5074, -0.1278),
     Case("paris", "Paris", 48.8566, 2.3522),
-    Case("tokyo", "Tokyo", 35.6762, 139.6503),
+    Case("tokyo", "Tokyo", 35.6762, 139.6503, alt_targets=("東京都", "東京")),
     Case("berlin", "Berlin", 52.5200, 13.4050),
     Case("sao paulo", "São Paulo", -23.5505, -46.6333),
-    Case("beijing", "Beijing", 39.9042, 116.4074),
-    Case("mexico city", "Mexico City", 19.4326, -99.1332),
+    Case("beijing", "Beijing", 39.9042, 116.4074, alt_targets=("北京市", "北京")),
+    Case("mexico city", "Mexico City", 19.4326, -99.1332,
+         alt_targets=("Ciudad de México", "CDMX")),
     Case("amsterdam", "Amsterdam", 52.3676, 4.9041),
     Case("new york", "New York", 40.7128, -74.0060),
     Case("san francisco", "San Francisco", 37.7749, -122.4194),
@@ -83,7 +90,8 @@ CASES = [
     # Regression: porter stemmer made "france" match San Francisco (P0)
     Case("france", "France", 46.6, 2.4, note="P0 stemmer regression"),
     # Regression: partial-match credit let Gelsenkirchen beat Deutschland
-    Case("germany", "Germany", 51.1, 10.4, note="partial-credit regression"),
+    Case("germany", "Germany", 51.1, 10.4, note="partial-credit regression",
+         alt_targets=("Deutschland",)),
     # Regression: alt-name token-bag rung let NYC capture "york". Any exact
     # York may win (location bias picks the nearest one); NYC must not.
     Case("york", "York", 53.96, -1.08, note="alt-name rung regression",
@@ -108,10 +116,12 @@ def normalize(s: str) -> str:
 
 
 def is_target(case: Case, name: str, lat: float, lon: float) -> bool:
-    """Result counts when its name starts with the target (or vice versa for
-    partial typing) and it is geographically the right place."""
-    n, t = normalize(name.split(",")[0]), normalize(case.target.split(",")[0])
-    if not (n.startswith(t) or t.startswith(n)):
+    """Result counts when its name matches any accepted variant (the target or
+    an alt_target, prefix match in either direction for partial typing) and it
+    is geographically the right place."""
+    n = normalize(name.split(",")[0])
+    accepted = (normalize(t.split(",")[0]) for t in (case.target, *case.alt_targets))
+    if not any(n.startswith(t) or t.startswith(n) for t in accepted):
         return False
     if case.name_only:
         return True
