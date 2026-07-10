@@ -178,7 +178,6 @@ HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.65
 # Router constants
 ROUTER_TOKEN_MIN_LEN = 3
 ROUTER_MAX_SHARDS_PER_TOKEN = 3
-ROUTER_SPLIT_RE = re.compile(r'[^a-z0-9]+')
 
 
 def _router_normalize(s: str) -> str:
@@ -191,14 +190,21 @@ def _router_tokenize(text: str | None) -> set[str]:
     if not text:
         return set()
     normalized = _router_normalize(text).replace(';', ' ')
-    parts = ROUTER_SPLIT_RE.split(normalized)
     tokens: set[str] = set()
-    for p in parts:
-        if len(p) < ROUTER_TOKEN_MIN_LEN:
-            continue
-        if not any(ch.isalpha() for ch in p):
-            continue
-        tokens.add(p)
+    cur: list[str] = []
+    for ch in normalized:
+        if ch.isalnum():
+            cur.append(ch)
+        else:
+            if cur:
+                tok = ''.join(cur)
+                if len(tok) >= ROUTER_TOKEN_MIN_LEN and any(c.isalpha() for c in tok):
+                    tokens.add(tok)
+                cur = []
+    if cur:
+        tok = ''.join(cur)
+        if len(tok) >= ROUTER_TOKEN_MIN_LEN and any(c.isalpha() for c in tok):
+            tokens.add(tok)
     return tokens
 
 
@@ -255,6 +261,9 @@ def build_global_router(
              is_country_capital, is_region_capital,
              primary_name, search_name, country, region) = row
 
+            if subtype in ('country', 'region'):
+                continue
+
             is_head_locality = False
             if subtype == 'locality':
                 pop = population or 0
@@ -266,7 +275,7 @@ def build_global_router(
                 continue
 
             shard_ids: list[str] = []
-            if region:
+            if region and not region.endswith(f"-{FALLBACK_REGION_SUFFIX}"):
                 shard_ids.append(region)
             if country:
                 if not shard_ids or country != region:
@@ -1882,9 +1891,6 @@ def build_forward_shards(args, version: str, version_dir: Path) -> dict:
         router_info = build_global_router(
             parquet, router_path, args.head_threshold, version
         )
-        alt_path = shards_subdir / "router.db"
-        if alt_path != router_path:
-            shutil.copy2(router_path, alt_path)
         router_hash = hash_file(router_path)
         print(f"  Router hash: {router_hash[:12]}...")
         collection_path = version_dir / "collection.json"

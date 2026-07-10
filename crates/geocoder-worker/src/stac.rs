@@ -32,12 +32,12 @@ const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
 
 // Shard selection constants
 const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
-                                        // Max shards to load (excluding HEAD). Capped at 2: the user's own location
-                                        // shard is always the closest, and every extra shard multiplies the
-                                        // worst-case first-touch cost (R2 fetch + deserialize of a multi-MB file)
-                                        // that dominates tail latency.
 const MAX_LOCATION_SHARDS: usize = 2;
 const MAX_ROUTER_SHARDS: usize = 2;
+// Total extra shards beyond HEAD. Previously HEAD+2 (nearby only); now
+// HEAD+3 to accommodate suffix + router + nearby while still bounding
+// worst-case first-touch cost (additional R2 fetch + deserialize). Tail
+// latency increase is acceptable for the recall improvement.
 const MAX_EXTRA_SHARDS: usize = 3;
 const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
                                        // the newest complete id-index reachable while fresher versions still
@@ -288,7 +288,8 @@ impl RouterDb {
         let normalized = Self::normalize_token(query);
         normalized
             .split(|c: char| !c.is_alphanumeric())
-            .filter(|t| t.len() >= 3)
+            .filter(|t| t.chars().count() >= 3)
+            .filter(|t| t.chars().any(|c| c.is_alphabetic()))
             .map(|s| s.to_string())
             .collect()
     }
@@ -761,12 +762,26 @@ impl ShardLoader {
                 continue;
             }
             if Self::collection_has_shard(collection, &sid) {
-                filtered.push(sid);
+                if !filtered.contains(&sid) {
+                    filtered.push(sid);
+                }
+            } else if let Some(regions) = collection.region_sharded.get(&sid) {
+                if let Some(first) = regions.first() {
+                    if !filtered.contains(first) {
+                        filtered.push(first.clone());
+                    }
+                }
             } else if let Some((country, _)) = sid.split_once('-') {
                 if Self::collection_has_shard(collection, country) {
                     let cs = country.to_string();
                     if !filtered.contains(&cs) {
                         filtered.push(cs);
+                    }
+                } else if let Some(regions) = collection.region_sharded.get(country) {
+                    if let Some(first) = regions.first() {
+                        if !filtered.contains(first) {
+                            filtered.push(first.clone());
+                        }
                     }
                 }
             }
@@ -784,6 +799,15 @@ impl ShardLoader {
     ) -> Result<SearchResult> {
         let collection = self.load_collection(version).await?;
 
+        let suffix_shards = Self::select_shards_by_country_suffix(&query.text, &collection);
+        if !suffix_shards.is_empty() {
+            console_log!(
+                "Suffix heuristic selected: {:?} for query {:?}",
+                suffix_shards,
+                query.text
+            );
+        }
+
         let router_shards = match self.load_router_db(version).await {
             Ok(Some(router)) => {
                 let shards = self.select_shards_from_router(&router, &query.text, &collection);
@@ -798,21 +822,15 @@ impl ShardLoader {
             }
             Ok(None) => {
                 console_log!(
-                    "Router DB not available for version {}, fallback to suffix",
+                    "Router DB not available for version {}, using suffix only",
                     version
                 );
-                Self::select_shards_by_country_suffix(&query.text, &collection)
+                Vec::new()
             }
             Err(e) => {
-                console_log!("Router load failed: {:?}, trying suffix heuristic", e);
-                Self::select_shards_by_country_suffix(&query.text, &collection)
+                console_log!("Router load failed: {:?}, using suffix only", e);
+                Vec::new()
             }
-        };
-
-        let router_shards = if router_shards.is_empty() {
-            Self::select_shards_by_country_suffix(&query.text, &collection)
-        } else {
-            router_shards
         };
 
         let nearby_shards = self.select_nearby_shards(&collection, user_location);
@@ -821,7 +839,11 @@ impl ShardLoader {
         let mut seen = std::collections::HashSet::new();
         seen.insert("HEAD".to_string());
         let mut extra: Vec<String> = Vec::new();
-        for sid in router_shards.iter().chain(nearby_shards.iter()) {
+        for sid in suffix_shards
+            .iter()
+            .chain(router_shards.iter())
+            .chain(nearby_shards.iter())
+        {
             if seen.insert(sid.clone()) {
                 extra.push(sid.clone());
                 if extra.len() >= MAX_EXTRA_SHARDS {
@@ -1164,7 +1186,7 @@ impl ShardLoader {
                     let mut cache = c.borrow_mut();
                     if !cache.iter().any(|(k, _, _)| k == &key) {
                         cache.push((key.clone(), Rc::clone(&router), size));
-                        while cache.len() > 4 {
+                        while cache.len() > 2 {
                             let (evicted, _, _) = cache.remove(0);
                             console_log!("Router cache evict: {}", evicted);
                         }
