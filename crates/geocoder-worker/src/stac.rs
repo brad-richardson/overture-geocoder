@@ -341,14 +341,70 @@ impl ShardLoader {
         }
     }
 
-    /// Lightweight health check: verify catalog loads and latest version exists.
+    /// Health check: verify catalog, latest version, and that required
+    /// versioned assets exist. Response shape stays {"status":"ok","version":...}.
     pub async fn check_health(&self) -> Result<String> {
         let catalog = self.load_catalog().await?;
         let versions = get_ordered_versions(&catalog);
         if versions.is_empty() {
             return Err(Error::RustError("No versions found in catalog".into()));
         }
-        Ok(versions[0].clone())
+        let latest = versions[0].clone();
+
+        let collection_key = format!("{}/collection.json", latest);
+        let collection_text = self
+            .memoized_get_text(&collection_key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(&collection_key))?;
+        serde_json::from_str::<StacCollection>(&collection_text)
+            .map_err(|e| Error::RustError(format!("Invalid {}: {}", collection_key, e)))?;
+
+        let reverse_key = format!("{}/reverse-collection.json", latest);
+        let reverse_text = self
+            .memoized_get_text(&reverse_key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(&reverse_key))?;
+        serde_json::from_str::<StacCollection>(&reverse_text)
+            .map_err(|e| Error::RustError(format!("Invalid {}: {}", reverse_key, e)))?;
+
+        let id_meta_key = format!("{}/id-meta.json", latest);
+        let id_collection_key = format!("{}/id-collection.json", latest);
+        let id_meta_text = self
+            .memoized_get_text(&id_meta_key, ID_INDEX_CACHE_TTL)
+            .await?;
+        let has_id_meta = if let Some(ref text) = id_meta_text {
+            serde_json::from_str::<serde_json::Value>(text)
+                .map_err(|e| Error::RustError(format!("Invalid {}: {}", id_meta_key, e)))?;
+            true
+        } else {
+            false
+        };
+        let has_id_collection = if has_id_meta {
+            true
+        } else {
+            match self
+                .memoized_get_text(&id_collection_key, ID_INDEX_CACHE_TTL)
+                .await?
+            {
+                Some(text) => {
+                    if text.find("\"prefix_len\"").is_none() {
+                        serde_json::from_str::<serde_json::Value>(&text).map_err(|e| {
+                            Error::RustError(format!("Invalid {}: {}", id_collection_key, e))
+                        })?;
+                    }
+                    true
+                }
+                None => false,
+            }
+        };
+        if !has_id_collection {
+            return Err(not_found(format!(
+                "id-index metadata for version {} (checked {} and {})",
+                latest, id_meta_key, id_collection_key
+            )));
+        }
+
+        Ok(latest)
     }
 
     /// Fetch from R2 with edge caching via Cache API.
