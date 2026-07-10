@@ -15,7 +15,7 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run != null && github.event.workflow_run.conclusion == 'success') }}
     steps:
       - uses: actions/checkout@v7
 
@@ -66,6 +66,8 @@ jobs:
             echo "$search" | jq -e '
               (.results | length) >= 1
               and .results[0].country == "DE"
+              and (.results[0].lat | type == "number")
+              and (.results[0].lon | type == "number")
               and (.results[0].lat >= 51 and .results[0].lat <= 54)
               and (.results[0].lon >= 12 and .results[0].lon <= 15)
             ' >/dev/null || {
@@ -76,7 +78,7 @@ jobs:
               echo "  FAIL /reverse: request error"; return 1; }
             echo "$reverse" | jq -e '
               (.subtype == "locality" or .hierarchy[0].subtype == "locality")
-              and (.primary_name | test("Boston"; "i"))
+              and (.primary_name // "" | test("Boston"; "i"))
               and (.hierarchy | length >= 2)
             ' >/dev/null || {
               echo "  FAIL /reverse: expected locality Boston with hierarchy>=2 -> $reverse"; return 1; }
@@ -91,6 +93,10 @@ jobs:
               echo "  FAIL /id/$gers_id: request error"; return 1; }
             echo "$id_json" | jq -e '
               .bbox
+              and (.bbox.xmin | type == "number")
+              and (.bbox.xmax | type == "number")
+              and (.bbox.ymin | type == "number")
+              and (.bbox.ymax | type == "number")
               and (.bbox.xmin < .bbox.xmax)
               and (.bbox.ymin < .bbox.ymax)
               and .bbox.xmin >= -180 and .bbox.xmax <= 180

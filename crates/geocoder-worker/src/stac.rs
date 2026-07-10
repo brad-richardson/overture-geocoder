@@ -352,27 +352,50 @@ impl ShardLoader {
         let latest = versions[0].clone();
 
         let collection_key = format!("{}/collection.json", latest);
-        self.memoized_get_text(&collection_key, IMMUTABLE_CACHE_TTL)
+        let collection_text = self
+            .memoized_get_text(&collection_key, IMMUTABLE_CACHE_TTL)
             .await?
             .ok_or_else(|| not_found(&collection_key))?;
+        serde_json::from_str::<StacCollection>(&collection_text)
+            .map_err(|e| Error::RustError(format!("Invalid {}: {}", collection_key, e)))?;
 
         let reverse_key = format!("{}/reverse-collection.json", latest);
-        self.memoized_get_text(&reverse_key, IMMUTABLE_CACHE_TTL)
+        let reverse_text = self
+            .memoized_get_text(&reverse_key, IMMUTABLE_CACHE_TTL)
             .await?
             .ok_or_else(|| not_found(&reverse_key))?;
+        serde_json::from_str::<StacCollection>(&reverse_text)
+            .map_err(|e| Error::RustError(format!("Invalid {}: {}", reverse_key, e)))?;
 
         let id_meta_key = format!("{}/id-meta.json", latest);
         let id_collection_key = format!("{}/id-collection.json", latest);
-        let has_id_meta = self
+        let id_meta_text = self
             .memoized_get_text(&id_meta_key, ID_INDEX_CACHE_TTL)
-            .await?
-            .is_some();
+            .await?;
+        let has_id_meta = if let Some(ref text) = id_meta_text {
+            serde_json::from_str::<serde_json::Value>(text)
+                .map_err(|e| Error::RustError(format!("Invalid {}: {}", id_meta_key, e)))?;
+            true
+        } else {
+            false
+        };
         let has_id_collection = if has_id_meta {
             true
         } else {
-            self.memoized_get_text(&id_collection_key, ID_INDEX_CACHE_TTL)
+            match self
+                .memoized_get_text(&id_collection_key, ID_INDEX_CACHE_TTL)
                 .await?
-                .is_some()
+            {
+                Some(text) => {
+                    if text.find("\"prefix_len\"").is_none() {
+                        serde_json::from_str::<serde_json::Value>(&text).map_err(|e| {
+                            Error::RustError(format!("Invalid {}: {}", id_collection_key, e))
+                        })?;
+                    }
+                    true
+                }
+                None => false,
+            }
         };
         if !has_id_collection {
             return Err(not_found(format!(
