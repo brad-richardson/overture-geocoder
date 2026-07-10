@@ -336,6 +336,65 @@ pub const REVERSE_GEOCODE_SQL: &str = r#"
     ORDER BY area ASC
 "#;
 
+pub const REVERSE_GEOCODE_RTREE_SQL_WKB: &str = r#"
+    WITH candidates AS (
+        SELECT
+            d.gers_id,
+            d.subtype,
+            d.primary_name,
+            d.lat,
+            d.lon,
+            d.bbox_xmin,
+            d.bbox_ymin,
+            d.bbox_xmax,
+            d.bbox_ymax,
+            d.area,
+            d.wkb,
+            ROW_NUMBER() OVER (PARTITION BY d.subtype ORDER BY d.area ASC) AS rn
+        FROM divisions_reverse_rtree r
+        JOIN divisions_reverse d ON d.rowid = r.id
+        WHERE r.xmin <= ?1 AND r.xmax >= ?1
+          AND r.ymin <= ?2 AND r.ymax >= ?2
+          AND d.bbox_xmin <= ?1 AND d.bbox_xmax >= ?1
+          AND d.bbox_ymin <= ?2 AND d.bbox_ymax >= ?2
+    )
+    SELECT
+        gers_id, subtype, primary_name, lat, lon,
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, wkb
+    FROM candidates
+    WHERE rn <= ?3
+    ORDER BY area ASC
+"#;
+
+pub const REVERSE_GEOCODE_SQL_WKB: &str = r#"
+    WITH candidates AS (
+        SELECT
+            gers_id,
+            subtype,
+            primary_name,
+            lat,
+            lon,
+            bbox_xmin,
+            bbox_ymin,
+            bbox_xmax,
+            bbox_ymax,
+            area,
+            wkb,
+            ROW_NUMBER() OVER (PARTITION BY subtype ORDER BY area ASC) AS rn
+        FROM divisions_reverse
+        WHERE bbox_xmin <= ?1
+          AND bbox_xmax >= ?1
+          AND bbox_ymin <= ?2
+          AND bbox_ymax >= ?2
+    )
+    SELECT
+        gers_id, subtype, primary_name, lat, lon,
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, wkb
+    FROM candidates
+    WHERE rn <= ?3
+    ORDER BY area ASC
+"#;
+
 #[cfg(test)]
 mod tests {
     use super::*;

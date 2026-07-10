@@ -11,8 +11,9 @@ use crate::error::Result;
 use crate::geo::haversine_distance;
 use crate::query::{
     alt_name_quality, match_quality, prepare_fts_query, NormalizedQuery, BM25_TIEBREAK_WEIGHT,
-    REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_SQL,
-    SEARCH_DIVISIONS_SQL, SEARCH_DIVISIONS_SQL_WEIGHTED, STATIC_IMPORTANCE_WEIGHT,
+    REVERSE_CANDIDATES_PER_SUBTYPE, REVERSE_GEOCODE_RTREE_SQL, REVERSE_GEOCODE_RTREE_SQL_WKB,
+    REVERSE_GEOCODE_SQL, REVERSE_GEOCODE_SQL_WKB, SEARCH_DIVISIONS_SQL,
+    SEARCH_DIVISIONS_SQL_WEIGHTED, STATIC_IMPORTANCE_WEIGHT,
 };
 use crate::types::{
     DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
@@ -34,6 +35,8 @@ pub struct Database {
     /// Whether the forward shard carries a precomputed `importance` column
     /// (new schema with weighted multi-column FTS).
     has_static_importance: OnceCell<bool>,
+    /// Whether the reverse shard has a `wkb` geometry column for exact containment.
+    has_wkb: OnceCell<bool>,
 }
 
 impl Database {
@@ -62,6 +65,7 @@ impl Database {
             conn,
             has_rtree: OnceCell::new(),
             has_static_importance: OnceCell::new(),
+            has_wkb: OnceCell::new(),
         })
     }
 
@@ -126,6 +130,14 @@ impl Database {
                     [],
                     |_| Ok(()),
                 )
+                .is_ok()
+        })
+    }
+
+    fn has_wkb(&self) -> bool {
+        *self.has_wkb.get_or_init(|| {
+            self.conn
+                .prepare("SELECT wkb FROM divisions_reverse LIMIT 0")
                 .is_ok()
         })
     }
@@ -311,41 +323,82 @@ impl Database {
     /// This method expects a reverse geocoding shard (divisions_reverse table).
     /// Shards built with the `divisions_reverse_rtree` spatial index use an
     /// indexed lookup; legacy shards fall back to a bbox range scan.
+    /// If the shard carries an optional `wkb` column (future build), exact
+    /// polygon containment is applied after the bbox candidate prefilter.
     pub fn reverse_geocode(&self, lat: f64, lon: f64) -> Result<Option<ReverseResult>> {
-        let sql = if self.has_rtree() {
-            REVERSE_GEOCODE_RTREE_SQL
-        } else {
-            REVERSE_GEOCODE_SQL
+        let use_wkb = self.has_wkb();
+        let sql = match (self.has_rtree(), use_wkb) {
+            (true, true) => REVERSE_GEOCODE_RTREE_SQL_WKB,
+            (true, false) => REVERSE_GEOCODE_RTREE_SQL,
+            (false, true) => REVERSE_GEOCODE_SQL_WKB,
+            (false, false) => REVERSE_GEOCODE_SQL,
         };
         let mut stmt = self.conn.prepare_cached(sql)?;
 
         // lon is ?1, lat is ?2 (matching the SQL parameter order)
-        let rows = stmt.query_map(params![lon, lat, REVERSE_CANDIDATES_PER_SUBTYPE], |row| {
-            Ok(ReverseDivisionRow {
-                gers_id: row.get(0)?,
-                subtype: row.get(1)?,
-                primary_name: row.get(2)?,
-                lat: row.get(3)?,
-                lon: row.get(4)?,
-                bbox_xmin: row.get(5)?,
-                bbox_ymin: row.get(6)?,
-                bbox_xmax: row.get(7)?,
-                bbox_ymax: row.get(8)?,
-                area: row.get(9)?,
-            })
-        })?;
-
-        let division_rows: Vec<ReverseDivisionRow> =
-            rows.collect::<std::result::Result<Vec<_>, _>>()?;
+        let division_rows: Vec<ReverseDivisionRow> = if use_wkb {
+            stmt.query_map(params![lon, lat, REVERSE_CANDIDATES_PER_SUBTYPE], |row| {
+                Ok(ReverseDivisionRow {
+                    gers_id: row.get(0)?,
+                    subtype: row.get(1)?,
+                    primary_name: row.get(2)?,
+                    lat: row.get(3)?,
+                    lon: row.get(4)?,
+                    bbox_xmin: row.get(5)?,
+                    bbox_ymin: row.get(6)?,
+                    bbox_xmax: row.get(7)?,
+                    bbox_ymax: row.get(8)?,
+                    area: row.get(9)?,
+                    wkb: row.get(10)?,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+        } else {
+            stmt.query_map(params![lon, lat, REVERSE_CANDIDATES_PER_SUBTYPE], |row| {
+                Ok(ReverseDivisionRow {
+                    gers_id: row.get(0)?,
+                    subtype: row.get(1)?,
+                    primary_name: row.get(2)?,
+                    lat: row.get(3)?,
+                    lon: row.get(4)?,
+                    bbox_xmin: row.get(5)?,
+                    bbox_ymin: row.get(6)?,
+                    bbox_xmax: row.get(7)?,
+                    bbox_ymax: row.get(8)?,
+                    area: row.get(9)?,
+                    wkb: None,
+                })
+            })?
+            .collect::<std::result::Result<Vec<_>, _>>()?
+        };
 
         if division_rows.is_empty() {
+            return Ok(None);
+        }
+
+        let filtered: Vec<ReverseDivisionRow> = if use_wkb {
+            division_rows
+                .into_iter()
+                .filter(|row| {
+                    if let Some(wkb) = &row.wkb {
+                        point_in_wkb(wkb, lat, lon).unwrap_or(true)
+                    } else {
+                        true
+                    }
+                })
+                .collect()
+        } else {
+            division_rows
+        };
+
+        if filtered.is_empty() {
             return Ok(None);
         }
 
         // Deduplicate by gers_id (for antimeridian-split divisions);
         // rows are sorted by area ascending.
         let mut seen_ids = HashSet::new();
-        let deduped: Vec<ReverseDivisionRow> = division_rows
+        let deduped: Vec<ReverseDivisionRow> = filtered
             .into_iter()
             .filter(|row| seen_ids.insert(row.gers_id.clone()))
             .collect();
@@ -477,6 +530,145 @@ struct ReverseDivisionRow {
     bbox_xmax: f64,
     bbox_ymax: f64,
     area: f64,
+    wkb: Option<Vec<u8>>,
+}
+
+fn read_u32_wkb(data: &[u8], offset: usize, little: bool) -> Option<u32> {
+    if data.len() < offset + 4 {
+        return None;
+    }
+    let b = &data[offset..offset + 4];
+    Some(if little {
+        u32::from_le_bytes([b[0], b[1], b[2], b[3]])
+    } else {
+        u32::from_be_bytes([b[0], b[1], b[2], b[3]])
+    })
+}
+
+fn read_f64_wkb(data: &[u8], offset: usize, little: bool) -> Option<f64> {
+    if data.len() < offset + 8 {
+        return None;
+    }
+    let b = &data[offset..offset + 8];
+    Some(if little {
+        f64::from_le_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+    } else {
+        f64::from_be_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])
+    })
+}
+
+fn point_in_ring(lon: f64, lat: f64, ring: &[(f64, f64)]) -> bool {
+    let mut inside = false;
+    let n = ring.len();
+    if n < 3 {
+        return false;
+    }
+    let mut j = n - 1;
+    for i in 0..n {
+        let (xi, yi) = ring[i];
+        let (xj, yj) = ring[j];
+        if (yi > lat) != (yj > lat) {
+            let xinters = (lat - yi) * (xj - xi) / (yj - yi) + xi;
+            if lon < xinters {
+                inside = !inside;
+            }
+        }
+        j = i;
+    }
+    inside
+}
+
+fn point_in_polygon_rings(lon: f64, lat: f64, rings: &[Vec<(f64, f64)>]) -> bool {
+    if rings.is_empty() {
+        return false;
+    }
+    if !point_in_ring(lon, lat, &rings[0]) {
+        return false;
+    }
+    for hole in &rings[1..] {
+        if point_in_ring(lon, lat, hole) {
+            return false;
+        }
+    }
+    true
+}
+
+fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
+    if wkb.len() < 9 {
+        return None;
+    }
+    let little = wkb[0] == 1;
+    if wkb[0] != 0 && wkb[0] != 1 {
+        return None;
+    }
+    let ty = read_u32_wkb(wkb, 1, little)?;
+    let geom_type = ty % 1000;
+    match geom_type {
+        3 => {
+            let mut offset = 5;
+            let num_rings = read_u32_wkb(wkb, offset, little)? as usize;
+            offset += 4;
+            let mut rings = Vec::with_capacity(num_rings);
+            for _ in 0..num_rings {
+                let num_points = read_u32_wkb(wkb, offset, little)? as usize;
+                offset += 4;
+                if wkb.len() < offset + num_points * 16 {
+                    return None;
+                }
+                let mut ring = Vec::with_capacity(num_points);
+                for _ in 0..num_points {
+                    let x = read_f64_wkb(wkb, offset, little)?;
+                    offset += 8;
+                    let y = read_f64_wkb(wkb, offset, little)?;
+                    offset += 8;
+                    ring.push((x, y));
+                }
+                rings.push(ring);
+            }
+            Some(point_in_polygon_rings(lon, lat, &rings))
+        }
+        6 => {
+            let mut offset = 5;
+            let num_polys = read_u32_wkb(wkb, offset, little)? as usize;
+            offset += 4;
+            for _ in 0..num_polys {
+                if wkb.len() < offset + 5 {
+                    return None;
+                }
+                let little2 = wkb[offset] == 1;
+                offset += 1;
+                let ty2 = read_u32_wkb(wkb, offset, little2)?;
+                offset += 4;
+                if ty2 % 1000 != 3 {
+                    return None;
+                }
+                let num_rings = read_u32_wkb(wkb, offset, little2)? as usize;
+                offset += 4;
+                let mut rings = Vec::with_capacity(num_rings);
+                for _ in 0..num_rings {
+                    let num_points = read_u32_wkb(wkb, offset, little2)? as usize;
+                    offset += 4;
+                    if wkb.len() < offset + num_points * 16 {
+                        return None;
+                    }
+                    let mut ring = Vec::with_capacity(num_points);
+                    for _ in 0..num_points {
+                        let x = read_f64_wkb(wkb, offset, little2)?;
+                        offset += 8;
+                        let y = read_f64_wkb(wkb, offset, little2)?;
+                        offset += 8;
+                        ring.push((x, y));
+                    }
+                    rings.push(ring);
+                }
+                if point_in_polygon_rings(lon, lat, &rings) {
+                    return Some(true);
+                }
+            }
+            Some(false)
+        }
+        _ => None,
+    }
 }
 
 // Integration tests for Database are in crates/geocoder-core/tests/
