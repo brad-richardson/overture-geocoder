@@ -180,9 +180,13 @@ jobs:
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
           export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+          # Non-fatal: a transient R2 error here must not fail an otherwise
+          # green run (default pipefail would). Stale leftovers are removed
+          # by the pre-clean step at the start of the next run.
           aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
             --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-            --region auto | wc -l | xargs -I{} echo "Deleted {} objects from R2."
+            --region auto | wc -l | xargs -I{} echo "Deleted {} objects from R2." \
+            || echo "::warning::R2 cleanup failed; the next run's pre-clean step will remove leftovers."
 
       - name: Summary
         if: always()

@@ -430,6 +430,13 @@ def _registry_sub_ranges(prefix_len, prefixes=None,
                        {"prefixes": list(prefixes)})]
         return sub_ranges, sub_ranges[0][1]
 
+    # A single-sided range is a caller mistake (e.g. a dispatch that set only
+    # --prefix-start); silently widening it to the full prefix space would
+    # stage the entire registry under one range job.
+    if bool(prefix_start) != bool(prefix_end):
+        raise ValueError(
+            "registry staging requires both prefix_start and prefix_end "
+            "(or neither, for the full prefix space)")
     if not (prefix_start and prefix_end):
         prefix_start = format(0, f'0{prefix_len}x')
         prefix_end = format(16 ** prefix_len - 1, f'0{prefix_len}x')
