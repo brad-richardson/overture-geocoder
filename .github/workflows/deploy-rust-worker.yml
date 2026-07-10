@@ -15,7 +15,7 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
-    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     steps:
       - uses: actions/checkout@v7
 
@@ -53,7 +53,7 @@ jobs:
           # 0 only when every check passes. Kept to four requests per attempt
           # to stay well under the worker's 60 req/min per-IP rate limit.
           run_checks() {
-            local health search reverse gers_id id_code
+            local health search reverse gers_id id_json
 
             health=$(curl -fsS --max-time 15 "$BASE_URL/health") || {
               echo "  FAIL /health: request error"; return 1; }
@@ -63,14 +63,23 @@ jobs:
 
             search=$(curl -fsS --max-time 15 "$BASE_URL/search?q=berlin&limit=1") || {
               echo "  FAIL /search: request error"; return 1; }
-            echo "$search" | jq -e '(.results | length) >= 1' >/dev/null || {
-              echo "  FAIL /search: no results -> $search"; return 1; }
+            echo "$search" | jq -e '
+              (.results | length) >= 1
+              and .results[0].country == "DE"
+              and (.results[0].lat >= 51 and .results[0].lat <= 54)
+              and (.results[0].lon >= 12 and .results[0].lon <= 15)
+            ' >/dev/null || {
+              echo "  FAIL /search: expected DE near Berlin (52.5,13.4) -> $search"; return 1; }
             echo "  OK   /search"
 
             reverse=$(curl -fsS --max-time 15 "$BASE_URL/reverse?lat=42.3601&lon=-71.0589") || {
               echo "  FAIL /reverse: request error"; return 1; }
-            echo "$reverse" | jq -e '(.primary_name // "") | length > 0' >/dev/null || {
-              echo "  FAIL /reverse: empty result -> $reverse"; return 1; }
+            echo "$reverse" | jq -e '
+              (.subtype == "locality" or .hierarchy[0].subtype == "locality")
+              and (.primary_name | test("Boston"; "i"))
+              and (.hierarchy | length >= 2)
+            ' >/dev/null || {
+              echo "  FAIL /reverse: expected locality Boston with hierarchy>=2 -> $reverse"; return 1; }
             echo "  OK   /reverse"
 
             # Derive the ID from the search result so we never hardcode a GERS
@@ -78,9 +87,16 @@ jobs:
             gers_id=$(echo "$search" | jq -r '.results[0].gers_id // empty')
             if [ -z "$gers_id" ]; then
               echo "  FAIL /id: no gers_id in /search response"; return 1; fi
-            id_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$BASE_URL/id/$gers_id")
-            if [ "$id_code" != "200" ]; then
-              echo "  FAIL /id/$gers_id: HTTP $id_code"; return 1; fi
+            id_json=$(curl -fsS --max-time 15 "$BASE_URL/id/$gers_id") || {
+              echo "  FAIL /id/$gers_id: request error"; return 1; }
+            echo "$id_json" | jq -e '
+              .bbox
+              and (.bbox.xmin < .bbox.xmax)
+              and (.bbox.ymin < .bbox.ymax)
+              and .bbox.xmin >= -180 and .bbox.xmax <= 180
+              and .bbox.ymin >= -90 and .bbox.ymax <= 90
+            ' >/dev/null || {
+              echo "  FAIL /id/$gers_id: bbox sanity check failed -> $id_json"; return 1; }
             echo "  OK   /id ($gers_id)"
 
             return 0

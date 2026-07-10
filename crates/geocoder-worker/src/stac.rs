@@ -341,14 +341,47 @@ impl ShardLoader {
         }
     }
 
-    /// Lightweight health check: verify catalog loads and latest version exists.
+    /// Health check: verify catalog, latest version, and that required
+    /// versioned assets exist. Response shape stays {"status":"ok","version":...}.
     pub async fn check_health(&self) -> Result<String> {
         let catalog = self.load_catalog().await?;
         let versions = get_ordered_versions(&catalog);
         if versions.is_empty() {
             return Err(Error::RustError("No versions found in catalog".into()));
         }
-        Ok(versions[0].clone())
+        let latest = versions[0].clone();
+
+        let collection_key = format!("{}/collection.json", latest);
+        self.memoized_get_text(&collection_key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(&collection_key))?;
+
+        let reverse_key = format!("{}/reverse-collection.json", latest);
+        self.memoized_get_text(&reverse_key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(&reverse_key))?;
+
+        let id_meta_key = format!("{}/id-meta.json", latest);
+        let id_collection_key = format!("{}/id-collection.json", latest);
+        let has_id_meta = self
+            .memoized_get_text(&id_meta_key, ID_INDEX_CACHE_TTL)
+            .await?
+            .is_some();
+        let has_id_collection = if has_id_meta {
+            true
+        } else {
+            self.memoized_get_text(&id_collection_key, ID_INDEX_CACHE_TTL)
+                .await?
+                .is_some()
+        };
+        if !has_id_collection {
+            return Err(not_found(format!(
+                "id-index metadata for version {} (checked {} and {})",
+                latest, id_meta_key, id_collection_key
+            )));
+        }
+
+        Ok(latest)
     }
 
     /// Fetch from R2 with edge caching via Cache API.
