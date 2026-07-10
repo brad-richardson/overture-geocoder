@@ -42,3 +42,62 @@ jobs:
         run: |
           npm install wrangler
           npx wrangler deploy
+
+      - name: Post-deploy verification
+        env:
+          BASE_URL: https://geocoder.bradr.dev
+        run: |
+          set -uo pipefail
+
+          # One pass of the four smoke checks against the live worker. Returns
+          # 0 only when every check passes. Kept to four requests per attempt
+          # to stay well under the worker's 60 req/min per-IP rate limit.
+          run_checks() {
+            local health search reverse gers_id id_code
+
+            health=$(curl -fsS --max-time 15 "$BASE_URL/health") || {
+              echo "  FAIL /health: request error"; return 1; }
+            echo "$health" | jq -e '.status == "ok"' >/dev/null || {
+              echo "  FAIL /health: status not ok -> $health"; return 1; }
+            echo "  OK   /health"
+
+            search=$(curl -fsS --max-time 15 "$BASE_URL/search?q=berlin&limit=1") || {
+              echo "  FAIL /search: request error"; return 1; }
+            echo "$search" | jq -e '(.results | length) >= 1' >/dev/null || {
+              echo "  FAIL /search: no results -> $search"; return 1; }
+            echo "  OK   /search"
+
+            reverse=$(curl -fsS --max-time 15 "$BASE_URL/reverse?lat=42.3601&lon=-71.0589") || {
+              echo "  FAIL /reverse: request error"; return 1; }
+            echo "$reverse" | jq -e '(.primary_name // "") | length > 0' >/dev/null || {
+              echo "  FAIL /reverse: empty result -> $reverse"; return 1; }
+            echo "  OK   /reverse"
+
+            # Derive the ID from the search result so we never hardcode a GERS
+            # ID that can churn between releases.
+            gers_id=$(echo "$search" | jq -r '.results[0].gers_id // empty')
+            if [ -z "$gers_id" ]; then
+              echo "  FAIL /id: no gers_id in /search response"; return 1; fi
+            id_code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "$BASE_URL/id/$gers_id")
+            if [ "$id_code" != "200" ]; then
+              echo "  FAIL /id/$gers_id: HTTP $id_code"; return 1; fi
+            echo "  OK   /id ($gers_id)"
+
+            return 0
+          }
+
+          # Retry a few times so brief deploy propagation doesn't fail the run.
+          for attempt in 1 2 3; do
+            echo "Post-deploy checks, attempt $attempt/3:"
+            if run_checks; then
+              echo "All post-deploy checks passed."
+              exit 0
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              echo "Retrying in 10s..."
+              sleep 10
+            fi
+          done
+
+          echo "Post-deploy checks failed after 3 attempts." >&2
+          exit 1

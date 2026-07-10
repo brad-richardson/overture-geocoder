@@ -47,9 +47,10 @@ and worker timing have landed. Items below are intentionally still open.
 
 ## P1 — Deployment and CI hygiene
 
-- [ ] Add post-deploy checks directly to `deploy-rust-worker.yml`: `/health`, a
+- [x] Add post-deploy checks directly to `deploy-rust-worker.yml`: `/health`, a
   forward query, a reverse query, and an ID lookup. Fail the deployment workflow
   when the deployed worker is not healthy instead of relying on a manual check.
+  (Done 2026-07-09, ci-hygiene-and-benchmark-scoring.)
 - [ ] Update GitHub Actions and the workflow Node runtime away from deprecated
   Node 20 (`actions/checkout@v4`, `actions/setup-node@v4`,
   `actions/setup-python@v5`, and `node-version: 20`). Current runs pass but emit
