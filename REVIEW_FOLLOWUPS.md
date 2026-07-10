@@ -70,7 +70,15 @@ and worker timing have landed. Items below are intentionally still open.
   in `docs/plans/2026-07-02-future-work.md`.
 - [ ] Measure demand for multilingual forward search, then choose localized
   shard families or a separate names table rather than putting every language
-  into one FTS field. See `docs/plans/2026-07-02-future-work.md`.
+  into one FTS field. See `docs/plans/2026-07-02-future-work.md`. Measurement
+  done 2026-07-09 (`benchmarks/2026-07-09-multilingual-report.md`): on 13
+  third-language exonyms Overture resolves 0/13 completed queries at rank-1
+  (1/13 in top-5, that one only via an English alt) vs Photon's 3/13 rank-1
+  and 6/13 in top-5, despite Photon being handicapped with no location/`lang=`
+  bias. Gap confirmed real; the choice of fix (variant table vs per-language
+  shards) is left open per "measure, THEN choose" — the report leans toward a
+  bounded `names_i18n`/multi-variant `search_name` first, and notes this
+  measures capability, not observed demand.
 - [x] Improve benchmark scoring/display-name handling for local-script primary
   names. Coordinate-correct results such as Tokyo, Beijing, and Germany should
   not be counted as name failures solely because the benchmark expects an
