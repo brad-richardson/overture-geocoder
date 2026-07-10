@@ -175,6 +175,33 @@ WIKI_LOCALITY_KEEP_THRESHOLD = 0.5
 # where 0.5 admitted ~60k and tripled HEAD's size.
 HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.65
 
+# ---------------------------------------------------------------------------
+# Places prototype constants
+# ---------------------------------------------------------------------------
+PLACES_CA_BBOX = {
+    "xmin": -124.5,
+    "xmax": -114.0,
+    "ymin": 32.5,
+    "ymax": 42.1,
+}
+
+PLACES_CONFIDENCE_WEIGHT = 0.5
+PLACES_BRAND_BONUS = 0.20
+PLACES_BRAND_WIKIDATA_BONUS = 0.10
+PLACES_HIGH_CONFIDENCE_BONUS = 0.10
+PLACES_HIGH_CONFIDENCE_THRESHOLD = 0.90
+
+PLACES_CATEGORY_PRIOR = {
+    "airport": 0.25,
+    "national_park": 0.20,
+    "university": 0.15,
+    "hospital": 0.12,
+    "stadium": 0.12,
+    "museum": 0.10,
+    "hotel": 0.05,
+    "restaurant": 0.02,
+}
+
 # Router constants
 ROUTER_TOKEN_MIN_LEN = 3
 ROUTER_MAX_SHARDS_PER_TOKEN = 3
@@ -2059,6 +2086,269 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
     return shard_infos
 
 
+
+# ---------------------------------------------------------------------------
+# Places prototype
+# ---------------------------------------------------------------------------
+
+def compute_places_importance(
+    confidence: float | None,
+    brand_name: str | None,
+    brand_wikidata: str | None,
+    category_primary: str | None,
+    basic_category: str | None,
+) -> float:
+    conf = confidence if confidence is not None else 0.5
+    conf = max(0.0, min(1.0, conf))
+    importance = conf * PLACES_CONFIDENCE_WEIGHT
+    if brand_name:
+        importance += PLACES_BRAND_BONUS
+        if brand_wikidata:
+            importance += PLACES_BRAND_WIKIDATA_BONUS
+    if conf >= PLACES_HIGH_CONFIDENCE_THRESHOLD:
+        importance += PLACES_HIGH_CONFIDENCE_BONUS
+    cat = (category_primary or basic_category or "").lower()
+    if cat in PLACES_CATEGORY_PRIOR:
+        importance += PLACES_CATEGORY_PRIOR[cat]
+    return min(1.0, importance)
+
+
+def _places_try_flat_schema(parquet_path: Path) -> bool:
+    try:
+        con = duckdb.connect()
+        cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{str(parquet_path.resolve())}') LIMIT 0").fetchall()]
+        con.close()
+        needed = {"gers_id", "primary_name", "lat", "lon"}
+        return needed.issubset(set(cols))
+    except Exception:
+        return False
+
+
+def build_places_shard(
+    parquet_path: Path | str,
+    output_path: Path,
+    version: str,
+    region_code: str = "US-CA",
+    limit: int | None = None,
+) -> dict:
+    if isinstance(parquet_path, str) and parquet_path.startswith("s3://"):
+        parquet_str = parquet_path
+        is_flat = False
+    else:
+        pp = Path(parquet_path) if not isinstance(parquet_path, Path) else parquet_path
+        try:
+            exists = pp.exists()
+        except Exception:
+            exists = False
+        if exists:
+            parquet_str = str(pp.resolve())
+            is_flat = _places_try_flat_schema(pp)
+        else:
+            parquet_str = str(parquet_path)
+            is_flat = False
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    if output_path.exists():
+        output_path.unlink()
+
+    con = duckdb.connect()
+    db = sqlite3.connect(output_path)
+    build_shard_schema(db)
+
+    if is_flat:
+        if limit:
+            query = f"""
+                SELECT
+                    gers_id, version, primary_name, lat, lon,
+                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                    country, region, locality,
+                    category_primary, basic_category,
+                    brand_name, brand_wikidata, confidence,
+                    COALESCE(search_name_base, LOWER(primary_name)) as search_name_base,
+                    COALESCE(search_context_base, LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
+                FROM read_parquet('{parquet_str}')
+                ORDER BY confidence DESC NULLS LAST, brand_name DESC NULLS LAST
+                LIMIT {int(limit)}
+            """
+        else:
+            query = f"""
+                SELECT
+                    gers_id, version, primary_name, lat, lon,
+                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                    country, region, locality,
+                    category_primary, basic_category,
+                    brand_name, brand_wikidata, confidence,
+                    COALESCE(search_name_base, LOWER(primary_name)) as search_name_base,
+                    COALESCE(search_context_base, LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
+                FROM read_parquet('{parquet_str}')
+            """
+        cursor = con.execute(query)
+    else:
+        print("  Places source appears to be raw Overture places parquet, using nested extraction...")
+        limit_clause = f"LIMIT {int(limit)}" if limit else ""
+        order_clause = "ORDER BY confidence DESC NULLS LAST" if limit else ""
+        query = f"""
+            SELECT
+                id as gers_id,
+                version,
+                names.primary as primary_name,
+                ST_X(geometry) as lon,
+                ST_Y(geometry) as lat,
+                bbox.xmin as bbox_xmin,
+                bbox.ymin as bbox_ymin,
+                bbox.xmax as bbox_xmax,
+                bbox.ymax as bbox_ymax,
+                COALESCE(addresses[1].country, '') as country,
+                COALESCE(addresses[1].region, '') as region,
+                COALESCE(addresses[1].locality, '') as locality,
+                categories.primary as category_primary,
+                basic_category,
+                brand.names.primary as brand_name,
+                brand.wikidata as brand_wikidata,
+                confidence,
+                LOWER(CONCAT_WS(' ', names.primary, brand.names.primary, categories.primary, basic_category)) as search_name_base,
+                LOWER(CONCAT_WS(' ', addresses[1].locality, addresses[1].region, addresses[1].country, categories.primary, basic_category)) as search_context_base
+            FROM read_parquet('{parquet_str}', hive_partitioning=true)
+            WHERE bbox.xmin BETWEEN {PLACES_CA_BBOX['xmin']} AND {PLACES_CA_BBOX['xmax']}
+              AND bbox.ymin BETWEEN {PLACES_CA_BBOX['ymin']} AND {PLACES_CA_BBOX['ymax']}
+              AND names.primary IS NOT NULL
+            {order_clause}
+            {limit_clause}
+        """
+        con.execute("INSTALL spatial; LOAD spatial;")
+        cursor = con.execute(query)
+
+    count = 0
+    bbox = [180.0, 90.0, -180.0, -90.0]
+    FETCH_SIZE = 50000
+
+    while True:
+        rows = cursor.fetchmany(FETCH_SIZE)
+        if not rows:
+            break
+        prepared = []
+        for r in rows:
+            try:
+                (gers_id, version_num, primary_name, lat, lon,
+                 bxmin, bymin, bxmax, bymax,
+                 country, region, locality,
+                 cat_primary, basic_cat,
+                 brand_name, brand_wikidata, confidence,
+                 search_name_base, search_context_base) = r
+            except ValueError:
+                continue
+            if not gers_id or not primary_name:
+                continue
+            try:
+                lat_f = float(lat)
+                lon_f = float(lon)
+                bxmin_f = float(bxmin)
+                bymin_f = float(bymin)
+                bxmax_f = float(bxmax)
+                bymax_f = float(bymax)
+            except Exception:
+                continue
+
+            bbox[0] = min(bbox[0], bxmin_f)
+            bbox[1] = min(bbox[1], bymin_f)
+            bbox[2] = max(bbox[2], bxmax_f)
+            bbox[3] = max(bbox[3], bymax_f)
+
+            search_name = (search_name_base or primary_name.lower()).strip()
+            if not search_name:
+                search_name = primary_name.lower()
+            search_context = (search_context_base or f"{locality} {region} {country}".strip().lower()).strip()
+            search_alias = build_search_alias(primary_name, search_name)
+
+            if isinstance(version_num, int):
+                ver = version_num
+            else:
+                try:
+                    ver = int(version_num) if version_num is not None else 0
+                except Exception:
+                    ver = 0
+
+            importance = compute_places_importance(
+                confidence, brand_name, brand_wikidata, cat_primary, basic_cat
+            )
+
+            c = (country or "US")[:2] or "US"
+            reg = region or "US-CA"
+            if len(reg) == 2 and c == "US":
+                reg = f"US-{reg}"
+
+            prepared.append((
+                gers_id, ver, "place", primary_name, lat_f, lon_f,
+                bxmin_f, bymin_f, bxmax_f, bymax_f,
+                None, c, reg,
+                search_name, search_alias, search_context, importance,
+            ))
+
+        if prepared:
+            db.executemany(DIVISIONS_INSERT_SQL, prepared)
+            count += len(prepared)
+
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('region', ?)", (region_code,))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('type', ?)", ("places",))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
+    db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
+               (datetime.now(timezone.utc).isoformat(),))
+
+    db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
+    db.commit()
+    db.execute("VACUUM")
+    db.close()
+    con.close()
+
+    return {
+        "region": region_code,
+        "record_count": count,
+        "size_bytes": output_path.stat().st_size,
+        "bbox": bbox,
+    }
+
+
+def build_places_shards(args, version: str, version_dir: Path) -> dict:
+    places_subdir = version_dir / "places"
+    parquet_path = getattr(args, "places_parquet", Path("exports/places-CA.parquet"))
+    region_code: str = getattr(args, "places_region", "US-CA")
+    limit: int | None = getattr(args, "places_limit", None)
+
+    # Handle S3 case: parquet_path may be string or Path that doesn't exist
+    is_s3 = isinstance(parquet_path, str) and str(parquet_path).startswith("s3://")
+    if not is_s3:
+        pp_check = Path(parquet_path) if not isinstance(parquet_path, Path) else parquet_path
+        try:
+            exists = pp_check.exists()
+        except Exception:
+            exists = False
+        if not exists:
+            print(f"Places parquet not found: {parquet_path}")
+            print("Generating via direct S3 read for CA bbox (may take a few minutes)...")
+            release = getattr(args, "overture_release", None) or "2026-06-17.0"
+            parquet_path = f"s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*"
+            is_s3 = True
+
+    output_path = places_subdir / f"{region_code}-places.db"
+    print(f"Building places shard for {region_code} from {parquet_path}")
+    if limit:
+        print(f"  Sampling limit: {limit:,} most prominent places")
+
+    info = build_places_shard(parquet_path, output_path, version, region_code=region_code, limit=limit)
+    size_mb = info["size_bytes"] / 1024 / 1024
+    print(f"  {region_code}: {info['record_count']:,} records, {size_mb:.1f} MB")
+
+    collection = generate_stac_collection(version, {region_code: info}, {region_code: ""}, "places")
+    collection["id"] = f"geocoder-places-shards-{version}"
+    collection["title"] = f"Overture Places Shards {version}"
+    collection["description"] = "Experimental places (POI) shards for CA prototype"
+    write_json(version_dir / "places-collection.json", collection)
+
+    return {region_code: info}
+
+
+
 def main():
     parser = argparse.ArgumentParser(description="Build geocoder shards")
     parser.add_argument("--version", help="Version string (default: date-based with suffix)")
@@ -2083,9 +2373,20 @@ def main():
                         help="Local cache path for the wikimedia importance file "
                              f"(default: {WIKIMEDIA_IMPORTANCE_FILE}; downloaded "
                              "from nominatim.org when missing)")
+    parser.add_argument("--places", action="store_true",
+                        help="Build places (POI) prototype shards")
+    parser.add_argument("--places-region", type=str, default="US-CA",
+                        help="Places region code e.g. US-CA (default: US-CA)")
+    parser.add_argument("--places-parquet", type=Path, default=Path("exports/places-CA.parquet"),
+                        help="Input parquet for places (flattened or raw Overture places)")
+    parser.add_argument("--places-limit", type=int, default=None,
+                        help="Sampling limit: top N most prominent places (by confidence)")
+    parser.add_argument("--overture-release", type=str, default=None,
+                        help="Overture release tag for places S3 fallback (e.g., 2026-06-17.0)")
     args = parser.parse_args()
 
-    if not args.reverse and not args.parquet.exists():
+    is_places = getattr(args, "places", False)
+    if not is_places and not args.reverse and not args.parquet.exists():
         print(f"Error: {args.parquet} not found")
         print("Run: ./scripts/download_divisions.sh")
         sys.exit(1)
@@ -2098,6 +2399,11 @@ def main():
         shard_type = "reverse"
         collection_file = "reverse-collection.json"
         shards_subdir = "reverse"
+    elif is_places:
+        shard_infos = build_places_shards(args, version, version_dir)
+        shard_type = "places"
+        collection_file = "places-collection.json"
+        shards_subdir = "places"
     else:
         shard_infos = build_forward_shards(args, version, version_dir)
         shard_type = "forward"
@@ -2105,7 +2411,7 @@ def main():
         shards_subdir = "shards"
 
     # Update root catalog (only for forward shards, reverse has its own collection)
-    if not args.reverse:
+    if not args.reverse and not is_places:
         existing_versions = [version]
         catalog_path = SHARDS_DIR / "catalog.json"
         if catalog_path.exists():
