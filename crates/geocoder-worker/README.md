@@ -2,22 +2,25 @@
 
 Cloudflare Worker for Overture geocoding using R2-stored SQLite shards.
 
-## Status
+SQLite WASM queries use rusqlite 0.38+, which natively supports
+`wasm32-unknown-unknown`. See the repository root `README.md` for the full
+public API reference and `SPEC.md` for architecture details.
 
-SQLite WASM queries are implemented using rusqlite 0.38+ which natively supports `wasm32-unknown-unknown`.
+## Features
 
-### Completed
-- Worker routing (`/search`, `/reverse`, `/health`, `/`)
-- STAC catalog loading from R2
-- Shard selection (HEAD + country based on CF-IPCountry)
-- R2 bucket integration
-- SQLite query execution via rusqlite WASM
-- Location bias (country-based from CF-IPCountry header)
-
-### TODO
-- [ ] Edge caching for catalog and shards
-- [ ] Reverse geocoding implementation
-- [ ] Performance optimization for large shards
+- Worker routing (`/search`, `/reverse`, `/id/:gers_id`, `/health`, `/`),
+  with HEAD request support on all endpoints
+- STAC catalog loading from R2 with version fallback
+- Forward shard selection: HEAD + location shards (coordinates or
+  CF-IPCountry/CF-Region-Code headers)
+- Reverse geocoding: coordinate-routed country shards (bbox containment)
+  with IP-country and HEAD fallbacks
+- GERS ID lookup via range reads against UUID-prefix-sharded parquet
+- Edge caching (Cache API): catalog/collection JSON, SQLite shards,
+  parquet footers and row groups (id-index TTL bounded for patch runs)
+- In-isolate memo caches for opened shards and small JSON
+- Rate limiting (60 req/min per IP) and privacy-safe request timing
+  (`Server-Timing` header; logs carry endpoint class only)
 
 ## Development
 
@@ -40,44 +43,32 @@ npx wrangler deploy
 ## Prerequisites
 
 1. R2 bucket named `geocoder-shards`
-2. Shards uploaded via `scripts/upload_shards.sh`
+2. Shards built and uploaded by the `Rebuild R2 Shards` workflow
+   (`scripts/build_shards.py` + `scripts/build_id_index.py`)
 3. STAC catalog at `catalog.json` in bucket root
 
 ## API
 
-### GET /search
+See the root `README.md` for the authoritative endpoint reference.
+Summary:
 
-```
-/search?q=boston&limit=10&autocomplete=true&format=json
-```
-
-Parameters:
-- `q` (required): Search query
-- `limit`: Max results (default: 10, max: 40)
-- `autocomplete`: Enable prefix matching (default: true)
-- `format`: `json` or `geojson` (default: json)
-
-Location bias is automatically applied based on the `CF-IPCountry` header.
-
-### GET /reverse
-
-```
-/reverse?lat=42.36&lon=-71.06
-```
-
-Parameters:
-- `lat` (required): Latitude
-- `lon` (required): Longitude
-
-(Not yet implemented for R2 shards)
+- `GET /search?q=<text>&limit=<n>&autocomplete=<bool>&format=json|geojson`
+  — forward geocode; optional `lat`/`lon` override the IP-derived location
+  bias
+- `GET /reverse?lat=<f>&lon=<f>&format=json|geojson` — reverse geocode
+  (bbox-based containment over countries, regions, counties, and populated
+  localities)
+- `GET /id/:gers_id` — resolve a GERS ID to its bounding box
+- `GET /health` — verifies the catalog loads and a version exists
 
 ## Architecture
 
 The worker:
-1. Fetches STAC catalog from R2 to discover available shards
-2. Selects HEAD shard (global high-population places) + country shard (if available)
-3. Fetches SQLite databases from R2
+1. Fetches the STAC catalog from R2 to discover available versions/shards
+2. Selects HEAD (global prominent places) + location shards
+3. Fetches SQLite databases from R2 (edge- and isolate-cached)
 4. Opens each database in-memory using rusqlite
 5. Executes FTS5 queries against each shard
-6. Merges, deduplicates, and applies location bias
+6. Merges, deduplicates, and ranks (match quality + static importance +
+   BM25 tiebreak, with location bias)
 7. Returns results as JSON or GeoJSON

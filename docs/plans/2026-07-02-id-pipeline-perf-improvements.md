@@ -113,7 +113,7 @@ for no measured latency gain). Takes effect on the next id-index build.
 100k rows ≈ 2.4-3 MB per row group; every cold lookup range-reads a full
 row group. Halving row-group size halves the cold read, at the cost of a
 larger footer. Cheap experiment: build one prefix at 25k/50k/100k and
-compare `scripts/latency_test.py` cold `/id` numbers.
+compare cold `/id` numbers (`scripts/benchmark_latency.py`).
 
 Prior-trial context:
 - 100k was chosen deliberately (`f78a6a0`): ~10 groups/shard, sorted
