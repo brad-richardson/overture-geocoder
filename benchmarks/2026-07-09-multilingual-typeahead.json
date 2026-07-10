@@ -1,0 +1,611 @@
+{
+ "metadata": {
+  "top_k": 5,
+  "min_prefix": 3,
+  "tolerance_km": 50.0,
+  "engines": [
+   "Overture",
+   "Photon"
+  ],
+  "case_set": "multilingual",
+  "n_cases": 13
+ },
+ "summaries": {
+  "Overture": {
+   "cases": 13,
+   "full_query_top1": 0,
+   "typeahead_cases": 13,
+   "resolved_before_full_query": 8,
+   "median_keystrokes_to_top1": 3.5,
+   "unresolved_top1": 5,
+   "latency_p50_ms": 56.5
+  },
+  "Photon": {
+   "cases": 13,
+   "full_query_top1": 3,
+   "typeahead_cases": 13,
+   "resolved_before_full_query": 5,
+   "median_keystrokes_to_top1": 4.0,
+   "unresolved_top1": 7,
+   "latency_p50_ms": 467.5
+  }
+ },
+ "results": {
+  "Overture": {
+   "engine": "Overture",
+   "cases": [
+    {
+     "query": "moscou",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "multilingual",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 1,
+      "6": null
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      63.83183399884729,
+      63.77437500486849,
+      58.86900000041351,
+      53.723916003946215
+     ],
+     "errors": 0
+    },
+    {
+     "query": "londres",
+     "target": "London",
+     "note": "multilingual",
+     "ranks": {
+      "3": 3,
+      "4": 1,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      59.887374998652376,
+      65.61487500584917,
+      53.11233300017193,
+      63.75812499754829,
+      50.16987500130199
+     ],
+     "errors": 0
+    },
+    {
+     "query": "venise",
+     "target": "Venezia",
+     "note": "multilingual",
+     "ranks": {
+      "3": 3,
+      "4": 1,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      68.31345799582778,
+      69.62824999936856,
+      49.77258299913956,
+      56.04237499937881
+     ],
+     "errors": 0
+    },
+    {
+     "query": "moskau",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "multilingual",
+     "ranks": {
+      "3": 1,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      57.749957995838486,
+      52.71437500050524,
+      58.66858299850719,
+      59.30791699938709
+     ],
+     "errors": 0
+    },
+    {
+     "query": "tokio",
+     "target": "\u6771\u4eac\u90fd",
+     "note": "multilingual",
+     "ranks": {
+      "3": 1,
+      "4": null,
+      "5": null
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      54.86712499987334,
+      49.52879100164864,
+      67.886290999013
+     ],
+     "errors": 0
+    },
+    {
+     "query": "nueva york",
+     "target": "New York",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      66.09612500324147,
+      56.13891699613305,
+      58.34504200174706,
+      59.2201660037972,
+      57.17108299722895,
+      55.40849999670172,
+      58.679750000010245,
+      54.141375003382564
+     ],
+     "errors": 0
+    },
+    {
+     "query": "florencia",
+     "target": "Firenze",
+     "note": "multilingual",
+     "ranks": {
+      "3": 2,
+      "4": 1,
+      "5": 1,
+      "6": 1,
+      "7": 1,
+      "8": null,
+      "9": null
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      56.54162500286475,
+      54.49129099724814,
+      54.76220799755538,
+      61.677874997258186,
+      53.13395899429452,
+      61.122334001993295,
+      52.14625000371598
+     ],
+     "errors": 0
+    },
+    {
+     "query": "atenas",
+     "target": "\u0391\u03b8\u03ae\u03bd\u03b1",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      60.894709000422154,
+      54.266250001091976,
+      52.635166997788474,
+      56.66454199672444
+     ],
+     "errors": 0
+    },
+    {
+     "query": "kolonia",
+     "target": "K\u00f6ln",
+     "note": "multilingual",
+     "ranks": {
+      "3": 2,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      50.39795800257707,
+      53.892374999122694,
+      55.295040998316836,
+      59.63287499616854,
+      61.743541999021545
+     ],
+     "errors": 0
+    },
+    {
+     "query": "praga",
+     "target": "Praha",
+     "note": "multilingual",
+     "ranks": {
+      "3": 2,
+      "4": 1,
+      "5": null
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      58.602541001164354,
+      53.77816699910909,
+      57.07412500487408
+     ],
+     "errors": 0
+    },
+    {
+     "query": "pekin",
+     "target": "\u5317\u4eac\u5e02",
+     "note": "multilingual",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": 2
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 2,
+     "latencies_ms": [
+      50.935583996761125,
+      59.51524999545654,
+      56.3783749967115
+     ],
+     "errors": 0
+    },
+    {
+     "query": "\u30e2\u30b9\u30af\u30ef",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      55.90437500359258,
+      58.562209000228904
+     ],
+     "errors": 0
+    },
+    {
+     "query": "\u0432\u0430\u0440\u0448\u0430\u0432\u0430",
+     "target": "Warszawa",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      55.94341700634686,
+      55.357457997160964,
+      56.309958003112115,
+      65.52833299792837,
+      46.54662500252016
+     ],
+     "errors": 0
+    }
+   ]
+  },
+  "Photon": {
+   "engine": "Photon",
+   "cases": [
+    {
+     "query": "moscou",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "multilingual",
+     "ranks": {
+      "3": 4,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      457.80966600432293,
+      512.7520839960198,
+      456.1449579996406,
+      471.5903749965946
+     ],
+     "errors": 0
+    },
+    {
+     "query": "londres",
+     "target": "London",
+     "note": "multilingual",
+     "ranks": {
+      "3": 2,
+      "4": 1,
+      "5": 2,
+      "6": 1,
+      "7": 2
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 2,
+     "latencies_ms": [
+      503.53733300289605,
+      457.6694579955074,
+      502.2652920015389,
+      495.0914580040262,
+      507.2940829995787
+     ],
+     "errors": 0
+    },
+    {
+     "query": "venise",
+     "target": "Venezia",
+     "note": "multilingual",
+     "ranks": {
+      "3": 3,
+      "4": null,
+      "5": 2,
+      "6": 2
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": 2,
+     "latencies_ms": [
+      509.33454200276174,
+      506.38358300057007,
+      464.3335419968935,
+      467.18295799655607
+     ],
+     "errors": 0
+    },
+    {
+     "query": "moskau",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "multilingual",
+     "ranks": {
+      "3": 4,
+      "4": 1,
+      "5": 1,
+      "6": 1
+     },
+     "keystrokes_to_top1": 4,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      472.1218749982654,
+      464.5742499997141,
+      462.7790829981677,
+      476.2272079969989
+     ],
+     "errors": 0
+    },
+    {
+     "query": "tokio",
+     "target": "\u6771\u4eac\u90fd",
+     "note": "multilingual",
+     "ranks": {
+      "3": 4,
+      "4": 5,
+      "5": 1
+     },
+     "keystrokes_to_top1": 5,
+     "keystrokes_to_top3": 5,
+     "full_query_rank": 1,
+     "latencies_ms": [
+      461.58899999863934,
+      458.7835839993204,
+      463.0087090044981
+     ],
+     "errors": 0
+    },
+    {
+     "query": "nueva york",
+     "target": "New York",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null,
+      "8": null,
+      "9": null,
+      "10": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      467.52466700127115,
+      468.55141599371564,
+      515.6229589993018,
+      462.1392500048387,
+      473.25324999837903,
+      483.8817499985453,
+      464.8577080006362,
+      456.034583003202
+     ],
+     "errors": 0
+    },
+    {
+     "query": "florencia",
+     "target": "Firenze",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": 1,
+      "7": 1,
+      "8": null,
+      "9": null
+     },
+     "keystrokes_to_top1": 6,
+     "keystrokes_to_top3": 6,
+     "full_query_rank": null,
+     "latencies_ms": [
+      462.6490410009865,
+      537.5912910021725,
+      481.17795799771557,
+      553.8649170048302,
+      459.77441699506016,
+      544.4612920036889,
+      490.9911249997094
+     ],
+     "errors": 0
+    },
+    {
+     "query": "atenas",
+     "target": "\u0391\u03b8\u03ae\u03bd\u03b1",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      460.8610840004985,
+      452.97645900427597,
+      457.60662500106264,
+      497.5842499989085
+     ],
+     "errors": 0
+    },
+    {
+     "query": "kolonia",
+     "target": "K\u00f6ln",
+     "note": "multilingual",
+     "ranks": {
+      "3": 4,
+      "4": 4,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      458.1975830005831,
+      465.63700000115205,
+      469.54504199675284,
+      473.92750000290107,
+      504.63379199936753
+     ],
+     "errors": 0
+    },
+    {
+     "query": "praga",
+     "target": "Praha",
+     "note": "multilingual",
+     "ranks": {
+      "3": 1,
+      "4": 1,
+      "5": null
+     },
+     "keystrokes_to_top1": 3,
+     "keystrokes_to_top3": 3,
+     "full_query_rank": null,
+     "latencies_ms": [
+      471.3869170009275,
+      469.81195899570594,
+      460.44391699979315
+     ],
+     "errors": 0
+    },
+    {
+     "query": "pekin",
+     "target": "\u5317\u4eac\u5e02",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": 3,
+      "5": 2
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": 4,
+     "full_query_rank": 2,
+     "latencies_ms": [
+      454.12045800185297,
+      478.77445799531415,
+      465.12820899806684
+     ],
+     "errors": 0
+    },
+    {
+     "query": "\u30e2\u30b9\u30af\u30ef",
+     "target": "\u041c\u043e\u0441\u043a\u0432\u0430",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      459.57495799666503,
+      451.47070799430367
+     ],
+     "errors": 0
+    },
+    {
+     "query": "\u0432\u0430\u0440\u0448\u0430\u0432\u0430",
+     "target": "Warszawa",
+     "note": "multilingual",
+     "ranks": {
+      "3": null,
+      "4": null,
+      "5": null,
+      "6": null,
+      "7": null
+     },
+     "keystrokes_to_top1": null,
+     "keystrokes_to_top3": null,
+     "full_query_rank": null,
+     "latencies_ms": [
+      450.37220799713396,
+      453.62312499491964,
+      452.9133329997421,
+      506.0540409976966,
+      482.7326250015176
+     ],
+     "errors": 0
+    }
+   ]
+  }
+ }
+}
