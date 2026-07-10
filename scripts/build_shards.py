@@ -40,9 +40,11 @@ import argparse
 import json
 import hashlib
 import math
+import platform
 import re
 import shutil
 import sqlite3
+import subprocess
 import sys
 import tempfile
 import unicodedata
@@ -1722,6 +1724,147 @@ def write_json(path: Path, data: dict):
         json.dump(data, f, indent=2)
 
 
+def get_git_sha() -> str | None:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            cwd=Path(__file__).resolve().parent.parent,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except Exception:
+        pass
+    return None
+
+
+def get_wiki_importance_sha(path: Path) -> str | None:
+    if not path.exists() or path.stat().st_size == 0:
+        return None
+    try:
+        return hash_file(path)
+    except Exception:
+        return None
+
+
+def get_version_from_catalog(catalog_path: Path = SHARDS_DIR / "catalog.json") -> str | None:
+    """Read latest version from a shards STAC catalog (local file)."""
+    if not catalog_path.exists():
+        return None
+    try:
+        with open(catalog_path) as f:
+            catalog = json.load(f)
+        for link in catalog.get("links", []):
+            if link.get("rel") == "child" and link.get("latest") is True:
+                href = link.get("href", "")
+                parts = href.strip("./").split("/")
+                if parts:
+                    return parts[0]
+        versions = []
+        for link in catalog.get("links", []):
+            if link.get("rel") == "child":
+                href = link.get("href", "")
+                parts = href.strip("./").split("/")
+                if parts and parts[0]:
+                    versions.append(parts[0])
+        if versions:
+            versions.sort(key=version_sort_key, reverse=True)
+            return versions[0]
+    except Exception:
+        return None
+    return None
+
+
+def write_build_meta(
+    version: str,
+    version_dir: Path,
+    shard_infos: dict[str, dict],
+    args,
+) -> Path:
+    """Write shards/{version}/build-meta.json with reproducibility info."""
+    overture_release = getattr(args, "overture_release", None)
+    if overture_release:
+        division_s3_paths = [
+            f"s3://overturemaps-us-west-2/release/{overture_release}/theme=divisions/type=division/*",
+            f"s3://overturemaps-us-west-2/release/{overture_release}/theme=divisions/type=division_area/*",
+        ]
+    else:
+        division_s3_paths = []
+
+    wiki_file = getattr(args, "wiki_importance_file", WIKIMEDIA_IMPORTANCE_FILE)
+    if isinstance(wiki_file, str):
+        wiki_file = Path(wiki_file)
+
+    parquet_path = getattr(args, "parquet", DIVISIONS_PARQUET)
+    input_size = None
+    try:
+        if parquet_path.exists():
+            input_size = parquet_path.stat().st_size
+    except Exception:
+        pass
+
+    meta = {
+        "version": version,
+        "build_timestamp": datetime.now(timezone.utc).isoformat(),
+        "overture_release": overture_release,
+        "division_s3_paths": division_s3_paths,
+        "wikimedia_importance": {
+            "url": WIKIMEDIA_IMPORTANCE_URL,
+            "local_path": str(wiki_file),
+            "sha256": get_wiki_importance_sha(wiki_file),
+        },
+        "git_sha": get_git_sha(),
+        "python_version": platform.python_version(),
+        "platform": platform.platform(),
+        "duckdb_version": getattr(duckdb, "__version__", "unknown"),
+        "thresholds": {
+            "head_threshold": getattr(args, "head_threshold", DEFAULT_HEAD_THRESHOLD),
+            "head_wiki_importance_threshold": HEAD_WIKI_IMPORTANCE_THRESHOLD,
+            "wiki_locality_keep_threshold": WIKI_LOCALITY_KEEP_THRESHOLD,
+            "shard_size_threshold_bytes": SHARD_SIZE_THRESHOLD_BYTES,
+            "region_split_record_threshold": REGION_SPLIT_RECORD_THRESHOLD,
+            "fts5_prefix_lengths": FTS5_PREFIX_LENGTHS,
+            "fts5_tokenizer": FTS5_TOKENIZER,
+            "router_token_min_len": ROUTER_TOKEN_MIN_LEN,
+            "router_max_shards_per_token": ROUTER_MAX_SHARDS_PER_TOKEN,
+            "dedup_radius_km": DEDUP_RADIUS_KM,
+            "reverse_locality_population_threshold": REVERSE_LOCALITY_POPULATION_THRESHOLD,
+        },
+        "constants": {
+            "type_prior": TYPE_PRIOR,
+            "locality_class_prior": LOCALITY_CLASS_PRIOR,
+            "wiki_importance_weight": WIKI_IMPORTANCE_WEIGHT,
+            "pop_component_cap": POP_COMPONENT_CAP,
+            "pop_component_coeff": POP_COMPONENT_COEFF,
+        },
+        "input": {
+            "parquet": str(parquet_path),
+            "size_bytes": input_size,
+        },
+        "record_counts": {
+            "total_records": sum(s["record_count"] for s in shard_infos.values()),
+            "total_size_bytes": sum(s["size_bytes"] for s in shard_infos.values()),
+            "shard_count": len(shard_infos),
+            "shards": {sid: info["record_count"] for sid, info in shard_infos.items()},
+        },
+        "args": {
+            "reverse": bool(getattr(args, "reverse", False)),
+            "no_wiki_importance": bool(getattr(args, "no_wiki_importance", False)),
+            "no_router": bool(getattr(args, "no_router", False)),
+            "countries": getattr(args, "countries", None),
+            "head_only": bool(getattr(args, "head_only", False)),
+            "skip_head": bool(getattr(args, "skip_head", False)),
+        },
+    }
+
+    out_path = version_dir / "build-meta.json"
+    write_json(out_path, meta)
+    print(f"\nBuild meta: {out_path}")
+    return out_path
+
+
 def build_forward_shards(args, version: str, version_dir: Path) -> dict:
     """Build forward geocoding shards (FTS-based)."""
     shards_subdir = version_dir / "shards"
@@ -2083,6 +2226,8 @@ def main():
                         help="Local cache path for the wikimedia importance file "
                              f"(default: {WIKIMEDIA_IMPORTANCE_FILE}; downloaded "
                              "from nominatim.org when missing)")
+    parser.add_argument("--overture-release", type=str, default=None,
+                        help="Overture release tag (e.g., 2026-05-21.0) for build-meta.json")
     args = parser.parse_args()
 
     if not args.reverse and not args.parquet.exists():
@@ -2120,6 +2265,11 @@ def main():
         catalog = generate_stac_catalog(existing_versions, version)
         write_json(catalog_path, catalog)
 
+    try:
+        write_build_meta(version, version_dir, shard_infos, args)
+    except Exception as exc:
+        print(f"Warning: failed to write build-meta.json: {exc}", file=sys.stderr)
+
     # Summary
     total_records = sum(s["record_count"] for s in shard_infos.values())
     total_size = sum(s["size_bytes"] for s in shard_infos.values())
@@ -2133,6 +2283,7 @@ def main():
         print(f"  {SHARDS_DIR}/catalog.json")
     print(f"  {version_dir}/{collection_file}")
     print(f"  {version_dir}/{shards_subdir}/*.db")
+    print(f"  {version_dir}/build-meta.json")
 
 
 if __name__ == "__main__":

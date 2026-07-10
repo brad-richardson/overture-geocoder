@@ -159,6 +159,17 @@ impl From<&UserLocation> for UserLocationDebug {
 pub struct SearchResult {
     pub results: Vec<GeocoderResult>,
     pub debug: Option<SearchDebugInfo>,
+    pub version: String,
+}
+
+pub struct ReverseSearchResult {
+    pub result: Option<ReverseResult>,
+    pub version: String,
+}
+
+pub struct IdSearchResult {
+    pub result: Option<IdLookupResult>,
+    pub version: String,
 }
 
 /// Loads and caches shards from R2 with edge caching via Cache API.
@@ -971,6 +982,7 @@ impl ShardLoader {
         Ok(SearchResult {
             results: all_results,
             debug,
+            version: version.to_string(),
         })
     }
 
@@ -1069,41 +1081,45 @@ impl ShardLoader {
         Vec::new()
     }
 
-    /// Select a reverse country shard from the requested coordinates when its
-    /// collection bbox is unambiguous. Overlapping country bboxes cannot prove
-    /// containment, so those cases retain the caller's IP-country fallback
-    /// until a polygon/H3 country-routing index exists.
     fn select_reverse_shards(
         collection: &StacCollection,
         lat: f64,
         lon: f64,
         cf_country: Option<&str>,
     ) -> Vec<String> {
-        // Reverse routing needs containment, not the forward-search notion of
-        // "nearby". Reusing select_shards_by_proximity here made a country up
-        // to 200 km away count as an overlapping bbox and needlessly forced an
-        // IP-country fallback even when exactly one bbox contained the point.
-        let coordinate_shards: Vec<String> = collection
+        let mut containing: Vec<(String, f64)> = collection
             .items
             .iter()
             .filter_map(|(shard_id, item)| {
                 if shard_id == "HEAD" {
                     return None;
                 }
-                item.bbox
-                    .as_ref()
-                    .filter(|bbox| distance_to_bbox(lat, lon, bbox) == 0.0)
-                    .map(|_| shard_id.clone())
+                let bbox = item.bbox.as_ref()?;
+                if bbox_contains(lat, lon, bbox) {
+                    Some((shard_id.clone(), bbox_area_deg2(bbox)))
+                } else {
+                    None
+                }
             })
             .collect();
-        if coordinate_shards.len() == 1 {
-            return coordinate_shards;
+
+        if containing.is_empty() {
+            return cf_country
+                .filter(|country| Self::collection_has_shard(collection, country))
+                .map(|country| vec![country.to_string()])
+                .unwrap_or_default();
         }
 
-        cf_country
-            .filter(|country| Self::collection_has_shard(collection, country))
-            .map(|country| vec![country.to_string()])
-            .unwrap_or_default()
+        if containing.len() == 1 {
+            return vec![containing.remove(0).0];
+        }
+
+        containing.sort_by(|a, b| {
+            a.1.partial_cmp(&b.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
+        vec![containing[0].0.clone()]
     }
 
     /// Reverse geocode a lat/lon coordinate.
@@ -1113,7 +1129,7 @@ impl ShardLoader {
         lat: f64,
         lon: f64,
         cf_country: Option<&str>,
-    ) -> Result<Option<ReverseResult>> {
+    ) -> Result<ReverseSearchResult> {
         with_version_fallback!(self, "reverse", version, {
             self.try_reverse_geocode(version, lat, lon, cf_country)
                 .await
@@ -1127,18 +1143,20 @@ impl ShardLoader {
         lat: f64,
         lon: f64,
         cf_country: Option<&str>,
-    ) -> Result<Option<ReverseResult>> {
+    ) -> Result<ReverseSearchResult> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
-        // Use a coordinate-selected shard only when its bbox is unambiguous.
-        // Overlap and legacy-metadata cases fall back to the caller's country,
-        // then HEAD, until country polygons/H3 covers are available.
         for country in Self::select_reverse_shards(&reverse_collection, lat, lon, cf_country) {
             match self
                 .query_reverse_shard(version, &country, &reverse_collection, lat, lon)
                 .await
             {
-                Ok(Some(result)) => return Ok(Some(result)),
+                Ok(Some(result)) => {
+                    return Ok(ReverseSearchResult {
+                        result: Some(result),
+                        version: version.to_string(),
+                    })
+                }
                 Ok(None) => {
                     console_log!("No result in country {} reverse shard", country);
                 }
@@ -1152,9 +1170,13 @@ impl ShardLoader {
             }
         }
 
-        // Fall back to HEAD shard
-        self.query_reverse_shard(version, "HEAD", &reverse_collection, lat, lon)
-            .await
+        let res = self
+            .query_reverse_shard(version, "HEAD", &reverse_collection, lat, lon)
+            .await?;
+        Ok(ReverseSearchResult {
+            result: res,
+            version: version.to_string(),
+        })
     }
 
     /// Load a shard database, preferring the isolate-level cache, then the
@@ -1282,7 +1304,7 @@ impl ShardLoader {
 
     /// Look up a GERS ID to get its bounding box from a parquet shard.
     /// Falls back to older versions if the latest version's index is unavailable.
-    pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
+    pub async fn lookup_id(&self, gers_id: &str) -> Result<IdSearchResult> {
         with_version_fallback!(self, "id_lookup", version, {
             self.try_lookup_id(version, gers_id).await
         })
@@ -1295,23 +1317,26 @@ impl ShardLoader {
     /// 1. Suffix read (32 KB) → get file size + parquet footer
     /// 2. Parse footer → find row group containing the target UUID via min/max stats
     /// 3. Range read just that row group's column data
-    async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<Option<IdLookupResult>> {
+    async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<IdSearchResult> {
         let prefix_len = self.load_id_prefix_len(version).await?;
 
-        // Compute shard prefix from GERS ID (remove hyphens, take first N hex
-        // chars). get() rather than slicing: a multi-byte character in the
-        // path param would otherwise panic on a non-char boundary and abort
-        // the whole wasm isolate.
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
         let Some(prefix) = hex_id.get(..prefix_len) else {
-            return Ok(None);
+            return Ok(IdSearchResult {
+                result: None,
+                version: version.to_string(),
+            });
         };
         let shard_key = format!("{}/id-index/{}.parquet", version, prefix);
 
-        // Parse target UUID early so we can fail fast
         let target = match parse_uuid_bytes(gers_id) {
             Some(t) => t,
-            None => return Ok(None),
+            None => {
+                return Ok(IdSearchResult {
+                    result: None,
+                    version: version.to_string(),
+                })
+            }
         };
 
         // Step 1: Suffix read to get footer + file size (cached at edge).
@@ -1400,7 +1425,12 @@ impl ShardLoader {
         }
         let rg_idx = match matching_rg {
             Some(idx) => idx,
-            None => return Ok(None),
+            None => {
+                return Ok(IdSearchResult {
+                    result: None,
+                    version: version.to_string(),
+                })
+            }
         };
 
         // Step 4: Compute byte range for the matching row group's columns
@@ -1464,9 +1494,11 @@ impl ShardLoader {
             let id_bytes = row
                 .get_bytes(0)
                 .map_err(|e| Error::RustError(format!("Bad UUID column: {}", e)))?;
-            // Rows are sorted by UUID; once past the target it can't appear.
             if id_bytes.data() > target.as_slice() {
-                return Ok(None);
+                return Ok(IdSearchResult {
+                    result: None,
+                    version: version.to_string(),
+                });
             }
             if id_bytes.data() == target.as_slice() {
                 let bbox_xmin = row
@@ -1485,18 +1517,24 @@ impl ShardLoader {
                     .get_float(4)
                     .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
                     as f64;
-                return Ok(Some(IdLookupResult {
-                    id: gers_id.to_string(),
-                    bbox: geocoder_core::BBox {
-                        xmin: bbox_xmin,
-                        ymin: bbox_ymin,
-                        xmax: bbox_xmax,
-                        ymax: bbox_ymax,
-                    },
-                }));
+                return Ok(IdSearchResult {
+                    result: Some(IdLookupResult {
+                        id: gers_id.to_string(),
+                        bbox: geocoder_core::BBox {
+                            xmin: bbox_xmin,
+                            ymin: bbox_ymin,
+                            xmax: bbox_xmax,
+                            ymax: bbox_ymax,
+                        },
+                    }),
+                    version: version.to_string(),
+                });
             }
         }
-        Ok(None)
+        Ok(IdSearchResult {
+            result: None,
+            version: version.to_string(),
+        })
     }
 
     /// Load the ID index prefix_len from a small metadata file.
@@ -1768,21 +1806,66 @@ impl ChunkReader for RangeChunkReader {
     }
 }
 
-/// Calculate the minimum distance from a point to a bounding box in kilometers.
-/// Returns 0 if the point is inside the bbox.
-fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
-    let [min_lon, min_lat, max_lon, max_lat] = *bbox;
+fn normalize_lon(mut lon: f64) -> f64 {
+    while lon > 180.0 {
+        lon -= 360.0;
+    }
+    while lon < -180.0 {
+        lon += 360.0;
+    }
+    lon
+}
 
-    // Check if point is inside bbox
-    if lon >= min_lon && lon <= max_lon && lat >= min_lat && lat <= max_lat {
+fn bbox_contains(lat: f64, lon: f64, bbox: &[f64; 4]) -> bool {
+    let [min_lon, min_lat, max_lon, max_lat] = *bbox;
+    if lat < min_lat || lat > max_lat {
+        return false;
+    }
+    let lon = normalize_lon(lon);
+    let min_lon_n = normalize_lon(min_lon);
+    let max_lon_n = normalize_lon(max_lon);
+    if min_lon_n <= max_lon_n {
+        lon >= min_lon_n && lon <= max_lon_n
+    } else {
+        lon >= min_lon_n || lon <= max_lon_n
+    }
+}
+
+fn bbox_area_deg2(bbox: &[f64; 4]) -> f64 {
+    let [min_lon, min_lat, max_lon, max_lat] = *bbox;
+    let height = (max_lat - min_lat).abs();
+    let width = if min_lon <= max_lon {
+        (max_lon - min_lon).abs()
+    } else {
+        (180.0 - min_lon) + (max_lon + 180.0)
+    };
+    width * height
+}
+
+fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
+    if bbox_contains(lat, lon, bbox) {
         return 0.0;
     }
-
-    // Find closest point on bbox boundary
-    let closest_lon = lon.clamp(min_lon, max_lon);
+    let [min_lon, min_lat, max_lon, max_lat] = *bbox;
     let closest_lat = lat.clamp(min_lat, max_lat);
-
-    // Calculate haversine distance
+    let closest_lon = if min_lon <= max_lon {
+        lon.clamp(min_lon, max_lon)
+    } else {
+        let nlon = normalize_lon(lon);
+        let min_n = normalize_lon(min_lon);
+        let max_n = normalize_lon(max_lon);
+        if nlon > max_n && nlon < min_n {
+            let dist_to_min = (min_n - nlon).abs();
+            let dist_to_max = (nlon - max_n).abs();
+            if dist_to_min < dist_to_max {
+                min_lon
+            } else {
+                max_lon
+            }
+        } else {
+            lon.clamp(min_lon, max_lon)
+        }
+    };
     haversine_distance(lat, lon, closest_lat, closest_lon)
 }
 
@@ -1836,7 +1919,7 @@ mod tests {
     }
 
     #[test]
-    fn test_overlapping_country_bboxes_do_not_override_ip_country() {
+    fn test_overlapping_country_bboxes_chooses_smallest_area() {
         let collection = collection_with_bboxes(&[
             ("CA", Some([-141.0, 41.0, -52.0, 83.0])),
             ("US", Some([-125.0, 24.0, -66.0, 50.0])),
@@ -1845,7 +1928,8 @@ mod tests {
         let fallback = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, Some("US"));
         assert_eq!(fallback, vec!["US"]);
 
-        assert!(ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None).is_empty());
+        let no_ip = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None);
+        assert_eq!(no_ip, vec!["US"], "smallest area should win without IP fallback");
     }
 
     #[test]
@@ -1855,11 +1939,58 @@ mod tests {
             ("US", Some([-125.0, 24.0, -66.0, 50.0])),
         ]);
 
-        // New York is within 200 km of Canada's broad bbox, but only the US
-        // bbox actually contains it. Reverse routing must not fall back to an
-        // unrelated caller IP in this case.
         let shards = ShardLoader::select_reverse_shards(&collection, 40.7128, -74.0060, Some("JP"));
         assert_eq!(shards, vec!["US"]);
+    }
+
+    #[test]
+    fn test_tokyo_routes_to_jp_despite_overlapping_world_bbox() {
+        let collection = collection_with_bboxes(&[
+            ("JP", Some([122.0, 20.0, 154.0, 46.0])),
+            ("RU", Some([-180.0, 41.0, 180.0, 82.0])),
+            ("US", Some([-125.0, 24.0, -66.0, 50.0])),
+        ]);
+
+        let shards = ShardLoader::select_reverse_shards(&collection, 35.68, 139.69, Some("US"));
+        assert_eq!(shards, vec!["JP"], "Tokyo should route to JP not US IP");
+
+        let no_ip = ShardLoader::select_reverse_shards(&collection, 35.68, 139.69, None);
+        assert_eq!(no_ip, vec!["JP"], "Tokyo should route to JP even without IP");
+    }
+
+    #[test]
+    fn test_antimeridian_bbox_contains() {
+        let bbox_crossing = [170.0, -10.0, -170.0, 10.0];
+        assert!(bbox_contains(0.0, 175.0, &bbox_crossing));
+        assert!(bbox_contains(0.0, -175.0, &bbox_crossing));
+        assert!(!bbox_contains(0.0, 0.0, &bbox_crossing));
+        assert!(!bbox_contains(20.0, 175.0, &bbox_crossing));
+
+        let collection = collection_with_bboxes(&[
+            ("FJ", Some([170.0, -20.0, -175.0, -12.0])),
+            ("NZ", Some([165.0, -52.0, 180.0, -34.0])),
+        ]);
+        let shards = ShardLoader::select_reverse_shards(&collection, -16.0, 179.0, None);
+        assert_eq!(shards, vec!["FJ"]);
+        let shards_west = ShardLoader::select_reverse_shards(&collection, -16.0, -178.0, None);
+        assert_eq!(shards_west, vec!["FJ"]);
+    }
+
+    #[test]
+    fn test_bbox_area_antimeridian() {
+        let normal = [-125.0, 24.0, -66.0, 50.0];
+        let crossing = [170.0, -10.0, -170.0, 10.0];
+        assert!((bbox_area_deg2(&normal) - 59.0 * 26.0).abs() < 1e-6);
+        assert!((bbox_area_deg2(&crossing) - 20.0 * 20.0).abs() < 1e-6);
+    }
+
+    #[test]
+    fn test_distance_to_bbox_antimeridian() {
+        let bbox = [170.0, -10.0, -170.0, 10.0];
+        assert_eq!(distance_to_bbox(0.0, 175.0, &bbox), 0.0);
+        assert_eq!(distance_to_bbox(0.0, -175.0, &bbox), 0.0);
+        let outside = distance_to_bbox(0.0, 0.0, &bbox);
+        assert!(outside > 1000.0);
     }
 
     #[test]

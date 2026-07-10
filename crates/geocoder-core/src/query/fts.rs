@@ -23,10 +23,10 @@
 /// // Punctuation removal
 /// assert_eq!(prepare_fts_query("new york, ny", true), r#""new" "york" "ny"*"#);
 /// ```
+const MAX_FTS_TOKENS: usize = 10;
+const MIN_FTS_TOKEN_CHARS: usize = 2;
+
 pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
-    // Tokenize: lowercase (Unicode-aware), keep only alphanumeric, whitespace, and hyphens.
-    // Use a loop with the full to_lowercase() iterator to avoid truncating multi-char
-    // expansions (e.g., İ → i + combining dot above).
     let mut normalized = String::with_capacity(query.len());
     for c in query.chars() {
         if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
@@ -34,27 +34,44 @@ pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
                 normalized.push(lc);
             }
         } else {
-            // Replace punctuation with space
             normalized.push(' ');
         }
     }
 
-    // Split into tokens, filter empty
-    let tokens: Vec<&str> = normalized
+    let mut tokens: Vec<String> = normalized
         .split_whitespace()
         .filter(|t| !t.is_empty())
+        .filter(|t| t.chars().count() >= MIN_FTS_TOKEN_CHARS)
+        .map(|s| s.to_string())
         .collect();
 
     if tokens.is_empty() {
         return String::new();
     }
 
-    // Quote each token; add prefix wildcard to last token for autocomplete
+    if tokens.len() > MAX_FTS_TOKENS {
+        tokens.truncate(MAX_FTS_TOKENS);
+    }
+
+    if autocomplete {
+        if let Some(last) = tokens.last() {
+            if last.chars().count() < MIN_FTS_TOKEN_CHARS {
+                tokens.pop();
+                if tokens.is_empty() {
+                    return String::new();
+                }
+            }
+        }
+    }
+
+    if tokens.is_empty() {
+        return String::new();
+    }
+
     tokens
         .iter()
         .enumerate()
         .map(|(i, token)| {
-            // Escape any double quotes in the token
             let escaped = token.replace('"', "\"\"");
             if autocomplete && i == tokens.len() - 1 {
                 format!("\"{}\"*", escaped)
