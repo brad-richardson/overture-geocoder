@@ -47,10 +47,10 @@ jobs:
   patch-stage:
     runs-on: ubuntu-24.04-arm
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -58,9 +58,9 @@ jobs:
         run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install wrangler
         run: npm install -g wrangler
@@ -94,10 +94,10 @@ jobs:
     needs: patch-stage
     if: inputs.run_build && inputs.prefixes != ''
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -105,9 +105,9 @@ jobs:
         run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install wrangler
         run: npm install -g wrangler
@@ -144,10 +144,10 @@ jobs:
         with:
           tool-cache: false
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -155,9 +155,9 @@ jobs:
         run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install wrangler
         run: npm install -g wrangler
@@ -195,10 +195,10 @@ jobs:
           && needs.build-patched.result != 'failure'
           && needs.build-ranges.result != 'failure' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Setup Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v6
         with:
           python-version: '3.11'
 
@@ -206,9 +206,9 @@ jobs:
         run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
-          node-version: '20'
+          node-version: '24'
 
       - name: Install wrangler
         run: npm install -g wrangler

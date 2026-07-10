@@ -51,10 +51,11 @@ and worker timing have landed. Items below are intentionally still open.
   forward query, a reverse query, and an ID lookup. Fail the deployment workflow
   when the deployed worker is not healthy instead of relying on a manual check.
   (Done 2026-07-09, ci-hygiene-and-benchmark-scoring.)
-- [ ] Update GitHub Actions and the workflow Node runtime away from deprecated
+- [x] Update GitHub Actions and the workflow Node runtime away from deprecated
   Node 20 (`actions/checkout@v4`, `actions/setup-node@v4`,
   `actions/setup-python@v5`, and `node-version: 20`). Current runs pass but emit
-  deprecation annotations.
+  deprecation annotations. (Done 2026-07-09, ci-hygiene-and-benchmark-scoring:
+  checkout@v7, setup-node@v6, setup-python@v6, upload-artifact@v7, node 24.)
 - [x] Update `crates/geocoder-worker/README.md`; its TODO/API sections still say
   reverse geocoding and edge caching are unimplemented even though both exist.
   (Done 2026-07-09, review-followups-fixes.)
