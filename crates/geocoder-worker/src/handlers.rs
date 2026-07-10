@@ -8,25 +8,6 @@ const MAX_QUERY_LENGTH: usize = 200;
 const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
 const MAX_TOKEN_COUNT: usize = 10;
 
-fn empty_json_response() -> Result<Response> {
-    let body = serde_json::json!({ "results": [] });
-    let mut resp = Response::from_json(&body)?;
-    resp.headers_mut()
-        .set("Content-Type", "application/json; charset=utf-8")?;
-    Ok(resp)
-}
-
-fn empty_geojson_response() -> Result<Response> {
-    let body = serde_json::json!({
-        "type": "FeatureCollection",
-        "features": []
-    });
-    let mut resp = Response::from_json(&body)?;
-    resp.headers_mut()
-        .set("Content-Type", "application/geo+json; charset=utf-8")?;
-    Ok(resp)
-}
-
 pub async fn handle_search(
     req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
@@ -69,10 +50,10 @@ pub async fn handle_search(
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
 
     if autocomplete && q.trim().chars().count() < MIN_AUTOCOMPLETE_QUERY_CHARS {
-        return match format {
-            "geojson" => empty_geojson_response(),
-            _ => empty_json_response(),
-        };
+        return Response::error(
+            "Query too short: minimum 2 characters for autocomplete",
+            400,
+        );
     }
 
     let include_debug = params
