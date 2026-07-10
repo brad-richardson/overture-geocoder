@@ -1929,7 +1929,11 @@ mod tests {
         assert_eq!(fallback, vec!["US"]);
 
         let no_ip = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None);
-        assert_eq!(no_ip, vec!["US"], "smallest area should win without IP fallback");
+        assert_eq!(
+            no_ip,
+            vec!["US"],
+            "smallest area should win without IP fallback"
+        );
     }
 
     #[test]
@@ -1955,7 +1959,11 @@ mod tests {
         assert_eq!(shards, vec!["JP"], "Tokyo should route to JP not US IP");
 
         let no_ip = ShardLoader::select_reverse_shards(&collection, 35.68, 139.69, None);
-        assert_eq!(no_ip, vec!["JP"], "Tokyo should route to JP even without IP");
+        assert_eq!(
+            no_ip,
+            vec!["JP"],
+            "Tokyo should route to JP even without IP"
+        );
     }
 
     #[test]

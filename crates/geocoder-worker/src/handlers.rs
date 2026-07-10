@@ -30,10 +30,7 @@ pub async fn handle_search(
     };
 
     if q.split_whitespace().count() > MAX_TOKEN_COUNT {
-        return Response::error(
-            format!("Too many tokens: max {}", MAX_TOKEN_COUNT),
-            400,
-        );
+        return Response::error(format!("Too many tokens: max {}", MAX_TOKEN_COUNT), 400);
     }
 
     let limit: usize = params
@@ -147,8 +144,7 @@ pub async fn handle_reverse(
                 let mut resp = Response::from_json(&body)?;
                 resp.headers_mut()
                     .set("Content-Type", "application/json; charset=utf-8")?;
-                resp.headers_mut()
-                    .set("X-Data-Version", &search.version)?;
+                resp.headers_mut().set("X-Data-Version", &search.version)?;
                 Ok(resp)
             }
         },
@@ -187,8 +183,7 @@ pub async fn handle_id_lookup(
                     .set("Content-Type", "application/json; charset=utf-8")?;
                 resp.headers_mut()
                     .set("Cache-Control", "public, max-age=86400")?;
-                resp.headers_mut()
-                    .set("X-Data-Version", &search.version)?;
+                resp.headers_mut().set("X-Data-Version", &search.version)?;
                 Ok(resp)
             }
             None => Response::error("GERS ID not found", 404),
