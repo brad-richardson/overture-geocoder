@@ -350,23 +350,55 @@ impl Database {
             .filter(|row| seen_ids.insert(row.gers_id.clone()))
             .collect();
 
-        // Bbox containment is not polygon containment: in dense areas many
-        // sibling divisions' bboxes overlap the point. Instead of blindly
-        // taking the smallest bbox, tie-break candidates of the same subtype
-        // and comparable area by centroid distance to the query point.
-        let smallest = &deduped[0];
-        let most_specific = deduped
+        let best_priority = deduped
             .iter()
-            .filter(|row| {
-                row.subtype == smallest.subtype
-                    && row.area <= smallest.area * REVERSE_TIEBREAK_AREA_FACTOR
-            })
-            .min_by(|a, b| {
-                let da = haversine_distance(lat, lon, a.lat, a.lon);
-                let db = haversine_distance(lat, lon, b.lat, b.lon);
-                da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
-            })
-            .unwrap_or(smallest);
+            .filter_map(|r| DivisionType::parse(&r.subtype).map(|dt| dt.priority()))
+            .min()
+            .unwrap_or(10);
+
+        let most_specific = if best_priority < 10 {
+            let candidates: Vec<&ReverseDivisionRow> = deduped
+                .iter()
+                .filter(|r| {
+                    DivisionType::parse(&r.subtype)
+                        .map(|dt| dt.priority() == best_priority)
+                        .unwrap_or(false)
+                })
+                .collect();
+            let smallest_in_type = candidates
+                .iter()
+                .min_by(|a, b| {
+                    a.area
+                        .partial_cmp(&b.area)
+                        .unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .copied()
+                .unwrap_or(&deduped[0]);
+            candidates
+                .iter()
+                .filter(|r| r.area <= smallest_in_type.area * REVERSE_TIEBREAK_AREA_FACTOR)
+                .min_by(|a, b| {
+                    let da = haversine_distance(lat, lon, a.lat, a.lon);
+                    let db = haversine_distance(lat, lon, b.lat, b.lon);
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .copied()
+                .unwrap_or(smallest_in_type)
+        } else {
+            let smallest = &deduped[0];
+            deduped
+                .iter()
+                .filter(|row| {
+                    row.subtype == smallest.subtype
+                        && row.area <= smallest.area * REVERSE_TIEBREAK_AREA_FACTOR
+                })
+                .min_by(|a, b| {
+                    let da = haversine_distance(lat, lon, a.lat, a.lon);
+                    let db = haversine_distance(lat, lon, b.lat, b.lon);
+                    da.partial_cmp(&db).unwrap_or(std::cmp::Ordering::Equal)
+                })
+                .unwrap_or(smallest)
+        };
 
         // Build hierarchy: the chosen division for its own subtype, plus the
         // smallest-area division of every other subtype.
@@ -729,5 +761,55 @@ mod tests {
 
         // A point outside everything returns None.
         assert!(db.reverse_geocode(60.0, 60.0).unwrap().is_none());
+    }
+
+    #[test]
+    fn test_reverse_geocode_subtype_priority_over_area() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'county-1', 'county', 'Small County', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.010, NULL, 'US', NULL),
+              (2, 'loc-1', 'locality', 'Big Town', 0.05, 0.05, 0.0, 0.0, 0.3, 0.3, 0.012, NULL, 'US', NULL),
+              (3, 'reg-1', 'region', 'State', 0.0, 0.0, -5.0, -5.0, 5.0, 5.0, 100.0, NULL, 'US', NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(
+            result.gers_id, "loc-1",
+            "locality should win over smaller county due to priority"
+        );
+    }
+
+    #[test]
+    fn test_reverse_geocode_same_subtype_distance_tiebreak() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-far', 'locality', 'Far Town', 0.30, 0.30, 0.0, 0.0, 0.4, 0.4, 0.010, NULL, 'US', NULL),
+              (2, 'loc-near', 'locality', 'Near Town', 0.06, 0.06, 0.0, 0.0, 0.5, 0.5, 0.012, NULL, 'US', NULL),
+              (3, 'c-1', 'country', 'Country', 0.0, 0.0, -20.0, -20.0, 20.0, 20.0, 1600.0, NULL, 'US', NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(result.gers_id, "loc-near");
+    }
+
+    #[test]
+    fn test_reverse_geocode_full_priority_chain() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'n-1', 'neighborhood', 'Hood', 0.05, 0.05, 0.0, 0.0, 0.1, 0.1, 0.001, NULL, 'US', NULL),
+              (2, 'loc-1', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.5, 0.5, 0.01, NULL, 'US', NULL),
+              (3, 'county-1', 'county', 'County', 0.05, 0.05, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'US', NULL),
+              (4, 'reg-1', 'region', 'Region', 0.0, 0.0, -5.0, -5.0, 5.0, 5.0, 100.0, NULL, 'US', NULL),
+              (5, 'c-1', 'country', 'Country', 0.0, 0.0, -20.0, -20.0, 20.0, 20.0, 1600.0, NULL, 'US', NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(result.gers_id, "n-1", "neighborhood highest priority");
     }
 }
