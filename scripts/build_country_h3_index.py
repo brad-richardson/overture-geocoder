@@ -2,7 +2,9 @@
 """
 Prototype H3 country router index builder.
 Reads Overture division-area country polygons and builds H3 cell -> country mapping.
-Interior cells map directly; boundary cells store candidate countries + simplified WKB.
+The current center-point polyfill is suitable for sizing experiments only: cells
+with one country are not proven to be fully interior. Do not use this artifact for
+production routing until cell/polygon intersection classifies coast and border cells.
 
 Usage:
     python scripts/build_country_h3_index.py --parquet /path/to/division_area.parquet --resolution 2 --output country_h3.json
@@ -116,6 +118,11 @@ def build_h3_index(country_geoms, resolution=2, simplify_tol=0.005):
             print(f"Warn polyfill {country}: {e}", file=sys.stderr)
             continue
     print(f"Total cells {len(cell_to_countries)}")
+    print(
+        "WARNING: center-point polyfill does not prove interior coverage; "
+        "output is experimental only",
+        file=sys.stderr,
+    )
     boundary_cells = {c: cs for c, cs in cell_to_countries.items() if len(cs) > 1}
     interior_cells = {c: next(iter(cs)) for c, cs in cell_to_countries.items() if len(cs) == 1}
     print(f"Interior {len(interior_cells)} Boundary {len(boundary_cells)}")

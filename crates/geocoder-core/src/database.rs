@@ -608,11 +608,18 @@ fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
             let mut offset = 5;
             let num_rings = read_u32_wkb(wkb, offset, little)? as usize;
             offset += 4;
+            // Every ring needs at least its 4-byte point count. Bound the
+            // attacker-controlled count before allocating or iterating.
+            if num_rings > wkb.len().saturating_sub(offset) / 4 {
+                return None;
+            }
             let mut rings = Vec::with_capacity(num_rings);
             for _ in 0..num_rings {
                 let num_points = read_u32_wkb(wkb, offset, little)? as usize;
                 offset += 4;
-                if wkb.len() < offset + num_points * 16 {
+                let points_len = num_points.checked_mul(16)?;
+                let points_end = offset.checked_add(points_len)?;
+                if wkb.len() < points_end {
                     return None;
                 }
                 let mut ring = Vec::with_capacity(num_points);
@@ -631,8 +638,15 @@ fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
             let mut offset = 5;
             let num_polys = read_u32_wkb(wkb, offset, little)? as usize;
             offset += 4;
+            // Each nested polygon needs at least byte order + type.
+            if num_polys > wkb.len().saturating_sub(offset) / 5 {
+                return None;
+            }
             for _ in 0..num_polys {
                 if wkb.len() < offset + 5 {
+                    return None;
+                }
+                if wkb[offset] != 0 && wkb[offset] != 1 {
                     return None;
                 }
                 let little2 = wkb[offset] == 1;
@@ -644,11 +658,16 @@ fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
                 }
                 let num_rings = read_u32_wkb(wkb, offset, little2)? as usize;
                 offset += 4;
+                if num_rings > wkb.len().saturating_sub(offset) / 4 {
+                    return None;
+                }
                 let mut rings = Vec::with_capacity(num_rings);
                 for _ in 0..num_rings {
                     let num_points = read_u32_wkb(wkb, offset, little2)? as usize;
                     offset += 4;
-                    if wkb.len() < offset + num_points * 16 {
+                    let points_len = num_points.checked_mul(16)?;
+                    let points_end = offset.checked_add(points_len)?;
+                    if wkb.len() < points_end {
                         return None;
                     }
                     let mut ring = Vec::with_capacity(num_points);
@@ -677,6 +696,114 @@ fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn polygon_wkb(rings: &[&[(f64, f64)]], little: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(u8::from(little));
+        if little {
+            out.extend_from_slice(&3_u32.to_le_bytes());
+            out.extend_from_slice(&(rings.len() as u32).to_le_bytes());
+        } else {
+            out.extend_from_slice(&3_u32.to_be_bytes());
+            out.extend_from_slice(&(rings.len() as u32).to_be_bytes());
+        }
+        for ring in rings {
+            if little {
+                out.extend_from_slice(&(ring.len() as u32).to_le_bytes());
+            } else {
+                out.extend_from_slice(&(ring.len() as u32).to_be_bytes());
+            }
+            for (x, y) in *ring {
+                if little {
+                    out.extend_from_slice(&x.to_le_bytes());
+                    out.extend_from_slice(&y.to_le_bytes());
+                } else {
+                    out.extend_from_slice(&x.to_be_bytes());
+                    out.extend_from_slice(&y.to_be_bytes());
+                }
+            }
+        }
+        out
+    }
+
+    fn multipolygon_wkb(polygons: &[Vec<u8>]) -> Vec<u8> {
+        let mut out = vec![1];
+        out.extend_from_slice(&6_u32.to_le_bytes());
+        out.extend_from_slice(&(polygons.len() as u32).to_le_bytes());
+        for polygon in polygons {
+            out.extend_from_slice(polygon);
+        }
+        out
+    }
+
+    #[test]
+    fn point_in_wkb_handles_polygon_holes_and_endianness() {
+        let outer = [
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ];
+        let hole = [
+            (4.0, 4.0),
+            (6.0, 4.0),
+            (6.0, 6.0),
+            (4.0, 6.0),
+            (4.0, 4.0),
+        ];
+        for little in [true, false] {
+            let wkb = polygon_wkb(&[&outer, &hole], little);
+            assert_eq!(point_in_wkb(&wkb, 2.0, 2.0), Some(true));
+            assert_eq!(point_in_wkb(&wkb, 5.0, 5.0), Some(false));
+            assert_eq!(point_in_wkb(&wkb, 12.0, 12.0), Some(false));
+        }
+    }
+
+    #[test]
+    fn point_in_wkb_handles_multipolygon() {
+        let left = [
+            (0.0, 0.0),
+            (2.0, 0.0),
+            (2.0, 2.0),
+            (0.0, 2.0),
+            (0.0, 0.0),
+        ];
+        let right = [
+            (8.0, 8.0),
+            (10.0, 8.0),
+            (10.0, 10.0),
+            (8.0, 10.0),
+            (8.0, 8.0),
+        ];
+        let wkb = multipolygon_wkb(&[
+            polygon_wkb(&[&left], true),
+            polygon_wkb(&[&right], false),
+        ]);
+        assert_eq!(point_in_wkb(&wkb, 1.0, 1.0), Some(true));
+        assert_eq!(point_in_wkb(&wkb, 9.0, 9.0), Some(true));
+        assert_eq!(point_in_wkb(&wkb, 5.0, 5.0), Some(false));
+    }
+
+    #[test]
+    fn point_in_wkb_rejects_malformed_lengths_and_byte_order() {
+        let mut huge_ring_count = vec![1];
+        huge_ring_count.extend_from_slice(&3_u32.to_le_bytes());
+        huge_ring_count.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(point_in_wkb(&huge_ring_count, 0.0, 0.0), None);
+
+        let mut huge_point_count = vec![1];
+        huge_point_count.extend_from_slice(&3_u32.to_le_bytes());
+        huge_point_count.extend_from_slice(&1_u32.to_le_bytes());
+        huge_point_count.extend_from_slice(&u32::MAX.to_le_bytes());
+        assert_eq!(point_in_wkb(&huge_point_count, 0.0, 0.0), None);
+
+        let mut bad_nested_order = vec![1];
+        bad_nested_order.extend_from_slice(&6_u32.to_le_bytes());
+        bad_nested_order.extend_from_slice(&1_u32.to_le_bytes());
+        bad_nested_order.extend_from_slice(&[2, 3, 0, 0, 0]);
+        assert_eq!(point_in_wkb(&bad_nested_order, 0.0, 0.0), None);
+    }
 
     fn db_with(schema_and_data: &str) -> Database {
         let conn = Connection::open_in_memory().unwrap();

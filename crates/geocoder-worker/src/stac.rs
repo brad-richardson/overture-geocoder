@@ -1134,9 +1134,9 @@ impl ShardLoader {
     ) -> Result<Option<ReverseResult>> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
-        // Use a coordinate-selected shard only when its bbox is unambiguous.
-        // Overlap and legacy-metadata cases fall back to the caller's country,
-        // then HEAD, until country polygons/H3 covers are available.
+        // Prefer the smallest containing country bbox. This resolves broad
+        // overlapping metadata (for example Tokyo inside both JP's bbox and a
+        // world-spanning RU bbox); exact country polygons/H3 remain future work.
         for country in Self::select_reverse_shards(&reverse_collection, lat, lon, cf_country) {
             match self
                 .query_reverse_shard(version, &country, &reverse_collection, lat, lon)
@@ -1895,7 +1895,11 @@ mod tests {
         assert_eq!(fallback, vec!["US"]);
 
         let no_ip = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None);
-        assert_eq!(no_ip, vec!["US"], "smallest area should win without IP fallback");
+        assert_eq!(
+            no_ip,
+            vec!["US"],
+            "smallest area should win without IP fallback"
+        );
     }
 
     #[test]
@@ -1921,7 +1925,11 @@ mod tests {
         assert_eq!(shards, vec!["JP"], "Tokyo should route to JP not US IP");
 
         let no_ip = ShardLoader::select_reverse_shards(&collection, 35.68, 139.69, None);
-        assert_eq!(no_ip, vec!["JP"], "Tokyo should route to JP even without IP");
+        assert_eq!(
+            no_ip,
+            vec!["JP"],
+            "Tokyo should route to JP even without IP"
+        );
     }
 
     #[test]
