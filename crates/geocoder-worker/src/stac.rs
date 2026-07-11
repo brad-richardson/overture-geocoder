@@ -1218,12 +1218,14 @@ impl ShardLoader {
             return vec![containing.remove(0).0];
         }
 
-        containing.sort_by(|a, b| {
-            a.1.partial_cmp(&b.1)
-                .unwrap_or(std::cmp::Ordering::Equal)
-                .then_with(|| a.0.cmp(&b.0))
-        });
-        vec![containing[0].0.clone()]
+        // Country bboxes aggregate disconnected territories and can be much
+        // larger than the mainland they represent. Neither bbox area nor the
+        // caller's IP country can safely resolve an overlap: a Canadian user
+        // asking about Boston must not be routed to Canada, and the aggregate
+        // US bbox can span nearly the whole longitude range. Fall through to
+        // the global HEAD shard, whose more-specific admin candidates provide
+        // a safer result until exact country polygons/H3 are available.
+        Vec::new()
     }
 
     /// Reverse geocode a lat/lon coordinate.
@@ -1250,9 +1252,9 @@ impl ShardLoader {
     ) -> Result<ReverseSearchResult> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
-        // Prefer the smallest containing country bbox. This resolves broad
-        // overlapping metadata (for example Tokyo inside both JP's bbox and a
-        // world-spanning RU bbox); exact country polygons/H3 remain future work.
+        // Ambiguous country bboxes fall through to HEAD. This avoids choosing
+        // by bbox area or caller IP when disconnected territories inflate a
+        // country's aggregate bbox. Exact country polygons/H3 remain future work.
         for country in Self::select_reverse_shards(&reverse_collection, lat, lon, cf_country) {
             match self
                 .query_reverse_shard(version, &country, &reverse_collection, lat, lon)
@@ -2026,21 +2028,55 @@ mod tests {
     }
 
     #[test]
-    fn test_overlapping_country_bboxes_chooses_smallest_area() {
+    fn test_overlapping_country_bboxes_fall_through_to_head() {
         let collection = collection_with_bboxes(&[
             ("CA", Some([-141.0, 41.0, -52.0, 83.0])),
             ("US", Some([-125.0, 24.0, -66.0, 50.0])),
         ]);
 
         let fallback = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, Some("US"));
-        assert_eq!(fallback, vec!["US"]);
+        assert_eq!(fallback, Vec::<String>::new());
 
         let no_ip = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, None);
         assert_eq!(
             no_ip,
-            vec!["US"],
-            "smallest area should win without IP fallback"
+            Vec::<String>::new(),
+            "ambiguous bboxes without an IP tie-breaker should fall through to HEAD"
         );
+
+        let foreign_ip = ShardLoader::select_reverse_shards(&collection, 45.0, -100.0, Some("JP"));
+        assert_eq!(
+            foreign_ip,
+            Vec::<String>::new(),
+            "a non-containing IP country must not decide the overlap"
+        );
+    }
+
+    #[test]
+    fn test_boston_overlap_falls_through_to_head_regardless_of_cf_country() {
+        let collection = collection_with_bboxes(&[
+            (
+                "CA",
+                Some([-141.0026607, 41.6765597, -52.6193663, 83.1370864]),
+            ),
+            // Disconnected US territories inflate this aggregate bbox, making
+            // it much larger than CA even though Boston is in the US.
+            ("US", Some([-179.2, -14.8, 179.8, 71.5])),
+        ]);
+
+        let shards = ShardLoader::select_reverse_shards(&collection, 42.3601, -71.0589, Some("US"));
+        assert_eq!(shards, Vec::<String>::new());
+
+        let no_ip = ShardLoader::select_reverse_shards(&collection, 42.3601, -71.0589, None);
+        assert_eq!(
+            no_ip,
+            Vec::<String>::new(),
+            "without a country hint the safer fallback is the global HEAD shard"
+        );
+
+        let foreign_ip =
+            ShardLoader::select_reverse_shards(&collection, 42.3601, -71.0589, Some("CA"));
+        assert_eq!(foreign_ip, Vec::<String>::new());
     }
 
     #[test]
