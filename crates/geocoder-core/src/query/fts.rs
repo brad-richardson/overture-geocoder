@@ -23,10 +23,10 @@
 /// // Punctuation removal
 /// assert_eq!(prepare_fts_query("new york, ny", true), r#""new" "york" "ny"*"#);
 /// ```
+const MAX_FTS_TOKENS: usize = 10;
+const MIN_FTS_TOKEN_CHARS: usize = 2;
+
 pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
-    // Tokenize: lowercase (Unicode-aware), keep only alphanumeric, whitespace, and hyphens.
-    // Use a loop with the full to_lowercase() iterator to avoid truncating multi-char
-    // expansions (e.g., İ → i + combining dot above).
     let mut normalized = String::with_capacity(query.len());
     for c in query.chars() {
         if c.is_alphanumeric() || c.is_whitespace() || c == '-' {
@@ -34,27 +34,31 @@ pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
                 normalized.push(lc);
             }
         } else {
-            // Replace punctuation with space
             normalized.push(' ');
         }
     }
 
-    // Split into tokens, filter empty
-    let tokens: Vec<&str> = normalized
+    let mut tokens: Vec<String> = normalized
         .split_whitespace()
         .filter(|t| !t.is_empty())
+        // A one-character exact term is a legitimate query and uses the FTS
+        // term index. The expensive case is a one-character prefix scan.
+        .filter(|t| !autocomplete || t.chars().count() >= MIN_FTS_TOKEN_CHARS)
+        .map(|s| s.to_string())
         .collect();
 
     if tokens.is_empty() {
         return String::new();
     }
 
-    // Quote each token; add prefix wildcard to last token for autocomplete
+    if tokens.len() > MAX_FTS_TOKENS {
+        tokens.truncate(MAX_FTS_TOKENS);
+    }
+
     tokens
         .iter()
         .enumerate()
         .map(|(i, token)| {
-            // Escape any double quotes in the token
             let escaped = token.replace('"', "\"\"");
             if autocomplete && i == tokens.len() - 1 {
                 format!("\"{}\"*", escaped)
@@ -131,5 +135,22 @@ mod tests {
         // Case where Unicode lowercasing uses an expansion (e.g., 'İ' → "i\u{307}")
         // The full to_lowercase() iterator is preserved, so the combining dot above remains.
         assert_eq!(prepare_fts_query("İSTANBUL", true), "\"i\u{0307}stanbul\"*");
+    }
+
+    #[test]
+    fn test_short_token_guardrails_preserve_exact_search() {
+        assert_eq!(prepare_fts_query("a", true), "");
+        assert_eq!(prepare_fts_query("new y", true), r#""new"*"#);
+        assert_eq!(prepare_fts_query("a", false), r#""a""#);
+        assert_eq!(prepare_fts_query("route 1", false), r#""route" "1""#);
+    }
+
+    #[test]
+    fn test_token_count_is_capped() {
+        let query = "one two three four five six seven eight nine ten eleven twelve";
+        assert_eq!(
+            prepare_fts_query(query, true),
+            r#""one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten"*"#
+        );
     }
 }

@@ -8,6 +8,10 @@ use worker::*;
 
 use crate::stac::{SearchDebugInfo, ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
 
+const MAX_QUERY_LENGTH: usize = 200;
+const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
+const MAX_TOKEN_COUNT: usize = 10;
+
 const DEFAULT_DIVISION_TYPES: &[&str] = &[
     "country",
     "region",
@@ -62,7 +66,6 @@ pub async fn handle_search(
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect();
 
-    const MAX_QUERY_LENGTH: usize = 200;
     let q = match params.get("q") {
         Some(q) if !q.is_empty() && q.len() <= MAX_QUERY_LENGTH => q.clone(),
         Some(q) if q.len() > MAX_QUERY_LENGTH => {
@@ -73,6 +76,10 @@ pub async fn handle_search(
         }
         _ => return Response::error("Missing required parameter: q", 400),
     };
+
+    if q.split_whitespace().count() > MAX_TOKEN_COUNT {
+        return Response::error(format!("Too many tokens: max {}", MAX_TOKEN_COUNT), 400);
+    }
 
     let limit: usize = params
         .get("limit")
@@ -86,6 +93,13 @@ pub async fn handle_search(
         .unwrap_or(true);
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
+
+    if autocomplete && q.trim().chars().count() < MIN_AUTOCOMPLETE_QUERY_CHARS {
+        return Response::error(
+            "Query too short: minimum 2 characters for autocomplete",
+            400,
+        );
+    }
 
     let include_debug = params
         .get("debug")
@@ -123,18 +137,19 @@ pub async fn handle_search(
         .with_bias(bias)
         .with_allowed_types(Some(allowed_types));
 
-    // Load shards and search
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let search_result = loader.search(&query, &user_location, include_debug).await?;
 
-    // Format response
     match format {
-        "geojson" => to_geojson_response(&search_result.results),
-        _ => to_json_response(&search_result.results, search_result.debug),
+        "geojson" => to_geojson_response(&search_result.results, &search_result.version),
+        _ => to_json_response(
+            &search_result.results,
+            search_result.debug,
+            &search_result.version,
+        ),
     }
 }
 
-/// Reverse geocoding handler.
 pub async fn handle_reverse(
     req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
@@ -159,22 +174,28 @@ pub async fn handle_reverse(
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
 
-    // Get country from Cloudflare headers
     let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
 
-    // Load shards and reverse geocode
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
-    let result = loader
+    let search = loader
         .reverse_geocode(lat, lon, cf_country.as_deref())
         .await?;
 
-    match result {
+    match search.result {
         Some(r) => match format {
-            "geojson" => reverse_to_geojson_response(&r),
+            "geojson" => reverse_to_geojson_response(&r, &search.version),
             _ => {
-                let mut resp = Response::from_json(&r)?;
+                let mut body = serde_json::to_value(&r).unwrap_or(serde_json::json!({}));
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert(
+                        "data_version".to_string(),
+                        serde_json::Value::String(search.version.clone()),
+                    );
+                }
+                let mut resp = Response::from_json(&body)?;
                 resp.headers_mut()
                     .set("Content-Type", "application/json; charset=utf-8")?;
+                resp.headers_mut().set("X-Data-Version", &search.version)?;
                 Ok(resp)
             }
         },
@@ -182,7 +203,6 @@ pub async fn handle_reverse(
     }
 }
 
-/// GERS ID lookup handler.
 pub async fn handle_id_lookup(
     _req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
@@ -192,7 +212,6 @@ pub async fn handle_id_lookup(
         .ok_or_else(|| Error::RustError("Missing gers_id parameter".into()))?
         .to_string();
 
-    // Validate GERS ID format (UUID-like, 2-64 chars)
     if gers_id.len() < 2 || gers_id.len() > 64 {
         return Response::error("Invalid GERS ID: must be 2-64 characters", 400);
     }
@@ -201,18 +220,26 @@ pub async fn handle_id_lookup(
     let result = loader.lookup_id(&gers_id).await;
 
     match result {
-        Ok(Some(r)) => {
-            let mut resp = Response::from_json(&r)?;
-            resp.headers_mut()
-                .set("Content-Type", "application/json; charset=utf-8")?;
-            resp.headers_mut()
-                .set("Cache-Control", "public, max-age=86400")?;
-            Ok(resp)
-        }
-        Ok(None) => Response::error("GERS ID not found", 404),
+        Ok(search) => match search.result {
+            Some(r) => {
+                let mut body = serde_json::to_value(&r).unwrap_or(serde_json::json!({}));
+                if let Some(obj) = body.as_object_mut() {
+                    obj.insert(
+                        "data_version".to_string(),
+                        serde_json::Value::String(search.version.clone()),
+                    );
+                }
+                let mut resp = Response::from_json(&body)?;
+                resp.headers_mut()
+                    .set("Content-Type", "application/json; charset=utf-8")?;
+                resp.headers_mut()
+                    .set("Cache-Control", "public, max-age=86400")?;
+                resp.headers_mut().set("X-Data-Version", &search.version)?;
+                Ok(resp)
+            }
+            None => Response::error("GERS ID not found", 404),
+        },
         Err(e) => {
-            // All versions exhausted with the index/metadata missing: the
-            // id-index isn't deployed. 503 tells clients to retry later.
             let err_msg = format!("{:?}", e);
             if err_msg.contains(NOT_FOUND_SENTINEL) && err_msg.contains("id-index") {
                 return Response::error("ID index not available", 503);
@@ -222,7 +249,6 @@ pub async fn handle_id_lookup(
     }
 }
 
-/// Health check handler: verifies catalog and version availability.
 pub async fn handle_health(
     _req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
@@ -272,6 +298,7 @@ struct ResultItem {
 fn to_json_response(
     results: &[GeocoderResult],
     debug: Option<SearchDebugInfo>,
+    data_version: &str,
 ) -> Result<Response> {
     let items: Vec<ResultItem> = results
         .iter()
@@ -282,9 +309,6 @@ fn to_json_response(
             lat: r.lat,
             lon: r.lon,
             bbox: r.bbox,
-            // Importance is the composed ranking score (~0-2 with bias) and
-            // is unclamped through the pipeline so bias can reorder saturated
-            // results; scale by 1/2 and clamp to 0-1 for the API.
             importance: (r.importance / 2.0).clamp(0.0, 1.0),
             country: r.country.clone(),
             region: r.region.clone(),
@@ -295,19 +319,22 @@ fn to_json_response(
         Some(debug_info) => serde_json::json!({
             "results": items,
             "debug": debug_info,
+            "data_version": data_version,
         }),
         None => serde_json::json!({
             "results": items,
+            "data_version": data_version,
         }),
     };
 
     let mut resp = Response::from_json(&response)?;
     resp.headers_mut()
         .set("Content-Type", "application/json; charset=utf-8")?;
+    resp.headers_mut().set("X-Data-Version", data_version)?;
     Ok(resp)
 }
 
-fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
+fn to_geojson_response(results: &[GeocoderResult], data_version: &str) -> Result<Response> {
     let features: Vec<serde_json::Value> = results
         .iter()
         .map(|r| {
@@ -321,7 +348,6 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
                     "gers_id": r.gers_id,
                     "name": r.primary_name,
                     "type": r.division_type,
-                    // Composed score scaled to 0-1 for display (see ResultItem).
                     "importance": (r.importance / 2.0).clamp(0.0, 1.0),
                     "country": r.country,
                     "region": r.region,
@@ -333,16 +359,18 @@ fn to_geojson_response(results: &[GeocoderResult]) -> Result<Response> {
 
     let geojson = serde_json::json!({
         "type": "FeatureCollection",
-        "features": features
+        "features": features,
+        "data_version": data_version,
     });
 
     let mut resp = Response::from_json(&geojson)?;
     resp.headers_mut()
         .set("Content-Type", "application/geo+json; charset=utf-8")?;
+    resp.headers_mut().set("X-Data-Version", data_version)?;
     Ok(resp)
 }
 
-fn reverse_to_geojson_response(result: &ReverseResult) -> Result<Response> {
+fn reverse_to_geojson_response(result: &ReverseResult, data_version: &str) -> Result<Response> {
     let geojson = serde_json::json!({
         "type": "FeatureCollection",
         "features": [{
@@ -360,12 +388,14 @@ fn reverse_to_geojson_response(result: &ReverseResult) -> Result<Response> {
                 "hierarchy": result.hierarchy,
             },
             "bbox": result.bbox
-        }]
+        }],
+        "data_version": data_version,
     });
 
     let mut resp = Response::from_json(&geojson)?;
     resp.headers_mut()
         .set("Content-Type", "application/geo+json; charset=utf-8")?;
+    resp.headers_mut().set("X-Data-Version", data_version)?;
     Ok(resp)
 }
 

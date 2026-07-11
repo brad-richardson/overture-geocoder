@@ -6,6 +6,7 @@ import sqlite3
 import sys
 from types import SimpleNamespace
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,8 @@ from build_shards import (
     CAPITAL_COUNTRY_BONUS,
     CAPITAL_REGION_BONUS,
     DIVISIONS_INSERT_SQL,
+    DIVISIONS_PARQUET,
+    DIVISIONS_REVERSE_PARQUET,
     FALLBACK_REGION_SUFFIX,
     SHARD_SIZE_THRESHOLD_BYTES,
     WIKI_IMPORTANCE_WEIGHT,
@@ -37,6 +40,7 @@ from build_shards import (
     validate_country_code,
     validate_population_threshold,
     validate_region_code,
+    write_build_meta,
 )
 
 import duckdb
@@ -845,6 +849,58 @@ class TestReverseBuildMetrics:
         assert "3 shards, 75 stored components, 63.0 MB total" in output
         assert "US: 50 components, 51.0 MB" in output
         assert "WARNING: 1 reverse shard(s) exceed 50 MB: US" in output
+
+
+class TestBuildMeta:
+    def test_reverse_build_records_the_actual_default_input(self, tmp_path):
+        args = SimpleNamespace(
+            parquet=DIVISIONS_PARQUET,
+            reverse=True,
+            overture_release="2026-06-17.0",
+            head_threshold=100_000,
+            no_wiki_importance=False,
+            no_router=False,
+            countries="US",
+            head_only=False,
+            skip_head=False,
+        )
+        out = write_build_meta(
+            "test-version",
+            tmp_path,
+            {"US": {"record_count": 2, "size_bytes": 100}},
+            args,
+        )
+
+        meta = json.loads(out.read_text())
+        assert meta["input"]["parquet"] == str(DIVISIONS_REVERSE_PARQUET)
+        assert meta["overture_release"] == "2026-06-17.0"
+        assert meta["record_counts"]["total_records"] == 2
+
+    def test_places_build_records_places_input(self, tmp_path):
+        places_input = tmp_path / "places.parquet"
+        places_input.write_bytes(b"test")
+        args = SimpleNamespace(
+            parquet=DIVISIONS_PARQUET,
+            places_parquet=places_input,
+            places=True,
+            reverse=False,
+            overture_release="2026-06-17.0",
+        )
+        out = write_build_meta(
+            "test-version",
+            tmp_path,
+            {"US-CA-places": {"record_count": 1, "size_bytes": 4}},
+            args,
+        )
+
+        meta = json.loads(out.read_text())
+        assert meta["input"] == {"parquet": str(places_input), "size_bytes": 4}
+        assert meta["args"]["places"] is True
+        assert meta["division_s3_paths"] == []
+        assert meta["source_s3_paths"] == [
+            "s3://overturemaps-us-west-2/release/2026-06-17.0/"
+            "theme=places/type=place/*"
+        ]
 
 
 class TestVersionSortKey:

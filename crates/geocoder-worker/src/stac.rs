@@ -160,6 +160,17 @@ impl From<&UserLocation> for UserLocationDebug {
 pub struct SearchResult {
     pub results: Vec<GeocoderResult>,
     pub debug: Option<SearchDebugInfo>,
+    pub version: String,
+}
+
+pub struct ReverseSearchResult {
+    pub result: Option<ReverseResult>,
+    pub version: String,
+}
+
+pub struct IdSearchResult {
+    pub result: Option<IdLookupResult>,
+    pub version: String,
 }
 
 /// Loads and caches shards from R2 with edge caching via Cache API.
@@ -1058,6 +1069,7 @@ impl ShardLoader {
         Ok(SearchResult {
             results: all_results,
             debug,
+            version: version.to_string(),
         })
     }
 
@@ -1204,7 +1216,7 @@ impl ShardLoader {
         lat: f64,
         lon: f64,
         cf_country: Option<&str>,
-    ) -> Result<Option<ReverseResult>> {
+    ) -> Result<ReverseSearchResult> {
         with_version_fallback!(self, "reverse", version, {
             self.try_reverse_geocode(version, lat, lon, cf_country)
                 .await
@@ -1218,7 +1230,7 @@ impl ShardLoader {
         lat: f64,
         lon: f64,
         cf_country: Option<&str>,
-    ) -> Result<Option<ReverseResult>> {
+    ) -> Result<ReverseSearchResult> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
         // Prefer the smallest containing country bbox. This resolves broad
@@ -1229,7 +1241,12 @@ impl ShardLoader {
                 .query_reverse_shard(version, &country, &reverse_collection, lat, lon)
                 .await
             {
-                Ok(Some(result)) => return Ok(Some(result)),
+                Ok(Some(result)) => {
+                    return Ok(ReverseSearchResult {
+                        result: Some(result),
+                        version: version.to_string(),
+                    })
+                }
                 Ok(None) => {
                     console_log!("No result in country {} reverse shard", country);
                 }
@@ -1243,9 +1260,13 @@ impl ShardLoader {
             }
         }
 
-        // Fall back to HEAD shard
-        self.query_reverse_shard(version, "HEAD", &reverse_collection, lat, lon)
-            .await
+        let res = self
+            .query_reverse_shard(version, "HEAD", &reverse_collection, lat, lon)
+            .await?;
+        Ok(ReverseSearchResult {
+            result: res,
+            version: version.to_string(),
+        })
     }
 
     /// Load a shard database, preferring the isolate-level cache, then the
@@ -1373,7 +1394,7 @@ impl ShardLoader {
 
     /// Look up a GERS ID to get its bounding box from a parquet shard.
     /// Falls back to older versions if the latest version's index is unavailable.
-    pub async fn lookup_id(&self, gers_id: &str) -> Result<Option<IdLookupResult>> {
+    pub async fn lookup_id(&self, gers_id: &str) -> Result<IdSearchResult> {
         with_version_fallback!(self, "id_lookup", version, {
             self.try_lookup_id(version, gers_id).await
         })
@@ -1386,23 +1407,26 @@ impl ShardLoader {
     /// 1. Suffix read (32 KB) → get file size + parquet footer
     /// 2. Parse footer → find row group containing the target UUID via min/max stats
     /// 3. Range read just that row group's column data
-    async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<Option<IdLookupResult>> {
+    async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<IdSearchResult> {
         let prefix_len = self.load_id_prefix_len(version).await?;
 
-        // Compute shard prefix from GERS ID (remove hyphens, take first N hex
-        // chars). get() rather than slicing: a multi-byte character in the
-        // path param would otherwise panic on a non-char boundary and abort
-        // the whole wasm isolate.
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
         let Some(prefix) = hex_id.get(..prefix_len) else {
-            return Ok(None);
+            return Ok(IdSearchResult {
+                result: None,
+                version: version.to_string(),
+            });
         };
         let shard_key = format!("{}/id-index/{}.parquet", version, prefix);
 
-        // Parse target UUID early so we can fail fast
         let target = match parse_uuid_bytes(gers_id) {
             Some(t) => t,
-            None => return Ok(None),
+            None => {
+                return Ok(IdSearchResult {
+                    result: None,
+                    version: version.to_string(),
+                })
+            }
         };
 
         // Step 1: Suffix read to get footer + file size (cached at edge).
@@ -1491,7 +1515,12 @@ impl ShardLoader {
         }
         let rg_idx = match matching_rg {
             Some(idx) => idx,
-            None => return Ok(None),
+            None => {
+                return Ok(IdSearchResult {
+                    result: None,
+                    version: version.to_string(),
+                })
+            }
         };
 
         // Step 4: Compute byte range for the matching row group's columns
@@ -1555,9 +1584,11 @@ impl ShardLoader {
             let id_bytes = row
                 .get_bytes(0)
                 .map_err(|e| Error::RustError(format!("Bad UUID column: {}", e)))?;
-            // Rows are sorted by UUID; once past the target it can't appear.
             if id_bytes.data() > target.as_slice() {
-                return Ok(None);
+                return Ok(IdSearchResult {
+                    result: None,
+                    version: version.to_string(),
+                });
             }
             if id_bytes.data() == target.as_slice() {
                 let bbox_xmin = row
@@ -1576,18 +1607,24 @@ impl ShardLoader {
                     .get_float(4)
                     .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
                     as f64;
-                return Ok(Some(IdLookupResult {
-                    id: gers_id.to_string(),
-                    bbox: geocoder_core::BBox {
-                        xmin: bbox_xmin,
-                        ymin: bbox_ymin,
-                        xmax: bbox_xmax,
-                        ymax: bbox_ymax,
-                    },
-                }));
+                return Ok(IdSearchResult {
+                    result: Some(IdLookupResult {
+                        id: gers_id.to_string(),
+                        bbox: geocoder_core::BBox {
+                            xmin: bbox_xmin,
+                            ymin: bbox_ymin,
+                            xmax: bbox_xmax,
+                            ymax: bbox_ymax,
+                        },
+                    }),
+                    version: version.to_string(),
+                });
             }
         }
-        Ok(None)
+        Ok(IdSearchResult {
+            result: None,
+            version: version.to_string(),
+        })
     }
 
     /// Load the ID index prefix_len from a small metadata file.
