@@ -29,7 +29,8 @@ SET threads = 4;
 -- Index 1 = city (e.g., "Boston")
 COPY (
     SELECT
-        id as gers_id,
+        id as overture_id,
+        '__OVERTURE_RELEASE__' as overture_release,
         version,
         ST_X(geometry) as lon,
         ST_Y(geometry) as lat,
@@ -42,15 +43,12 @@ COPY (
         number,
         unit,
         country,
-        -- Preserve the feature-level external source. Property-specific
-        -- Overture-derived confidence/status entries are intentionally not
-        -- counted as independent provenance.
-        (list_extract(list_filter(sources, lambda x: x.property = ''), 1)).dataset
-            as source_dataset,
-        (list_extract(list_filter(sources, lambda x: x.property = ''), 1)).update_time
-            as source_update_time,
-        (list_extract(list_filter(sources, lambda x: x.property = ''), 1)).confidence
-            as source_confidence,
+        -- Preserve complete provenance, including license and record_id.
+        -- A feature can have multiple root sources, and property-specific
+        -- sources can independently describe fields such as geometry.
+        sources,
+        list_filter(sources, lambda x: x.property = '') as root_sources,
+        list_count(list_filter(sources, lambda x: x.property = '')) as root_source_count,
         -- Extract city and state from address_levels array
         address_levels[1].value as state,
         address_levels[2].value as city,
@@ -62,15 +60,16 @@ COPY (
             CONCAT(address_levels[1].value, ' ', postcode)
         ) as primary_name,
         -- Build search text (lowercase, for FTS indexing)
-        -- Includes: number, street, unit, city, state, postcode, country
+        -- Includes: number, street, unit, locality, postal city, state, postcode, country
         LOWER(CONCAT_WS(' ',
             COALESCE(number, ''),
             COALESCE(street, ''),
             COALESCE(unit, ''),
-            COALESCE(address_levels[2].value, postal_city, ''),
+            COALESCE(address_levels[2].value, ''),
+            COALESCE(postal_city, ''),
             COALESCE(address_levels[1].value, ''),  -- state abbreviation (MA)
             COALESCE(postcode, ''),
-            'us'  -- country (addresses are US-only currently)
+            LOWER(country)
         )) as search_text
     FROM read_parquet(
         's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=addresses/type=address/*',
