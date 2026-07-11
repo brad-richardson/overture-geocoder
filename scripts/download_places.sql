@@ -11,6 +11,7 @@ SET threads = 2;
 COPY (
     SELECT
         id as gers_id,
+        '__OVERTURE_RELEASE__' as overture_release,
         version,
         names.primary as primary_name,
         ST_X(geometry) as lon,
@@ -32,9 +33,9 @@ COPY (
         brand.wikidata as brand_wikidata,
         confidence,
         operating_status,
-        (list_extract(list_filter(sources, lambda s: COALESCE(s.property, '') = ''), 1)).dataset as root_source_dataset,
-        (list_extract(list_filter(sources, lambda s: COALESCE(s.property, '') = ''), 1)).update_time as root_source_update_time,
-        (list_extract(list_filter(sources, lambda s: COALESCE(s.property, '') = ''), 1)).confidence as root_source_confidence,
+        sources,
+        list_filter(sources, lambda s: COALESCE(s.property, '') = '') as root_sources,
+        LEN(list_filter(sources, lambda s: COALESCE(s.property, '') = '')) as root_source_count,
         LEN(websites) as website_count,
         LEN(socials) as social_count,
         LEN(phones) as phone_count,
@@ -46,4 +47,4 @@ COPY (
       AND bbox.ymin BETWEEN 32.5 AND 42.1
       AND names.primary IS NOT NULL
       AND COALESCE(operating_status, 'open') != 'permanently_closed'
-) TO 'exports/places-CA.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO 'exports/places-CA-bbox.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);

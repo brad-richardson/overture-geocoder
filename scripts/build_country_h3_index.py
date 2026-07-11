@@ -15,8 +15,10 @@ Usage:
 
 import argparse
 import datetime
+import hashlib
 import json
 import numbers
+import re
 import sys
 from collections import defaultdict
 from pathlib import Path
@@ -28,6 +30,7 @@ except ImportError:
     H3_AVAILABLE = False
 
 try:
+    import shapely
     from shapely import wkb as shapely_wkb
     from shapely.affinity import translate
     from shapely.geometry import GeometryCollection, MultiPolygon, Polygon
@@ -39,14 +42,31 @@ except ImportError:
     SHAPELY_AVAILABLE = False
 
 
-def parse_args():
+def parse_args(argv=None):
     p = argparse.ArgumentParser(description="Build H3 country index")
-    p.add_argument("--parquet", type=str, required=True, help="Path or S3 URI to division_area parquet")
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument(
+        "--parquet",
+        type=str,
+        help="Path or S3 URI to division_area parquet",
+    )
+    source.add_argument(
+        "--demo-fixtures",
+        action="store_true",
+        help="Use explicit synthetic rectangles instead of release data",
+    )
     p.add_argument("--resolution", type=int, default=2, help="H3 resolution")
     p.add_argument("--output", type=Path, default=Path("country_h3.json"), help="Output JSON")
     p.add_argument("--sqlite", type=Path, default=None, help="Optional SQLite")
     p.add_argument("--simplify-tol", type=float, default=0.005, help="Simplify tolerance")
     p.add_argument("--countries", type=str, default=None, help="Comma separated ISO codes")
+    p.add_argument("--expected-country-count", type=int, default=None)
+    p.add_argument("--expected-country-codes", type=Path, default=None,
+                   help="JSON array (or country_codes object) defining the exact expected set")
+    p.add_argument("--allow-country-subset", action="store_true",
+                   help="Explicitly allow --countries subset builds")
+    p.add_argument("--overture-release", default=None,
+                   help="Required release provenance for remote parquet input")
     p.add_argument(
         "--compare-resolutions",
         type=str,
@@ -54,7 +74,39 @@ def parse_args():
         help="Comma separated resolutions to compare without writing index artifacts",
     )
     p.add_argument("--report", type=Path, default=None, help="Optional comparison report JSON")
-    return p.parse_args()
+    p.add_argument(
+        "--manifest",
+        type=Path,
+        default=None,
+        help="Completeness/provenance manifest (default: <output>.manifest.json)",
+    )
+    return p.parse_args(argv)
+
+
+def _merge_country_components(country_components):
+    """Merge every decoded component, failing rather than dropping geometry."""
+    merged = {}
+    for country, geoms in country_components.items():
+        if not country or not geoms:
+            raise RuntimeError(f"Country {country!r} has no usable polygon components")
+        try:
+            geom = geoms[0] if len(geoms) == 1 else unary_union(geoms)
+            if not geom.is_valid:
+                geom = make_valid(geom)
+        except Exception as exc:
+            raise RuntimeError(
+                f"Failed to merge all {len(geoms)} components for {country}"
+            ) from exc
+        if geom.is_empty:
+            raise RuntimeError(f"Merged geometry for {country} is empty")
+        if not isinstance(geom, (Polygon, MultiPolygon, GeometryCollection)):
+            raise RuntimeError(
+                f"Merged geometry for {country} is not polygonal: {geom.geom_type}"
+            )
+        merged[country] = geom
+    if not merged:
+        raise RuntimeError("No country geometries were decoded")
+    return merged
 
 
 def load_country_geoms(parquet_path: str, countries_filter=None):
@@ -77,10 +129,12 @@ def load_country_geoms(parquet_path: str, countries_filter=None):
     rows = con.execute(f"SELECT country, {geometry_col} as g FROM read_parquet('{parquet_path}') WHERE {where_clause}").fetchall()
     con.close()
     print(f"Fetched {len(rows)} components")
-    country_geoms = defaultdict(list)
-    for country, g_wkb in rows:
+    country_components = defaultdict(list)
+    for row_number, (country, g_wkb) in enumerate(rows, 1):
+        if not country:
+            raise RuntimeError(f"Country component row {row_number} has no country code")
         if g_wkb is None:
-            continue
+            raise RuntimeError(f"Country component row {row_number} ({country}) has no geometry")
         try:
             if isinstance(g_wkb, str):
                 geom = shapely_wkb.loads(bytes.fromhex(g_wkb))
@@ -88,21 +142,50 @@ def load_country_geoms(parquet_path: str, countries_filter=None):
                 geom = shapely_wkb.loads(bytes(g_wkb))
             if not geom.is_valid:
                 geom = make_valid(geom)
-            country_geoms[country].append(geom)
+            if geom.is_empty:
+                raise ValueError("decoded geometry is empty")
+            country_components[country].append(geom)
         except Exception as e:
-            print(f"Warn {country}: {e}", file=sys.stderr)
-            continue
-    merged = {}
-    for country, geoms in country_geoms.items():
-        if len(geoms) == 1:
-            merged[country] = geoms[0]
-        else:
-            try:
-                merged[country] = unary_union(geoms)
-            except Exception:
-                merged[country] = geoms[0]
+            raise RuntimeError(
+                f"Failed to decode country component row {row_number} ({country}): {e}"
+            ) from e
+    merged = _merge_country_components(country_components)
+    if countries_filter:
+        missing = sorted(set(countries_filter) - set(merged))
+        if missing:
+            raise RuntimeError(
+                "Requested countries missing from decoded geometry: "
+                + ", ".join(missing)
+            )
     print(f"Merged {len(merged)} countries")
-    return merged
+    return merged, {
+        "source_component_count": len(rows),
+        "decoded_component_count": sum(len(v) for v in country_components.values()),
+        "country_count": len(merged),
+        "country_codes": sorted(merged),
+        "components_by_country": {
+            country: len(country_components[country]) for country in sorted(merged)
+        },
+    }
+
+
+def demo_country_geoms():
+    """Small synthetic fixtures, available only through --demo-fixtures."""
+    from shapely.geometry import box
+
+    geoms = {
+        "JP": box(122.0, 20.0, 154.0, 46.0),
+        "US": box(-125.0, 24.0, -66.0, 50.0),
+        "RU": box(-180.0, 41.0, 180.0, 82.0),
+        "CA": box(-141.0, 41.0, -52.0, 83.0),
+    }
+    return geoms, {
+        "source_component_count": len(geoms),
+        "decoded_component_count": len(geoms),
+        "country_count": len(geoms),
+        "country_codes": sorted(geoms),
+        "components_by_country": {country: 1 for country in sorted(geoms)},
+    }
 
 
 def _cells_at_resolution(resolution):
@@ -331,6 +414,77 @@ def compare_resolutions(country_geoms, resolutions, simplify_tol=0.005):
     return report
 
 
+def _sha256(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _artifact_record(path):
+    return {"path": str(path), "size_bytes": path.stat().st_size, "sha256": _sha256(path)}
+
+
+def _expected_country_codes(path):
+    value = json.loads(path.read_text())
+    if isinstance(value, dict):
+        value = value.get("country_codes")
+    if not isinstance(value, list) or not all(isinstance(code, str) for code in value):
+        raise ValueError("expected-country-codes must contain a JSON country-code array")
+    return sorted({code.strip().upper() for code in value if code.strip()})
+
+
+def _validate_release_provenance(parquet, overture_release):
+    if not overture_release:
+        raise ValueError("non-demo builds require --overture-release")
+    if parquet.startswith("s3://"):
+        match = re.search(r"/release/([^/]+)/", parquet)
+        if not match:
+            raise ValueError("remote parquet must use the standard /release/<tag>/ path")
+        if match.group(1) != overture_release:
+            raise ValueError(
+                f"remote path release {match.group(1)} does not match {overture_release}"
+            )
+
+
+def write_manifest(path, args, source_stats, resolution_reports, artifacts):
+    source = {
+        "mode": "demo-fixtures" if args.demo_fixtures else "parquet",
+        "parquet": args.parquet,
+        "overture_release": args.overture_release,
+        "countries_filter": (
+            sorted(c.strip().upper() for c in args.countries.split(",") if c.strip())
+            if args.countries else None
+        ),
+        "expected_country_count": args.expected_country_count,
+        "expected_country_codes_file": (
+            str(args.expected_country_codes) if args.expected_country_codes else None
+        ),
+        "allow_country_subset": args.allow_country_subset,
+    }
+    if args.parquet and not args.parquet.startswith("s3://"):
+        local_source = Path(args.parquet)
+        source["local_input"] = _artifact_record(local_source)
+    manifest = {
+        "schema_version": 1,
+        "generated": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "source": source,
+        "completeness": source_stats,
+        "classifier": "intersection-and-full-cell-coverage-v1",
+        "simplify_tolerance_degrees": args.simplify_tol,
+        "dependencies": {
+            "h3": getattr(h3, "__version__", "unknown"),
+            "shapely": getattr(shapely, "__version__", "unknown"),
+        },
+        "resolutions": resolution_reports,
+        "artifacts": [_artifact_record(artifact) for artifact in artifacts],
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+    print(f"Wrote {path}")
+
+
 def main():
     args = parse_args()
     if not SHAPELY_AVAILABLE:
@@ -341,18 +495,28 @@ def main():
         sys.exit(1)
     countries_filter = None
     if args.countries:
-        countries_filter = [c.strip().upper() for c in args.countries.split(",")]
-    try:
-        country_geoms = load_country_geoms(args.parquet, countries_filter)
-    except Exception as e:
-        print(f"Failed load: {e}, using dummy bboxes", file=sys.stderr)
-        from shapely.geometry import box
-        country_geoms = {
-            "JP": box(122.0, 20.0, 154.0, 46.0),
-            "US": box(-125.0, 24.0, -66.0, 50.0),
-            "RU": box(-180.0, 41.0, 180.0, 82.0),
-            "CA": box(-141.0, 41.0, -52.0, 83.0),
-        }
+        countries_filter = [c.strip().upper() for c in args.countries.split(",") if c.strip()]
+    expected_codes = None
+    if not args.demo_fixtures:
+        _validate_release_provenance(args.parquet, args.overture_release)
+        if args.expected_country_count is None or args.expected_country_codes is None:
+            raise ValueError(
+                "release builds require --expected-country-count and --expected-country-codes"
+            )
+        expected_codes = _expected_country_codes(args.expected_country_codes)
+        if args.expected_country_count != len(expected_codes):
+            raise ValueError("expected country count does not match code manifest")
+        if countries_filter and not args.allow_country_subset:
+            raise ValueError("--countries requires explicit --allow-country-subset")
+        if countries_filter and set(countries_filter) != set(expected_codes):
+            raise ValueError("subset country filter must exactly match expected code manifest")
+    if args.demo_fixtures:
+        country_geoms, source_stats = demo_country_geoms()
+    else:
+        country_geoms, source_stats = load_country_geoms(args.parquet, countries_filter)
+        if set(country_geoms) != set(expected_codes):
+            raise RuntimeError("decoded countries do not exactly match expected code manifest")
+    manifest_path = args.manifest or args.output.with_suffix(".manifest.json")
     if args.compare_resolutions:
         resolutions = [int(value.strip()) for value in args.compare_resolutions.split(",")]
         report = compare_resolutions(country_geoms, resolutions, args.simplify_tol)
@@ -360,6 +524,8 @@ def main():
             args.report.parent.mkdir(parents=True, exist_ok=True)
             args.report.write_text(json.dumps({"resolutions": report}, indent=2) + "\n")
             print(f"Wrote {args.report}")
+        artifacts = [args.report] if args.report else []
+        write_manifest(manifest_path, args, source_stats, report, artifacts)
         return
 
     interior, boundary, _ = build_h3_index(
@@ -368,6 +534,7 @@ def main():
         simplify_tol=args.simplify_tol,
     )
     write_json_output(args.output, args.resolution, interior, boundary)
+    artifacts = [args.output]
     if args.sqlite:
         import sqlite3
         args.sqlite.parent.mkdir(parents=True, exist_ok=True)
@@ -383,6 +550,20 @@ def main():
         db.execute("VACUUM")
         db.close()
         print(f"Wrote SQLite {args.sqlite}")
+        artifacts.append(args.sqlite)
+    write_manifest(
+        manifest_path,
+        args,
+        source_stats,
+        [{
+            "resolution": args.resolution,
+            "global_cells": len(_cells_at_resolution(args.resolution)),
+            "land_cells": len(interior) + len(boundary),
+            "interior_cells": len(interior),
+            "boundary_cells": len(boundary),
+        }],
+        artifacts,
+    )
     if H3_AVAILABLE:
         tokyo_lat, tokyo_lon = 35.68, 139.69
         try:

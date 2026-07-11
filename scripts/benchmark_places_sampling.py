@@ -7,9 +7,10 @@ data or builds shards.  JSON output is intended for comparing experiment runs;
 Markdown output is a compact review artifact.
 
 Example:
-    python scripts/benchmark_places_sampling.py exports/places-CA.parquet \
+    python scripts/benchmark_places_sampling.py exports/places-CA-bbox.parquet \
       --cases benchmarks/places-sampling-cases.example.json \
       --sizes 10000,25000,50000 \
+      --strategies confidence,experimental-prominence \
       --json-out /tmp/places-sampling.json \
       --markdown-out /tmp/places-sampling.md
 
@@ -28,7 +29,7 @@ import math
 import re
 import sys
 import unicodedata
-from collections import defaultdict
+from collections import Counter, defaultdict
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any, Iterable, Iterator, Sequence
@@ -47,8 +48,10 @@ CATEGORY_PRIORS = {
     "restaurant": 0.02,
 }
 ROUTING_CLASSES = {"famous_unique", "local_unique", "ubiquitous_brand"}
-STRATEGIES = ("confidence", "prominence")
+STRATEGIES = ("confidence", "experimental-prominence")
+DEFAULT_STRATEGIES = ("confidence",)
 WORD_RE = re.compile(r"[\w]+", re.UNICODE)
+PROFILE_KEY_LIMIT = 256
 
 
 def normalize(value: Any) -> str:
@@ -68,6 +71,24 @@ def optional_float(value: Any) -> float | None:
 
 def truthy_text(value: Any) -> str:
     return "" if value is None else str(value).strip()
+
+
+def _root_source_items(row: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+    """Read complete root SourceItems, with compatibility for older exports."""
+    roots = row.get("root_sources")
+    if roots is None and isinstance(row.get("sources"), (list, tuple)):
+        roots = [
+            source
+            for source in row["sources"]
+            if isinstance(source, dict) and not truthy_text(source.get("property"))
+        ]
+    if isinstance(roots, (list, tuple)):
+        items = tuple(source for source in roots if isinstance(source, dict))
+        if items:
+            return items
+    if isinstance(row.get("root_source_datasets"), (list, tuple)):
+        return tuple({"dataset": value} for value in row["root_source_datasets"])
+    return ()
 
 
 def prominence_score(row: dict[str, Any]) -> float:
@@ -97,6 +118,15 @@ class Place:
     basic_category: str
     locality: str
     region: str
+    country: str
+    taxonomy_primary: str
+    overture_release: str
+    root_source_datasets: tuple[str, ...]
+    root_source_confidences: tuple[float | None, ...]
+    root_source_update_times: tuple[str, ...]
+    root_source_licenses: tuple[str, ...]
+    root_source_record_ids: tuple[str, ...]
+    root_source_count: int
     lat: float | None
     lon: float | None
     confidence: float
@@ -129,6 +159,14 @@ def place_from_row(row: dict[str, Any], row_number: int) -> Place:
     basic_category = truthy_text(row.get("basic_category"))
     confidence = optional_float(row.get("confidence"))
     confidence = 0.5 if confidence is None else min(1.0, max(0.0, confidence))
+    root_items = _root_source_items(row)
+    root_datasets = tuple(
+        truthy_text(item.get("dataset")) or "(missing-dataset)" for item in root_items
+    )
+    raw_root_count = optional_float(row.get("root_source_count"))
+    root_source_count = (
+        max(0, int(raw_root_count)) if raw_root_count is not None else len(root_datasets)
+    )
     parts = (
         row.get("search_name_base"), primary_name, brand_name, category,
         basic_category, row.get("locality") or row.get("city"),
@@ -142,6 +180,23 @@ def place_from_row(row: dict[str, Any], row_number: int) -> Place:
         basic_category=basic_category,
         locality=truthy_text(row.get("locality") or row.get("city")),
         region=truthy_text(row.get("region")),
+        country=truthy_text(row.get("country")),
+        taxonomy_primary=truthy_text(row.get("taxonomy_primary")),
+        overture_release=truthy_text(row.get("overture_release")),
+        root_source_datasets=root_datasets,
+        root_source_confidences=tuple(
+            optional_float(item.get("confidence")) for item in root_items
+        ),
+        root_source_update_times=tuple(
+            truthy_text(item.get("update_time")) for item in root_items
+        ),
+        root_source_licenses=tuple(
+            truthy_text(item.get("license")) for item in root_items
+        ),
+        root_source_record_ids=tuple(
+            truthy_text(item.get("record_id")) for item in root_items
+        ),
+        root_source_count=root_source_count,
         lat=optional_float(row.get("lat")),
         lon=optional_float(row.get("lon")),
         confidence=confidence,
@@ -297,15 +352,30 @@ def query_relevance(place: Place, query: str) -> int:
 def strategy_key(place: Place, strategy: str) -> tuple[Any, ...]:
     if strategy == "confidence":
         return (-place.confidence, place.place_id)
-    if strategy == "prominence":
+    if strategy == "experimental-prominence":
         return (-place.prominence, -place.confidence, place.place_id)
     raise ValueError(f"unknown strategy: {strategy}")
 
 
-def evaluate_case(sample: Sequence[Place], case: Case, eligible_ids: set[str], top_k: int) -> dict[str, Any]:
+def query_ranking_key(place: Place, query: str, strategy: str) -> tuple[Any, ...]:
+    relevance = query_relevance(place, query)
+    if strategy == "confidence":
+        return (-relevance, -place.confidence, place.place_id)
+    if strategy == "experimental-prominence":
+        return (-relevance, -place.prominence, -place.confidence, place.place_id)
+    raise ValueError(f"unknown strategy: {strategy}")
+
+
+def evaluate_case(
+    sample: Sequence[Place],
+    case: Case,
+    eligible_ids: set[str],
+    top_k: int,
+    strategy: str,
+) -> dict[str, Any]:
     retained_ids = {place.place_id for place in sample if place.place_id in eligible_ids}
     candidates = [place for place in sample if query_relevance(place, case.query)]
-    candidates.sort(key=lambda place: (-query_relevance(place, case.query), -place.prominence, place.place_id))
+    candidates.sort(key=lambda place: query_ranking_key(place, case.query, strategy))
     rank = next((index for index, place in enumerate(candidates, 1) if place.place_id in eligible_ids), None)
     return {
         "case_id": case.case_id,
@@ -403,6 +473,173 @@ def routing_recommendation(case: Case, results: Sequence[dict[str, Any]]) -> dic
     }
 
 
+def confidence_bucket(confidence: float) -> str:
+    if confidence < 0.5:
+        return "0.0-0.5"
+    if confidence < 0.75:
+        return "0.5-0.75"
+    if confidence < 0.9:
+        return "0.75-0.9"
+    return "0.9-1.0"
+
+
+class CoverageAccumulator:
+    """Bounded diagnostic counters; source identity never changes ranking."""
+
+    DIMENSIONS = (
+        "root_datasets",
+        "categories",
+        "geographies",
+        "feature_confidence_buckets",
+        "root_source_confidence_buckets",
+        "root_source_update_years",
+        "root_source_licenses",
+        "root_source_record_id_presence",
+        "source_categories",
+        "source_geographies",
+        "source_feature_confidence",
+        "source_root_confidence",
+        "releases",
+    )
+
+    def __init__(self, key_limit: int = PROFILE_KEY_LIMIT):
+        self.key_limit = key_limit
+        self.rows = 0
+        self.counts = {name: Counter() for name in self.DIMENSIONS}
+        self.overflow = Counter()
+        self.root_cardinality = Counter()
+        self.max_root_sources = 0
+
+    def _add(self, dimension: str, key: str) -> None:
+        key = key or "(missing)"
+        counter = self.counts[dimension]
+        if key in counter or len(counter) < self.key_limit:
+            counter[key] += 1
+        else:
+            self.overflow[dimension] += 1
+
+    def add(self, place: Place) -> None:
+        self.rows += 1
+        root_count = place.root_source_count
+        self.max_root_sources = max(self.max_root_sources, root_count)
+        self.root_cardinality[
+            "zero" if root_count == 0 else "one" if root_count == 1 else "multiple"
+        ] += 1
+        datasets = place.root_source_datasets or ("(missing)",)
+        category = normalize(
+            place.taxonomy_primary or place.basic_category or place.category_primary
+        ) or "(missing)"
+        geography = "|".join(
+            part or "(missing)" for part in (place.country, place.region)
+        )
+        conf_bucket = confidence_bucket(place.confidence)
+        self._add("categories", category)
+        self._add("geographies", geography)
+        self._add("feature_confidence_buckets", conf_bucket)
+        self._add("releases", place.overture_release or "(missing)")
+        for dataset in datasets:
+            self._add("root_datasets", dataset)
+            self._add("source_categories", f"{dataset}|{category}")
+            self._add("source_geographies", f"{dataset}|{geography}")
+            self._add("source_feature_confidence", f"{dataset}|{conf_bucket}")
+        for index, dataset in enumerate(place.root_source_datasets):
+            root_confidence = (
+                place.root_source_confidences[index]
+                if index < len(place.root_source_confidences)
+                else None
+            )
+            root_bucket = (
+                confidence_bucket(root_confidence)
+                if root_confidence is not None
+                else "(missing)"
+            )
+            update_time = (
+                place.root_source_update_times[index]
+                if index < len(place.root_source_update_times)
+                else ""
+            )
+            license_name = (
+                place.root_source_licenses[index]
+                if index < len(place.root_source_licenses)
+                else ""
+            )
+            record_id = (
+                place.root_source_record_ids[index]
+                if index < len(place.root_source_record_ids)
+                else ""
+            )
+            self._add("root_source_confidence_buckets", root_bucket)
+            self._add("root_source_update_years", update_time[:4] or "(missing)")
+            self._add("root_source_licenses", license_name or "(missing)")
+            self._add(
+                "root_source_record_id_presence",
+                "present" if record_id else "missing",
+            )
+            self._add("source_root_confidence", f"{dataset}|{root_bucket}")
+
+    def as_dict(self) -> dict[str, Any]:
+        return {
+            "rows": self.rows,
+            "key_limit_per_dimension": self.key_limit,
+            "root_cardinality": {
+                "zero_root_rows": self.root_cardinality["zero"],
+                "one_root_rows": self.root_cardinality["one"],
+                "multiple_root_rows": self.root_cardinality["multiple"],
+                "max_root_sources": self.max_root_sources,
+            },
+            "dimensions": {
+                name: {
+                    "counts": dict(sorted(self.counts[name].items())),
+                    "overflow_records": self.overflow[name],
+                }
+                for name in self.DIMENSIONS
+            },
+        }
+
+
+def coverage_profile(places: Iterable[Place]) -> dict[str, Any]:
+    accumulator = CoverageAccumulator()
+    for place in places:
+        accumulator.add(place)
+    return accumulator.as_dict()
+
+
+def compare_coverage(
+    source_profile: dict[str, Any], retained_profile: dict[str, Any]
+) -> dict[str, Any]:
+    dimensions = {}
+    for name, source_dimension in source_profile["dimensions"].items():
+        retained_counts = retained_profile["dimensions"][name]["counts"]
+        rows = []
+        for key, source_records in source_dimension["counts"].items():
+            retained_records = retained_counts.get(key, 0)
+            rows.append({
+                "key": key,
+                "source_records": source_records,
+                "retained_records": retained_records,
+                "retention_rate": (
+                    retained_records / source_records if source_records else None
+                ),
+            })
+        dimensions[name] = {
+            "records": rows,
+            "source_overflow_records": source_dimension["overflow_records"],
+            "retained_overflow_records": retained_profile["dimensions"][name][
+                "overflow_records"
+            ],
+        }
+    return {
+        "source_rows": source_profile["rows"],
+        "retained_rows": retained_profile["rows"],
+        "root_cardinality": retained_profile["root_cardinality"],
+        "dimensions": dimensions,
+        "ranking_note": (
+            "Source and source-confidence fields are calibration/coverage diagnostics; "
+            "they never add a ranking bonus."
+        ),
+    }
+
+
 def assemble_report(
     source_count: int,
     ordered_by_strategy: dict[str, Sequence[Place]],
@@ -411,6 +648,7 @@ def assemble_report(
     sizes: Sequence[int],
     strategies: Sequence[str],
     top_k: int,
+    source_profile: dict[str, Any],
 ) -> dict[str, Any]:
     sizes = sorted(set(size for size in sizes if size > 0))
     if not sizes:
@@ -426,7 +664,12 @@ def assemble_report(
         for requested_size in sizes:
             sample = ordered[:requested_size]
             ids = {place.place_id for place in sample}
-            case_rows = [evaluate_case(sample, case, eligible[case.case_id], top_k) for case in cases]
+            case_rows = [
+                evaluate_case(
+                    sample, case, eligible[case.case_id], top_k, strategy
+                )
+                for case in cases
+            ]
             for row in case_rows:
                 per_case[row["case_id"]].append(row)
             samples.append({
@@ -434,6 +677,7 @@ def assemble_report(
                 "actual_size": len(sample),
                 "incremental_rows": len(ids - previous_ids),
                 "summary": summarize_cases(case_rows),
+                "coverage": compare_coverage(source_profile, coverage_profile(sample)),
                 "cases": case_rows,
             })
             previous_ids = ids
@@ -452,6 +696,8 @@ def assemble_report(
         "assumptions": [
             "Samples are deterministic nested prefixes of one sorted source dataset.",
             "Prominence mirrors the current prototype formula; confidence sampling mirrors the download LIMIT ordering.",
+            "The rejected prominence baseline runs only when experimental-prominence is explicitly requested.",
+            "Confidence ranking is source-calibrated through diagnostics only; provider identity is never a score bonus.",
             "Offline query rank is an approximation (exact/prefix/token match, then prominence), not SQLite FTS/BM25.",
             "Results measure only the supplied source ceiling and labels; a pre-sampled input cannot measure excluded rows.",
             "The streaming CLI assumes source place IDs are unique, matching the Overture Places contract.",
@@ -470,7 +716,7 @@ def run_benchmark(
     }
     return assemble_report(
         len(places), ordered, eligible_ids_by_case(places, cases),
-        cases, sizes, strategies, top_k,
+        cases, sizes, strategies, top_k, coverage_profile(places),
     )
 
 
@@ -489,9 +735,11 @@ def run_benchmark_file(
     source_count = 0
     indexes = case_indexes(cases)
     eligible = {case.case_id: set() for case in cases}
+    source_coverage = CoverageAccumulator()
     for place in iter_places(path):
         source_count += 1
         add_eligible_place(place, cases, indexes, eligible)
+        source_coverage.add(place)
 
     max_size = max(positive_sizes)
     ordered = {
@@ -503,7 +751,14 @@ def run_benchmark_file(
         for strategy in strategies
     }
     return assemble_report(
-        source_count, ordered, eligible, cases, sizes, strategies, top_k,
+        source_count,
+        ordered,
+        eligible,
+        cases,
+        sizes,
+        strategies,
+        top_k,
+        source_coverage.as_dict(),
     )
 
 
@@ -557,7 +812,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("input", type=Path, help="Local flattened Places parquet/CSV/JSONL/JSON")
     parser.add_argument("--cases", required=True, type=Path, help="Curated case JSON")
     parser.add_argument("--sizes", default="10000,25000,50000", help="Comma-separated nested sample sizes")
-    parser.add_argument("--strategies", default=",".join(STRATEGIES), help="confidence,prominence")
+    parser.add_argument(
+        "--strategies",
+        default=",".join(DEFAULT_STRATEGIES),
+        help="confidence; optionally add the rejected experimental-prominence baseline",
+    )
     parser.add_argument("--top-k", type=int, default=5, help="Rank cutoff for hit-rate metrics")
     parser.add_argument("--json-out", type=Path, help="Write machine-readable report")
     parser.add_argument("--markdown-out", type=Path, help="Write Markdown report")

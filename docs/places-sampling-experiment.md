@@ -33,12 +33,17 @@ Use `basic_category` and the new taxonomy hierarchy for retrieval and soft
 coverage diagnostics, not hard fame priors. A global landmark rung requires a
 reviewed allowlist or a venue-level external fame join.
 
-Run it against the full flattened state export, not a prior top-50k download:
+The current exporter produces a rectangular CA-bbox slice, not an exact
+California state export. It can include nearby out-of-state or international
+features and must not be promoted as `US-CA`. Use it only for bounded ranking
+experiments until exact division-area containment is implemented. Do not run
+the benchmark against a prior top-50k download:
 
 ```bash
-python scripts/benchmark_places_sampling.py exports/places-CA.parquet \
+python scripts/benchmark_places_sampling.py exports/places-CA-bbox.parquet \
   --cases benchmarks/places-sampling-cases.example.json \
   --sizes 10000,25000,50000 \
+  --strategies confidence,experimental-prominence \
   --json-out benchmarks/places-CA-sampling.json \
   --markdown-out benchmarks/places-CA-sampling.md
 ```
@@ -46,12 +51,21 @@ python scripts/benchmark_places_sampling.py exports/places-CA.parquet \
 The two default strategies isolate the current sampling ambiguity:
 
 - `confidence` reproduces the existing download's confidence-first prefix.
-- `prominence` uses the prototype score: confidence plus brand, Wikidata,
-  high-confidence, and category bonuses.
+- `experimental-prominence` uses the rejected prototype score: confidence plus
+  brand, Wikidata, high-confidence, and category bonuses. It is never enabled
+  by default and must be requested explicitly.
 
 Every size is a prefix of one stable ordering, so changes between sample sizes
 are attributable to capacity rather than a re-sample. The JSON report is the
 comparison artifact; Markdown is for review.
+
+Reports include bounded root-source cardinality and source-stratified
+retention, category, country/region, feature-confidence, root-source-confidence,
+update-year, license, and record-ID coverage. Overture feature confidence and
+SourceItem confidence are reported separately. Source identity, license,
+freshness, record IDs, and root confidence are diagnostics only and never add
+a ranking bonus. Confidence samples are ranked by confidence, not silently
+reranked by the rejected prominence formula.
 
 The CLI scans the source once to resolve labels, then once per sampling
 strategy while retaining only the largest requested top-N. Memory therefore
@@ -83,7 +97,8 @@ a substitute for a later SQLite FTS/BM25 benchmark.
 
 ## Inputs needed for a decision
 
-1. A full, unsampled current-release CA flattened export. A top-50k source imposes a ceiling
+1. A full, unsampled current-release exact-CA export. The current bbox slice is
+   suitable only for exploratory work. A top-50k source imposes a ceiling
    that makes 10k/25k/50k comparisons unable to observe excluded landmarks.
 2. Reviewed GERS IDs for roughly 30-50 famous unique landmarks, 20-30 strong
    local businesses/venues, and 10-15 ubiquitous brands.

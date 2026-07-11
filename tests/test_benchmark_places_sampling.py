@@ -72,7 +72,9 @@ def test_nested_samples_and_prominence_improve_famous_retention(tmp_path):
         "id": "airport", "query": "Great Airport", "routing_class": "famous_unique",
         "expected_ids": ["landmark"],
     }])
-    report = benchmark.run_benchmark(places, cases, [2, 3], ["confidence", "prominence"])
+    report = benchmark.run_benchmark(
+        places, cases, [2, 3], ["confidence", "experimental-prominence"]
+    )
 
     confidence, prominence = report["strategies"]
     assert [sample["actual_size"] for sample in confidence["samples"]] == [2, 3]
@@ -158,7 +160,7 @@ def test_file_benchmark_keeps_only_largest_requested_sample(tmp_path, monkeypatc
     )
 
     report = benchmark.run_benchmark_file(
-        csv_path, cases, [1, 2], ["confidence", "prominence"]
+        csv_path, cases, [1, 2], ["confidence", "experimental-prominence"]
     )
 
     assert report["source_count"] == 3
@@ -178,3 +180,52 @@ def test_unlabelled_case_is_explicit_not_scored_as_failure(tmp_path):
     assert summary["labelled_case_count"] == 0
     assert summary["coverage_rate"] is None
     assert summary["unlabelled_cases"] == ["missing"]
+
+
+def test_confidence_strategy_is_not_reranked_by_rejected_prominence(tmp_path):
+    places = make_places([
+        row("target", "Same", 0.95),
+        row("branded", "Same", 0.60, brand="Brand", wikidata="Q1", category="airport"),
+    ])
+    case = make_cases(tmp_path, [{
+        "id": "same", "query": "Same", "routing_class": "famous_unique",
+        "expected_ids": ["target"],
+    }])[0]
+    result = benchmark.evaluate_case(
+        places, case, {"target"}, top_k=1, strategy="confidence"
+    )
+    assert result["first_target_rank"] == 1
+
+
+def test_source_coverage_is_bounded_and_source_stratified():
+    places = [
+        benchmark.place_from_row({
+            **row("one", "One", 0.95, category="museum"),
+            "country": "US",
+            "root_sources": [{
+                "property": "", "dataset": "alpha", "license": "x",
+                "record_id": "a1", "update_time": "2026-01-02", "confidence": 0.8,
+            }],
+            "root_source_count": 1,
+            "overture_release": "2026-06-17.0",
+        }, 1),
+        benchmark.place_from_row({
+            **row("two", "Two", 0.65, category="hotel"),
+            "country": "US",
+            "root_sources": [
+                {"property": "", "dataset": "beta"},
+                {"property": "", "dataset": "gamma"},
+            ],
+            "root_source_count": 2,
+            "overture_release": "2026-06-17.0",
+        }, 2),
+    ]
+    profile = benchmark.coverage_profile(places)
+    assert profile["key_limit_per_dimension"] == benchmark.PROFILE_KEY_LIMIT
+    assert profile["root_cardinality"]["one_root_rows"] == 1
+    assert profile["root_cardinality"]["multiple_root_rows"] == 1
+    assert profile["dimensions"]["source_feature_confidence"]["counts"]["alpha|0.9-1.0"] == 1
+    assert profile["dimensions"]["source_root_confidence"]["counts"]["alpha|0.75-0.9"] == 1
+    assert profile["dimensions"]["root_source_update_years"]["counts"]["2026"] == 1
+    assert profile["dimensions"]["root_source_licenses"]["counts"]["x"] == 1
+    assert profile["dimensions"]["root_source_record_id_presence"]["counts"]["present"] == 1

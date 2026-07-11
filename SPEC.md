@@ -146,7 +146,7 @@ GET /reverse?lat={lat}&lon={lon}
 ]
 ```
 
-**Note:** Reverse geocoding selects a country shard from the requested coordinate only when one collection bbox is unambiguous, then uses bounding box filtering. Zero or multiple matching country bboxes fall back to `HEAD`; caller IP metadata never resolves geometric ambiguity. Results include all eligible divisions whose bounding box contains the query point: countries, regions, counties, and populated localities (initially population >= 50,000). Bbox containment is an approximation, not exact polygon containment.
+**Note:** Reverse geocoding selects a country shard from the requested coordinate only when one collection bbox is unambiguous, then uses bounding box filtering. With zero matching bboxes it falls back to a valid caller IP country and then `HEAD`; multiple matching bboxes always fall back to `HEAD`, and IP metadata never resolves geometric ambiguity. Results include all eligible divisions whose bounding box contains the query point: countries, regions, counties, and populated localities (initially population >= 50,000). Bbox containment is an approximation, not exact polygon containment.
 
 ## Indexing Pipeline
 

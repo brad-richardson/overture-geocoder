@@ -106,3 +106,100 @@ def test_low_resolution_global_cell_counts_are_stable():
     assert len(country_h3._cells_at_resolution(2)) == 5_882
     assert len(country_h3._cells_at_resolution(3)) == 41_162
 
+
+def test_merge_country_components_fails_instead_of_dropping_parts(monkeypatch):
+    def fail_union(_geoms):
+        raise ValueError("synthetic union failure")
+
+    monkeypatch.setattr(country_h3, "unary_union", fail_union)
+    with pytest.raises(RuntimeError, match="Failed to merge all 2 components for XX"):
+        country_h3._merge_country_components({
+            "XX": [box(0, 0, 1, 1), box(2, 2, 3, 3)],
+        })
+
+
+def test_main_fails_closed_when_release_input_cannot_load(monkeypatch, tmp_path):
+    def fail_load(_path, _countries):
+        raise RuntimeError("synthetic source failure")
+
+    monkeypatch.setattr(country_h3, "load_country_geoms", fail_load)
+    expected = tmp_path / "expected.json"
+    expected.write_text('["US"]')
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_country_h3_index.py",
+            "--parquet",
+            "missing.parquet",
+            "--expected-country-count",
+            "1",
+            "--expected-country-codes",
+            str(expected),
+            "--overture-release",
+            "2026-06-17.0",
+            "--output",
+            str(tmp_path / "router.json"),
+        ],
+    )
+    with pytest.raises(RuntimeError, match="synthetic source failure"):
+        country_h3.main()
+    assert not (tmp_path / "router.json").exists()
+
+
+def test_demo_fixtures_require_explicit_flag_and_write_manifest(monkeypatch, tmp_path):
+    output = tmp_path / "router.json"
+    manifest = tmp_path / "router-manifest.json"
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_country_h3_index.py",
+            "--demo-fixtures",
+            "--resolution",
+            "0",
+            "--output",
+            str(output),
+            "--manifest",
+            str(manifest),
+        ],
+    )
+    country_h3.main()
+    metadata = __import__("json").loads(manifest.read_text())
+    assert output.exists()
+    assert metadata["source"]["mode"] == "demo-fixtures"
+    assert metadata["completeness"]["country_count"] == 4
+    assert metadata["completeness"]["decoded_component_count"] == 4
+    assert metadata["artifacts"][0]["sha256"]
+    assert metadata["artifacts"][0]["size_bytes"] == output.stat().st_size
+
+
+def test_release_build_requires_expected_country_manifest(monkeypatch, tmp_path):
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "build_country_h3_index.py",
+            "--parquet",
+            str(tmp_path / "input.parquet"),
+            "--overture-release",
+            "2026-06-17.0",
+        ],
+    )
+    with pytest.raises(ValueError, match="expected-country-count"):
+        country_h3.main()
+
+
+def test_s3_release_provenance_matches_standard_path():
+    country_h3._validate_release_provenance(
+        "s3://bucket/release/2026-06-17.0/theme=divisions/type=division_area/*",
+        "2026-06-17.0",
+    )
+
+
+def test_s3_release_provenance_rejects_mismatch():
+    with pytest.raises(ValueError, match="does not match"):
+        country_h3._validate_release_provenance(
+            "s3://bucket/release/2026-06-17.0/theme=divisions/type=division_area/*",
+            "2026-07-01.0",
+        )
