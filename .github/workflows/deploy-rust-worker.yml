@@ -16,8 +16,17 @@ jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run != null && github.event.workflow_run.conclusion == 'success') }}
+    concurrency:
+      group: deploy-rust-worker-production
+      cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v7
+      - name: Check out the CI-tested commit
+        uses: actions/checkout@v7
+        with:
+          # workflow_run executes in the default-branch context, so github.sha
+          # is not necessarily the commit that passed CI. A manual dispatch
+          # has no workflow_run payload and should use its selected ref's SHA.
+          ref: ${{ github.event_name == 'workflow_run' && github.event.workflow_run.head_sha || github.sha }}
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -53,13 +62,15 @@ jobs:
           # 0 only when every check passes. Kept to four requests per attempt
           # to stay well under the worker's 60 req/min per-IP rate limit.
           run_checks() {
-            local health search reverse gers_id id_json
+            local health health_version search reverse data_version gers_id id_json
 
             health=$(curl -fsS --max-time 15 "$BASE_URL/health") || {
               echo "  FAIL /health: request error"; return 1; }
             echo "$health" | jq -e '.status == "ok"' >/dev/null || {
               echo "  FAIL /health: status not ok -> $health"; return 1; }
-            echo "  OK   /health"
+            health_version=$(echo "$health" | jq -er '.version | select(type == "string" and length > 0)') || {
+              echo "  FAIL /health: missing data version -> $health"; return 1; }
+            echo "  OK   /health (data $health_version)"
 
             search=$(curl -fsS --max-time 15 "$BASE_URL/search?q=berlin&limit=1") || {
               echo "  FAIL /search: request error"; return 1; }
@@ -76,13 +87,46 @@ jobs:
 
             reverse=$(curl -fsS --max-time 15 "$BASE_URL/reverse?lat=42.3601&lon=-71.0589") || {
               echo "  FAIL /reverse: request error"; return 1; }
-            echo "$reverse" | jq -e '
-              (.subtype == "locality" or .hierarchy[0].subtype == "locality")
-              and (.primary_name // "" | test("Boston"; "i"))
-              and (.hierarchy | length >= 2)
-            ' >/dev/null || {
-              echo "  FAIL /reverse: expected locality Boston with hierarchy>=2 -> $reverse"; return 1; }
-            echo "  OK   /reverse"
+            data_version=$(echo "$reverse" | jq -er '.data_version | select(type == "string" and length > 0)') || {
+              echo "  FAIL /reverse: missing data_version -> $reverse"; return 1; }
+            if [ "$data_version" != "$health_version" ]; then
+              echo "  FAIL /reverse: data version $data_version does not match /health $health_version -> $reverse"
+              return 1
+            fi
+
+            if [ "$data_version" = "2026-07-02.3" ]; then
+              # This legacy shard predates locality ingestion. Keep the
+              # exception exact and still require the expected US hierarchy;
+              # unrelated country/county fallbacks must fail the deployment.
+              echo "$reverse" | jq -e '
+                .subtype == "county"
+                and (.primary_name // "" | test("Suffolk"; "i"))
+                and (.hierarchy | length >= 2)
+                and any(.hierarchy[]; .subtype == "county" and (.name // "" | test("Suffolk"; "i")))
+                and any(.hierarchy[];
+                  .subtype == "country"
+                  and (.name // "" | test("United States|(^|, )US$|^USA$"; "i"))
+                )
+              ' >/dev/null || {
+                echo "  FAIL /reverse: expected legacy Suffolk county with country hierarchy for $data_version -> $reverse"
+                return 1
+              }
+              echo "  OK   /reverse (legacy Suffolk county; data $data_version)"
+            else
+              echo "$reverse" | jq -e '
+                (.subtype == "locality" or .hierarchy[0].subtype == "locality")
+                and (.primary_name // "" | test("Boston"; "i"))
+                and (.hierarchy | length >= 2)
+                and any(.hierarchy[];
+                  .subtype == "country"
+                  and (.name // "" | test("United States|(^|, )US$|^USA$"; "i"))
+                )
+              ' >/dev/null || {
+                echo "  FAIL /reverse: expected Boston locality with country hierarchy for $data_version -> $reverse"
+                return 1
+              }
+              echo "  OK   /reverse (Boston locality; data $data_version)"
+            fi
 
             # Derive the ID from the search result so we never hardcode a GERS
             # ID that can churn between releases.
