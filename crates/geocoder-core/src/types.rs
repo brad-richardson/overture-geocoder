@@ -1,6 +1,17 @@
 //! Core types for the geocoder.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
+
+fn normalize_type_name(s: &str) -> String {
+    let lower = s.trim().to_lowercase();
+    if lower == "neighbourhood" {
+        "neighborhood".to_string()
+    } else {
+        lower
+    }
+}
 
 /// Query parameters for forward geocoding.
 #[derive(Debug, Clone)]
@@ -13,6 +24,8 @@ pub struct GeocoderQuery {
     pub autocomplete: bool,
     /// Location bias for ranking.
     pub bias: LocationBias,
+    /// Optional allowed division types (lowercased, normalized). None means no filtering.
+    pub allowed_types: Option<HashSet<String>>,
 }
 
 impl GeocoderQuery {
@@ -23,6 +36,7 @@ impl GeocoderQuery {
             limit: 10,
             autocomplete: true,
             bias: LocationBias::None,
+            allowed_types: None,
         }
     }
 
@@ -42,6 +56,29 @@ impl GeocoderQuery {
     pub fn with_bias(mut self, bias: LocationBias) -> Self {
         self.bias = bias;
         self
+    }
+
+    pub fn with_allowed_types(mut self, types: Option<HashSet<String>>) -> Self {
+        self.allowed_types = types.map(|set| {
+            set.into_iter()
+                .map(|s| normalize_type_name(&s))
+                .filter(|s| !s.is_empty())
+                .collect()
+        });
+        self
+    }
+
+    pub fn includes_place(&self) -> bool {
+        self.allowed_types
+            .as_ref()
+            .is_some_and(|s| s.contains("place"))
+    }
+
+    pub fn is_type_allowed(&self, division_type: &str) -> bool {
+        match &self.allowed_types {
+            None => true,
+            Some(set) => set.contains(&normalize_type_name(division_type)),
+        }
     }
 }
 
@@ -181,10 +218,82 @@ impl DivisionType {
             "county" => Some(Self::County),
             "localadmin" => Some(Self::LocalAdmin),
             "locality" => Some(Self::Locality),
-            "neighborhood" => Some(Self::Neighborhood),
+            "neighborhood" | "neighbourhood" => Some(Self::Neighborhood),
             "macrohood" => Some(Self::Macrohood),
             _ => None,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::collections::HashSet;
+
+    #[test]
+    fn test_allowed_types_case_insensitive_and_normalization() {
+        let set: HashSet<String> = ["LOCALITY", "Country", "neighbourhood", "PLACE"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
+        let q = GeocoderQuery::new("test").with_allowed_types(Some(set));
+        assert!(q.is_type_allowed("locality"));
+        assert!(q.is_type_allowed("COUNTRY"));
+        assert!(q.is_type_allowed("neighborhood"));
+        assert!(q.is_type_allowed("neighbourhood"));
+        assert!(q.is_type_allowed("place"));
+        assert!(!q.is_type_allowed("county"));
+        assert!(q.includes_place());
+    }
+
+    #[test]
+    fn test_allowed_types_no_filter_allows_all() {
+        let q = GeocoderQuery::new("test");
+        assert!(q.is_type_allowed("locality"));
+        assert!(q.is_type_allowed("place"));
+        assert!(!q.includes_place());
+    }
+
+    #[test]
+    fn test_allowed_types_excludes_place_by_default() {
+        let default_types: HashSet<String> = [
+            "country",
+            "region",
+            "county",
+            "localadmin",
+            "locality",
+            "neighborhood",
+            "macrohood",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+        let q = GeocoderQuery::new("test").with_allowed_types(Some(default_types));
+        assert!(!q.includes_place());
+        assert!(q.is_type_allowed("locality"));
+        assert!(!q.is_type_allowed("place"));
+    }
+
+    #[test]
+    fn test_allowed_types_place_only() {
+        let set: HashSet<String> = ["place"].iter().map(|s| s.to_string()).collect();
+        let q = GeocoderQuery::new("starbucks").with_allowed_types(Some(set));
+        assert!(q.includes_place());
+        assert!(q.is_type_allowed("place"));
+        assert!(!q.is_type_allowed("locality"));
+    }
+
+    #[test]
+    fn test_division_type_parse_synonyms() {
+        assert_eq!(
+            DivisionType::parse("neighbourhood"),
+            Some(DivisionType::Neighborhood)
+        );
+        assert_eq!(
+            DivisionType::parse("NEIGHBORHOOD"),
+            Some(DivisionType::Neighborhood)
+        );
+        assert_eq!(DivisionType::parse("place"), None);
     }
 }
 
