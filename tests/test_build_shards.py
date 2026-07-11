@@ -1,8 +1,10 @@
 """Tests for build_shards.py functions."""
 
 import gzip
+import json
 import sqlite3
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -19,11 +21,14 @@ from build_shards import (
     WIKI_IMPORTANCE_WEIGHT,
     build_country_shard,
     build_head_shard,
+    build_places_shard,
+    build_places_shards,
     build_reverse_country_shard,
     build_reverse_head_shard,
     build_search_alias,
     build_shard_schema,
     compute_importance,
+    compute_places_importance,
     dedup_localities,
     enrich_parquet_with_wiki_importance,
     get_reverse_input_metrics,
@@ -665,6 +670,89 @@ class TestEndToEndShardBuild:
         assert "county-cook" not in ids  # wiki_importance 0.80
         assert "localadmin-manhattan" not in ids  # population 2,000,000
         assert info["record_count"] == len(ids)
+
+
+class TestPlacesShardBuild:
+    @staticmethod
+    def write_places_parquet(path: Path):
+        duckdb.sql(f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    ('confidence-only', 1, 'Confidence Only', 34.0, -118.0,
+                     -118.01, 33.99, -117.99, 34.01, 'US', 'US-CA', 'Los Angeles',
+                     NULL, NULL, NULL, NULL, 0.99, NULL, NULL),
+                    ('prominent-place', 1, 'Prominent Place', 37.6, -122.4,
+                     -122.41, 37.59, -122.39, 37.61, 'US', 'US-CA', 'San Francisco',
+                     'airport', 'transport', 'Known Brand', 'Q123', 0.70, NULL, NULL)
+                ) AS t(
+                    gers_id, version, primary_name, lat, lon,
+                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                    country, region, locality,
+                    category_primary, basic_category,
+                    brand_name, brand_wikidata, confidence,
+                    search_name_base, search_context_base
+                )
+            ) TO '{path}' (FORMAT PARQUET)
+        """)
+
+    def test_sampling_uses_composed_prominence(self, tmp_path):
+        source = tmp_path / "places.parquet"
+        self.write_places_parquet(source)
+        shard_path = tmp_path / "US-CA-places.db"
+
+        info = build_places_shard(
+            source, shard_path, "test", region_code="US-CA", limit=1
+        )
+
+        db = sqlite3.connect(shard_path)
+        rows = db.execute(
+            "SELECT gers_id, type, importance FROM divisions"
+        ).fetchall()
+        db.close()
+        assert info["record_count"] == 1
+        assert rows == [("prominent-place", "place", pytest.approx(0.9))]
+        assert compute_places_importance(
+            0.70, "Known Brand", "Q123", "airport", None
+        ) == pytest.approx(0.9)
+
+    def test_collection_uses_worker_visible_shard_id_and_href(self, tmp_path):
+        source = tmp_path / "places.parquet"
+        self.write_places_parquet(source)
+        version_dir = tmp_path / "test-version"
+        version_dir.mkdir()
+        (version_dir / "collection.json").write_text("""{
+            "items": {
+                "HEAD": {
+                    "record_count": 2,
+                    "size_bytes": 100,
+                    "href": "./shards/HEAD.db",
+                    "bbox": [-180, -90, 180, 90]
+                }
+            },
+            "summaries": {}
+        }""")
+        args = SimpleNamespace(
+            places_parquet=source,
+            places_region="US-CA",
+            places_limit=1,
+            overture_release=None,
+        )
+
+        infos = build_places_shards(args, "test-version", version_dir)
+
+        assert set(infos) == {"US-CA-places"}
+        places_collection = json.loads(
+            (version_dir / "places-collection.json").read_text()
+        )
+        item = places_collection["items"]["US-CA-places"]
+        assert item["href"] == "./places/US-CA-places.db"
+        assert item["sha256"]
+        forward_collection = json.loads(
+            (version_dir / "collection.json").read_text()
+        )
+        assert forward_collection["items"]["US-CA-places"] == item
+        assert forward_collection["summaries"]["shard_count"] == 2
+        assert forward_collection["summaries"]["total_records"] == 3
 
 
 class TestReverseShardBuild:
