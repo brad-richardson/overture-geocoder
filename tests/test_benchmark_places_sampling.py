@@ -45,6 +45,22 @@ def test_prominence_score_matches_prototype_weights():
     assert benchmark.prominence_score(row("x", "Unknown", "", "", "", "")) == 0.25
 
 
+def test_older_raw_export_schema_aliases_are_preserved():
+    place = benchmark.place_from_row({
+        "gers_id": "old-schema",
+        "name": "Asian Art Museum",
+        "category": "museum",
+        "city": "San Francisco",
+        "address": "200 Larkin St",
+        "confidence": 0.8,
+    }, 1)
+    assert place.primary_name == "Asian Art Museum"
+    assert place.category_primary == "museum"
+    assert place.locality == "San Francisco"
+    assert place.prominence == pytest.approx(0.5)
+    assert "200 larkin st" in place.search_text
+
+
 def test_nested_samples_and_prominence_improve_famous_retention(tmp_path):
     places = make_places([
         row("generic-1", "Generic One", 0.99),

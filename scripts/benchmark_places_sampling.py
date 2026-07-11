@@ -81,7 +81,9 @@ def prominence_score(row: dict[str, Any]) -> float:
             score += 0.10
     if confidence >= 0.90:
         score += 0.10
-    category = normalize(row.get("category_primary") or row.get("basic_category"))
+    category = normalize(
+        row.get("category_primary") or row.get("category") or row.get("basic_category")
+    )
     score += CATEGORY_PRIORS.get(category, 0.0)
     return min(1.0, score)
 
@@ -123,13 +125,14 @@ def place_from_row(row: dict[str, Any], row_number: int) -> Place:
         place_id = f"__row_{row_number}"
     primary_name = truthy_text(row.get("primary_name") or row.get("name"))
     brand_name = truthy_text(row.get("brand_name"))
-    category = truthy_text(row.get("category_primary"))
+    category = truthy_text(row.get("category_primary") or row.get("category"))
     basic_category = truthy_text(row.get("basic_category"))
     confidence = optional_float(row.get("confidence"))
     confidence = 0.5 if confidence is None else min(1.0, max(0.0, confidence))
     parts = (
         row.get("search_name_base"), primary_name, brand_name, category,
-        basic_category, row.get("locality"), row.get("region"),
+        basic_category, row.get("locality") or row.get("city"),
+        row.get("region"), row.get("address"),
     )
     return Place(
         place_id=place_id,
@@ -137,7 +140,7 @@ def place_from_row(row: dict[str, Any], row_number: int) -> Place:
         brand_name=brand_name,
         category_primary=category,
         basic_category=basic_category,
-        locality=truthy_text(row.get("locality")),
+        locality=truthy_text(row.get("locality") or row.get("city")),
         region=truthy_text(row.get("region")),
         lat=optional_float(row.get("lat")),
         lon=optional_float(row.get("lon")),

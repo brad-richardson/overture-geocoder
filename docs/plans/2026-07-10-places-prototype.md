@@ -1,5 +1,14 @@
 # Places Single-State Prototype (CA) - Findings & Plan
 
+> **2026-07-11 experiment note:** The confidence + brand + category importance
+> formula below is now a rejected baseline, not a recommended production
+> ranking. Current-release audits show confidence is existence confidence and
+> brand/contact fields are heavily source-confounded; the local top-100 sample
+> collapsed to 86 hotels. Keep the prototype isolated, remove arbitrary region
+> fallback, and do not select a per-state limit or populate HEAD until a full
+> current-release, source-stratified rank audit is reviewed. Prefer
+> `basic_category`/`taxonomy`; legacy `categories` is being retired.
+
 **Date:** 2026-07-10
 **Branch:** `places-single-state-prototype`
 **Goal:** Validate shard size and ranking for Places theme, single-state slice (CA), without full global rebuild.

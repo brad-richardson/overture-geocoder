@@ -5,6 +5,34 @@ survive deterministic 10k/25k/50k sampling, and do the retained targets rank
 well enough to justify their routing tier? It does not build, upload, or
 promote data.
 
+## 2026-07-11 findings
+
+The current confidence/brand/category `prominence` formula is retained only as
+a baseline to disprove or replace; it is not a proposed fleet ranking policy.
+On the available 1,768-row downtown San Francisco slice, its top 100 contained
+only four categories (86 hotels), while confidence-only retained 53 categories.
+Asian Art Museum ranked 530/574 by confidence/prominence and The Warfield
+961/973, while Tenderloin Museum jumped 414→4 solely because its exact legacy
+category received a hard-coded bonus. Confidence is highly quantized and is an
+existence signal, not fame.
+
+A bounded audit of 100,000 rows from the official `2026-06-17.0` release also
+showed that brand/contact completeness is strongly source-confounded. Every
+feature had exactly one external root dataset; additional source rows were
+Overture-derived confidence/status signals, so raw source count is not
+independent corroboration. Meta rows were all branded/social, Microsoft and
+Foursquare rows were unbranded, and AllThePlaces rows were all branded with
+frequent brand Wikidata. Brand and completeness bonuses would therefore rank
+providers more than venue fame. Overture explicitly defines `confidence` as
+confidence that a Place exists, and `brand.wikidata` identifies the brand, not
+the individual venue.
+
+Use confidence, operating status, source dataset/update time, and feature
+version for eligibility, calibration, freshness analysis, and tie-breaking.
+Use `basic_category` and the new taxonomy hierarchy for retrieval and soft
+coverage diagnostics, not hard fame priors. A global landmark rung requires a
+reviewed allowlist or a venue-level external fame join.
+
 Run it against the full flattened state export, not a prior top-50k download:
 
 ```bash
@@ -55,16 +83,19 @@ a substitute for a later SQLite FTS/BM25 benchmark.
 
 ## Inputs needed for a decision
 
-1. A full, unsampled CA flattened export. A top-50k source imposes a ceiling
+1. A full, unsampled current-release CA flattened export. A top-50k source imposes a ceiling
    that makes 10k/25k/50k comparisons unable to observe excluded landmarks.
 2. Reviewed GERS IDs for roughly 30-50 famous unique landmarks, 20-30 strong
    local businesses/venues, and 10-15 ubiquitous brands.
-3. Category and geography coverage across those labels, including places with
-   and without brands/Wikidata, so bonus-heavy sampling is not self-validating.
+3. Source-stratified category and geography coverage across those labels,
+   including confidence decile, root dataset/update time, taxonomy branch, and
+   places with and without brands/Wikidata, so provider-heavy sampling is not
+   self-validating.
 4. A target HEAD byte budget. Quality should be considered alongside the
    already measured 10k/50k shard sizes, not retention alone.
 
-The next useful decision is whether prominence materially improves famous
-unique retention at 10k/25k without merely filling the sample with chain
-locations. If it does not, add a genuine place-level fame signal (for example
-a place Wikidata/Wikipedia signal) before increasing sample capacity.
+The next useful artifact is a compact rank-audit parquet containing the union
+of the top candidates under confidence, the rejected prominence baseline, and
+soft category/geographic coverage policies. Evaluate reviewed landmark/local/
+chain cases by source and taxonomy without building a shard. Add a genuine
+place-level fame signal before considering automatic Places in HEAD.

@@ -684,17 +684,21 @@ class TestPlacesShardBuild:
                 SELECT * FROM (VALUES
                     ('confidence-only', 1, 'Confidence Only', 34.0, -118.0,
                      -118.01, 33.99, -117.99, 34.01, 'US', 'US-CA', 'Los Angeles',
-                     NULL, NULL, NULL, NULL, 0.99, NULL, NULL),
+                     NULL, NULL, NULL, NULL, 0.99, NULL, NULL, 'open'),
                     ('prominent-place', 1, 'Prominent Place', 37.6, -122.4,
                      -122.41, 37.59, -122.39, 37.61, 'US', 'US-CA', 'San Francisco',
-                     'airport', 'transport', 'Known Brand', 'Q123', 0.70, NULL, NULL)
+                     'airport', 'transport', 'Known Brand', 'Q123', 0.70, NULL, NULL, 'open'),
+                    ('closed-place', 1, 'Closed Place', 37.7, -122.3,
+                     -122.31, 37.69, -122.29, 37.71, 'US', 'US-CA', 'San Francisco',
+                     'airport', 'transport', 'Closed Brand', 'Q999', 1.0, NULL, NULL,
+                     'permanently_closed')
                 ) AS t(
                     gers_id, version, primary_name, lat, lon,
                     bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                     country, region, locality,
                     category_primary, basic_category,
                     brand_name, brand_wikidata, confidence,
-                    search_name_base, search_context_base
+                    search_name_base, search_context_base, operating_status
                 )
             ) TO '{path}' (FORMAT PARQUET)
         """)
@@ -718,6 +722,19 @@ class TestPlacesShardBuild:
         assert compute_places_importance(
             0.70, "Known Brand", "Q123", "airport", None
         ) == pytest.approx(0.9)
+
+    def test_permanently_closed_flat_places_are_excluded(self, tmp_path):
+        source = tmp_path / "places.parquet"
+        self.write_places_parquet(source)
+        shard_path = tmp_path / "US-CA-places.db"
+
+        info = build_places_shard(source, shard_path, "test", region_code="US-CA")
+
+        db = sqlite3.connect(shard_path)
+        ids = {row[0] for row in db.execute("SELECT gers_id FROM divisions")}
+        db.close()
+        assert info["record_count"] == 2
+        assert ids == {"confidence-only", "prominent-place"}
 
     def test_collection_uses_worker_visible_shard_id_and_href(self, tmp_path):
         source = tmp_path / "places.parquet"

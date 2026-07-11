@@ -857,6 +857,44 @@ impl ShardLoader {
         filtered
     }
 
+    /// Select Places shards only when an existing division route or explicit
+    /// caller region justifies them.  An unroutable Places query must not fall
+    /// through to an arbitrary prototype region (historically US-CA).
+    fn select_places_shards(
+        collection: &StacCollection,
+        division_shards: &[String],
+        user_location: &UserLocation,
+    ) -> Vec<String> {
+        let mut places = Vec::new();
+        for shard_id in division_shards {
+            if shard_id == "HEAD" {
+                continue;
+            }
+            let places_id = format!("{}-places", shard_id);
+            if Self::collection_has_shard(collection, &places_id)
+                && !division_shards.contains(&places_id)
+                && !places.contains(&places_id)
+            {
+                places.push(places_id);
+            }
+        }
+
+        if let (Some(country), Some(region_code)) =
+            (&user_location.country, &user_location.region_code)
+        {
+            let places_id = format!("{}-{}-places", country, region_code);
+            if Self::collection_has_shard(collection, &places_id)
+                && !division_shards.contains(&places_id)
+                && !places.contains(&places_id)
+            {
+                places.push(places_id);
+            }
+        }
+
+        places.truncate(MAX_PLACES_SHARDS);
+        places
+    }
+
     /// Attempt search against a specific version.
     async fn try_search(
         &self,
@@ -941,63 +979,15 @@ impl ShardLoader {
         let mut shard_ids = vec!["HEAD".to_string()];
         shard_ids.extend(extra.clone());
 
-        let mut places_extra: Vec<String> = Vec::new();
-        if includes_place {
-            for sid in &shard_ids {
-                if sid == "HEAD" {
-                    continue;
-                }
-                let pid = format!("{}-places", sid);
-                if Self::collection_has_shard(&collection, &pid)
-                    && !shard_ids.contains(&pid)
-                    && !places_extra.contains(&pid)
-                {
-                    places_extra.push(pid);
-                }
+        let places_extra = if includes_place {
+            let places = Self::select_places_shards(&collection, &shard_ids, user_location);
+            if !places.is_empty() {
+                console_log!("Places extra shards: {:?}", places);
             }
-            if let (Some(country), Some(region_code)) =
-                (&user_location.country, &user_location.region_code)
-            {
-                let region = format!("{}-{}", country, region_code);
-                let pid = format!("{}-places", region);
-                if Self::collection_has_shard(&collection, &pid)
-                    && !shard_ids.contains(&pid)
-                    && !places_extra.contains(&pid)
-                {
-                    places_extra.push(pid);
-                }
-            }
-            if places_extra.is_empty() {
-                let mut candidates: Vec<String> = collection
-                    .items
-                    .keys()
-                    .filter(|k| k.contains("places"))
-                    .cloned()
-                    .collect();
-                candidates.sort_by(|a, b| {
-                    if a == "US-CA-places" {
-                        std::cmp::Ordering::Less
-                    } else if b == "US-CA-places" {
-                        std::cmp::Ordering::Greater
-                    } else {
-                        a.cmp(b)
-                    }
-                });
-                for c in candidates {
-                    if !shard_ids.contains(&c) && !places_extra.contains(&c) {
-                        places_extra.push(c);
-                    }
-                    if places_extra.len() >= MAX_PLACES_SHARDS {
-                        break;
-                    }
-                }
-            } else {
-                places_extra.truncate(MAX_PLACES_SHARDS);
-            }
-            if !places_extra.is_empty() {
-                console_log!("Places extra shards: {:?}", places_extra);
-            }
-        }
+            places
+        } else {
+            Vec::new()
+        };
 
         let mut all_shard_ids = shard_ids.clone();
         all_shard_ids.extend(places_extra.clone());
@@ -2423,5 +2413,43 @@ mod tests {
             .filter(|sid| ShardLoader::collection_has_shard(&collection, sid))
             .collect();
         assert!(filtered.contains(&"FR".to_string()));
+    }
+
+    #[test]
+    fn test_places_shards_require_a_justified_region() {
+        let collection = collection_with_bboxes(&[
+            ("HEAD", Some([-180.0, -90.0, 180.0, 90.0])),
+            ("US-CA", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-CA-places", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NY-places", Some([-80.0, 40.0, -71.0, 45.1])),
+        ]);
+
+        // Merely having a prototype Places shard in the collection is not a
+        // reason to search it for an otherwise unroutable global query.
+        let no_route = ShardLoader::select_places_shards(
+            &collection,
+            &["HEAD".to_string()],
+            &UserLocation::default(),
+        );
+        assert!(no_route.is_empty());
+
+        let division_route = ShardLoader::select_places_shards(
+            &collection,
+            &["HEAD".to_string(), "US-CA".to_string()],
+            &UserLocation::default(),
+        );
+        assert_eq!(division_route, vec!["US-CA-places".to_string()]);
+
+        let caller_region = UserLocation {
+            country: Some("US".to_string()),
+            region_code: Some("NY".to_string()),
+            ..Default::default()
+        };
+        let location_route = ShardLoader::select_places_shards(
+            &collection,
+            &["HEAD".to_string()],
+            &caller_region,
+        );
+        assert_eq!(location_route, vec!["US-NY-places".to_string()]);
     }
 }

@@ -1,7 +1,7 @@
 /**
  * Overture Geocoder JavaScript/TypeScript Client
  *
- * Forward geocoder using Overture Maps data with Nominatim-compatible API.
+ * Client for the divisions-first Overture Geocoder API.
  */
 
 // NOTE: @bradrichardson/overturemaps is an OPTIONAL peer dependency.

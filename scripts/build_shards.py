@@ -2321,15 +2321,16 @@ def places_importance_sql(
     """.strip()
 
 
-def _places_try_flat_schema(parquet_path: Path) -> bool:
+def _places_flat_columns(parquet_path: Path) -> set[str] | None:
     try:
         con = duckdb.connect()
         cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{str(parquet_path.resolve())}') LIMIT 0").fetchall()]
         con.close()
         needed = {"gers_id", "primary_name", "lat", "lon"}
-        return needed.issubset(set(cols))
+        column_set = set(cols)
+        return column_set if needed.issubset(column_set) else None
     except Exception:
-        return False
+        return None
 
 
 def build_places_shard(
@@ -2346,6 +2347,7 @@ def build_places_shard(
     if isinstance(parquet_path, str) and parquet_path.startswith("s3://"):
         parquet_str = parquet_path
         is_flat = False
+        flat_columns: set[str] = set()
     else:
         pp = Path(parquet_path) if not isinstance(parquet_path, Path) else parquet_path
         try:
@@ -2354,10 +2356,13 @@ def build_places_shard(
             exists = False
         if exists:
             parquet_str = str(pp.resolve())
-            is_flat = _places_try_flat_schema(pp)
+            detected_columns = _places_flat_columns(pp)
+            is_flat = detected_columns is not None
+            flat_columns = detected_columns or set()
         else:
             parquet_str = str(parquet_path)
             is_flat = False
+            flat_columns = set()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists():
@@ -2368,6 +2373,11 @@ def build_places_shard(
     build_shard_schema(db)
 
     if is_flat:
+        status_predicate = (
+            "COALESCE(operating_status, 'open') != 'permanently_closed'"
+            if "operating_status" in flat_columns
+            else "TRUE"
+        )
         importance_expr = places_importance_sql(
             "confidence",
             "brand_name",
@@ -2386,6 +2396,7 @@ def build_places_shard(
                     COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
                     COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
                 FROM read_parquet('{parquet_str}')
+                WHERE {status_predicate}
                 ORDER BY {importance_expr} DESC,
                          confidence DESC NULLS LAST,
                          gers_id
@@ -2402,6 +2413,7 @@ def build_places_shard(
                     COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
                     COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
                 FROM read_parquet('{parquet_str}')
+                WHERE {status_predicate}
             """
         cursor = con.execute(query)
     else:
@@ -2452,6 +2464,7 @@ def build_places_shard(
             WHERE bbox.xmin BETWEEN {PLACES_CA_BBOX['xmin']} AND {PLACES_CA_BBOX['xmax']}
               AND bbox.ymin BETWEEN {PLACES_CA_BBOX['ymin']} AND {PLACES_CA_BBOX['ymax']}
               AND names.primary IS NOT NULL
+              AND COALESCE(operating_status, 'open') != 'permanently_closed'
             {order_clause}
             {limit_clause}
         """
