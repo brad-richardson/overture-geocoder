@@ -1,0 +1,48 @@
+{
+  "description": "Starter CA cases. Replace or supplement name rules with reviewed GERS IDs before treating metrics as a release gate.",
+  "cases": [
+    {
+      "id": "golden_gate_bridge",
+      "query": "Golden Gate Bridge",
+      "routing_class": "famous_unique",
+      "target_name": "Golden Gate Bridge",
+      "target_lat": 37.8199,
+      "target_lon": -122.4783,
+      "tolerance_km": 5,
+      "note": "Global-head candidate if the feature exists in Overture Places and survives the smallest sample."
+    },
+    {
+      "id": "disneyland",
+      "query": "Disneyland",
+      "routing_class": "famous_unique",
+      "target_name": "Disneyland",
+      "target_lat": 33.8121,
+      "target_lon": -117.9190,
+      "tolerance_km": 5
+    },
+    {
+      "id": "tartine_manufactory",
+      "query": "Tartine Manufactory",
+      "routing_class": "local_unique",
+      "target_name": "Tartine Manufactory",
+      "target_lat": 37.7614,
+      "target_lon": -122.4108,
+      "tolerance_km": 2
+    },
+    {
+      "id": "starbucks",
+      "query": "Starbucks",
+      "routing_class": "ubiquitous_brand",
+      "target_brand": "Starbucks",
+      "min_retained": 1,
+      "note": "Retention count is descriptive; chain locations should remain region-routed."
+    },
+    {
+      "id": "mcdonalds",
+      "query": "McDonald's",
+      "routing_class": "ubiquitous_brand",
+      "target_brand": "McDonald's",
+      "min_retained": 1
+    }
+  ]
+}
