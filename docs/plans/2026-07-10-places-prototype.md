@@ -57,11 +57,11 @@ build_places_shard(parquet_path, region_filter, output_path, version)
   - `search_alias` = via `build_search_alias` (concatenations, abbreviation variants)
 - **Importance:**
   ```python
-  importance = min(1.0, 
-    confidence*0.5 + 
-    (0.20 if brand else 0) + 
-    (0.10 if brand.wikidata else 0) + 
-    (0.10 if confidence>=0.90 else 0) + 
+  importance = min(1.0,
+    confidence*0.5 +
+    (0.20 if brand else 0) +
+    (0.10 if brand.wikidata else 0) +
+    (0.10 if confidence>=0.90 else 0) +
     category_prior)
   ```
   Category prior small boost: airport 0.25, national_park 0.20, university 0.15, hospital/stadium 0.12, museum 0.10, hotel 0.05, restaurant 0.02.

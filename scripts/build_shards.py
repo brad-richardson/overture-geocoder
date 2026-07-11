@@ -2098,7 +2098,7 @@ def compute_places_importance(
     category_primary: str | None,
     basic_category: str | None,
 ) -> float:
-    conf = confidence if confidence is not None else 0.5
+    conf = float(confidence) if confidence is not None else 0.5
     conf = max(0.0, min(1.0, conf))
     importance = conf * PLACES_CONFIDENCE_WEIGHT
     if brand_name:
@@ -2111,6 +2111,39 @@ def compute_places_importance(
     if cat in PLACES_CATEGORY_PRIOR:
         importance += PLACES_CATEGORY_PRIOR[cat]
     return min(1.0, importance)
+
+
+def places_importance_sql(
+    confidence_expr: str,
+    brand_name_expr: str,
+    brand_wikidata_expr: str,
+    category_primary_expr: str,
+    basic_category_expr: str,
+) -> str:
+    """Return the SQL equivalent of compute_places_importance()."""
+    category_cases = " ".join(
+        f"WHEN '{category}' THEN {prior}"
+        for category, prior in PLACES_CATEGORY_PRIOR.items()
+    )
+    category_expr = (
+        f"LOWER(COALESCE({category_primary_expr}, {basic_category_expr}, ''))"
+    )
+    return f"""
+        LEAST(1.0,
+            LEAST(1.0, GREATEST(0.0, COALESCE({confidence_expr}, 0.5)))
+                * {PLACES_CONFIDENCE_WEIGHT}
+            + CASE WHEN {brand_name_expr} IS NOT NULL AND {brand_name_expr} != ''
+                THEN {PLACES_BRAND_BONUS} ELSE 0 END
+            + CASE WHEN {brand_name_expr} IS NOT NULL AND {brand_name_expr} != ''
+                         AND {brand_wikidata_expr} IS NOT NULL
+                         AND {brand_wikidata_expr} != ''
+                THEN {PLACES_BRAND_WIKIDATA_BONUS} ELSE 0 END
+            + CASE WHEN COALESCE({confidence_expr}, 0.5)
+                         >= {PLACES_HIGH_CONFIDENCE_THRESHOLD}
+                THEN {PLACES_HIGH_CONFIDENCE_BONUS} ELSE 0 END
+            + CASE {category_expr} {category_cases} ELSE 0 END
+        )
+    """.strip()
 
 
 def _places_try_flat_schema(parquet_path: Path) -> bool:
@@ -2131,6 +2164,10 @@ def build_places_shard(
     region_code: str = "US-CA",
     limit: int | None = None,
 ) -> dict:
+    region_code = validate_region_code(region_code)
+    if limit is not None and limit <= 0:
+        raise ValueError("places limit must be greater than zero")
+
     if isinstance(parquet_path, str) and parquet_path.startswith("s3://"):
         parquet_str = parquet_path
         is_flat = False
@@ -2156,6 +2193,13 @@ def build_places_shard(
     build_shard_schema(db)
 
     if is_flat:
+        importance_expr = places_importance_sql(
+            "confidence",
+            "brand_name",
+            "brand_wikidata",
+            "category_primary",
+            "basic_category",
+        )
         if limit:
             query = f"""
                 SELECT
@@ -2164,10 +2208,12 @@ def build_places_shard(
                     country, region, locality,
                     category_primary, basic_category,
                     brand_name, brand_wikidata, confidence,
-                    COALESCE(search_name_base, LOWER(primary_name)) as search_name_base,
-                    COALESCE(search_context_base, LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
+                    COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
+                    COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
                 FROM read_parquet('{parquet_str}')
-                ORDER BY confidence DESC NULLS LAST, brand_name DESC NULLS LAST
+                ORDER BY {importance_expr} DESC,
+                         confidence DESC NULLS LAST,
+                         gers_id
                 LIMIT {int(limit)}
             """
         else:
@@ -2178,15 +2224,34 @@ def build_places_shard(
                     country, region, locality,
                     category_primary, basic_category,
                     brand_name, brand_wikidata, confidence,
-                    COALESCE(search_name_base, LOWER(primary_name)) as search_name_base,
-                    COALESCE(search_context_base, LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
+                    COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
+                    COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
                 FROM read_parquet('{parquet_str}')
             """
         cursor = con.execute(query)
     else:
+        if region_code != "US-CA":
+            db.close()
+            con.close()
+            output_path.unlink(missing_ok=True)
+            raise ValueError(
+                "raw Overture places extraction currently supports only US-CA; "
+                "provide a flattened, region-filtered parquet for other regions"
+            )
         print("  Places source appears to be raw Overture places parquet, using nested extraction...")
         limit_clause = f"LIMIT {int(limit)}" if limit else ""
-        order_clause = "ORDER BY confidence DESC NULLS LAST" if limit else ""
+        importance_expr = places_importance_sql(
+            "confidence",
+            "brand.names.primary",
+            "brand.wikidata",
+            "categories.primary",
+            "basic_category",
+        )
+        order_clause = (
+            f"ORDER BY {importance_expr} DESC, confidence DESC NULLS LAST, id"
+            if limit
+            else ""
+        )
         query = f"""
             SELECT
                 id as gers_id,
@@ -2302,6 +2367,7 @@ def build_places_shard(
     con.close()
 
     return {
+        "country": region_code.split("-", 1)[0],
         "region": region_code,
         "record_count": count,
         "size_bytes": output_path.stat().st_size,
@@ -2312,8 +2378,10 @@ def build_places_shard(
 def build_places_shards(args, version: str, version_dir: Path) -> dict:
     places_subdir = version_dir / "places"
     parquet_path = getattr(args, "places_parquet", Path("exports/places-CA.parquet"))
-    region_code: str = getattr(args, "places_region", "US-CA")
+    region_code = validate_region_code(getattr(args, "places_region", "US-CA"))
     limit: int | None = getattr(args, "places_limit", None)
+    if limit is not None and limit <= 0:
+        raise ValueError("--places-limit must be greater than zero")
 
     # Handle S3 case: parquet_path may be string or Path that doesn't exist
     is_s3 = isinstance(parquet_path, str) and str(parquet_path).startswith("s3://")
@@ -2339,13 +2407,39 @@ def build_places_shards(args, version: str, version_dir: Path) -> dict:
     size_mb = info["size_bytes"] / 1024 / 1024
     print(f"  {region_code}: {info['record_count']:,} records, {size_mb:.1f} MB")
 
-    collection = generate_stac_collection(version, {region_code: info}, {region_code: ""}, "places")
+    shard_id = f"{region_code}-places"
+    shard_hash = hash_file(output_path)
+    collection = generate_stac_collection(
+        version,
+        {shard_id: info},
+        {shard_id: shard_hash},
+        "places",
+    )
     collection["id"] = f"geocoder-places-shards-{version}"
     collection["title"] = f"Overture Places Shards {version}"
     collection["description"] = "Experimental places (POI) shards for CA prototype"
     write_json(version_dir / "places-collection.json", collection)
 
-    return {region_code: info}
+    # The worker reads collection.json for every forward request. Add the
+    # experimental places item there when a forward collection already exists,
+    # while retaining places-collection.json as the standalone build artifact.
+    forward_collection_path = version_dir / "collection.json"
+    if forward_collection_path.exists():
+        with open(forward_collection_path) as f:
+            forward_collection = json.load(f)
+        forward_collection.setdefault("items", {})[shard_id] = collection["items"][shard_id]
+        summaries = forward_collection.setdefault("summaries", {})
+        items = forward_collection["items"]
+        summaries["shard_count"] = len(items)
+        summaries["total_records"] = sum(
+            item.get("record_count", 0) for item in items.values()
+        )
+        summaries["total_size_bytes"] = sum(
+            item.get("size_bytes", 0) for item in items.values()
+        )
+        write_json(forward_collection_path, forward_collection)
+
+    return {shard_id: info}
 
 
 
