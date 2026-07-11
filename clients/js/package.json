@@ -1,7 +1,7 @@
 {
   "name": "@bradrichardson/overture-geocoder",
   "version": "0.3.0",
-  "description": "Forward geocoder using Overture Maps data with Nominatim-compatible API",
+  "description": "Client for the divisions-first Overture Geocoder API",
   "type": "module",
   "main": "./dist/index.cjs",
   "module": "./dist/index.js",

@@ -1,5 +1,14 @@
 # Places Single-State Prototype (CA) - Findings & Plan
 
+> **2026-07-11 experiment note:** The confidence + brand + category importance
+> formula below is now a rejected baseline, not a recommended production
+> ranking. Current-release audits show confidence is existence confidence and
+> brand/contact fields are heavily source-confounded; the local top-100 sample
+> collapsed to 86 hotels. Keep the prototype isolated, remove arbitrary region
+> fallback, and do not select a per-state limit or populate HEAD until a full
+> current-release, source-stratified rank audit is reviewed. Prefer
+> `basic_category`/`taxonomy`; legacy `categories` is being retired.
+
 **Date:** 2026-07-10
 **Branch:** `places-single-state-prototype`
 **Goal:** Validate shard size and ranking for Places theme, single-state slice (CA), without full global rebuild.
@@ -31,9 +40,9 @@ bbox STRUCT(xmin DOUBLE, xmax DOUBLE, ymin DOUBLE, ymax DOUBLE)
 theme, type VARCHAR
 ```
 
-### CA Filtering
+### Experimental CA-bbox filtering
 - Address filter `list_contains(addresses.country='US') AND region='CA'` is unreliable: first sample showed geometries in Hawaii/Texas but addresses said CA (data conflation issues).
-- Geographic truth: bbox filter `bbox.xmin BETWEEN -124.5 AND -114.0 AND bbox.ymin BETWEEN 32.5 AND 42.1` yields **1,940,735** places for CA.
+- The rectangle filter `bbox.xmin BETWEEN -124.5 AND -114.0 AND bbox.ymin BETWEEN 32.5 AND 42.1` yielded **1,940,735** places, but it is not geographic truth and can include Nevada, Arizona, Oregon, or Mexico. It is now explicitly labeled a non-promotable CA-bbox slice. An exact `US-CA` shard requires containment by the pinned release's California division-area polygon.
 - US total via bbox would be much larger; via address filter timed out after 120s (requires full scan). Estimated US ~15-20M places (CA ~10% of US).
 
 ### Existing Download Patterns
@@ -49,7 +58,7 @@ theme, type VARCHAR
 build_places_shard(parquet_path, region_filter, output_path, version)
 ```
 
-- Accepts either flattened parquet (exports/places-CA.parquet) or raw Overture S3 URI (hive_partitioning=true, spatial).
+- Accepts either the flattened experimental bbox parquet (`exports/places-CA-bbox.parquet`) or raw Overture S3 URI (hive_partitioning=true, spatial).
 - **Flat detection**: `_places_try_flat_schema` checks for gers_id, primary_name, lat, lon columns.
 - **Schema:** Reuses `build_shard_schema` (divisions table) with `type='place'` so existing worker query (`SEARCH_DIVISIONS_SQL_WEIGHTED`) works without modification. Extra columns stored in search_name/context:
   - `search_name` = lower(primary + brand + categories.primary + basic_category)
@@ -65,27 +74,36 @@ build_places_shard(parquet_path, region_filter, output_path, version)
     category_prior)
   ```
   Category prior small boost: airport 0.25, national_park 0.20, university 0.15, hospital/stadium 0.12, museum 0.10, hotel 0.05, restaurant 0.02.
-- **Output:** `shards/{version}/places/{region}-places.db`, e.g. `US-CA-places.db`
+- **Current experimental output:** `shards/{version}/places-experimental/EXPERIMENT-CA-BBOX-places.db`. It is deliberately excluded from forward `collection.json` and cannot be mistaken for an exact `US-CA` shard.
 - **Collection:** `places-collection.json` similar to reverse-collection, with bbox.
 
 ### CLI Flags Added
 
 ```
 --places                    Build places prototype shards
+--experimental-places-bbox-slice
+                            Required non-promotable bbox acknowledgement
 --places-region US-CA       Region code (default US-CA)
---places-parquet PATH       Flattened or raw parquet (default exports/places-CA.parquet, fallback to S3 bbox)
---places-limit N            Sampling: top N by confidence DESC
+--places-parquet PATH       Flattened or raw parquet (default exports/places-CA-bbox.parquet, fallback to S3 bbox)
+--places-limit N            Experimental sampling limit
+--places-sampling-strategy confidence|experimental-prominence
+                            Required with a limit; prominence is rejected
+--places-ranking-strategy neutral|confidence|experimental-prominence
+                            Stored/query rank independent of sampling (default confidence)
 --overture-release TAG      For S3 fallback (default 2026-06-17.0)
 ```
 
 Usage:
 ```bash
-python scripts/build_shards.py --places --places-region US-CA --places-limit 50000 --version 2026-07-10-places-50k
+python scripts/build_shards.py --places --experimental-places-bbox-slice \
+  --places-region US-CA --places-limit 50000 \
+  --places-sampling-strategy confidence --places-ranking-strategy confidence \
+  --version 2026-07-10-places-50k
 ```
 
 ### Download Scripts
 
-- `scripts/download_places.sql`: template with `__OVERTURE_RELEASE__` placeholder, outputs `exports/places-CA.parquet` flattened.
+- `scripts/download_places.sql`: template with `__OVERTURE_RELEASE__` placeholder, outputs the non-promotable `exports/places-CA-bbox.parquet` slice.
 - `scripts/download_places.sh [RELEASE] [LIMIT]`: wrapper fetching latest release via stac.py, supports sampled download via ORDER BY confidence.
 
 ## 3. Sampling & Size Estimates
@@ -213,7 +231,7 @@ This matches existing pattern: no breaking change, additive param.
 - Files added/modified:
   - `scripts/build_shards.py`: added places constants, `compute_places_importance`, `build_places_shard`, `build_places_shards`, CLI flags
   - `scripts/download_places.sql` + `scripts/download_places.sh`: CA bbox download helpers
-- Test shards built locally (not committed, .db files):
+- Historical test shards built before the bbox guard (measurements only; do not promote):
   - `shards/2026-07-10-places-test/places/US-CA-places.db` 10k / 5.1MB
   - `shards/2026-07-10-places-50k/places/US-CA-places.db` 50k / 28.4MB
   - `shards/2026-07-10-places-100k/places/US-CA-places.db` 100k / 56.9MB
@@ -223,8 +241,11 @@ This matches existing pattern: no breaking change, additive param.
 Run to reproduce CA sample:
 ```bash
 ./scripts/download_places.sh 2026-06-17.0 50000
-python scripts/build_shards.py --places --places-region US-CA --places-limit 50000 --version dev
-sqlite3 shards/dev/places/US-CA-places.db "SELECT COUNT(*), SUM(LENGTH(search_name))/COUNT(*) FROM divisions;"
+python scripts/build_shards.py --places --experimental-places-bbox-slice \
+  --places-region US-CA --places-limit 50000 \
+  --places-sampling-strategy confidence --version dev
+sqlite3 shards/dev/places-experimental/EXPERIMENT-CA-BBOX-places.db \
+  "SELECT COUNT(*), SUM(LENGTH(search_name))/COUNT(*) FROM divisions;"
 ```
 
 ## 8. Open Questions

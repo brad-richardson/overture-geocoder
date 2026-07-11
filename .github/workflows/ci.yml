@@ -36,7 +36,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install duckdb pytest
+          pip install duckdb pytest h3==4.3.1 shapely==2.1.2
       - name: Run pipeline tests
         run: pytest tests/ -v
 

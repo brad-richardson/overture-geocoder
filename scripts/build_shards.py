@@ -186,6 +186,7 @@ PLACES_CA_BBOX = {
     "ymin": 32.5,
     "ymax": 42.1,
 }
+PLACES_CA_BBOX_SLICE_ID = "EXPERIMENT-CA-BBOX-places"
 
 PLACES_CONFIDENCE_WEIGHT = 0.5
 PLACES_BRAND_BONUS = 0.20
@@ -1849,7 +1850,7 @@ def write_build_meta(
         wiki_file = Path(wiki_file)
 
     parquet_path = (
-        getattr(args, "places_parquet", Path("exports/places-CA.parquet"))
+        getattr(args, "places_parquet", Path("exports/places-CA-bbox.parquet"))
         if is_places
         else getattr(args, "parquet", DIVISIONS_PARQUET)
     )
@@ -1910,6 +1911,15 @@ def write_build_meta(
         "args": {
             "reverse": bool(getattr(args, "reverse", False)),
             "places": is_places,
+            "experimental_places_bbox_slice": bool(
+                getattr(args, "experimental_places_bbox_slice", False)
+            ),
+            "places_sampling_strategy": getattr(
+                args, "places_sampling_strategy", None
+            ),
+            "places_ranking_strategy": getattr(
+                args, "places_ranking_strategy", "confidence"
+            ),
             "no_wiki_importance": bool(getattr(args, "no_wiki_importance", False)),
             "no_router": bool(getattr(args, "no_router", False)),
             "countries": getattr(args, "countries", None),
@@ -2288,6 +2298,31 @@ def compute_places_importance(
     return min(1.0, importance)
 
 
+def compute_places_stored_importance(
+    ranking_strategy: str,
+    confidence: float | None,
+    brand_name: str | None,
+    brand_wikidata: str | None,
+    category_primary: str | None,
+    basic_category: str | None,
+) -> float:
+    """Compute stored/query importance independently from sample selection."""
+    if ranking_strategy == "neutral":
+        return 0.5
+    if ranking_strategy == "confidence":
+        conf = float(confidence) if confidence is not None else 0.5
+        return max(0.0, min(1.0, conf))
+    if ranking_strategy == "experimental-prominence":
+        return compute_places_importance(
+            confidence,
+            brand_name,
+            brand_wikidata,
+            category_primary,
+            basic_category,
+        )
+    raise ValueError(f"unknown places ranking strategy: {ranking_strategy}")
+
+
 def places_importance_sql(
     confidence_expr: str,
     brand_name_expr: str,
@@ -2321,15 +2356,16 @@ def places_importance_sql(
     """.strip()
 
 
-def _places_try_flat_schema(parquet_path: Path) -> bool:
+def _places_flat_columns(parquet_path: Path) -> set[str] | None:
     try:
         con = duckdb.connect()
         cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{str(parquet_path.resolve())}') LIMIT 0").fetchall()]
         con.close()
         needed = {"gers_id", "primary_name", "lat", "lon"}
-        return needed.issubset(set(cols))
+        column_set = set(cols)
+        return column_set if needed.issubset(column_set) else None
     except Exception:
-        return False
+        return None
 
 
 def build_places_shard(
@@ -2338,14 +2374,31 @@ def build_places_shard(
     version: str,
     region_code: str = "US-CA",
     limit: int | None = None,
+    sampling_strategy: str | None = None,
+    ranking_strategy: str = "confidence",
 ) -> dict:
     region_code = validate_region_code(region_code)
     if limit is not None and limit <= 0:
         raise ValueError("places limit must be greater than zero")
+    if limit is not None and sampling_strategy not in {
+        "confidence",
+        "experimental-prominence",
+    }:
+        raise ValueError(
+            "places sampling requires an explicit strategy: confidence or "
+            "experimental-prominence"
+        )
+    if ranking_strategy not in {
+        "neutral",
+        "confidence",
+        "experimental-prominence",
+    }:
+        raise ValueError(f"unknown places ranking strategy: {ranking_strategy}")
 
     if isinstance(parquet_path, str) and parquet_path.startswith("s3://"):
         parquet_str = parquet_path
         is_flat = False
+        flat_columns: set[str] = set()
     else:
         pp = Path(parquet_path) if not isinstance(parquet_path, Path) else parquet_path
         try:
@@ -2354,10 +2407,13 @@ def build_places_shard(
             exists = False
         if exists:
             parquet_str = str(pp.resolve())
-            is_flat = _places_try_flat_schema(pp)
+            detected_columns = _places_flat_columns(pp)
+            is_flat = detected_columns is not None
+            flat_columns = detected_columns or set()
         else:
             parquet_str = str(parquet_path)
             is_flat = False
+            flat_columns = set()
 
     output_path.parent.mkdir(parents=True, exist_ok=True)
     if output_path.exists():
@@ -2368,6 +2424,11 @@ def build_places_shard(
     build_shard_schema(db)
 
     if is_flat:
+        status_predicate = (
+            "COALESCE(operating_status, 'open') != 'permanently_closed'"
+            if "operating_status" in flat_columns
+            else "TRUE"
+        )
         importance_expr = places_importance_sql(
             "confidence",
             "brand_name",
@@ -2376,6 +2437,11 @@ def build_places_shard(
             "basic_category",
         )
         if limit:
+            sampling_order = (
+                f"{importance_expr} DESC, confidence DESC NULLS LAST, gers_id"
+                if sampling_strategy == "experimental-prominence"
+                else "confidence DESC NULLS LAST, gers_id"
+            )
             query = f"""
                 SELECT
                     gers_id, version, primary_name, lat, lon,
@@ -2386,9 +2452,8 @@ def build_places_shard(
                     COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
                     COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
                 FROM read_parquet('{parquet_str}')
-                ORDER BY {importance_expr} DESC,
-                         confidence DESC NULLS LAST,
-                         gers_id
+                WHERE {status_predicate}
+                ORDER BY {sampling_order}
                 LIMIT {int(limit)}
             """
         else:
@@ -2402,6 +2467,7 @@ def build_places_shard(
                     COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
                     COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
                 FROM read_parquet('{parquet_str}')
+                WHERE {status_predicate}
             """
         cursor = con.execute(query)
     else:
@@ -2422,11 +2488,13 @@ def build_places_shard(
             "categories.primary",
             "basic_category",
         )
-        order_clause = (
-            f"ORDER BY {importance_expr} DESC, confidence DESC NULLS LAST, id"
-            if limit
-            else ""
-        )
+        order_clause = ""
+        if limit:
+            order_clause = (
+                f"ORDER BY {importance_expr} DESC, confidence DESC NULLS LAST, id"
+                if sampling_strategy == "experimental-prominence"
+                else "ORDER BY confidence DESC NULLS LAST, id"
+            )
         query = f"""
             SELECT
                 id as gers_id,
@@ -2452,6 +2520,7 @@ def build_places_shard(
             WHERE bbox.xmin BETWEEN {PLACES_CA_BBOX['xmin']} AND {PLACES_CA_BBOX['xmax']}
               AND bbox.ymin BETWEEN {PLACES_CA_BBOX['ymin']} AND {PLACES_CA_BBOX['ymax']}
               AND names.primary IS NOT NULL
+              AND COALESCE(operating_status, 'open') != 'permanently_closed'
             {order_clause}
             {limit_clause}
         """
@@ -2508,8 +2577,13 @@ def build_places_shard(
                 except Exception:
                     ver = 0
 
-            importance = compute_places_importance(
-                confidence, brand_name, brand_wikidata, cat_primary, basic_cat
+            importance = compute_places_stored_importance(
+                ranking_strategy,
+                confidence,
+                brand_name,
+                brand_wikidata,
+                cat_primary,
+                basic_cat,
             )
 
             c = (country or "US")[:2] or "US"
@@ -2531,6 +2605,18 @@ def build_places_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('region', ?)", (region_code,))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('type', ?)", ("places",))
+    db.execute(
+        "INSERT OR REPLACE INTO metadata VALUES ('experimental_scope', ?)",
+        ("ca-bbox-not-state-boundary",),
+    )
+    db.execute(
+        "INSERT OR REPLACE INTO metadata VALUES ('sampling_strategy', ?)",
+        (sampling_strategy or "none",),
+    )
+    db.execute(
+        "INSERT OR REPLACE INTO metadata VALUES ('ranking_strategy', ?)",
+        (ranking_strategy,),
+    )
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
                (datetime.now(timezone.utc).isoformat(),))
@@ -2551,12 +2637,31 @@ def build_places_shard(
 
 
 def build_places_shards(args, version: str, version_dir: Path) -> dict:
-    places_subdir = version_dir / "places"
-    parquet_path = getattr(args, "places_parquet", Path("exports/places-CA.parquet"))
+    if not bool(getattr(args, "experimental_places_bbox_slice", False)):
+        raise ValueError(
+            "Places output is only a CA-bbox experiment; pass "
+            "--experimental-places-bbox-slice to acknowledge it is not an exact "
+            "US-CA shard and cannot be promoted"
+        )
+    places_subdir = version_dir / "places-experimental"
+    parquet_path = getattr(
+        args, "places_parquet", Path("exports/places-CA-bbox.parquet")
+    )
     region_code = validate_region_code(getattr(args, "places_region", "US-CA"))
     limit: int | None = getattr(args, "places_limit", None)
+    sampling_strategy: str | None = getattr(args, "places_sampling_strategy", None)
+    ranking_strategy: str = getattr(args, "places_ranking_strategy", "confidence")
     if limit is not None and limit <= 0:
         raise ValueError("--places-limit must be greater than zero")
+    if region_code != "US-CA":
+        raise ValueError(
+            "the current experimental bbox extractor is fixed to the US-CA bbox"
+        )
+    if limit is not None and sampling_strategy is None:
+        raise ValueError(
+            "--places-limit requires --places-sampling-strategy; the old composed "
+            "prominence formula is a rejected experimental baseline"
+        )
 
     # Handle S3 case: parquet_path may be string or Path that doesn't exist
     is_s3 = isinstance(parquet_path, str) and str(parquet_path).startswith("s3://")
@@ -2574,46 +2679,48 @@ def build_places_shards(args, version: str, version_dir: Path) -> dict:
             args.places_parquet = parquet_path
             is_s3 = True
 
-    output_path = places_subdir / f"{region_code}-places.db"
-    print(f"Building places shard for {region_code} from {parquet_path}")
+    output_path = places_subdir / f"{PLACES_CA_BBOX_SLICE_ID}.db"
+    print(f"Building experimental CA bbox Places slice from {parquet_path}")
+    print("  WARNING: this is a rectangle, not an exact California state shard")
+    print(f"  Stored/query ranking strategy: {ranking_strategy}")
+    if ranking_strategy == "experimental-prominence":
+        print("  WARNING: stored ranking uses the rejected prominence baseline")
     if limit:
-        print(f"  Sampling limit: {limit:,} most prominent places")
+        print(f"  Sampling limit: {limit:,}; strategy: {sampling_strategy}")
+        if sampling_strategy == "experimental-prominence":
+            print("  WARNING: experimental-prominence is a rejected baseline")
 
-    info = build_places_shard(parquet_path, output_path, version, region_code=region_code, limit=limit)
+    info = build_places_shard(
+        parquet_path,
+        output_path,
+        version,
+        region_code=region_code,
+        limit=limit,
+        sampling_strategy=sampling_strategy,
+        ranking_strategy=ranking_strategy,
+    )
     size_mb = info["size_bytes"] / 1024 / 1024
     print(f"  {region_code}: {info['record_count']:,} records, {size_mb:.1f} MB")
 
-    shard_id = f"{region_code}-places"
+    shard_id = PLACES_CA_BBOX_SLICE_ID
     shard_hash = hash_file(output_path)
     collection = generate_stac_collection(
         version,
         {shard_id: info},
         {shard_id: shard_hash},
-        "places",
+        "places-experimental",
     )
-    collection["id"] = f"geocoder-places-shards-{version}"
-    collection["title"] = f"Overture Places Shards {version}"
-    collection["description"] = "Experimental places (POI) shards for CA prototype"
+    collection["id"] = f"geocoder-places-experimental-bbox-{version}"
+    collection["title"] = f"Overture Places Experimental CA Bbox {version}"
+    collection["description"] = (
+        "Non-promotable Places experiment for the CA bounding rectangle; "
+        "not an exact California shard"
+    )
+    collection["extent"]["spatial"]["bbox"] = [info["bbox"]]
+    for link in collection["links"]:
+        if link.get("rel") == "self":
+            link["href"] = "./places-collection.json"
     write_json(version_dir / "places-collection.json", collection)
-
-    # The worker reads collection.json for every forward request. Add the
-    # experimental places item there when a forward collection already exists,
-    # while retaining places-collection.json as the standalone build artifact.
-    forward_collection_path = version_dir / "collection.json"
-    if forward_collection_path.exists():
-        with open(forward_collection_path) as f:
-            forward_collection = json.load(f)
-        forward_collection.setdefault("items", {})[shard_id] = collection["items"][shard_id]
-        summaries = forward_collection.setdefault("summaries", {})
-        items = forward_collection["items"]
-        summaries["shard_count"] = len(items)
-        summaries["total_records"] = sum(
-            item.get("record_count", 0) for item in items.values()
-        )
-        summaries["total_size_bytes"] = sum(
-            item.get("size_bytes", 0) for item in items.values()
-        )
-        write_json(forward_collection_path, forward_collection)
 
     return {shard_id: info}
 
@@ -2645,12 +2752,32 @@ def main():
                              "from nominatim.org when missing)")
     parser.add_argument("--places", action="store_true",
                         help="Build places (POI) prototype shards")
+    parser.add_argument(
+        "--experimental-places-bbox-slice",
+        action="store_true",
+        help="Acknowledge Places output is a non-promotable CA bbox experiment",
+    )
     parser.add_argument("--places-region", type=str, default="US-CA",
                         help="Places region code e.g. US-CA (default: US-CA)")
-    parser.add_argument("--places-parquet", type=Path, default=Path("exports/places-CA.parquet"),
+    parser.add_argument("--places-parquet", type=Path, default=Path("exports/places-CA-bbox.parquet"),
                         help="Input parquet for places (flattened or raw Overture places)")
     parser.add_argument("--places-limit", type=int, default=None,
-                        help="Sampling limit: top N places by composed prominence")
+                        help="Experimental sampling limit; requires an explicit strategy")
+    parser.add_argument(
+        "--places-sampling-strategy",
+        choices=("confidence", "experimental-prominence"),
+        default=None,
+        help="Explicit Places sampling order; prominence is a rejected baseline",
+    )
+    parser.add_argument(
+        "--places-ranking-strategy",
+        choices=("neutral", "confidence", "experimental-prominence"),
+        default="confidence",
+        help=(
+            "Stored/query importance, independent of sampling; rejected prominence "
+            "must be selected explicitly"
+        ),
+    )
     parser.add_argument("--overture-release", type=str, default=None,
                         help="Overture release tag for build metadata and places S3 fallback "
                              "(e.g., 2026-06-17.0)")
@@ -2672,9 +2799,9 @@ def main():
         shards_subdir = "reverse"
     elif is_places:
         shard_infos = build_places_shards(args, version, version_dir)
-        shard_type = "places"
+        shard_type = "places-experimental"
         collection_file = "places-collection.json"
-        shards_subdir = "places"
+        shards_subdir = "places-experimental"
     else:
         shard_infos = build_forward_shards(args, version, version_dir)
         shard_type = "forward"

@@ -34,8 +34,8 @@ const CACHE_PREFIX: &str = "https://geocoder.bradr.dev/__cache/";
 const NEARBY_THRESHOLD_KM: f64 = 200.0; // Include shards within this distance
 const MAX_LOCATION_SHARDS: usize = 2;
 const MAX_ROUTER_SHARDS: usize = 2;
-// Total extra shards beyond HEAD. Previously HEAD+2 (nearby only); now
-// HEAD+3 to accommodate suffix + router + nearby while still bounding
+// Total extra shards beyond HEAD, including opt-in Places. Previously HEAD+2
+// (nearby only); now HEAD+3 to accommodate suffix + router + nearby while still bounding
 // worst-case first-touch cost (additional R2 fetch + deserialize). Tail
 // latency increase is acceptable for the recall improvement.
 const MAX_EXTRA_SHARDS: usize = 3;
@@ -857,6 +857,83 @@ impl ShardLoader {
         filtered
     }
 
+    fn is_places_shard(shard_id: &str) -> bool {
+        shard_id.ends_with("-places")
+    }
+
+    /// Select Places shards only when an existing division route or explicit
+    /// caller region justifies them.  An unroutable Places query must not fall
+    /// through to an arbitrary prototype region (historically US-CA).
+    fn select_places_shards(
+        collection: &StacCollection,
+        division_shards: &[String],
+        user_location: &UserLocation,
+        remaining_extra_budget: usize,
+    ) -> Vec<String> {
+        if remaining_extra_budget == 0 {
+            return Vec::new();
+        }
+        let mut places = Vec::new();
+        for shard_id in division_shards {
+            if shard_id == "HEAD" {
+                continue;
+            }
+            let places_id = format!("{}-places", shard_id);
+            if Self::collection_has_shard(collection, &places_id)
+                && !division_shards.contains(&places_id)
+                && !places.contains(&places_id)
+            {
+                places.push(places_id);
+            }
+        }
+
+        if let (Some(country), Some(region_code)) =
+            (&user_location.country, &user_location.region_code)
+        {
+            let places_id = format!("{}-{}-places", country, region_code);
+            if Self::collection_has_shard(collection, &places_id)
+                && !division_shards.contains(&places_id)
+                && !places.contains(&places_id)
+            {
+                places.push(places_id);
+            }
+        }
+
+        places.truncate(MAX_PLACES_SHARDS.min(remaining_extra_budget));
+        places
+    }
+
+    fn allocate_extra_shards(
+        collection: &StacCollection,
+        generic_candidates: &[String],
+        user_location: &UserLocation,
+        includes_place: bool,
+    ) -> (Vec<String>, Vec<String>) {
+        let mut routing_ids = vec!["HEAD".to_string()];
+        routing_ids.extend(generic_candidates.iter().cloned());
+        let has_places = includes_place
+            && !Self::select_places_shards(
+                collection,
+                &routing_ids,
+                user_location,
+                MAX_PLACES_SHARDS,
+            )
+            .is_empty();
+        let generic_limit = MAX_EXTRA_SHARDS.saturating_sub(usize::from(has_places));
+        let generic: Vec<String> = generic_candidates
+            .iter()
+            .take(generic_limit)
+            .cloned()
+            .collect();
+        let remaining = MAX_EXTRA_SHARDS.saturating_sub(generic.len());
+        let places = if includes_place {
+            Self::select_places_shards(collection, &routing_ids, user_location, remaining)
+        } else {
+            Vec::new()
+        };
+        (generic, places)
+    }
+
     /// Attempt search against a specific version.
     async fn try_search(
         &self,
@@ -906,97 +983,37 @@ impl ShardLoader {
 
         let includes_place = query.includes_place();
 
-        let filtered_nearby: Vec<String> = if includes_place {
-            nearby_shards
-        } else {
-            nearby_shards
-                .into_iter()
-                .filter(|sid| !sid.contains("places"))
-                .collect()
-        };
-
         let mut seen = std::collections::HashSet::new();
         seen.insert("HEAD".to_string());
-        let mut extra: Vec<String> = Vec::new();
+        let mut generic_candidates: Vec<String> = Vec::new();
         for sid in suffix_shards
             .iter()
             .chain(router_shards.iter())
-            .chain(filtered_nearby.iter())
+            .chain(nearby_shards.iter())
         {
-            if sid.contains("places") && !includes_place {
+            // Places use one dedicated derivation path below. Allowing them
+            // into this generic budget would let proximity-selected items
+            // bypass MAX_PLACES_SHARDS and inflate concurrent cold loads.
+            if Self::is_places_shard(sid) {
                 continue;
             }
             if seen.insert(sid.clone()) {
-                extra.push(sid.clone());
-                if extra.len() >= MAX_EXTRA_SHARDS {
-                    break;
-                }
+                generic_candidates.push(sid.clone());
             }
         }
-        if !includes_place {
-            extra.retain(|sid| !sid.contains("places"));
-        }
+        let (extra, places_extra) = Self::allocate_extra_shards(
+            &collection,
+            &generic_candidates,
+            user_location,
+            includes_place,
+        );
         console_log!("Final extra shards: {:?}", extra);
 
         let mut shard_ids = vec!["HEAD".to_string()];
         shard_ids.extend(extra.clone());
 
-        let mut places_extra: Vec<String> = Vec::new();
-        if includes_place {
-            for sid in &shard_ids {
-                if sid == "HEAD" {
-                    continue;
-                }
-                let pid = format!("{}-places", sid);
-                if Self::collection_has_shard(&collection, &pid)
-                    && !shard_ids.contains(&pid)
-                    && !places_extra.contains(&pid)
-                {
-                    places_extra.push(pid);
-                }
-            }
-            if let (Some(country), Some(region_code)) =
-                (&user_location.country, &user_location.region_code)
-            {
-                let region = format!("{}-{}", country, region_code);
-                let pid = format!("{}-places", region);
-                if Self::collection_has_shard(&collection, &pid)
-                    && !shard_ids.contains(&pid)
-                    && !places_extra.contains(&pid)
-                {
-                    places_extra.push(pid);
-                }
-            }
-            if places_extra.is_empty() {
-                let mut candidates: Vec<String> = collection
-                    .items
-                    .keys()
-                    .filter(|k| k.contains("places"))
-                    .cloned()
-                    .collect();
-                candidates.sort_by(|a, b| {
-                    if a == "US-CA-places" {
-                        std::cmp::Ordering::Less
-                    } else if b == "US-CA-places" {
-                        std::cmp::Ordering::Greater
-                    } else {
-                        a.cmp(b)
-                    }
-                });
-                for c in candidates {
-                    if !shard_ids.contains(&c) && !places_extra.contains(&c) {
-                        places_extra.push(c);
-                    }
-                    if places_extra.len() >= MAX_PLACES_SHARDS {
-                        break;
-                    }
-                }
-            } else {
-                places_extra.truncate(MAX_PLACES_SHARDS);
-            }
-            if !places_extra.is_empty() {
-                console_log!("Places extra shards: {:?}", places_extra);
-            }
+        if !places_extra.is_empty() {
+            console_log!("Places extra shards: {:?}", places_extra);
         }
 
         let mut all_shard_ids = shard_ids.clone();
@@ -1105,7 +1122,7 @@ impl ShardLoader {
             .iter()
             .filter_map(|(shard_id, item)| {
                 // Skip HEAD (queried separately)
-                if shard_id == "HEAD" {
+                if shard_id == "HEAD" || Self::is_places_shard(shard_id) {
                     return None;
                 }
 
@@ -2459,5 +2476,150 @@ mod tests {
             .filter(|sid| ShardLoader::collection_has_shard(&collection, sid))
             .collect();
         assert!(filtered.contains(&"FR".to_string()));
+    }
+
+    #[test]
+    fn test_places_shards_require_a_justified_region() {
+        let collection = collection_with_bboxes(&[
+            ("HEAD", Some([-180.0, -90.0, 180.0, 90.0])),
+            ("US-CA", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-CA-places", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NY-places", Some([-80.0, 40.0, -71.0, 45.1])),
+        ]);
+
+        // Merely having a prototype Places shard in the collection is not a
+        // reason to search it for an otherwise unroutable global query.
+        let no_route = ShardLoader::select_places_shards(
+            &collection,
+            &["HEAD".to_string()],
+            &UserLocation::default(),
+            MAX_EXTRA_SHARDS,
+        );
+        assert!(no_route.is_empty());
+
+        let division_route = ShardLoader::select_places_shards(
+            &collection,
+            &["HEAD".to_string(), "US-CA".to_string()],
+            &UserLocation::default(),
+            MAX_EXTRA_SHARDS,
+        );
+        assert_eq!(division_route, vec!["US-CA-places".to_string()]);
+
+        let caller_region = UserLocation {
+            country: Some("US".to_string()),
+            region_code: Some("NY".to_string()),
+            ..Default::default()
+        };
+        let location_route = ShardLoader::select_places_shards(
+            &collection,
+            &["HEAD".to_string()],
+            &caller_region,
+            MAX_EXTRA_SHARDS,
+        );
+        assert_eq!(location_route, vec!["US-NY-places".to_string()]);
+    }
+
+    #[test]
+    fn test_places_never_enter_generic_proximity_selection() {
+        let collection = collection_with_bboxes(&[
+            ("HEAD", Some([-180.0, -90.0, 180.0, 90.0])),
+            ("US-CA", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-CA-places", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NV", Some([-120.1, 35.0, -114.0, 42.1])),
+        ]);
+
+        let selected = ShardLoader::select_shards_by_proximity(&collection, 37.7, -122.4);
+        assert_eq!(selected, vec!["US-CA".to_string()]);
+        assert!(selected
+            .iter()
+            .all(|shard| !ShardLoader::is_places_shard(shard)));
+    }
+
+    #[test]
+    fn test_places_have_one_total_selection_cap() {
+        let collection = collection_with_bboxes(&[
+            ("HEAD", Some([-180.0, -90.0, 180.0, 90.0])),
+            ("US-CA", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NV", Some([-120.1, 35.0, -114.0, 42.1])),
+            ("US-AZ", Some([-114.9, 31.0, -109.0, 37.1])),
+            ("US-CA-places", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NV-places", Some([-120.1, 35.0, -114.0, 42.1])),
+            ("US-AZ-places", Some([-114.9, 31.0, -109.0, 37.1])),
+        ]);
+
+        let divisions = vec![
+            "HEAD".to_string(),
+            "US-CA".to_string(),
+            "US-NV".to_string(),
+            "US-AZ".to_string(),
+        ];
+        let places = ShardLoader::select_places_shards(
+            &collection,
+            &divisions,
+            &UserLocation::default(),
+            MAX_EXTRA_SHARDS,
+        );
+        assert_eq!(places.len(), MAX_PLACES_SHARDS);
+        assert_eq!(
+            places,
+            vec!["US-CA-places".to_string(), "US-NV-places".to_string()]
+        );
+    }
+
+    #[test]
+    fn test_places_share_the_total_beyond_head_budget() {
+        let collection = collection_with_bboxes(&[
+            ("HEAD", Some([-180.0, -90.0, 180.0, 90.0])),
+            ("US-CA", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NV", Some([-120.1, 35.0, -114.0, 42.1])),
+            ("US-AZ", Some([-114.9, 31.0, -109.0, 37.1])),
+            ("US-CA-places", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NV-places", Some([-120.1, 35.0, -114.0, 42.1])),
+            ("US-AZ-places", Some([-114.9, 31.0, -109.0, 37.1])),
+        ]);
+        let divisions = vec![
+            "HEAD".to_string(),
+            "US-CA".to_string(),
+            "US-NV".to_string(),
+            "US-AZ".to_string(),
+        ];
+
+        for (generic_count, expected_places) in [(3, 0), (2, 1), (1, 2), (0, 2)] {
+            let remaining = MAX_EXTRA_SHARDS.saturating_sub(generic_count);
+            let places = ShardLoader::select_places_shards(
+                &collection,
+                &divisions,
+                &UserLocation::default(),
+                remaining,
+            );
+            assert_eq!(places.len(), expected_places);
+            assert!(generic_count + places.len() <= MAX_EXTRA_SHARDS);
+            assert!(places.len() <= MAX_PLACES_SHARDS);
+        }
+    }
+
+    #[test]
+    fn test_explicit_places_request_reserves_a_slot_under_full_generic_budget() {
+        let collection = collection_with_bboxes(&[
+            ("HEAD", Some([-180.0, -90.0, 180.0, 90.0])),
+            ("US-CA", Some([-124.5, 32.5, -114.0, 42.1])),
+            ("US-NV", Some([-120.1, 35.0, -114.0, 42.1])),
+            ("US-AZ", Some([-114.9, 31.0, -109.0, 37.1])),
+            ("US-CA-places", Some([-124.5, 32.5, -114.0, 42.1])),
+        ]);
+        let candidates = vec![
+            "US-CA".to_string(),
+            "US-NV".to_string(),
+            "US-AZ".to_string(),
+        ];
+        let (generic, places) = ShardLoader::allocate_extra_shards(
+            &collection,
+            &candidates,
+            &UserLocation::default(),
+            true,
+        );
+        assert_eq!(generic.len(), 2);
+        assert_eq!(places, vec!["US-CA-places".to_string()]);
+        assert!(generic.len() + places.len() <= MAX_EXTRA_SHARDS);
     }
 }

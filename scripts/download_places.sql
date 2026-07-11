@@ -11,6 +11,7 @@ SET threads = 2;
 COPY (
     SELECT
         id as gers_id,
+        '__OVERTURE_RELEASE__' as overture_release,
         version,
         names.primary as primary_name,
         ST_X(geometry) as lon,
@@ -22,11 +23,23 @@ COPY (
         COALESCE(addresses[1].country, '') as country,
         COALESCE(addresses[1].region, '') as region,
         COALESCE(addresses[1].locality, '') as locality,
+        COALESCE(addresses[1].postcode, '') as postcode,
+        COALESCE(addresses[1].freeform, '') as freeform_address,
         categories.primary as category_primary,
         basic_category,
+        taxonomy.primary as taxonomy_primary,
+        taxonomy.hierarchy as taxonomy_hierarchy,
         brand.names.primary as brand_name,
         brand.wikidata as brand_wikidata,
         confidence,
+        operating_status,
+        sources,
+        list_filter(sources, lambda s: COALESCE(s.property, '') = '') as root_sources,
+        LEN(list_filter(sources, lambda s: COALESCE(s.property, '') = '')) as root_source_count,
+        LEN(websites) as website_count,
+        LEN(socials) as social_count,
+        LEN(phones) as phone_count,
+        LEN(names.common) as common_name_count,
         LOWER(CONCAT_WS(' ', names.primary, brand.names.primary, categories.primary, basic_category)) as search_name_base,
         LOWER(CONCAT_WS(' ', addresses[1].locality, addresses[1].region, addresses[1].country, categories.primary, basic_category)) as search_context_base
     FROM read_parquet('s3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=places/type=place/*', hive_partitioning=true)
@@ -34,4 +47,4 @@ COPY (
       AND bbox.ymin BETWEEN 32.5 AND 42.1
       AND names.primary IS NOT NULL
       AND COALESCE(operating_status, 'open') != 'permanently_closed'
-) TO 'exports/places-CA.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO 'exports/places-CA-bbox.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);

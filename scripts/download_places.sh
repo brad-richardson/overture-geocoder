@@ -10,7 +10,7 @@ if [ -z "$RELEASE" ]; then echo "ERROR fetch release"; exit 1; fi
 echo "Using release: $RELEASE"; fi
 mkdir -p "$PROJECT_DIR/exports"; cd "$PROJECT_DIR"
 if [ -n "$LIMIT" ]; then
-echo "Downloading top $LIMIT places by confidence for CA..."
+echo "Downloading top $LIMIT places by confidence for the experimental CA bbox slice..."
 python3 << PY
 import duckdb
 release="$RELEASE"
@@ -19,26 +19,38 @@ con=duckdb.connect()
 con.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial; SET s3_region='us-west-2'; SET memory_limit='8GB'; SET threads=2;")
 con.execute(f"""
 COPY (
-    SELECT id as gers_id, version, names.primary as primary_name,
+    SELECT id as gers_id, '{release}' as overture_release, version, names.primary as primary_name,
     ST_X(geometry) as lon, ST_Y(geometry) as lat,
     bbox.xmin as bbox_xmin, bbox.ymin as bbox_ymin, bbox.xmax as bbox_xmax, bbox.ymax as bbox_ymax,
     COALESCE(addresses[1].country, '') as country,
     COALESCE(addresses[1].region, '') as region,
     COALESCE(addresses[1].locality, '') as locality,
+    COALESCE(addresses[1].postcode, '') as postcode,
+    COALESCE(addresses[1].freeform, '') as freeform_address,
     categories.primary as category_primary, basic_category,
+    taxonomy.primary as taxonomy_primary,
+    taxonomy.hierarchy as taxonomy_hierarchy,
     brand.names.primary as brand_name, brand.wikidata as brand_wikidata,
     confidence,
+    operating_status,
+    sources,
+    list_filter(sources, lambda s: COALESCE(s.property, '') = '') as root_sources,
+    LEN(list_filter(sources, lambda s: COALESCE(s.property, '') = '')) as root_source_count,
+    LEN(websites) as website_count,
+    LEN(socials) as social_count,
+    LEN(phones) as phone_count,
+    LEN(names.common) as common_name_count,
     LOWER(CONCAT_WS(' ', names.primary, brand.names.primary, categories.primary, basic_category)) as search_name_base,
     LOWER(CONCAT_WS(' ', addresses[1].locality, addresses[1].region, addresses[1].country, categories.primary, basic_category)) as search_context_base
     FROM read_parquet('s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*', hive_partitioning=true)
     WHERE bbox.xmin BETWEEN -124.5 AND -114.0 AND bbox.ymin BETWEEN 32.5 AND 42.1
     AND names.primary IS NOT NULL AND COALESCE(operating_status, 'open') != 'permanently_closed'
     ORDER BY confidence DESC NULLS LAST LIMIT {limit}
-) TO 'exports/places-CA.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+) TO 'exports/places-CA-bbox.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
 PY
 else
-echo "Downloading CA places full bbox..."
+echo "Downloading the full experimental CA bbox slice (not an exact CA boundary)..."
 sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_places.sql | duckdb
 fi
-ROW_COUNT=$(duckdb -csv -noheader -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/places-CA.parquet')" 2>/dev/null | tr -d '[:space:]')
-echo "CA places: exports/places-CA.parquet ($ROW_COUNT rows)"
+ROW_COUNT=$(duckdb -csv -noheader -c "SELECT COUNT(*) FROM read_parquet('$PROJECT_DIR/exports/places-CA-bbox.parquet')" 2>/dev/null | tr -d '[:space:]')
+echo "Experimental CA bbox places: exports/places-CA-bbox.parquet ($ROW_COUNT rows)"

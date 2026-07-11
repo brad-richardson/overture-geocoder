@@ -1,6 +1,6 @@
 # Overture Geocoder - JavaScript/TypeScript Client
 
-Forward geocoder using Overture Maps data with Nominatim-compatible API.
+Client for the divisions-first Overture Geocoder API. The service is not a general Nominatim-compatible replacement; Places support is experimental and addresses and streets are not yet part of the production search contract.
 
 ## Installation
 
