@@ -71,6 +71,7 @@ Small hardening improvements per roadmap:
   - `/search` JSON: `{"results": [...], "data_version": "<ver>", "debug": {...}}`; header `X-Data-Version: <ver>`; GeoJSON: FeatureCollection gains `"data_version"` property + same header.
   - `/reverse` JSON: original `ReverseResult` fields + `"data_version"` merged via `serde_json::Value` + header `X-Data-Version`; GeoJSON similar.
   - `/id` JSON: `IdLookupResult` + `"data_version"` + header + `Cache-Control` preserved.
+  - Worker CORS exposes `X-Data-Version` so browser clients can read it.
   - `/health` already returns version; unchanged.
 - Explorer (`explorer/` static) does `data.results || []` and ignores extra fields/headers → safe.
 

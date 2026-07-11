@@ -88,6 +88,9 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     response
         .headers_mut()
         .set("Access-Control-Allow-Origin", "*")?;
+    response
+        .headers_mut()
+        .set("Access-Control-Expose-Headers", "X-Data-Version")?;
 
     add_timing(&mut response, endpoint, started_at)?;
 

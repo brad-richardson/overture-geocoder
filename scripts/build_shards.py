@@ -1798,6 +1798,8 @@ def write_build_meta(
         wiki_file = Path(wiki_file)
 
     parquet_path = getattr(args, "parquet", DIVISIONS_PARQUET)
+    if bool(getattr(args, "reverse", False)) and parquet_path == DIVISIONS_PARQUET:
+        parquet_path = DIVISIONS_REVERSE_PARQUET
     input_size = None
     try:
         if parquet_path.exists():

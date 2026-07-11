@@ -41,7 +41,9 @@ pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
     let mut tokens: Vec<String> = normalized
         .split_whitespace()
         .filter(|t| !t.is_empty())
-        .filter(|t| t.chars().count() >= MIN_FTS_TOKEN_CHARS)
+        // A one-character exact term is a legitimate query and uses the FTS
+        // term index. The expensive case is a one-character prefix scan.
+        .filter(|t| !autocomplete || t.chars().count() >= MIN_FTS_TOKEN_CHARS)
         .map(|s| s.to_string())
         .collect();
 
@@ -51,21 +53,6 @@ pub fn prepare_fts_query(query: &str, autocomplete: bool) -> String {
 
     if tokens.len() > MAX_FTS_TOKENS {
         tokens.truncate(MAX_FTS_TOKENS);
-    }
-
-    if autocomplete {
-        if let Some(last) = tokens.last() {
-            if last.chars().count() < MIN_FTS_TOKEN_CHARS {
-                tokens.pop();
-                if tokens.is_empty() {
-                    return String::new();
-                }
-            }
-        }
-    }
-
-    if tokens.is_empty() {
-        return String::new();
     }
 
     tokens
@@ -148,5 +135,22 @@ mod tests {
         // Case where Unicode lowercasing uses an expansion (e.g., 'İ' → "i\u{307}")
         // The full to_lowercase() iterator is preserved, so the combining dot above remains.
         assert_eq!(prepare_fts_query("İSTANBUL", true), "\"i\u{0307}stanbul\"*");
+    }
+
+    #[test]
+    fn test_short_token_guardrails_preserve_exact_search() {
+        assert_eq!(prepare_fts_query("a", true), "");
+        assert_eq!(prepare_fts_query("new y", true), r#""new"*"#);
+        assert_eq!(prepare_fts_query("a", false), r#""a""#);
+        assert_eq!(prepare_fts_query("route 1", false), r#""route" "1""#);
+    }
+
+    #[test]
+    fn test_token_count_is_capped() {
+        let query = "one two three four five six seven eight nine ten eleven twelve";
+        assert_eq!(
+            prepare_fts_query(query, true),
+            r#""one" "two" "three" "four" "five" "six" "seven" "eight" "nine" "ten"*"#
+        );
     }
 }
