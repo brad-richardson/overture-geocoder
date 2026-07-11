@@ -1422,7 +1422,8 @@ def build_reverse_shard_schema(db: sqlite3.Connection):
             area REAL NOT NULL,
             population INTEGER,
             country TEXT,
-            region TEXT
+            region TEXT,
+            wkb BLOB
         );
 
         -- R*Tree spatial index for reverse geocoding point-in-bbox queries.
@@ -1452,15 +1453,29 @@ def populate_reverse_rtree(db: sqlite3.Connection):
 
 
 def prepare_reverse_rows(rows: list[tuple]) -> list[tuple]:
-    """Coerce DuckDB numeric values to SQLite-compatible Python primitives."""
+    """Coerce DuckDB numeric values to SQLite-compatible Python primitives.
+
+    Supports optional trailing wkb column (future build with exact geometry).
+    """
     prepared = []
     for row in rows:
-        prepared.append((
+        has_wkb = len(row) > 13
+        base = (
             row[0], row[1], row[2],
             *(float(value) for value in row[3:10]),
             int(row[10]) if row[10] is not None else None,
             row[11], row[12],
-        ))
+        )
+        if has_wkb:
+            wkb_val = row[13] if len(row) > 13 else None
+            if wkb_val is not None and not isinstance(wkb_val, (bytes, bytearray, type(None))):
+                try:
+                    wkb_val = bytes(wkb_val)
+                except Exception:
+                    wkb_val = None
+            prepared.append(base + (wkb_val,))
+        else:
+            prepared.append(base + (None,))
     return prepared
 
 
@@ -1526,8 +1541,8 @@ def build_reverse_country_shard(
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                area, population, country, region
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                area, population, country, region, wkb
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, prepared_rows)
         count += len(rows)
 
@@ -1608,8 +1623,8 @@ def build_reverse_head_shard(
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                area, population, country, region
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                area, population, country, region, wkb
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, prepared_rows)
         count += len(rows)
 
