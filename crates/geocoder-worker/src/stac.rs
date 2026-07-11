@@ -2445,11 +2445,8 @@ mod tests {
             region_code: Some("NY".to_string()),
             ..Default::default()
         };
-        let location_route = ShardLoader::select_places_shards(
-            &collection,
-            &["HEAD".to_string()],
-            &caller_region,
-        );
+        let location_route =
+            ShardLoader::select_places_shards(&collection, &["HEAD".to_string()], &caller_region);
         assert_eq!(location_route, vec!["US-NY-places".to_string()]);
     }
 }
