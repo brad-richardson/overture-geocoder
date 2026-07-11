@@ -39,6 +39,7 @@ const MAX_ROUTER_SHARDS: usize = 2;
 // worst-case first-touch cost (additional R2 fetch + deserialize). Tail
 // latency increase is acceptable for the recall improvement.
 const MAX_EXTRA_SHARDS: usize = 3;
+const MAX_PLACES_SHARDS: usize = 2;
 const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
                                        // the newest complete id-index reachable while fresher versions still
                                        // build. Retention (rebuild-r2-shards.yml) keeps only the newest 2
@@ -903,14 +904,28 @@ impl ShardLoader {
         let nearby_shards = self.select_nearby_shards(&collection, user_location);
         console_log!("Nearby shards: {:?}", nearby_shards);
 
+        let includes_place = query.includes_place();
+
+        let filtered_nearby: Vec<String> = if includes_place {
+            nearby_shards
+        } else {
+            nearby_shards
+                .into_iter()
+                .filter(|sid| !sid.contains("places"))
+                .collect()
+        };
+
         let mut seen = std::collections::HashSet::new();
         seen.insert("HEAD".to_string());
         let mut extra: Vec<String> = Vec::new();
         for sid in suffix_shards
             .iter()
             .chain(router_shards.iter())
-            .chain(nearby_shards.iter())
+            .chain(filtered_nearby.iter())
         {
+            if sid.contains("places") && !includes_place {
+                continue;
+            }
             if seen.insert(sid.clone()) {
                 extra.push(sid.clone());
                 if extra.len() >= MAX_EXTRA_SHARDS {
@@ -918,12 +933,77 @@ impl ShardLoader {
                 }
             }
         }
+        if !includes_place {
+            extra.retain(|sid| !sid.contains("places"));
+        }
         console_log!("Final extra shards: {:?}", extra);
 
         let mut shard_ids = vec!["HEAD".to_string()];
-        shard_ids.extend(extra);
+        shard_ids.extend(extra.clone());
+
+        let mut places_extra: Vec<String> = Vec::new();
+        if includes_place {
+            for sid in &shard_ids {
+                if sid == "HEAD" {
+                    continue;
+                }
+                let pid = format!("{}-places", sid);
+                if Self::collection_has_shard(&collection, &pid)
+                    && !shard_ids.contains(&pid)
+                    && !places_extra.contains(&pid)
+                {
+                    places_extra.push(pid);
+                }
+            }
+            if let (Some(country), Some(region_code)) =
+                (&user_location.country, &user_location.region_code)
+            {
+                let region = format!("{}-{}", country, region_code);
+                let pid = format!("{}-places", region);
+                if Self::collection_has_shard(&collection, &pid)
+                    && !shard_ids.contains(&pid)
+                    && !places_extra.contains(&pid)
+                {
+                    places_extra.push(pid);
+                }
+            }
+            if places_extra.is_empty() {
+                let mut candidates: Vec<String> = collection
+                    .items
+                    .keys()
+                    .filter(|k| k.contains("places"))
+                    .cloned()
+                    .collect();
+                candidates.sort_by(|a, b| {
+                    if a == "US-CA-places" {
+                        std::cmp::Ordering::Less
+                    } else if b == "US-CA-places" {
+                        std::cmp::Ordering::Greater
+                    } else {
+                        a.cmp(b)
+                    }
+                });
+                for c in candidates {
+                    if !shard_ids.contains(&c) && !places_extra.contains(&c) {
+                        places_extra.push(c);
+                    }
+                    if places_extra.len() >= MAX_PLACES_SHARDS {
+                        break;
+                    }
+                }
+            } else {
+                places_extra.truncate(MAX_PLACES_SHARDS);
+            }
+            if !places_extra.is_empty() {
+                console_log!("Places extra shards: {:?}", places_extra);
+            }
+        }
+
+        let mut all_shard_ids = shard_ids.clone();
+        all_shard_ids.extend(places_extra.clone());
+
         let outcomes = futures::future::join_all(
-            shard_ids
+            all_shard_ids
                 .iter()
                 .map(|shard_id| self.query_shard_with_info(version, shard_id, &collection, query)),
         )
@@ -931,7 +1011,7 @@ impl ShardLoader {
 
         let mut all_results = Vec::new();
         let mut shards_loaded = Vec::new();
-        for (shard_id, outcome) in shard_ids.iter().zip(outcomes) {
+        for (shard_id, outcome) in all_shard_ids.iter().zip(outcomes) {
             match outcome {
                 Ok((results, info)) => {
                     all_results.extend(results);
@@ -939,7 +1019,6 @@ impl ShardLoader {
                         shards_loaded.push(info);
                     }
                 }
-                // HEAD shard is required - failure triggers version fallback
                 Err(e) if shard_id == "HEAD" => return Err(e),
                 Err(e) => {
                     console_log!("Warning: shard {} unavailable: {:?}", shard_id, e);
@@ -947,25 +1026,33 @@ impl ShardLoader {
             }
         }
 
-        // Sort by composed importance before deduplication. Match quality
-        // ("Paris" above "Parish") is already part of the per-result score
-        // computed in Database::search, so no separate exact-match bonus.
+        if let Some(allowed) = &query.allowed_types {
+            if !allowed.is_empty() {
+                all_results.retain(|r| {
+                    let t = r.division_type.to_lowercase();
+                    let normalized = if t == "neighbourhood" {
+                        "neighborhood".to_string()
+                    } else {
+                        t
+                    };
+                    allowed.contains(&normalized)
+                });
+            }
+        }
+
         all_results.sort_by(|a, b| {
             b.importance
                 .partial_cmp(&a.importance)
                 .unwrap_or(std::cmp::Ordering::Equal)
         });
 
-        // Deduplicate by gers_id (keep highest importance)
         let mut seen = std::collections::HashSet::new();
         all_results.retain(|r| seen.insert(r.gers_id.clone()));
 
-        // Apply location bias (can elevate results from country shard)
         if !matches!(query.bias, LocationBias::None) {
             apply_location_bias(&mut all_results, &query.bias);
         }
 
-        // Truncate to requested limit after bias is applied
         all_results.truncate(query.limit);
 
         // Build debug info if requested
@@ -1146,6 +1233,9 @@ impl ShardLoader {
     ) -> Result<ReverseSearchResult> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
+        // Prefer the smallest containing country bbox. This resolves broad
+        // overlapping metadata (for example Tokyo inside both JP's bbox and a
+        // world-spanning RU bbox); exact country polygons/H3 remain future work.
         for country in Self::select_reverse_shards(&reverse_collection, lat, lon, cf_country) {
             match self
                 .query_reverse_shard(version, &country, &reverse_collection, lat, lon)

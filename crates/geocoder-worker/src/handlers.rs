@@ -1,3 +1,7 @@
+//! Request handlers for geocoding endpoints.
+
+use std::collections::HashSet;
+
 use geocoder_core::{GeocoderQuery, GeocoderResult, LocationBias, ReverseResult};
 use serde::Serialize;
 use worker::*;
@@ -8,6 +12,50 @@ const MAX_QUERY_LENGTH: usize = 200;
 const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
 const MAX_TOKEN_COUNT: usize = 10;
 
+const DEFAULT_DIVISION_TYPES: &[&str] = &[
+    "country",
+    "region",
+    "county",
+    "localadmin",
+    "locality",
+    "neighborhood",
+    "macrohood",
+];
+
+fn normalize_type_token(s: &str) -> String {
+    let lower = s.trim().to_lowercase();
+    if lower == "neighbourhood" {
+        "neighborhood".to_string()
+    } else {
+        lower
+    }
+}
+
+fn parse_types_param(raw: Option<&String>) -> HashSet<String> {
+    match raw {
+        Some(s) if !s.trim().is_empty() => {
+            let parsed: HashSet<String> = s
+                .split(',')
+                .map(normalize_type_token)
+                .filter(|t| !t.is_empty())
+                .collect();
+            if parsed.is_empty() {
+                DEFAULT_DIVISION_TYPES
+                    .iter()
+                    .map(|t| t.to_string())
+                    .collect()
+            } else {
+                parsed
+            }
+        }
+        _ => DEFAULT_DIVISION_TYPES
+            .iter()
+            .map(|t| t.to_string())
+            .collect(),
+    }
+}
+
+/// Search request handler.
 pub async fn handle_search(
     req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
@@ -81,10 +129,13 @@ pub async fn handle_search(
         _ => LocationBias::None,
     };
 
+    let allowed_types = parse_types_param(params.get("types"));
+
     let query = GeocoderQuery::new(&q)
         .with_limit(limit)
         .with_autocomplete(autocomplete)
-        .with_bias(bias);
+        .with_bias(bias)
+        .with_allowed_types(Some(allowed_types));
 
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let search_result = loader.search(&query, &user_location, include_debug).await?;
@@ -346,4 +397,63 @@ fn reverse_to_geojson_response(result: &ReverseResult, data_version: &str) -> Re
         .set("Content-Type", "application/geo+json; charset=utf-8")?;
     resp.headers_mut().set("X-Data-Version", data_version)?;
     Ok(resp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_types_default_when_missing() {
+        let parsed = parse_types_param(None);
+        assert!(!parsed.contains("place"));
+        assert!(parsed.contains("locality"));
+        assert!(parsed.contains("country"));
+        assert!(parsed.contains("neighborhood"));
+    }
+
+    #[test]
+    fn test_parse_types_empty_string_defaults() {
+        let s = "".to_string();
+        let parsed = parse_types_param(Some(&s));
+        assert!(!parsed.contains("place"));
+        assert!(parsed.contains("locality"));
+    }
+
+    #[test]
+    fn test_parse_types_place_only() {
+        let s = "place".to_string();
+        let parsed = parse_types_param(Some(&s));
+        assert_eq!(parsed.len(), 1);
+        assert!(parsed.contains("place"));
+    }
+
+    #[test]
+    fn test_parse_types_mixed_case_and_spaces() {
+        let s = " Locality , Country , place ".to_string();
+        let parsed = parse_types_param(Some(&s));
+        assert!(parsed.contains("locality"));
+        assert!(parsed.contains("country"));
+        assert!(parsed.contains("place"));
+        assert_eq!(parsed.len(), 3);
+    }
+
+    #[test]
+    fn test_parse_types_neighbourhood_synonym() {
+        let s = "neighbourhood,locality".to_string();
+        let parsed = parse_types_param(Some(&s));
+        assert!(parsed.contains("neighborhood"));
+        assert!(!parsed.contains("neighbourhood"));
+        assert!(parsed.contains("locality"));
+    }
+
+    #[test]
+    fn test_parse_types_all_division_types_plus_place() {
+        let s =
+            "country,region,county,localadmin,locality,neighborhood,macrohood,place".to_string();
+        let parsed = parse_types_param(Some(&s));
+        assert!(parsed.contains("place"));
+        assert!(parsed.contains("country"));
+        assert_eq!(parsed.len(), 8);
+    }
 }
