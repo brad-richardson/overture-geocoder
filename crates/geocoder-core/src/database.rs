@@ -745,13 +745,7 @@ mod tests {
             (0.0, 10.0),
             (0.0, 0.0),
         ];
-        let hole = [
-            (4.0, 4.0),
-            (6.0, 4.0),
-            (6.0, 6.0),
-            (4.0, 6.0),
-            (4.0, 4.0),
-        ];
+        let hole = [(4.0, 4.0), (6.0, 4.0), (6.0, 6.0), (4.0, 6.0), (4.0, 4.0)];
         for little in [true, false] {
             let wkb = polygon_wkb(&[&outer, &hole], little);
             assert_eq!(point_in_wkb(&wkb, 2.0, 2.0), Some(true));
@@ -762,13 +756,7 @@ mod tests {
 
     #[test]
     fn point_in_wkb_handles_multipolygon() {
-        let left = [
-            (0.0, 0.0),
-            (2.0, 0.0),
-            (2.0, 2.0),
-            (0.0, 2.0),
-            (0.0, 0.0),
-        ];
+        let left = [(0.0, 0.0), (2.0, 0.0), (2.0, 2.0), (0.0, 2.0), (0.0, 0.0)];
         let right = [
             (8.0, 8.0),
             (10.0, 8.0),
@@ -776,10 +764,7 @@ mod tests {
             (8.0, 10.0),
             (8.0, 8.0),
         ];
-        let wkb = multipolygon_wkb(&[
-            polygon_wkb(&[&left], true),
-            polygon_wkb(&[&right], false),
-        ]);
+        let wkb = multipolygon_wkb(&[polygon_wkb(&[&left], true), polygon_wkb(&[&right], false)]);
         assert_eq!(point_in_wkb(&wkb, 1.0, 1.0), Some(true));
         assert_eq!(point_in_wkb(&wkb, 9.0, 9.0), Some(true));
         assert_eq!(point_in_wkb(&wkb, 5.0, 5.0), Some(false));
