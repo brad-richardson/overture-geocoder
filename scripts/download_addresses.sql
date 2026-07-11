@@ -30,6 +30,7 @@ SET threads = 4;
 COPY (
     SELECT
         id as gers_id,
+        version,
         ST_X(geometry) as lon,
         ST_Y(geometry) as lat,
         bbox.xmin as bbox_xmin,
@@ -40,6 +41,16 @@ COPY (
         street,
         number,
         unit,
+        country,
+        -- Preserve the feature-level external source. Property-specific
+        -- Overture-derived confidence/status entries are intentionally not
+        -- counted as independent provenance.
+        (list_extract(list_filter(sources, lambda x: x.property = ''), 1)).dataset
+            as source_dataset,
+        (list_extract(list_filter(sources, lambda x: x.property = ''), 1)).update_time
+            as source_update_time,
+        (list_extract(list_filter(sources, lambda x: x.property = ''), 1)).confidence
+            as source_confidence,
         -- Extract city and state from address_levels array
         address_levels[1].value as state,
         address_levels[2].value as city,
@@ -51,10 +62,11 @@ COPY (
             CONCAT(address_levels[1].value, ' ', postcode)
         ) as primary_name,
         -- Build search text (lowercase, for FTS indexing)
-        -- Includes: number, street, city, state, postcode, country
+        -- Includes: number, street, unit, city, state, postcode, country
         LOWER(CONCAT_WS(' ',
             COALESCE(number, ''),
             COALESCE(street, ''),
+            COALESCE(unit, ''),
             COALESCE(address_levels[2].value, postal_city, ''),
             COALESCE(address_levels[1].value, ''),  -- state abbreviation (MA)
             COALESCE(postcode, ''),
