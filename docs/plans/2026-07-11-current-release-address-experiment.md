@@ -6,6 +6,7 @@ Release: `2026-06-17.0` / schema `v1.17.0` / Addresses maturity: **Alpha**.
 > Counts are raw unweighted sample counts; no global design-weighted estimate is reported.
 > Row/byte/temp/memory guards bound local outputs and DuckDB workspace only. They do not meter S3 bytes scanned or HTTP requests. The single remote query is interrupted at the reported wall-clock cap.
 > Remote I/O was bounded with one combined bbox-prefiltered scan, followed by exact Point-coordinate membership. Missing or spatially discordant bbox rows are unobservable, so candidate populations are not fully geometry-authoritative.
+> Post-query artifact acceptance only: the cap removes a completed sample whose observed box population is too large; it does not bound the remote scan, count, window, or deterministic sort. The wall-clock and DuckDB workspace guards bound that work.
 
 Official references: [address schema](https://docs.overturemaps.org/schema/reference/addresses/address/), [source item schema](https://docs.overturemaps.org/schema/reference/core/source_item/), and [address data guide](https://docs.overturemaps.org/guides/addresses/).
 

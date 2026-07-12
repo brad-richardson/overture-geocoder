@@ -270,8 +270,12 @@ def test_markdown_keeps_representativeness_and_confidence_warnings():
         "limitations": ["purposive"],
     }
     report["sampling"]["bounds_warning"] = "does not bound S3 bytes scanned"
+    report["sampling"]["candidate_cap_scope_warning"] = (
+        "post-query acceptance does not bound remote work"
+    )
 
     markdown = experiment.render_markdown(report)
     assert "not a statistically representative sample" in markdown
     assert "not calibrated across datasets" in markdown
     assert "No gold queries were created" in markdown
+    assert "post-query acceptance does not bound remote work" in markdown

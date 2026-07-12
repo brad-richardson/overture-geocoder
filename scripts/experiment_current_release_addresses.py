@@ -998,6 +998,11 @@ def render_markdown(report: dict[str, Any]) -> str:
             if sampling.get("sample_contract_warning")
             else []
         ),
+        *(
+            [f"> {sampling['candidate_cap_scope_warning']}"]
+            if sampling.get("candidate_cap_scope_warning")
+            else []
+        ),
         "",
         "Official references: [address schema](https://docs.overturemaps.org/schema/reference/addresses/address/), "
         "[source item schema](https://docs.overturemaps.org/schema/reference/core/source_item/), and "

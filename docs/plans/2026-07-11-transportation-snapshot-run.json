@@ -73,7 +73,6 @@
     "unique_referenced_connector_ids": 99878
   },
   "execution": {
-    "duckdb_temp_byte_cap": 8589934592,
     "duckdb_version": "1.4.4",
     "invocation": [
       "scripts/benchmark_transport_components.py",
