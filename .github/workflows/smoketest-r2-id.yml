@@ -1,0 +1,164 @@
+name: Smoke Test R2 ID Index
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/build_id_index.py'
+      - 'scripts/stac.py'
+      - '.github/workflows/smoketest-r2-id.yml'
+  workflow_dispatch:
+
+# This smoke uses a fixed, ID-family-only R2 prefix. Cancel an older ID run
+# before its replacement starts so marker-resumable phases and cleanup cannot
+# overlap. The shard smoke has a different prefix and concurrency group.
+concurrency:
+  group: smoketest-r2-id
+  cancel-in-progress: true
+
+env:
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  # Fixed family-specific prefix (never collides with real date-based versions)
+  SMOKE_VERSION: smoketest-id
+
+jobs:
+  smoketest:
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb==1.5.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      # Stale staging markers under the fixed prefix would make these
+      # resumable phases silently skip, turning the smoke into a no-op.
+      - name: Pre-clean stale smoketest data
+        run: |
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+          export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+          aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+            --only-show-errors \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto
+          REMAINING=$(aws s3api list-objects-v2 \
+            --bucket geocoder-shards \
+            --prefix "${SMOKE_VERSION}/" \
+            --max-keys 1 \
+            --query 'KeyCount' \
+            --output text \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto)
+          if [ "$REMAINING" != "0" ]; then
+            echo "::error::Pre-clean left objects under ${SMOKE_VERSION}/"
+            exit 1
+          fi
+
+      - name: Discover Overture release once
+        run: |
+          RELEASE=$(python3 scripts/stac.py | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
+          if [ -z "$RELEASE" ]; then
+            echo "::error::Failed to discover latest Overture release from STAC"
+            exit 1
+          fi
+          echo "OVERTURE_RELEASE=$RELEASE" >> "$GITHUB_ENV"
+          echo "Overture release: $RELEASE"
+
+      - name: Stage registry (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase stage-registry \
+            --version $SMOKE_VERSION \
+            --release "$OVERTURE_RELEASE" \
+            --prefix-len 3 \
+            --smoke-test \
+            --workers 2
+
+      - name: Stage base (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase stage-base \
+            --version $SMOKE_VERSION \
+            --release "$OVERTURE_RELEASE" \
+            --prefix-len 3 \
+            --smoke-test \
+            --workers 2
+
+      - name: Build ID locator dictionary (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase dictionaries \
+            --version $SMOKE_VERSION \
+            --release "$OVERTURE_RELEASE" \
+            --prefix-len 3 \
+            --smoke-test
+
+      - name: Build ID shards (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase build \
+            --version $SMOKE_VERSION \
+            --release "$OVERTURE_RELEASE" \
+            --prefix-len 3 \
+            --smoke-test \
+            --workers 2
+
+      - name: Build ID metadata (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase metadata \
+            --version $SMOKE_VERSION \
+            --release "$OVERTURE_RELEASE" \
+            --prefix-len 3 \
+            --smoke-test
+
+      - name: Verify ID index uploads
+        run: |
+          if wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
+            echo "  ok: ${SMOKE_VERSION}/id-collection.json"
+          else
+            echo "::error::${SMOKE_VERSION}/id-collection.json NOT FOUND"
+            exit 1
+          fi
+          echo "ID index verification passed."
+
+      - name: Cleanup test data from R2
+        if: always()
+        run: |
+          echo "Cleaning up ID smoke test data from R2..."
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
+          export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
+          # Non-fatal: stale leftovers are removed by the next pre-clean.
+          aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto | wc -l | xargs -I{} echo "Deleted {} objects from R2." \
+            || echo "::warning::R2 cleanup failed; the next run's pre-clean step will remove leftovers."
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## R2 ID Index Smoke Test" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Release-theme limit:** 50 records per type" >> $GITHUB_STEP_SUMMARY
+          echo "**Overture release:** ${OVERTURE_RELEASE}" >> $GITHUB_STEP_SUMMARY
+          echo "**R2 prefix:** ${SMOKE_VERSION}" >> $GITHUB_STEP_SUMMARY
+          echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

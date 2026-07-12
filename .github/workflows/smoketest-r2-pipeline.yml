@@ -1,29 +1,31 @@
-name: Smoke Test R2 Pipeline
+name: Smoke Test R2 Shards
 
 on:
   push:
     branches: [main]
     paths:
-      - 'scripts/**'
+      - 'scripts/build_shards.py'
+      - 'scripts/download_divisions.sh'
+      - 'scripts/download_divisions_area.sql'
+      - 'scripts/download_divisions_global.sql'
+      - 'scripts/stac.py'
       - '.github/workflows/smoketest-r2-pipeline.yml'
-      - '.github/workflows/rebuild-r2-shards.yml'
   workflow_dispatch:
 
-# Smoke tests share the fixed "smoketest" R2 version prefix: two concurrent
-# runs (e.g. back-to-back pushes touching scripts/) would read each other's
-# staging markers and skip phases, or race one run's cleanup against the
-# other's build. Queue instead.
+# This smoke uses a fixed, shard-family-only R2 prefix. Cancel an older shard
+# run before its replacement starts so their pre-clean/build/cleanup phases
+# cannot overlap. The ID smoke has a different prefix and concurrency group.
 concurrency:
-  group: smoketest-r2-pipeline
-  cancel-in-progress: false
+  group: smoketest-r2-shards
+  cancel-in-progress: true
 
 env:
   CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
   CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
   R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
   R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-  # Fixed version prefix for smoke tests (never collides with real date-based versions)
-  SMOKE_VERSION: smoketest
+  # Fixed family-specific prefix (never collides with real date-based versions)
+  SMOKE_VERSION: smoketest-shards
 
 jobs:
   smoketest:
@@ -38,12 +40,14 @@ jobs:
 
       - name: Install DuckDB CLI
         run: |
-          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.1.3/duckdb_cli-linux-aarch64.zip
+          # Keep the CLI and Python package aligned with the production build.
+          curl -L -o duckdb.zip https://github.com/duckdb/duckdb/releases/download/v1.5.1/duckdb_cli-linux-arm64.zip
           unzip duckdb.zip
           sudo mv duckdb /usr/local/bin/
+          duckdb --version
 
       - name: Install Python dependencies
-        run: pip install duckdb
+        run: pip install duckdb==1.5.1
 
       - name: Setup Node.js
         uses: actions/setup-node@v6
@@ -53,9 +57,8 @@ jobs:
       - name: Install wrangler
         run: npm install -g wrangler
 
-      # Stale staging markers from a previous run would make the ID phases
-      # below silently skip (they're marker-resumable), turning the smoke
-      # test into a no-op. Start from a clean slate.
+      # A prior interrupted run may leave objects under the fixed family
+      # prefix. Start from a clean slate so verification tests this run.
       - name: Pre-clean stale smoketest data
         run: |
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
@@ -63,10 +66,21 @@ jobs:
           export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
           export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
           aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+            --only-show-errors \
             --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-            --region auto | tail -1 || true
-
-      # --- Shard pipeline (forward + reverse for a tiny country) ---
+            --region auto
+          REMAINING=$(aws s3api list-objects-v2 \
+            --bucket geocoder-shards \
+            --prefix "${SMOKE_VERSION}/" \
+            --max-keys 1 \
+            --query 'KeyCount' \
+            --output text \
+            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
+            --region auto)
+          if [ "$REMAINING" != "0" ]; then
+            echo "::error::Pre-clean left objects under ${SMOKE_VERSION}/"
+            exit 1
+          fi
 
       - name: Download divisions data
         run: ./scripts/download_divisions.sh
@@ -120,68 +134,11 @@ jobs:
           fi
           echo "Shard verification passed."
 
-      # --- ID index pipeline (registry + release, smoke test) ---
-
-      - name: Stage registry (smoke test)
-        run: |
-          python scripts/build_id_index.py \
-            --phase stage-registry \
-            --version $SMOKE_VERSION \
-            --prefix-len 3 \
-            --smoke-test \
-            --workers 2
-
-      - name: Stage base (smoke test)
-        run: |
-          python scripts/build_id_index.py \
-            --phase stage-base \
-            --version $SMOKE_VERSION \
-            --prefix-len 3 \
-            --smoke-test \
-            --workers 2
-
-      - name: Build ID locator dictionary (smoke test)
-        run: |
-          python scripts/build_id_index.py \
-            --phase dictionaries \
-            --version $SMOKE_VERSION \
-            --prefix-len 3 \
-            --smoke-test
-
-      - name: Build ID shards (smoke test)
-        run: |
-          python scripts/build_id_index.py \
-            --phase build \
-            --version $SMOKE_VERSION \
-            --prefix-len 3 \
-            --smoke-test \
-            --workers 2
-
-      - name: Build ID metadata (smoke test)
-        run: |
-          python scripts/build_id_index.py \
-            --phase metadata \
-            --version $SMOKE_VERSION \
-            --prefix-len 3 \
-            --smoke-test
-
-      - name: Verify ID index uploads
-        run: |
-          if wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
-            echo "  ok: ${SMOKE_VERSION}/id-collection.json"
-          else
-            echo "::error::${SMOKE_VERSION}/id-collection.json NOT FOUND"
-            exit 1
-          fi
-          echo "ID index verification passed."
-
-      # --- Cleanup: remove all smoketest objects from R2 ---
-
       - name: Cleanup test data from R2
         if: always()
         # NOTE: `wrangler r2 object list` no longer exists — the old
         # wrangler-based cleanup silently deleted nothing for months and
-        # stale markers made every later smoke test skip its ID phases.
+        # left test objects behind. Use the paginated S3 client instead.
         run: |
           echo "Cleaning up smoke test data from R2..."
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
@@ -199,8 +156,8 @@ jobs:
       - name: Summary
         if: always()
         run: |
-          echo "## R2 Pipeline Smoke Test" >> $GITHUB_STEP_SUMMARY
+          echo "## Forward/Reverse R2 Shard Smoke Test" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Country:** MC (Monaco)" >> $GITHUB_STEP_SUMMARY
-          echo "**ID index limit:** 50 records" >> $GITHUB_STEP_SUMMARY
+          echo "**R2 prefix:** ${SMOKE_VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
