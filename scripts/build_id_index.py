@@ -89,6 +89,9 @@ RELEASE_THEMES = ["addresses", "base"]
 # type, filename, and historical release strings once per shard set.
 ID_INDEX_FORMAT_VERSION = 3
 ID_LOCATOR_MANIFEST = "id-locator-manifest.json"
+ID_STAGE_INVENTORY_VERSION = 1
+ID_INVENTORY_SET_VERSION = 1
+ID_INVENTORY_DIR = "id-inventories"
 TYPE_THEME_MAP_VERSION = 1
 TYPE_THEME_MAP = {
     "address": "addresses",
@@ -611,7 +614,77 @@ def phase_partition_r2(prefix_len, r2_config, version,
     print(f"  [registry] Done ({label}) in {mins}m{secs:02d}s")
 
 
-def _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=None):
+def _registry_inventory_scope(
+    prefix_len, prefixes=None, prefix_start=None, prefix_end=None
+):
+    if prefixes is not None:
+        normalized = sorted(set(prefixes))
+        if not normalized:
+            raise RuntimeError("Registry inventory scope has no prefixes")
+        return {"prefixes": normalized}
+    start = prefix_start or ("0" * prefix_len)
+    end = prefix_end or ("f" * prefix_len)
+    return {"prefix_start": start, "prefix_end": end}
+
+
+def _registry_staged_files_for_scope(con, r2_config, version, scope):
+    files = _glob_files(
+        con,
+        f"s3://{r2_config['bucket']}/{version}/staging/"
+        "id-partitioned/prefix=*/*.parquet",
+    )
+    if "prefixes" in scope:
+        wanted = set(scope["prefixes"])
+    else:
+        lo, hi = int(scope["prefix_start"], 16), int(scope["prefix_end"], 16)
+        width = len(scope["prefix_start"])
+        wanted = {format(value, f"0{width}x") for value in range(lo, hi + 1)}
+    selected = [
+        path
+        for path in files
+        if path.split("prefix=", 1)[-1].split("/", 1)[0] in wanted
+    ]
+    found = {path.split("prefix=", 1)[-1].split("/", 1)[0] for path in selected}
+    missing = sorted(wanted - found)
+    # Empty prefixes are valid in theory, so completeness is ultimately tied
+    # to the stage job's scope marker rather than requiring one file per prefix.
+    # In the real 3-hex registry every prefix is populated; smoke tests likewise
+    # expect their contiguous sample prefixes to exist.
+    if missing:
+        raise RuntimeError(
+            f"Registry inventory scope is missing staged prefixes: {missing[:10]}"
+        )
+    return sorted(selected)
+
+
+def _build_registry_stage_inventory(r2_config, version, release_version, scope):
+    """Discover only path-null historical releases for one completed range."""
+    con = _r2_con(r2_config)
+    try:
+        files = _registry_staged_files_for_scope(con, r2_config, version, scope)
+        file_sql = ", ".join(f"'{path}'" for path in files)
+        rows = _retry_transient(
+            lambda: con.execute(f"""
+            SELECT DISTINCT last_seen_release
+            FROM read_parquet([{file_sql}], union_by_name=true)
+            WHERE filename IS NULL AND last_seen_release IS NOT NULL
+            ORDER BY last_seen_release
+        """).fetchall()
+        )()
+    finally:
+        con.close()
+    payload = _make_stage_inventory(
+        "registry_range",
+        release_version,
+        scope,
+        last_seen_releases=[row[0] for row in rows],
+    )
+    return _publish_stage_inventory(r2_config, version, payload)
+
+
+def _release_id_query_for_type(
+    prefix_len, release_version, theme, type_name, limit=None
+):
     """Query for release IDs from a specific theme/type.
 
     Includes a computed `prefix` column so the build phase can filter on it
@@ -750,7 +823,13 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
     con.execute("SET memory_limit = '4GB';")
     con.execute("SET s3_region = 'us-west-2';")
 
-    query = _release_id_query_for_type(prefix_len, release_version, theme, type_name, limit=limit)
+    source_files_before = _release_type_source_files(
+        con, release_version, theme, type_name
+    )
+
+    query = _release_id_query_for_type(
+        prefix_len, release_version, theme, type_name, limit=limit
+    )
 
     # Re-run safety: a cancelled run can leave marker-less partial staging
     # (including legacy single-file data.parquet from older code) that the
@@ -769,9 +848,30 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
         _do_copy,
         on_retry=lambda: _clear_release_staging(r2_config, version, staging_dir),
     )()
+    source_files_after = _release_type_source_files(
+        con, release_version, theme, type_name
+    )
     con.close()
 
-    _write_staging_marker(r2_config, version, staging_dir, 16)
+    if source_files_before != source_files_after:
+        raise RuntimeError(
+            f"Current-release file inventory changed while staging {theme}/{type_name}"
+        )
+    inventory = _make_stage_inventory(
+        "release_type",
+        release_version,
+        {"theme": theme, "feature_type": type_name},
+        source_files=source_files_after,
+    )
+    inventory_reference = _publish_stage_inventory(r2_config, version, inventory)
+
+    _write_staging_marker(
+        r2_config,
+        version,
+        staging_dir,
+        16,
+        extra={"locator_inventory": inventory_reference},
+    )
     return (theme, type_name)
 
 
@@ -783,7 +883,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
     path so there are no conflicts.
     """
     _ensure_httpfs_installed()
-    print(f"  [release] Discovering release types...")
+    print("  [release] Discovering release types...")
     # Raises if discovery fails or any theme comes back empty
     types = _discover_release_types(release_version)
 
@@ -924,10 +1024,408 @@ def _read_optional_r2_json(r2_config, version, filename, retries=3):
     raise RuntimeError(f"Failed to read optional {r2_key}: {last_err}")
 
 
+def _publish_stage_inventory(r2_config, version, payload):
+    """Publish an immutable inventory before its mutable stage marker."""
+    reference, raw = _stage_inventory_reference(payload)
+    relative_href = reference["href"].removeprefix("./")
+    tmp = Path(f"tmp-id-inventory-{os.getpid()}-{time.time_ns()}.json")
+    tmp.write_bytes(raw)
+    try:
+        err = _upload_to_r2(tmp, f"{r2_config['bucket']}/{version}/{relative_href}")
+    finally:
+        tmp.unlink(missing_ok=True)
+    if err:
+        raise RuntimeError(f"Failed to upload locator inventory: {err}")
+    return reference
+
+
+def _publish_inventory_set(r2_config, version, payload):
+    """Publish the permanent, auditable set of stage inventory references."""
+    reference, raw = _inventory_set_reference(payload)
+    relative_href = reference["href"].removeprefix("./")
+    tmp = Path(f"tmp-id-inventory-set-{os.getpid()}-{time.time_ns()}.json")
+    tmp.write_bytes(raw)
+    try:
+        err = _upload_to_r2(tmp, f"{r2_config['bucket']}/{version}/{relative_href}")
+    finally:
+        tmp.unlink(missing_ok=True)
+    if err:
+        raise RuntimeError(f"Failed to upload locator inventory set: {err}")
+    return reference
+
+
+def _load_inventory_set(r2_config, version, reference, release_version):
+    reference = _validate_inventory_set_reference(reference)
+    href = reference["href"].removeprefix("./")
+    payload = _validate_inventory_set(
+        _read_r2_json(
+            r2_config,
+            version,
+            href,
+            expected_sha256=reference["sha256"],
+            expected_size_bytes=reference["size_bytes"],
+        ),
+        release_version,
+    )
+    expected, _ = _inventory_set_reference(payload)
+    if expected != reference:
+        raise RuntimeError("Locator inventory set payload/reference mismatch")
+    return payload
+
+
+def _load_stage_inventory(r2_config, version, reference, release_version):
+    reference = _validate_stage_inventory_reference(reference)
+    href = reference["href"].removeprefix("./")
+    payload = _validate_stage_inventory(
+        _read_r2_json(
+            r2_config,
+            version,
+            href,
+            expected_sha256=reference["sha256"],
+            expected_size_bytes=reference["size_bytes"],
+        ),
+        release_version,
+    )
+    expected, _ = _stage_inventory_reference(payload)
+    if expected != reference:
+        raise RuntimeError("Locator inventory payload/reference mismatch")
+    return payload
+
+
+def _release_source_pattern(release_version, theme, feature_type):
+    return (
+        f"{RELEASE_S3}{release_version}/theme={theme}/type={feature_type}/**/*.parquet"
+    )
+
+
+def _release_type_source_files(con, release_version, theme, feature_type):
+    expected_theme = TYPE_THEME_MAP.get(feature_type)
+    if expected_theme != theme:
+        raise RuntimeError(
+            f"Unsupported release theme/type {theme}/{feature_type}; "
+            f"type map expects {expected_theme!r}"
+        )
+    paths = _glob_files(
+        con, _release_source_pattern(release_version, theme, feature_type)
+    )
+    if not paths:
+        raise RuntimeError(f"No current-release files for {theme}/{feature_type}")
+    tuples = []
+    for path in paths:
+        filename = path.rsplit("/", 1)[-1]
+        if not _validate_source_filename(filename):
+            raise RuntimeError(f"Invalid current-release source path {path!r}")
+        tuples.append((theme, feature_type, filename))
+    if len(set(tuples)) != len(tuples):
+        raise RuntimeError(
+            f"Duplicate current-release basenames for {theme}/{feature_type}"
+        )
+    return sorted(tuples)
+
+
+def _discover_current_release_source_files(con, release_version, retries=3):
+    """Return a stable exact S3 file inventory for every mapped type.
+
+    Two identical complete listings are required. A transient partial listing
+    can therefore fail or retry, but can never silently shrink the dictionary.
+    """
+    previous = None
+    last_error = None
+    for attempt in range(retries):
+        try:
+            current = []
+            for feature_type, theme in sorted(TYPE_THEME_MAP.items()):
+                current.extend(
+                    _release_type_source_files(
+                        con, release_version, theme, feature_type
+                    )
+                )
+            current = sorted(set(current))
+        except Exception as exc:
+            last_error = exc
+            previous = None
+        else:
+            if previous == current:
+                return current
+            previous = current
+            last_error = RuntimeError("Current-release inventory was not stable")
+        if attempt < retries - 1:
+            time.sleep(2 * (attempt + 1))
+    raise RuntimeError(
+        f"Failed to obtain two stable current-release inventories: {last_error}"
+    )
+
+
 def _canonical_json_bytes(value):
-    return (json.dumps(
-        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
-    ) + "\n").encode("utf-8")
+    return (
+        json.dumps(
+            value,
+            ensure_ascii=False,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
+def _make_stage_inventory(
+    kind, release_version, scope, source_files=(), last_seen_releases=()
+):
+    """Create one canonical, scope-bound staging inventory.
+
+    Inventories intentionally contain only low-cardinality dictionary values,
+    never IDs or feature rows. Registry ranges contribute historical releases;
+    release/current-file scopes contribute authoritative source tuples.
+    """
+    if kind not in {"registry_range", "release_type", "current_release_files"}:
+        raise RuntimeError(f"Invalid locator inventory kind {kind!r}")
+    if not isinstance(release_version, str) or not release_version:
+        raise RuntimeError("Invalid locator inventory release")
+    if not isinstance(scope, dict):
+        raise RuntimeError("Invalid locator inventory scope")
+    if kind == "registry_range":
+        allowed = ({"prefix_start", "prefix_end"}, {"prefixes"})
+        if set(scope) not in allowed or source_files:
+            raise RuntimeError("Invalid registry inventory scope/values")
+        if "prefixes" in scope:
+            prefixes = scope["prefixes"]
+            if (
+                not isinstance(prefixes, list)
+                or not prefixes
+                or prefixes != sorted(set(prefixes))
+            ):
+                raise RuntimeError("Invalid registry inventory prefixes")
+        else:
+            if scope["prefix_start"] > scope["prefix_end"]:
+                raise RuntimeError("Invalid registry inventory range")
+    elif kind == "release_type":
+        if set(scope) != {"theme", "feature_type"} or last_seen_releases:
+            raise RuntimeError("Invalid release-type inventory scope/values")
+    else:
+        if set(scope) != {"universe"} or scope["universe"] != "all_mapped_types":
+            raise RuntimeError("Invalid current-release inventory scope")
+        if last_seen_releases:
+            raise RuntimeError("Current-release inventory cannot contain history")
+
+    normalized_files = sorted(set(tuple(value) for value in source_files))
+    normalized_releases = sorted(set(last_seen_releases))
+    # Reuse the production dictionary validator for theme/type/basename and
+    # historical release shape. The result is discarded; this is validation.
+    _make_locator_dictionary(
+        normalized_files,
+        normalized_releases,
+        release_version,
+        input_inventory_set_sha256=None,
+    )
+    if kind == "release_type":
+        expected = (scope["theme"], scope["feature_type"])
+        if any(
+            (theme, feature_type) != expected
+            for theme, feature_type, _ in normalized_files
+        ):
+            raise RuntimeError("Release inventory tuple escapes its scope")
+    return {
+        "format_version": ID_INDEX_FORMAT_VERSION,
+        "inventory_version": ID_STAGE_INVENTORY_VERSION,
+        "kind": kind,
+        "overture_release": release_version,
+        "scope": scope,
+        "source_files": [
+            {"theme": theme, "feature_type": feature_type, "filename": filename}
+            for theme, feature_type, filename in normalized_files
+        ],
+        "last_seen_releases": normalized_releases,
+        "source_files_count": len(normalized_files),
+        "last_seen_releases_count": len(normalized_releases),
+    }
+
+
+def _validate_stage_inventory(payload, release_version=None):
+    if not isinstance(payload, dict) or set(payload) != {
+        "format_version",
+        "inventory_version",
+        "kind",
+        "overture_release",
+        "scope",
+        "source_files",
+        "last_seen_releases",
+        "source_files_count",
+        "last_seen_releases_count",
+    }:
+        raise RuntimeError("Invalid locator stage inventory fields")
+    files = payload.get("source_files")
+    releases = payload.get("last_seen_releases")
+    if not isinstance(files, list) or not isinstance(releases, list):
+        raise RuntimeError("Invalid locator stage inventory arrays")
+    if (
+        release_version is not None
+        and payload.get("overture_release") != release_version
+    ):
+        raise RuntimeError("Locator stage inventory release mismatch")
+    rebuilt = _make_stage_inventory(
+        payload.get("kind"),
+        payload.get("overture_release"),
+        payload.get("scope"),
+        [
+            (item.get("theme"), item.get("feature_type"), item.get("filename"))
+            for item in files
+            if isinstance(item, dict)
+        ],
+        releases,
+    )
+    if rebuilt != payload:
+        raise RuntimeError("Invalid locator stage inventory content/order")
+    return payload
+
+
+def _stage_inventory_reference(payload):
+    payload = _validate_stage_inventory(payload)
+    raw = _canonical_json_bytes(payload)
+    if len(raw) > 1024 * 1024:
+        raise RuntimeError("Locator stage inventory exceeds 1 MiB")
+    sha256 = hashlib.sha256(raw).hexdigest()
+    scope_sha = hashlib.sha256(_canonical_json_bytes(payload["scope"])).hexdigest()[:16]
+    href = f"{ID_INVENTORY_DIR}/{payload['kind']}-{scope_sha}-{sha256}.json"
+    return {
+        "href": f"./{href}",
+        "sha256": sha256,
+        "size_bytes": len(raw),
+        "kind": payload["kind"],
+        "scope": payload["scope"],
+    }, raw
+
+
+def _validate_stage_inventory_reference(reference):
+    if not isinstance(reference, dict) or set(reference) != {
+        "href",
+        "sha256",
+        "size_bytes",
+        "kind",
+        "scope",
+    }:
+        raise RuntimeError("Invalid locator inventory reference fields")
+    sha256 = reference.get("sha256")
+    if (
+        not isinstance(sha256, str)
+        or len(sha256) != 64
+        or any(char not in "0123456789abcdef" for char in sha256)
+    ):
+        raise RuntimeError("Invalid locator inventory reference SHA")
+    scope_sha = hashlib.sha256(
+        _canonical_json_bytes(reference.get("scope"))
+    ).hexdigest()[:16]
+    expected = f"./{ID_INVENTORY_DIR}/{reference.get('kind')}-{scope_sha}-{sha256}.json"
+    if reference.get("href") != expected:
+        raise RuntimeError("Invalid locator inventory reference href")
+    size = reference.get("size_bytes")
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or not 0 < size <= 1024 * 1024
+    ):
+        raise RuntimeError("Invalid locator inventory reference size")
+    return reference
+
+
+def _inventory_set_sha256(references):
+    normalized = sorted(
+        (
+            _validate_stage_inventory_reference(dict(reference))
+            for reference in references
+        ),
+        key=lambda item: item["href"],
+    )
+    if len({item["href"] for item in normalized}) != len(normalized):
+        raise RuntimeError("Duplicate locator inventory reference")
+    return hashlib.sha256(_canonical_json_bytes(normalized)).hexdigest()
+
+
+def _make_inventory_set(references, release_version):
+    normalized = sorted(
+        (
+            _validate_stage_inventory_reference(dict(reference))
+            for reference in references
+        ),
+        key=lambda item: item["href"],
+    )
+    references_sha256 = _inventory_set_sha256(normalized)
+    return {
+        "format_version": ID_INDEX_FORMAT_VERSION,
+        "inventory_set_version": ID_INVENTORY_SET_VERSION,
+        "overture_release": release_version,
+        "inventories": normalized,
+        "inventories_count": len(normalized),
+        "inventory_references_sha256": references_sha256,
+    }
+
+
+def _validate_inventory_set(payload, release_version=None):
+    if not isinstance(payload, dict) or set(payload) != {
+        "format_version",
+        "inventory_set_version",
+        "overture_release",
+        "inventories",
+        "inventories_count",
+        "inventory_references_sha256",
+    }:
+        raise RuntimeError("Invalid locator inventory set fields")
+    references = payload.get("inventories")
+    if not isinstance(references, list):
+        raise RuntimeError("Invalid locator inventory set references")
+    rebuilt = _make_inventory_set(references, payload.get("overture_release"))
+    if payload != rebuilt:
+        raise RuntimeError("Invalid locator inventory set content/order")
+    if release_version is not None and payload["overture_release"] != release_version:
+        raise RuntimeError("Locator inventory set release mismatch")
+    return payload
+
+
+def _inventory_set_reference(payload):
+    payload = _validate_inventory_set(payload)
+    raw = _canonical_json_bytes(payload)
+    if len(raw) > 1024 * 1024:
+        raise RuntimeError("Locator inventory set exceeds 1 MiB")
+    sha256 = hashlib.sha256(raw).hexdigest()
+    return {
+        "href": f"./{ID_INVENTORY_DIR}/inventory-set-{sha256}.json",
+        "sha256": sha256,
+        "size_bytes": len(raw),
+        "inventories_count": payload["inventories_count"],
+        "inventory_references_sha256": payload["inventory_references_sha256"],
+    }, raw
+
+
+def _validate_inventory_set_reference(reference):
+    if not isinstance(reference, dict) or set(reference) != {
+        "href",
+        "sha256",
+        "size_bytes",
+        "inventories_count",
+        "inventory_references_sha256",
+    }:
+        raise RuntimeError("Invalid locator inventory set reference fields")
+    sha256 = reference.get("sha256")
+    references_sha256 = reference.get("inventory_references_sha256")
+    if any(
+        not isinstance(value, str)
+        or len(value) != 64
+        or any(char not in "0123456789abcdef" for char in value)
+        for value in (sha256, references_sha256)
+    ):
+        raise RuntimeError("Invalid locator inventory set reference SHA")
+    if reference.get("href") != (f"./{ID_INVENTORY_DIR}/inventory-set-{sha256}.json"):
+        raise RuntimeError("Invalid locator inventory set reference href")
+    size = reference.get("size_bytes")
+    count = reference.get("inventories_count")
+    if (
+        not isinstance(size, int)
+        or isinstance(size, bool)
+        or not 0 < size <= 1024 * 1024
+    ):
+        raise RuntimeError("Invalid locator inventory set reference size")
+    if not isinstance(count, int) or isinstance(count, bool) or not 0 < count <= 65_535:
+        raise RuntimeError("Invalid locator inventory set reference count")
+    return reference
 
 
 def _sha256_json(value):
@@ -945,7 +1443,13 @@ def _validate_source_filename(filename):
     )
 
 
-def _make_locator_dictionary(source_files, last_seen_releases, release_version):
+def _make_locator_dictionary(
+    source_files,
+    last_seen_releases,
+    release_version,
+    input_inventory_set_sha256=None,
+    input_inventory_set=None,
+):
     """Build and validate a deterministic compact locator dictionary."""
     for entry in source_files:
         if (
@@ -956,6 +1460,23 @@ def _make_locator_dictionary(source_files, last_seen_releases, release_version):
             raise RuntimeError(f"Invalid source-file dictionary entry {entry!r}")
     if not all(isinstance(value, str) for value in last_seen_releases):
         raise RuntimeError("Invalid release dictionary entry")
+    if input_inventory_set_sha256 is not None and (
+        not isinstance(input_inventory_set_sha256, str)
+        or len(input_inventory_set_sha256) != 64
+        or any(char not in "0123456789abcdef" for char in input_inventory_set_sha256)
+    ):
+        raise RuntimeError("Invalid input inventory set SHA")
+    if input_inventory_set is not None:
+        input_inventory_set = _validate_inventory_set_reference(
+            dict(input_inventory_set)
+        )
+        if (
+            input_inventory_set_sha256
+            != input_inventory_set["inventory_references_sha256"]
+        ):
+            raise RuntimeError("Input inventory set reference/SHA mismatch")
+    elif input_inventory_set_sha256 is not None:
+        raise RuntimeError("Input inventory set SHA requires a permanent reference")
     normalized_files = sorted({tuple(entry) for entry in source_files})
     normalized_releases = sorted(set(last_seen_releases))
     if len(normalized_files) > 65_535:
@@ -990,12 +1511,14 @@ def _make_locator_dictionary(source_files, last_seen_releases, release_version):
         "last_seen_releases": normalized_releases,
         "source_files_count": len(source_entries),
         "last_seen_releases_count": len(normalized_releases),
-        "source_file_id_bounds": (
-            [1, len(source_entries)] if source_entries else None),
+        "source_file_id_bounds": ([1, len(source_entries)] if source_entries else None),
         "last_seen_release_id_bounds": (
-            [1, len(normalized_releases)] if normalized_releases else None),
+            [1, len(normalized_releases)] if normalized_releases else None
+        ),
         "source_files_sha256": _sha256_json(source_entries),
         "last_seen_releases_sha256": _sha256_json(normalized_releases),
+        "input_inventory_set_sha256": input_inventory_set_sha256,
+        "input_inventory_set": input_inventory_set,
     }
     return payload
 
@@ -1006,24 +1529,38 @@ def _validate_locator_dictionary(payload, release_version=None):
         raise RuntimeError("Unsupported locator dictionary format_version")
     if payload.get("dictionary_version") != 1:
         raise RuntimeError("Unsupported locator dictionary_version")
-    if release_version is not None and payload.get("overture_release") != release_version:
+    if (
+        release_version is not None
+        and payload.get("overture_release") != release_version
+    ):
         raise RuntimeError("Locator dictionary release does not match build release")
     source_files = payload.get("source_files")
     releases = payload.get("last_seen_releases")
     if not isinstance(source_files, list) or not isinstance(releases, list):
         raise RuntimeError("Locator dictionaries must be arrays")
     rebuilt = _make_locator_dictionary(
-        [(entry.get("theme"), entry.get("feature_type"), entry.get("filename"))
-         for entry in source_files if isinstance(entry, dict)],
+        [
+            (entry.get("theme"), entry.get("feature_type"), entry.get("filename"))
+            for entry in source_files
+            if isinstance(entry, dict)
+        ],
         releases,
         payload.get("overture_release"),
+        payload.get("input_inventory_set_sha256"),
+        payload.get("input_inventory_set"),
     )
     for key in (
-        "source_files", "last_seen_releases", "source_files_count",
-        "last_seen_releases_count", "source_file_id_bounds",
-        "last_seen_release_id_bounds", "source_files_sha256",
+        "source_files",
+        "last_seen_releases",
+        "source_files_count",
+        "last_seen_releases_count",
+        "source_file_id_bounds",
+        "last_seen_release_id_bounds",
+        "source_files_sha256",
         "last_seen_releases_sha256",
         "type_theme_map",
+        "input_inventory_set_sha256",
+        "input_inventory_set",
     ):
         if payload.get(key) != rebuilt.get(key):
             raise RuntimeError(f"Invalid locator dictionary field {key}")
@@ -1108,22 +1645,35 @@ def _validate_locator_manifest(manifest, release_version=None):
 
 
 def _load_locator_manifest_and_dictionary(r2_config, version, release_version):
-    manifest = _read_optional_r2_json(
-        r2_config, version, ID_LOCATOR_MANIFEST)
+    manifest = _read_optional_r2_json(r2_config, version, ID_LOCATOR_MANIFEST)
     if manifest is None:
-        raise RuntimeError(
-            f"Required {ID_LOCATOR_MANIFEST} is missing for {version}")
+        raise RuntimeError(f"Required {ID_LOCATOR_MANIFEST} is missing for {version}")
     href, sha256, size_bytes, reference = _validate_locator_manifest(
-        manifest, release_version)
+        manifest, release_version
+    )
     payload = _validate_locator_dictionary(
         _read_r2_json(
-            r2_config, version, href,
+            r2_config,
+            version,
+            href,
             expected_sha256=sha256,
-            expected_size_bytes=size_bytes),
+            expected_size_bytes=size_bytes,
+        ),
         release_version,
     )
-    expected_reference = _dictionary_reference(
-        payload, href, sha256, size_bytes)
+    inventory_set_reference = payload.get("input_inventory_set")
+    if inventory_set_reference is not None:
+        inventory_set = _load_inventory_set(
+            r2_config, version, inventory_set_reference, release_version
+        )
+        if inventory_set["inventory_references_sha256"] != payload.get(
+            "input_inventory_set_sha256"
+        ):
+            raise RuntimeError(
+                "ID locator dictionary inventory set payload does not match "
+                "its aggregate SHA"
+            )
+    expected_reference = _dictionary_reference(payload, href, sha256, size_bytes)
     if reference != expected_reference:
         raise RuntimeError("ID locator manifest does not match dictionary payload")
     return manifest, payload, reference
@@ -1196,7 +1746,67 @@ def _assert_shard_schema(con, path):
     format_version = _classify_shard_schema(con, path)
     if format_version != ID_INDEX_FORMAT_VERSION:
         raise RuntimeError(
-            f"Shard {path}: wrote legacy format v{format_version}, expected v3")
+            f"Shard {path}: wrote legacy format v{format_version}, expected v3"
+        )
+
+
+def _assert_shard_locator_footer_stats(con, path, source_count, release_count):
+    """Footer-only bounds and aggregate null-count defense-in-depth.
+
+    These statistics cannot prove row-level XOR: a both-null row could cancel
+    a both-present row. `_assert_compact_locator_mapping` remains the primary
+    row-level proof before COPY.
+    """
+    rows = con.execute(
+        """
+        SELECT row_group_id, path_in_schema, row_group_num_rows,
+               stats_min, stats_max, stats_null_count
+        FROM parquet_metadata(?)
+        WHERE path_in_schema IN ('source_file_id', 'last_seen_release_id')
+        ORDER BY row_group_id, path_in_schema
+    """,
+        [path],
+    ).fetchall()
+    grouped = {}
+    for row_group, column, row_count, minimum, maximum, null_count in rows:
+        grouped.setdefault(row_group, {"rows": row_count})[column] = {
+            "min": minimum,
+            "max": maximum,
+            "nulls": null_count,
+        }
+    if not grouped:
+        raise RuntimeError(f"Shard {path}: locator footer stats are missing")
+    bounds = {
+        "source_file_id": source_count,
+        "last_seen_release_id": release_count,
+    }
+    for row_group, values in grouped.items():
+        if set(values) != {
+            "rows",
+            "source_file_id",
+            "last_seen_release_id",
+        }:
+            raise RuntimeError(
+                f"Shard {path}: incomplete locator stats in row group {row_group}"
+            )
+        total_nulls = 0
+        for column, upper in bounds.items():
+            stats = values[column]
+            if stats["nulls"] is None:
+                raise RuntimeError(f"Shard {path}: missing null stats for {column}")
+            total_nulls += int(stats["nulls"])
+            if stats["min"] is not None:
+                minimum, maximum = int(stats["min"]), int(stats["max"])
+                if minimum < 1 or maximum > upper or minimum > maximum:
+                    raise RuntimeError(
+                        f"Shard {path}: {column} stats {minimum}..{maximum} "
+                        f"outside dictionary 1..{upper}"
+                    )
+        if total_nulls != int(values["rows"]):
+            raise RuntimeError(
+                f"Shard {path}: aggregate locator null-count invariant failed "
+                f"in row group {row_group}"
+            )
 
 
 def _assert_locator_rows(con, union_query, prefix, release_version):
@@ -1294,7 +1904,6 @@ def _worker_build_r2_batch(args_tuple):
 
     bucket = r2_config['bucket']
     results = []
-    t0 = time.time()
 
     try:
         con = duckdb.connect()
@@ -1318,6 +1927,12 @@ def _worker_build_r2_batch(args_tuple):
                 URL_STYLE 'path'
             );
         """)
+        source_dictionary_count = con.execute(
+            f"SELECT COUNT(*) FROM read_parquet('{source_dictionary_path}')"
+        ).fetchone()[0]
+        release_dictionary_count = con.execute(
+            f"SELECT COUNT(*) FROM read_parquet('{release_dictionary_path}')"
+        ).fetchone()[0]
 
         # Download registry staging partition locally (one R2 read instead of N).
         # Distinguish "no staged data for this prefix" (acceptable: probe via
@@ -1412,6 +2027,11 @@ def _worker_build_r2_batch(args_tuple):
             # Verify the written footer before this shard can count toward
             # a _SUCCESS marker (the worker reads columns positionally)
             _retry_transient(lambda: _assert_shard_schema(con, r2_dest))()
+            _retry_transient(
+                lambda: _assert_shard_locator_footer_stats(
+                    con, r2_dest, source_dictionary_count, release_dictionary_count
+                )
+            )()
 
             # Planning estimate only: UUID+bbox plus the measured compact-v3
             # locator delta (~1.8 B/row at 700-1,000 source IDs). Actual R2
@@ -1474,67 +2094,189 @@ def _has_v3_id_build_state(r2_config, version):
         con.close()
 
 
-def phase_build_locator_dictionary(r2_config, version, release_version):
+def _scope_prefixes(scope, prefix_len):
+    if "prefixes" in scope:
+        values = scope["prefixes"]
+    else:
+        lo = int(scope["prefix_start"], 16)
+        hi = int(scope["prefix_end"], 16)
+        values = [format(value, f"0{prefix_len}x") for value in range(lo, hi + 1)]
+    for value in values:
+        if (
+            not isinstance(value, str)
+            or len(value) != prefix_len
+            or any(char not in "0123456789abcdef" for char in value)
+        ):
+            raise RuntimeError(f"Invalid inventory prefix {value!r}")
+    return values
+
+
+def _load_required_marker_inventory(
+    r2_config, version, staging_dir, release_version, expected_kind
+):
+    marker = _read_staging_marker(r2_config, version, staging_dir)
+    if not _marker_is_current(marker):
+        raise RuntimeError(f"Required staging marker {staging_dir} is missing/stale")
+    reference = marker.get("locator_inventory")
+    payload = _load_stage_inventory(r2_config, version, reference, release_version)
+    if payload["kind"] != expected_kind:
+        raise RuntimeError(
+            f"Staging marker {staging_dir} has {payload['kind']} inventory; "
+            f"expected {expected_kind}"
+        )
+    return marker, reference, payload
+
+
+def _load_registry_inventory_fan_in(
+    r2_config, version, release_version, prefix_len, smoke=False
+):
+    con = _r2_con(r2_config)
+    try:
+        marker_paths = _glob_files(
+            con,
+            f"s3://{r2_config['bucket']}/{version}/staging/id-partitioned*/_SUCCESS",
+        )
+    finally:
+        con.close()
+    if not marker_paths:
+        raise RuntimeError("No registry range inventory markers found")
+    staging_dirs = sorted(
+        {
+            path.split("/staging/", 1)[-1].rsplit("/_SUCCESS", 1)[0]
+            for path in marker_paths
+        }
+    )
+    seen = set()
+    references = []
+    releases = []
+    for staging_dir in staging_dirs:
+        marker, reference, payload = _load_required_marker_inventory(
+            r2_config, version, staging_dir, release_version, "registry_range"
+        )
+        prefixes = _scope_prefixes(payload["scope"], prefix_len)
+        overlap = seen.intersection(prefixes)
+        if overlap:
+            raise RuntimeError(
+                f"Overlapping registry inventory scopes: {sorted(overlap)[:10]}"
+            )
+        if marker.get("partitions") != len(prefixes):
+            raise RuntimeError(
+                f"Registry marker {staging_dir} partition/scope mismatch"
+            )
+        seen.update(prefixes)
+        references.append(reference)
+        releases.extend(payload["last_seen_releases"])
+    expected = {format(value, f"0{prefix_len}x") for value in range(16**prefix_len)}
+    if not smoke and seen != expected:
+        missing = sorted(expected - seen)
+        extra = sorted(seen - expected)
+        raise RuntimeError(
+            f"Registry inventory fan-in is incomplete: missing={missing[:10]}, "
+            f"extra={extra[:10]}"
+        )
+    if smoke and not seen:
+        raise RuntimeError("Smoke registry inventory fan-in is empty")
+    return sorted(set(releases)), references, seen
+
+
+def _load_release_inventory_fan_in(
+    r2_config, version, release_version, global_source_files
+):
+    expected_types = _discover_release_types(release_version)
+    global_set = set(global_source_files)
+    staged_universe = {item for item in global_set if item[:2] in set(expected_types)}
+    references = []
+    covered = set()
+    for theme, feature_type in expected_types:
+        staging_dir = f"id-release-{theme}-{feature_type}"
+        marker, reference, payload = _load_required_marker_inventory(
+            r2_config, version, staging_dir, release_version, "release_type"
+        )
+        if marker.get("partitions") != 16:
+            raise RuntimeError(
+                f"Release marker {staging_dir} has invalid partition count"
+            )
+        scope = payload["scope"]
+        if scope != {"theme": theme, "feature_type": feature_type}:
+            raise RuntimeError(f"Release marker {staging_dir} scope mismatch")
+        tuples = {
+            (item["theme"], item["feature_type"], item["filename"])
+            for item in payload["source_files"]
+        }
+        expected = {item for item in global_set if item[:2] == (theme, feature_type)}
+        if tuples != expected:
+            raise RuntimeError(f"Release marker {staging_dir} file inventory mismatch")
+        if covered.intersection(tuples):
+            raise RuntimeError("Duplicate release inventory tuples")
+        covered.update(tuples)
+        references.append(reference)
+    if covered != staged_universe:
+        missing = sorted(staged_universe - covered)
+        extra = sorted(covered - staged_universe)
+        raise RuntimeError(
+            "Release inventory fan-in does not cover the current-release "
+            f"universe: missing={missing[:10]}, extra={extra[:10]}"
+        )
+    return references
+
+
+def phase_build_locator_dictionary(
+    r2_config, version, release_version, prefix_len=3, smoke=False
+):
     """Build the one global dictionary required by every parallel build range."""
-    manifest = _read_optional_r2_json(
-        r2_config, version, ID_LOCATOR_MANIFEST)
+    manifest = _read_optional_r2_json(r2_config, version, ID_LOCATOR_MANIFEST)
     if manifest is not None:
         _, payload, _ = _load_locator_manifest_and_dictionary(
-            r2_config, version, release_version)
+            r2_config, version, release_version
+        )
+        _require_locator_input_inventory_set_sha(payload)
         print("  [dictionary] Existing immutable manifest is valid; skipping")
         return payload
     if _has_v3_id_build_state(r2_config, version):
         raise RuntimeError(
             "Refusing to create a missing ID locator manifest after ID "
-            "shards or build markers already exist; use a new version")
+            "shards or build markers already exist; use a new version"
+        )
 
+    # Source tuples are the exact, immutable pinned-release file universe. A
+    # stable double listing is dramatically cheaper than DISTINCT over feature
+    # rows and is a safe superset: unused entries have no semantics, while any
+    # staged row outside the inventory still fails _assert_compact_locator_mapping.
     con = _r2_con(r2_config)
     try:
-        registry_files = _retry_transient(lambda: _glob_files(
-            con,
-            f"s3://{r2_config['bucket']}/{version}/staging/"
-            "id-partitioned/prefix=*/*.parquet",
-        ))()
-        release_files = _discover_release_staging_files(con, r2_config, version)
-        files = registry_files + release_files
-        if not files:
-            raise RuntimeError("No staged ID rows available for dictionary build")
-        file_list = ", ".join(f"'{path}'" for path in files)
-        rows = _retry_transient(lambda: con.execute(f"""
-            SELECT DISTINCT feature_type, filename, last_seen_release,
-                            registry_member, source_theme
-            FROM read_parquet([{file_list}], union_by_name=true)
-        """).fetchall())()
+        source_files = _discover_current_release_source_files(con, release_version)
     finally:
         con.close()
 
-    source_files = []
-    historical_releases = []
-    for feature_type, filename, last_seen, registry_member, source_theme in rows:
-        if filename is not None:
-            expected_theme = TYPE_THEME_MAP.get(feature_type)
-            if expected_theme is None or source_theme != expected_theme:
-                raise RuntimeError(
-                    f"Invalid staged theme/type {source_theme!r}/{feature_type!r}")
-            if not _validate_source_filename(filename):
-                raise RuntimeError(f"Invalid staged filename {filename!r}")
-            if last_seen != release_version:
-                raise RuntimeError(
-                    f"Current source file has last_seen={last_seen!r}, "
-                    f"expected {release_version}")
-            source_files.append((source_theme, feature_type, filename))
-        else:
-            if not registry_member:
-                raise RuntimeError("Release-only staged row has no source filename")
-            if feature_type is not None or source_theme is not None:
-                raise RuntimeError("Path-null registry row retained partial path metadata")
-            if not last_seen:
-                raise RuntimeError(
-                    f"Path-null registry row has invalid last_seen {last_seen!r}")
-            historical_releases.append(last_seen)
+    historical_releases, registry_references, _ = _load_registry_inventory_fan_in(
+        r2_config, version, release_version, prefix_len, smoke=smoke
+    )
+    release_references = _load_release_inventory_fan_in(
+        r2_config, version, release_version, source_files
+    )
+    current_inventory = _make_stage_inventory(
+        "current_release_files",
+        release_version,
+        {"universe": "all_mapped_types"},
+        source_files=source_files,
+    )
+    current_reference = _publish_stage_inventory(r2_config, version, current_inventory)
+    inventory_references = (
+        registry_references + release_references + [current_reference]
+    )
+    inventory_set = _make_inventory_set(inventory_references, release_version)
+    input_inventory_set_reference = _publish_inventory_set(
+        r2_config, version, inventory_set
+    )
+    input_inventory_set_sha256 = inventory_set["inventory_references_sha256"]
 
     payload = _make_locator_dictionary(
-        source_files, historical_releases, release_version)
+        source_files,
+        historical_releases,
+        release_version,
+        input_inventory_set_sha256=input_inventory_set_sha256,
+        input_inventory_set=input_inventory_set_reference,
+    )
     artifact_bytes = _canonical_json_bytes(payload)
     if len(artifact_bytes) > 1024 * 1024:
         raise RuntimeError("Locator dictionary exceeds the 1 MiB hard limit")
@@ -1581,6 +2323,8 @@ def phase_build_locator_dictionary(r2_config, version, release_version):
             "dictionary_size_bytes": len(artifact_bytes),
             "source_files_count": payload["source_files_count"],
             "last_seen_releases_count": payload["last_seen_releases_count"],
+            "input_inventory_set_sha256": input_inventory_set_sha256,
+            "input_inventory_count": len(inventory_references),
         },
     )
     return payload
@@ -1722,7 +2466,7 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
 
     local_release_files = []
     if release_files:
-        print(f"  Downloading and merging release staging locally...")
+        print("  Downloading and merging release staging locally...")
         # Only this job's prefixes: a range job needs a quarter of the
         # release data, and the ORDER BY's disk spill is proportional to
         # input — sorting the full addresses theme once filled a runner's
@@ -1867,14 +2611,27 @@ def _read_current_build_markers(r2_config, version):
         con.close()
 
 
-def _validate_build_marker_dictionary_sha(r2_config, version, expected_sha256):
+def _validate_build_marker_dictionary_sha(
+    r2_config, version, expected_sha256, expected_input_inventory_set_sha256
+):
     for marker_path, marker in _read_current_build_markers(r2_config, version):
         if marker.get("dictionary_sha256") != expected_sha256:
             raise RuntimeError(
-                f"Build marker {marker_path} does not match locator manifest SHA")
+                f"Build marker {marker_path} does not match locator manifest SHA"
+            )
+        if (
+            marker.get("input_inventory_set_sha256")
+            != expected_input_inventory_set_sha256
+        ):
+            raise RuntimeError(
+                f"Build marker {marker_path} does not match locator input "
+                "inventory set SHA"
+            )
 
 
-def _sum_build_marker_records(r2_config, version, expected_sha256=None):
+def _sum_build_marker_records(
+    r2_config, version, expected_sha256=None, expected_input_inventory_set_sha256=None
+):
     """Sum real record counts from per-range build _SUCCESS markers.
 
     Returns the total, or None if no build markers with record counts exist.
@@ -1882,10 +2639,22 @@ def _sum_build_marker_records(r2_config, version, expected_sha256=None):
     total = 0
     found = False
     for marker_path, data in _read_current_build_markers(r2_config, version):
-        if (expected_sha256 is not None
-                and data.get("dictionary_sha256") != expected_sha256):
+        if (
+            expected_sha256 is not None
+            and data.get("dictionary_sha256") != expected_sha256
+        ):
             raise RuntimeError(
-                f"Build marker {marker_path} does not match locator manifest SHA")
+                f"Build marker {marker_path} does not match locator manifest SHA"
+            )
+        if (
+            expected_input_inventory_set_sha256 is not None
+            and data.get("input_inventory_set_sha256")
+            != expected_input_inventory_set_sha256
+        ):
+            raise RuntimeError(
+                f"Build marker {marker_path} does not match locator input "
+                "inventory set SHA"
+            )
         if "records" in data:
             total += int(data["records"])
             found = True
@@ -1926,21 +2695,50 @@ def _load_locator_dictionary_reference(r2_config, version, release_version):
     return reference
 
 
+def _require_locator_input_inventory_set_sha(dictionary):
+    value = dictionary.get("input_inventory_set_sha256")
+    reference = dictionary.get("input_inventory_set")
+    if not value or not reference:
+        raise RuntimeError(
+            "Locator dictionary predates stage-inventory binding; build "
+            "dictionaries under a new version before building or publishing "
+            "v3 metadata"
+        )
+    reference = _validate_inventory_set_reference(reference)
+    if reference["inventory_references_sha256"] != value:
+        raise RuntimeError("Locator dictionary inventory set binding mismatch")
+    return value
+
+
+def _load_locator_dictionary_binding(r2_config, version, release_version):
+    _, dictionary, reference = _load_locator_manifest_and_dictionary(
+        r2_config, version, release_version
+    )
+    return reference, _require_locator_input_inventory_set_sha(dictionary)
+
+
 def phase_metadata(results, prefix_len, version, release_version, r2_config):
     """Generate id-collection.json and upload to R2."""
     # This check intentionally precedes creation/upload of either metadata
     # object. A resumed metadata-only run must never label v1 or mixed shards
     # as v3 based on the currently checked-out producer.
     format_version = _detect_output_shard_format(r2_config, version)
-    dictionary_reference = (
-        _load_locator_dictionary_reference(r2_config, version, release_version)
-        if format_version == ID_INDEX_FORMAT_VERSION else None
-    )
+    dictionary_reference = None
+    input_inventory_set_sha256 = None
+    if format_version == ID_INDEX_FORMAT_VERSION:
+        dictionary_reference, input_inventory_set_sha256 = (
+            _load_locator_dictionary_binding(r2_config, version, release_version)
+        )
     if dictionary_reference is not None:
         _validate_build_marker_dictionary_sha(
-            r2_config, version, dictionary_reference["sha256"])
+            r2_config,
+            version,
+            dictionary_reference["sha256"],
+            input_inventory_set_sha256,
+        )
     format_metadata = _format_metadata(
-        format_version, release_version, dictionary_reference)
+        format_version, release_version, dictionary_reference
+    )
     shard_infos = {}
     total_records = 0
     counts_known = True
@@ -1964,6 +2762,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
             r2_config,
             version,
             dictionary_reference["sha256"] if dictionary_reference else None,
+            input_inventory_set_sha256,
         )
         if marker_total is not None:
             total_records = marker_total
@@ -2080,7 +2879,7 @@ def build_id_index(args):
 
     print(f"\n  Workers: {args.workers}")
     if smoke:
-        print(f"  Mode: smoke test")
+        print("  Mode: smoke test")
 
     # Compute prefix range for parallelism
     all_prefixes = [format(i, f'0{args.prefix_len}x') for i in range(shard_count)]
@@ -2145,7 +2944,7 @@ def build_id_index(args):
         if skip:
             print(f"\nStage registry: Skipped ({staging_marker_key} complete for {version})")
         else:
-            print(f"\nStage registry: Partition registry")
+            print("\nStage registry: Partition registry")
             t0 = time.time()
             stage_prefixes = smoke_prefixes or range_prefixes
             if smoke_prefixes is not None or args.prefixes:
@@ -2166,12 +2965,42 @@ def build_id_index(args):
             if marker_ranges:
                 for mr in marker_ranges:
                     mk = f"id-partitioned-{mr}"
-                    _write_staging_marker(r2_config, version, mk,
-                                          len(stage_prefixes) if stage_prefixes else shard_count)
+                    range_start, separator, range_end = mr.partition("-")
+                    if not separator:
+                        raise RuntimeError(f"Invalid marker range {mr!r}")
+                    scope = _registry_inventory_scope(
+                        args.prefix_len, prefix_start=range_start, prefix_end=range_end
+                    )
+                    inventory_reference = _build_registry_stage_inventory(
+                        r2_config, version, release_version, scope
+                    )
+                    _write_staging_marker(
+                        r2_config,
+                        version,
+                        mk,
+                        len(stage_prefixes) if stage_prefixes else shard_count,
+                        extra={"locator_inventory": inventory_reference},
+                    )
                     print(f"  Wrote marker: {mk}")
             elif not args.prefixes:
-                _write_staging_marker(r2_config, version, staging_marker_key,
-                                      len(stage_prefixes) if stage_prefixes else shard_count)
+                scope = _registry_inventory_scope(
+                    args.prefix_len,
+                    prefixes=stage_prefixes if smoke_prefixes is not None else None,
+                    prefix_start=(
+                        args.prefix_start if smoke_prefixes is None else None
+                    ),
+                    prefix_end=(args.prefix_end if smoke_prefixes is None else None),
+                )
+                inventory_reference = _build_registry_stage_inventory(
+                    r2_config, version, release_version, scope
+                )
+                _write_staging_marker(
+                    r2_config,
+                    version,
+                    staging_marker_key,
+                    len(stage_prefixes) if stage_prefixes else shard_count,
+                    extra={"locator_inventory": inventory_reference},
+                )
             phase_times["Stage registry"] = time.time() - t0
 
     # === Stage base (release themes) ===
@@ -2191,33 +3020,52 @@ def build_id_index(args):
     if run_all or "dictionaries" in phases:
         print("\nDictionaries: Build compact global locator dictionaries")
         t0 = time.time()
-        phase_build_locator_dictionary(r2_config, version, release_version)
+        phase_build_locator_dictionary(
+            r2_config, version, release_version, prefix_len=args.prefix_len, smoke=smoke
+        )
         phase_times["Dictionaries"] = time.time() - t0
 
     # === Build shards ===
     results = None
     if run_all or "build" in phases:
-        build_dictionary_reference = _load_locator_dictionary_reference(
-            r2_config, version, release_version)
+        _, build_dictionary, build_dictionary_reference = (
+            _load_locator_manifest_and_dictionary(r2_config, version, release_version)
+        )
         build_dictionary_sha256 = build_dictionary_reference["sha256"]
+        build_inventory_set_sha256 = _require_locator_input_inventory_set_sha(
+            build_dictionary
+        )
         build_marker_key = f"build{range_suffix}"
         # Explicit-prefix patch builds bypass markers entirely: they must
         # re-run unconditionally, and a suffix-less "build" marker would both
         # block future patch builds and corrupt _sum_build_marker_records
         # (its build*/_SUCCESS glob would double-count the patched prefixes).
-        marker = (None if args.prefixes
-                  else _read_staging_marker(r2_config, version, build_marker_key))
+        marker = (
+            None
+            if args.prefixes
+            else _read_staging_marker(r2_config, version, build_marker_key)
+        )
         if _marker_is_current(marker):
             if marker.get("dictionary_sha256") != build_dictionary_sha256:
                 raise RuntimeError(
                     f"Build marker {build_marker_key} does not match "
-                    "locator manifest SHA")
+                    "locator manifest SHA"
+                )
+            if marker.get("input_inventory_set_sha256") != build_inventory_set_sha256:
+                raise RuntimeError(
+                    f"Build marker {build_marker_key} does not match "
+                    "locator input inventory set SHA"
+                )
             print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
-            print(f"\nBuild: Build parquet shards")
+            print("\nBuild: Build parquet shards")
             t0 = time.time()
             results = phase_build_r2(
-                args.prefix_len, r2_config, version, release_version, args.workers,
+                args.prefix_len,
+                r2_config,
+                version,
+                release_version,
+                args.workers,
                 prefixes=range_prefixes,
                 row_group_size=getattr(args, "row_group_size", ROW_GROUP_SIZE),
             )
@@ -2237,11 +3085,17 @@ def build_id_index(args):
                 raise RuntimeError(f"Build failed: {errs} shard errors")
 
             if not args.prefixes:
-                _write_staging_marker(r2_config, version, build_marker_key, built,
-                                      extra={
-                                          "records": records,
-                                          "dictionary_sha256": build_dictionary_sha256,
-                                      })
+                _write_staging_marker(
+                    r2_config,
+                    version,
+                    build_marker_key,
+                    built,
+                    extra={
+                        "records": records,
+                        "dictionary_sha256": build_dictionary_sha256,
+                        "input_inventory_set_sha256": build_inventory_set_sha256,
+                    },
+                )
 
     # === Metadata ===
     if run_all or "metadata" in phases:
@@ -2250,39 +3104,82 @@ def build_id_index(args):
         # describes stale metadata. The marker only short-circuits resumed
         # full-pipeline runs.
         explicit_metadata = "metadata" in phases
-        meta_marker = (None if explicit_metadata
-                       else _read_staging_marker(r2_config, version, "metadata"))
+        meta_marker = (
+            None
+            if explicit_metadata
+            else _read_staging_marker(r2_config, version, "metadata")
+        )
         if _marker_is_current(meta_marker):
-            metadata_dictionary_reference = _load_locator_dictionary_reference(
-                r2_config, version, release_version)
+            (metadata_dictionary_reference, metadata_inventory_set_sha256) = (
+                _load_locator_dictionary_binding(r2_config, version, release_version)
+            )
             _validate_build_marker_dictionary_sha(
-                r2_config, version, metadata_dictionary_reference["sha256"])
+                r2_config,
+                version,
+                metadata_dictionary_reference["sha256"],
+                metadata_inventory_set_sha256,
+            )
+            if (
+                meta_marker.get("dictionary_sha256")
+                != metadata_dictionary_reference["sha256"]
+            ):
+                raise RuntimeError(
+                    "Metadata marker does not match locator manifest SHA"
+                )
+            if (
+                meta_marker.get("input_inventory_set_sha256")
+                != metadata_inventory_set_sha256
+            ):
+                raise RuntimeError(
+                    "Metadata marker does not match locator input inventory set SHA"
+                )
             print(f"\nMetadata: Skipped (metadata complete for {version})")
         else:
             t_meta = time.time()
             # If build phase didn't run, gather shard info from existing R2 data
             if results is None:
                 results = _gather_shard_info_from_r2(
-                    args.prefix_len, r2_config, version,
+                    args.prefix_len,
+                    r2_config,
+                    version,
                 )
 
-            print(f"\nMetadata: Generate id-collection.json")
+            print("\nMetadata: Generate id-collection.json")
             shard_infos, total_records, errors, output_format = phase_metadata(
-                results, args.prefix_len, version, release_version, r2_config,
+                results,
+                args.prefix_len,
+                version,
+                release_version,
+                r2_config,
             )
             phase_times["Metadata"] = time.time() - t_meta
 
             metadata_extra = {"records": total_records}
             if output_format == ID_INDEX_FORMAT_VERSION:
-                metadata_extra["dictionary_sha256"] = (
-                    _load_locator_dictionary_reference(
-                        r2_config, version, release_version)["sha256"])
-            _write_staging_marker(r2_config, version, "metadata", len(shard_infos),
-                                  extra=metadata_extra,
-                                  format_version=output_format)
+                (metadata_dictionary_reference, metadata_inventory_set_sha256) = (
+                    _load_locator_dictionary_binding(
+                        r2_config, version, release_version
+                    )
+                )
+                metadata_extra.update(
+                    {
+                        "dictionary_sha256": metadata_dictionary_reference["sha256"],
+                        "input_inventory_set_sha256": metadata_inventory_set_sha256,
+                    }
+                )
+            _write_staging_marker(
+                r2_config,
+                version,
+                "metadata",
+                len(shard_infos),
+                extra=metadata_extra,
+                format_version=output_format,
+            )
 
             total_size = sum(s.get("size_bytes", 0) for s in shard_infos.values())
-            max_shard = max((s.get("size_bytes", 0) for s in shard_infos.values()), default=0)
+            max_shard = max(
+                (s.get("size_bytes", 0) for s in shard_infos.values()), default=0
+            )
 
             print(f"  Shards: {len(shard_infos)} / {shard_count}")
             print(f"  Records: {total_records:,}")
@@ -2298,7 +3195,7 @@ def build_id_index(args):
 
     # Per-phase timing breakdown
     if phase_times:
-        print(f"\n  Timing breakdown:")
+        print("\n  Timing breakdown:")
         for name, t in phase_times.items():
             mins, secs = divmod(int(t), 60)
             pct = t * 100 / total_elapsed if total_elapsed > 0 else 0

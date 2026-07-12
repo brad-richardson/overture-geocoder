@@ -315,6 +315,29 @@ fn validate_bounds(bounds: Option<[u32; 2]>, count: usize) -> std::result::Resul
     Ok(())
 }
 
+const MAX_PARQUET_FOOTER_SIZE: usize = 16 * 1024 * 1024;
+
+/// Validate a footer length read from Parquet's final eight bytes and decide
+/// whether the Worker's initial suffix needs one exact-size retry.
+///
+/// `tail_len` is the number of bytes actually returned by the initial suffix
+/// request (which can be smaller than 32 KiB for a small object).
+fn footer_retry_size(
+    file_size: u64,
+    tail_len: usize,
+    metadata_len: usize,
+) -> std::result::Result<Option<u64>, String> {
+    let footer_size = metadata_len
+        .checked_add(8)
+        .ok_or_else(|| "parquet footer length overflow".to_string())?;
+    if metadata_len > MAX_PARQUET_FOOTER_SIZE || footer_size as u64 > file_size {
+        return Err(format!(
+            "implausible parquet footer length {metadata_len}B for {file_size}B file"
+        ));
+    }
+    Ok((footer_size > tail_len).then_some(footer_size as u64))
+}
+
 fn compact_locator_ids(
     row: &parquet::record::Row,
     format_version: u32,
@@ -1754,26 +1777,23 @@ impl ShardLoader {
         // Sanity-cap before acting on the length: a corrupt (or stale-cached)
         // 4-byte footer field of up to ~4 GB would otherwise trigger a
         // whole-file suffix fetch, buffered in memory and edge-cached.
-        const MAX_FOOTER_SIZE: usize = 16 * 1024 * 1024;
-        if metadata_len > MAX_FOOTER_SIZE || (metadata_len + 8) as u64 > file_size {
-            return Err(Error::RustError(format!(
-                "Implausible parquet footer length {}B for {} ({}B file)",
-                metadata_len, shard_key, file_size
-            )));
-        }
-        if metadata_len + 8 > tail_bytes.len() {
+        let footer_retry =
+            footer_retry_size(file_size, tail_bytes.len(), metadata_len).map_err(|reason| {
+                Error::RustError(format!(
+                    "Invalid parquet footer for {}: {}",
+                    shard_key, reason
+                ))
+            })?;
+        if let Some(footer_size) = footer_retry {
             // Footer larger than the default suffix window: re-read with the
             // exact size (cached under a size-specific key).
             console_log!(
                 "Footer {}B exceeds {}B window for {}, re-reading",
-                metadata_len + 8,
+                footer_size,
                 tail_bytes.len(),
                 shard_key
             );
-            tail_bytes = match self
-                .cached_suffix_read(&shard_key, (metadata_len + 8) as u64)
-                .await?
-            {
+            tail_bytes = match self.cached_suffix_read(&shard_key, footer_size).await? {
                 Some((_, bytes)) => bytes,
                 None => return Err(not_found(format!("id-index shard {}", shard_key))),
             };
@@ -2466,6 +2486,29 @@ mod tests {
         );
         assert!(compact_locator_ids(&locator_row(Field::Int(1), Field::Int(1), true), 3).is_none());
         assert!(compact_locator_ids(&locator_row(Field::Null, Field::Null, true), 3).is_none());
+    }
+
+    #[test]
+    fn test_footer_retry_decision_covers_initial_and_exact_retry_paths() {
+        assert_eq!(footer_retry_size(1_000_000, 32_768, 7_313), Ok(None));
+        assert_eq!(
+            footer_retry_size(1_000_000, 32_768, 39_992),
+            Ok(Some(40_000))
+        );
+        // R2 returns the complete small file even though 32 KiB was requested.
+        assert_eq!(footer_retry_size(10_000, 10_000, 8_992), Ok(None));
+    }
+
+    #[test]
+    fn test_footer_retry_rejects_corrupt_or_implausible_lengths() {
+        assert!(footer_retry_size(1_000, 1_000, 1_001).is_err());
+        assert!(footer_retry_size(
+            (MAX_PARQUET_FOOTER_SIZE + 9) as u64,
+            32_768,
+            MAX_PARQUET_FOOTER_SIZE + 1,
+        )
+        .is_err());
+        assert!(footer_retry_size(u64::MAX, 32_768, usize::MAX).is_err());
     }
 
     fn collection_with_bboxes(rows: &[(&str, Option<[f64; 4]>)]) -> StacCollection {

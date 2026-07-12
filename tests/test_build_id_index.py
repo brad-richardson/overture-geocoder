@@ -173,6 +173,63 @@ def test_locator_fixture_uses_compact_ids_and_is_bounded(tmp_path):
     assert bii._classify_shard_set(con, [str(output)]) == 3
     with pytest.raises(RuntimeError, match="Mixed ID shard formats"):
         bii._classify_shard_set(con, [str(legacy), str(output)])
+    bii._assert_shard_locator_footer_stats(con, str(output), 1, 1)
+
+
+def test_locator_footer_stats_reject_out_of_bounds_and_bad_null_accounting(tmp_path):
+    con = duckdb.connect()
+    out_of_bounds = tmp_path / "out-of-bounds.parquet"
+    con.execute(f"""
+        COPY (
+          SELECT md5(i::VARCHAR)::UUID id,
+                 1::FLOAT bbox_xmin, 2::FLOAT bbox_ymin,
+                 3::FLOAT bbox_xmax, 4::FLOAT bbox_ymax,
+                 2::INTEGER source_file_id,
+                 NULL::INTEGER last_seen_release_id,
+                 TRUE::BOOLEAN registry_member
+          FROM range(10) values(i)
+        ) TO '{out_of_bounds}' (FORMAT PARQUET, COMPRESSION UNCOMPRESSED)
+    """)
+    with pytest.raises(RuntimeError, match="outside dictionary"):
+        bii._assert_shard_locator_footer_stats(
+            con, str(out_of_bounds), source_count=1, release_count=1
+        )
+
+    both_present = tmp_path / "both-present.parquet"
+    con.execute(f"""
+        COPY (
+          SELECT md5(i::VARCHAR)::UUID id,
+                 1::FLOAT bbox_xmin, 2::FLOAT bbox_ymin,
+                 3::FLOAT bbox_xmax, 4::FLOAT bbox_ymax,
+                 1::INTEGER source_file_id,
+                 1::INTEGER last_seen_release_id,
+                 TRUE::BOOLEAN registry_member
+          FROM range(10) values(i)
+        ) TO '{both_present}' (FORMAT PARQUET, COMPRESSION UNCOMPRESSED)
+    """)
+    with pytest.raises(RuntimeError, match="aggregate locator null-count"):
+        bii._assert_shard_locator_footer_stats(
+            con, str(both_present), source_count=1, release_count=1
+        )
+
+    # Footer aggregates are deliberately only defense-in-depth: these two bad
+    # rows cancel in the null totals. The pre-COPY row-level mapping assertion
+    # is what rejects this shape in the real builder.
+    cancelling = tmp_path / "cancelling-null-counts.parquet"
+    con.execute(f"""
+        COPY (
+          SELECT md5(i::VARCHAR)::UUID id,
+                 1::FLOAT bbox_xmin, 2::FLOAT bbox_ymin,
+                 3::FLOAT bbox_xmax, 4::FLOAT bbox_ymax,
+                 CASE WHEN i = 0 THEN 1 END::INTEGER source_file_id,
+                 CASE WHEN i = 0 THEN 1 END::INTEGER last_seen_release_id,
+                 TRUE::BOOLEAN registry_member
+          FROM range(2) values(i)
+        ) TO '{cancelling}' (FORMAT PARQUET, COMPRESSION UNCOMPRESSED)
+    """)
+    bii._assert_shard_locator_footer_stats(
+        con, str(cancelling), source_count=1, release_count=1
+    )
 
 
 @pytest.mark.parametrize("source_count", [700, 1000])
@@ -282,6 +339,209 @@ def test_locator_dictionary_is_deterministic_and_content_addressable():
     bii._validate_locator_dictionary(first, release)
 
 
+def test_stage_inventories_are_canonical_scoped_and_content_addressed():
+    release = "2026-06-17.0"
+    inventory = bii._make_stage_inventory(
+        "release_type",
+        release,
+        {"theme": "addresses", "feature_type": "address"},
+        [
+            ("addresses", "address", "z.parquet"),
+            ("addresses", "address", "a.parquet"),
+            ("addresses", "address", "z.parquet"),
+        ],
+    )
+    assert [item["filename"] for item in inventory["source_files"]] == [
+        "a.parquet",
+        "z.parquet",
+    ]
+    reference, raw = bii._stage_inventory_reference(inventory)
+    assert reference["href"].startswith("./id-inventories/release_type-")
+    assert reference["sha256"] == bii.hashlib.sha256(raw).hexdigest()
+    assert bii._validate_stage_inventory(inventory, release) == inventory
+    assert bii._validate_stage_inventory_reference(reference) == reference
+
+
+def test_registry_inventory_rejects_source_tuples_and_bad_scope():
+    with pytest.raises(RuntimeError, match="scope/values"):
+        bii._make_stage_inventory(
+            "registry_range",
+            "2026-06-17.0",
+            {"prefix_start": "000", "prefix_end": "3ff"},
+            [("addresses", "address", "a.parquet")],
+        )
+    with pytest.raises(RuntimeError, match="range"):
+        bii._make_stage_inventory(
+            "registry_range",
+            "2026-06-17.0",
+            {"prefix_start": "400", "prefix_end": "3ff"},
+            last_seen_releases=["2026-05-20.0"],
+        )
+    with pytest.raises(RuntimeError, match="prefixes"):
+        bii._make_stage_inventory(
+            "registry_range",
+            "2026-06-17.0",
+            {"prefixes": ["001", "000"]},
+        )
+
+
+def test_inventory_references_fail_closed_on_tampering_and_duplicates():
+    inventory = bii._make_stage_inventory(
+        "registry_range",
+        "2026-06-17.0",
+        {"prefix_start": "000", "prefix_end": "3ff"},
+        last_seen_releases=["2026-05-20.0"],
+    )
+    reference, _ = bii._stage_inventory_reference(inventory)
+    assert len(bii._inventory_set_sha256([reference])) == 64
+    with pytest.raises(RuntimeError, match="Duplicate"):
+        bii._inventory_set_sha256([reference, reference])
+    corrupt = dict(reference, size_bytes=0)
+    with pytest.raises(RuntimeError, match="size"):
+        bii._validate_stage_inventory_reference(corrupt)
+    bad_href = dict(reference, href=reference["href"] + ".other")
+    with pytest.raises(RuntimeError, match="href"):
+        bii._validate_stage_inventory_reference(bad_href)
+
+
+@pytest.mark.parametrize(
+    ("scopes", "message"),
+    [
+        ([{"prefix_start": "0", "prefix_end": "7"}], "incomplete"),
+        (
+            [
+                {"prefix_start": "0", "prefix_end": "8"},
+                {"prefix_start": "8", "prefix_end": "f"},
+            ],
+            "Overlapping",
+        ),
+    ],
+)
+def test_registry_inventory_fan_in_rejects_missing_and_overlap(
+    monkeypatch, scopes, message
+):
+    class Connection:
+        def close(self):
+            pass
+
+    marker_paths = [
+        f"s3://b/v/staging/id-partitioned-{i}/_SUCCESS" for i in range(len(scopes))
+    ]
+    monkeypatch.setattr(bii, "_r2_con", lambda *_: Connection())
+    monkeypatch.setattr(bii, "_glob_files", lambda *_: marker_paths)
+
+    def load(_config, _version, staging_dir, release, expected_kind):
+        index = int(staging_dir.rsplit("-", 1)[-1])
+        inventory = bii._make_stage_inventory(
+            "registry_range",
+            release,
+            scopes[index],
+            last_seen_releases=["2026-05-20.0"],
+        )
+        reference, _ = bii._stage_inventory_reference(inventory)
+        prefixes = bii._scope_prefixes(scopes[index], 1)
+        return {"partitions": len(prefixes)}, reference, inventory
+
+    monkeypatch.setattr(bii, "_load_required_marker_inventory", load)
+    with pytest.raises(RuntimeError, match=message):
+        bii._load_registry_inventory_fan_in(
+            {"bucket": "b"}, "v", "2026-06-17.0", prefix_len=1
+        )
+
+
+def test_required_marker_inventory_rejects_stale_before_payload_read(monkeypatch):
+    monkeypatch.setattr(
+        bii,
+        "_read_staging_marker",
+        lambda *_: {"status": "complete", "format_version": 1},
+    )
+    payload_read = mock.Mock(side_effect=AssertionError("payload read"))
+    monkeypatch.setattr(bii, "_load_stage_inventory", payload_read)
+    with pytest.raises(RuntimeError, match="missing/stale"):
+        bii._load_required_marker_inventory(
+            {"bucket": "b"},
+            "v",
+            "id-partitioned",
+            "2026-06-17.0",
+            "registry_range",
+        )
+    payload_read.assert_not_called()
+
+
+def test_release_inventory_fan_in_rejects_missing_direct_staged_tuple(monkeypatch):
+    release = "2026-06-17.0"
+    monkeypatch.setattr(
+        bii, "_discover_release_types", lambda *_: [("places", "place")]
+    )
+    inventory = bii._make_stage_inventory(
+        "release_type",
+        release,
+        {"theme": "places", "feature_type": "place"},
+        source_files=[("places", "place", "part.parquet")],
+    )
+    reference, _ = bii._stage_inventory_reference(inventory)
+    monkeypatch.setattr(
+        bii,
+        "_load_required_marker_inventory",
+        lambda *_: ({"partitions": 16}, reference, inventory),
+    )
+    with pytest.raises(RuntimeError, match="file inventory mismatch"):
+        bii._load_release_inventory_fan_in(
+            {"bucket": "b"},
+            "v",
+            release,
+            [
+                ("places", "place", "part.parquet"),
+                ("places", "place", "other.parquet"),
+            ],
+        )
+
+
+def test_release_source_inventory_requires_two_identical_listings(monkeypatch):
+    monkeypatch.setattr(bii, "TYPE_THEME_MAP", {"place": "places"})
+    listing = mock.Mock(
+        side_effect=[
+            [("places", "place", "a.parquet")],
+            [("places", "place", "b.parquet")],
+            [("places", "place", "b.parquet")],
+        ]
+    )
+    monkeypatch.setattr(bii, "_release_type_source_files", listing)
+    monkeypatch.setattr(bii.time, "sleep", lambda *_: None)
+
+    assert bii._discover_current_release_source_files(
+        object(), "2026-06-17.0", retries=3
+    ) == [("places", "place", "b.parquet")]
+    assert listing.call_count == 3
+
+
+def test_dictionary_inventory_sha_is_validated_and_content_bound():
+    stage = bii._make_stage_inventory(
+        "registry_range",
+        "2026-06-17.0",
+        {"prefix_start": "000", "prefix_end": "fff"},
+        last_seen_releases=["2026-05-20.0"],
+    )
+    stage_reference, _ = bii._stage_inventory_reference(stage)
+    inventory_set = bii._make_inventory_set([stage_reference], "2026-06-17.0")
+    inventory_set_reference, raw = bii._inventory_set_reference(inventory_set)
+    sha = inventory_set["inventory_references_sha256"]
+    assert inventory_set_reference["size_bytes"] == len(raw)
+    assert bii._validate_inventory_set(inventory_set, "2026-06-17.0") == inventory_set
+    payload = bii._make_locator_dictionary(
+        [("addresses", "address", "a.parquet")],
+        ["2026-05-20.0"],
+        "2026-06-17.0",
+        sha,
+        inventory_set_reference,
+    )
+    assert payload["input_inventory_set_sha256"] == sha
+    bii._validate_locator_dictionary(payload, "2026-06-17.0")
+    payload["input_inventory_set_sha256"] = "bad"
+    with pytest.raises(RuntimeError, match="inventory set SHA"):
+        bii._validate_locator_dictionary(payload, "2026-06-17.0")
+
+
 def _locator_manifest_fixture():
     release = "2026-06-17.0"
     payload = bii._make_locator_dictionary(
@@ -312,6 +572,43 @@ def test_permanent_manifest_reference_does_not_depend_on_staging_marker(monkeypa
     staging_read.assert_not_called()
 
 
+def test_missing_inventory_binding_requires_new_version():
+    with pytest.raises(RuntimeError, match="new version"):
+        bii._require_locator_input_inventory_set_sha({})
+
+
+def test_existing_pre_inventory_manifest_fails_dictionary_phase(monkeypatch):
+    monkeypatch.setattr(bii, "_read_optional_r2_json", lambda *_: {})
+    monkeypatch.setattr(
+        bii, "_load_locator_manifest_and_dictionary",
+        lambda *_: ({}, {}, {}),
+    )
+    with pytest.raises(RuntimeError, match="new version"):
+        bii.phase_build_locator_dictionary(
+            {"bucket": "b"}, "v", "2026-06-17.0"
+        )
+
+
+def test_build_marker_validation_checks_inventory_binding(monkeypatch):
+    monkeypatch.setattr(
+        bii,
+        "_read_current_build_markers",
+        lambda *_: [
+            (
+                "build-000-fff/_SUCCESS",
+                {
+                    "dictionary_sha256": "dictionary",
+                    "input_inventory_set_sha256": "wrong",
+                },
+            )
+        ],
+    )
+    with pytest.raises(RuntimeError, match="input inventory set SHA"):
+        bii._validate_build_marker_dictionary_sha(
+            {"bucket": "b"}, "v", "dictionary", "expected"
+        )
+
+
 def test_dictionary_manifest_is_not_recreated_after_v3_outputs(monkeypatch):
     monkeypatch.setattr(bii, "_read_optional_r2_json", lambda *_: None)
     monkeypatch.setattr(bii, "_has_v3_id_build_state", lambda *_: True)
@@ -328,24 +625,46 @@ def test_dictionary_publication_orders_artifact_manifest_then_marker(monkeypatch
     release = "2026-06-17.0"
     events = []
 
-    class FakeResult:
-        def fetchall(self):
-            return [("place", "part.parquet", release, False, "places")]
-
     class FakeConnection:
-        def execute(self, _query):
-            return FakeResult()
-
         def close(self):
             pass
 
     monkeypatch.setattr(bii, "_read_optional_r2_json", lambda *_: None)
     monkeypatch.setattr(bii, "_has_v3_id_build_state", lambda *_: False)
     monkeypatch.setattr(bii, "_r2_con", lambda *_: FakeConnection())
-    monkeypatch.setattr(bii, "_glob_files", lambda *_: [])
+    source_files = [("places", "place", "part.parquet")]
+    registry_inventory = bii._make_stage_inventory(
+        "registry_range",
+        release,
+        {"prefix_start": "000", "prefix_end": "fff"},
+        last_seen_releases=["2026-05-20.0"],
+    )
+    registry_reference, _ = bii._stage_inventory_reference(registry_inventory)
+    release_inventory = bii._make_stage_inventory(
+        "release_type",
+        release,
+        {"theme": "places", "feature_type": "place"},
+        source_files=source_files,
+    )
+    release_reference, _ = bii._stage_inventory_reference(release_inventory)
     monkeypatch.setattr(
-        bii, "_discover_release_staging_files",
-        lambda *_: ["s3://b/v/staging/id-release-places-place/data.parquet"],
+        bii,
+        "_discover_current_release_source_files",
+        lambda *_: source_files,
+    )
+    monkeypatch.setattr(
+        bii,
+        "_load_registry_inventory_fan_in",
+        lambda *_args, **_kwargs: (
+            ["2026-05-20.0"],
+            [registry_reference],
+            set(range(4096)),
+        ),
+    )
+    monkeypatch.setattr(
+        bii,
+        "_load_release_inventory_fan_in",
+        lambda *_: [release_reference],
     )
 
     def upload(_path, key):
@@ -360,9 +679,11 @@ def test_dictionary_publication_orders_artifact_manifest_then_marker(monkeypatch
 
     bii.phase_build_locator_dictionary({"bucket": "b"}, "v", release)
     assert events[0][0] == "upload"
-    assert "/id-locator-dictionary-" in events[0][1]
-    assert events[1] == ("upload", "b/v/id-locator-manifest.json")
-    assert events[2] == ("marker", "id-dictionaries")
+    assert "/id-inventories/current_release_files-" in events[0][1]
+    assert "/id-inventories/inventory-set-" in events[1][1]
+    assert "/id-locator-dictionary-" in events[2][1]
+    assert events[3] == ("upload", "b/v/id-locator-manifest.json")
+    assert events[4] == ("marker", "id-dictionaries")
 
 
 def test_locator_dictionary_rejects_reordering_and_bad_path():
@@ -678,12 +999,49 @@ def pipeline(monkeypatch):
         ("_read_staging_marker", None),
         ("_write_staging_marker", None),
         ("phase_partition_r2", None),
+        (
+            "_build_registry_stage_inventory",
+            {
+                "href": "./id-inventories/registry.json",
+                "sha256": "b" * 64,
+                "size_bytes": 100,
+                "kind": "registry_range",
+                "scope": {"prefix_start": "000", "prefix_end": "3ff"},
+            },
+        ),
         ("phase_partition_release_r2", None),
         ("phase_build_locator_dictionary", None),
-        ("_load_locator_dictionary_reference", {
-            "href": "./id-locator-dictionary-abc.json",
-            "sha256": "abc",
-        }),
+        (
+            "_load_locator_manifest_and_dictionary",
+            (
+                {},
+                {
+                    "input_inventory_set_sha256": "d" * 64,
+                    "input_inventory_set": {
+                        "href": "./id-inventories/inventory-set-" + "e" * 64 + ".json",
+                        "sha256": "e" * 64,
+                        "size_bytes": 100,
+                        "inventories_count": 1,
+                        "inventory_references_sha256": "d" * 64,
+                    },
+                },
+                {"href": "./id-locator-dictionary-abc.json", "sha256": "abc"},
+            ),
+        ),
+        (
+            "_load_locator_dictionary_reference",
+            {
+                "href": "./id-locator-dictionary-abc.json",
+                "sha256": "abc",
+            },
+        ),
+        (
+            "_load_locator_dictionary_binding",
+            (
+                {"href": "./id-locator-dictionary-abc.json", "sha256": "abc"},
+                "d" * 64,
+            ),
+        ),
         ("_validate_build_marker_dictionary_sha", None),
         ("phase_build_r2", [("001", 10, 360, None)]),
         ("phase_metadata", ({"001": {"record_count": 10}}, 10, [], 3)),
@@ -776,7 +1134,11 @@ def test_range_build_writes_range_marker_with_records(pipeline):
     mocks["phase_build_r2"].assert_called_once()
     assert written_marker_keys(mocks) == ["build-000-3ff"]
     extra = mocks["_write_staging_marker"].call_args.kwargs["extra"]
-    assert extra == {"records": 10, "dictionary_sha256": "abc"}
+    assert extra == {
+        "records": 10,
+        "dictionary_sha256": "abc",
+        "input_inventory_set_sha256": "d" * 64,
+    }
 
 
 def test_matching_build_marker_sha_skips_build(pipeline):
@@ -785,6 +1147,7 @@ def test_matching_build_marker_sha_skips_build(pipeline):
         "status": "complete",
         "format_version": 3,
         "dictionary_sha256": "abc",
+        "input_inventory_set_sha256": "d" * 64,
     }
     run(make_args(phase="build", prefix_start="000", prefix_end="3ff"))
     mocks["phase_build_r2"].assert_not_called()
@@ -806,17 +1169,22 @@ def test_metadata_build_marker_mismatch_precedes_upload(monkeypatch):
     upload = mock.Mock()
     monkeypatch.setattr(bii, "_detect_output_shard_format", lambda *_: 3)
     monkeypatch.setattr(
-        bii, "_load_locator_dictionary_reference",
-        lambda *_: {"sha256": "expected"},
+        bii,
+        "_load_locator_dictionary_binding",
+        lambda *_: ({"sha256": "expected"}, "d" * 64),
     )
     monkeypatch.setattr(
-        bii, "_validate_build_marker_dictionary_sha",
+        bii,
+        "_validate_build_marker_dictionary_sha",
         mock.Mock(side_effect=RuntimeError("build marker SHA mismatch")),
     )
     monkeypatch.setattr(bii, "_upload_to_r2", upload)
     with pytest.raises(RuntimeError, match="build marker SHA mismatch"):
         bii.phase_metadata(
-            [("000", 1, 32, None)], 3, "v", "2026-06-17.0",
+            [("000", 1, 32, None)],
+            3,
+            "v",
+            "2026-06-17.0",
             {"bucket": "test"},
         )
     upload.assert_not_called()
@@ -834,6 +1202,25 @@ def test_record_total_recovery_rejects_dictionary_sha_mismatch(monkeypatch):
         bii._sum_build_marker_records({"bucket": "b"}, "v", "expected")
 
 
+def test_record_total_recovery_rejects_inventory_sha_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        bii,
+        "_read_current_build_markers",
+        lambda *_: [
+            (
+                "build-000-3ff/_SUCCESS",
+                {
+                    "records": 10,
+                    "dictionary_sha256": "dictionary",
+                    "input_inventory_set_sha256": "wrong",
+                },
+            )
+        ],
+    )
+    with pytest.raises(RuntimeError, match="input inventory set SHA"):
+        bii._sum_build_marker_records({"bucket": "b"}, "v", "dictionary", "expected")
+
+
 def test_explicit_metadata_regenerates_despite_marker(pipeline):
     run, mocks = pipeline
     mocks["_read_staging_marker"].return_value = {"status": "complete"}
@@ -847,8 +1234,11 @@ def test_explicit_metadata_regenerates_despite_marker(pipeline):
 def test_full_run_resume_skips_completed_phases(pipeline):
     run, mocks = pipeline
     mocks["_read_staging_marker"].return_value = {
-        "status": "complete", "format_version": 3,
-        "dictionary_sha256": "abc"}
+        "status": "complete",
+        "format_version": 3,
+        "dictionary_sha256": "abc",
+        "input_inventory_set_sha256": "d" * 64,
+    }
     run(make_args(phase=None))  # "all"
 
     mocks["phase_partition_r2"].assert_not_called()
@@ -870,3 +1260,9 @@ def test_full_run_executes_all_phases_and_markers(pipeline):
     mocks["phase_metadata"].assert_called_once()
     # ("id-release" is written inside phase_partition_release_r2, mocked here)
     assert written_marker_keys(mocks) == ["id-partitioned", "build", "metadata"]
+    metadata_call = mocks["_write_staging_marker"].call_args_list[-1]
+    assert metadata_call.kwargs["extra"] == {
+        "records": 10,
+        "dictionary_sha256": "abc",
+        "input_inventory_set_sha256": "d" * 64,
+    }
