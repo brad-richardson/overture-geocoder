@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-12
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `f8e8c25` (`main` after #53 and #54). Keep measured evidence
+The code baseline is `86cdfce` (`main` after #55). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -24,6 +24,13 @@ preserving branch- or PR-specific history.
 - #54 completed bounded current-release address/source and Boston
   transportation-topology experiments. It did not add Worker, API, R2, or
   production-build integration.
+- #55 split the external-source/R2 smoke into merge-only shard and ID-index
+  workflows with narrow production-path filters, fixed per-family prefixes,
+  and cancel-in-progress concurrency. Its first merged runs passed.
+- #55 also completed the pinned Overture exact-country decision artifact. It
+  retained an exact all-claims oracle, rejected the `territorial-primary` and
+  ordinary simplified candidates, and added no production router or H3
+  dependency.
 
 ### Current production data
 
@@ -41,10 +48,14 @@ preserving branch- or PR-specific history.
    reviewed labels, explicit byte/heap/latency gates, and fail-closed metadata.
 2. Keep required smoke work merge-only (`push` to `main`, plus manual dispatch).
    Do not turn the external-source/R2 smoke into a pull-request check.
-3. Exact country containment is the preferred durable reverse router. Keep
-   `HEAD` fallback for missing, invalid, boundary, multiply contained, or
-   policy-ambiguous inputs. Test H3 only if the direct exact router misses an
-   agreed budget.
+3. Exact country containment is the preferred durable reverse router. The
+   direct all-claims oracle implements the stated experiment semantics but is
+   far above the proposed 5 MiB budget, while ordinary polygon simplification
+   is not decision-safe. Keep `HEAD` fallback for missing, invalid, boundary,
+   multiply contained, or policy-ambiguous inputs. If the 5 MiB gate stands,
+   test a conservative H3 or equivalent interior cover with exact full-geometry
+   handling for boundary cells; do not use simplification as the decision
+   layer.
 4. Preserve country polygon components rather than unioning them by country.
    The Overture `division_area` schema says exactly one of `is_land` and
    `is_territorial` is true, but the pinned release contains dual-true rows that
@@ -87,10 +98,12 @@ preserving branch- or PR-specific history.
   dual rows are a release fact that the artifact must classify explicitly, not
   silently reject or reinterpret.
 - The all-claims exact oracle was 183,095,296 hot SQLite bytes. Exact
-  `territorial-primary` was 90,083,328 bytes and had zero drift on 5,000 global,
-  200 territorial-boundary, and 2,400 nearby points, but it false-uniquely routed
-  195 of 200 sampled all-claims boundary vertices. Excluding land claims is not
-  conservative under the current any-boundary-to-`HEAD` rule.
+  `territorial-primary` retained all 219 territorial-flag rows, including 60
+  dual-flag rows, while excluding 159 land-only rows. It was 90,083,328 bytes
+  and had zero drift on 5,000 global, 200 territorial-boundary, and 2,400 nearby
+  points, but it false-uniquely routed 195 of 200 sampled all-claims boundary
+  vertices. Excluding land-only claims is not conservative under the current
+  any-boundary-to-`HEAD` rule.
 - The 5,263,360-byte 0.0025-degree simplified candidate exceeded 5 MiB and
   produced 64 false-unique and 145 wrong-country routes on the primary corpus.
   The 3,305,472-byte 0.005-degree candidate produced 59 and 161. Ordinary
@@ -136,35 +149,68 @@ preserving branch- or PR-specific history.
   KiB and cold row groups about 1.74 MiB. These are sizing evidence, not a fleet
   forecast.
 - The exact-main smoke took 14m20s; 7m26s was spent exporting global divisions
-  to build Monaco. This is the first runtime bottleneck to remove.
+  to build Monaco.
+- After #55, the first independent merged runs passed in 5m35s for shards and
+  6m00s for the ID index. The shard run still spent 4m13s (76% of job time)
+  exporting global divisions; both Monaco shard builds, upload, verification,
+  and cleanup then took about one minute combined. The global export remains
+  the first runtime bottleneck to remove.
 
 ## Ordered work
 
-### 1. Bound the merge-only smokes
+### 1. Query only the Monaco smoke subset
 
-The merge-only smoke split gives ID and forward/reverse separate workflows,
-dependency filters, concurrency groups, and R2 prefixes.
+Keep the completed workflow split, merge-only triggers, narrow production-path
+filters, fixed prefix per smoke family, and cancel-in-progress concurrency.
+Do not add the external-source/R2 smokes to pull requests and do not add
+run-specific prefixes or a stale-prefix sweeper.
 
-- Trigger on merges to `main` and manual dispatch only, never on pull requests.
-- Replace broad `scripts/**` path matching with only the scripts, schemas, and
-  runtime dependencies each smoke actually executes. Research-only scripts and
-  unrelated workflow wrappers must trigger neither smoke.
-- Use the same pinned DuckDB generation as the production build path.
-- Record before/after total and stage timings on the first merged run.
+- Replace the global forward and reverse division exports with smoke-specific
+  queries for only the Monaco division, division-area, and required hierarchy
+  rows. Make country/code plus the immutable required-ID hierarchy closure the
+  authoritative correctness filter. Use bbox only as an additional coarse
+  Parquet-scan predicate after validating the required rows have present,
+  consistent bbox metadata; fail closed if any expected Monaco division, area,
+  or hierarchy row is missing. Confirm pushdown with the query plan and scanned
+  row-group/file reduction rather than inferring it from elapsed time alone.
+- Preserve the production transformations, geometry, aliases, hierarchy, and
+  forward/reverse build paths. The smoke should remain an external-source
+  integration test, not become a checked-in fixture.
+- On the pinned same release, require schema, IDs/rows, hierarchy/context,
+  aliases, geometry, and built shard contents to match the legacy global export
+  filtered to Monaco. Demonstrate reduced scanned files/row groups and target
+  less than 60 seconds for extraction on the same runner; if that bound is not
+  practical, ratify a replacement before accepting the optimization.
+- Record total and stage timings on the first post-change merged run. The
+  immediate goal is to make source extraction a bounded setup step rather than
+  the dominant 4m13s of a 5m35s job.
+- A release+SQL-SHA export cache is a fallback only if the subset query remains
+  too slow. Keep a slower scheduled full-source integration run only if the
+  bounded merge smoke stops covering material production extraction behavior.
 
-### 2. Ratify the exact-country gate and next comparator
+### 2. Ratify the exact-country gates and build the next comparator
 
 The completed research-only direct artifact and decision report use pinned
-release `2026-06-17.0`. They reject territorial-only and simplified variants
-under conservative boundary semantics and add no Worker, R2, fleet-build, or
-production routing integration.
+release `2026-06-17.0`. They reject `territorial-primary` and simplified
+variants under conservative boundary semantics and add no Worker, R2,
+fleet-build, or production routing integration.
 
 - Decide whether the proposed 5 MiB hot-artifact gate stands. The valid direct
   all-claims oracle is about 174.6 MiB (183.1 MB).
-- If the gate stands, build a bounded H3 or equivalent conservative interior
-  cover paired with exact full geometry for boundary cells. Preserve land and
-  territorial boundary blockers, compare to the all-claims oracle, and do not
-  add a production dependency.
+- If the gate stands, build a research-only H3 or equivalent conservative
+  interior cover from all 378 land and territorial claims. A cell may route
+  directly only when exact build-time proof over the entire closed cell, using
+  the oracle's normalized antimeridian semantics, shows a constant claim set
+  with no boundary, synthetic `X*`, perspective, or decode blocker and interior
+  hits that deduplicate to exactly one standard country. This must also reject
+  cells wholly inside overlapping claims from different countries. Any failure
+  to prove the rule uses exact unsimplified full-geometry predicates; unresolved
+  cases return `HEAD`. Compare every decision to the 183,095,296-byte
+  all-claims oracle and do not add a production dependency.
+- Ordinary topology-preserving simplification may be measured only as a
+  conservative candidate-pruning aid with proof that it cannot affect the
+  routing decision. The existing R-tree/bbox filter remains the safe coarse
+  filter; the measured simplified polygons are rejected as routers.
 - Independently review the border/coast/island/enclave/antimeridian and `X*`
   labels. The committed curated seed queries and deterministic corpora are
   diagnostic evidence, not independently reviewed gold data.
@@ -177,30 +223,16 @@ false-unique, false-negative, and wrong-country routes), at most 5 MiB of
 uncompressed hot runtime-object bytes, at most 12 MiB incremental peak heap, at
 most 10 ms cold open, and at most 100 microseconds warm p95. Cold audit/manifest
 bytes and compressed/published-object bytes require separate explicit budgets.
-These are proposed starting points, not accepted production thresholds; every
-current candidate fails either correctness or bytes.
+For the hybrid comparator, the 5 MiB numerator includes the cell index and every
+exact boundary geometry/index object it requires; it must not hide the exact
+fallback in an uncounted sidecar. A future lazy/sharded design needs separate
+total-published, fetched-per-request, and hot-resident budgets. Cell-clipped
+exact geometry, if tested, must prove decision equivalence to the original
+unsimplified components. These are proposed starting points, not accepted
+production thresholds; every current candidate fails either correctness or
+bytes.
 
-### 3. Finish the remaining smoke-performance work
-
-After the exact-country decision artifact, replace the global divisions export
-with a query for only the Monaco division/area subset required by the
-forward/reverse smoke. Preserve the production transformation, geometry, and
-hierarchy semantics rather than substituting a fixture.
-
-Keep one fixed prefix per smoke family and use the workflow concurrency guard
-to cancel an older in-progress run before the replacement starts. A
-release+SQL-SHA divisions-export cache is a fallback, not the first fix. Keep a
-slower scheduled full external-source integration run if the bounded merge
-smoke no longer covers that path.
-
-### 4. Consider production exact-country integration only if gates pass
-
-If the decision artifact meets the quality and resource gates, add a separate
-review for Worker caching, artifact publication/rollback, failure behavior, and
-production smoke coverage. Continue using ambiguous-bbox-to-`HEAD` fallback
-until that integration is deployed and verified.
-
-### 5. Places rank and routing audit
+### 3. Places rank and routing audit
 
 - Produce a compact current-release California audit union, not a shard.
 - Independently label famous unique, local unique, and chain examples across
@@ -210,7 +242,7 @@ until that integration is deployed and verified.
 - Design explicit low/high-fanout token routing. Only reviewed venue-level fame
   evidence may justify a future unique landmark in `HEAD`.
 
-### 6. Address and street-context evaluation
+### 4. Address and street-context evaluation
 
 - Spatially join the bounded Boston address sample to transportation segments
   and connector components; measure missing and contradictory locality/postcode
@@ -221,21 +253,32 @@ until that integration is deployed and verified.
   dictionary to measure cold bytes, heap, and latency. Keep interpolation out
   of scope unless a later experiment proves ordering, parity, and coverage.
 
-### 7. Minor hardening
+### 5. Minor hardening
 
 - Define and fault-test additive degraded/partial-result signaling: required
   `HEAD` or catalog failure should fail the request; optional regional/Places
   failure should be visibly degraded with a coherent data version.
 - Replace the current single-file build metadata behavior with a complete,
   immutable, multi-artifact manifest and atomic publication/linking.
-- Add stage-level timing for catalog, cache, R2, deserialize, FTS, and merge.
+- Add Worker request-stage timing for catalog, cache, R2, deserialize, FTS, and
+  merge. Keep this distinct from the workflow build-stage timings above.
+
+### 6. Consider production exact-country integration only if a future candidate passes
+
+Every current candidate fails correctness or stored bytes. Only after a future
+candidate passes the ratified gates should a separate review cover Worker
+caching, artifact publication/rollback, failure behavior, and production smoke
+coverage. Continue using ambiguous-bbox-to-`HEAD` fallback until that
+integration is deployed and verified.
 
 ## Open decisions
 
 1. Ratified exact-country byte, heap, cold-open, and warm-latency gates.
 2. Political-perspective and synthetic `X*` routing policy, including which
    cases can ever resolve uniquely instead of falling through to `HEAD`.
-3. Exact boundary semantics and antimeridian component representation.
+3. Whether the experiment's conservative any-claim-boundary-to-`HEAD` rule is
+   the production boundary contract, plus the antimeridian component
+   representation.
 4. Places regional byte budget, soft coverage floors, fame evidence, and
    low/high-fanout thresholds; do not enable `place` by default before fleet
    validation.
