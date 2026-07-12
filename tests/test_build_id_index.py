@@ -468,6 +468,19 @@ def test_required_marker_inventory_rejects_stale_before_payload_read(monkeypatch
     payload_read.assert_not_called()
 
 
+def test_required_staging_marker_upload_failure_is_fatal(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(bii, "_upload_to_r2", lambda *_: "upload exhausted")
+
+    with pytest.raises(RuntimeError, match="required staging marker"):
+        bii._write_staging_marker(
+            {"bucket": "test"}, "v", "build-000-3ff", 1024,
+            extra={"dictionary_sha256": "a" * 64},
+        )
+
+    assert not list(tmp_path.glob("tmp-staging-marker-*"))
+
+
 def test_release_inventory_fan_in_rejects_missing_direct_staged_tuple(monkeypatch):
     release = "2026-06-17.0"
     monkeypatch.setattr(
@@ -1081,6 +1094,8 @@ def test_patch_stage_with_marker_ranges_writes_only_those(pipeline):
     assert written_marker_keys(mocks) == [
         "id-partitioned-000-3ff", "id-partitioned-c00-fff"]
     assert "id-partitioned" not in read_marker_keys(mocks)
+    assert [call.args[3] for call in
+            mocks["_write_staging_marker"].call_args_list] == [1024, 1024]
 
 
 def test_range_stage_skips_when_range_marker_exists(pipeline):

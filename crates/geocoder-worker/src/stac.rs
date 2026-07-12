@@ -317,6 +317,21 @@ fn validate_bounds(bounds: Option<[u32; 2]>, count: usize) -> std::result::Resul
 
 const MAX_PARQUET_FOOTER_SIZE: usize = 16 * 1024 * 1024;
 
+fn parquet_footer_metadata_len(tail_bytes: &[u8]) -> std::result::Result<usize, String> {
+    if tail_bytes.len() < 8 {
+        return Err("shard too small for parquet footer".to_string());
+    }
+    let trailer_start = tail_bytes.len() - 8;
+    if &tail_bytes[trailer_start + 4..] != b"PAR1" {
+        return Err("invalid parquet magic".to_string());
+    }
+    Ok(u32::from_le_bytes(
+        tail_bytes[trailer_start..trailer_start + 4]
+            .try_into()
+            .expect("four-byte parquet footer length"),
+    ) as usize)
+}
+
 /// Validate a footer length read from Parquet's final eight bytes and decide
 /// whether the Worker's initial suffix needs one exact-size retry.
 ///
@@ -330,12 +345,34 @@ fn footer_retry_size(
     let footer_size = metadata_len
         .checked_add(8)
         .ok_or_else(|| "parquet footer length overflow".to_string())?;
-    if metadata_len > MAX_PARQUET_FOOTER_SIZE || footer_size as u64 > file_size {
+    if tail_len as u64 > file_size
+        || metadata_len > MAX_PARQUET_FOOTER_SIZE
+        || footer_size as u64 > file_size
+    {
         return Err(format!(
             "implausible parquet footer length {metadata_len}B for {file_size}B file"
         ));
     }
     Ok((footer_size > tail_len).then_some(footer_size as u64))
+}
+
+fn validate_footer_retry_response(
+    expected_file_size: u64,
+    expected_metadata_len: usize,
+    actual_file_size: u64,
+    tail_bytes: &[u8],
+) -> std::result::Result<(), String> {
+    if actual_file_size != expected_file_size {
+        return Err("parquet object changed size between footer reads".to_string());
+    }
+    let actual_metadata_len = parquet_footer_metadata_len(tail_bytes)?;
+    if actual_metadata_len != expected_metadata_len {
+        return Err("parquet footer changed between suffix reads".to_string());
+    }
+    if footer_retry_size(actual_file_size, tail_bytes.len(), actual_metadata_len)?.is_some() {
+        return Err("exact parquet footer retry returned too few bytes".to_string());
+    }
+    Ok(())
 }
 
 fn compact_locator_ids(
@@ -1761,19 +1798,12 @@ impl ShardLoader {
         };
 
         // Step 2: Parse parquet footer from the tail bytes
-        if tail_bytes.len() < 8 {
-            return Err(Error::RustError("Shard too small for parquet".into()));
-        }
-        let footer_8_start = tail_bytes.len() - 8;
-        let magic = &tail_bytes[footer_8_start + 4..];
-        if magic != b"PAR1" {
-            return Err(Error::RustError("Invalid parquet magic".into()));
-        }
-        let metadata_len = u32::from_le_bytes(
-            tail_bytes[footer_8_start..footer_8_start + 4]
-                .try_into()
-                .unwrap(),
-        ) as usize;
+        let metadata_len = parquet_footer_metadata_len(&tail_bytes).map_err(|reason| {
+            Error::RustError(format!(
+                "Invalid parquet footer for {}: {}",
+                shard_key, reason
+            ))
+        })?;
         // Sanity-cap before acting on the length: a corrupt (or stale-cached)
         // 4-byte footer field of up to ~4 GB would otherwise trigger a
         // whole-file suffix fetch, buffered in memory and edge-cached.
@@ -1794,19 +1824,31 @@ impl ShardLoader {
                 shard_key
             );
             tail_bytes = match self.cached_suffix_read(&shard_key, footer_size).await? {
-                Some((_, bytes)) => bytes,
+                Some((retry_file_size, bytes)) => {
+                    validate_footer_retry_response(
+                        file_size,
+                        metadata_len,
+                        retry_file_size,
+                        &bytes,
+                    )
+                    .map_err(|reason| {
+                        Error::RustError(format!(
+                            "Invalid parquet footer retry for {}: {}",
+                            shard_key, reason
+                        ))
+                    })?;
+                    bytes
+                }
                 None => return Err(not_found(format!("id-index shard {}", shard_key))),
             };
-            if metadata_len + 8 > tail_bytes.len() {
-                return Err(Error::RustError(format!(
-                    "Footer too large ({} bytes), fetched {}",
-                    metadata_len + 8,
-                    tail_bytes.len()
-                )));
-            }
         }
         let tail_len = tail_bytes.len() as u64;
-        let tail_offset = file_size - tail_len;
+        let tail_offset = file_size.checked_sub(tail_len).ok_or_else(|| {
+            Error::RustError(format!(
+                "Parquet suffix for {} exceeds object size",
+                shard_key
+            ))
+        })?;
         let metadata_start = tail_bytes.len() - 8 - metadata_len;
         let metadata = parquet::file::metadata::ParquetMetaDataReader::decode_metadata(
             &tail_bytes[metadata_start..metadata_start + metadata_len],
@@ -2509,6 +2551,38 @@ mod tests {
         )
         .is_err());
         assert!(footer_retry_size(u64::MAX, 32_768, usize::MAX).is_err());
+        assert!(footer_retry_size(1_000, 1_001, 100).is_err());
+    }
+
+    #[test]
+    fn test_footer_retry_rejects_mixed_object_generations() {
+        fn footer(metadata_len: u32, magic: &[u8; 4]) -> Vec<u8> {
+            let mut bytes = vec![0; metadata_len as usize];
+            bytes.extend_from_slice(&metadata_len.to_le_bytes());
+            bytes.extend_from_slice(magic);
+            bytes
+        }
+
+        let expected = footer(40_000, b"PAR1");
+        assert_eq!(
+            validate_footer_retry_response(1_000_000, 40_000, 1_000_000, &expected),
+            Ok(())
+        );
+        assert!(validate_footer_retry_response(1_000_000, 40_000, 1_000_001, &expected,).is_err());
+        assert!(validate_footer_retry_response(
+            1_000_000,
+            40_000,
+            1_000_000,
+            &footer(39_999, b"PAR1"),
+        )
+        .is_err());
+        assert!(validate_footer_retry_response(
+            1_000_000,
+            40_000,
+            1_000_000,
+            &footer(40_000, b"NOPE"),
+        )
+        .is_err());
     }
 
     fn collection_with_bboxes(rows: &[(&str, Option<[f64; 4]>)]) -> StacCollection {

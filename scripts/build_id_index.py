@@ -317,7 +317,7 @@ def _write_staging_marker(r2_config, version, staging_dir, partition_count,
     err = _upload_to_r2(tmp, r2_key)
     tmp.unlink(missing_ok=True)
     if err:
-        print(f"  WARNING: Failed to write staging marker: {err}")
+        raise RuntimeError(f"Failed to write required staging marker {r2_key}: {err}")
 
 
 def _marker_is_current(marker):
@@ -2978,7 +2978,7 @@ def build_id_index(args):
                         r2_config,
                         version,
                         mk,
-                        len(stage_prefixes) if stage_prefixes else shard_count,
+                        len(_scope_prefixes(scope, args.prefix_len)),
                         extra={"locator_inventory": inventory_reference},
                     )
                     print(f"  Wrote marker: {mk}")
