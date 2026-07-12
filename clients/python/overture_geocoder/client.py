@@ -203,6 +203,13 @@ class IdLookupResult:
 
     id: str
     bbox: BBox
+    feature_type: Optional[str] = None
+    theme: Optional[str] = None
+    filename: Optional[str] = None
+    last_seen_release: Optional[str] = None
+    registry_member: Optional[bool] = None
+    exists_in_current_release: Optional[bool] = None
+    overture_path: Optional[str] = None
 
 
 @dataclass
@@ -424,6 +431,13 @@ class OvertureGeocoder:
                 xmax=float(bbox["xmax"]),
                 ymax=float(bbox["ymax"]),
             ),
+            feature_type=data.get("feature_type"),
+            theme=data.get("theme"),
+            filename=data.get("filename"),
+            last_seen_release=data.get("last_seen_release"),
+            registry_member=data.get("registry_member"),
+            exists_in_current_release=data.get("exists_in_current_release"),
+            overture_path=data.get("overture_path"),
         )
 
     def health(self) -> dict[str, Any]:

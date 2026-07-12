@@ -279,6 +279,31 @@ class TestLookupId:
         assert result.bbox.ymin == 42.227
         assert result.bbox.xmax == -70.923
         assert result.bbox.ymax == 42.397
+        assert result.feature_type is None  # v1 response compatibility
+
+    def test_lookup_id_v3_locator_fields(self, mock_id_lookup_response):
+        payload = dict(mock_id_lookup_response)
+        payload.update({
+            "feature_type": "place",
+            "theme": "places",
+            "filename": "part.zstd.parquet",
+            "last_seen_release": "2026-06-17.0",
+            "registry_member": True,
+            "exists_in_current_release": True,
+            "overture_path": (
+                "release/2026-06-17.0/theme=places/type=place/part.zstd.parquet"
+            ),
+        })
+        mock_client = MagicMock()
+        mock_client.get.return_value = make_response(payload)
+
+        result = OvertureGeocoder(http_client=mock_client).lookup_id("abc-123")
+
+        assert result.feature_type == "place"
+        assert result.theme == "places"
+        assert result.registry_member is True
+        assert result.exists_in_current_release is True
+        assert result.overture_path.endswith("/part.zstd.parquet")
 
     def test_lookup_id_404_returns_none(self):
         """Should return None for unknown IDs."""

@@ -111,6 +111,14 @@ export interface ReverseGeocoderResult {
 export interface IdLookupResult {
   id: string;
   bbox: BoundingBox;
+  /** Present for format-v3 ID-index shards. */
+  feature_type?: string | null;
+  theme?: string | null;
+  filename?: string | null;
+  last_seen_release?: string | null;
+  registry_member?: boolean;
+  exists_in_current_release?: boolean;
+  overture_path?: string | null;
 }
 
 /** Response from GET /health. */

@@ -74,7 +74,8 @@ curl "https://geocoder.bradr.dev/reverse?lat=42.3601&lon=-71.0589"
 
 **Endpoint:** `GET /id/:gers_id`
 
-Resolves any Overture GERS ID to its bounding box.
+Resolves any indexed Overture ID to its bounding box. Format-v3 indexes also
+return a release-pinned locator for the source GeoParquet file.
 
 **Example:**
 ```bash
@@ -90,9 +91,22 @@ curl "https://geocoder.bradr.dev/id/08b2a100-d664-7fff-0200-a44bcea04b76"
     "ymin": 42.35,
     "xmax": -71.05,
     "ymax": 42.36
-  }
+  },
+  "feature_type": "place",
+  "theme": "places",
+  "filename": "part-00001-example-c000.zstd.parquet",
+  "last_seen_release": "2026-06-17.0",
+  "registry_member": true,
+  "exists_in_current_release": true,
+  "overture_path": "release/2026-06-17.0/theme=places/type=place/part-00001-example-c000.zstd.parquet"
 }
 ```
+
+The locator fields are additive. Legacy format-v1 shards continue returning
+only `id` and `bbox`. Format v3 stores compact source-file and historical-
+release IDs in each shard and expands them through one content-addressed
+dictionary per shard set. A registry record with no current `path` returns
+null type/filename/path fields and `exists_in_current_release: false`.
 
 ## Architecture
 
@@ -101,7 +115,7 @@ This project uses a **sharded architecture** to handle global datasets within th
 1.  **Data Ingestion**: DuckDB extracts division data from Overture Maps' S3 buckets (Parquet format).
 2.  **Shard Generation**:
     *   `scripts/build_shards.py` partitions divisions by country/region into optimized **SQLite databases** with FTS5 indexes.
-    *   `scripts/build_id_index.py` builds a **UUID-prefix-sharded parquet index** mapping every GERS ID to its bounding box. Streams from Overture's registry and release themes via DuckDB, stages partitioned parquet to R2, then merges into sorted snappy-compressed shards.
+    *   `scripts/build_id_index.py` builds a **UUID-prefix-sharded parquet index** mapping every GERS ID to its bounding box and optional source-file locator. Streams from Overture's registry and release themes via DuckDB, stages partitioned parquet to R2, then merges into sorted uncompressed shards.
 3.  **Storage**: All shards are uploaded to **Cloudflare R2** (`geocoder-shards` bucket), versioned by date.
 4.  **Runtime**: The **Rust Worker** (`crates/geocoder-worker`) dynamically fetches shards from R2, caches at the edge via the Cache API, and queries them for each request.
 

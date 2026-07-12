@@ -20,7 +20,14 @@ from pathlib import Path
 import duckdb
 
 sys.path.insert(0, str(Path(__file__).parent))
+from build_id_index import (
+    _classify_shard_set,
+    _format_metadata,
+    _load_locator_dictionary_reference,
+    _validate_build_marker_dictionary_sha,
+)
 from stac import get_latest_release
+
 
 # Load .env
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -97,6 +104,19 @@ def main():
     shard_files = [r[0] for r in rows]
     print(f"  Found {len(shard_files)} shards in {time.time() - t0:.0f}s")
 
+    # Shared validator checks exact order, physical types, UUID length, and
+    # uniform format for every footer before either metadata object is written.
+    format_version = _classify_shard_set(con, shard_files)
+    dictionary_reference = (
+        _load_locator_dictionary_reference(r2_config, version, release_version)
+        if format_version >= 3 else None
+    )
+    if dictionary_reference is not None:
+        _validate_build_marker_dictionary_sha(
+            r2_config, version, dictionary_reference["sha256"])
+    format_metadata = _format_metadata(
+        format_version, release_version, dictionary_reference)
+
     shard_infos = {}
     for path in shard_files:
         prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
@@ -120,6 +140,7 @@ def main():
             "total_size_bytes": 0,
             "prefix_len": args.prefix_len,
             "overture_release": release_version,
+            **format_metadata,
         },
         "items": {
             p: {"href": f"./id-index/{p}.parquet"}
@@ -152,7 +173,11 @@ def main():
     print(f"  Uploaded id-collection.json to R2 ({r2_key})")
 
     # Upload id-meta.json (tiny metadata for fast worker prefix_len lookup)
-    meta = {"prefix_len": args.prefix_len, "shard_count": len(shard_infos)}
+    meta = {
+        "prefix_len": args.prefix_len,
+        "shard_count": len(shard_infos),
+        **format_metadata,
+    }
     tmp_meta = Path("tmp-id-meta.json")
     with open(tmp_meta, "w") as f:
         json.dump(meta, f)

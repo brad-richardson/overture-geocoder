@@ -27,7 +27,7 @@ on:
         required: false
         default: false
       run_build:
-        description: 'Run build phase after patching staging'
+        description: 'Run build using the existing immutable global locator dictionary; unseen tuples/releases fail closed'
         type: boolean
         required: false
         default: true
