@@ -1,0 +1,265 @@
+{
+  "address_extract": {
+    "aggregated_street_names": 3712,
+    "elapsed_seconds": 24.813,
+    "bbox_observable_point_within_polygon_population": 397783,
+    "hash_threshold_u32": 1025739896,
+    "row_guard": 100000,
+    "rows": 94771,
+    "sample_fraction": 0.23824798948170234,
+    "sampled": true,
+    "sampling_method": "pinned hash(id) threshold targeting 95% of the row cap, followed by a hard LIMIT; avoids a global deterministic sort",
+    "selection_contract": "bbox-prefiltered for I/O, then exact Point-within unsimplified division_area; missing/discordant bbox rows are unobservable",
+    "skipped": false,
+    "warning": "Name-level proxy only; no contexts are assigned to snapshot clusters."
+  },
+  "address_name_context": {
+    "address_street_names": 3712,
+    "ambiguous_repeated_name_snapshot_clusters_with_context": 1215,
+    "coverage": 0.752914951989026,
+    "diagnostic_only": true,
+    "snapshot_clusters_with_name_level_address_context": 4391,
+    "uniquely_named_snapshot_clusters_with_context": 3176,
+    "warning": "Exact normalized-name matching is not snapshot-cluster enrichment. Disconnected same-name clusters require a spatial address-to-segment join."
+  },
+  "architecture_warning": "No production shards, APIs, Worker paths, R2 objects, or deploy state were changed.",
+  "boundary": {
+    "bbox": [
+      -71.1912442,
+      42.2279149,
+      -70.8044881,
+      42.3969775
+    ],
+    "country": "US",
+    "division_area_id": "78cd3b93-9cd5-4023-9e31-4194be70701b",
+    "division_area_version": 10,
+    "division_id": "5df2793f-5a0a-4fcf-bd3c-7edb8cc495d8",
+    "division_name": "Boston",
+    "division_version": 6,
+    "elapsed_seconds": 56.534,
+    "geometry_handling": "exact Overture division_area geometry; no simplification or buffering for core membership; bbox is only a remote prefilter",
+    "geometry_sha256": "bb5e08c01aa2e01c2d73c7ba00b5ececafa925c12efb66410260b5a1cfd452a5",
+    "geometry_wkb_bytes": 32729,
+    "halo_degrees": 0.005,
+    "label": "Overture Boston locality division_area (official dataset polygon) with an experimental extraction halo",
+    "materialized_parquet_bytes": 31460,
+    "region": "US-MA",
+    "release": "2026-06-17.0",
+    "subtype": "locality"
+  },
+  "common_alias_lookup_summary": {
+    "cluster_references": 1,
+    "keys": 1,
+    "separate_from_snapshot_cluster_records": true
+  },
+  "connector_extract": {
+    "byte_guard": 67108864,
+    "elapsed_seconds": 21.925,
+    "materialized_parquet_bytes": 3937061,
+    "remote_path": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=transportation/type=connector/*",
+    "row_guard": 100000,
+    "rows": 98521
+  },
+  "connector_validation": {
+    "connector_references": 213351,
+    "duplicate_at_references_within_segment": 1,
+    "duplicate_connector_id_references_within_segment": 0,
+    "endpoint_connector_references": 130353,
+    "interior_connector_references": 82998,
+    "invalid_at_references": 0,
+    "missing_reference_warning": "A missing connector feature can be boundary clipping; it is not proof of invalid Overture topology in this bounded snapshot.",
+    "referenced_connector_ids_missing_from_bounded_connector_extract": 2720,
+    "single_segment_reference_connector_ids": 15510,
+    "unique_referenced_connector_ids": 99878
+  },
+  "execution": {
+    "duckdb_version": "1.4.4",
+    "invocation": [
+      "scripts/benchmark_transport_components.py",
+      "--halo",
+      "0.005",
+      "--max-transport-rows",
+      "100000",
+      "--max-transport-bytes",
+      "134217728",
+      "--max-connector-rows",
+      "100000",
+      "--max-connector-bytes",
+      "67108864",
+      "--max-address-rows",
+      "100000",
+      "--max-crossing-segments",
+      "20000",
+      "--max-crossing-tile-memberships",
+      "1000000",
+      "--max-crossing-candidate-pairs",
+      "1000000",
+      "--crossing-tile-degrees",
+      "0.01",
+      "--remote-time-cap-seconds",
+      "900",
+      "--json-out",
+      "/private/tmp/boston-transport-v3.json",
+      "--markdown-out",
+      "/private/tmp/boston-transport-v3.md"
+    ],
+    "platform": "macOS-26.5.1-arm64-arm-64bit",
+    "python_version": "3.12.12",
+    "remote_wall_clock_cap_seconds": 900
+  },
+  "generated_at": "2026-07-12T13:46:23+00:00",
+  "geometric_crossing_reference_audit": {
+    "candidate_pair_guard": 1000000,
+    "geometric_crossings_without_shared_connector_reference": 588,
+    "interpretation": "This only shows that two geometries cross without sharing a connector reference; it does not classify grade, bridge, tunnel, or data validity.",
+    "segment_guard": 20000,
+    "segment_rows": 18696,
+    "tile_degrees": 0.01,
+    "tile_membership_guard": 1000000,
+    "tile_memberships": 21716,
+    "tiled_bbox_candidate_pairs": 59974
+  },
+  "halo_comparison": {
+    "changed_fraction": 0.004760376551133932,
+    "core_named_segments_compared": 18696,
+    "core_named_segments_with_changed_core_peer_membership": 89,
+    "inner_core_touching_snapshot_clusters": 5839,
+    "inner_halo_degrees": 0.0,
+    "interpretation": "A change means halo support altered connectivity among core named segments; snapshot cluster IDs are intentionally release/member scoped.",
+    "outer_core_touching_snapshot_clusters": 5832,
+    "outer_halo_degrees": 0.005
+  },
+  "overture_release": "2026-06-17.0",
+  "provenance_coverage": {
+    "connectors": {
+      "all_source_field_populated_records": {
+        "between": 0,
+        "confidence": 0,
+        "dataset": 98521,
+        "license": 98521,
+        "record_id": 96805,
+        "update_time": 96415
+      },
+      "all_source_records": 98521,
+      "confidence_interpretation": "source-supplied and not calibrated across datasets; missing is not zero",
+      "feature_rows": 98521,
+      "features_with_any_source": 98521,
+      "features_with_root_source": 98521,
+      "features_with_version": 98521,
+      "property_specific_source_records": 0,
+      "root_dataset_records": {
+        "OpenStreetMap": 98521
+      },
+      "root_source_field_populated_records": {
+        "between": 0,
+        "confidence": 0,
+        "dataset": 98521,
+        "license": 98521,
+        "record_id": 96805,
+        "update_time": 96415
+      },
+      "root_source_records": 98521,
+      "source_property_records": {
+        "<root>": 98521
+      }
+    },
+    "segments": {
+      "all_source_field_populated_records": {
+        "between": 29652,
+        "confidence": 0,
+        "dataset": 86507,
+        "license": 86507,
+        "record_id": 85295,
+        "update_time": 83465
+      },
+      "all_source_records": 86507,
+      "confidence_interpretation": "source-supplied and not calibrated across datasets; missing is not zero",
+      "feature_rows": 65176,
+      "features_with_any_source": 65176,
+      "features_with_root_source": 65176,
+      "features_with_version": 65176,
+      "property_specific_source_records": 1779,
+      "root_dataset_records": {
+        "OpenStreetMap": 83516,
+        "TomTom": 1212
+      },
+      "root_source_field_populated_records": {
+        "between": 29652,
+        "confidence": 0,
+        "dataset": 84728,
+        "license": 84728,
+        "record_id": 83516,
+        "update_time": 83465
+      },
+      "root_source_records": 84728,
+      "source_property_records": {
+        "/routes": 1779,
+        "<root>": 84728
+      }
+    }
+  },
+  "report_version": 3,
+  "scoped_name_rule_assertions": {
+    "assertions": 23138,
+    "excluded_from_topology_grouping": true,
+    "reason": "between/side/perspectives are scoped assertions; this snapshot does not evaluate them against connector.at positions and query perspective.",
+    "with_between": 929,
+    "with_perspectives": 0,
+    "with_side": 0
+  },
+  "serialized_snapshot_estimate": {
+    "common_alias_keys": 1,
+    "common_alias_lookup_bytes": 69,
+    "deduplicated_segment_index_bytes": 12664870,
+    "detail_segment_index_bytes": 12664870,
+    "encoding": "compact UTF-8 JSON measurement; not a production forecast",
+    "hot_cluster_lookup_bytes": 2106043,
+    "hot_cluster_records_bytes": 2105974,
+    "segment_records": 19220,
+    "snapshot_cluster_records": 5832,
+    "snapshot_cluster_records_bytes": 4569246,
+    "total_bytes": 17234185
+  },
+  "snapshot_cluster_build_seconds": 6.301,
+  "snapshot_name_cluster_summary": {
+    "all_road_segments": 65176,
+    "connector_references": 213351,
+    "core_seed_named_road_segments": 18696,
+    "core_seed_road_segments": 54038,
+    "core_seed_segment_memberships": 18696,
+    "core_touching_snapshot_name_clusters": 5832,
+    "frontier_open_connector_proxy_references": 163,
+    "frontier_open_connector_proxy_warning": "A single-reference connector on a frontier segment is a bounded-snapshot continuation proxy, not proof that the global connector is open.",
+    "frontier_snapshot_clusters": 202,
+    "halo_support_segment_memberships": 524,
+    "named_road_segments": 22385,
+    "names_with_multiple_snapshot_clusters": 559,
+    "primary_names": 4864,
+    "root_source_dataset_segment_memberships": {
+      "OpenStreetMap": 63964,
+      "TomTom": 1212
+    },
+    "scoped_name_rule_assertions_excluded_from_topology": 23138,
+    "segments_with_version": 65176,
+    "segments_without_connectors": 0,
+    "snapshot_cluster_segment_count": {
+      "max": 161,
+      "p50": 1,
+      "p90": 7,
+      "p99": 30
+    },
+    "snapshot_clusters_on_repeated_names": 1527,
+    "snapshot_clusters_with_single_reference_connector": 2130,
+    "unique_connector_ids": 99878
+  },
+  "transport_extract": {
+    "byte_guard": 134217728,
+    "elapsed_seconds": 85.993,
+    "filter": "segment.subtype = 'road' AND segment.bbox.xmax >= -71.1962442 AND segment.bbox.xmin <= -70.7994881 AND segment.bbox.ymax >= 42.2229149 AND segment.bbox.ymin <= 42.4019775",
+    "guard_scope": "Guards bound materialized rows and Parquet bytes; remote Parquet range-scan traffic is controlled by bbox predicate pushdown but is not byte-metered.",
+    "materialized_parquet_bytes": 15572666,
+    "remote_path": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=transportation/type=segment/*",
+    "row_guard": 100000,
+    "rows": 65176
+  }
+}
