@@ -347,13 +347,13 @@ pub struct IdLookupResult {
     /// Overture GERS ID.
     pub id: String,
     pub bbox: BBox,
-    /// Format-v2 locator fields. Flattening keeps the HTTP response additive;
+    /// Format-v3 locator fields. Flattening keeps the HTTP response additive;
     /// legacy shards leave this as None and serialize exactly as `{id, bbox}`.
     #[serde(flatten)]
     pub locator: Option<IdLocatorMetadata>,
 }
 
-/// Optional full-record locator metadata appended by ID-index format v2.
+/// Optional full-record locator metadata expanded from ID-index format v3.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct IdLocatorMetadata {
     pub feature_type: Option<String>,
@@ -392,7 +392,7 @@ mod id_lookup_tests {
     }
 
     #[test]
-    fn v2_id_result_serializes_nullable_flat_locator_keys() {
+    fn v3_id_result_serializes_nullable_flat_locator_keys() {
         let value = serde_json::to_value(IdLookupResult {
             id: "abc".into(),
             bbox: bbox(),

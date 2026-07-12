@@ -281,7 +281,7 @@ class TestLookupId:
         assert result.bbox.ymax == 42.397
         assert result.feature_type is None  # v1 response compatibility
 
-    def test_lookup_id_v2_locator_fields(self, mock_id_lookup_response):
+    def test_lookup_id_v3_locator_fields(self, mock_id_lookup_response):
         payload = dict(mock_id_lookup_response)
         payload.update({
             "feature_type": "place",

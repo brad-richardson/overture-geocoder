@@ -74,7 +74,7 @@ curl "https://geocoder.bradr.dev/reverse?lat=42.3601&lon=-71.0589"
 
 **Endpoint:** `GET /id/:gers_id`
 
-Resolves any indexed Overture ID to its bounding box. Format-v2 indexes also
+Resolves any indexed Overture ID to its bounding box. Format-v3 indexes also
 return a release-pinned locator for the source GeoParquet file.
 
 **Example:**
@@ -103,8 +103,10 @@ curl "https://geocoder.bradr.dev/id/08b2a100-d664-7fff-0200-a44bcea04b76"
 ```
 
 The locator fields are additive. Legacy format-v1 shards continue returning
-only `id` and `bbox`. A registry record with no current `path` returns null
-type/filename/path fields and `exists_in_current_release: false`.
+only `id` and `bbox`. Format v3 stores compact source-file and historical-
+release IDs in each shard and expands them through one content-addressed
+dictionary per shard set. A registry record with no current `path` returns
+null type/filename/path fields and `exists_in_current_release: false`.
 
 ## Architecture
 

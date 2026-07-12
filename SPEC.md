@@ -151,17 +151,20 @@ GET /reverse?lat={lat}&lon={lon}
 ### ID Lookup: `/id/{gers_id}`
 
 The first five ID-index columns remain positional and compatible with format
-v1: `id`, then four float bbox values. Format v2 appends nullable
-`feature_type`, basename-only `filename`, `last_seen_release`, and
-`registry_member`. `id-meta.json` pins `format_version`, `overture_release`,
-and a versioned type-to-theme map.
+v1: `id`, then four float bbox values. Format v3 appends nullable INT32
+`source_file_id`, nullable INT32 `last_seen_release_id`, and non-null
+`registry_member`. Both IDs are semantically unsigned 16-bit, one-based, and
+expanded through an immutable content-addressed dictionary referenced by
+`id-meta.json` and `id-collection.json`.
 
-Format-v2 responses add `feature_type`, `theme`, `filename`,
+Format-v3 responses add `feature_type`, `theme`, `filename`,
 `last_seen_release`, `registry_member`, `exists_in_current_release`, and
 `overture_path`. The path always includes the pinned release:
-`release/{release}/theme={theme}/type={type}/{filename}`. When a registry path
-is null, locator strings are null and `exists_in_current_release` is false.
-Format-v1 responses remain exactly the legacy `id` and `bbox` shape.
+`release/{release}/theme={theme}/type={type}/{filename}`. A non-null source ID
+means the feature exists in the pinned release, whose release string is
+derived from metadata. Historical path-null registry rows instead carry a
+sparse last-seen release ID. Format-v1 responses—and v3 rows whose dictionary
+is unavailable or invalid—retain exactly the legacy `id` and `bbox` shape.
 
 ## Indexing Pipeline
 

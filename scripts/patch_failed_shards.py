@@ -18,7 +18,16 @@ from pathlib import Path
 import duckdb
 
 sys.path.insert(0, str(Path(__file__).parent))
-from build_id_index import _assert_locator_rows, _assert_shard_schema, _glob_files
+from build_id_index import (
+    ROW_GROUP_SIZE,
+    _assert_compact_locator_mapping,
+    _assert_locator_rows,
+    _assert_shard_schema,
+    _compact_locator_query,
+    _glob_files,
+    _load_locator_manifest_and_dictionary,
+    _write_local_dictionary_tables,
+)
 
 # Load .env
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -106,6 +115,13 @@ def main():
 
     con = r2_con(r2_config)
     con.execute("SET memory_limit = '4GB';")
+
+    # Patch builds must reuse the exact immutable global dictionary. A subset
+    # is never allowed to renumber IDs or introduce unseen tuples/releases.
+    _, dictionary, _ = _load_locator_manifest_and_dictionary(
+        r2_config, version, args.release)
+    source_dictionary_path, release_dictionary_path = (
+        _write_local_dictionary_tables(dictionary))
 
     # Discover release staging files
     print("Discovering release staging files...")
@@ -202,6 +218,9 @@ def main():
 
             union_query = " UNION ALL ".join(sources)
             _assert_locator_rows(con, union_query, prefix, args.release)
+            mapped_query = _compact_locator_query(
+                union_query, source_dictionary_path, release_dictionary_path)
+            _assert_compact_locator_mapping(con, mapped_query, prefix)
             count = con.execute(f"SELECT COUNT(*) FROM ({union_query})").fetchone()[0]
             if count == 0:
                 print(f"  {prefix}: 0 records")
@@ -211,11 +230,12 @@ def main():
             con.execute(f"""
                 COPY (
                     SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                           feature_type, filename, last_seen_release,
+                           source_file_id, last_seen_release_id,
                            registry_member
-                    FROM ({union_query}) ORDER BY id
+                    FROM ({mapped_query}) ORDER BY id
                 ) TO '{r2_dest}'
-                (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
+                (FORMAT PARQUET, COMPRESSION UNCOMPRESSED,
+                 ROW_GROUP_SIZE {int(ROW_GROUP_SIZE)});
             """)
 
             # Verify footer (worker reads columns positionally)
@@ -233,7 +253,7 @@ def main():
                 pass
 
     # Cleanup release files
-    for lrf in local_release_files:
+    for lrf in local_release_files + [source_dictionary_path, release_dictionary_path]:
         try:
             os.unlink(lrf)
         except Exception:

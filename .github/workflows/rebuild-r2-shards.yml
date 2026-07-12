@@ -712,9 +712,40 @@ jobs:
             --release ${{ needs.prep.outputs.release }} \
             ${{ matrix.extra_args }}
 
-  id-build:
+  # One global, deterministic dictionary must be published before the four
+  # parallel build ranges assign compact IDs. No range may derive IDs alone.
+  id-dictionary:
     runs-on: ubuntu-24.04-arm
     needs: [prep, id-stage]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb==1.5.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Build global ID locator dictionary
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase dictionaries --prefix-len 3 \
+            --version ${{ needs.prep.outputs.version }} \
+            --release ${{ needs.prep.outputs.release }}
+
+  id-build:
+    runs-on: ubuntu-24.04-arm
+    needs: [prep, id-dictionary]
     strategy:
       fail-fast: false
       matrix:

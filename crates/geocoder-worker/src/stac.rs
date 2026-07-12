@@ -12,6 +12,7 @@ use geocoder_core::{
 use parquet::file::reader::{ChunkReader, FileReader, Length, SerializedFileReader};
 use parquet::record::RowAccessor;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use worker::*;
 
 // Cache TTLs for different resource types
@@ -53,6 +54,7 @@ const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for miss
 // requests skip the Cache API round trip and the SQLite deserialize copy.
 const DB_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
 const DB_CACHE_MAX_ENTRIES: usize = 4;
+const LOCATOR_DICTIONARY_CACHE_MAX_ENTRIES: usize = 2;
 // Catalog/collection JSON memo TTL. Short: this bounds how stale the
 // version pointer can be within one isolate.
 const TEXT_MEMO_TTL_MS: u64 = 60_000;
@@ -66,6 +68,10 @@ thread_local! {
     static TEXT_MEMO: RefCell<HashMap<String, (Option<String>, u64)>> =
         RefCell::new(HashMap::new());
     static ROUTER_CACHE: RefCell<Vec<(String, Rc<RouterDb>, usize)>> =
+        const { RefCell::new(Vec::new()) };
+    /// Parsed immutable locator dictionaries. Raw JSON is separately edge-
+    /// cached; this avoids reparsing and reallocating ~100 KiB on every hit.
+    static LOCATOR_DICTIONARY_CACHE: RefCell<Vec<(String, Rc<LocatorDictionary>)>> =
         const { RefCell::new(Vec::new()) };
 }
 
@@ -178,7 +184,46 @@ struct IdIndexConfig {
     prefix_len: usize,
     format_version: u32,
     overture_release: Option<String>,
-    type_theme_map: HashMap<String, String>,
+    locator_dictionary: Option<LocatorDictionaryReference>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LocatorDictionaryReference {
+    href: String,
+    sha256: String,
+    size_bytes: usize,
+    dictionary_version: u32,
+    source_files_count: usize,
+    last_seen_releases_count: usize,
+    source_file_id_bounds: Option<[u32; 2]>,
+    last_seen_release_id_bounds: Option<[u32; 2]>,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+struct SourceFileEntry {
+    theme: String,
+    feature_type: String,
+    filename: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct LocatorDictionary {
+    format_version: u32,
+    dictionary_version: u32,
+    overture_release: String,
+    type_theme_map: TypeThemeMap,
+    source_files: Vec<SourceFileEntry>,
+    last_seen_releases: Vec<String>,
+    source_files_count: usize,
+    last_seen_releases_count: usize,
+    source_file_id_bounds: Option<[u32; 2]>,
+    last_seen_release_id_bounds: Option<[u32; 2]>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct TypeThemeMap {
+    version: u32,
+    types: HashMap<String, String>,
 }
 
 fn parse_id_index_config(text: &str) -> std::result::Result<IdIndexConfig, String> {
@@ -197,37 +242,24 @@ fn parse_id_index_config(text: &str) -> std::result::Result<IdIndexConfig, Strin
             .ok_or_else(|| "format_version must be an unsigned 32-bit integer".to_string())?,
     };
 
-    // Existing v1 collections already carry overture_release. Do not use it
-    // to enrich v1 rows: format_version is the explicit compatibility gate.
-    let (overture_release, type_theme_map) = if format_version == 2 {
+    let (overture_release, locator_dictionary) = if format_version == 3 {
         let release = values
             .get("overture_release")
-            .and_then(|v| v.as_str())
-            .filter(|v| !v.is_empty())
-            .map(str::to_owned)
-            .ok_or_else(|| "format v2 requires overture_release".to_string())?;
-        let map_root = values
-            .get("type_theme_map")
-            .ok_or_else(|| "format v2 requires type_theme_map".to_string())?;
-        if map_root.get("version").and_then(|v| v.as_u64()) != Some(1) {
-            return Err("unsupported or missing type_theme_map version".to_string());
-        }
-        let entries = map_root
-            .get("types")
-            .and_then(|v| v.as_object())
-            .filter(|entries| !entries.is_empty())
-            .ok_or_else(|| "format v2 requires a non-empty type-theme map".to_string())?;
-        let mut map = HashMap::with_capacity(entries.len());
-        for (feature_type, theme) in entries {
-            let theme = theme
-                .as_str()
-                .filter(|value| !value.is_empty())
-                .ok_or_else(|| format!("invalid theme for feature type {feature_type}"))?;
-            map.insert(feature_type.clone(), theme.to_owned());
-        }
-        (Some(release), map)
+            .and_then(|value| value.as_str())
+            .filter(|value| !value.is_empty())
+            .ok_or_else(|| "format v3 requires overture_release".to_string())?
+            .to_string();
+        let reference: LocatorDictionaryReference = serde_json::from_value(
+            values
+                .get("locator_dictionary")
+                .cloned()
+                .ok_or_else(|| "format v3 requires locator_dictionary".to_string())?,
+        )
+        .map_err(|e| format!("invalid locator dictionary reference: {e}"))?;
+        validate_dictionary_reference(&reference)?;
+        (Some(release), Some(reference))
     } else if format_version == 1 {
-        (None, HashMap::new())
+        (None, None)
     } else {
         return Err(format!(
             "unsupported ID-index format_version {format_version}"
@@ -238,68 +270,170 @@ fn parse_id_index_config(text: &str) -> std::result::Result<IdIndexConfig, Strin
         prefix_len,
         format_version,
         overture_release,
-        type_theme_map,
+        locator_dictionary,
     })
 }
 
-fn locator_metadata_from_row(
+fn validate_dictionary_reference(
+    reference: &LocatorDictionaryReference,
+) -> std::result::Result<(), String> {
+    let expected_href = format!("./id-locator-dictionary-{}.json", reference.sha256);
+    if reference.dictionary_version != 1
+        || reference.sha256.len() != 64
+        || !reference
+            .sha256
+            .bytes()
+            .all(|byte| b"0123456789abcdef".contains(&byte))
+        || reference.href != expected_href
+        || reference.size_bytes == 0
+        || reference.size_bytes > 1024 * 1024
+        || reference.source_files_count > 65_535
+        || reference.last_seen_releases_count > 65_535
+    {
+        return Err("malformed locator dictionary reference".to_string());
+    }
+    validate_bounds(
+        reference.source_file_id_bounds,
+        reference.source_files_count,
+    )?;
+    validate_bounds(
+        reference.last_seen_release_id_bounds,
+        reference.last_seen_releases_count,
+    )?;
+    Ok(())
+}
+
+fn validate_bounds(bounds: Option<[u32; 2]>, count: usize) -> std::result::Result<(), String> {
+    let expected = if count == 0 {
+        None
+    } else {
+        Some([1, count as u32])
+    };
+    if bounds != expected {
+        return Err("locator dictionary bounds/count mismatch".to_string());
+    }
+    Ok(())
+}
+
+fn compact_locator_ids(
     row: &parquet::record::Row,
-    config: &IdIndexConfig,
-) -> Option<IdLocatorMetadata> {
-    if config.format_version < 2 {
+    format_version: u32,
+) -> Option<(Option<u16>, Option<u16>, bool)> {
+    if format_version != 3 || row.len() < 8 {
         return None;
     }
-
-    // Metadata may become visible before a shard during an interrupted or
-    // eventually-consistent rollout. A short v1/partial row must preserve the
-    // exact legacy response shape, never publish fabricated false flags.
-    if row.len() < 9 {
+    let source_raw = row.get_int(5).ok();
+    let release_raw = row.get_int(6).ok();
+    // Check physical nullity before conversion. Otherwise a corrupt negative
+    // or overflowing value could be discarded and make a both-present row
+    // look like a valid current or historical locator.
+    if source_raw.is_some() == release_raw.is_some() {
         return None;
     }
+    let source_file_id = source_raw
+        .and_then(|value| u16::try_from(value).ok())
+        .filter(|value| *value != 0);
+    let last_seen_release_id = release_raw
+        .and_then(|value| u16::try_from(value).ok())
+        .filter(|value| *value != 0);
+    if source_file_id.is_none() && last_seen_release_id.is_none() {
+        return None;
+    }
+    let registry_member = row.get_bool(7).ok()?;
+    Some((source_file_id, last_seen_release_id, registry_member))
+}
 
-    // Safe optional access is intentional: a format-v2 metadata/shard skew
-    // degrades to null locator fields instead of panicking on a short v1 row.
-    build_locator_metadata(
-        row.get_string(5).ok().cloned(),
-        row.get_string(6).ok().cloned(),
-        row.get_string(7).ok().cloned(),
-        row.get_bool(8).ok().unwrap_or(false),
-        config,
-    )
+fn validate_locator_dictionary(
+    dictionary: &LocatorDictionary,
+    reference: &LocatorDictionaryReference,
+    expected_release: &str,
+) -> std::result::Result<(), String> {
+    if dictionary.format_version != 3
+        || dictionary.dictionary_version != 1
+        || dictionary.overture_release != expected_release
+        || dictionary.type_theme_map.version != 1
+        || dictionary.source_files.len() != dictionary.source_files_count
+        || dictionary.last_seen_releases.len() != dictionary.last_seen_releases_count
+        || dictionary.source_files_count != reference.source_files_count
+        || dictionary.last_seen_releases_count != reference.last_seen_releases_count
+    {
+        return Err("locator dictionary contract mismatch".to_string());
+    }
+    validate_bounds(
+        dictionary.source_file_id_bounds,
+        dictionary.source_files_count,
+    )?;
+    validate_bounds(
+        dictionary.last_seen_release_id_bounds,
+        dictionary.last_seen_releases_count,
+    )?;
+    if dictionary.source_file_id_bounds != reference.source_file_id_bounds
+        || dictionary.last_seen_release_id_bounds != reference.last_seen_release_id_bounds
+    {
+        return Err("locator dictionary reference bounds mismatch".to_string());
+    }
+    if dictionary
+        .source_files
+        .windows(2)
+        .any(|pair| pair[0] >= pair[1])
+        || dictionary
+            .last_seen_releases
+            .windows(2)
+            .any(|pair| pair[0] >= pair[1])
+    {
+        return Err("locator dictionaries are not strictly sorted and unique".to_string());
+    }
+    for entry in &dictionary.source_files {
+        if entry.filename.is_empty()
+            || entry.filename.len() > 255
+            || entry.filename.contains('/')
+            || entry.filename.contains('\\')
+            || !entry.filename.ends_with(".parquet")
+            || dictionary.type_theme_map.types.get(&entry.feature_type) != Some(&entry.theme)
+        {
+            return Err("invalid source-file dictionary entry".to_string());
+        }
+    }
+    if dictionary.last_seen_releases.iter().any(String::is_empty) {
+        return Err("invalid last-seen release dictionary entry".to_string());
+    }
+    Ok(())
 }
 
 fn build_locator_metadata(
-    feature_type: Option<String>,
-    filename: Option<String>,
-    last_seen_release: Option<String>,
+    source_file_id: Option<u16>,
+    last_seen_release_id: Option<u16>,
     registry_member: bool,
-    config: &IdIndexConfig,
+    dictionary: &LocatorDictionary,
 ) -> Option<IdLocatorMetadata> {
-    if config.format_version < 2 {
-        return None;
-    }
-
-    let theme = feature_type
-        .as_ref()
-        .and_then(|value| config.type_theme_map.get(value))
-        .cloned();
-    let exists_in_current_release =
-        filename.is_some() && last_seen_release.as_deref() == config.overture_release.as_deref();
-    let overture_path = if exists_in_current_release {
-        match (
-            config.overture_release.as_deref(),
-            theme.as_deref(),
-            feature_type.as_deref(),
-            filename.as_deref(),
-        ) {
-            (Some(release), Some(theme), Some(feature_type), Some(filename)) => Some(format!(
-                "release/{}/theme={}/type={}/{}",
-                release, theme, feature_type, filename
-            )),
-            _ => None,
-        }
+    let (
+        feature_type,
+        theme,
+        filename,
+        last_seen_release,
+        exists_in_current_release,
+        overture_path,
+    ) = if let Some(id) = source_file_id {
+        let entry = dictionary.source_files.get(usize::from(id) - 1)?;
+        let path = format!(
+            "release/{}/theme={}/type={}/{}",
+            dictionary.overture_release, entry.theme, entry.feature_type, entry.filename
+        );
+        (
+            Some(entry.feature_type.clone()),
+            Some(entry.theme.clone()),
+            Some(entry.filename.clone()),
+            Some(dictionary.overture_release.clone()),
+            true,
+            Some(path),
+        )
     } else {
-        None
+        let id = last_seen_release_id?;
+        let release = dictionary
+            .last_seen_releases
+            .get(usize::from(id) - 1)?
+            .clone();
+        (None, None, None, Some(release), false, None)
     };
 
     Some(IdLocatorMetadata {
@@ -1767,6 +1901,28 @@ impl ShardLoader {
                     .get_float(4)
                     .map_err(|e| Error::RustError(format!("Bad bbox: {}", e)))?
                     as f64;
+                let locator = if let Some((source_file_id, last_seen_release_id, registry_member)) =
+                    compact_locator_ids(&row, id_config.format_version)
+                {
+                    match self.load_locator_dictionary(version, &id_config).await {
+                        Ok(dictionary) => build_locator_metadata(
+                            source_file_id,
+                            last_seen_release_id,
+                            registry_member,
+                            &dictionary,
+                        ),
+                        Err(error) => {
+                            console_log!(
+                                "ID locator unavailable for {}: {:?}; returning legacy bbox",
+                                gers_id,
+                                error
+                            );
+                            None
+                        }
+                    }
+                } else {
+                    None
+                };
                 return Ok(IdSearchResult {
                     result: Some(IdLookupResult {
                         id: gers_id.to_string(),
@@ -1776,7 +1932,7 @@ impl ShardLoader {
                             xmax: bbox_xmax,
                             ymax: bbox_ymax,
                         },
-                        locator: locator_metadata_from_row(&row, &id_config),
+                        locator,
                     }),
                     version: version.to_string(),
                 });
@@ -1802,7 +1958,7 @@ impl ShardLoader {
                 .map_err(|e| not_found(format!("invalid id-index metadata {}: {}", meta_key, e)));
         }
 
-        // Fallback: load id-collection.json. Its v2 fields live under
+        // Fallback: load id-collection.json. Its v3 fields live under
         // summaries; legacy collections produce a format-v1 config.
         let key = format!("{}/id-collection.json", version);
         if let Some(text) = self.memoized_get_text(&key, ID_INDEX_CACHE_TTL).await? {
@@ -1817,6 +1973,71 @@ impl ShardLoader {
             "id-index metadata for version {}",
             version
         )))
+    }
+
+    async fn load_locator_dictionary(
+        &self,
+        version: &str,
+        config: &IdIndexConfig,
+    ) -> Result<Rc<LocatorDictionary>> {
+        let reference = config.locator_dictionary.as_ref().ok_or_else(|| {
+            Error::RustError("ID-index format has no locator dictionary reference".into())
+        })?;
+        let expected_release = config
+            .overture_release
+            .as_deref()
+            .ok_or_else(|| Error::RustError("ID-index format has no Overture release".into()))?;
+        let href = reference.href.trim_start_matches("./");
+        let key = format!("{}/{}", version, href);
+        if let Some(cached) = LOCATOR_DICTIONARY_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            let position = cache
+                .iter()
+                .position(|(cached_key, _)| cached_key == &key)?;
+            let entry = cache.remove(position);
+            let result = Rc::clone(&entry.1);
+            cache.push(entry);
+            Some(result)
+        }) {
+            return Ok(cached);
+        }
+        let text = self
+            .memoized_get_text(&key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(format!("ID locator dictionary {}", key)))?;
+        if text.len() > 1024 * 1024 {
+            return Err(Error::RustError(
+                "ID locator dictionary exceeds 1 MiB".into(),
+            ));
+        }
+        if text.len() != reference.size_bytes {
+            return Err(Error::RustError(format!(
+                "ID locator dictionary size mismatch for {}",
+                key
+            )));
+        }
+        let actual_sha256 = format!("{:x}", Sha256::digest(text.as_bytes()));
+        if actual_sha256 != reference.sha256 {
+            return Err(Error::RustError(format!(
+                "ID locator dictionary checksum mismatch for {}",
+                key
+            )));
+        }
+        let dictionary: LocatorDictionary = serde_json::from_str(&text).map_err(|error| {
+            Error::RustError(format!("Invalid ID locator dictionary {}: {}", key, error))
+        })?;
+        validate_locator_dictionary(&dictionary, reference, expected_release).map_err(|error| {
+            Error::RustError(format!("Invalid ID locator dictionary {}: {}", key, error))
+        })?;
+        let dictionary = Rc::new(dictionary);
+        LOCATOR_DICTIONARY_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            cache.push((key, Rc::clone(&dictionary)));
+            if cache.len() > LOCATOR_DICTIONARY_CACHE_MAX_ENTRIES {
+                cache.remove(0);
+            }
+        });
+        Ok(dictionary)
     }
 
     /// Load the reverse collection for a given version.
@@ -2104,6 +2325,56 @@ fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use parquet::record::{Field, Row};
+
+    const DICTIONARY_SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
+
+    fn dictionary_reference() -> LocatorDictionaryReference {
+        LocatorDictionaryReference {
+            href: format!("./id-locator-dictionary-{DICTIONARY_SHA}.json"),
+            sha256: DICTIONARY_SHA.to_string(),
+            size_bytes: 512,
+            dictionary_version: 1,
+            source_files_count: 1,
+            last_seen_releases_count: 1,
+            source_file_id_bounds: Some([1, 1]),
+            last_seen_release_id_bounds: Some([1, 1]),
+        }
+    }
+
+    fn locator_dictionary() -> LocatorDictionary {
+        LocatorDictionary {
+            format_version: 3,
+            dictionary_version: 1,
+            overture_release: "2026-06-17.0".to_string(),
+            type_theme_map: TypeThemeMap {
+                version: 1,
+                types: HashMap::from([("address".to_string(), "addresses".to_string())]),
+            },
+            source_files: vec![SourceFileEntry {
+                theme: "addresses".to_string(),
+                feature_type: "address".to_string(),
+                filename: "part-00001.zstd.parquet".to_string(),
+            }],
+            last_seen_releases: vec!["2026-05-20.0".to_string()],
+            source_files_count: 1,
+            last_seen_releases_count: 1,
+            source_file_id_bounds: Some([1, 1]),
+            last_seen_release_id_bounds: Some([1, 1]),
+        }
+    }
+
+    fn locator_row(source_id: Field, release_id: Field, registry_member: bool) -> Row {
+        let mut fields: Vec<_> = (0..5)
+            .map(|index| (format!("bbox_{index}"), Field::Null))
+            .collect();
+        fields.extend([
+            ("source_file_id".to_string(), source_id),
+            ("last_seen_release_id".to_string(), release_id),
+            ("registry_member".to_string(), Field::Bool(registry_member)),
+        ]);
+        Row::new(fields)
+    }
 
     #[test]
     fn test_v1_id_metadata_stays_legacy() {
@@ -2111,33 +2382,24 @@ mod tests {
             parse_id_index_config(r#"{"prefix_len":3,"overture_release":"2026-06-17.0"}"#).unwrap();
         assert_eq!(config.format_version, 1);
         assert!(config.overture_release.is_none());
-        assert!(config.type_theme_map.is_empty());
-        assert!(build_locator_metadata(
-            Some("place".into()),
-            Some("part.parquet".into()),
-            Some("2026-06-17.0".into()),
-            true,
-            &config,
-        )
-        .is_none());
+        assert!(config.locator_dictionary.is_none());
     }
 
     #[test]
-    fn test_v2_collection_builds_current_release_path() {
-        let config = parse_id_index_config(
-            r#"{"summaries":{"prefix_len":3,"format_version":2,
+    fn test_v3_collection_and_dictionary_build_current_release_path() {
+        let text = format!(
+            r#"{{"summaries":{{"prefix_len":3,"format_version":3,
                 "overture_release":"2026-06-17.0",
-                "type_theme_map":{"version":1,"types":{"address":"addresses"}}}}"#,
-        )
-        .unwrap();
-        let locator = build_locator_metadata(
-            Some("address".into()),
-            Some("part-00001.zstd.parquet".into()),
-            Some("2026-06-17.0".into()),
-            false,
-            &config,
-        )
-        .unwrap();
+                "locator_dictionary":{{"href":"./id-locator-dictionary-{DICTIONARY_SHA}.json",
+                "sha256":"{DICTIONARY_SHA}","size_bytes":512,"dictionary_version":1,
+                "source_files_count":1,"last_seen_releases_count":1,
+                "source_file_id_bounds":[1,1],"last_seen_release_id_bounds":[1,1]}}}}}}"#
+        );
+        let config = parse_id_index_config(&text).unwrap();
+        assert!(config.locator_dictionary.is_some());
+        let dictionary = locator_dictionary();
+        validate_locator_dictionary(&dictionary, &dictionary_reference(), "2026-06-17.0").unwrap();
+        let locator = build_locator_metadata(Some(1), None, false, &dictionary).unwrap();
         assert_eq!(locator.theme.as_deref(), Some("addresses"));
         assert!(locator.exists_in_current_release);
         assert_eq!(
@@ -2147,75 +2409,63 @@ mod tests {
     }
 
     #[test]
-    fn test_v2_null_filename_is_not_current() {
-        let config = parse_id_index_config(
-            r#"{"prefix_len":3,"format_version":2,
-                "overture_release":"2026-06-17.0",
-                "type_theme_map":{"version":1,"types":{"place":"places"}}}"#,
-        )
-        .unwrap();
-        let locator =
-            build_locator_metadata(None, None, Some("2026-05-20.0".into()), true, &config).unwrap();
+    fn test_v3_historical_id_has_no_current_path() {
+        let locator = build_locator_metadata(None, Some(1), true, &locator_dictionary()).unwrap();
         assert!(!locator.exists_in_current_release);
         assert!(locator.filename.is_none());
         assert!(locator.overture_path.is_none());
+        assert_eq!(locator.last_seen_release.as_deref(), Some("2026-05-20.0"));
     }
 
     #[test]
-    fn test_v2_unknown_type_does_not_construct_path() {
-        let config = parse_id_index_config(
-            r#"{"prefix_len":3,"format_version":2,
-                "overture_release":"2026-06-17.0",
-                "type_theme_map":{"version":1,"types":{"place":"places"}}}"#,
-        )
-        .unwrap();
-        let locator = build_locator_metadata(
-            Some("future_type".into()),
-            Some("part.parquet".into()),
-            Some("2026-06-17.0".into()),
-            true,
-            &config,
-        )
-        .unwrap();
-        assert!(locator.exists_in_current_release);
-        assert!(locator.theme.is_none());
-        assert!(locator.overture_path.is_none());
+    fn test_v3_invalid_or_out_of_range_ids_have_no_locator() {
+        let dictionary = locator_dictionary();
+        assert!(build_locator_metadata(None, None, true, &dictionary).is_none());
+        assert!(build_locator_metadata(Some(2), None, true, &dictionary).is_none());
+        assert!(build_locator_metadata(None, Some(2), true, &dictionary).is_none());
     }
 
     #[test]
-    fn test_v2_metadata_requires_supported_complete_contract() {
+    fn test_v3_metadata_requires_supported_complete_contract() {
         for text in [
             r#"{"prefix_len":3,"format_version":3}"#,
             r#"{"prefix_len":3,"format_version":"2"}"#,
             r#"{"prefix_len":3,"format_version":null}"#,
             r#"{"prefix_len":3,"format_version":2.0}"#,
-            r#"{"prefix_len":3,"format_version":2,
-                "overture_release":"2026-06-17.0"}"#,
-            r#"{"prefix_len":3,"format_version":2,
-                "overture_release":"2026-06-17.0",
-                "type_theme_map":{"version":2,"types":{"place":"places"}}}"#,
-            r#"{"prefix_len":3,"format_version":2,
-                "overture_release":"2026-06-17.0",
-                "type_theme_map":{"version":1,"types":{}}}"#,
+            r#"{"prefix_len":3,"format_version":2}"#,
         ] {
             assert!(parse_id_index_config(text).is_err(), "accepted {text}");
         }
+        let mut reference = dictionary_reference();
+        reference.href = format!("./id-locator-dictionary-{}-extra.json", reference.sha256);
+        assert!(validate_dictionary_reference(&reference).is_err());
     }
 
     #[test]
-    fn test_v2_metadata_with_short_v1_row_stays_legacy() {
-        let config = parse_id_index_config(
-            r#"{"prefix_len":3,"format_version":2,
-                "overture_release":"2026-06-17.0",
-                "type_theme_map":{"version":1,"types":{"place":"places"}}}"#,
-        )
-        .unwrap();
-        let row = parquet::record::Row::new(
+    fn test_v3_compact_row_validation_fails_closed() {
+        let short = Row::new(
             (0..5)
                 .map(|index| (format!("legacy_{index}"), parquet::record::Field::Null))
                 .collect(),
         );
-        assert!(locator_metadata_from_row(&row, &config).is_none());
+        assert!(compact_locator_ids(&short, 3).is_none());
+        assert_eq!(
+            compact_locator_ids(&locator_row(Field::Int(1), Field::Null, true), 3),
+            Some((Some(1), None, true))
+        );
+        assert_eq!(
+            compact_locator_ids(&locator_row(Field::Null, Field::Int(1), true), 3),
+            Some((None, Some(1), true))
+        );
+        assert!(compact_locator_ids(&locator_row(Field::Int(0), Field::Null, true), 3).is_none());
+        assert!(
+            compact_locator_ids(&locator_row(Field::Int(-1), Field::Int(1), true), 3).is_none()
+        );
+        assert!(
+            compact_locator_ids(&locator_row(Field::Int(1), Field::Int(70_000), true), 3).is_none()
+        );
+        assert!(compact_locator_ids(&locator_row(Field::Int(1), Field::Int(1), true), 3).is_none());
+        assert!(compact_locator_ids(&locator_row(Field::Null, Field::Null, true), 3).is_none());
     }
 
     fn collection_with_bboxes(rows: &[(&str, Option<[f64; 4]>)]) -> StacCollection {

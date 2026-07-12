@@ -28,6 +28,7 @@ Usage:
     python scripts/build_id_index.py --dry-run                     # Count records only
     python scripts/build_id_index.py --phase stage-registry        # Only registry staging
     python scripts/build_id_index.py --phase stage-base            # Only release staging
+    python scripts/build_id_index.py --phase dictionaries          # Build global locator dictionary
     python scripts/build_id_index.py --phase build                 # Only build shards
     python scripts/build_id_index.py --phase metadata              # Regenerate metadata
     python scripts/build_id_index.py --phase stage-registry,build  # Multiple phases
@@ -44,6 +45,7 @@ Environment:
 """
 
 import argparse
+import hashlib
 import json
 import multiprocessing
 import os
@@ -82,11 +84,11 @@ RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
 RELEASE_THEMES = ["addresses", "base"]
 
-# ID-index format v2 appends locator metadata after the five v1 positional
-# columns. Keep this mapping versioned in id-meta.json so readers do not have
-# to infer themes from filenames and future type additions fail closed until
-# the producer and reader agree on their meaning.
-ID_INDEX_FORMAT_VERSION = 2
+# ID-index format v3 appends compact locator IDs after the five v1 positional
+# columns. The content-addressed dictionary keeps the authoritative theme,
+# type, filename, and historical release strings once per shard set.
+ID_INDEX_FORMAT_VERSION = 3
+ID_LOCATOR_MANIFEST = "id-locator-manifest.json"
 TYPE_THEME_MAP_VERSION = 1
 TYPE_THEME_MAP = {
     "address": "addresses",
@@ -316,7 +318,7 @@ def _write_staging_marker(r2_config, version, staging_dir, partition_count,
 
 
 def _marker_is_current(marker):
-    """Only v2 markers may resume a v2 pipeline run."""
+    """Only v3 markers may resume a v3 pipeline run."""
     return (
         marker is not None
         and marker.get("status") == "complete"
@@ -514,7 +516,7 @@ def _registry_sub_ranges(prefix_len, prefixes=None,
 
 
 def _registry_id_query(prefix_len, sub_filter):
-    """Build the registry staging query with v2 locator metadata.
+    """Build the registry staging query used to derive v3 compact IDs.
 
     Registry ``path`` is authoritative for current-release membership. A null
     path deliberately produces null feature_type/filename while retaining
@@ -853,6 +855,280 @@ def _upload_to_r2(local_path, r2_key, retries=3):
     return last_err
 
 
+def _read_r2_json(r2_config, version, filename, expected_sha256=None,
+                  expected_size_bytes=None, retries=3):
+    """Read one required versioned JSON object; absence and corruption fail."""
+    r2_key = f"{r2_config['bucket']}/{version}/{filename}"
+    last_err = None
+    for attempt in range(retries):
+        try:
+            result = subprocess.run(
+                ["wrangler", "r2", "object", "get", r2_key,
+                 "--remote", "--pipe"],
+                capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            last_err = "wrangler r2 object get timed out"
+        else:
+            if result.returncode == 0:
+                raw = result.stdout.encode("utf-8")
+                if len(raw) > 1024 * 1024:
+                    raise RuntimeError(f"Required JSON {r2_key} exceeds 1 MiB")
+                if expected_size_bytes is not None and len(raw) != expected_size_bytes:
+                    raise RuntimeError(
+                        f"Size mismatch for {r2_key}: {len(raw)} "
+                        f"!= {expected_size_bytes}")
+                actual_sha256 = hashlib.sha256(raw).hexdigest()
+                if expected_sha256 is not None and actual_sha256 != expected_sha256:
+                    raise RuntimeError(
+                        f"Checksum mismatch for {r2_key}: {actual_sha256} "
+                        f"!= {expected_sha256}")
+                try:
+                    return json.loads(result.stdout)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(f"Invalid JSON in {r2_key}: {exc}") from exc
+            last_err = f"{result.stderr or ''} {result.stdout or ''}".strip()[:300]
+        if attempt < retries - 1:
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError(f"Failed to read required {r2_key}: {last_err}")
+
+
+def _read_optional_r2_json(r2_config, version, filename, retries=3):
+    """Read a version-root JSON object, returning None only for true absence."""
+    r2_key = f"{r2_config['bucket']}/{version}/{filename}"
+    last_err = None
+    for attempt in range(retries):
+        try:
+            result = subprocess.run(
+                ["wrangler", "r2", "object", "get", r2_key,
+                 "--remote", "--pipe"],
+                capture_output=True, text=True, timeout=60,
+            )
+        except subprocess.TimeoutExpired:
+            last_err = "wrangler r2 object get timed out"
+        else:
+            if result.returncode == 0:
+                raw = result.stdout.encode("utf-8")
+                if len(raw) > 1024 * 1024:
+                    raise RuntimeError(f"Required JSON {r2_key} exceeds 1 MiB")
+                try:
+                    return json.loads(result.stdout)
+                except json.JSONDecodeError as exc:
+                    raise RuntimeError(f"Invalid JSON in {r2_key}: {exc}") from exc
+            err_text = f"{result.stderr or ''} {result.stdout or ''}".strip()
+            if any(value in err_text.lower() for value in _R2_ABSENT_MARKERS):
+                return None
+            last_err = err_text[:300]
+        if attempt < retries - 1:
+            time.sleep(5 * (attempt + 1))
+    raise RuntimeError(f"Failed to read optional {r2_key}: {last_err}")
+
+
+def _canonical_json_bytes(value):
+    return (json.dumps(
+        value, ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ) + "\n").encode("utf-8")
+
+
+def _sha256_json(value):
+    return hashlib.sha256(_canonical_json_bytes(value)).hexdigest()
+
+
+def _validate_source_filename(filename):
+    return (
+        isinstance(filename, str)
+        and 0 < len(filename) <= 255
+        and "/" not in filename
+        and "\\" not in filename
+        and filename not in {".", ".."}
+        and filename.endswith(".parquet")
+    )
+
+
+def _make_locator_dictionary(source_files, last_seen_releases, release_version):
+    """Build and validate a deterministic compact locator dictionary."""
+    for entry in source_files:
+        if (
+            not isinstance(entry, (list, tuple))
+            or len(entry) != 3
+            or not all(isinstance(value, str) for value in entry)
+        ):
+            raise RuntimeError(f"Invalid source-file dictionary entry {entry!r}")
+    if not all(isinstance(value, str) for value in last_seen_releases):
+        raise RuntimeError("Invalid release dictionary entry")
+    normalized_files = sorted({tuple(entry) for entry in source_files})
+    normalized_releases = sorted(set(last_seen_releases))
+    if len(normalized_files) > 65_535:
+        raise RuntimeError(
+            f"source-file dictionary has {len(normalized_files)} entries; "
+            "IDs 1..65535 are available")
+    if len(normalized_releases) > 65_535:
+        raise RuntimeError(
+            f"release dictionary has {len(normalized_releases)} entries; "
+            "IDs 1..65535 are available")
+    for theme, feature_type, filename in normalized_files:
+        if TYPE_THEME_MAP.get(feature_type) != theme:
+            raise RuntimeError(
+                f"Invalid locator theme/type {theme!r}/{feature_type!r}")
+        if not _validate_source_filename(filename):
+            raise RuntimeError(f"Invalid source filename {filename!r}")
+    for historical_release in normalized_releases:
+        if not historical_release:
+            raise RuntimeError(
+                f"Invalid historical last-seen release {historical_release!r}")
+
+    source_entries = [
+        {"theme": theme, "feature_type": feature_type, "filename": filename}
+        for theme, feature_type, filename in normalized_files
+    ]
+    payload = {
+        "format_version": ID_INDEX_FORMAT_VERSION,
+        "dictionary_version": 1,
+        "overture_release": release_version,
+        "type_theme_map": _type_theme_metadata(),
+        "source_files": source_entries,
+        "last_seen_releases": normalized_releases,
+        "source_files_count": len(source_entries),
+        "last_seen_releases_count": len(normalized_releases),
+        "source_file_id_bounds": (
+            [1, len(source_entries)] if source_entries else None),
+        "last_seen_release_id_bounds": (
+            [1, len(normalized_releases)] if normalized_releases else None),
+        "source_files_sha256": _sha256_json(source_entries),
+        "last_seen_releases_sha256": _sha256_json(normalized_releases),
+    }
+    return payload
+
+
+def _validate_locator_dictionary(payload, release_version=None):
+    """Fail closed on malformed, reordered, oversized, or corrupted dictionaries."""
+    if payload.get("format_version") != ID_INDEX_FORMAT_VERSION:
+        raise RuntimeError("Unsupported locator dictionary format_version")
+    if payload.get("dictionary_version") != 1:
+        raise RuntimeError("Unsupported locator dictionary_version")
+    if release_version is not None and payload.get("overture_release") != release_version:
+        raise RuntimeError("Locator dictionary release does not match build release")
+    source_files = payload.get("source_files")
+    releases = payload.get("last_seen_releases")
+    if not isinstance(source_files, list) or not isinstance(releases, list):
+        raise RuntimeError("Locator dictionaries must be arrays")
+    rebuilt = _make_locator_dictionary(
+        [(entry.get("theme"), entry.get("feature_type"), entry.get("filename"))
+         for entry in source_files if isinstance(entry, dict)],
+        releases,
+        payload.get("overture_release"),
+    )
+    for key in (
+        "source_files", "last_seen_releases", "source_files_count",
+        "last_seen_releases_count", "source_file_id_bounds",
+        "last_seen_release_id_bounds", "source_files_sha256",
+        "last_seen_releases_sha256",
+        "type_theme_map",
+    ):
+        if payload.get(key) != rebuilt.get(key):
+            raise RuntimeError(f"Invalid locator dictionary field {key}")
+    return payload
+
+
+def _locator_dictionary_marker_reference(marker):
+    """Return and validate the marker's exact content-addressed reference."""
+    sha256 = marker.get("dictionary_sha256")
+    href = marker.get("dictionary_href")
+    size_bytes = marker.get("dictionary_size_bytes")
+    if (
+        not isinstance(sha256, str)
+        or len(sha256) != 64
+        or any(char not in "0123456789abcdef" for char in sha256)
+        or href != f"id-locator-dictionary-{sha256}.json"
+        or not isinstance(size_bytes, int)
+        or not 0 < size_bytes <= 1024 * 1024
+    ):
+        raise RuntimeError("Invalid locator dictionary marker reference")
+    return href, sha256, size_bytes
+
+
+def _dictionary_reference(payload, href, sha256, size_bytes):
+    return {
+        "href": f"./{href}",
+        "sha256": sha256,
+        "size_bytes": size_bytes,
+        "dictionary_version": payload["dictionary_version"],
+        "source_files_count": payload["source_files_count"],
+        "last_seen_releases_count": payload["last_seen_releases_count"],
+        "source_file_id_bounds": payload["source_file_id_bounds"],
+        "last_seen_release_id_bounds": payload["last_seen_release_id_bounds"],
+    }
+
+
+def _validate_locator_manifest(manifest, release_version=None):
+    if not isinstance(manifest, dict):
+        raise RuntimeError("Invalid ID locator manifest")
+    if set(manifest) != {
+        "format_version", "overture_release", "locator_dictionary",
+    }:
+        raise RuntimeError("Invalid ID locator manifest fields")
+    if manifest.get("format_version") != ID_INDEX_FORMAT_VERSION:
+        raise RuntimeError("Invalid ID locator manifest format_version")
+    manifest_release = manifest.get("overture_release")
+    if not isinstance(manifest_release, str) or not manifest_release:
+        raise RuntimeError("Invalid ID locator manifest release")
+    if release_version is not None and manifest_release != release_version:
+        raise RuntimeError("ID locator manifest release does not match build release")
+    reference = manifest.get("locator_dictionary")
+    if not isinstance(reference, dict):
+        raise RuntimeError("Invalid ID locator manifest dictionary reference")
+    if set(reference) != {
+        "href", "sha256", "size_bytes", "dictionary_version",
+        "source_files_count", "last_seen_releases_count",
+        "source_file_id_bounds", "last_seen_release_id_bounds",
+    }:
+        raise RuntimeError("Invalid ID locator manifest dictionary fields")
+    href = reference.get("href")
+    marker_shape = {
+        "dictionary_href": href[2:] if isinstance(href, str) and href.startswith("./") else None,
+        "dictionary_sha256": reference.get("sha256"),
+        "dictionary_size_bytes": reference.get("size_bytes"),
+    }
+    artifact_href, sha256, size_bytes = (
+        _locator_dictionary_marker_reference(marker_shape))
+    if reference.get("dictionary_version") != 1:
+        raise RuntimeError("Invalid ID locator manifest dictionary_version")
+    for count_key, bounds_key in (
+        ("source_files_count", "source_file_id_bounds"),
+        ("last_seen_releases_count", "last_seen_release_id_bounds"),
+    ):
+        count = reference.get(count_key)
+        bounds = reference.get(bounds_key)
+        if not isinstance(count, int) or isinstance(count, bool) or not 0 <= count <= 65_535:
+            raise RuntimeError(f"Invalid ID locator manifest {count_key}")
+        expected_bounds = [1, count] if count else None
+        if bounds != expected_bounds:
+            raise RuntimeError(f"Invalid ID locator manifest {bounds_key}")
+    return artifact_href, sha256, size_bytes, reference
+
+
+def _load_locator_manifest_and_dictionary(r2_config, version, release_version):
+    manifest = _read_optional_r2_json(
+        r2_config, version, ID_LOCATOR_MANIFEST)
+    if manifest is None:
+        raise RuntimeError(
+            f"Required {ID_LOCATOR_MANIFEST} is missing for {version}")
+    href, sha256, size_bytes, reference = _validate_locator_manifest(
+        manifest, release_version)
+    payload = _validate_locator_dictionary(
+        _read_r2_json(
+            r2_config, version, href,
+            expected_sha256=sha256,
+            expected_size_bytes=size_bytes),
+        release_version,
+    )
+    expected_reference = _dictionary_reference(
+        payload, href, sha256, size_bytes)
+    if reference != expected_reference:
+        raise RuntimeError("ID locator manifest does not match dictionary payload")
+    return manifest, payload, reference
+
+
 # Expected output shard columns, in order. The worker reads these
 # positionally: col 0 must be the 16-byte UUID, cols 1-4 the FLOAT bbox.
 V1_SHARD_COLUMNS = [
@@ -863,9 +1139,8 @@ V1_SHARD_COLUMNS = [
     ("bbox_ymax", "FLOAT"),
 ]
 EXPECTED_SHARD_COLUMNS = V1_SHARD_COLUMNS + [
-    ("feature_type", "BYTE_ARRAY"),
-    ("filename", "BYTE_ARRAY"),
-    ("last_seen_release", "BYTE_ARRAY"),
+    ("source_file_id", "INT32"),
+    ("last_seen_release_id", "INT32"),
     ("registry_member", "BOOLEAN"),
 ]
 
@@ -881,7 +1156,7 @@ def _shard_schema(con, path):
 
 
 def _classify_shard_schema(con, path):
-    """Return 1 or 2 for an exact known shard schema; reject everything else."""
+    """Return 1 or 3 for an exact known shard schema; reject everything else."""
     actual, uuid_len = _shard_schema(con, path)
     if uuid_len != "16":
         raise RuntimeError(
@@ -892,7 +1167,7 @@ def _classify_shard_schema(con, path):
         return ID_INDEX_FORMAT_VERSION
     raise RuntimeError(
         f"Shard schema mismatch for {path}: got {actual}, expected "
-        f"v1={V1_SHARD_COLUMNS} or v2={EXPECTED_SHARD_COLUMNS}")
+        f"v1={V1_SHARD_COLUMNS} or v3={EXPECTED_SHARD_COLUMNS}")
 
 
 def _classify_shard_set(con, paths):
@@ -912,7 +1187,7 @@ def _classify_shard_set(con, paths):
 
 
 def _assert_shard_schema(con, path):
-    """Assert a written shard's parquet footer matches the v2 layout.
+    """Assert a written shard's parquet footer matches the v3 layout.
 
     The worker reads columns positionally, so a silent column reorder or
     type change would break every ID lookup. Raises RuntimeError on
@@ -921,7 +1196,7 @@ def _assert_shard_schema(con, path):
     format_version = _classify_shard_schema(con, path)
     if format_version != ID_INDEX_FORMAT_VERSION:
         raise RuntimeError(
-            f"Shard {path}: wrote legacy format v{format_version}, expected v2")
+            f"Shard {path}: wrote legacy format v{format_version}, expected v3")
 
 
 def _assert_locator_rows(con, union_query, prefix, release_version):
@@ -969,6 +1244,41 @@ def _assert_locator_rows(con, union_query, prefix, release_version):
             f"expected release {release_version}")
 
 
+def _compact_locator_query(union_query, source_dictionary_path,
+                           release_dictionary_path):
+    return f"""
+        SELECT u.id, u.bbox_xmin, u.bbox_ymin, u.bbox_xmax, u.bbox_ymax,
+               sf.source_file_id::INTEGER AS source_file_id,
+               CASE WHEN u.filename IS NULL
+                    THEN lr.last_seen_release_id::INTEGER END
+                   AS last_seen_release_id,
+               u.registry_member
+        FROM ({union_query}) u
+        LEFT JOIN read_parquet('{source_dictionary_path}') sf
+          ON u.source_theme = sf.source_theme
+         AND u.feature_type = sf.feature_type
+         AND u.filename = sf.filename
+        LEFT JOIN read_parquet('{release_dictionary_path}') lr
+          ON u.filename IS NULL
+         AND u.last_seen_release = lr.last_seen_release
+    """
+
+
+def _assert_compact_locator_mapping(con, mapped_query, prefix):
+    unmapped = con.execute(f"""
+        SELECT id FROM ({mapped_query})
+        WHERE (source_file_id IS NULL AND last_seen_release_id IS NULL)
+           OR (source_file_id IS NOT NULL AND last_seen_release_id IS NOT NULL)
+           OR source_file_id NOT BETWEEN 1 AND 65535
+           OR last_seen_release_id NOT BETWEEN 1 AND 65535
+        LIMIT 1
+    """).fetchone()
+    if unmapped:
+        raise RuntimeError(
+            f"ID {unmapped[0]} in shard {prefix} is not representable by the "
+            "immutable locator dictionary")
+
+
 def _worker_build_r2_batch(args_tuple):
     """Worker: download one staging prefix locally, write one output shard to R2.
 
@@ -979,7 +1289,8 @@ def _worker_build_r2_batch(args_tuple):
     paths. All reads are local; only output writes go to R2.
     """
     (staging_prefix, output_prefixes, r2_config, version, release_version,
-     release_files, row_group_size) = args_tuple
+     release_files, source_dictionary_path, release_dictionary_path,
+     row_group_size) = args_tuple
 
     bucket = r2_config['bucket']
     results = []
@@ -1071,6 +1382,9 @@ def _worker_build_r2_batch(args_tuple):
 
             union_query = " UNION ALL ".join(sources)
             _assert_locator_rows(con, union_query, prefix, release_version)
+            mapped_query = _compact_locator_query(
+                union_query, source_dictionary_path, release_dictionary_path)
+            _assert_compact_locator_mapping(con, mapped_query, prefix)
 
             # Count locally (fast, avoids R2 read-back)
             count = con.execute(
@@ -1086,9 +1400,9 @@ def _worker_build_r2_batch(args_tuple):
                 con.execute(f"""
                     COPY (
                         SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                               feature_type, filename, last_seen_release,
+                               source_file_id, last_seen_release_id,
                                registry_member
-                        FROM ({union_query}) ORDER BY id
+                        FROM ({mapped_query}) ORDER BY id
                     ) TO '{r2_dest}'
                     (FORMAT PARQUET, COMPRESSION UNCOMPRESSED,
                      ROW_GROUP_SIZE {int(row_group_size)});
@@ -1099,10 +1413,10 @@ def _worker_build_r2_batch(args_tuple):
             # a _SUCCESS marker (the worker reads columns positionally)
             _retry_transient(lambda: _assert_shard_schema(con, r2_dest))()
 
-            # Planning estimate only: UUID+bbox plus three dictionary codes
-            # and the boolean. Actual Parquet size is recorded by storage,
-            # not available from this write-only worker connection.
-            size = count * (16 + 4 * 4 + 3 * 4 + 1)
+            # Planning estimate only: UUID+bbox plus the measured compact-v3
+            # locator delta (~1.8 B/row at 700-1,000 source IDs). Actual R2
+            # object size is not available from this write-only connection.
+            size = count * (16 + 4 * 4 + 2)
             results.append((prefix, count, size, None))
 
         # Cleanup
@@ -1136,6 +1450,174 @@ def _discover_release_staging_files(con, r2_config, version):
     legacy = _retry_transient(lambda: _glob_files(
         con, f"{staging_base}/id-release-*/data.parquet"))()
     return bucketed + legacy
+
+
+def _has_v3_id_build_state(r2_config, version):
+    """Detect any ID output that makes creating a new v3 manifest unsafe."""
+    con = _r2_con(r2_config)
+    try:
+        shard_paths = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{r2_config['bucket']}/{version}/id-index/*.parquet",
+        ))()
+        # A positional-format upgrade must always use a new version prefix;
+        # even v1 shards at these keys may be cached by deployed Workers.
+        if shard_paths:
+            return True
+
+        marker_paths = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{r2_config['bucket']}/{version}/staging/build*/_SUCCESS",
+        ))()
+        return bool(marker_paths)
+    finally:
+        con.close()
+
+
+def phase_build_locator_dictionary(r2_config, version, release_version):
+    """Build the one global dictionary required by every parallel build range."""
+    manifest = _read_optional_r2_json(
+        r2_config, version, ID_LOCATOR_MANIFEST)
+    if manifest is not None:
+        _, payload, _ = _load_locator_manifest_and_dictionary(
+            r2_config, version, release_version)
+        print("  [dictionary] Existing immutable manifest is valid; skipping")
+        return payload
+    if _has_v3_id_build_state(r2_config, version):
+        raise RuntimeError(
+            "Refusing to create a missing ID locator manifest after ID "
+            "shards or build markers already exist; use a new version")
+
+    con = _r2_con(r2_config)
+    try:
+        registry_files = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{r2_config['bucket']}/{version}/staging/"
+            "id-partitioned/prefix=*/*.parquet",
+        ))()
+        release_files = _discover_release_staging_files(con, r2_config, version)
+        files = registry_files + release_files
+        if not files:
+            raise RuntimeError("No staged ID rows available for dictionary build")
+        file_list = ", ".join(f"'{path}'" for path in files)
+        rows = _retry_transient(lambda: con.execute(f"""
+            SELECT DISTINCT feature_type, filename, last_seen_release,
+                            registry_member, source_theme
+            FROM read_parquet([{file_list}], union_by_name=true)
+        """).fetchall())()
+    finally:
+        con.close()
+
+    source_files = []
+    historical_releases = []
+    for feature_type, filename, last_seen, registry_member, source_theme in rows:
+        if filename is not None:
+            expected_theme = TYPE_THEME_MAP.get(feature_type)
+            if expected_theme is None or source_theme != expected_theme:
+                raise RuntimeError(
+                    f"Invalid staged theme/type {source_theme!r}/{feature_type!r}")
+            if not _validate_source_filename(filename):
+                raise RuntimeError(f"Invalid staged filename {filename!r}")
+            if last_seen != release_version:
+                raise RuntimeError(
+                    f"Current source file has last_seen={last_seen!r}, "
+                    f"expected {release_version}")
+            source_files.append((source_theme, feature_type, filename))
+        else:
+            if not registry_member:
+                raise RuntimeError("Release-only staged row has no source filename")
+            if feature_type is not None or source_theme is not None:
+                raise RuntimeError("Path-null registry row retained partial path metadata")
+            if not last_seen:
+                raise RuntimeError(
+                    f"Path-null registry row has invalid last_seen {last_seen!r}")
+            historical_releases.append(last_seen)
+
+    payload = _make_locator_dictionary(
+        source_files, historical_releases, release_version)
+    artifact_bytes = _canonical_json_bytes(payload)
+    if len(artifact_bytes) > 1024 * 1024:
+        raise RuntimeError("Locator dictionary exceeds the 1 MiB hard limit")
+    dictionary_sha256 = hashlib.sha256(artifact_bytes).hexdigest()
+    dictionary_href = f"id-locator-dictionary-{dictionary_sha256}.json"
+    tmp = Path(f"tmp-id-locator-meta-{os.getpid()}.json")
+    tmp.write_bytes(artifact_bytes)
+    try:
+        err = _upload_to_r2(
+            tmp, f"{r2_config['bucket']}/{version}/{dictionary_href}")
+    finally:
+        tmp.unlink(missing_ok=True)
+    if err:
+        raise RuntimeError(f"Failed to upload {dictionary_href}: {err}")
+
+    reference = _dictionary_reference(
+        payload, dictionary_href, dictionary_sha256, len(artifact_bytes))
+    manifest = {
+        "format_version": ID_INDEX_FORMAT_VERSION,
+        "overture_release": release_version,
+        "locator_dictionary": reference,
+    }
+    _validate_locator_manifest(manifest, release_version)
+    manifest_tmp = Path(f"tmp-id-locator-manifest-{os.getpid()}.json")
+    manifest_tmp.write_bytes(_canonical_json_bytes(manifest))
+    try:
+        err = _upload_to_r2(
+            manifest_tmp,
+            f"{r2_config['bucket']}/{version}/{ID_LOCATOR_MANIFEST}",
+        )
+    finally:
+        manifest_tmp.unlink(missing_ok=True)
+    if err:
+        raise RuntimeError(f"Failed to upload {ID_LOCATOR_MANIFEST}: {err}")
+
+    _write_staging_marker(
+        r2_config,
+        version,
+        "id-dictionaries",
+        payload["source_files_count"] + payload["last_seen_releases_count"],
+        extra={
+            "dictionary_sha256": dictionary_sha256,
+            "dictionary_href": dictionary_href,
+            "dictionary_size_bytes": len(artifact_bytes),
+            "source_files_count": payload["source_files_count"],
+            "last_seen_releases_count": payload["last_seen_releases_count"],
+        },
+    )
+    return payload
+
+
+def _write_local_dictionary_tables(payload):
+    """Materialize tiny dictionary tables once for forked DuckDB workers."""
+    token = f"{os.getpid()}-{int(time.time() * 1000)}"
+    source_path = f"/tmp/id-source-files-{token}.parquet"
+    release_path = f"/tmp/id-last-seen-releases-{token}.parquet"
+    con = duckdb.connect()
+    try:
+        con.execute("""
+            CREATE TABLE source_files (
+                source_file_id INTEGER, source_theme VARCHAR,
+                feature_type VARCHAR, filename VARCHAR)
+        """)
+        source_rows = [
+            (index, entry["theme"], entry["feature_type"], entry["filename"])
+            for index, entry in enumerate(payload["source_files"], start=1)
+        ]
+        if source_rows:
+            con.executemany(
+                "INSERT INTO source_files VALUES (?, ?, ?, ?)", source_rows)
+        con.execute(f"COPY source_files TO '{source_path}' (FORMAT PARQUET)")
+        con.execute("""
+            CREATE TABLE releases (
+                last_seen_release_id INTEGER, last_seen_release VARCHAR)
+        """)
+        release_rows = list(enumerate(payload["last_seen_releases"], start=1))
+        if release_rows:
+            con.executemany(
+                "INSERT INTO releases VALUES (?, ?)", release_rows)
+        con.execute(f"COPY releases TO '{release_path}' (FORMAT PARQUET)")
+    finally:
+        con.close()
+    return source_path, release_path
 
 
 def _release_files_for_prefixes(release_files, prefixes):
@@ -1225,6 +1707,11 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
         else:
             prefixes = all_prefixes
 
+    _, dictionary, _ = _load_locator_manifest_and_dictionary(
+        r2_config, version, release_version)
+    source_dictionary_path, release_dictionary_path = (
+        _write_local_dictionary_tables(dictionary))
+
     # Filter to the buckets this job actually needs (bucketed staging), then
     # download and merge everything into ONE local file sorted by
     # (prefix, id). One file means one probe per prefix in the workers
@@ -1276,7 +1763,7 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
     # Each prefix maps 1:1 to a staging prefix (same prefix-len)
     work = [
         (p, [p], r2_config, version, release_version, local_release_files,
-         row_group_size)
+         source_dictionary_path, release_dictionary_path, row_group_size)
         for p in prefixes
     ]
 
@@ -1313,8 +1800,8 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
                     flush=True,
                 )
 
-    # Cleanup local release files
-    for lf in local_release_files:
+    # Cleanup local release and dictionary files
+    for lf in local_release_files + [source_dictionary_path, release_dictionary_path]:
         try:
             os.unlink(lf)
         except Exception:
@@ -1362,30 +1849,47 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     return results
 
 
-def _sum_build_marker_records(r2_config, version):
-    """Sum real record counts from per-range build _SUCCESS markers.
-
-    Returns the total, or None if no build markers with record counts exist.
-    """
+def _read_current_build_markers(r2_config, version):
     bucket = r2_config["bucket"]
     con = _r2_con(r2_config)
     try:
         marker_files = _retry_transient(lambda: _glob_files(
             con, f"s3://{bucket}/{version}/staging/build*/_SUCCESS"))()
-        total = 0
-        found = False
+        markers = []
         for marker_path in marker_files:
-            def _read_marker(path=marker_path):
-                return con.execute(
-                    f"SELECT content FROM read_text('{path}')").fetchone()[0]
-            content = _retry_transient(_read_marker)()
+            content = _retry_transient(lambda path=marker_path: con.execute(
+                f"SELECT content FROM read_text('{path}')").fetchone()[0])()
             data = json.loads(content)
-            if _marker_is_current(data) and "records" in data:
-                total += int(data["records"])
-                found = True
-        return total if found else None
+            if _marker_is_current(data):
+                markers.append((marker_path, data))
+        return markers
     finally:
         con.close()
+
+
+def _validate_build_marker_dictionary_sha(r2_config, version, expected_sha256):
+    for marker_path, marker in _read_current_build_markers(r2_config, version):
+        if marker.get("dictionary_sha256") != expected_sha256:
+            raise RuntimeError(
+                f"Build marker {marker_path} does not match locator manifest SHA")
+
+
+def _sum_build_marker_records(r2_config, version, expected_sha256=None):
+    """Sum real record counts from per-range build _SUCCESS markers.
+
+    Returns the total, or None if no build markers with record counts exist.
+    """
+    total = 0
+    found = False
+    for marker_path, data in _read_current_build_markers(r2_config, version):
+        if (expected_sha256 is not None
+                and data.get("dictionary_sha256") != expected_sha256):
+            raise RuntimeError(
+                f"Build marker {marker_path} does not match locator manifest SHA")
+        if "records" in data:
+            total += int(data["records"])
+            found = True
+    return total if found else None
 
 
 def _detect_output_shard_format(r2_config, version):
@@ -1401,26 +1905,42 @@ def _detect_output_shard_format(r2_config, version):
         con.close()
 
 
-def _format_metadata(format_version, release_version):
+def _format_metadata(format_version, release_version, dictionary_reference=None):
     """Return only metadata supported by the uniform shard format."""
     if format_version == 1:
         return {}
     if format_version != ID_INDEX_FORMAT_VERSION:
         raise RuntimeError(f"Unsupported ID-index format v{format_version}")
+    if not isinstance(dictionary_reference, dict):
+        raise RuntimeError("Format v3 requires a locator dictionary reference")
     return {
         "format_version": ID_INDEX_FORMAT_VERSION,
         "overture_release": release_version,
-        "type_theme_map": _type_theme_metadata(),
+        "locator_dictionary": dictionary_reference,
     }
+
+
+def _load_locator_dictionary_reference(r2_config, version, release_version):
+    _, _, reference = _load_locator_manifest_and_dictionary(
+        r2_config, version, release_version)
+    return reference
 
 
 def phase_metadata(results, prefix_len, version, release_version, r2_config):
     """Generate id-collection.json and upload to R2."""
     # This check intentionally precedes creation/upload of either metadata
     # object. A resumed metadata-only run must never label v1 or mixed shards
-    # as v2 based on the currently checked-out producer.
+    # as v3 based on the currently checked-out producer.
     format_version = _detect_output_shard_format(r2_config, version)
-    format_metadata = _format_metadata(format_version, release_version)
+    dictionary_reference = (
+        _load_locator_dictionary_reference(r2_config, version, release_version)
+        if format_version == ID_INDEX_FORMAT_VERSION else None
+    )
+    if dictionary_reference is not None:
+        _validate_build_marker_dictionary_sha(
+            r2_config, version, dictionary_reference["sha256"])
+    format_metadata = _format_metadata(
+        format_version, release_version, dictionary_reference)
     shard_infos = {}
     total_records = 0
     counts_known = True
@@ -1440,7 +1960,11 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
     # When run standalone, recover the real totals from the per-range build
     # markers instead of fabricating per-shard counts.
     if not counts_known:
-        marker_total = _sum_build_marker_records(r2_config, version)
+        marker_total = _sum_build_marker_records(
+            r2_config,
+            version,
+            dictionary_reference["sha256"] if dictionary_reference else None,
+        )
         if marker_total is not None:
             total_records = marker_total
             print(f"  Total records from build markers: {total_records:,}")
@@ -1663,9 +2187,19 @@ def build_id_index(args):
             )
             phase_times["Stage base"] = time.time() - t0
 
+    # === Global locator dictionaries ===
+    if run_all or "dictionaries" in phases:
+        print("\nDictionaries: Build compact global locator dictionaries")
+        t0 = time.time()
+        phase_build_locator_dictionary(r2_config, version, release_version)
+        phase_times["Dictionaries"] = time.time() - t0
+
     # === Build shards ===
     results = None
     if run_all or "build" in phases:
+        build_dictionary_reference = _load_locator_dictionary_reference(
+            r2_config, version, release_version)
+        build_dictionary_sha256 = build_dictionary_reference["sha256"]
         build_marker_key = f"build{range_suffix}"
         # Explicit-prefix patch builds bypass markers entirely: they must
         # re-run unconditionally, and a suffix-less "build" marker would both
@@ -1674,6 +2208,10 @@ def build_id_index(args):
         marker = (None if args.prefixes
                   else _read_staging_marker(r2_config, version, build_marker_key))
         if _marker_is_current(marker):
+            if marker.get("dictionary_sha256") != build_dictionary_sha256:
+                raise RuntimeError(
+                    f"Build marker {build_marker_key} does not match "
+                    "locator manifest SHA")
             print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
             print(f"\nBuild: Build parquet shards")
@@ -1700,7 +2238,10 @@ def build_id_index(args):
 
             if not args.prefixes:
                 _write_staging_marker(r2_config, version, build_marker_key, built,
-                                      extra={"records": records})
+                                      extra={
+                                          "records": records,
+                                          "dictionary_sha256": build_dictionary_sha256,
+                                      })
 
     # === Metadata ===
     if run_all or "metadata" in phases:
@@ -1712,6 +2253,10 @@ def build_id_index(args):
         meta_marker = (None if explicit_metadata
                        else _read_staging_marker(r2_config, version, "metadata"))
         if _marker_is_current(meta_marker):
+            metadata_dictionary_reference = _load_locator_dictionary_reference(
+                r2_config, version, release_version)
+            _validate_build_marker_dictionary_sha(
+                r2_config, version, metadata_dictionary_reference["sha256"])
             print(f"\nMetadata: Skipped (metadata complete for {version})")
         else:
             t_meta = time.time()
@@ -1727,8 +2272,13 @@ def build_id_index(args):
             )
             phase_times["Metadata"] = time.time() - t_meta
 
+            metadata_extra = {"records": total_records}
+            if output_format == ID_INDEX_FORMAT_VERSION:
+                metadata_extra["dictionary_sha256"] = (
+                    _load_locator_dictionary_reference(
+                        r2_config, version, release_version)["sha256"])
             _write_staging_marker(r2_config, version, "metadata", len(shard_infos),
-                                  extra={"records": total_records},
+                                  extra=metadata_extra,
                                   format_version=output_format)
 
             total_size = sum(s.get("size_bytes", 0) for s in shard_infos.values())
@@ -1780,7 +2330,8 @@ def main():
 
     # Pipeline control
     p.add_argument("--phase",
-                   help="Run specific phase(s): stage-registry, stage-base, build, metadata, or all (comma-separated)")
+                   help="Run specific phase(s): stage-registry, stage-base, "
+                        "dictionaries, build, metadata, or all (comma-separated)")
     p.add_argument("--prefix-start",
                    help="Start prefix inclusive (hex, e.g. '000') for range-based parallelism")
     p.add_argument("--prefix-end",

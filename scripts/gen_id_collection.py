@@ -23,6 +23,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 from build_id_index import (
     _classify_shard_set,
     _format_metadata,
+    _load_locator_dictionary_reference,
+    _validate_build_marker_dictionary_sha,
 )
 from stac import get_latest_release
 
@@ -105,7 +107,15 @@ def main():
     # Shared validator checks exact order, physical types, UUID length, and
     # uniform format for every footer before either metadata object is written.
     format_version = _classify_shard_set(con, shard_files)
-    format_metadata = _format_metadata(format_version, release_version)
+    dictionary_reference = (
+        _load_locator_dictionary_reference(r2_config, version, release_version)
+        if format_version >= 3 else None
+    )
+    if dictionary_reference is not None:
+        _validate_build_marker_dictionary_sha(
+            r2_config, version, dictionary_reference["sha256"])
+    format_metadata = _format_metadata(
+        format_version, release_version, dictionary_reference)
 
     shard_infos = {}
     for path in shard_files:

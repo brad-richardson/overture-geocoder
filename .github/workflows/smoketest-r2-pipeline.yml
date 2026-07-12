@@ -140,6 +140,14 @@ jobs:
             --smoke-test \
             --workers 2
 
+      - name: Build ID locator dictionary (smoke test)
+        run: |
+          python scripts/build_id_index.py \
+            --phase dictionaries \
+            --version $SMOKE_VERSION \
+            --prefix-len 3 \
+            --smoke-test
+
       - name: Build ID shards (smoke test)
         run: |
           python scripts/build_id_index.py \
