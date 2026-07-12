@@ -7,7 +7,7 @@ use std::rc::Rc;
 use bytes::Bytes;
 use geocoder_core::{
     geo::haversine_distance, query::apply_location_bias, Database, GeocoderQuery, GeocoderResult,
-    IdLookupResult, LocationBias, ReverseResult,
+    IdLocatorMetadata, IdLookupResult, LocationBias, ReverseResult,
 };
 use parquet::file::reader::{ChunkReader, FileReader, Length, SerializedFileReader};
 use parquet::record::RowAccessor;
@@ -171,6 +171,146 @@ pub struct ReverseSearchResult {
 pub struct IdSearchResult {
     pub result: Option<IdLookupResult>,
     pub version: String,
+}
+
+#[derive(Debug, Clone)]
+struct IdIndexConfig {
+    prefix_len: usize,
+    format_version: u32,
+    overture_release: Option<String>,
+    type_theme_map: HashMap<String, String>,
+}
+
+fn parse_id_index_config(text: &str) -> std::result::Result<IdIndexConfig, String> {
+    let root: serde_json::Value =
+        serde_json::from_str(text).map_err(|e| format!("invalid JSON: {e}"))?;
+    let values = root.get("summaries").unwrap_or(&root);
+    let prefix_len = values
+        .get("prefix_len")
+        .and_then(|v| v.as_u64())
+        .ok_or_else(|| "missing integer prefix_len".to_string())? as usize;
+    let format_version = match values.get("format_version") {
+        None => 1,
+        Some(value) => value
+            .as_u64()
+            .and_then(|value| u32::try_from(value).ok())
+            .ok_or_else(|| "format_version must be an unsigned 32-bit integer".to_string())?,
+    };
+
+    // Existing v1 collections already carry overture_release. Do not use it
+    // to enrich v1 rows: format_version is the explicit compatibility gate.
+    let (overture_release, type_theme_map) = if format_version == 2 {
+        let release = values
+            .get("overture_release")
+            .and_then(|v| v.as_str())
+            .filter(|v| !v.is_empty())
+            .map(str::to_owned)
+            .ok_or_else(|| "format v2 requires overture_release".to_string())?;
+        let map_root = values
+            .get("type_theme_map")
+            .ok_or_else(|| "format v2 requires type_theme_map".to_string())?;
+        if map_root.get("version").and_then(|v| v.as_u64()) != Some(1) {
+            return Err("unsupported or missing type_theme_map version".to_string());
+        }
+        let entries = map_root
+            .get("types")
+            .and_then(|v| v.as_object())
+            .filter(|entries| !entries.is_empty())
+            .ok_or_else(|| "format v2 requires a non-empty type-theme map".to_string())?;
+        let mut map = HashMap::with_capacity(entries.len());
+        for (feature_type, theme) in entries {
+            let theme = theme
+                .as_str()
+                .filter(|value| !value.is_empty())
+                .ok_or_else(|| format!("invalid theme for feature type {feature_type}"))?;
+            map.insert(feature_type.clone(), theme.to_owned());
+        }
+        (Some(release), map)
+    } else if format_version == 1 {
+        (None, HashMap::new())
+    } else {
+        return Err(format!(
+            "unsupported ID-index format_version {format_version}"
+        ));
+    };
+
+    Ok(IdIndexConfig {
+        prefix_len,
+        format_version,
+        overture_release,
+        type_theme_map,
+    })
+}
+
+fn locator_metadata_from_row(
+    row: &parquet::record::Row,
+    config: &IdIndexConfig,
+) -> Option<IdLocatorMetadata> {
+    if config.format_version < 2 {
+        return None;
+    }
+
+    // Metadata may become visible before a shard during an interrupted or
+    // eventually-consistent rollout. A short v1/partial row must preserve the
+    // exact legacy response shape, never publish fabricated false flags.
+    if row.len() < 9 {
+        return None;
+    }
+
+    // Safe optional access is intentional: a format-v2 metadata/shard skew
+    // degrades to null locator fields instead of panicking on a short v1 row.
+    build_locator_metadata(
+        row.get_string(5).ok().cloned(),
+        row.get_string(6).ok().cloned(),
+        row.get_string(7).ok().cloned(),
+        row.get_bool(8).ok().unwrap_or(false),
+        config,
+    )
+}
+
+fn build_locator_metadata(
+    feature_type: Option<String>,
+    filename: Option<String>,
+    last_seen_release: Option<String>,
+    registry_member: bool,
+    config: &IdIndexConfig,
+) -> Option<IdLocatorMetadata> {
+    if config.format_version < 2 {
+        return None;
+    }
+
+    let theme = feature_type
+        .as_ref()
+        .and_then(|value| config.type_theme_map.get(value))
+        .cloned();
+    let exists_in_current_release =
+        filename.is_some() && last_seen_release.as_deref() == config.overture_release.as_deref();
+    let overture_path = if exists_in_current_release {
+        match (
+            config.overture_release.as_deref(),
+            theme.as_deref(),
+            feature_type.as_deref(),
+            filename.as_deref(),
+        ) {
+            (Some(release), Some(theme), Some(feature_type), Some(filename)) => Some(format!(
+                "release/{}/theme={}/type={}/{}",
+                release, theme, feature_type, filename
+            )),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
+    Some(IdLocatorMetadata {
+        feature_type,
+        theme,
+        filename,
+        last_seen_release,
+        registry_member,
+        exists_in_current_release,
+        overture_path,
+    })
 }
 
 /// Loads and caches shards from R2 with edge caching via Cache API.
@@ -1427,7 +1567,8 @@ impl ShardLoader {
     /// 2. Parse footer → find row group containing the target UUID via min/max stats
     /// 3. Range read just that row group's column data
     async fn try_lookup_id(&self, version: &str, gers_id: &str) -> Result<IdSearchResult> {
-        let prefix_len = self.load_id_prefix_len(version).await?;
+        let id_config = self.load_id_index_config(version).await?;
+        let prefix_len = id_config.prefix_len;
 
         let hex_id: String = gers_id.replace('-', "").to_lowercase();
         let Some(prefix) = hex_id.get(..prefix_len) else {
@@ -1635,6 +1776,7 @@ impl ShardLoader {
                             xmax: bbox_xmax,
                             ymax: bbox_ymax,
                         },
+                        locator: locator_metadata_from_row(&row, &id_config),
                     }),
                     version: version.to_string(),
                 });
@@ -1648,7 +1790,7 @@ impl ShardLoader {
 
     /// Load the ID index prefix_len from a small metadata file.
     /// Falls back to id-collection.json summaries if id-meta.json doesn't exist.
-    async fn load_id_prefix_len(&self, version: &str) -> Result<usize> {
+    async fn load_id_index_config(&self, version: &str) -> Result<IdIndexConfig> {
         // Try tiny metadata file first (avoids loading multi-MB collection).
         // id-index TTL: patch runs re-upload these files in place.
         let meta_key = format!("{}/id-meta.json", version);
@@ -1656,35 +1798,16 @@ impl ShardLoader {
             .memoized_get_text(&meta_key, ID_INDEX_CACHE_TTL)
             .await?
         {
-            #[derive(Deserialize)]
-            struct IdMeta {
-                #[serde(default)]
-                prefix_len: Option<u32>,
-            }
-            if let Ok(meta) = serde_json::from_str::<IdMeta>(&text) {
-                if let Some(n) = meta.prefix_len {
-                    return Ok(n as usize);
-                }
-            }
+            return parse_id_index_config(&text)
+                .map_err(|e| not_found(format!("invalid id-index metadata {}: {}", meta_key, e)));
         }
 
-        // Fallback: load id-collection.json and extract prefix_len via string search
+        // Fallback: load id-collection.json. Its v2 fields live under
+        // summaries; legacy collections produce a format-v1 config.
         let key = format!("{}/id-collection.json", version);
         if let Some(text) = self.memoized_get_text(&key, ID_INDEX_CACHE_TTL).await? {
-            if let Some(pos) = text.find("\"prefix_len\"") {
-                let rest = &text[pos + "\"prefix_len\"".len()..];
-                let rest = rest
-                    .trim_start()
-                    .strip_prefix(':')
-                    .unwrap_or(rest)
-                    .trim_start();
-                let num_end = rest
-                    .find(|c: char| !c.is_ascii_digit())
-                    .unwrap_or(rest.len());
-                if let Ok(n) = rest[..num_end].parse::<usize>() {
-                    return Ok(n);
-                }
-            }
+            return parse_id_index_config(&text)
+                .map_err(|e| not_found(format!("invalid id-index metadata {}: {}", key, e)));
         }
 
         // Both metadata files missing: the id-index isn't deployed for this
@@ -1981,6 +2104,119 @@ fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_v1_id_metadata_stays_legacy() {
+        let config =
+            parse_id_index_config(r#"{"prefix_len":3,"overture_release":"2026-06-17.0"}"#).unwrap();
+        assert_eq!(config.format_version, 1);
+        assert!(config.overture_release.is_none());
+        assert!(config.type_theme_map.is_empty());
+        assert!(build_locator_metadata(
+            Some("place".into()),
+            Some("part.parquet".into()),
+            Some("2026-06-17.0".into()),
+            true,
+            &config,
+        )
+        .is_none());
+    }
+
+    #[test]
+    fn test_v2_collection_builds_current_release_path() {
+        let config = parse_id_index_config(
+            r#"{"summaries":{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0",
+                "type_theme_map":{"version":1,"types":{"address":"addresses"}}}}"#,
+        )
+        .unwrap();
+        let locator = build_locator_metadata(
+            Some("address".into()),
+            Some("part-00001.zstd.parquet".into()),
+            Some("2026-06-17.0".into()),
+            false,
+            &config,
+        )
+        .unwrap();
+        assert_eq!(locator.theme.as_deref(), Some("addresses"));
+        assert!(locator.exists_in_current_release);
+        assert_eq!(
+            locator.overture_path.as_deref(),
+            Some("release/2026-06-17.0/theme=addresses/type=address/part-00001.zstd.parquet")
+        );
+    }
+
+    #[test]
+    fn test_v2_null_filename_is_not_current() {
+        let config = parse_id_index_config(
+            r#"{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0",
+                "type_theme_map":{"version":1,"types":{"place":"places"}}}"#,
+        )
+        .unwrap();
+        let locator =
+            build_locator_metadata(None, None, Some("2026-05-20.0".into()), true, &config).unwrap();
+        assert!(!locator.exists_in_current_release);
+        assert!(locator.filename.is_none());
+        assert!(locator.overture_path.is_none());
+    }
+
+    #[test]
+    fn test_v2_unknown_type_does_not_construct_path() {
+        let config = parse_id_index_config(
+            r#"{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0",
+                "type_theme_map":{"version":1,"types":{"place":"places"}}}"#,
+        )
+        .unwrap();
+        let locator = build_locator_metadata(
+            Some("future_type".into()),
+            Some("part.parquet".into()),
+            Some("2026-06-17.0".into()),
+            true,
+            &config,
+        )
+        .unwrap();
+        assert!(locator.exists_in_current_release);
+        assert!(locator.theme.is_none());
+        assert!(locator.overture_path.is_none());
+    }
+
+    #[test]
+    fn test_v2_metadata_requires_supported_complete_contract() {
+        for text in [
+            r#"{"prefix_len":3,"format_version":3}"#,
+            r#"{"prefix_len":3,"format_version":"2"}"#,
+            r#"{"prefix_len":3,"format_version":null}"#,
+            r#"{"prefix_len":3,"format_version":2.0}"#,
+            r#"{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0"}"#,
+            r#"{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0",
+                "type_theme_map":{"version":2,"types":{"place":"places"}}}"#,
+            r#"{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0",
+                "type_theme_map":{"version":1,"types":{}}}"#,
+        ] {
+            assert!(parse_id_index_config(text).is_err(), "accepted {text}");
+        }
+    }
+
+    #[test]
+    fn test_v2_metadata_with_short_v1_row_stays_legacy() {
+        let config = parse_id_index_config(
+            r#"{"prefix_len":3,"format_version":2,
+                "overture_release":"2026-06-17.0",
+                "type_theme_map":{"version":1,"types":{"place":"places"}}}"#,
+        )
+        .unwrap();
+        let row = parquet::record::Row::new(
+            (0..5)
+                .map(|index| (format!("legacy_{index}"), parquet::record::Field::Null))
+                .collect(),
+        );
+        assert!(locator_metadata_from_row(&row, &config).is_none());
+    }
 
     fn collection_with_bboxes(rows: &[(&str, Option<[f64; 4]>)]) -> StacCollection {
         let items = rows

@@ -148,6 +148,21 @@ GET /reverse?lat={lat}&lon={lon}
 
 **Note:** Reverse geocoding selects a country shard from the requested coordinate only when one collection bbox is unambiguous, then uses bounding box filtering. With zero matching bboxes it falls back to a valid caller IP country and then `HEAD`; multiple matching bboxes always fall back to `HEAD`, and IP metadata never resolves geometric ambiguity. Results include all eligible divisions whose bounding box contains the query point: countries, regions, counties, and populated localities (initially population >= 50,000). Bbox containment is an approximation, not exact polygon containment.
 
+### ID Lookup: `/id/{gers_id}`
+
+The first five ID-index columns remain positional and compatible with format
+v1: `id`, then four float bbox values. Format v2 appends nullable
+`feature_type`, basename-only `filename`, `last_seen_release`, and
+`registry_member`. `id-meta.json` pins `format_version`, `overture_release`,
+and a versioned type-to-theme map.
+
+Format-v2 responses add `feature_type`, `theme`, `filename`,
+`last_seen_release`, `registry_member`, `exists_in_current_release`, and
+`overture_path`. The path always includes the pinned release:
+`release/{release}/theme={theme}/type={type}/{filename}`. When a registry path
+is null, locator strings are null and `exists_in_current_release` is false.
+Format-v1 responses remain exactly the legacy `id` and `bbox` shape.
+
 ## Indexing Pipeline
 
 1.  **Download & Extract**: `scripts/download_divisions.sql` (DuckDB) extracts data from Overture S3 to Parquet.

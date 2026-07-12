@@ -82,6 +82,30 @@ RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
 RELEASE_THEMES = ["addresses", "base"]
 
+# ID-index format v2 appends locator metadata after the five v1 positional
+# columns. Keep this mapping versioned in id-meta.json so readers do not have
+# to infer themes from filenames and future type additions fail closed until
+# the producer and reader agree on their meaning.
+ID_INDEX_FORMAT_VERSION = 2
+TYPE_THEME_MAP_VERSION = 1
+TYPE_THEME_MAP = {
+    "address": "addresses",
+    "bathymetry": "base",
+    "building": "buildings",
+    "building_part": "buildings",
+    "connector": "transportation",
+    "division": "divisions",
+    "division_area": "divisions",
+    "division_boundary": "divisions",
+    "infrastructure": "base",
+    "land": "base",
+    "land_cover": "base",
+    "land_use": "base",
+    "place": "places",
+    "segment": "transportation",
+    "water": "base",
+}
+
 # Rows per parquet row group in output shards. Every cold /id lookup
 # range-reads one full row group, so this bounds the cold-read size.
 # 50k chosen from the 2026-07-02 rowgroup_experiment.py run against live
@@ -98,6 +122,14 @@ ROW_GROUP_SIZE = 50_000
 def get_version(suffix="0"):
     date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     return f"{date}.{suffix}"
+
+
+def _type_theme_metadata():
+    """Return the deterministic, versioned type-to-theme contract."""
+    return {
+        "version": TYPE_THEME_MAP_VERSION,
+        "types": dict(sorted(TYPE_THEME_MAP.items())),
+    }
 
 
 def write_json(path, data):
@@ -263,11 +295,13 @@ def _r2_con(r2_config):
     return con
 
 
-def _write_staging_marker(r2_config, version, staging_dir, partition_count, extra=None):
+def _write_staging_marker(r2_config, version, staging_dir, partition_count,
+                          extra=None, format_version=ID_INDEX_FORMAT_VERSION):
     """Write a _SUCCESS marker to R2 staging after a completed phase."""
     marker = {
         "status": "complete",
         "partitions": partition_count,
+        "format_version": format_version,
         "timestamp": datetime.now(timezone.utc).isoformat(),
     }
     if extra:
@@ -279,6 +313,15 @@ def _write_staging_marker(r2_config, version, staging_dir, partition_count, extr
     tmp.unlink(missing_ok=True)
     if err:
         print(f"  WARNING: Failed to write staging marker: {err}")
+
+
+def _marker_is_current(marker):
+    """Only v2 markers may resume a v2 pipeline run."""
+    return (
+        marker is not None
+        and marker.get("status") == "complete"
+        and marker.get("format_version") == ID_INDEX_FORMAT_VERSION
+    )
 
 
 # Substrings in wrangler errors that mean "object genuinely absent"
@@ -470,6 +513,32 @@ def _registry_sub_ranges(prefix_len, prefixes=None,
     return sub_ranges, label
 
 
+def _registry_id_query(prefix_len, sub_filter):
+    """Build the registry staging query with v2 locator metadata.
+
+    Registry ``path`` is authoritative for current-release membership. A null
+    path deliberately produces null feature_type/filename while retaining
+    last_seen_release for historical context.
+    """
+    return f"""
+        SELECT
+            id::UUID as id,
+            bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
+            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
+            NULLIF(regexp_extract(path, '(^|/)type=([^/]+)/', 2), '')::VARCHAR
+                as feature_type,
+            NULLIF(regexp_extract(path, '([^/]+)$', 1), '')::VARCHAR as filename,
+            last_seen::VARCHAR as last_seen_release,
+            true::BOOLEAN as registry_member,
+            NULLIF(regexp_extract(path, '(^|/)theme=([^/]+)/', 2), '')::VARCHAR
+                as source_theme,
+            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
+        FROM read_parquet('{REGISTRY_S3}*')
+        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+        AND {sub_filter}
+    """
+
+
 def phase_partition_r2(prefix_len, r2_config, version,
                        prefixes=None, prefix_start=None, prefix_end=None):
     """Partition the Overture registry into per-prefix staging files on R2.
@@ -515,17 +584,9 @@ def phase_partition_r2(prefix_len, r2_config, version,
             watchdog = threading.Timer(SUBRANGE_COPY_TIMEOUT_S, con.interrupt)
             watchdog.start()
             try:
+                query = _registry_id_query(prefix_len, sub_filter)
                 con.execute(f"""
-                    COPY (
-                        SELECT
-                            id::UUID as id,
-                            bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
-                            bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
-                            lower(left(replace(id, '-', ''), {prefix_len})) as prefix
-                        FROM read_parquet('{REGISTRY_S3}*')
-                        WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
-                        AND {sub_filter}
-                    ) TO '{dest}'
+                    COPY ({query}) TO '{dest}'
                     (FORMAT PARQUET, COMPRESSION ZSTD,
                      PARTITION_BY (prefix), OVERWRITE_OR_IGNORE true);
                 """)
@@ -560,15 +621,22 @@ def _release_id_query_for_type(prefix_len, release_version, theme, type_name, li
     the runners and was retired; see the perf plan doc.)
     """
     source = f"'{RELEASE_S3}{release_version}/theme={theme}/type={type_name}/**/*.parquet'"
+    type_literal = type_name.replace("'", "''")
+    release_literal = release_version.replace("'", "''")
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
     return f"""
         SELECT
             id::UUID as id,
             bbox.xmin::FLOAT as bbox_xmin, bbox.ymin::FLOAT as bbox_ymin,
             bbox.xmax::FLOAT as bbox_xmax, bbox.ymax::FLOAT as bbox_ymax,
+            '{type_literal}'::VARCHAR as feature_type,
+            NULLIF(regexp_extract(filename, '([^/]+)$', 1), '')::VARCHAR as filename,
+            '{release_literal}'::VARCHAR as last_seen_release,
+            false::BOOLEAN as registry_member,
+            '{theme.replace("'", "''")}'::VARCHAR as source_theme,
             lower(left(replace(id, '-', ''), {prefix_len})) as prefix,
             lower(left(replace(id, '-', ''), 1)) as bucket
-        FROM read_parquet({source}, union_by_name=true)
+        FROM read_parquet({source}, union_by_name=true, filename=true)
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
         {limit_clause}
     """
@@ -576,7 +644,8 @@ def _release_id_query_for_type(prefix_len, release_version, theme, type_name, li
 
 def _r2_release_staging_exists(r2_config, version):
     """Check if completed release staging data exists for this version."""
-    return _read_staging_marker(r2_config, version, "id-release") is not None
+    return _marker_is_current(
+        _read_staging_marker(r2_config, version, "id-release"))
 
 
 def _discover_release_types(release_version, retries=3):
@@ -660,11 +729,16 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
     pushdown, and per-job disk spill stays proportional to a quarter of one
     theme no matter how large the themes grow.
     """
+    expected_theme = TYPE_THEME_MAP.get(type_name)
+    if expected_theme != theme:
+        raise RuntimeError(
+            f"Unsupported release theme/type {theme}/{type_name}; "
+            f"type map expects {expected_theme!r}")
     staging_dir = f"id-release-{theme}-{type_name}"
 
     # Skip if this type already completed
     marker = _read_staging_marker(r2_config, version, staging_dir)
-    if marker is not None:
+    if _marker_is_current(marker):
         print(f"    [release] {theme}/{type_name} already complete, skipping")
         return (theme, type_name)
 
@@ -781,36 +855,118 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 
 # Expected output shard columns, in order. The worker reads these
 # positionally: col 0 must be the 16-byte UUID, cols 1-4 the FLOAT bbox.
-EXPECTED_SHARD_COLUMNS = [
+V1_SHARD_COLUMNS = [
     ("id", "FIXED_LEN_BYTE_ARRAY"),
     ("bbox_xmin", "FLOAT"),
     ("bbox_ymin", "FLOAT"),
     ("bbox_xmax", "FLOAT"),
     ("bbox_ymax", "FLOAT"),
 ]
+EXPECTED_SHARD_COLUMNS = V1_SHARD_COLUMNS + [
+    ("feature_type", "BYTE_ARRAY"),
+    ("filename", "BYTE_ARRAY"),
+    ("last_seen_release", "BYTE_ARRAY"),
+    ("registry_member", "BOOLEAN"),
+]
 
 
-def _assert_shard_schema(con, path):
-    """Assert a written shard's parquet footer matches the worker's layout.
-
-    The worker reads columns positionally, so a silent column reorder or
-    type change would break every ID lookup. Raises RuntimeError on
-    mismatch; call before writing any _SUCCESS marker.
-    """
+def _shard_schema(con, path):
+    """Read ordered physical leaf columns and UUID length from one footer."""
     rows = con.execute(f"""
         SELECT name, type, type_length
         FROM parquet_schema('{path}')
         WHERE type IS NOT NULL
     """).fetchall()
-    actual = [(r[0], str(r[1])) for r in rows]
-    if actual != EXPECTED_SHARD_COLUMNS:
-        raise RuntimeError(
-            f"Shard schema mismatch for {path}: "
-            f"got {actual}, expected {EXPECTED_SHARD_COLUMNS}")
-    uuid_len = str(rows[0][2])
+    return [(r[0], str(r[1])) for r in rows], str(rows[0][2]) if rows else None
+
+
+def _classify_shard_schema(con, path):
+    """Return 1 or 2 for an exact known shard schema; reject everything else."""
+    actual, uuid_len = _shard_schema(con, path)
     if uuid_len != "16":
         raise RuntimeError(
             f"Shard {path}: uuid column type_length {uuid_len} != 16")
+    if actual == V1_SHARD_COLUMNS:
+        return 1
+    if actual == EXPECTED_SHARD_COLUMNS:
+        return ID_INDEX_FORMAT_VERSION
+    raise RuntimeError(
+        f"Shard schema mismatch for {path}: got {actual}, expected "
+        f"v1={V1_SHARD_COLUMNS} or v2={EXPECTED_SHARD_COLUMNS}")
+
+
+def _classify_shard_set(con, paths):
+    """Inspect every footer and require one exact, uniform format."""
+    if not paths:
+        raise RuntimeError("No ID-index shards found")
+    formats = {}
+    for path in paths:
+        format_version = _classify_shard_schema(con, path)
+        formats.setdefault(format_version, []).append(path)
+    if len(formats) != 1:
+        detail = ", ".join(
+            f"v{version}={len(version_paths)}"
+            for version, version_paths in sorted(formats.items()))
+        raise RuntimeError(f"Mixed ID shard formats: {detail}")
+    return next(iter(formats))
+
+
+def _assert_shard_schema(con, path):
+    """Assert a written shard's parquet footer matches the v2 layout.
+
+    The worker reads columns positionally, so a silent column reorder or
+    type change would break every ID lookup. Raises RuntimeError on
+    mismatch; call before writing any _SUCCESS marker.
+    """
+    format_version = _classify_shard_schema(con, path)
+    if format_version != ID_INDEX_FORMAT_VERSION:
+        raise RuntimeError(
+            f"Shard {path}: wrote legacy format v{format_version}, expected v2")
+
+
+def _assert_locator_rows(con, union_query, prefix, release_version):
+    """Fail closed on ambiguous IDs or locator metadata we cannot serve."""
+    duplicate = con.execute(f"""
+        SELECT id, COUNT(*) AS copies
+        FROM ({union_query})
+        GROUP BY id
+        HAVING COUNT(*) > 1
+        LIMIT 1
+    """).fetchone()
+    if duplicate:
+        raise RuntimeError(
+            f"Duplicate ID in shard {prefix}: {duplicate[0]} "
+            f"appears {duplicate[1]} times")
+
+    known_types = ", ".join(
+        "'" + value.replace("'", "''") + "'" for value in TYPE_THEME_MAP)
+    theme_case = "CASE feature_type " + " ".join(
+        "WHEN '" + feature_type.replace("'", "''") + "' THEN '"
+        + theme.replace("'", "''") + "'"
+        for feature_type, theme in TYPE_THEME_MAP.items()
+    ) + " END"
+    invalid = con.execute(f"""
+        SELECT id, feature_type, filename, last_seen_release, source_theme
+        FROM ({union_query})
+        WHERE
+            (feature_type IS NOT NULL AND feature_type NOT IN ({known_types}))
+            OR (filename IS NOT NULL AND feature_type IS NULL)
+            OR (filename LIKE '%/%')
+            OR (filename LIKE '%\\%')
+            OR (filename IN ('.', '..'))
+            OR (filename IS NOT NULL AND filename NOT LIKE '%.parquet')
+            OR (length(filename) > 255)
+            OR (filename IS NOT NULL AND last_seen_release IS DISTINCT FROM ?)
+            OR (feature_type IS NOT NULL
+                AND source_theme IS DISTINCT FROM ({theme_case}))
+        LIMIT 1
+    """, [release_version]).fetchone()
+    if invalid:
+        raise RuntimeError(
+            f"Invalid locator metadata in shard {prefix}: id={invalid[0]} "
+            f"type={invalid[1]!r} filename={invalid[2]!r} "
+            f"last_seen={invalid[3]!r} theme={invalid[4]!r}; "
+            f"expected release {release_version}")
 
 
 def _worker_build_r2_batch(args_tuple):
@@ -822,8 +978,8 @@ def _worker_build_r2_batch(args_tuple):
     Release files are pre-downloaded locally by the caller and passed as local
     paths. All reads are local; only output writes go to R2.
     """
-    (staging_prefix, output_prefixes, r2_config, version, release_files,
-     row_group_size) = args_tuple
+    (staging_prefix, output_prefixes, r2_config, version, release_version,
+     release_files, row_group_size) = args_tuple
 
     bucket = r2_config['bucket']
     results = []
@@ -869,7 +1025,9 @@ def _worker_build_r2_batch(args_tuple):
             def _download_registry():
                 con.execute(f"""
                     COPY (
-                        SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+                        SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                               feature_type, filename, last_seen_release,
+                               registry_member, source_theme
                         FROM read_parquet('{registry_r2}')
                     ) TO '{local_registry}' (FORMAT PARQUET);
                 """)
@@ -884,7 +1042,9 @@ def _worker_build_r2_batch(args_tuple):
             # Registry: read from LOCAL file
             if has_registry:
                 sources.append(
-                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, "
+                    f"feature_type, filename, last_seen_release, registry_member, "
+                    f"source_theme "
                     f"FROM read_parquet('{local_registry}') WHERE 1=1 {id_filter}"
                 )
 
@@ -898,7 +1058,9 @@ def _worker_build_r2_batch(args_tuple):
                 ).fetchone()
                 if row:
                     sources.append(
-                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, "
+                        f"feature_type, filename, last_seen_release, registry_member, "
+                        f"source_theme "
                         f"FROM read_parquet('{release_path}') "
                         f"WHERE prefix = '{staging_prefix}' {id_filter}"
                     )
@@ -908,6 +1070,7 @@ def _worker_build_r2_batch(args_tuple):
                 continue
 
             union_query = " UNION ALL ".join(sources)
+            _assert_locator_rows(con, union_query, prefix, release_version)
 
             # Count locally (fast, avoids R2 read-back)
             count = con.execute(
@@ -922,7 +1085,10 @@ def _worker_build_r2_batch(args_tuple):
             def _do_copy():
                 con.execute(f"""
                     COPY (
-                        SELECT * FROM ({union_query}) ORDER BY id
+                        SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                               feature_type, filename, last_seen_release,
+                               registry_member
+                        FROM ({union_query}) ORDER BY id
                     ) TO '{r2_dest}'
                     (FORMAT PARQUET, COMPRESSION UNCOMPRESSED,
                      ROW_GROUP_SIZE {int(row_group_size)});
@@ -933,7 +1099,10 @@ def _worker_build_r2_batch(args_tuple):
             # a _SUCCESS marker (the worker reads columns positionally)
             _retry_transient(lambda: _assert_shard_schema(con, r2_dest))()
 
-            size = count * (16 + 4 * 4)
+            # Planning estimate only: UUID+bbox plus three dictionary codes
+            # and the boolean. Actual Parquet size is recorded by storage,
+            # not available from this write-only worker connection.
+            size = count * (16 + 4 * 4 + 3 * 4 + 1)
             results.append((prefix, count, size, None))
 
         # Cleanup
@@ -1026,7 +1195,7 @@ def _discover_staging_prefixes(r2_config, version):
     return sorted(prefixes), release_files
 
 
-def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
+def phase_build_r2(prefix_len, r2_config, version, release_version, workers, prefixes=None,
                    row_group_size=ROW_GROUP_SIZE):
     """Build parquet shards from R2 staging, upload to R2.
 
@@ -1090,7 +1259,8 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
             dl_con.execute(f"""
                 COPY (
                     SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                           prefix
+                           feature_type, filename, last_seen_release,
+                           registry_member, source_theme, prefix
                     FROM read_parquet([{file_list}], union_by_name=true)
                     {release_where}
                     ORDER BY prefix, id
@@ -1105,7 +1275,8 @@ def phase_build_r2(prefix_len, r2_config, version, workers, prefixes=None,
 
     # Each prefix maps 1:1 to a staging prefix (same prefix-len)
     work = [
-        (p, [p], r2_config, version, local_release_files, row_group_size)
+        (p, [p], r2_config, version, release_version, local_release_files,
+         row_group_size)
         for p in prefixes
     ]
 
@@ -1209,7 +1380,7 @@ def _sum_build_marker_records(r2_config, version):
                     f"SELECT content FROM read_text('{path}')").fetchone()[0]
             content = _retry_transient(_read_marker)()
             data = json.loads(content)
-            if "records" in data:
+            if _marker_is_current(data) and "records" in data:
                 total += int(data["records"])
                 found = True
         return total if found else None
@@ -1217,8 +1388,39 @@ def _sum_build_marker_records(r2_config, version):
         con.close()
 
 
+def _detect_output_shard_format(r2_config, version):
+    """Inspect every output footer before metadata can be published."""
+    con = _r2_con(r2_config)
+    try:
+        paths = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{r2_config['bucket']}/{version}/id-index/*.parquet",
+        ))()
+        return _retry_transient(lambda: _classify_shard_set(con, paths))()
+    finally:
+        con.close()
+
+
+def _format_metadata(format_version, release_version):
+    """Return only metadata supported by the uniform shard format."""
+    if format_version == 1:
+        return {}
+    if format_version != ID_INDEX_FORMAT_VERSION:
+        raise RuntimeError(f"Unsupported ID-index format v{format_version}")
+    return {
+        "format_version": ID_INDEX_FORMAT_VERSION,
+        "overture_release": release_version,
+        "type_theme_map": _type_theme_metadata(),
+    }
+
+
 def phase_metadata(results, prefix_len, version, release_version, r2_config):
     """Generate id-collection.json and upload to R2."""
+    # This check intentionally precedes creation/upload of either metadata
+    # object. A resumed metadata-only run must never label v1 or mixed shards
+    # as v2 based on the currently checked-out producer.
+    format_version = _detect_output_shard_format(r2_config, version)
+    format_metadata = _format_metadata(format_version, release_version)
     shard_infos = {}
     total_records = 0
     counts_known = True
@@ -1266,6 +1468,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
             "total_size_bytes": sum(s.get("size_bytes", 0) for s in shard_infos.values()),
             "prefix_len": prefix_len,
             "overture_release": release_version,
+            **format_metadata,
         },
         "items": {
             p: {
@@ -1295,7 +1498,11 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
     print("  Uploaded id-collection.json to R2")
 
     # Upload id-meta.json (tiny metadata file for fast worker prefix_len lookup)
-    meta = {"prefix_len": prefix_len, "shard_count": len(shard_infos)}
+    meta = {
+        "prefix_len": prefix_len,
+        "shard_count": len(shard_infos),
+        **format_metadata,
+    }
     tmp_meta = Path("tmp-id-meta.json")
     write_json(tmp_meta, meta)
     err = _upload_to_r2(tmp_meta, f"{bucket}/{version}/id-meta.json")
@@ -1305,7 +1512,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
         sys.exit(1)
     print("  Uploaded id-meta.json to R2")
 
-    return shard_infos, total_records, errors
+    return shard_infos, total_records, errors, format_version
 
 
 # ---------------------------------------------------------------------------
@@ -1405,8 +1612,12 @@ def build_id_index(args):
         # whole point of a patch is to re-stage those prefixes, and the
         # suffix-less full-run marker must be neither read (it would skip
         # the patch) nor written (it would make every later patch a no-op).
-        skip = (not args.prefixes and marker_ranges is None
-                and _read_staging_marker(r2_config, version, staging_marker_key) is not None)
+        skip = (
+            not args.prefixes
+            and marker_ranges is None
+            and _marker_is_current(
+                _read_staging_marker(r2_config, version, staging_marker_key))
+        )
         if skip:
             print(f"\nStage registry: Skipped ({staging_marker_key} complete for {version})")
         else:
@@ -1462,13 +1673,13 @@ def build_id_index(args):
         # (its build*/_SUCCESS glob would double-count the patched prefixes).
         marker = (None if args.prefixes
                   else _read_staging_marker(r2_config, version, build_marker_key))
-        if marker is not None:
+        if _marker_is_current(marker):
             print(f"\nBuild: Skipped ({build_marker_key} complete for {version})")
         else:
             print(f"\nBuild: Build parquet shards")
             t0 = time.time()
             results = phase_build_r2(
-                args.prefix_len, r2_config, version, args.workers,
+                args.prefix_len, r2_config, version, release_version, args.workers,
                 prefixes=range_prefixes,
                 row_group_size=getattr(args, "row_group_size", ROW_GROUP_SIZE),
             )
@@ -1500,7 +1711,7 @@ def build_id_index(args):
         explicit_metadata = "metadata" in phases
         meta_marker = (None if explicit_metadata
                        else _read_staging_marker(r2_config, version, "metadata"))
-        if meta_marker is not None:
+        if _marker_is_current(meta_marker):
             print(f"\nMetadata: Skipped (metadata complete for {version})")
         else:
             t_meta = time.time()
@@ -1511,13 +1722,14 @@ def build_id_index(args):
                 )
 
             print(f"\nMetadata: Generate id-collection.json")
-            shard_infos, total_records, errors = phase_metadata(
+            shard_infos, total_records, errors, output_format = phase_metadata(
                 results, args.prefix_len, version, release_version, r2_config,
             )
             phase_times["Metadata"] = time.time() - t_meta
 
             _write_staging_marker(r2_config, version, "metadata", len(shard_infos),
-                                  extra={"records": total_records})
+                                  extra={"records": total_records},
+                                  format_version=output_format)
 
             total_size = sum(s.get("size_bytes", 0) for s in shard_infos.values())
             max_shard = max((s.get("size_bytes", 0) for s in shard_infos.values()), default=0)

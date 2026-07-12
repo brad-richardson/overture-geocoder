@@ -347,4 +347,69 @@ pub struct IdLookupResult {
     /// Overture GERS ID.
     pub id: String,
     pub bbox: BBox,
+    /// Format-v2 locator fields. Flattening keeps the HTTP response additive;
+    /// legacy shards leave this as None and serialize exactly as `{id, bbox}`.
+    #[serde(flatten)]
+    pub locator: Option<IdLocatorMetadata>,
+}
+
+/// Optional full-record locator metadata appended by ID-index format v2.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct IdLocatorMetadata {
+    pub feature_type: Option<String>,
+    pub theme: Option<String>,
+    pub filename: Option<String>,
+    pub last_seen_release: Option<String>,
+    pub registry_member: bool,
+    pub exists_in_current_release: bool,
+    pub overture_path: Option<String>,
+}
+
+#[cfg(test)]
+mod id_lookup_tests {
+    use super::*;
+
+    fn bbox() -> BBox {
+        BBox {
+            xmin: -1.0,
+            ymin: -2.0,
+            xmax: 1.0,
+            ymax: 2.0,
+        }
+    }
+
+    #[test]
+    fn v1_id_result_serializes_without_locator_keys() {
+        let value = serde_json::to_value(IdLookupResult {
+            id: "abc".into(),
+            bbox: bbox(),
+            locator: None,
+        })
+        .unwrap();
+        assert_eq!(value.as_object().unwrap().len(), 2);
+        assert_eq!(value["id"], "abc");
+        assert!(value.get("filename").is_none());
+    }
+
+    #[test]
+    fn v2_id_result_serializes_nullable_flat_locator_keys() {
+        let value = serde_json::to_value(IdLookupResult {
+            id: "abc".into(),
+            bbox: bbox(),
+            locator: Some(IdLocatorMetadata {
+                feature_type: None,
+                theme: None,
+                filename: None,
+                last_seen_release: Some("2026-05-20.0".into()),
+                registry_member: true,
+                exists_in_current_release: false,
+                overture_path: None,
+            }),
+        })
+        .unwrap();
+        assert!(value["filename"].is_null());
+        assert!(value["feature_type"].is_null());
+        assert_eq!(value["registry_member"], true);
+        assert_eq!(value["exists_in_current_release"], false);
+    }
 }

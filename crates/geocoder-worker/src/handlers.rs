@@ -12,6 +12,10 @@ const MAX_QUERY_LENGTH: usize = 200;
 const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
 const MAX_TOKEN_COUNT: usize = 10;
 
+fn is_id_index_unavailable(err_msg: &str) -> bool {
+    err_msg.contains(NOT_FOUND_SENTINEL) && err_msg.contains("id-index")
+}
+
 const DEFAULT_DIVISION_TYPES: &[&str] = &[
     "country",
     "region",
@@ -241,7 +245,7 @@ pub async fn handle_id_lookup(
         },
         Err(e) => {
             let err_msg = format!("{:?}", e);
-            if err_msg.contains(NOT_FOUND_SENTINEL) && err_msg.contains("id-index") {
+            if is_id_index_unavailable(&err_msg) {
                 return Response::error("ID index not available", 503);
             }
             Err(e)
@@ -455,5 +459,15 @@ mod tests {
         assert!(parsed.contains("place"));
         assert!(parsed.contains("country"));
         assert_eq!(parsed.len(), 8);
+    }
+
+    #[test]
+    fn test_invalid_id_index_metadata_maps_to_unavailable() {
+        let message = format!(
+            "RustError(\"{} invalid id-index metadata for latest version\")",
+            NOT_FOUND_SENTINEL
+        );
+        assert!(is_id_index_unavailable(&message));
+        assert!(!is_id_index_unavailable("invalid id-index metadata"));
     }
 }

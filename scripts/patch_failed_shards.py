@@ -5,7 +5,8 @@ Downloads relevant release data for just the target staging prefixes once,
 then processes all output sub-prefixes from local data.
 
 Usage:
-    python scripts/patch_failed_shards.py --staging-prefixes 430 ff6 --version 2026-02-26.0
+    python scripts/patch_failed_shards.py --staging-prefixes 430 ff6 \
+        --version 2026-07-02.3 --release 2026-06-17.0
 """
 
 import argparse
@@ -17,7 +18,7 @@ from pathlib import Path
 import duckdb
 
 sys.path.insert(0, str(Path(__file__).parent))
-from build_id_index import _assert_shard_schema
+from build_id_index import _assert_locator_rows, _assert_shard_schema, _glob_files
 
 # Load .env
 _env_path = Path(__file__).resolve().parent.parent / ".env"
@@ -63,11 +64,37 @@ def r2_con(r2_config):
     return con
 
 
+def _discover_release_staging_files(con, bucket, version):
+    """Return staged release files; propagate every non-empty-source error."""
+    files = sorted(set(
+        _glob_files(
+            con,
+            f"s3://{bucket}/{version}/staging/id-release-*/bucket=*/*.parquet",
+        )
+        + _glob_files(
+            con,
+            f"s3://{bucket}/{version}/staging/id-release-*/data.parquet",
+        )
+    ))
+    if not files:
+        raise RuntimeError(
+            f"No release staging files found for {version}; refusing partial patch")
+    return files
+
+
+def _local_release_path(remote_path, file_index, pid=None):
+    """Return a collision-free temp path for one staged release object."""
+    name = remote_path.split("/staging/")[-1].split("/")[0]
+    return f"/tmp/patch-release-{name}-{file_index}-{pid or os.getpid()}.parquet"
+
+
 def main():
     parser = argparse.ArgumentParser(description="Patch failed ID index shards")
     parser.add_argument("--staging-prefixes", nargs="+", required=True,
                         help="3-char staging prefixes to rebuild (e.g. 430 ff6)")
     parser.add_argument("--version", required=True, help="Version string (e.g. 2026-02-26.0)")
+    parser.add_argument("--release", required=True,
+                        help="Pinned Overture release represented by the staging data")
     parser.add_argument("--bucket", default="geocoder-shards")
     args = parser.parse_args()
 
@@ -82,36 +109,33 @@ def main():
 
     # Discover release staging files
     print("Discovering release staging files...")
-    rows = con.execute(f"""
-        SELECT file FROM glob('s3://{bucket}/{version}/staging/id-release-*/data.parquet')
-    """).fetchall()
-    release_files = sorted(r[0] for r in rows)
+    release_files = _discover_release_staging_files(con, bucket, version)
     print(f"  Found {len(release_files)} release files")
 
     # Download only the rows we need from release files (filtered by our staging prefixes)
     prefix_filter = ", ".join(f"'{sp}'" for sp in staging_prefixes)
     local_release_files = []
-    for rf in release_files:
+    for file_index, rf in enumerate(release_files):
         name = rf.split("/staging/")[-1].split("/")[0]
-        local_path = f"/tmp/patch-release-{name}.parquet"
+        # Bucketed staging contains many objects under the same type directory.
+        # Keep each download distinct: reusing only `name` overwrote earlier
+        # buckets and could later unlink a path already queued for the merge.
+        local_path = _local_release_path(rf, file_index)
         t_dl = time.time()
-        try:
-            con.execute(f"""
-                COPY (
-                    SELECT * FROM read_parquet('{rf}')
-                    WHERE prefix IN ({prefix_filter})
-                    ORDER BY prefix, id
-                ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-            """)
-            count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{local_path}')").fetchone()[0]
-            size_mb = os.path.getsize(local_path) / 1024 / 1024
-            print(f"  {name}: {count:,} records, {size_mb:.1f} MB ({time.time() - t_dl:.0f}s)")
-            if count > 0:
-                local_release_files.append(local_path)
-            else:
-                os.unlink(local_path)
-        except Exception as e:
-            print(f"  {name}: no matching data ({e})")
+        con.execute(f"""
+            COPY (
+                SELECT * FROM read_parquet('{rf}')
+                WHERE prefix IN ({prefix_filter})
+                ORDER BY prefix, id
+            ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+        """)
+        count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{local_path}')").fetchone()[0]
+        size_mb = os.path.getsize(local_path) / 1024 / 1024
+        print(f"  {name}: {count:,} records, {size_mb:.1f} MB ({time.time() - t_dl:.0f}s)")
+        if count > 0:
+            local_release_files.append(local_path)
+        else:
+            os.unlink(local_path)
     print(f"  {len(local_release_files)} release files with data for target prefixes")
 
     total_shards = 0
@@ -128,20 +152,22 @@ def main():
             f"prefix={staging_prefix}/*.parquet"
         )
         local_registry = f"/tmp/patch-reg-{staging_prefix}.parquet"
-        has_registry = False
+        registry_files = _glob_files(con, registry_r2)
+        has_registry = bool(registry_files)
 
-        try:
+        if has_registry:
             con.execute(f"""
                 COPY (
-                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
+                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                           feature_type, filename, last_seen_release,
+                           registry_member, source_theme
                     FROM read_parquet('{registry_r2}')
                 ) TO '{local_registry}' (FORMAT PARQUET);
             """)
             reg_count = con.execute(f"SELECT COUNT(*) FROM read_parquet('{local_registry}')").fetchone()[0]
             print(f"  Registry: {reg_count:,} records")
-            has_registry = True
-        except Exception as e:
-            print(f"  No registry data for {staging_prefix}: {e}")
+        else:
+            print(f"  No registry data for {staging_prefix}")
 
         for prefix in output_prefixes:
             id_filter = f"AND id::VARCHAR LIKE '{prefix}%'"
@@ -149,31 +175,33 @@ def main():
 
             if has_registry:
                 sources.append(
-                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
+                    f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, "
+                    f"feature_type, filename, last_seen_release, registry_member, "
+                    f"source_theme "
                     f"FROM read_parquet('{local_registry}') WHERE 1=1 {id_filter}"
                 )
 
             # Query LOCAL release files
             for lrf in local_release_files:
-                try:
-                    row = con.execute(
-                        f"SELECT 1 FROM read_parquet('{lrf}') "
-                        f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
-                    ).fetchone()
-                    if row:
-                        sources.append(
-                            f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax "
-                            f"FROM read_parquet('{lrf}') "
-                            f"WHERE prefix = '{staging_prefix}' {id_filter}"
-                        )
-                except Exception:
-                    pass
+                row = con.execute(
+                    f"SELECT 1 FROM read_parquet('{lrf}') "
+                    f"WHERE prefix = '{staging_prefix}' {id_filter} LIMIT 1"
+                ).fetchone()
+                if row:
+                    sources.append(
+                        f"SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, "
+                        f"feature_type, filename, last_seen_release, registry_member, "
+                        f"source_theme "
+                        f"FROM read_parquet('{lrf}') "
+                        f"WHERE prefix = '{staging_prefix}' {id_filter}"
+                    )
 
             if not sources:
                 print(f"  {prefix}: no data")
                 continue
 
             union_query = " UNION ALL ".join(sources)
+            _assert_locator_rows(con, union_query, prefix, args.release)
             count = con.execute(f"SELECT COUNT(*) FROM ({union_query})").fetchone()[0]
             if count == 0:
                 print(f"  {prefix}: 0 records")
@@ -182,7 +210,10 @@ def main():
             r2_dest = f"s3://{bucket}/{version}/id-index/{prefix}.parquet"
             con.execute(f"""
                 COPY (
-                    SELECT * FROM ({union_query}) ORDER BY id
+                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                           feature_type, filename, last_seen_release,
+                           registry_member
+                    FROM ({union_query}) ORDER BY id
                 ) TO '{r2_dest}'
                 (FORMAT PARQUET, COMPRESSION UNCOMPRESSED, ROW_GROUP_SIZE 100000);
             """)
