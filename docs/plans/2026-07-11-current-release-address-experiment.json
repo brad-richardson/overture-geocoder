@@ -1,0 +1,1095 @@
+{
+  "address_benchmark": {
+    "address_derived_street_proxy": {
+      "address_rows_with_street": 19702,
+      "distinct_address_street_names": 2033,
+      "max_locality_fanout": 5,
+      "max_postcode_fanout": 117,
+      "median_locality_fanout": 1.0,
+      "median_postcode_fanout": 1.0,
+      "names_spanning_multiple_localities": 133,
+      "names_spanning_multiple_postcodes": 302,
+      "p90_locality_fanout": 1.0,
+      "p90_postcode_fanout": 2.0,
+      "proxy_only": true,
+      "warning": "Address-derived street metrics are a proxy for searchable name/context coverage; they are not transportation-segment, connector, topology, road-class, or routability evidence."
+    },
+    "field_coverage": [
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "overture_id",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "overture_release",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 0.9855344635062431,
+        "field": "number",
+        "populated_rows": 19417
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "street",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 0.3834636077555578,
+        "field": "unit",
+        "populated_rows": 7555
+      },
+      {
+        "available_in_input": true,
+        "coverage": 0.8981321693229114,
+        "field": "postcode",
+        "populated_rows": 17695
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "state",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 0.9874632017054106,
+        "field": "locality",
+        "populated_rows": 19455
+      },
+      {
+        "available_in_input": true,
+        "coverage": 0.013399654857374885,
+        "field": "postal_city",
+        "populated_rows": 264
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "country",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "lon",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "lat",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "version",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": true,
+        "coverage": 1.0,
+        "field": "root_source_count",
+        "populated_rows": 19702
+      },
+      {
+        "available_in_input": false,
+        "coverage": 0.0,
+        "field": "search_text",
+        "populated_rows": 0
+      }
+    ],
+    "historical_byte_extrapolations": {
+      "estimates": [],
+      "historical_only": true,
+      "status": "not_provided",
+      "warning": "Pass --historical-metrics to extrapolate old measured artifacts."
+    },
+    "identity_and_provenance": {
+      "feature_version": {
+        "distinct_count": 1,
+        "populated_rows": 19702,
+        "top_values": [
+          {
+            "rows": 19702,
+            "version": 1
+          }
+        ]
+      },
+      "mixed_release": false,
+      "mixed_release_warning": null,
+      "nested_root_sources_available": true,
+      "nested_sources_available": true,
+      "property_specific_source_records": 0,
+      "release_distinct_count": 1,
+      "release_values": [
+        {
+          "release": "2026-06-17.0",
+          "rows": 19702
+        }
+      ],
+      "root_cardinality": {
+        "max_root_sources": 1,
+        "multiple_root_rows": 0,
+        "one_root_rows": 19702,
+        "zero_root_rows": 0
+      },
+      "root_datasets": [
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/Geoscape Australia",
+          "distinct_feature_ids": 4000,
+          "license_populated_records": 0,
+          "root_source_records": 4000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/adresse.data.gouv.fr",
+          "distinct_feature_ids": 3438,
+          "license_populated_records": 0,
+          "root_source_records": 3438,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/AddressForAll/INEGI",
+          "distinct_feature_ids": 2000,
+          "license_populated_records": 0,
+          "root_source_records": 2000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/LINZ",
+          "distinct_feature_ids": 2000,
+          "license_populated_records": 0,
+          "root_source_records": 2000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/MA/MassGIS",
+          "distinct_feature_ids": 2000,
+          "license_populated_records": 0,
+          "root_source_records": 2000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/NY/NYC Open Data",
+          "distinct_feature_ids": 2000,
+          "license_populated_records": 0,
+          "root_source_records": 2000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "OpenAddresses/Singapore Land Authority",
+          "distinct_feature_ids": 2000,
+          "license_populated_records": 0,
+          "root_source_records": 2000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "br_ibge",
+          "distinct_feature_ids": 2000,
+          "license_populated_records": 0,
+          "root_source_records": 2000,
+          "update_time_populated_records": 0
+        },
+        {
+          "confidence_populated_records": 0,
+          "dataset": "NAD",
+          "distinct_feature_ids": 264,
+          "license_populated_records": 0,
+          "root_source_records": 264,
+          "update_time_populated_records": 0
+        }
+      ],
+      "root_source_count_mismatch_rows": 0,
+      "root_source_field_coverage": {
+        "confidence_max": null,
+        "confidence_min": null,
+        "confidence_populated_records": 0,
+        "dataset_populated_records": 19702,
+        "license_populated_records": 0,
+        "root_source_records": 19702,
+        "update_time_populated_records": 0
+      },
+      "source_status": "computed",
+      "source_stratified_coordinate_variation": [
+        {
+          "address_rows_with_coordinates": 4000,
+          "dataset": "OpenAddresses/Geoscape Australia",
+          "proxy_context_coordinate_variant_keys": 0,
+          "proxy_context_keys_over_10m_envelope_spread": 0,
+          "proxy_context_keys_with_coordinates": 4000
+        },
+        {
+          "address_rows_with_coordinates": 3438,
+          "dataset": "OpenAddresses/adresse.data.gouv.fr",
+          "proxy_context_coordinate_variant_keys": 1,
+          "proxy_context_keys_over_10m_envelope_spread": 1,
+          "proxy_context_keys_with_coordinates": 3437
+        },
+        {
+          "address_rows_with_coordinates": 2000,
+          "dataset": "OpenAddresses/LINZ",
+          "proxy_context_coordinate_variant_keys": 0,
+          "proxy_context_keys_over_10m_envelope_spread": 0,
+          "proxy_context_keys_with_coordinates": 2000
+        },
+        {
+          "address_rows_with_coordinates": 2000,
+          "dataset": "OpenAddresses/NY/NYC Open Data",
+          "proxy_context_coordinate_variant_keys": 0,
+          "proxy_context_keys_over_10m_envelope_spread": 0,
+          "proxy_context_keys_with_coordinates": 2000
+        },
+        {
+          "address_rows_with_coordinates": 2000,
+          "dataset": "OpenAddresses/Singapore Land Authority",
+          "proxy_context_coordinate_variant_keys": 0,
+          "proxy_context_keys_over_10m_envelope_spread": 0,
+          "proxy_context_keys_with_coordinates": 2000
+        },
+        {
+          "address_rows_with_coordinates": 1998,
+          "dataset": "OpenAddresses/MA/MassGIS",
+          "proxy_context_coordinate_variant_keys": 1,
+          "proxy_context_keys_over_10m_envelope_spread": 0,
+          "proxy_context_keys_with_coordinates": 1997
+        },
+        {
+          "address_rows_with_coordinates": 1972,
+          "dataset": "br_ibge",
+          "proxy_context_coordinate_variant_keys": 58,
+          "proxy_context_keys_over_10m_envelope_spread": 43,
+          "proxy_context_keys_with_coordinates": 1893
+        },
+        {
+          "address_rows_with_coordinates": 1745,
+          "dataset": "OpenAddresses/AddressForAll/INEGI",
+          "proxy_context_coordinate_variant_keys": 16,
+          "proxy_context_keys_over_10m_envelope_spread": 12,
+          "proxy_context_keys_with_coordinates": 1728
+        },
+        {
+          "address_rows_with_coordinates": 264,
+          "dataset": "NAD",
+          "proxy_context_coordinate_variant_keys": 0,
+          "proxy_context_keys_over_10m_envelope_spread": 0,
+          "proxy_context_keys_with_coordinates": 264
+        }
+      ],
+      "source_stratified_normalization": [
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "OpenAddresses/Geoscape Australia",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 4000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "OpenAddresses/adresse.data.gouv.fr",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 3438
+        },
+        {
+          "conservative_keys_collapsed": 2,
+          "dataset": "OpenAddresses/AddressForAll/INEGI",
+          "lossy_collision_keys": 1,
+          "source_address_rows": 2000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "OpenAddresses/LINZ",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 2000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "OpenAddresses/MA/MassGIS",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 2000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "OpenAddresses/NY/NYC Open Data",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 2000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "OpenAddresses/Singapore Land Authority",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 2000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "br_ibge",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 2000
+        },
+        {
+          "conservative_keys_collapsed": 0,
+          "dataset": "NAD",
+          "lossy_collision_keys": 0,
+          "source_address_rows": 264
+        }
+      ]
+    },
+    "input": {
+      "columns": [
+        "address_levels",
+        "bbox_geometry_discordant",
+        "bbox_missing",
+        "bbox_population",
+        "bbox_xmax",
+        "bbox_xmin",
+        "bbox_ymax",
+        "bbox_ymin",
+        "country",
+        "deterministic_sample_rank",
+        "expected_country",
+        "lat",
+        "locality",
+        "lon",
+        "number",
+        "overture_id",
+        "overture_release",
+        "overture_schema_version",
+        "postal_city",
+        "postcode",
+        "root_source_count",
+        "root_sources",
+        "sample_box",
+        "sample_selection_contract",
+        "sample_stratum",
+        "sources",
+        "state",
+        "street",
+        "unit",
+        "version"
+      ],
+      "path": "<validated temporary output-bounded sample; not committed>",
+      "row_count": 19702,
+      "size_bytes": 997523
+    },
+    "limitations": [
+      "Address-derived street metrics are a proxy for searchable name/context coverage; they are not transportation-segment, connector, topology, road-class, or routability evidence.",
+      "Proxy-context-key spread uses latitude range plus the minimum circular longitude arc, not all pairwise distances.",
+      "A collision reports key collapse, not proof that the source strings identify different addresses.",
+      "Postal city is a query alias and is measured separately from geographic locality.",
+      "Outputs are bounded, but DuckDB aggregate and sort memory is input-dependent and may spill to disk.",
+      "No address interpolation, transportation topology, or query-quality benchmark is performed."
+    ],
+    "locality_and_postal_city": {
+      "postal_city_only_rows": 247,
+      "rows_with_both": 17,
+      "rows_with_distinct_postal_city": 0,
+      "rows_with_locality": 19455,
+      "rows_with_postal_city": 264
+    },
+    "normalization_collisions": {
+      "conservative_keys_collapsed": 2,
+      "lossy_collision_keys": 1,
+      "lossy_normalization": "The comparison removes every character except Unicode letters and numbers inside each component. It is deliberately lossy and is not recommended for identity keys.",
+      "max_conservative_keys_per_lossy_key": 2,
+      "recommended_normalization": "NFC normalize, lowercase, trim, and collapse whitespace per structured component; preserve punctuation, diacritics, and component boundaries.",
+      "rows_on_lossy_collision_keys": 2
+    },
+    "postcode_shard_distribution": {
+      "max_rows": 1403,
+      "median_rows": 2.0,
+      "min_rows": 1,
+      "p90_rows": 8.0,
+      "postcode_count": 1388,
+      "postcodes_over_50k_rows": 0,
+      "rows_with_postcode": 17695
+    },
+    "proxy_context_key_coordinate_variation": {
+      "duplicate_proxy_context_keys": 76,
+      "envelope_spread_buckets": [
+        {
+          "distance_bucket": "0-1m",
+          "proxy_context_keys": 1,
+          "rows": 2
+        },
+        {
+          "distance_bucket": "1-10m",
+          "proxy_context_keys": 19,
+          "rows": 38
+        },
+        {
+          "distance_bucket": "10-100m",
+          "proxy_context_keys": 47,
+          "rows": 111
+        },
+        {
+          "distance_bucket": "100m-1km",
+          "proxy_context_keys": 9,
+          "rows": 23
+        }
+      ],
+      "max_circular_longitude_span_degrees": 0.004291999999963991,
+      "max_envelope_spread_m": 369.86846665210345,
+      "proxy_context_coordinate_variant_keys": 76,
+      "proxy_context_keys_over_10m_envelope_spread": 56,
+      "proxy_context_keys_with_coordinates": 19319,
+      "rows_on_proxy_context_coordinate_variant_keys": 174
+    },
+    "report_version": 1,
+    "unit_and_base_key_density": {
+      "base_keys_with_multiple_units": 970,
+      "distinct_base_keys": 15928,
+      "keyable_rows": 19417,
+      "max_units_on_one_base": 49,
+      "mean_rows_per_base": 1.2190482169763939,
+      "rows_on_multi_unit_bases": 4182,
+      "rows_with_unit": 7555
+    }
+  },
+  "data_maturity": "Alpha",
+  "gold_queries": {
+    "created": 0,
+    "reason": "Sampled source records are not independently verified relevance labels. Promoting them to gold queries would manufacture circular ground truth."
+  },
+  "limitations": [
+    "The Overture Addresses theme is Alpha in the cited release.",
+    "The boxes are purposive and tiny; estimates must not be extrapolated globally.",
+    "All counts are raw unweighted sample counts unless explicitly labeled as preflight box populations.",
+    "Rows are deterministic pseudo-random samples only when a box exceeds its cap.",
+    "A zero-row box is evidence of no records in that exact box, not country-wide absence.",
+    "address_levels are preserved in full. The first/last values are only general/particular routing proxies; their semantic meaning is country-dependent.",
+    "Source-stratified records are multi-membership: one feature may count in multiple root datasets.",
+    "Coordinate variation uses an envelope-spread proxy, not pairwise distance.",
+    "Local output/workspace guards do not meter S3 scan bytes or HTTP requests; the remote query has an explicit wall-clock interrupt.",
+    "No production shard, catalog, Worker, R2 object, deployment, or interpolation is changed."
+  ],
+  "proxy_context_key": {
+    "coordinate_spread_warning": "Coordinate spread is a latitude-range/minimum-circular-longitude-envelope proxy, not maximum pairwise or road-network distance.",
+    "definition": "NFC/lowercase/whitespace-normalized country, first address_levels value (most-general proxy), last address_levels value (most-specific proxy), postcode, number, street, and unit. Address-level meanings remain country-dependent, so this is not a globally typed structured address key."
+  },
+  "release": "2026-06-17.0",
+  "report_generated_utc": "2026-07-12T13:52:00.627329+00:00",
+  "report_version": 3,
+  "sampling": {
+    "bounds_warning": "Row/byte/temp/memory guards bound local outputs and DuckDB workspace only. They do not meter S3 bytes scanned or HTTP requests. The single remote query is interrupted at the reported wall-clock cap.",
+    "box_count": 12,
+    "boxes": [
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 4156,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "US",
+        "missing_bbox_rows": null,
+        "name": "manhattan",
+        "number_rows": 2000,
+        "postal_city_rows": 0,
+        "postcode_rows": 1999,
+        "rationale": "US high-rise core; municipal/open-address source mix",
+        "sample_box": "manhattan",
+        "sample_fraction": 0.48123195380173245,
+        "sample_stratum": "high-rise",
+        "sampled_rows": 2000,
+        "stratum": "high-rise",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 159,
+        "xmax": -73.99,
+        "xmin": -74.01,
+        "ymax": 40.72,
+        "ymin": 40.7,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 2130,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "SG",
+        "missing_bbox_rows": null,
+        "name": "singapore-cbd",
+        "number_rows": 2000,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "Asian high-rise core and non-US address conventions",
+        "sample_box": "singapore-cbd",
+        "sample_fraction": 0.9389671361502347,
+        "sample_stratum": "high-rise",
+        "sampled_rows": 2000,
+        "stratum": "high-rise",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 2000,
+        "xmax": 103.865,
+        "xmin": 103.845,
+        "ymax": 1.295,
+        "ymin": 1.275,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 94359,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "AU",
+        "missing_bbox_rows": null,
+        "name": "melbourne-cbd",
+        "number_rows": 2000,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "G-NAF-backed high-rise core with units",
+        "sample_box": "melbourne-cbd",
+        "sample_fraction": 0.021195646414226516,
+        "sample_stratum": "high-rise",
+        "sampled_rows": 2000,
+        "stratum": "high-rise",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 1846,
+        "xmax": 144.98,
+        "xmin": 144.95,
+        "ymax": -37.805,
+        "ymin": -37.825,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 8754,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "FR",
+        "missing_bbox_rows": null,
+        "name": "paris",
+        "number_rows": 2000,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "Dense European addressing and diacritics",
+        "sample_box": "paris",
+        "sample_fraction": 0.2284669865204478,
+        "sample_stratum": "dense",
+        "sampled_rows": 2000,
+        "stratum": "dense",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 0,
+        "xmax": 2.355,
+        "xmin": 2.335,
+        "ymax": 48.87,
+        "ymin": 48.85,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 6869,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "MX",
+        "missing_bbox_rows": null,
+        "name": "mexico-city",
+        "number_rows": 1745,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "Dense Latin American addressing",
+        "sample_box": "mexico-city",
+        "sample_fraction": 0.29116319697190274,
+        "sample_stratum": "dense",
+        "sampled_rows": 2000,
+        "stratum": "dense",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 0,
+        "xmax": -99.125,
+        "xmin": -99.145,
+        "ymax": 19.44,
+        "ymin": 19.42,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 10845,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "BR",
+        "missing_bbox_rows": null,
+        "name": "sao-paulo",
+        "number_rows": 1972,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "AddressForAll-relevant dense South American coverage",
+        "sample_box": "sao-paulo",
+        "sample_fraction": 0.18441678192715538,
+        "sample_stratum": "dense",
+        "sampled_rows": 2000,
+        "stratum": "dense",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 0,
+        "xmax": -46.635,
+        "xmin": -46.655,
+        "ymax": -23.54,
+        "ymin": -23.56,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 13153,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "US",
+        "missing_bbox_rows": null,
+        "name": "cambridge-ma",
+        "number_rows": 1998,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "US mixed residential/institutional fabric",
+        "sample_box": "cambridge-ma",
+        "sample_fraction": 0.1520565650421957,
+        "sample_stratum": "suburban",
+        "sampled_rows": 2000,
+        "stratum": "suburban",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 1059,
+        "xmax": -71.13,
+        "xmin": -71.16,
+        "ymax": 42.39,
+        "ymin": 42.36,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 41040,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "AU",
+        "missing_bbox_rows": null,
+        "name": "parramatta",
+        "number_rows": 2000,
+        "postal_city_rows": 0,
+        "postcode_rows": 2000,
+        "rationale": "Australian suburban G-NAF coverage",
+        "sample_box": "parramatta",
+        "sample_fraction": 0.04873294346978557,
+        "sample_stratum": "suburban",
+        "sampled_rows": 2000,
+        "stratum": "suburban",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 1662,
+        "xmax": 151.02,
+        "xmin": 150.99,
+        "ymax": -33.8,
+        "ymin": -33.83,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 2000,
+        "bbox_population": 30734,
+        "cap_hit": true,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "NZ",
+        "missing_bbox_rows": null,
+        "name": "auckland",
+        "number_rows": 2000,
+        "postal_city_rows": 0,
+        "postcode_rows": 0,
+        "rationale": "New Zealand suburban source and addressing conventions",
+        "sample_box": "auckland",
+        "sample_fraction": 0.06507451031430989,
+        "sample_stratum": "suburban",
+        "sampled_rows": 2000,
+        "stratum": "suburban",
+        "street_rows": 2000,
+        "unexpected_country_rows": 0,
+        "unit_rows": 829,
+        "xmax": 174.77,
+        "xmin": 174.73,
+        "ymax": -36.86,
+        "ymin": -36.9,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 264,
+        "bbox_population": 264,
+        "cap_hit": false,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "US",
+        "missing_bbox_rows": null,
+        "name": "rural-kansas",
+        "number_rows": 264,
+        "postal_city_rows": 264,
+        "postcode_rows": 258,
+        "rationale": "Sparse US rural coverage",
+        "sample_box": "rural-kansas",
+        "sample_fraction": 1.0,
+        "sample_stratum": "rural",
+        "sampled_rows": 264,
+        "stratum": "rural",
+        "street_rows": 264,
+        "unexpected_country_rows": 0,
+        "unit_rows": 0,
+        "xmax": -96.95,
+        "xmin": -97.05,
+        "ymax": 39.08,
+        "ymin": 38.98,
+        "zero_root_rows": 0
+      },
+      {
+        "address_level_rows": 1438,
+        "bbox_population": 1438,
+        "cap_hit": false,
+        "discordant_bbox_rows": 0,
+        "distinct_root_datasets": 1,
+        "expected_country": "FR",
+        "missing_bbox_rows": null,
+        "name": "rural-france",
+        "number_rows": 1438,
+        "postal_city_rows": 0,
+        "postcode_rows": 1438,
+        "rationale": "Sparse European rural coverage",
+        "sample_box": "rural-france",
+        "sample_fraction": 1.0,
+        "sample_stratum": "rural",
+        "sampled_rows": 1438,
+        "stratum": "rural",
+        "street_rows": 1438,
+        "unexpected_country_rows": 0,
+        "unit_rows": 0,
+        "xmax": 1.9,
+        "xmin": 1.8,
+        "ymax": 46.85,
+        "ymin": 46.75,
+        "zero_root_rows": 0
+      },
+      {
+        "bbox_population": 0,
+        "cap_hit": false,
+        "distinct_root_datasets": 0,
+        "expected_country": "ZA",
+        "name": "rural-kwazulu-natal",
+        "rationale": "Sparse African coverage and possible sample-coverage gap",
+        "sample_fraction": null,
+        "sampled_rows": 0,
+        "stratum": "rural",
+        "xmax": 30.25,
+        "xmin": 30.15,
+        "ymax": -29.75,
+        "ymin": -29.85
+      }
+    ],
+    "candidate_count_cap_per_box": 250000,
+    "count_basis": "Counts are raw, unweighted sample counts. Recorded candidate populations come from bbox-prefiltered, exact-geometry-verified candidates and cannot observe missing or spatially discordant bbox rows; no global design-weighted estimate is reported.",
+    "current_harness_query_sql": "WITH configured_boxes(\n            sample_box, sample_stratum, expected_country,\n            xmin, ymin, xmax, ymax\n        ) AS (VALUES\n                ('manhattan', 'high-rise', 'US', -74.01, 40.7, -73.99, 40.72),\n                ('singapore-cbd', 'high-rise', 'SG', 103.845, 1.275, 103.865, 1.295),\n                ('melbourne-cbd', 'high-rise', 'AU', 144.95, -37.825, 144.98, -37.805),\n                ('paris', 'dense', 'FR', 2.335, 48.85, 2.355, 48.87),\n                ('mexico-city', 'dense', 'MX', -99.145, 19.42, -99.125, 19.44),\n                ('sao-paulo', 'dense', 'BR', -46.655, -23.56, -46.635, -23.54),\n                ('cambridge-ma', 'suburban', 'US', -71.16, 42.36, -71.13, 42.39),\n                ('parramatta', 'suburban', 'AU', 150.99, -33.83, 151.02, -33.8),\n                ('auckland', 'suburban', 'NZ', 174.73, -36.9, 174.77, -36.86),\n                ('rural-kansas', 'rural', 'US', -97.05, 38.98, -96.95, 39.08),\n                ('rural-france', 'rural', 'FR', 1.8, 46.75, 1.9, 46.85),\n                ('rural-kwazulu-natal', 'rural', 'ZA', 30.15, -29.85, 30.25, -29.75)\n        ), bbox_pruned AS MATERIALIZED (\n            SELECT *\n            FROM read_parquet('s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/*', hive_partitioning = true)\n            WHERE ((bbox IS NOT NULL\n              AND bbox.xmax >= -74.01\n              AND bbox.xmin <= -73.99\n              AND bbox.ymax >= 40.7\n              AND bbox.ymin <= 40.72)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 103.845\n              AND bbox.xmin <= 103.865\n              AND bbox.ymax >= 1.275\n              AND bbox.ymin <= 1.295)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 144.95\n              AND bbox.xmin <= 144.98\n              AND bbox.ymax >= -37.825\n              AND bbox.ymin <= -37.805)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 2.335\n              AND bbox.xmin <= 2.355\n              AND bbox.ymax >= 48.85\n              AND bbox.ymin <= 48.87)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= -99.145\n              AND bbox.xmin <= -99.125\n              AND bbox.ymax >= 19.42\n              AND bbox.ymin <= 19.44)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= -46.655\n              AND bbox.xmin <= -46.635\n              AND bbox.ymax >= -23.56\n              AND bbox.ymin <= -23.54)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= -71.16\n              AND bbox.xmin <= -71.13\n              AND bbox.ymax >= 42.36\n              AND bbox.ymin <= 42.39)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 150.99\n              AND bbox.xmin <= 151.02\n              AND bbox.ymax >= -33.83\n              AND bbox.ymin <= -33.8)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 174.73\n              AND bbox.xmin <= 174.77\n              AND bbox.ymax >= -36.9\n              AND bbox.ymin <= -36.86)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= -97.05\n              AND bbox.xmin <= -96.95\n              AND bbox.ymax >= 38.98\n              AND bbox.ymin <= 39.08)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 1.8\n              AND bbox.xmin <= 1.9\n              AND bbox.ymax >= 46.75\n              AND bbox.ymin <= 46.85)\n                OR (bbox IS NOT NULL\n              AND bbox.xmax >= 30.15\n              AND bbox.xmin <= 30.25\n              AND bbox.ymax >= -29.85\n              AND bbox.ymin <= -29.75))\n        ), matched AS (\n            SELECT address.*, box.*\n            FROM bbox_pruned address\n            JOIN configured_boxes box ON\n                address.geometry IS NOT NULL\n                AND ST_GeometryType(address.geometry) = 'POINT'\n                AND ST_X(address.geometry) >= box.xmin\n                AND ST_X(address.geometry) <= box.xmax\n                AND ST_Y(address.geometry) >= box.ymin\n                AND ST_Y(address.geometry) <= box.ymax\n        ), ranked AS (\n            SELECT\n                id AS overture_id,\n                '2026-06-17.0' AS overture_release,\n                'v1.17.0' AS overture_schema_version,\n                version,\n                ST_X(geometry) AS lon,\n                ST_Y(geometry) AS lat,\n                bbox.xmin AS bbox_xmin,\n                bbox.ymin AS bbox_ymin,\n                bbox.xmax AS bbox_xmax,\n                bbox.ymax AS bbox_ymax,\n                FALSE AS bbox_missing,\n                NOT (\n                    ST_X(geometry) >= bbox.xmin AND ST_X(geometry) <= bbox.xmax\n                    AND ST_Y(geometry) >= bbox.ymin AND ST_Y(geometry) <= bbox.ymax\n                ) AS bbox_geometry_discordant,\n                country, number, street, unit, postcode, postal_city,\n                address_levels,\n                list_extract(address_levels, 1).value AS state,\n                list_extract(address_levels, -1).value AS locality,\n                sources,\n                list_filter(sources, lambda source: source.property = '') AS root_sources,\n                list_count(list_filter(sources, lambda source: source.property = ''))\n                    AS root_source_count,\n                sample_box, sample_stratum, expected_country,\n                'bbox-prefiltered-geometry-verified' AS sample_selection_contract,\n                COUNT(*) OVER (PARTITION BY sample_box)::BIGINT AS bbox_population,\n                ROW_NUMBER() OVER (\n                    PARTITION BY sample_box ORDER BY md5(id)\n                ) AS deterministic_sample_rank\n            FROM matched\n        )\n        SELECT * FROM ranked\n        WHERE deterministic_sample_rank <= 2000\n        ORDER BY sample_box, deterministic_sample_rank",
+    "duckdb_memory_limit": "2GB",
+    "duckdb_temp_byte_cap": 536870912,
+    "extraction": [
+      {
+        "boxes": [
+          "manhattan",
+          "singapore-cbd",
+          "melbourne-cbd",
+          "paris",
+          "mexico-city",
+          "sao-paulo",
+          "cambridge-ma",
+          "parramatta",
+          "auckland",
+          "rural-kansas",
+          "rural-france",
+          "rural-kwazulu-natal"
+        ],
+        "candidate_populations": {
+          "auckland": 30734,
+          "cambridge-ma": 13153,
+          "manhattan": 4156,
+          "melbourne-cbd": 94359,
+          "mexico-city": 6869,
+          "paris": 8754,
+          "parramatta": 41040,
+          "rural-france": 1438,
+          "rural-kansas": 264,
+          "sao-paulo": 10845,
+          "singapore-cbd": 2130
+        },
+        "completed_utc": "2026-07-12T13:32:51.020849+00:00",
+        "elapsed_seconds": 595.19,
+        "parquet_bytes": 997523,
+        "per_box_parquet_bytes": {
+          "auckland": 108836,
+          "cambridge-ma": 103020,
+          "manhattan": 103252,
+          "melbourne-cbd": 95183,
+          "mexico-city": 106678,
+          "paris": 111544,
+          "parramatta": 102580,
+          "rural-france": 83712,
+          "rural-kansas": 21924,
+          "rural-kwazulu-natal": 1062,
+          "sao-paulo": 108450,
+          "singapore-cbd": 110491
+        },
+        "rows": 19702,
+        "sample_sql_sha256": "543b1bbed6f203df0d443d90c598a4029448e5f2c1ad54b9cab4c350b4333f4d",
+        "scope": "single-pass-multi-box",
+        "shared_single_pass": true,
+        "started_utc": "2026-07-12T13:22:55.515233+00:00",
+        "workspace_parquet_bytes": 997523
+      }
+    ],
+    "geometry_contract": "Required Point geometry and ST_X/ST_Y select rows. Optional bbox is never a correctness filter; missing and geometry-discordant bbox values are reported.",
+    "method": "purposive 12-box strata; deterministic md5(id) sample within each box",
+    "peak_output_parquet_bytes": 997523,
+    "per_box_output_byte_cap": 8388608,
+    "remote_wall_clock_cap_seconds": 600,
+    "row_cap_per_box": 2000,
+    "sample_contract_warning": "Remote I/O was bounded with one combined bbox-prefiltered scan, followed by exact Point-coordinate membership. Missing or spatially discordant bbox rows are unobservable, so candidate populations are not fully geometry-authoritative.",
+    "statistically_representative": false,
+    "total_extraction_seconds": 595.19,
+    "workspace_output_byte_cap": 100663296
+  },
+  "schema_version": "v1.17.0",
+  "source_evidence": {
+    "confidence_warning": "Source confidence is source-supplied and is not calibrated across datasets; missing confidence is not zero confidence.",
+    "datasets": [
+      {
+        "boxes": 2,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/Geoscape Australia",
+        "distinct_features": 4000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 4000,
+        "strata": "high-rise, suburban",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 2,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/adresse.data.gouv.fr",
+        "distinct_features": 3438,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 3438,
+        "strata": "dense, rural",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/AddressForAll/INEGI",
+        "distinct_features": 2000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 2000,
+        "strata": "dense",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/LINZ",
+        "distinct_features": 2000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 2000,
+        "strata": "suburban",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/MA/MassGIS",
+        "distinct_features": 2000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 2000,
+        "strata": "suburban",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/NY/NYC Open Data",
+        "distinct_features": 2000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 2000,
+        "strata": "high-rise",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "OpenAddresses/Singapore Land Authority",
+        "distinct_features": 2000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 2000,
+        "strata": "high-rise",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "br_ibge",
+        "distinct_features": 2000,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 2000,
+        "strata": "dense",
+        "update_time_records": 0
+      },
+      {
+        "boxes": 1,
+        "confidence_max": null,
+        "confidence_mean": null,
+        "confidence_min": null,
+        "confidence_records": 0,
+        "dataset": "NAD",
+        "distinct_features": 264,
+        "example_license": null,
+        "newest_update_time": null,
+        "oldest_update_time": null,
+        "root_source_records": 264,
+        "strata": "rural",
+        "update_time_records": 0
+      }
+    ],
+    "freshness_warning": "update_time describes a source record when populated; it is neither Overture release time nor a guaranteed observation time.",
+    "source_item_coverage": [
+      {
+        "between_records": 0,
+        "confidence_records": 0,
+        "dataset_records": 19702,
+        "license_records": 0,
+        "non_root_property_records": 0,
+        "record_id_records": 0,
+        "scope": "all",
+        "source_item_records": 19702,
+        "update_time_records": 0
+      },
+      {
+        "between_records": 0,
+        "confidence_records": 0,
+        "dataset_records": 19702,
+        "license_records": 0,
+        "non_root_property_records": 0,
+        "record_id_records": 0,
+        "scope": "root",
+        "source_item_records": 19702,
+        "update_time_records": 0
+      }
+    ],
+    "source_properties": [
+      {
+        "property": "",
+        "source_item_records": 19702
+      }
+    ],
+    "summary": {
+      "confidence_max": null,
+      "confidence_median": null,
+      "confidence_min": null,
+      "confidence_p90": null,
+      "confidence_records": 0,
+      "distinct_datasets": 9,
+      "distinct_populated_licenses": 0,
+      "features_with_root_source": 19702,
+      "newest_update_time": null,
+      "oldest_update_time": null,
+      "root_source_records": 19702,
+      "update_time_records": 0
+    }
+  },
+  "source_uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/*",
+  "tooling": {
+    "benchmark_script_sha256": "7faf6fff2c62b070bd4e93471a978207e7079093c0e565e073b69e196dfd386f",
+    "duckdb_version": "1.4.4",
+    "experiment_script_sha256": "289149ed49d49f90d83a58726df1680d942a0a157686a9801fd8f195a4c9d233",
+    "python_version": "3.12.12",
+    "sample_input": {
+      "bytes": 997523,
+      "mtime_utc": "2026-07-12T13:32:50.705342+00:00",
+      "release_schema_values": [
+        [
+          "2026-06-17.0",
+          "v1.17.0"
+        ]
+      ],
+      "rows": 19702,
+      "selection_contracts": [
+        "bbox-prefiltered-geometry-verified"
+      ],
+      "sha256": "dc870bbe69dbbbff2c03843247a921207aed5e75dfa7f66e04f34844c9bf3220",
+      "validated_boxes_with_rows": [
+        "auckland",
+        "cambridge-ma",
+        "manhattan",
+        "melbourne-cbd",
+        "mexico-city",
+        "paris",
+        "parramatta",
+        "rural-france",
+        "rural-kansas",
+        "sao-paulo",
+        "singapore-cbd"
+      ]
+    },
+    "sanitizer": "top-level benchmark whitelist plus recursive row/example key redaction"
+  }
+}

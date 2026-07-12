@@ -34,10 +34,16 @@ def segment(
         "names": {"primary": primary, "common": common or {}, "rules": rules or []},
         "class": "residential",
         "connectors": connector_records,
-        "sources": [{
-            "property": "", "dataset": "example/transport", "license": "ODbL",
-            "record_id": segment_id, "update_time": "2026-01-01", "confidence": 0.9,
-        }],
+        "sources": [
+            {
+                "property": "",
+                "dataset": "example/transport",
+                "license": "ODbL",
+                "record_id": segment_id,
+                "update_time": "2026-01-01",
+                "confidence": 0.9,
+            }
+        ],
         "version": 2,
         "bbox": bbox or {"xmin": 0.1, "ymin": 0.1, "xmax": 0.2, "ymax": 0.2},
         "representative_lon": 0.15,
@@ -52,12 +58,19 @@ def fixture_segments() -> list[dict]:
         segment("b", "Main St.", ["2", "3"]),
         segment("c", "Main St.", ["4", "5"]),
         segment(
-            "d", "Broadway", ["2", "6"],
-            rules=[{
-                "variant": "alternate", "language": "en", "value": "Main Street",
-                "between": [0.2, 0.8], "side": "left",
-                "perspectives": [{"mode": "accepted", "countries": ["US"]}],
-            }],
+            "d",
+            "Broadway",
+            ["2", "6"],
+            rules=[
+                {
+                    "variant": "alternate",
+                    "language": "en",
+                    "value": "Main Street",
+                    "between": [0.2, 0.8],
+                    "side": "left",
+                    "perspectives": [{"mode": "accepted", "countries": ["US"]}],
+                }
+            ],
         ),
     ]
 
@@ -71,13 +84,18 @@ def test_scoped_rules_are_excluded_and_common_aliases_are_separate():
         cluster["primary_name_normalized"] == "main street" for cluster in clusters
     )
     main = [
-        cluster for cluster in clusters
+        cluster
+        for cluster in clusters
         if cluster["primary_name_normalized"] == "main st."
     ]
     assert sorted(cluster["segment_ids"] for cluster in main) == [["a", "b"], ["c"]]
     aliases = benchmark.build_alias_lookup(segments, clusters)
     assert aliases["main street"] == [
-        next(cluster["snapshot_cluster_id"] for cluster in main if "a" in cluster["segment_ids"])
+        next(
+            cluster["snapshot_cluster_id"]
+            for cluster in main
+            if "a" in cluster["segment_ids"]
+        )
     ]
     rules = benchmark.rule_assertion_summary(segments)
     assert rules["excluded_from_topology_grouping"] is True
@@ -108,7 +126,10 @@ def test_frontier_halo_support_and_core_only_reporting():
     segments = [
         segment("core", "Boundary Road", ["a", "b"]),
         segment(
-            "support", "Boundary Road", ["b", "c"], core_seed=False,
+            "support",
+            "Boundary Road",
+            ["b", "c"],
+            core_seed=False,
             bbox={"xmin": 0.9, "ymin": 0.1, "xmax": 1.0, "ymax": 0.2},
         ),
         segment("outside", "Other", ["x", "y"], core_seed=False),
@@ -149,10 +170,23 @@ def test_markdown_uses_polygon_not_core_bbox_contract():
 def test_halo_comparison_detects_support_connectivity_change():
     core_bbox = (0.0, 0.0, 1.0, 1.0)
     segments = [
-        segment("a", "Main", ["a0", "h1"], bbox={"xmin": 0.1, "ymin": 0.1, "xmax": 0.2, "ymax": 0.2}),
-        segment("b", "Main", ["h2", "b0"], bbox={"xmin": 0.8, "ymin": 0.1, "xmax": 0.9, "ymax": 0.2}),
         segment(
-            "halo", "Main", ["h1", "h2"], core_seed=False,
+            "a",
+            "Main",
+            ["a0", "h1"],
+            bbox={"xmin": 0.1, "ymin": 0.1, "xmax": 0.2, "ymax": 0.2},
+        ),
+        segment(
+            "b",
+            "Main",
+            ["h2", "b0"],
+            bbox={"xmin": 0.8, "ymin": 0.1, "xmax": 0.9, "ymax": 0.2},
+        ),
+        segment(
+            "halo",
+            "Main",
+            ["h1", "h2"],
+            core_seed=False,
             bbox={"xmin": 1.001, "ymin": 0.1, "xmax": 1.004, "ymax": 0.2},
         ),
     ]
@@ -163,10 +197,20 @@ def test_halo_comparison_detects_support_connectivity_change():
 
 
 def test_connector_validation_counts_interior_duplicates_and_missing_features():
-    segments = [segment("a", "Main", [
-        ("endpoint", 0.0), ("interior", 0.5), ("same-at", 0.5),
-        ("duplicate", 1.0), ("duplicate", 1.0), ("invalid", 1.2),
-    ])]
+    segments = [
+        segment(
+            "a",
+            "Main",
+            [
+                ("endpoint", 0.0),
+                ("interior", 0.5),
+                ("same-at", 0.5),
+                ("duplicate", 1.0),
+                ("duplicate", 1.0),
+                ("invalid", 1.2),
+            ],
+        )
+    ]
     result = benchmark.connector_validation(
         segments, {"endpoint", "interior", "same-at", "duplicate"}
     )
@@ -175,7 +219,9 @@ def test_connector_validation_counts_interior_duplicates_and_missing_features():
     assert result["invalid_at_references"] == 1
     assert result["duplicate_connector_id_references_within_segment"] == 1
     assert result["duplicate_at_references_within_segment"] == 2
-    assert result["referenced_connector_ids_missing_from_bounded_connector_extract"] == 1
+    assert (
+        result["referenced_connector_ids_missing_from_bounded_connector_extract"] == 1
+    )
 
 
 def test_shared_interior_connector_is_a_topology_edge():
@@ -190,22 +236,37 @@ def test_shared_interior_connector_is_a_topology_edge():
 
 def valid_args() -> argparse.Namespace:
     return argparse.Namespace(
-        release=benchmark.PINNED_RELEASE, bbox=[0, 0, 1, 1], halo=0.1,
-        max_transport_rows=10, max_transport_bytes=10, max_connector_rows=10,
-        max_connector_bytes=10, max_address_rows=10, max_crossing_segments=10,
+        release=benchmark.PINNED_RELEASE,
+        bbox=[0, 0, 1, 1],
+        halo=0.1,
+        max_transport_rows=10,
+        max_transport_bytes=10,
+        max_connector_rows=10,
+        max_connector_bytes=10,
+        max_address_rows=10,
+        max_crossing_segments=10,
         max_crossing_tile_memberships=10,
-        max_crossing_candidate_pairs=10, crossing_tile_degrees=0.1,
+        max_crossing_candidate_pairs=10,
+        crossing_tile_degrees=0.1,
         remote_time_cap_seconds=10,
-        json_out=None, markdown_out=None,
+        json_out=None,
+        markdown_out=None,
     )
 
 
-@pytest.mark.parametrize("field", [
-    "max_transport_rows", "max_transport_bytes", "max_connector_rows",
-    "max_connector_bytes", "max_address_rows", "max_crossing_segments",
-    "max_crossing_tile_memberships",
-    "max_crossing_candidate_pairs",
-])
+@pytest.mark.parametrize(
+    "field",
+    [
+        "max_transport_rows",
+        "max_transport_bytes",
+        "max_connector_rows",
+        "max_connector_bytes",
+        "max_address_rows",
+        "max_crossing_segments",
+        "max_crossing_tile_memberships",
+        "max_crossing_candidate_pairs",
+    ],
+)
 def test_guards_must_be_positive_before_remote_work(field: str):
     args = valid_args()
     setattr(args, field, 0)
@@ -242,7 +303,10 @@ def test_serialized_estimate_deduplicates_segment_metadata():
     assert estimate["snapshot_cluster_records"] == 3
     assert estimate["total_bytes"] > estimate["snapshot_cluster_records_bytes"]
     assert estimate["hot_cluster_lookup_bytes"] < estimate["total_bytes"]
-    assert estimate["detail_segment_index_bytes"] == estimate["deduplicated_segment_index_bytes"]
+    assert (
+        estimate["detail_segment_index_bytes"]
+        == estimate["deduplicated_segment_index_bytes"]
+    )
 
 
 def test_provenance_coverage_includes_full_source_shape_and_warning():
@@ -264,5 +328,6 @@ def test_committable_report_sanitizer_removes_row_examples_recursively():
         "nested": [{"repeated_name_examples": [{"name": "Main"}]}],
     }
     assert benchmark.sanitize_aggregate_report(report) == {
-        "summary": {"rows": 2}, "nested": [{}],
+        "summary": {"rows": 2},
+        "nested": [{}],
     }

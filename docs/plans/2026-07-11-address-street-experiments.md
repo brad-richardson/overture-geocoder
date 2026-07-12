@@ -19,6 +19,13 @@ It intentionally distinguishes:
 - address-derived street-name coverage, which is only a proxy and says nothing
   about transportation topology, connectors, road class, or routability.
 
+The collision and coordinate metrics use a **proxy-context key**: normalized
+country, first and last `address_levels` values, postcode, number, street, and
+unit. The address-level endpoints are most-general/most-specific routing
+proxies whose meanings are country-dependent. This is not a globally typed
+structured address key. Coordinate spread is an envelope approximation, not a
+maximum pairwise or road-network distance.
+
 For current exports it also reads the nested `sources` and `root_sources`
 arrays, reports release and feature-version distributions, root-source
 cardinality and field coverage, and caps source-stratified normalization and
@@ -42,9 +49,9 @@ Measured from the historical `exports/US-MA.parquet` artifact:
 | Maximum distinct units on one base | 821 |
 | Lossy punctuation keys with collisions | 1,128 |
 | Conservative keys collapsed by lossy form | 2,258 |
-| Duplicate exact structured keys | 6,804 |
-| Exact keys with multiple coordinates | 6,804 |
-| Exact keys with coordinate-envelope spread over 10 m | 4,367 |
+| Duplicate proxy-context keys | 6,804 |
+| Proxy-context keys with multiple coordinates | 6,804 |
+| Proxy-context keys with coordinate-envelope spread over 10 m | 4,367 |
 | Coordinate-envelope spread over 1 km | 29 keys / 1,263 rows |
 | Postcodes | 531 |
 | Median / P90 / max rows per postcode | 4,935 / 15,687 / 34,995 |
@@ -119,7 +126,7 @@ Normalize each component conservatively and retain the original display value.
 The value is a candidate list containing Overture feature ID, coordinates/bbox,
 feature version, release, and complete source provenance. An address ID must not
 be assumed to be a GERS ID without validation. Do not interpolate missing house
-numbers and do not collapse coordinate-varying exact keys during build.
+numbers and do not collapse coordinate-varying proxy-context keys during build.
 
 Search text should contain number, street, unit, locality, postal city, region,
 postcode, and country. Geographic locality remains part of structured identity;
@@ -160,8 +167,8 @@ Official schema references:
    directionals, unit formats, repeated house numbers, and ambiguous cities.
 3. Compare conservative lookup with lossy normalization; lossy lookup must not
    silently choose among conservative keys.
-4. Measure exact-key candidate counts and distance buckets by root source before
-   defining deduplication or precedence.
+4. Measure proxy-context-key candidate counts and envelope-spread buckets by
+   root source before defining deduplication or precedence.
    Treat multi-root features as members of each reported source stratum and do
    not interpret source-supplied confidence as calibrated across datasets.
 5. Build transportation components for one bounded metro; validate crossings,
@@ -174,3 +181,36 @@ Official schema references:
 
 Until those pass, do not add interpolation, promote address/road shards, or
 change the public API/default types.
+
+## Current-release source follow-up
+
+The first acceptance experiment has a completed bounded result in
+[`2026-07-11-current-release-address-experiment.md`](./2026-07-11-current-release-address-experiment.md).
+It sampled 19,702 records from release `2026-06-17.0` across twelve purposive
+high-rise, dense, suburban, and rural boxes. Eleven boxes contained data and
+the sample covered nine root datasets.
+
+The corrected extraction made one combined remote pass, used bbox only as an
+I/O prefilter, and then required exact Point coordinates inside each configured
+box. It completed in 595.19 seconds under a 600-second interrupt and produced a
+997,523-byte aggregate sample. Missing or spatially discordant bbox rows remain
+unobservable, so candidate populations are exact only within bbox-observable
+rows. Candidate caps now abort explicitly rather than silently looking empty;
+per-box output-byte caps are measured independently.
+
+Every sampled feature had exactly one root source and no property-specific
+source. Dataset identity was complete, but license, update time, and source
+confidence, record ID, and `between` were absent on every sampled root record.
+The full source arrays also contained no property-specific records. This does
+not establish a
+fleet-wide invariant; it does establish that source confidence cannot be a
+required ranking input and that missing confidence must not be interpreted as
+zero confidence. Keep dataset identity in compact hot records, but retain the
+complete source array in a colder provenance/detail record.
+
+The sample also found 76 proxy-context keys with multiple coordinates; 56 had
+an approximate envelope spread over 10 m. Most were in the sampled Brazil
+and Mexico datasets. Units occurred on 7,555 rows and 970 unitless base keys had
+multiple units. These findings reinforce candidate-list storage and keeping
+unit in structured identity. They do not justify cross-source precedence,
+deduplication, interpolation, or global size extrapolation.

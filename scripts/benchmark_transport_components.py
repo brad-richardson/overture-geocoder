@@ -88,7 +88,9 @@ def _jsonable(value: Any) -> Any:
 
 
 _ROW_EXAMPLE_KEYS = {
-    "examples", "missing_reference_examples", "repeated_name_examples",
+    "examples",
+    "missing_reference_examples",
+    "repeated_name_examples",
 }
 
 
@@ -135,19 +137,23 @@ def _rule_assertions(segment: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def _connector_ids(segment: dict[str, Any]) -> list[str]:
-    return sorted({
-        connector["connector_id"]
-        for connector in (segment.get("connectors") or [])
-        if connector and connector.get("connector_id")
-    })
+    return sorted(
+        {
+            connector["connector_id"]
+            for connector in (segment.get("connectors") or [])
+            if connector and connector.get("connector_id")
+        }
+    )
 
 
 def _root_source_datasets(segment: dict[str, Any]) -> list[str]:
-    return sorted({
-        source.get("dataset")
-        for source in (segment.get("sources") or [])
-        if source and not (source.get("property") or "") and source.get("dataset")
-    })
+    return sorted(
+        {
+            source.get("dataset")
+            for source in (segment.get("sources") or [])
+            if source and not (source.get("property") or "") and source.get("dataset")
+        }
+    )
 
 
 def _bbox_intersects(
@@ -155,8 +161,10 @@ def _bbox_intersects(
 ) -> bool:
     xmin, ymin, xmax, ymax = window
     return (
-        float(bbox["xmax"]) >= xmin and float(bbox["xmin"]) <= xmax
-        and float(bbox["ymax"]) >= ymin and float(bbox["ymin"]) <= ymax
+        float(bbox["xmax"]) >= xmin
+        and float(bbox["xmin"]) <= xmax
+        and float(bbox["ymax"]) >= ymin
+        and float(bbox["ymin"]) <= ymax
     )
 
 
@@ -222,7 +230,9 @@ def build_snapshot_name_clusters(
 
         for segment_ids in sorted(groups.values(), key=lambda values: tuple(values)):
             cluster_segments = [by_id[segment_id] for segment_id in segment_ids]
-            core_segments = [segment for segment in cluster_segments if segment.get("core_seed")]
+            core_segments = [
+                segment for segment in cluster_segments if segment.get("core_seed")
+            ]
             if not core_segments:
                 continue
             digest_input = f"{release}\0{normalized}\0" + "\0".join(segment_ids)
@@ -234,57 +244,75 @@ def build_snapshot_name_clusters(
                 "xmax": max(float(item["xmax"]) for item in bboxes),
                 "ymax": max(float(item["ymax"]) for item in bboxes),
             }
-            representative_segment = min(core_segments, key=lambda item: str(item["id"]))
-            open_connector_ids = sorted({
-                connector_id
-                for segment in cluster_segments
-                for connector_id in _connector_ids(segment)
-                if connector_frequency[connector_id] == 1
-            })
+            representative_segment = min(
+                core_segments, key=lambda item: str(item["id"])
+            )
+            open_connector_ids = sorted(
+                {
+                    connector_id
+                    for segment in cluster_segments
+                    for connector_id in _connector_ids(segment)
+                    if connector_frequency[connector_id] == 1
+                }
+            )
             frontier = any(
                 not segment.get("core_seed") or segment.get("boundary_crossing")
                 for segment in cluster_segments
             )
-            frontier_single_reference_ids = sorted({
-                connector_id
-                for segment in cluster_segments
-                if not segment.get("core_seed") or segment.get("boundary_crossing")
-                for connector_id in _connector_ids(segment)
-                if connector_frequency[connector_id] == 1
-            })
-            snapshot_name_clusters.append({
-                "snapshot_cluster_id": f"snapshot_name_cluster_v1_{digest}",
-                "overture_release": release,
-                "primary_name_normalized": normalized,
-                "segment_ids": segment_ids,
-                "segment_count": len(segment_ids),
-                "core_seed_segment_count": len(core_segments),
-                "halo_support_segment_count": len(cluster_segments) - len(core_segments),
-                "frontier": frontier,
-                "single_reference_connector_count": len(open_connector_ids),
-                "frontier_open_connector_proxy_count": len(
-                    frontier_single_reference_ids
-                ),
-                "classes": dict(sorted(Counter(
-                    segment.get("class") or "unknown" for segment in cluster_segments
-                ).items())),
-                "versions": sorted({
-                    int(segment["version"])
+            frontier_single_reference_ids = sorted(
+                {
+                    connector_id
                     for segment in cluster_segments
-                    if segment.get("version") is not None
-                }),
-                "root_source_datasets": sorted({
-                    dataset
-                    for segment in cluster_segments
-                    for dataset in _root_source_datasets(segment)
-                }),
-                "bbox": bbox,
-                "representative_point": {
-                    "lon": representative_segment.get("representative_lon"),
-                    "lat": representative_segment.get("representative_lat"),
-                    "method": "centroid of lexically first segment ID",
-                },
-            })
+                    if not segment.get("core_seed") or segment.get("boundary_crossing")
+                    for connector_id in _connector_ids(segment)
+                    if connector_frequency[connector_id] == 1
+                }
+            )
+            snapshot_name_clusters.append(
+                {
+                    "snapshot_cluster_id": f"snapshot_name_cluster_v1_{digest}",
+                    "overture_release": release,
+                    "primary_name_normalized": normalized,
+                    "segment_ids": segment_ids,
+                    "segment_count": len(segment_ids),
+                    "core_seed_segment_count": len(core_segments),
+                    "halo_support_segment_count": len(cluster_segments)
+                    - len(core_segments),
+                    "frontier": frontier,
+                    "single_reference_connector_count": len(open_connector_ids),
+                    "frontier_open_connector_proxy_count": len(
+                        frontier_single_reference_ids
+                    ),
+                    "classes": dict(
+                        sorted(
+                            Counter(
+                                segment.get("class") or "unknown"
+                                for segment in cluster_segments
+                            ).items()
+                        )
+                    ),
+                    "versions": sorted(
+                        {
+                            int(segment["version"])
+                            for segment in cluster_segments
+                            if segment.get("version") is not None
+                        }
+                    ),
+                    "root_source_datasets": sorted(
+                        {
+                            dataset
+                            for segment in cluster_segments
+                            for dataset in _root_source_datasets(segment)
+                        }
+                    ),
+                    "bbox": bbox,
+                    "representative_point": {
+                        "lon": representative_segment.get("representative_lon"),
+                        "lat": representative_segment.get("representative_lat"),
+                        "method": "centroid of lexically first segment ID",
+                    },
+                }
+            )
     return snapshot_name_clusters
 
 
@@ -343,33 +371,40 @@ def summarize_snapshot_name_clusters(
             }
             for items in repeated
         ),
-        key=lambda item: (-item["snapshot_cluster_count"], item["primary_name_normalized"]),
+        key=lambda item: (
+            -item["snapshot_cluster_count"],
+            item["primary_name_normalized"],
+        ),
     )[:25]
     connector_refs = sum(len(_connector_ids(segment)) for segment in segments)
     connector_ids = {
         connector_id for segment in segments for connector_id in _connector_ids(segment)
     }
     root_sources = Counter(
-        dataset
-        for segment in segments
-        for dataset in _root_source_datasets(segment)
+        dataset for segment in segments for dataset in _root_source_datasets(segment)
     )
     return {
         "all_road_segments": len(segments),
-        "named_road_segments": sum(bool(_primary_name(segment)) for segment in segments),
-        "core_seed_road_segments": sum(bool(segment.get("core_seed")) for segment in segments),
+        "named_road_segments": sum(
+            bool(_primary_name(segment)) for segment in segments
+        ),
+        "core_seed_road_segments": sum(
+            bool(segment.get("core_seed")) for segment in segments
+        ),
         "core_seed_named_road_segments": sum(
             bool(segment.get("core_seed")) and bool(_primary_name(segment))
             for segment in segments
         ),
         "connector_references": connector_refs,
         "unique_connector_ids": len(connector_ids),
-        "segments_without_connectors": sum(not _connector_ids(segment) for segment in segments),
+        "segments_without_connectors": sum(
+            not _connector_ids(segment) for segment in segments
+        ),
         "primary_names": len(by_name),
         "core_touching_snapshot_name_clusters": len(clusters),
-        "snapshot_cluster_segment_count": _quantiles([
-            cluster["segment_count"] for cluster in clusters
-        ]),
+        "snapshot_cluster_segment_count": _quantiles(
+            [cluster["segment_count"] for cluster in clusters]
+        ),
         "names_with_multiple_snapshot_clusters": len(repeated),
         "snapshot_clusters_on_repeated_names": sum(len(items) for items in repeated),
         "repeated_name_examples": examples,
@@ -391,7 +426,9 @@ def summarize_snapshot_name_clusters(
             "continuation proxy, not proof that the global connector is open."
         ),
         "root_source_dataset_segment_memberships": dict(root_sources.most_common()),
-        "segments_with_version": sum(segment.get("version") is not None for segment in segments),
+        "segments_with_version": sum(
+            segment.get("version") is not None for segment in segments
+        ),
         "scoped_name_rule_assertions_excluded_from_topology": sum(
             len(_rule_assertions(segment)) for segment in segments
         ),
@@ -405,11 +442,13 @@ def address_name_context(
     contexts = {row["street_norm"]: row for row in address_rows}
     by_name = Counter(cluster["primary_name_normalized"] for cluster in clusters)
     matched = [
-        cluster for cluster in clusters
+        cluster
+        for cluster in clusters
         if cluster["primary_name_normalized"] in contexts
     ]
     ambiguous = [
-        cluster for cluster in matched
+        cluster
+        for cluster in matched
         if by_name[cluster["primary_name_normalized"]] > 1
     ]
     return {
@@ -439,8 +478,7 @@ def _transport_path(release: str) -> str:
 
 def _address_path(release: str) -> str:
     return (
-        "s3://overturemaps-us-west-2/release/"
-        f"{release}/theme=addresses/type=address/*"
+        f"s3://overturemaps-us-west-2/release/{release}/theme=addresses/type=address/*"
     )
 
 
@@ -458,10 +496,14 @@ def address_hash_sample_plan(population: int, row_cap: int) -> dict[str, Any]:
     sampled = population > row_cap
     target = min(population, int(row_cap * 0.95) if sampled else row_cap)
     hash_space = 2**32
-    threshold = math.floor(target / population * hash_space) if population else hash_space
+    threshold = (
+        math.floor(target / population * hash_space) if population else hash_space
+    )
     return {
-        "sampled": sampled, "target_rows": target,
-        "hash_space": hash_space, "hash_threshold": threshold,
+        "sampled": sampled,
+        "target_rows": target,
+        "hash_space": hash_space,
+        "hash_threshold": threshold,
     }
 
 
@@ -487,8 +529,7 @@ def extract_boundary(
 ) -> dict[str, Any]:
     """Pin and materialize the exact unsimplified Overture Boston polygon."""
     division_path = (
-        "s3://overturemaps-us-west-2/release/"
-        f"{release}/theme=divisions/type=division/*"
+        f"s3://overturemaps-us-west-2/release/{release}/theme=divisions/type=division/*"
     )
     area_path = (
         "s3://overturemaps-us-west-2/release/"
@@ -507,20 +548,31 @@ def extract_boundary(
               AND a.id = {_sql_literal(BOUNDARY_AREA_ID)}
         ) TO {_sql_literal(str(output))} (FORMAT PARQUET, COMPRESSION ZSTD)
     """)
-    row = connection.execute("""
+    row = connection.execute(
+        """
         SELECT division_id, division_version, division_name, subtype, country, region,
                area_id, area_version, ST_XMin(geometry), ST_YMin(geometry),
                ST_XMax(geometry), ST_YMax(geometry), ST_AsWKB(geometry)
         FROM read_parquet(?)
-    """, [str(output)]).fetchone()
-    if row is None or connection.execute(
-        "SELECT COUNT(*) FROM read_parquet(?)", [str(output)]
-    ).fetchone()[0] != 1:
-        output.unlink(missing_ok=True)
-        raise RuntimeError("pinned Boston division_area did not resolve to exactly one row")
+    """,
+        [str(output)],
+    ).fetchone()
     if (
-        row[0] != BOUNDARY_DIVISION_ID or row[1] != BOUNDARY_DIVISION_VERSION
-        or row[6] != BOUNDARY_AREA_ID or row[7] != BOUNDARY_AREA_VERSION
+        row is None
+        or connection.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)", [str(output)]
+        ).fetchone()[0]
+        != 1
+    ):
+        output.unlink(missing_ok=True)
+        raise RuntimeError(
+            "pinned Boston division_area did not resolve to exactly one row"
+        )
+    if (
+        row[0] != BOUNDARY_DIVISION_ID
+        or row[1] != BOUNDARY_DIVISION_VERSION
+        or row[6] != BOUNDARY_AREA_ID
+        or row[7] != BOUNDARY_AREA_VERSION
         or row[2:6] != ("Boston", "locality", "US", "US-MA")
     ):
         output.unlink(missing_ok=True)
@@ -528,10 +580,14 @@ def extract_boundary(
     geometry_wkb = bytes(row[12])
     return {
         "release": release,
-        "division_id": row[0], "division_version": row[1],
-        "division_name": row[2], "subtype": row[3],
-        "country": row[4], "region": row[5],
-        "division_area_id": row[6], "division_area_version": row[7],
+        "division_id": row[0],
+        "division_version": row[1],
+        "division_name": row[2],
+        "subtype": row[3],
+        "country": row[4],
+        "region": row[5],
+        "division_area_id": row[6],
+        "division_area_version": row[7],
         "bbox": [float(value) for value in row[8:12]],
         "geometry_sha256": hashlib.sha256(geometry_wkb).hexdigest(),
         "geometry_wkb_bytes": len(geometry_wkb),
@@ -581,9 +637,11 @@ def extract_transportation(
             LIMIT {max_rows + 1}
         ) TO {_sql_literal(str(output))} (FORMAT PARQUET, COMPRESSION ZSTD)
     """)
-    row_count = int(connection.execute(
-        "SELECT COUNT(*) FROM read_parquet(?)", [str(output)]
-    ).fetchone()[0])
+    row_count = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)", [str(output)]
+        ).fetchone()[0]
+    )
     if row_count > max_rows:
         output.unlink(missing_ok=True)
         raise RuntimeError(
@@ -634,9 +692,11 @@ def extract_connectors(
             LIMIT {max_rows + 1}
         ) TO {_sql_literal(str(output))} (FORMAT PARQUET, COMPRESSION ZSTD)
     """)
-    row_count = int(connection.execute(
-        "SELECT COUNT(*) FROM read_parquet(?)", [str(output)]
-    ).fetchone()[0])
+    row_count = int(
+        connection.execute(
+            "SELECT COUNT(*) FROM read_parquet(?)", [str(output)]
+        ).fetchone()[0]
+    )
     if row_count > max_rows:
         output.unlink(missing_ok=True)
         raise RuntimeError(
@@ -666,9 +726,7 @@ def extract_address_context(
     max_rows: int,
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     if max_rows <= 0 or max_rows > ADDRESS_HARD_MAX_ROWS:
-        raise ValueError(
-            f"address row guard must be in 1..{ADDRESS_HARD_MAX_ROWS:,}"
-        )
+        raise ValueError(f"address row guard must be in 1..{ADDRESS_HARD_MAX_ROWS:,}")
     path = _address_path(release)
     where = "address.street IS NOT NULL AND " + _bbox_filter(bbox, 0).replace(
         "bbox.", "address.bbox."
@@ -679,12 +737,14 @@ def extract_address_context(
         "AND ST_Within(address.geometry, boundary.geometry)"
     )
     started = time.monotonic()
-    count = int(connection.execute(
-        f"SELECT COUNT(*) FROM read_parquet({_sql_literal(path)}, "
-        f"hive_partitioning=true) address, "
-        f"read_parquet({_sql_literal(str(boundary_path))}) boundary "
-        f"WHERE {geometry_where}"
-    ).fetchone()[0])
+    count = int(
+        connection.execute(
+            f"SELECT COUNT(*) FROM read_parquet({_sql_literal(path)}, "
+            f"hive_partitioning=true) address, "
+            f"read_parquet({_sql_literal(str(boundary_path))}) boundary "
+            f"WHERE {geometry_where}"
+        ).fetchone()[0]
+    )
     plan = address_hash_sample_plan(count, max_rows)
     sampled = plan["sampled"]
     hash_space = plan["hash_space"]
@@ -724,7 +784,8 @@ def extract_address_context(
         "sampling_method": (
             "pinned hash(id) threshold targeting 95% of the row cap, followed by a "
             "hard LIMIT; avoids a global deterministic sort"
-            if sampled else "complete polygon population"
+            if sampled
+            else "complete polygon population"
         ),
         "hash_threshold_u32": hash_threshold,
         "aggregated_street_names": len(rows),
@@ -757,7 +818,8 @@ def load_connector_records(
     connection: duckdb.DuckDBPyConnection, path: Path
 ) -> list[dict[str, Any]]:
     cursor = connection.execute(
-        "SELECT id, sources, version, bbox FROM read_parquet(?) ORDER BY id", [str(path)]
+        "SELECT id, sources, version, bbox FROM read_parquet(?) ORDER BY id",
+        [str(path)],
     )
     columns = [description[0] for description in cursor.description]
     result: list[dict[str, Any]] = []
@@ -813,17 +875,34 @@ def connector_validation(
 
 def provenance_coverage(features: list[dict[str, Any]]) -> dict[str, Any]:
     fields = (
-        "dataset", "license", "record_id", "update_time", "confidence", "between",
+        "dataset",
+        "license",
+        "record_id",
+        "update_time",
+        "confidence",
+        "between",
     )
-    all_sources = [source for feature in features for source in (feature.get("sources") or [])]
-    root_sources = [source for source in all_sources if not (source.get("property") or "")]
+    all_sources = [
+        source for feature in features for source in (feature.get("sources") or [])
+    ]
+    root_sources = [
+        source for source in all_sources if not (source.get("property") or "")
+    ]
     return {
         "feature_rows": len(features),
-        "features_with_version": sum(feature.get("version") is not None for feature in features),
-        "features_with_any_source": sum(bool(feature.get("sources")) for feature in features),
-        "features_with_root_source": sum(any(
-            not (source.get("property") or "") for source in (feature.get("sources") or [])
-        ) for feature in features),
+        "features_with_version": sum(
+            feature.get("version") is not None for feature in features
+        ),
+        "features_with_any_source": sum(
+            bool(feature.get("sources")) for feature in features
+        ),
+        "features_with_root_source": sum(
+            any(
+                not (source.get("property") or "")
+                for source in (feature.get("sources") or [])
+            )
+            for feature in features
+        ),
         "all_source_records": len(all_sources),
         "root_source_records": len(root_sources),
         "property_specific_source_records": len(all_sources) - len(root_sources),
@@ -835,12 +914,16 @@ def provenance_coverage(features: list[dict[str, Any]]) -> dict[str, Any]:
             field: sum(source.get(field) is not None for source in root_sources)
             for field in fields
         },
-        "root_dataset_records": dict(Counter(
-            source.get("dataset") or "<missing>" for source in root_sources
-        ).most_common()),
-        "source_property_records": dict(Counter(
-            source.get("property") or "<root>" for source in all_sources
-        ).most_common()),
+        "root_dataset_records": dict(
+            Counter(
+                source.get("dataset") or "<missing>" for source in root_sources
+            ).most_common()
+        ),
+        "source_property_records": dict(
+            Counter(
+                source.get("property") or "<root>" for source in all_sources
+            ).most_common()
+        ),
         "confidence_interpretation": (
             "source-supplied and not calibrated across datasets; missing is not zero"
         ),
@@ -862,7 +945,9 @@ def rule_assertion_summary(segments: list[dict[str, Any]]) -> dict[str, Any]:
         "assertions": len(assertions),
         "with_between": sum(item.get("between") is not None for item in assertions),
         "with_side": sum(item.get("side") is not None for item in assertions),
-        "with_perspectives": sum(item.get("perspectives") is not None for item in assertions),
+        "with_perspectives": sum(
+            item.get("perspectives") is not None for item in assertions
+        ),
         "examples": _jsonable(assertions[:10]),
     }
 
@@ -889,21 +974,26 @@ def serialized_snapshot_estimate(
         for segment in segments
         if str(segment["id"]) in relevant_ids
     }
-    compact = lambda value: len(json.dumps(
-        value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-    ).encode("utf-8"))
+    compact = lambda value: len(
+        json.dumps(
+            value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+        ).encode("utf-8")
+    )
     segment_bytes = compact(segment_index)
     cluster_bytes = compact(clusters)
     alias_bytes = compact(alias_lookup)
-    hot_clusters = [{
-        "id": cluster["snapshot_cluster_id"],
-        "name": cluster["primary_name_normalized"],
-        "bbox": cluster["bbox"],
-        "point": cluster["representative_point"],
-        "classes": cluster["classes"],
-        "segment_count": cluster["segment_count"],
-        "frontier": cluster["frontier"],
-    } for cluster in clusters]
+    hot_clusters = [
+        {
+            "id": cluster["snapshot_cluster_id"],
+            "name": cluster["primary_name_normalized"],
+            "bbox": cluster["bbox"],
+            "point": cluster["representative_point"],
+            "classes": cluster["classes"],
+            "segment_count": cluster["segment_count"],
+            "frontier": cluster["frontier"],
+        }
+        for cluster in clusters
+    ]
     hot_cluster_bytes = compact(hot_clusters)
     return {
         "encoding": "compact UTF-8 JSON measurement; not a production forecast",
@@ -935,7 +1025,8 @@ def compare_halo_snapshots(
     def core_peers(clusters: list[dict[str, Any]]) -> dict[str, frozenset[str]]:
         result: dict[str, frozenset[str]] = {}
         core_ids = {
-            str(segment["id"]) for segment in segments
+            str(segment["id"])
+            for segment in segments
             if segment.get("core_seed") and _primary_name(segment)
         }
         for cluster in clusters:
@@ -947,7 +1038,9 @@ def compare_halo_snapshots(
     inner_peers = core_peers(inner)
     outer_peers = core_peers(outer)
     all_core_ids = set(inner_peers) | set(outer_peers)
-    changed = sum(inner_peers.get(item) != outer_peers.get(item) for item in all_core_ids)
+    changed = sum(
+        inner_peers.get(item) != outer_peers.get(item) for item in all_core_ids
+    )
     return {
         "inner_halo_degrees": 0.0,
         "outer_halo_degrees": outer_halo,
@@ -983,16 +1076,17 @@ def geometric_crossing_reference_audit(
             ORDER BY id
             LIMIT {max_segments + 1}
         """)
-        segment_count = int(connection.execute(
-            "SELECT COUNT(*) FROM crossing_segments"
-        ).fetchone()[0])
+        segment_count = int(
+            connection.execute("SELECT COUNT(*) FROM crossing_segments").fetchone()[0]
+        )
         if segment_count > max_segments:
             return {
                 "skipped": True,
                 "reason": f"crossing segment guard exceeded: >{max_segments:,}",
                 "segment_guard": max_segments,
             }
-        tile_memberships = int(connection.execute(f"""
+        tile_memberships = int(
+            connection.execute(f"""
             SELECT COALESCE(SUM(
                 (FLOOR(bbox.xmax / {tile_degrees})
                  - FLOOR(bbox.xmin / {tile_degrees}) + 1)
@@ -1001,7 +1095,8 @@ def geometric_crossing_reference_audit(
                  - FLOOR(bbox.ymin / {tile_degrees}) + 1)
             ), 0)::BIGINT
             FROM crossing_segments
-        """).fetchone()[0])
+        """).fetchone()[0]
+        )
         if tile_memberships > max_tile_memberships:
             return {
                 "skipped": True,
@@ -1034,9 +1129,11 @@ def geometric_crossing_reference_audit(
               AND a.bbox.ymax >= b.bbox.ymin AND a.bbox.ymin <= b.bbox.ymax
             LIMIT {max_candidate_pairs + 1}
         """)
-        candidate_count = int(connection.execute(
-            "SELECT COUNT(*) FROM crossing_pair_candidates"
-        ).fetchone()[0])
+        candidate_count = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM crossing_pair_candidates"
+            ).fetchone()[0]
+        )
         if candidate_count > max_candidate_pairs:
             return {
                 "skipped": True,
@@ -1062,10 +1159,12 @@ def geometric_crossing_reference_audit(
                            []::VARCHAR[])
               )
         """)
-        total = int(connection.execute(
-            "SELECT COUNT(*) FROM "
-            "geometric_crossings_without_shared_connector_reference"
-        ).fetchone()[0])
+        total = int(
+            connection.execute(
+                "SELECT COUNT(*) FROM "
+                "geometric_crossings_without_shared_connector_reference"
+            ).fetchone()[0]
+        )
         cursor = connection.execute("""
             SELECT * FROM geometric_crossings_without_shared_connector_reference
             ORDER BY left_id, right_id LIMIT 10
@@ -1174,8 +1273,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             f"this experiment is pinned to {PINNED_RELEASE}; got {args.release}"
         )
     guard_names = (
-        "max_transport_rows", "max_transport_bytes", "max_connector_rows",
-        "max_connector_bytes", "max_address_rows", "max_crossing_segments",
+        "max_transport_rows",
+        "max_transport_bytes",
+        "max_connector_rows",
+        "max_connector_bytes",
+        "max_address_rows",
+        "max_crossing_segments",
         "max_crossing_tile_memberships",
         "max_crossing_candidate_pairs",
         "remote_time_cap_seconds",
@@ -1204,43 +1307,55 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     timer.daemon = True
     timer.start()
     try:
-      with tempfile.TemporaryDirectory(prefix="overture-transport-") as directory:
-        connection.execute(
-            "SET temp_directory = "
-            + _sql_literal(str(Path(directory) / "duckdb-spill"))
-        )
-        boundary_parquet = Path(directory) / "boundary.parquet"
-        parquet = Path(directory) / "segments.parquet"
-        connector_parquet = Path(directory) / "connectors.parquet"
-        boundary = extract_boundary(
-            connection, boundary_parquet, args.release
-        )
-        bbox = tuple(boundary["bbox"])
-        transport_extract = extract_transportation(
-            connection, parquet, args.release, boundary_parquet, bbox, args.halo,
-            args.max_transport_rows, args.max_transport_bytes,
-        )
-        connector_extract = extract_connectors(
-            connection, connector_parquet, args.release, boundary_parquet,
-            bbox, args.halo,
-            args.max_connector_rows, args.max_connector_bytes,
-        )
-        segments = load_segments(connection, parquet)
-        connector_records = load_connector_records(connection, connector_parquet)
-        started = time.monotonic()
-        clusters = build_snapshot_name_clusters(
-            segments, args.release, _expanded_bbox(bbox, args.halo)
-        )
-        cluster_seconds = round(time.monotonic() - started, 3)
-        alias_lookup = build_alias_lookup(segments, clusters)
-        crossing = geometric_crossing_reference_audit(
-            connection, parquet, args.max_crossing_segments,
-            args.max_crossing_tile_memberships,
-            args.max_crossing_candidate_pairs, args.crossing_tile_degrees,
-        )
-        address_rows, address_extract = extract_address_context(
-            connection, args.release, boundary_parquet, bbox, args.max_address_rows
-        )
+        with tempfile.TemporaryDirectory(prefix="overture-transport-") as directory:
+            connection.execute(
+                "SET temp_directory = "
+                + _sql_literal(str(Path(directory) / "duckdb-spill"))
+            )
+            boundary_parquet = Path(directory) / "boundary.parquet"
+            parquet = Path(directory) / "segments.parquet"
+            connector_parquet = Path(directory) / "connectors.parquet"
+            boundary = extract_boundary(connection, boundary_parquet, args.release)
+            bbox = tuple(boundary["bbox"])
+            transport_extract = extract_transportation(
+                connection,
+                parquet,
+                args.release,
+                boundary_parquet,
+                bbox,
+                args.halo,
+                args.max_transport_rows,
+                args.max_transport_bytes,
+            )
+            connector_extract = extract_connectors(
+                connection,
+                connector_parquet,
+                args.release,
+                boundary_parquet,
+                bbox,
+                args.halo,
+                args.max_connector_rows,
+                args.max_connector_bytes,
+            )
+            segments = load_segments(connection, parquet)
+            connector_records = load_connector_records(connection, connector_parquet)
+            started = time.monotonic()
+            clusters = build_snapshot_name_clusters(
+                segments, args.release, _expanded_bbox(bbox, args.halo)
+            )
+            cluster_seconds = round(time.monotonic() - started, 3)
+            alias_lookup = build_alias_lookup(segments, clusters)
+            crossing = geometric_crossing_reference_audit(
+                connection,
+                parquet,
+                args.max_crossing_segments,
+                args.max_crossing_tile_memberships,
+                args.max_crossing_candidate_pairs,
+                args.crossing_tile_degrees,
+            )
+            address_rows, address_extract = extract_address_context(
+                connection, args.release, boundary_parquet, bbox, args.max_address_rows
+            )
     except duckdb.Error as exc:
         if interrupted.is_set():
             raise RuntimeError(
@@ -1321,7 +1436,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--max-crossing-candidate-pairs", type=int, default=2_000_000)
     parser.add_argument("--crossing-tile-degrees", type=float, default=0.01)
     parser.add_argument(
-        "--remote-time-cap-seconds", type=int,
+        "--remote-time-cap-seconds",
+        type=int,
         default=DEFAULT_REMOTE_TIME_CAP_SECONDS,
     )
     parser.add_argument("--json-out", type=Path)
