@@ -47,6 +47,7 @@ BOUNDARY_LABEL = (
 REPORT_VERSION = 3
 ADDRESS_HARD_MAX_ROWS = 250_000
 DEFAULT_REMOTE_TIME_CAP_SECONDS = 900
+DEFAULT_DUCKDB_TEMP_CAP = 8 * 1024 * 1024 * 1024
 
 
 class UnionFind:
@@ -775,7 +776,7 @@ def extract_address_context(
     return rows, {
         "skipped": False,
         "row_guard": max_rows,
-        "geometry_authoritative_population": count,
+        "bbox_observable_point_within_polygon_population": count,
         "rows": sum(int(row["address_rows"]) for row in rows),
         "sampled": sampled,
         "sample_fraction": (
@@ -785,7 +786,7 @@ def extract_address_context(
             "pinned hash(id) threshold targeting 95% of the row cap, followed by a "
             "hard LIMIT; avoids a global deterministic sort"
             if sampled
-            else "complete polygon population"
+            else "complete bbox-observable Point-within-polygon population"
         ),
         "hash_threshold_u32": hash_threshold,
         "aggregated_street_names": len(rows),
@@ -974,11 +975,12 @@ def serialized_snapshot_estimate(
         for segment in segments
         if str(segment["id"]) in relevant_ids
     }
-    compact = lambda value: len(
-        json.dumps(
-            value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
-        ).encode("utf-8")
-    )
+    def compact(value: Any) -> int:
+        return len(
+            json.dumps(
+                value, ensure_ascii=False, separators=(",", ":"), sort_keys=True
+            ).encode("utf-8")
+        )
     segment_bytes = compact(segment_index)
     cluster_bytes = compact(clusters)
     alias_bytes = compact(alias_lookup)
@@ -1241,7 +1243,8 @@ def render_markdown(report: dict[str, Any]) -> str:
         "",
         "## Address context diagnostic",
         "",
-        f"- Full street-bearing polygon population: **{address['geometry_authoritative_population']:,}**",
+        "- Bbox-observable street-bearing Point-within-polygon population: "
+        f"**{address['bbox_observable_point_within_polygon_population']:,}**",
         f"- Hash sample contributing normalized-name context: **{address['rows']:,}** / cap **{address['row_guard']:,}**",
         "- The sampler targets 95% of the cap before the hard LIMIT, avoiding cap-edge truncation without a global sort; therefore a result below 100,000 is expected.",
         f"- Name-level cluster coverage: **{report['address_name_context']['snapshot_clusters_with_name_level_address_context']:,} / {summary['core_touching_snapshot_name_clusters']:,} ({report['address_name_context']['coverage']:.2%})**",
@@ -1282,6 +1285,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         "max_crossing_tile_memberships",
         "max_crossing_candidate_pairs",
         "remote_time_cap_seconds",
+        "duckdb_temp_cap",
     )
     for name in guard_names:
         if getattr(args, name) <= 0:
@@ -1311,6 +1315,9 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             connection.execute(
                 "SET temp_directory = "
                 + _sql_literal(str(Path(directory) / "duckdb-spill"))
+            )
+            connection.execute(
+                f"SET max_temp_directory_size = '{int(args.duckdb_temp_cap)}B'"
             )
             boundary_parquet = Path(directory) / "boundary.parquet"
             parquet = Path(directory) / "segments.parquet"
@@ -1414,6 +1421,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
             "duckdb_version": duckdb.__version__,
             "platform": platform.platform(),
             "remote_wall_clock_cap_seconds": args.remote_time_cap_seconds,
+            "duckdb_temp_byte_cap": args.duckdb_temp_cap,
         },
         "architecture_warning": (
             "No production shards, APIs, Worker paths, R2 objects, or deploy state were changed."
@@ -1439,6 +1447,12 @@ def parse_args() -> argparse.Namespace:
         "--remote-time-cap-seconds",
         type=int,
         default=DEFAULT_REMOTE_TIME_CAP_SECONDS,
+    )
+    parser.add_argument(
+        "--duckdb-temp-cap",
+        type=int,
+        default=DEFAULT_DUCKDB_TEMP_CAP,
+        help="Maximum DuckDB spill bytes in the temporary experiment directory",
     )
     parser.add_argument("--json-out", type=Path)
     parser.add_argument("--markdown-out", type=Path)

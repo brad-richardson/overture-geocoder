@@ -70,6 +70,8 @@ def test_multi_box_query_scans_once_then_exactly_verifies_geometry():
     assert "bbox_population <= 456" not in query
     assert "deterministic_sample_rank <= 123" in query
     assert "bbox-prefiltered-geometry-verified" in query
+    assert "Post-query artifact acceptance" in experiment.CANDIDATE_CAP_SCOPE
+    assert "does not bound the remote scan" in experiment.CANDIDATE_CAP_SCOPE
 
 
 def test_multi_box_query_rejects_empty_or_unsafe_caps():

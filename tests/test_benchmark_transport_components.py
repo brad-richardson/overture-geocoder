@@ -249,6 +249,7 @@ def valid_args() -> argparse.Namespace:
         max_crossing_candidate_pairs=10,
         crossing_tile_degrees=0.1,
         remote_time_cap_seconds=10,
+        duckdb_temp_cap=10,
         json_out=None,
         markdown_out=None,
     )
@@ -265,6 +266,7 @@ def valid_args() -> argparse.Namespace:
         "max_crossing_segments",
         "max_crossing_tile_memberships",
         "max_crossing_candidate_pairs",
+        "duckdb_temp_cap",
     ],
 )
 def test_guards_must_be_positive_before_remote_work(field: str):

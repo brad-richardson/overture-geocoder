@@ -39,6 +39,12 @@ DEFAULT_DUCKDB_TEMP_CAP = 512 * 1024 * 1024
 DEFAULT_REMOTE_TIME_CAP_SECONDS = 600
 REPORT_VERSION = 3
 DATA_MATURITY = "Alpha"
+CANDIDATE_CAP_SCOPE = (
+    "Post-query artifact acceptance only: the cap removes a completed sample whose "
+    "observed box population is too large; it does not bound the remote scan, count, "
+    "window, or deterministic sort. The wall-clock and DuckDB workspace guards bound "
+    "that work."
+)
 
 REQUIRED_SAMPLE_COLUMNS = {
     "overture_id",
@@ -870,7 +876,8 @@ def analyze_sample(
                     else None
                 ),
                 "row_cap_per_box": row_cap,
-                "candidate_count_cap_per_box": candidate_count_cap,
+                "post_query_candidate_acceptance_cap_per_box": candidate_count_cap,
+                "candidate_cap_scope_warning": CANDIDATE_CAP_SCOPE,
                 "per_box_output_byte_cap": per_box_byte_cap,
                 "workspace_output_byte_cap": overall_byte_cap,
                 "duckdb_temp_byte_cap": duckdb_temp_cap,
@@ -1267,7 +1274,7 @@ def parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         "--candidate-count-cap",
         type=int,
         default=DEFAULT_CANDIDATE_COUNT_CAP,
-        help="Abort a box before sample sorting when its geometry count exceeds this cap",
+        help=CANDIDATE_CAP_SCOPE,
     )
     parser.add_argument(
         "--duckdb-temp-cap",

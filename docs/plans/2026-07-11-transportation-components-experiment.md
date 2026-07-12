@@ -35,11 +35,11 @@
 
 ## Address context diagnostic
 
-- Full street-bearing polygon population: **397,783**
+- Bbox-observable street-bearing Point-within-polygon population: **397,783**
 - Hash sample contributing normalized-name context: **94,771** / cap **100,000**
 - The sampler targets 95% of the cap before the hard LIMIT, avoiding cap-edge truncation without a global sort; therefore a result below 100,000 is expected.
 - Name-level cluster coverage: **4,391 / 5,832 (75.29%)**
-- Extraction: `{"aggregated_street_names": 3712, "elapsed_seconds": 24.813, "geometry_authoritative_population": 397783, "hash_threshold_u32": 1025739896, "row_guard": 100000, "rows": 94771, "sample_fraction": 0.23824798948170234, "sampled": true, "sampling_method": "pinned hash(id) threshold targeting 95% of the row cap, followed by a hard LIMIT; avoids a global deterministic sort", "selection_contract": "bbox-prefiltered for I/O, then exact Point-within unsimplified division_area; missing/discordant bbox rows are unobservable", "skipped": false, "warning": "Name-level proxy only; no contexts are assigned to snapshot clusters."}`
+- Extraction: `{"aggregated_street_names": 3712, "bbox_observable_point_within_polygon_population": 397783, "elapsed_seconds": 24.813, "hash_threshold_u32": 1025739896, "row_guard": 100000, "rows": 94771, "sample_fraction": 0.23824798948170234, "sampled": true, "sampling_method": "pinned hash(id) threshold targeting 95% of the row cap, followed by a hard LIMIT; avoids a global deterministic sort", "selection_contract": "bbox-prefiltered for I/O, then exact Point-within unsimplified division_area; missing/discordant bbox rows are unobservable", "skipped": false, "warning": "Name-level proxy only; no contexts are assigned to snapshot clusters."}`
 - Diagnostic: `{"address_street_names": 3712, "ambiguous_repeated_name_snapshot_clusters_with_context": 1215, "coverage": 0.752914951989026, "diagnostic_only": true, "snapshot_clusters_with_name_level_address_context": 4391, "uniquely_named_snapshot_clusters_with_context": 3176, "warning": "Exact normalized-name matching is not snapshot-cluster enrichment. Disconnected same-name clusters require a spatial address-to-segment join."}`
 
 ## Geometric crossings without shared connector reference

@@ -2,7 +2,7 @@
   "address_extract": {
     "aggregated_street_names": 3712,
     "elapsed_seconds": 24.813,
-    "geometry_authoritative_population": 397783,
+    "bbox_observable_point_within_polygon_population": 397783,
     "hash_threshold_u32": 1025739896,
     "row_guard": 100000,
     "rows": 94771,
@@ -73,6 +73,7 @@
     "unique_referenced_connector_ids": 99878
   },
   "execution": {
+    "duckdb_temp_byte_cap": 8589934592,
     "duckdb_version": "1.4.4",
     "invocation": [
       "scripts/benchmark_transport_components.py",
