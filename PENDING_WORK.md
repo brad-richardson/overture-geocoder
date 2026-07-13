@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-13
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `62ca869` (`main` after #59). Keep measured evidence
+The code baseline is `04b527b` (`main` after #60). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -44,6 +44,11 @@ preserving branch- or PR-specific history.
   Monaco router is accepted only after exact metadata-count, integrity, schema,
   index, and queryability checks. The patch passed adversarial review, 287 local
   tests, and all six pull-request CI jobs.
+- #60 added a smoke-only historical registry sentinel because a bounded real
+  prefix sample cannot guarantee sparse path-null rows. Its merge-only ID smoke
+  passed every build/read stage, returned valid current and historical v3
+  responses through the isolated Worker, and verified Worker plus R2 cleanup in
+  8m35s.
 
 ### Current production data
 
@@ -55,9 +60,9 @@ preserving branch- or PR-specific history.
 - Forward search remains division-focused by default. No Places, address, or
   street artifact has been promoted to the production fleet.
 - No production shard fleet was rebuilt or published during this work. The
-  merge-only #59 shard smoke passed. The ID smoke failed before preview Worker
-  deployment because its bounded registry prefixes contained no historical
-  path-null row.
+  merge-only #59 shard smoke and #60 ID smoke passed. The latter used only the
+  fixed smoke prefix and isolated Worker; it did not publish a production v3
+  fleet.
 
 ## Decisions and constraints in force
 
@@ -176,28 +181,28 @@ preserving branch- or PR-specific history.
   complete shard smoke took 1m52s. After #59, exact generated-object and router
   readback passed. The ID smoke built and published v3 artifacts but stopped
   before preview Worker deployment because prefixes `000`–`004` contained no
-  retained historical row.
+  retained historical row. After #60, the deterministic historical smoke input
+  completed the isolated Worker assertions and strict cleanup in 8m35s.
 
 ## Pause checkpoint
 
 The original checkpoint paused after merged PR #59 with its merge-only runs in
 progress. The later status check found the shard smoke passed and the ID smoke
-failed before deploying its isolated Worker. A bounded registry sample cannot
-guarantee sparse historical rows, so the immediate follow-up is an explicit
-smoke-only historical sentinel that exercises inventory fan-in, v3 encoding,
-publication, and the isolated Worker path. Production remains intentionally
-unchanged.
+failed before deploying its isolated Worker. PR #60 retained the bounded real
+registry sample and added an explicit smoke-only historical sentinel; inventory
+fan-in, v3 encoding, publication, both isolated Worker response classes, and
+strict cleanup then passed. Production remains intentionally unchanged.
 
-After the ID smoke passes, prioritize immutable per-family manifests and atomic
-catalog publication (starting with exact ID file/hash inventories), then build
+Next prioritize immutable per-family manifests and atomic catalog publication
+(starting with exact ID file/hash inventories), then build
 the research-only conservative exact-country comparator. Keep the Places
 label/rank audit and Boston address-to-transport spatial join queued after that
 smoke/read and reverse-routing work.
 
 ## Work inventory and execution priority
 
-Execute the numbered inventory in this priority order: close the ID follow-up in
-item 1, implement the manifest/catalog foundation in item 5, build the
+Execute the remaining numbered inventory in this priority order: implement the
+manifest/catalog foundation in item 5, build the
 research-only country comparator in item 2, and then resume the forward Places
 and address/street work in items 3–4. The item numbers preserve the roadmap's
 subject grouping; they are not the execution sequence. The forward prototypes
@@ -205,7 +210,7 @@ are retained research baselines, not abandoned work, but they should not drive
 production shard or API changes until the smoke/read path and conservative
 reverse router are settled.
 
-### 1. Monaco subset and generated-object read smokes (ID follow-up in progress)
+### 1. Monaco subset and generated-object read smokes (completed)
 
 The implementation, pinned equivalence proof, and first merged current-release
 run are complete. On Overture
@@ -220,9 +225,9 @@ PRs #58 and #59 implemented the validated shard read/router smoke: publish
 `router.db` before metadata references it and read back and query exact actual
 R2 objects. The #59 shard run passed. Its ID run failed while selecting the
 historical v3 case, before catalog upload or preview Worker deployment, because
-the bounded registry sample had no retained historical row. Keep that assertion
-and make the historical smoke input deterministic before declaring the Worker
-path complete.
+the bounded registry sample had no retained historical row. PR #60 kept that
+assertion, made the historical smoke input deterministic, and passed the full
+current/historical preview Worker path plus strict cleanup in 8m35s.
 
 Keep the completed workflow split, merge-only triggers, narrow production-path
 filters, fixed prefix per smoke family, and cancel-in-progress concurrency.
@@ -355,6 +360,97 @@ candidate passes the ratified gates should a separate review cover Worker
 caching, artifact publication/rollback, failure behavior, and production smoke
 coverage. Continue using ambiguous-bbox-to-`HEAD` fallback until that
 integration is deployed and verified.
+
+## Deferred geocoder feature-gap review
+
+The current forward path is normalized exact/token/prefix search over divisions,
+with aliases, hierarchy context, autocomplete, and match-quality reranking. It
+is tolerant in the product sense but is not edit-distance, trigram, or
+typo-correcting fuzzy search. Keep that terminology explicit in API and product
+comparisons. The experimental regional Places path uses related exact/prefix
+candidate logic only when `types=place` is requested.
+
+Review these gaps after the smoke, manifest/catalog, and rebuild-readiness work:
+
+- Measure true typo tolerance on independently labeled division and multilingual
+  queries before choosing an edit-distance, n-gram, or query-rewrite design.
+- Add bounded multilingual name variants with requested-language display and
+  ranking behavior; do not put every language into one undifferentiated FTS
+  field.
+- Define structured address input and component-level match reporting for house
+  number, unit, street, locality, region, postcode, and country.
+- Add street and intersection search only after the Boston spatial
+  address-to-segment/component join establishes association and ambiguity rules.
+- Add regional POI/category/proximity search with explicit chain-name fanout
+  routing. Keep `HEAD` limited to independently reviewed global landmarks.
+- Define response accuracy/confidence fields that distinguish exact address
+  points, candidate lists, future interpolation, street-level results, and
+  administrative bbox or exact-containment results.
+
+The likely serving shape is a small routing directory plus separate immutable
+families: exact-address candidate shards partitioned by postcode prefix or
+spatial cell; a hot street name/alias/component index separated from larger
+segment detail; regional Places name/category shards; and spatial reverse-detail
+cells selected only after country/region routing. Do not fold these much larger
+families into the existing division shards.
+
+## Potential production rebuild checkpoint
+
+Do not trigger a rebuild without explicit approval. Before proposing one,
+require the merge-only shard and ID smokes to be green, reconcile the complete
+per-family manifests and atomic final catalog plan, pin the Overture release,
+inventory expected files/bytes/row counts, confirm range and retry coverage,
+and document promotion plus rollback checks. Treat scale or correctness defects
+found during that rehearsal as hardening work, not reasons to relax gates.
+
+### 2026-07-13 read-only readiness audit: no-go pending workflow hardening
+
+No rebuild or production write was triggered. Production is healthy on
+`2026-07-02.3`, and the latest upstream release remains `2026-06-17.0`. A new
+build would therefore exercise the current v3 ID producer and workflow fixes
+against the same upstream snapshot rather than ingest newer source data.
+
+Measured candidate inputs and current output headroom are healthy:
+
+- Divisions: 10 Parquet objects, 5,788,444 rows, and 5,508,502,487 bytes.
+- ID inputs: 3,586,392,274 registry rows plus 944,242,075 current-release
+  address/base rows, scanning about 353.6 GB of compressed Parquet.
+- Current output: 261 forward shards (56,864,768 bytes), 252 reverse shards
+  (32,690,176 bytes), and 4,096 ID shards (138,576,344,116 bytes). The largest
+  forward, reverse, and ID objects are about 12.6 MB, 11.2 MB, and 32.4 MB,
+  respectively, below the present 50 MB division-family warning threshold.
+- The last successful full workflow took about 2h06m; forward/reverse published
+  after about nine minutes, while ID staging/build determined the critical path.
+
+The current workflow is not ready for another production dispatch:
+
+1. `rebuild-shards` publishes the root discovery catalog independently of the
+   parallel ID pipeline. The Worker health check requires forward, reverse, and
+   ID metadata on the latest version, so normal publication can make `/health`
+   fail until ID completes, and indefinitely if ID fails.
+2. Scheduled/default retention runs in `rebuild-shards` immediately after that
+   early catalog publish, while ID is still building. Keeping only the current
+   incomplete version plus one fallback removes the deeper recovery margin.
+3. An explicit version is format-checked but not rejected when its prefix
+   already exists, so a manual dispatch can mutate supposedly immutable live
+   objects. Partial country, forward-only, or ID-disabled runs can also publish
+   an incomplete version as global latest; reverse-only creates an unreferenced
+   prefix instead.
+4. Forward/reverse collections contain per-object size and SHA-256, but the
+   workflow readback verifies only collections, `HEAD`, and the router. ID
+   metadata inspects Parquet formats but publishes neither per-shard sizes nor
+   hashes; the live ID collection reports zero total bytes. `build-meta.json`
+   is generated locally but is not uploaded.
+5. The rebuild has no final live production smoke and no automatic catalog
+   rollback if post-publication health, search, reverse, or ID checks fail.
+
+Before dispatching, add one finalization job that waits for every enabled
+production family, verifies exact immutable inventories, publishes the root
+catalog once, runs live four-endpoint smoke checks, and only then performs
+retention. Reject existing version prefixes, keep partial builds non-promoting,
+disable or guard the July 25 scheduled run until this lands, use cleanup=false
+for the first hardened rehearsal, and retain at least three complete versions
+until the new version has passed soak checks.
 
 ## Open decisions
 

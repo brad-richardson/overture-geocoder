@@ -955,6 +955,27 @@ def test_phase_metadata_schema_failure_precedes_upload(monkeypatch):
     upload.assert_not_called()
 
 
+def test_phase_metadata_preserves_exact_sizes_from_metadata_discovery(monkeypatch):
+    uploaded = {}
+
+    def capture(path, key):
+        uploaded[key] = __import__("json").loads(path.read_text())
+        return None
+
+    monkeypatch.setattr(bii, "_detect_output_shard_format", lambda *_: 1)
+    monkeypatch.setattr(bii, "_sum_build_marker_records", lambda *_: 7)
+    monkeypatch.setattr(bii, "_upload_to_r2", capture)
+    bii.phase_metadata(
+        [("000", None, 1234, None)], 3, "v", "2026-06-17.0",
+        {"bucket": "test"},
+    )
+
+    collection = uploaded["test/v/id-collection.json"]
+    assert collection["items"]["000"]["size_bytes"] == 1234
+    assert collection["summaries"]["total_size_bytes"] == 1234
+    assert collection["summaries"]["total_records"] == 7
+
+
 BUCKETED = [
     "s3://b/v/staging/id-release-addresses-address/bucket=0/data_0.parquet",
     "s3://b/v/staging/id-release-addresses-address/bucket=3/data_0.parquet",

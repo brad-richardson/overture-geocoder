@@ -2629,10 +2629,12 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     """Discover existing R2 shards via glob (for metadata-only runs).
 
-    Only checks which shards exist — does not read individual files for
-    record counts. Returns (prefix, None, 0, None) for each shard found;
-    a None count means "exists, count unknown" (real totals come from the
-    per-range build _SUCCESS markers — see _sum_build_marker_records).
+    Reads every Parquet footer to recover exact object sizes, but not individual
+    record counts. Returns (prefix, None, size, None) for each shard found; a
+    None count means "exists, count unknown" (real totals come from the per-range
+    build _SUCCESS markers — see _sum_build_marker_records). Exact sizes make
+    id-collection.json usable as an immutable output inventory instead of
+    reporting a misleading zero-byte fleet.
     """
     print("  Discovering existing R2 shards...")
     con = _r2_con(r2_config)
@@ -2643,12 +2645,23 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     # collection would break every ID lookup for this version.
     shard_files = _retry_transient(lambda: _glob_files(con, glob_path))()
 
+    sizes = {}
+    if shard_files:
+        rows = _retry_transient(lambda: con.execute(
+            "SELECT file_name, file_size_bytes FROM parquet_file_metadata(?)",
+            [shard_files],
+        ).fetchall())()
+        sizes = {path: int(size) for path, size in rows}
+
     con.close()
 
     results = []
     for path in shard_files:
         prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
-        results.append((prefix, None, 0, None))
+        size = sizes.get(path)
+        if size is None or size <= 0:
+            raise RuntimeError(f"Missing valid file size for ID shard {path}")
+        results.append((prefix, None, size, None))
 
     print(f"  Found {len(results)} shards")
     return results
@@ -2810,7 +2823,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
             errors.append((prefix, err))
         elif count is None:
             # Shard exists but per-shard count unknown (metadata-only run)
-            shard_infos[prefix] = {}
+            shard_infos[prefix] = {"size_bytes": size}
             counts_known = False
         elif count > 0:
             shard_infos[prefix] = {"record_count": count, "size_bytes": size}
