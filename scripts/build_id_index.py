@@ -45,6 +45,7 @@ Environment:
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import multiprocessing
@@ -381,6 +382,8 @@ def _delete_r2_keys(r2_config, keys):
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
     env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
+    env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
+    env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
     env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     endpoint = f"https://{r2_config['endpoint']}"
@@ -1013,6 +1016,49 @@ def _upload_to_r2(local_path, r2_key, retries=3):
             wait = 5 * (2 ** attempt)  # 5s, 10s, 20s
             print(f"    Upload retry {attempt + 1}/{retries} for {r2_key}, waiting {wait}s...")
             time.sleep(wait)
+    return last_err
+
+
+def _file_sha256(path):
+    """Return the SHA-256 of an exact output object before it is uploaded."""
+    digest = hashlib.sha256()
+    with open(path, "rb") as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _upload_id_shard_to_r2(local_path, r2_config, version, prefix, retries=3):
+    """Upload one ID shard with an R2-validated content digest."""
+    md5 = hashlib.md5(usedforsecurity=False)
+    with open(local_path, "rb") as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b""):
+            md5.update(chunk)
+    content_md5 = base64.b64encode(md5.digest()).decode("ascii")
+    env = os.environ.copy()
+    env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
+    env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
+    endpoint = f"https://{r2_config['endpoint']}"
+    key = f"{version}/id-index/{prefix}.parquet"
+    last_err = "unknown error"
+    for attempt in range(retries):
+        try:
+            result = subprocess.run(
+                ["aws", "s3api", "put-object", "--bucket", r2_config["bucket"],
+                 "--key", key, "--body", str(local_path),
+                 "--content-md5", content_md5,
+                 "--endpoint-url", endpoint, "--region", "auto"],
+                capture_output=True, text=True, timeout=600, env=env,
+            )
+            if result.returncode == 0:
+                return None
+            last_err = f"{result.stderr or ''} {result.stdout or ''}".strip()[:300]
+        except subprocess.TimeoutExpired:
+            last_err = "ID shard upload timed out after 600s"
+        except FileNotFoundError:
+            return "aws CLI is required for checksum-validated ID shard uploads"
+        if attempt < retries - 1:
+            time.sleep(5 * (2 ** attempt))
     return last_err
 
 
@@ -2053,7 +2099,7 @@ def _worker_build_r2_batch(args_tuple):
                     )
 
             if not sources:
-                results.append((prefix, 0, 0, None))
+                results.append((prefix, 0, 0, None, None))
                 continue
 
             union_query = " UNION ALL ".join(sources)
@@ -2067,38 +2113,61 @@ def _worker_build_r2_batch(args_tuple):
                 f"SELECT COUNT(*) FROM ({union_query})"
             ).fetchone()[0]
             if count == 0:
-                results.append((prefix, 0, 0, None))
+                results.append((prefix, 0, 0, None, None))
                 continue
 
-            # Sort and write to R2
+            # Sort locally so the producer can hash the exact bytes that are
+            # uploaded. Direct DuckDB-to-R2 COPY made it impossible for the
+            # finalizer to distinguish the intended shard from a later valid-
+            # looking replacement with the same schema and approximate size.
             r2_dest = f"s3://{bucket}/{version}/id-index/{prefix}.parquet"
+            local_output = f"/tmp/build-id-{prefix}-{os.getpid()}.parquet"
             def _do_copy():
+                try:
+                    os.unlink(local_output)
+                except FileNotFoundError:
+                    pass
                 con.execute(f"""
                     COPY (
                         SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
                                source_file_id, last_seen_release_id,
                                registry_member
                         FROM ({mapped_query}) ORDER BY id
-                    ) TO '{r2_dest}'
+                    ) TO '{local_output}'
                     (FORMAT PARQUET, COMPRESSION UNCOMPRESSED,
                      ROW_GROUP_SIZE {int(row_group_size)});
                 """)
             _retry_transient(_do_copy)()
 
-            # Verify the written footer before this shard can count toward
-            # a _SUCCESS marker (the worker reads columns positionally)
-            _retry_transient(lambda: _assert_shard_schema(con, r2_dest))()
-            _retry_transient(
-                lambda: _assert_shard_locator_footer_stats(
-                    con, r2_dest, source_dictionary_count, release_dictionary_count
+            try:
+                _assert_shard_schema(con, local_output)
+                _assert_shard_locator_footer_stats(
+                    con, local_output, source_dictionary_count, release_dictionary_count
                 )
-            )()
+                size = os.path.getsize(local_output)
+                sha256 = _file_sha256(local_output)
+                err = _upload_id_shard_to_r2(
+                    Path(local_output), r2_config, version, prefix
+                )
+                if err:
+                    raise RuntimeError(f"Failed to upload ID shard {prefix}: {err}")
 
-            # Planning estimate only: UUID+bbox plus the measured compact-v3
-            # locator delta (~1.8 B/row at 700-1,000 source IDs). Actual R2
-            # object size is not available from this write-only connection.
-            size = count * (16 + 4 * 4 + 2)
-            results.append((prefix, count, size, None))
+                # Read back the persisted footer before this shard can count
+                # toward a _SUCCESS marker. The release finalizer later binds
+                # the R2 object size/ETag to this producer SHA-256.
+                _retry_transient(lambda: _assert_shard_schema(con, r2_dest))()
+                _retry_transient(
+                    lambda: _assert_shard_locator_footer_stats(
+                        con, r2_dest,
+                        source_dictionary_count, release_dictionary_count,
+                    )
+                )()
+                results.append((prefix, count, size, None, sha256))
+            finally:
+                try:
+                    os.unlink(local_output)
+                except FileNotFoundError:
+                    pass
 
         # Cleanup
         if has_registry:
@@ -2111,7 +2180,7 @@ def _worker_build_r2_batch(args_tuple):
         return results
 
     except Exception as e:
-        return [(p, 0, 0, str(e)) for p in output_prefixes]
+        return [(p, 0, 0, str(e), None) for p in output_prefixes]
 
 
 def _discover_release_staging_files(con, r2_config, version):
@@ -2617,7 +2686,7 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
         processed = {r[0] for r in results}
         for p in all_prefixes:
             if p not in processed:
-                results.append((p, 0, 0, None))
+                results.append((p, 0, 0, None, None))
 
     return results
 
@@ -2629,10 +2698,12 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     """Discover existing R2 shards via glob (for metadata-only runs).
 
-    Only checks which shards exist — does not read individual files for
-    record counts. Returns (prefix, None, 0, None) for each shard found;
-    a None count means "exists, count unknown" (real totals come from the
-    per-range build _SUCCESS markers — see _sum_build_marker_records).
+    Reads every Parquet footer to recover exact object sizes, but not individual
+    record counts. Returns (prefix, None, size, None) for each shard found; a
+    None count means "exists, count unknown" (real totals come from the per-range
+    build _SUCCESS markers — see _sum_build_marker_records). Exact sizes make
+    id-collection.json usable as an immutable output inventory instead of
+    reporting a misleading zero-byte fleet.
     """
     print("  Discovering existing R2 shards...")
     con = _r2_con(r2_config)
@@ -2643,12 +2714,41 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     # collection would break every ID lookup for this version.
     shard_files = _retry_transient(lambda: _glob_files(con, glob_path))()
 
+    sizes = {}
+    if shard_files:
+        rows = _retry_transient(lambda: con.execute(
+            "SELECT file_name, file_size_bytes FROM parquet_file_metadata(?)",
+            [shard_files],
+        ).fetchall())()
+        sizes = {path: int(size) for path, size in rows}
+
     con.close()
+
+    intended_shards = _build_marker_shard_inventory(r2_config, version)
+    actual_prefixes = {
+        path.rsplit("/", 1)[-1].removesuffix(".parquet")
+        for path in shard_files
+    }
+    if actual_prefixes != set(intended_shards):
+        missing = sorted(set(intended_shards) - actual_prefixes)[:10]
+        extra = sorted(actual_prefixes - set(intended_shards))[:10]
+        raise RuntimeError(
+            f"ID shard inventory differs from producer markers: "
+            f"missing={missing}, extra={extra}"
+        )
 
     results = []
     for path in shard_files:
         prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
-        results.append((prefix, None, 0, None))
+        size = sizes.get(path)
+        if size is None or size <= 0:
+            raise RuntimeError(f"Missing valid file size for ID shard {path}")
+        intended = intended_shards[prefix]
+        if size != intended["size_bytes"]:
+            raise RuntimeError(f"ID shard {prefix} size differs from producer marker")
+        results.append(
+            (prefix, intended["record_count"], size, None, intended["sha256"])
+        )
 
     print(f"  Found {len(results)} shards")
     return results
@@ -2670,6 +2770,37 @@ def _read_current_build_markers(r2_config, version):
         return markers
     finally:
         con.close()
+
+
+def _build_marker_shard_inventory(r2_config, version):
+    """Return the producer-bound shard inventory from current build markers."""
+    combined = {}
+    for marker_path, marker in _read_current_build_markers(r2_config, version):
+        shards = marker.get("shards")
+        if not isinstance(shards, dict) or not shards:
+            raise RuntimeError(f"Build marker {marker_path} has no shard inventory")
+        for prefix, info in shards.items():
+            if prefix in combined:
+                raise RuntimeError(f"Duplicate ID shard {prefix} in build markers")
+            if not isinstance(info, dict):
+                raise RuntimeError(f"Invalid ID shard inventory for {prefix}")
+            record_count = info.get("record_count")
+            size_bytes = info.get("size_bytes")
+            sha256 = info.get("sha256")
+            if not isinstance(record_count, int) or record_count <= 0:
+                raise RuntimeError(f"Invalid record count for ID shard {prefix}")
+            if not isinstance(size_bytes, int) or size_bytes <= 0:
+                raise RuntimeError(f"Invalid size for ID shard {prefix}")
+            if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
+                raise RuntimeError(f"Invalid SHA-256 for ID shard {prefix}")
+            combined[prefix] = {
+                "record_count": record_count,
+                "size_bytes": size_bytes,
+                "sha256": sha256,
+            }
+    if not combined:
+        raise RuntimeError("No current ID build marker shard inventory exists")
+    return combined
 
 
 def _validate_build_marker_dictionary_sha(
@@ -2805,15 +2936,21 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
     counts_known = True
     errors = []
 
-    for prefix, count, size, err in results:
+    for result in results:
+        prefix, count, size, err = result[:4]
+        sha256 = result[4] if len(result) > 4 else None
         if err:
             errors.append((prefix, err))
         elif count is None:
             # Shard exists but per-shard count unknown (metadata-only run)
-            shard_infos[prefix] = {}
+            shard_infos[prefix] = {"size_bytes": size, "sha256": sha256}
             counts_known = False
         elif count > 0:
-            shard_infos[prefix] = {"record_count": count, "size_bytes": size}
+            shard_infos[prefix] = {
+                "record_count": count,
+                "size_bytes": size,
+                "sha256": sha256,
+            }
             total_records += count
 
     # When run standalone, recover the real totals from the per-range build
@@ -2860,6 +2997,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
                     ("href", f"./id-index/{p}.parquet"),
                     ("record_count", s.get("record_count")),
                     ("size_bytes", s.get("size_bytes")),
+                    ("sha256", s.get("sha256")),
                 ] if v
             }
             for p, s in sorted(shard_infos.items())
@@ -3157,6 +3295,15 @@ def build_id_index(args):
                         "records": records,
                         "dictionary_sha256": build_dictionary_sha256,
                         "input_inventory_set_sha256": build_inventory_set_sha256,
+                        "shards": {
+                            result[0]: {
+                                "record_count": result[1],
+                                "size_bytes": result[2],
+                                "sha256": result[4],
+                            }
+                            for result in results
+                            if result[1] > 0
+                        },
                     },
                 )
 

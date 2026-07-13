@@ -17,6 +17,12 @@ on:
         type: boolean
         default: false
 
+# Never interleave catalog pruning with a rebuild finalizer's compare/publish/
+# rollback sequence.
+concurrency:
+  group: r2-production-catalog
+  cancel-in-progress: false
+
 env:
   AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
   AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}

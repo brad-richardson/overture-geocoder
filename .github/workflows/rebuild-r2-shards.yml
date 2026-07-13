@@ -40,17 +40,23 @@ on:
         type: boolean
         required: false
         default: true
-      cleanup_old_versions:
-        description: 'Prune old versions, keeping only the newest 2'
+      promote:
+        description: 'Publish as production latest (requires countries empty, build_type=both, and ID enabled)'
         type: boolean
         required: false
-        default: true
+        default: false
+      cleanup_old_versions:
+        description: 'After successful promotion and smoke, prune old versions (keep newest 3)'
+        type: boolean
+        required: false
+        default: false
 
 # Overlapping runs (scheduled + a manual re-trigger) would compute the same
 # {date}.{n} version from the same published catalog, interleave uploads into
 # one prefix, and clobber each other's catalog publish. Queue instead.
 concurrency:
-  group: rebuild-r2-shards
+  # Shared with any workflow that can mutate the production root catalog.
+  group: r2-production-catalog
   cancel-in-progress: false
 
 env:
@@ -68,11 +74,16 @@ jobs:
   # reads the same release, even if the build crosses UTC midnight.
   prep:
     runs-on: ubuntu-24.04-arm
-    # Run if: scheduled OR manual with REBUILD confirmation
-    if: github.event_name == 'schedule' || github.event.inputs.confirm == 'REBUILD'
+    # Scheduled production writes are disabled unless an explicit repository
+    # variable opts in. Manual runs still require the typed confirmation.
+    if: >-
+      (github.event_name == 'schedule' && vars.ENABLE_SCHEDULED_REBUILD == 'true') ||
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'REBUILD')
     outputs:
       version: ${{ steps.version.outputs.version }}
       release: ${{ steps.release.outputs.release }}
+      promote: ${{ steps.mode.outputs.promote }}
+      complete: ${{ steps.mode.outputs.complete }}
     steps:
       - uses: actions/checkout@v7
 
@@ -92,10 +103,38 @@ jobs:
           echo "release=$RELEASE" >> $GITHUB_OUTPUT
           echo "Overture release: $RELEASE"
 
+      - name: Validate build and promotion mode
+        id: mode
+        env:
+          COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
+        run: |
+          BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
+          COUNTRIES="$COUNTRIES_INPUT"
+          BUILD_ID="${{ github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false' }}"
+          PROMOTE="${{ github.event_name == 'schedule' || github.event.inputs.promote == 'true' }}"
+
+          COMPLETE=false
+          if [ -z "$COUNTRIES" ] && [ "$BUILD_TYPE" = "both" ] && [ "$BUILD_ID" = "true" ]; then
+            COMPLETE=true
+          fi
+
+          if [ "$PROMOTE" = "true" ]; then
+            if [ "$COMPLETE" != "true" ]; then
+              echo "::error::Promotion requires a complete build: countries empty, build_type=both, build_id_index=true"
+              exit 1
+            fi
+          fi
+
+          echo "promote=$PROMOTE" >> "$GITHUB_OUTPUT"
+          echo "complete=$COMPLETE" >> "$GITHUB_OUTPUT"
+          echo "Build mode: type=$BUILD_TYPE, id=$BUILD_ID, complete=$COMPLETE, promote=$PROMOTE"
+
       - name: Compute version
         id: version
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version || '' }}
         run: |
-          INPUT="${{ github.event.inputs.version }}"
+          INPUT="$VERSION_INPUT"
           if [ -n "$INPUT" ]; then
             if ! echo "$INPUT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
               echo "::error::Invalid version format '$INPUT'. Expected YYYY-MM-DD.N (e.g. 2026-02-25.0)"
@@ -141,6 +180,22 @@ jobs:
           print(f'{date}.{n}')
           ")
           fi
+
+          # Versioned prefixes are immutable. Check the actual bucket, not
+          # only catalog links: failed/non-promoting runs can leave an orphan
+          # prefix that must never be resumed or overwritten by this workflow.
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          EXISTING=$(aws s3api list-objects-v2 \
+            --bucket geocoder-shards --prefix "${VERSION}/" --max-keys 1 \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --query 'KeyCount' --output text)
+          if [ "$EXISTING" != "0" ]; then
+            echo "::error::Version prefix ${VERSION}/ already exists in R2; choose a new version"
+            exit 1
+          fi
+
           echo "version=$VERSION" >> $GITHUB_OUTPUT
           echo "Build version: $VERSION"
 
@@ -179,59 +234,52 @@ jobs:
           npm install -g wrangler
           echo "Wrangler version: $(wrangler --version)"
 
-      - name: Seed catalog from R2
-        run: |
-          # A transient fetch failure must abort (not seed an empty catalog):
-          # the seeded file is what build_shards.py extends and the publish
-          # step uploads, so starting from empty would drop every existing
-          # version reference from the published catalog.
-          mkdir -p shards
-          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
-          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-          ./scripts/r2_catalog_fetch.sh shards/catalog.json
-          if [ -f shards/catalog.json ]; then
-            echo "Seeded shards/catalog.json from R2"
-            python3 -c "
-          import json, sys
-          catalog = json.load(sys.stdin)
-          versions = [l['href'].split('/')[1] for l in catalog.get('links', []) if l.get('rel') == 'child']
-          print(f'  Existing versions: {versions}')
-          " < shards/catalog.json
-          else
-            # Past first-deploy an absent catalog is a misclassified outage;
-            # publishing a catalog seeded from empty would drop every live
-            # version reference (see the Compute version guard).
-            echo "::error::catalog.json reported absent from R2 — refusing to seed an empty catalog past first deploy."
-            exit 1
-          fi
-
       - name: Download divisions data
         run: ./scripts/download_divisions.sh "${{ needs.prep.outputs.release }}"
 
       - name: Build forward geocoding shards
         if: github.event.inputs.build_type != 'reverse'
+        env:
+          BUILD_VERSION: ${{ needs.prep.outputs.version }}
+          OVERTURE_RELEASE: ${{ needs.prep.outputs.release }}
+          HEAD_THRESHOLD: ${{ github.event.inputs.head_threshold || '100000' }}
+          COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
         run: |
-          ARGS="--version ${{ needs.prep.outputs.version }}"
-          ARGS="$ARGS --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          if [ -n "${{ github.event.inputs.countries }}" ]; then
-            ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
+          ARGS=(
+            --version "$BUILD_VERSION"
+            --overture-release "$OVERTURE_RELEASE"
+            --head-threshold "$HEAD_THRESHOLD"
+          )
+          if [ -n "$COUNTRIES_INPUT" ]; then
+            ARGS+=(--countries "$COUNTRIES_INPUT")
           fi
-          python scripts/build_shards.py $ARGS
+          python scripts/build_shards.py "${ARGS[@]}"
+          mv "shards/${BUILD_VERSION}/build-meta.json" \
+            "shards/${BUILD_VERSION}/forward-build-meta.json"
 
       - name: Build reverse geocoding shards
         if: github.event.inputs.build_type != 'forward'
+        env:
+          BUILD_VERSION: ${{ needs.prep.outputs.version }}
+          OVERTURE_RELEASE: ${{ needs.prep.outputs.release }}
+          HEAD_THRESHOLD: ${{ github.event.inputs.head_threshold || '100000' }}
+          COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
         run: |
-          ARGS="--reverse --version ${{ needs.prep.outputs.version }}"
-          ARGS="$ARGS --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          if [ -n "${{ github.event.inputs.countries }}" ]; then
-            ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
+          ARGS=(
+            --reverse
+            --version "$BUILD_VERSION"
+            --overture-release "$OVERTURE_RELEASE"
+            --head-threshold "$HEAD_THRESHOLD"
+          )
+          if [ -n "$COUNTRIES_INPUT" ]; then
+            ARGS+=(--countries "$COUNTRIES_INPUT")
           fi
-          python scripts/build_shards.py $ARGS
+          python scripts/build_shards.py "${ARGS[@]}"
+          mv "shards/${BUILD_VERSION}/build-meta.json" \
+            "shards/${BUILD_VERSION}/reverse-build-meta.json"
 
-      # Upload order is deliberate (atomic publication): shard databases
-      # first, then collection.json files, then verification, and only after
-      # everything is in place is catalog.json (the sole discovery pointer)
-      # uploaded in the final publish step.
+      # This job only writes immutable versioned objects. The root catalog is
+      # owned exclusively by finalize-release after every family succeeds.
       - name: Upload forward shards to R2
         if: github.event.inputs.build_type != 'reverse'
         run: |
@@ -321,6 +369,19 @@ jobs:
             sleep $((attempt * 10))
           done
 
+          echo "Uploading ${VERSION}/forward-build-meta.json..."
+          for attempt in 1 2 3; do
+            if wrangler r2 object put "geocoder-shards/${VERSION}/forward-build-meta.json" \
+              --file "shards/${VERSION}/forward-build-meta.json" --remote; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to upload forward-build-meta.json after 3 attempts"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
           # Every referenced data object is now in place; publish metadata.
           echo "Uploading ${VERSION}/collection.json..."
           for attempt in 1 2 3; do
@@ -402,6 +463,19 @@ jobs:
           fi
 
           # Shards are in place; now upload collection metadata (with retry)
+          echo "Uploading ${VERSION}/reverse-build-meta.json..."
+          for attempt in 1 2 3; do
+            if wrangler r2 object put "geocoder-shards/${VERSION}/reverse-build-meta.json" \
+              --file "shards/${VERSION}/reverse-build-meta.json" --remote; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to upload reverse-build-meta.json after 3 attempts"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
           echo "Uploading ${VERSION}/reverse-collection.json..."
           for attempt in 1 2 3; do
             if wrangler r2 object put "geocoder-shards/${VERSION}/reverse-collection.json" \
@@ -484,194 +558,14 @@ jobs:
           fi
           echo "All R2 verification checks passed."
 
-      # catalog.json is the only discovery pointer: publishing it LAST means
-      # a failed run leaves the new version invisible rather than half-live.
-      - name: Publish catalog.json
-        if: github.event.inputs.build_type != 'reverse'
-        run: |
-          echo "Publishing catalog.json (final step of atomic publication)..."
-          for attempt in 1 2 3; do
-            if wrangler r2 object put geocoder-shards/catalog.json \
-              --file shards/catalog.json --remote; then
-              break
-            fi
-            if [ "$attempt" -eq 3 ]; then
-              echo "::error::Failed to upload catalog.json after 3 attempts"
-              exit 1
-            fi
-            sleep $((attempt * 10))
-          done
-
-          # Verify readback
-          if wrangler r2 object get geocoder-shards/catalog.json --remote --pipe > /dev/null 2>&1; then
-            echo "  ok: catalog.json published"
-          else
-            echo "::error::catalog.json NOT FOUND in R2 after publish"
-            exit 1
-          fi
-
-      - name: Prune to newest 2 versions
-        if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
-        run: |
-          # Retention policy: keep only the newest KEEP_VERSIONS versions
-          # (current + one fallback); everything older is deleted, catalog
-          # FIRST so a mid-cleanup crash can never leave dangling links.
-          #
-          # Known tradeoff (each version is a few $/mo of R2): this step runs
-          # while the current version's id-index is still building, so /id
-          # falls back to the previous version. If THAT version's id-index is
-          # itself broken (the case patch-id-stage exists for), there is no
-          # deeper fallback left — patch the prior id-index promptly.
-          KEEP_VERSIONS=2
-          CURRENT="${{ needs.prep.outputs.version }}"
-          echo "Keep newest $KEEP_VERSIONS versions (current build: $CURRENT)"
-
-          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
-          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-
-          # Abort on transient fetch failure: an empty catalog here would
-          # look like "no versions referenced" and prune real versions.
-          ./scripts/r2_catalog_fetch.sh /tmp/catalog.json
-          [ -f /tmp/catalog.json ] || { echo "No catalog; nothing to prune."; exit 0; }
-
-          # Catalog versions, newest first. -V so 2026-02-25.10 > 2026-02-25.9
-          # (lexicographic sort would misorder double-digit .N suffixes).
-          VERSIONS=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/catalog.json | sort -u -V -r || true)
-
-          echo "$(echo $VERSIONS | wc -w) version(s) total; keeping newest $KEEP_VERSIONS"
-
-          OLD_VERSIONS=$(echo "$VERSIONS" | tail -n +$((KEEP_VERSIONS + 1)) | tr '\n' ' ')
-          if [ -z "${OLD_VERSIONS// /}" ]; then
-            echo "Nothing to prune."
-            exit 0
-          fi
-          # Safety: the version built this run is the newest and must never be pruned.
-          for V in $OLD_VERSIONS; do
-            if [ "$V" = "$CURRENT" ]; then
-              echo "::error::refusing to prune the current build version $CURRENT"
-              exit 1
-            fi
-          done
-          echo "Pruning:$OLD_VERSIONS"
-
-          # 1) Prune catalog.json FIRST so a mid-cleanup crash can never leave the
-          #    catalog pointing at deleted versions. Guarded against over-pruning.
-          python3 -c "
-          import json
-          deleted = set('$OLD_VERSIONS'.split())
-          with open('/tmp/catalog.json') as f:
-              catalog = json.load(f)
-          kept = [
-              l for l in catalog.get('links', [])
-              if l.get('rel') != 'child' or l['href'].split('/')[1] not in deleted
-          ]
-          children = [l for l in kept if l.get('rel') == 'child']
-          assert len(children) >= $KEEP_VERSIONS, 'refusing to leave %d version(s)' % len(children)
-          assert any(l.get('latest') for l in children), 'no latest version would remain'
-          catalog['links'] = kept
-          with open('/tmp/catalog-pruned.json', 'w') as f:
-              json.dump(catalog, f, indent=2)
-          "
-          aws s3 cp /tmp/catalog-pruned.json "s3://geocoder-shards/catalog.json" \
-            --endpoint-url "$ENDPOINT" --region auto --content-type application/json
-          echo "catalog.json pruned"
-
-          # 2) Delete the dropped versions' objects (paginated S3 batch deletes).
-          DELETED_COUNT=0
-          for VERSION in $OLD_VERSIONS; do
-            echo "Deleting old version: $VERSION"
-            aws s3 rm "s3://geocoder-shards/${VERSION}/" --recursive \
-              --endpoint-url "$ENDPOINT" --region auto --only-show-errors
-            DELETED_COUNT=$((DELETED_COUNT + 1))
-          done
-          echo "Pruned $DELETED_COUNT version(s)"
-
-      - name: Sweep stray staging and orphaned prefixes
-        if: github.event_name == 'schedule' || github.event.inputs.cleanup_old_versions == 'true'
-        run: |
-          # Reclaim debris the catalog-based cleanup above cannot see:
-          #   * stray <version>/staging/ left behind when a build's own staging
-          #     cleanup never ran (the version is kept; only staging/ is removed)
-          #   * orphaned <version>/ prefixes never referenced by catalog.json
-          #     (e.g. a build that died before publishing), once past the cutoff
-          # STRICTLY scoped to exact YYYY-MM-DD.N prefixes, so backups/,
-          # smoketest/, catalog.json and any other object are never touched. The
-          # version built by THIS run is always skipped: its staging/ is still in
-          # use by the parallel id-build job and is removed by id-post.
-          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
-          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
-
-          # Unrelated to version retention (which keeps the newest 2): this
-          # cutoff only guards ORPHANED, never-referenced prefixes. An
-          # in-flight build is always recent (and the current build is
-          # skipped outright), so an orphan older than this is a
-          # dead/abandoned build, safe to remove.
-          CUTOFF=$(date -d '-30 days' +%Y-%m-%d)
-          CURRENT="${{ needs.prep.outputs.version }}"
-          echo "Cutoff: $CUTOFF   current version (always skipped): $CURRENT"
-
-          # Abort on transient fetch failure: an empty catalog here would mark
-          # every referenced live version as an orphan and delete it.
-          ./scripts/r2_catalog_fetch.sh /tmp/sweep-catalog.json
-          [ -f /tmp/sweep-catalog.json ] || { echo "No catalog; skipping sweep."; exit 0; }
-          REFERENCED=$(grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' /tmp/sweep-catalog.json | sort -u || true)
-
-          PREFIXES=$(S3 s3 ls "s3://geocoder-shards/" | awk '/PRE/{print $2}' || true)
-          stripped=0
-          orphans=0
-          for PFX in $PREFIXES; do
-            V="${PFX%/}"
-            # Guard 1: only ever act on an EXACT date-version prefix.
-            if ! echo "$V" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
-              echo "skip (not a version prefix): $PFX"
-              continue
-            fi
-            # Guard 2: never touch the version this run is building.
-            if [ "$V" = "$CURRENT" ]; then
-              echo "skip (current build): $V"
-              continue
-            fi
-            if echo "$REFERENCED" | grep -qx "$V"; then
-              # Referenced version: keep it, strip only a stray staging/.
-              if S3 s3 ls "s3://geocoder-shards/$V/staging/" >/dev/null 2>&1; then
-                # Guard 3: staging written in the last 2 days may belong to an
-                # in-flight patch-id-stage run for this version; leave it.
-                RECENT=$(S3 s3 ls "s3://geocoder-shards/$V/staging/" --recursive \
-                  | awk -v cutoff="$(date -d '-2 days' +%Y-%m-%d)" '$1 >= cutoff' | head -1)
-                if [ -n "$RECENT" ]; then
-                  echo "skip staging strip (modified within 2 days, possible in-flight patch): $V/staging/"
-                  continue
-                fi
-                echo "strip stray staging: $V/staging/"
-                S3 s3 rm "s3://geocoder-shards/$V/staging/" --recursive --only-show-errors
-                S3 s3 ls "s3://geocoder-shards/$V/collection.json" >/dev/null \
-                  || { echo "::error::$V/collection.json missing after staging strip"; exit 1; }
-                stripped=$((stripped + 1))
-              fi
-            else
-              # Unreferenced prefix = orphan. Only delete once past the cutoff so a
-              # concurrent or just-failed build (always recent) is never removed.
-              VDATE="${V%.*}"
-              if [[ "$VDATE" < "$CUTOFF" ]]; then
-                echo "delete orphaned prefix (older than $CUTOFF): $V/"
-                S3 s3 rm "s3://geocoder-shards/$V/" --recursive --only-show-errors
-                orphans=$((orphans + 1))
-              else
-                echo "keep recent unreferenced prefix (may be in flight): $V/"
-              fi
-            fi
-          done
-          echo "Sweep done: stripped staging from $stripped version(s), deleted $orphans orphaned prefix(es)."
-
+      # This job never mutates catalog.json. A failed or partial build remains
+      # invisible until the complete-release finalizer validates every family.
       - name: Summary
         run: |
           VERSION="${{ needs.prep.outputs.version }}"
           BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
 
-          echo "## R2 Shards Rebuild Complete" >> $GITHUB_STEP_SUMMARY
+          echo "## Immutable Forward/Reverse Artifacts Built" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Overture release:** ${{ needs.prep.outputs.release }}" >> $GITHUB_STEP_SUMMARY
@@ -882,13 +776,18 @@ jobs:
             exit 1
           fi
 
+          FAILED=0
           for PREFIX in 000 400 800 c00 fff; do
             if wrangler r2 object get "geocoder-shards/${VERSION}/id-index/${PREFIX}.parquet" --remote --pipe > /dev/null 2>&1; then
               echo "  ok: ${VERSION}/id-index/${PREFIX}.parquet"
             else
-              echo "  skip: ${VERSION}/id-index/${PREFIX}.parquet (may not exist)"
+              echo "::error::${VERSION}/id-index/${PREFIX}.parquet NOT FOUND in R2"
+              FAILED=1
             fi
           done
+          if [ "$FAILED" -ne 0 ]; then
+            exit 1
+          fi
           echo "R2 verification passed."
 
       # Staging data is several GB per version and is never read again once
@@ -914,3 +813,397 @@ jobs:
           echo "**Version:** ${VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Overture release:** ${{ needs.prep.outputs.release }}" >> $GITHUB_STEP_SUMMARY
           echo "**Trigger:** ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
+
+  # The only job allowed to create a release manifest or mutate catalog.json.
+  # It waits for every production family, so the discovery pointer can never
+  # expose a version whose reverse or ID artifacts are still building.
+  finalize-release:
+    runs-on: ubuntu-24.04-arm
+    needs: [prep, rebuild-shards, id-post]
+    if: >-
+      always() &&
+      needs.prep.outputs.complete == 'true' &&
+      needs.rebuild-shards.result == 'success' &&
+      needs.id-post.result == 'success'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Read back and verify the exact complete release
+        run: |
+          VERSION="${{ needs.prep.outputs.version }}"
+          RELEASE="${{ needs.prep.outputs.release }}"
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          mkdir -p /tmp/rebuild-finalize/metadata /tmp/rebuild-finalize/readback
+
+          # Retain the exact pre-promotion pointer for rollback before reading
+          # any candidate metadata. A missing/transient catalog is fatal.
+          ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-before.json
+          test -s /tmp/rebuild-finalize/catalog-before.json
+
+          # JSON metadata and dictionaries are small. Forward/reverse SQLite
+          # fleets total under 100 MB, so read every object back and verify its
+          # collection SHA rather than relying on upload success or spot checks.
+          aws s3 sync "s3://geocoder-shards/${VERSION}/" \
+            /tmp/rebuild-finalize/metadata \
+            --exclude "*" --include "*.json" \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          aws s3 sync "s3://geocoder-shards/${VERSION}/shards/" \
+            /tmp/rebuild-finalize/readback/shards \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          aws s3 sync "s3://geocoder-shards/${VERSION}/reverse/" \
+            /tmp/rebuild-finalize/readback/reverse \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          aws s3 cp "s3://geocoder-shards/${VERSION}/router.db" \
+            /tmp/rebuild-finalize/readback/router.db \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+
+          # AWS CLI paginates the full prefix. The manifest records exact key,
+          # byte-size, and R2 ETag for all 4,000+ objects; ID Parquet schema and
+          # footer invariants were already checked for every shard by id-post.
+          aws s3api list-objects-v2 \
+            --bucket geocoder-shards --prefix "${VERSION}/" \
+            --endpoint-url "$ENDPOINT" --region auto --output json \
+            > /tmp/rebuild-finalize/inventory.json
+
+          python scripts/finalize_rebuild.py verify \
+            --version "$VERSION" --release "$RELEASE" \
+            --inventory /tmp/rebuild-finalize/inventory.json \
+            --metadata-dir /tmp/rebuild-finalize/metadata \
+            --readback-dir /tmp/rebuild-finalize/readback \
+            --output /tmp/rebuild-finalize/release-manifest.json
+
+          python scripts/finalize_rebuild.py catalog \
+            --before /tmp/rebuild-finalize/catalog-before.json \
+            --version "$VERSION" \
+            --output /tmp/rebuild-finalize/catalog-next.json
+
+      - name: Publish immutable release manifest
+        run: |
+          VERSION="${{ needs.prep.outputs.version }}"
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          aws s3 cp /tmp/rebuild-finalize/release-manifest.json \
+            "s3://geocoder-shards/${VERSION}/release-manifest.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json --only-show-errors
+          aws s3 cp "s3://geocoder-shards/${VERSION}/release-manifest.json" \
+            /tmp/rebuild-finalize/release-manifest-readback.json \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          cmp /tmp/rebuild-finalize/release-manifest.json \
+            /tmp/rebuild-finalize/release-manifest-readback.json
+
+      - name: Atomically promote and smoke production
+        if: needs.prep.outputs.promote == 'true'
+        run: |
+          VERSION="${{ needs.prep.outputs.version }}"
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BASE_URL="https://geocoder.bradr.dev"
+
+          publish_catalog() {
+            local source="$1"
+            local attempt
+            for attempt in 1 2 3; do
+              if aws s3 cp "$source" "s3://geocoder-shards/catalog.json" \
+                --endpoint-url "$ENDPOINT" --region auto \
+                --content-type application/json --only-show-errors; then
+                return 0
+              fi
+              sleep $((attempt * 10))
+            done
+            echo "::error::Failed to publish catalog from ${source} after 3 attempts"
+            return 1
+          }
+
+          smoke_once() {
+            local expected_version="$1"
+            local health search reverse gers_id id_json
+            health=$(curl -fsS --max-time 20 "${BASE_URL}/health?rebuild=${expected_version}") || return 1
+            echo "$health" | jq -e --arg v "$expected_version" \
+              '.status == "ok" and .version == $v' >/dev/null || return 1
+
+            search=$(curl -fsS --max-time 20 \
+              "${BASE_URL}/search?q=boston&limit=1&rebuild=${expected_version}") || return 1
+            echo "$search" | jq -e --arg v "$expected_version" \
+              '.data_version == $v and (.results | length) > 0' >/dev/null || return 1
+            gers_id=$(echo "$search" | jq -er '.results[0].gers_id') || return 1
+
+            reverse=$(curl -fsS --max-time 20 \
+              "${BASE_URL}/reverse?lat=42.36&lon=-71.06&rebuild=${expected_version}") || return 1
+            echo "$reverse" | jq -e --arg v "$expected_version" \
+              '.data_version == $v and (.gers_id | type == "string")' >/dev/null || return 1
+
+            id_json=$(curl -fsS --max-time 30 "${BASE_URL}/id/${gers_id}?rebuild=${expected_version}") || return 1
+            echo "$id_json" | jq -e --arg v "$expected_version" --arg id "$gers_id" \
+              '.data_version == $v and .id == $id' >/dev/null || return 1
+          }
+
+          rollback_candidate() {
+            echo "::error::Restoring the exact previous catalog after failed promotion"
+            ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-live.json || return 1
+            if ! cmp /tmp/rebuild-finalize/catalog-next.json \
+              /tmp/rebuild-finalize/catalog-live.json; then
+              echo "::error::Live catalog no longer equals this candidate; refusing rollback clobber"
+              return 1
+            fi
+            publish_catalog /tmp/rebuild-finalize/catalog-before.json || return 1
+            ./scripts/r2_catalog_fetch.sh \
+              /tmp/rebuild-finalize/catalog-rollback-readback.json || return 1
+            cmp /tmp/rebuild-finalize/catalog-before.json \
+              /tmp/rebuild-finalize/catalog-rollback-readback.json || return 1
+
+            # Worker isolates cache catalog.json for up to 300 seconds. Confirm
+            # the prior version is served again before claiming rollback.
+            for attempt in $(seq 1 14); do
+              echo "Rollback smoke attempt ${attempt}/14..."
+              if smoke_once "$PREVIOUS_VERSION"; then
+                echo "Rollback confirmed: production serves ${PREVIOUS_VERSION}."
+                return 0
+              fi
+              sleep 30
+            done
+            echo "::error::R2 rolled back but production did not confirm ${PREVIOUS_VERSION}"
+            return 1
+          }
+
+          rollback_on_exit() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [ "$PUBLISHED" = "true" ]; then
+              set +e
+              rollback_candidate
+              local rollback_status=$?
+              set -e
+              if [ "$rollback_status" -ne 0 ]; then
+                echo "::error::Automatic catalog rollback needs operator attention"
+              fi
+            fi
+            exit "$status"
+          }
+
+          # Do not overwrite a catalog changed by another maintenance workflow
+          # while this finalizer was reading and hashing the candidate fleet.
+          ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-prepublish.json
+          test -s /tmp/rebuild-finalize/catalog-prepublish.json
+          if ! cmp /tmp/rebuild-finalize/catalog-before.json \
+            /tmp/rebuild-finalize/catalog-prepublish.json; then
+            echo "::error::catalog.json changed during finalization; refusing to clobber it"
+            exit 1
+          fi
+
+          PREVIOUS_VERSION=$(jq -er \
+            '[.links[] | select(.rel == "child" and .latest == true)][0].href
+             | ltrimstr("./") | split("/")[0]' \
+            /tmp/rebuild-finalize/catalog-before.json)
+
+          # Keep a durable operator-recovery copy outside the immutable release
+          # prefix. The trap handles normal failures; this survives runner loss.
+          aws s3 cp /tmp/rebuild-finalize/catalog-before.json \
+            "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json --only-show-errors
+          aws s3 cp "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
+            /tmp/rebuild-finalize/catalog-backup-readback.json \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          cmp /tmp/rebuild-finalize/catalog-before.json \
+            /tmp/rebuild-finalize/catalog-backup-readback.json
+          aws s3 cp /tmp/rebuild-finalize/catalog-next.json \
+            "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json --only-show-errors
+          aws s3 cp "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
+            /tmp/rebuild-finalize/catalog-candidate-backup-readback.json \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          cmp /tmp/rebuild-finalize/catalog-next.json \
+            /tmp/rebuild-finalize/catalog-candidate-backup-readback.json
+
+          echo "Publishing catalog.json once after all family verification..."
+          PUBLISHED=false
+          trap rollback_on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          # Treat publication as possibly successful before invoking the CLI:
+          # a connection can fail after R2 accepted the write.
+          PUBLISHED=true
+          publish_catalog /tmp/rebuild-finalize/catalog-next.json
+
+          PASSED=false
+          for attempt in $(seq 1 14); do
+            echo "Production smoke attempt ${attempt}/14..."
+            if smoke_once "$VERSION"; then
+              PASSED=true
+              break
+            fi
+            sleep 30
+          done
+
+          if [ "$PASSED" != "true" ]; then
+            echo "::error::Production smoke failed"
+            exit 1
+          fi
+
+          PUBLISHED=false
+          trap - EXIT INT TERM
+          echo "Production health, search, reverse, and ID all serve ${VERSION}."
+
+  # EXIT traps cannot run after a hard runner loss. This independent job uses
+  # the durable before/candidate pair and the same compare-before-swap rule.
+  post-finalize:
+    runs-on: ubuntu-24.04-arm
+    needs: [prep, finalize-release]
+    if: always()
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Recover an interrupted catalog promotion
+        if: >-
+          needs.prep.outputs.promote == 'true' &&
+          needs.finalize-release.result != 'success'
+        env:
+          VERSION: ${{ needs.prep.outputs.version }}
+        run: |
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BASE_URL="https://geocoder.bradr.dev"
+
+          COUNT=$(aws s3api list-objects-v2 \
+            --bucket geocoder-shards \
+            --prefix "backups/catalog-candidate-${VERSION}.json" \
+            --max-keys 1 --query 'KeyCount' --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          if [ "$COUNT" = "0" ]; then
+            echo "Promotion never reached durable candidate publication; nothing to recover."
+            exit 0
+          fi
+
+          aws s3 cp "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
+            /tmp/catalog-before.json --endpoint-url "$ENDPOINT" \
+            --region auto --only-show-errors
+          aws s3 cp "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
+            /tmp/catalog-candidate.json --endpoint-url "$ENDPOINT" \
+            --region auto --only-show-errors
+          ./scripts/r2_catalog_fetch.sh /tmp/catalog-live.json
+
+          if cmp /tmp/catalog-before.json /tmp/catalog-live.json; then
+            echo "Previous catalog is already restored."
+          elif cmp /tmp/catalog-candidate.json /tmp/catalog-live.json; then
+            aws s3 cp /tmp/catalog-before.json \
+              "s3://geocoder-shards/catalog.json" \
+              --endpoint-url "$ENDPOINT" --region auto \
+              --content-type application/json --only-show-errors
+            ./scripts/r2_catalog_fetch.sh /tmp/catalog-restored.json
+            cmp /tmp/catalog-before.json /tmp/catalog-restored.json
+          else
+            echo "::error::Live catalog is neither the interrupted candidate nor its predecessor; refusing to clobber it"
+            exit 1
+          fi
+
+          PREVIOUS_VERSION=$(jq -er \
+            '[.links[] | select(.rel == "child" and .latest == true)][0].href
+             | ltrimstr("./") | split("/")[0]' /tmp/catalog-before.json)
+          for attempt in $(seq 1 14); do
+            HEALTH=$(curl -fsS --max-time 20 \
+              "${BASE_URL}/health?recovery=${VERSION}-${attempt}") || true
+            if echo "$HEALTH" | jq -e --arg version "$PREVIOUS_VERSION" \
+              '.status == "ok" and .version == $version' >/dev/null; then
+              echo "Recovery confirmed: production serves ${PREVIOUS_VERSION}."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::Catalog restored in R2 but cached production did not recover"
+          exit 1
+
+      - name: Prune only after successful promotion and smoke
+        if: >-
+          needs.finalize-release.result == 'success' &&
+          needs.prep.outputs.promote == 'true' &&
+          github.event_name == 'workflow_dispatch' &&
+          github.event.inputs.cleanup_old_versions == 'true'
+        run: |
+          KEEP_VERSIONS=3
+          CURRENT="${{ needs.prep.outputs.version }}"
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+
+          ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-promoted.json
+          test -s /tmp/rebuild-finalize/catalog-promoted.json
+          python3 - "$KEEP_VERSIONS" "$CURRENT" <<'PY'
+          import json
+          import re
+          import sys
+
+          keep_count = int(sys.argv[1])
+          current = sys.argv[2]
+          path = "/tmp/rebuild-finalize/catalog-promoted.json"
+          with open(path) as src:
+              catalog = json.load(src)
+          version_re = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
+          children = []
+          static = []
+          for link in catalog.get("links", []):
+              if link.get("rel") != "child":
+                  static.append(link)
+                  continue
+              version = link["href"].strip("./").split("/", 1)[0]
+              if not version_re.fullmatch(version):
+                  raise RuntimeError(f"invalid catalog version {version!r}")
+              date, suffix = version.rsplit(".", 1)
+              key = tuple(map(int, date.split("-"))) + (int(suffix),)
+              children.append((key, version, link))
+          children.sort(reverse=True)
+          if not children or children[0][1] != current:
+              raise RuntimeError("current build is not catalog latest")
+          if len(children) < keep_count:
+              raise RuntimeError("refusing to prune below retention floor")
+          kept = children[:keep_count]
+          dropped = children[keep_count:]
+          catalog["links"] = static + [link for _, _, link in kept]
+          with open("/tmp/rebuild-finalize/catalog-pruned.json", "w") as dst:
+              json.dump(catalog, dst, indent=2)
+              dst.write("\n")
+          with open("/tmp/rebuild-finalize/prune-versions.txt", "w") as dst:
+              for _, version, _ in dropped:
+                  dst.write(version + "\n")
+          PY
+
+          if [ ! -s /tmp/rebuild-finalize/prune-versions.txt ]; then
+            echo "Nothing to prune."
+            exit 0
+          fi
+
+          # Remove discovery links first; a deletion failure then leaves only
+          # unreachable extra objects, never dangling catalog references.
+          aws s3 cp /tmp/rebuild-finalize/catalog-pruned.json \
+            "s3://geocoder-shards/catalog.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json --only-show-errors
+          while read -r VERSION; do
+            test "$VERSION" != "$CURRENT"
+            echo "Deleting retired version ${VERSION}/"
+            aws s3 rm "s3://geocoder-shards/${VERSION}/" --recursive \
+              --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          done < /tmp/rebuild-finalize/prune-versions.txt
+
+      - name: Summary
+        if: always()
+        run: |
+          echo "## Atomic release finalizer" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Version:** ${{ needs.prep.outputs.version }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Overture release:** ${{ needs.prep.outputs.release }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Promoted:** ${{ needs.prep.outputs.promote }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "**Retention requested:** ${{ github.event.inputs.cleanup_old_versions || 'false' }}" >> "$GITHUB_STEP_SUMMARY"

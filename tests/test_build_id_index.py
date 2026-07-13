@@ -545,6 +545,31 @@ def test_required_staging_marker_upload_failure_is_fatal(monkeypatch, tmp_path):
     assert not list(tmp_path.glob("tmp-staging-marker-*"))
 
 
+def test_id_shard_upload_sends_server_validated_content_md5(monkeypatch, tmp_path):
+    shard = tmp_path / "000.parquet"
+    shard.write_bytes(b"exact parquet bytes")
+    completed = mock.Mock(returncode=0, stdout="{}", stderr="")
+    run = mock.Mock(return_value=completed)
+    monkeypatch.setattr(bii.subprocess, "run", run)
+
+    error = bii._upload_id_shard_to_r2(
+        shard,
+        {
+            "bucket": "bucket",
+            "endpoint": "account.r2.cloudflarestorage.com",
+            "key_id": "key",
+            "secret": "secret",
+        },
+        "2026-07-13.0",
+        "000",
+    )
+
+    assert error is None
+    command = run.call_args.args[0]
+    assert command[:3] == ["aws", "s3api", "put-object"]
+    assert command[command.index("--content-md5") + 1] == "lLGWkJGzZsKs8e1P9OaaAQ=="
+
+
 def test_release_inventory_fan_in_rejects_missing_direct_staged_tuple(monkeypatch):
     release = "2026-06-17.0"
     monkeypatch.setattr(
@@ -955,6 +980,27 @@ def test_phase_metadata_schema_failure_precedes_upload(monkeypatch):
     upload.assert_not_called()
 
 
+def test_phase_metadata_preserves_exact_sizes_from_metadata_discovery(monkeypatch):
+    uploaded = {}
+
+    def capture(path, key):
+        uploaded[key] = __import__("json").loads(path.read_text())
+        return None
+
+    monkeypatch.setattr(bii, "_detect_output_shard_format", lambda *_: 1)
+    monkeypatch.setattr(bii, "_sum_build_marker_records", lambda *_: 7)
+    monkeypatch.setattr(bii, "_upload_to_r2", capture)
+    bii.phase_metadata(
+        [("000", None, 1234, None)], 3, "v", "2026-06-17.0",
+        {"bucket": "test"},
+    )
+
+    collection = uploaded["test/v/id-collection.json"]
+    assert collection["items"]["000"]["size_bytes"] == 1234
+    assert collection["summaries"]["total_size_bytes"] == 1234
+    assert collection["summaries"]["total_records"] == 7
+
+
 BUCKETED = [
     "s3://b/v/staging/id-release-addresses-address/bucket=0/data_0.parquet",
     "s3://b/v/staging/id-release-addresses-address/bucket=3/data_0.parquet",
@@ -1120,9 +1166,9 @@ def pipeline(monkeypatch):
             ),
         ),
         ("_validate_build_marker_dictionary_sha", None),
-        ("phase_build_r2", [("001", 10, 360, None)]),
+        ("phase_build_r2", [("001", 10, 360, None, "a" * 64)]),
         ("phase_metadata", ({"001": {"record_count": 10}}, 10, [], 3)),
-        ("_gather_shard_info_from_r2", [("001", None, 0, None)]),
+        ("_gather_shard_info_from_r2", [("001", 10, 360, None, "a" * 64)]),
     ]:
         m = mock.Mock(return_value=ret)
         monkeypatch.setattr(bii, name, m)
@@ -1217,6 +1263,13 @@ def test_range_build_writes_range_marker_with_records(pipeline):
         "records": 10,
         "dictionary_sha256": "abc",
         "input_inventory_set_sha256": "d" * 64,
+        "shards": {
+            "001": {
+                "record_count": 10,
+                "size_bytes": 360,
+                "sha256": "a" * 64,
+            }
+        },
     }
 
 
