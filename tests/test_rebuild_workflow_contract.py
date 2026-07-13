@@ -68,3 +68,13 @@ def test_promotion_rollback_is_guarded_and_confirms_cached_previous_version():
     assert "catalog-next.json" in text[text.index("rollback_candidate()") :]
     assert 'smoke_once "$PREVIOUS_VERSION"' in text
     assert "backups/catalog-before-${VERSION}.json" in text
+    assert "recover-failed-promotion:" in text
+    assert "catalog-candidate-${VERSION}.json" in text
+
+
+def test_id_patch_rejects_catalogued_versions_and_rebuilds_complete_ranges():
+    text = PATCH_ID_WORKFLOW.read_text()
+    assert "PATCH_VERSION" in text and "patch-catalog.json" in text
+    assert "catalogued and immutable" in text
+    assert "Force complete rebuilds of affected ranges" in text
+    assert "build-patched:" not in text

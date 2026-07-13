@@ -545,6 +545,31 @@ def test_required_staging_marker_upload_failure_is_fatal(monkeypatch, tmp_path):
     assert not list(tmp_path.glob("tmp-staging-marker-*"))
 
 
+def test_id_shard_upload_sends_server_validated_content_md5(monkeypatch, tmp_path):
+    shard = tmp_path / "000.parquet"
+    shard.write_bytes(b"exact parquet bytes")
+    completed = mock.Mock(returncode=0, stdout="{}", stderr="")
+    run = mock.Mock(return_value=completed)
+    monkeypatch.setattr(bii.subprocess, "run", run)
+
+    error = bii._upload_id_shard_to_r2(
+        shard,
+        {
+            "bucket": "bucket",
+            "endpoint": "account.r2.cloudflarestorage.com",
+            "key_id": "key",
+            "secret": "secret",
+        },
+        "2026-07-13.0",
+        "000",
+    )
+
+    assert error is None
+    command = run.call_args.args[0]
+    assert command[:3] == ["aws", "s3api", "put-object"]
+    assert command[command.index("--content-md5") + 1] == "lLGWkJGzZsKs8e1P9OaaAQ=="
+
+
 def test_release_inventory_fan_in_rejects_missing_direct_staged_tuple(monkeypatch):
     release = "2026-06-17.0"
     monkeypatch.setattr(

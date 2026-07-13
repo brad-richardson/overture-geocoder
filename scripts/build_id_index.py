@@ -45,6 +45,7 @@ Environment:
 """
 
 import argparse
+import base64
 import hashlib
 import json
 import multiprocessing
@@ -381,6 +382,8 @@ def _delete_r2_keys(r2_config, keys):
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
     env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
+    env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
+    env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
     env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     endpoint = f"https://{r2_config['endpoint']}"
@@ -1025,25 +1028,35 @@ def _file_sha256(path):
     return digest.hexdigest()
 
 
-def _download_r2_object(r2_key, local_path, retries=3):
-    """Download an exact R2 object for cryptographic readback verification."""
+def _upload_id_shard_to_r2(local_path, r2_config, version, prefix, retries=3):
+    """Upload one ID shard with an R2-validated content digest."""
+    md5 = hashlib.md5(usedforsecurity=False)
+    with open(local_path, "rb") as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b""):
+            md5.update(chunk)
+    content_md5 = base64.b64encode(md5.digest()).decode("ascii")
+    env = os.environ.copy()
+    env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
+    env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
+    endpoint = f"https://{r2_config['endpoint']}"
+    key = f"{version}/id-index/{prefix}.parquet"
     last_err = "unknown error"
     for attempt in range(retries):
         try:
-            try:
-                os.unlink(local_path)
-            except FileNotFoundError:
-                pass
             result = subprocess.run(
-                ["wrangler", "r2", "object", "get", r2_key,
-                 "--remote", "--file", str(local_path)],
-                capture_output=True, text=True, timeout=120,
+                ["aws", "s3api", "put-object", "--bucket", r2_config["bucket"],
+                 "--key", key, "--body", str(local_path),
+                 "--content-md5", content_md5,
+                 "--endpoint-url", endpoint, "--region", "auto"],
+                capture_output=True, text=True, timeout=600, env=env,
             )
             if result.returncode == 0:
                 return None
             last_err = f"{result.stderr or ''} {result.stdout or ''}".strip()[:300]
         except subprocess.TimeoutExpired:
-            last_err = "download timed out after 120s"
+            last_err = "ID shard upload timed out after 600s"
+        except FileNotFoundError:
+            return "aws CLI is required for checksum-validated ID shard uploads"
         if attempt < retries - 1:
             time.sleep(5 * (2 ** attempt))
     return last_err
@@ -2133,31 +2146,11 @@ def _worker_build_r2_batch(args_tuple):
                 )
                 size = os.path.getsize(local_output)
                 sha256 = _file_sha256(local_output)
-                err = _upload_to_r2(
-                    Path(local_output), f"{bucket}/{version}/id-index/{prefix}.parquet"
+                err = _upload_id_shard_to_r2(
+                    Path(local_output), r2_config, version, prefix
                 )
                 if err:
                     raise RuntimeError(f"Failed to upload ID shard {prefix}: {err}")
-
-                readback_output = f"{local_output}.readback"
-                try:
-                    err = _download_r2_object(
-                        f"{bucket}/{version}/id-index/{prefix}.parquet",
-                        readback_output,
-                    )
-                    if err:
-                        raise RuntimeError(
-                            f"Failed to read back ID shard {prefix}: {err}"
-                        )
-                    if os.path.getsize(readback_output) != size:
-                        raise RuntimeError(f"ID shard {prefix} readback size mismatch")
-                    if _file_sha256(readback_output) != sha256:
-                        raise RuntimeError(f"ID shard {prefix} readback SHA-256 mismatch")
-                finally:
-                    try:
-                        os.unlink(readback_output)
-                    except FileNotFoundError:
-                        pass
 
                 # Read back the persisted footer before this shard can count
                 # toward a _SUCCESS marker. The release finalizer later binds

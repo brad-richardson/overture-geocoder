@@ -67,10 +67,18 @@ jobs:
           COUNT=$(aws s3api list-objects-v2 \
             --bucket geocoder-shards \
             --prefix "${PATCH_VERSION}/release-manifest.json" \
-            --max-items 1 --query 'length(Contents)' --output text \
+            --max-keys 1 --query 'KeyCount' --output text \
             --endpoint-url "$ENDPOINT" --region auto)
           if [ "$COUNT" != "0" ]; then
             echo "::error::${PATCH_VERSION} is finalized and immutable; rebuild under a new version"
+            exit 1
+          fi
+          ./scripts/r2_catalog_fetch.sh /tmp/patch-catalog.json
+          if jq -e --arg version "$PATCH_VERSION" \
+            '.links[]? | select(.rel == "child") | .href
+             | ltrimstr("./") | split("/")[0] == $version' \
+            /tmp/patch-catalog.json >/dev/null; then
+            echo "::error::${PATCH_VERSION} is catalogued and immutable; rebuild under a new version"
             exit 1
           fi
 
@@ -103,6 +111,31 @@ jobs:
             --prefixes "$PATCH_PREFIXES" \
             --marker-ranges "$PATCH_MARKER_RANGES"
 
+      - name: Force complete rebuilds of affected ranges
+        if: inputs.prefixes != '' && inputs.run_build
+        run: |
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          for RANGE in 000-3ff 400-7ff 800-bff c00-fff; do
+            START=${RANGE%-*}
+            END=${RANGE#*-}
+            MATCH=false
+            IFS=',' read -ra PREFIX_LIST <<< "$PATCH_PREFIXES"
+            for PREFIX in "${PREFIX_LIST[@]}"; do
+              PREFIX=${PREFIX//[[:space:]]/}
+              if (( 16#$PREFIX >= 16#$START && 16#$PREFIX <= 16#$END )); then
+                MATCH=true
+              fi
+            done
+            if [ "$MATCH" = "true" ]; then
+              echo "Invalidating build-${RANGE}; patched shards require a complete range rebuild"
+              aws s3 rm \
+                "s3://geocoder-shards/${PATCH_VERSION}/staging/build-${RANGE}/_SUCCESS" \
+                --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+            fi
+          done
+
       - name: Stage release themes
         if: inputs.run_stage_base
         run: |
@@ -111,46 +144,12 @@ jobs:
             --version "$PATCH_VERSION" \
             --release "$PATCH_RELEASE"
 
-  # Patched prefixes are rebuilt directly (--prefixes bypasses the per-range
-  # build markers). The range-matrix job below would skip any range whose
-  # marker exists — i.e., exactly the ranges containing the patched shards.
-  build-patched:
-    runs-on: ubuntu-24.04-arm
-    needs: patch-stage
-    if: inputs.run_build && inputs.prefixes != ''
-    steps:
-      - uses: actions/checkout@v7
-
-      - name: Setup Python
-        uses: actions/setup-python@v6
-        with:
-          python-version: '3.11'
-
-      - name: Install Python dependencies
-        run: pip install duckdb==1.5.1
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v6
-        with:
-          node-version: '24'
-
-      - name: Install wrangler
-        run: npm install -g wrangler
-
-      - name: "Build patched prefixes"
-        run: |
-          python -u scripts/build_id_index.py \
-            --phase build --prefix-len 3 --workers 8 \
-            --version "$PATCH_VERSION" \
-            --release "$PATCH_RELEASE" \
-            --prefixes "$PATCH_PREFIXES"
-
-  # Full range-matrix build: for resuming a failed build with no specific
-  # prefixes to patch. Ranges whose _SUCCESS marker exists are skipped.
+  # Always rebuild the complete affected range so its producer SHA inventory
+  # remains canonical. Unaffected ranges retain and honor their markers.
   build-ranges:
     runs-on: ubuntu-24.04-arm
     needs: patch-stage
-    if: inputs.run_build && inputs.prefixes == ''
+    if: inputs.run_build
     strategy:
       fail-fast: false
       matrix:
@@ -210,14 +209,13 @@ jobs:
 
   metadata:
     runs-on: ubuntu-24.04-arm
-    needs: [patch-stage, build-patched, build-ranges]
+    needs: [patch-stage, build-ranges]
     # Run when requested even if both build jobs were skipped (run_build=false)
     # — the implicit success() would otherwise skip this job whenever a
     # dependency is skipped. Never run past a failed stage or build.
     if: >-
       ${{ !cancelled() && inputs.run_metadata
           && needs.patch-stage.result == 'success'
-          && needs.build-patched.result != 'failure'
           && needs.build-ranges.result != 'failure' }}
     steps:
       - uses: actions/checkout@v7

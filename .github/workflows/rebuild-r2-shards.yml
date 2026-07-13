@@ -1018,6 +1018,15 @@ jobs:
             --endpoint-url "$ENDPOINT" --region auto --only-show-errors
           cmp /tmp/rebuild-finalize/catalog-before.json \
             /tmp/rebuild-finalize/catalog-backup-readback.json
+          aws s3 cp /tmp/rebuild-finalize/catalog-next.json \
+            "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json --only-show-errors
+          aws s3 cp "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
+            /tmp/rebuild-finalize/catalog-candidate-backup-readback.json \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          cmp /tmp/rebuild-finalize/catalog-next.json \
+            /tmp/rebuild-finalize/catalog-candidate-backup-readback.json
 
           echo "Publishing catalog.json once after all family verification..."
           PUBLISHED=false
@@ -1047,6 +1056,75 @@ jobs:
           PUBLISHED=false
           trap - EXIT INT TERM
           echo "Production health, search, reverse, and ID all serve ${VERSION}."
+
+  # EXIT traps cannot run after a hard runner loss. This independent job uses
+  # the durable before/candidate pair and the same compare-before-swap rule.
+  recover-failed-promotion:
+    runs-on: ubuntu-24.04-arm
+    needs: [prep, finalize-release]
+    if: >-
+      always() &&
+      needs.prep.outputs.promote == 'true' &&
+      needs.finalize-release.result != 'success'
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Recover an interrupted catalog promotion
+        env:
+          VERSION: ${{ needs.prep.outputs.version }}
+        run: |
+          export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
+          export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          BASE_URL="https://geocoder.bradr.dev"
+
+          COUNT=$(aws s3api list-objects-v2 \
+            --bucket geocoder-shards \
+            --prefix "backups/catalog-candidate-${VERSION}.json" \
+            --max-keys 1 --query 'KeyCount' --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          if [ "$COUNT" = "0" ]; then
+            echo "Promotion never reached durable candidate publication; nothing to recover."
+            exit 0
+          fi
+
+          aws s3 cp "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
+            /tmp/catalog-before.json --endpoint-url "$ENDPOINT" \
+            --region auto --only-show-errors
+          aws s3 cp "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
+            /tmp/catalog-candidate.json --endpoint-url "$ENDPOINT" \
+            --region auto --only-show-errors
+          ./scripts/r2_catalog_fetch.sh /tmp/catalog-live.json
+
+          if cmp /tmp/catalog-before.json /tmp/catalog-live.json; then
+            echo "Previous catalog is already restored."
+          elif cmp /tmp/catalog-candidate.json /tmp/catalog-live.json; then
+            aws s3 cp /tmp/catalog-before.json \
+              "s3://geocoder-shards/catalog.json" \
+              --endpoint-url "$ENDPOINT" --region auto \
+              --content-type application/json --only-show-errors
+            ./scripts/r2_catalog_fetch.sh /tmp/catalog-restored.json
+            cmp /tmp/catalog-before.json /tmp/catalog-restored.json
+          else
+            echo "::error::Live catalog is neither the interrupted candidate nor its predecessor; refusing to clobber it"
+            exit 1
+          fi
+
+          PREVIOUS_VERSION=$(jq -er \
+            '[.links[] | select(.rel == "child" and .latest == true)][0].href
+             | ltrimstr("./") | split("/")[0]' /tmp/catalog-before.json)
+          for attempt in $(seq 1 14); do
+            HEALTH=$(curl -fsS --max-time 20 \
+              "${BASE_URL}/health?recovery=${VERSION}-${attempt}") || true
+            if echo "$HEALTH" | jq -e --arg version "$PREVIOUS_VERSION" \
+              '.status == "ok" and .version == $version' >/dev/null; then
+              echo "Recovery confirmed: production serves ${PREVIOUS_VERSION}."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "::error::Catalog restored in R2 but cached production did not recover"
+          exit 1
 
       - name: Prune only after successful promotion and smoke
         if: >-
