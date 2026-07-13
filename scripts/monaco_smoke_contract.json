@@ -1,0 +1,130 @@
+{
+  "contract_version": 1,
+  "country_code": "MC",
+  "required_divisions": [
+    {
+      "id": "8c379db3-e741-4766-95c9-ee2a7d92d984",
+      "subtype": "country"
+    },
+    {
+      "id": "0448061a-a127-41a6-9a6f-3b41cf684b25",
+      "subtype": "region"
+    },
+    {
+      "id": "0ce8ff8d-833e-41e1-8d30-f95ea95f1423",
+      "subtype": "locality"
+    }
+  ],
+  "required_areas": [
+    {
+      "id": "0b88c2ba-94d4-4207-9937-4b6e99a16885",
+      "division_id": "8c379db3-e741-4766-95c9-ee2a7d92d984",
+      "subtype": "country"
+    },
+    {
+      "id": "4fd509b7-ada1-4080-8033-20f4d76199c1",
+      "division_id": "8c379db3-e741-4766-95c9-ee2a7d92d984",
+      "subtype": "country"
+    },
+    {
+      "id": "7a7771da-b962-4be0-9636-d852dce0552f",
+      "division_id": "0448061a-a127-41a6-9a6f-3b41cf684b25",
+      "subtype": "region"
+    },
+    {
+      "id": "354240c6-02ad-4f68-8af5-a5a48bb4d06e",
+      "division_id": "b40b8b48-1faf-4ca1-8d52-74da5c05a4ba",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "3a8f3832-413f-4100-ac4a-b626d675ffc9",
+      "division_id": "0a067856-c822-4b38-bdbd-4abbb24cacca",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "8774f22d-08f5-4fa8-8e63-be11292e082c",
+      "division_id": "2b67f803-4e31-4583-be21-4ae8da54c2b9",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "91bea1fd-628e-4f8a-8e78-06975623bcff",
+      "division_id": "9e8c53e0-225f-49e7-81f2-93f51b089cce",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "ac469755-74e6-4bb4-9897-a4e274e9976b",
+      "division_id": "e410dac8-790d-4787-8427-4b992a80ca38",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "b7172ffa-1b36-47b6-bda6-f1ec26087df9",
+      "division_id": "bd6f652a-fc6b-41ab-be9f-ac4f09266bb9",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "d9890d85-6ffe-44f7-bc7d-7fe3e834d6d9",
+      "division_id": "1efb31d3-7308-4665-9951-b374ad637f1a",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "ee2e308f-6806-4c70-8c89-77a0d85bb4ad",
+      "division_id": "8a503959-6fba-456f-9d25-82abcf1a13e7",
+      "subtype": "macrohood"
+    },
+    {
+      "id": "0ffd9ffb-140f-48c9-aa14-248914cbec9a",
+      "division_id": "a7a717cf-b459-47a5-9331-a8b69aba550c",
+      "subtype": "microhood"
+    },
+    {
+      "id": "3265d6d2-839f-4059-9104-aa1ef8e715db",
+      "division_id": "9fac2b6d-7069-4367-bec1-e2161fb58663",
+      "subtype": "microhood"
+    },
+    {
+      "id": "6aade387-5630-4896-b2a0-6e6e3546dd05",
+      "division_id": "32829689-0af7-4adc-adcc-ced97b9380d6",
+      "subtype": "microhood"
+    },
+    {
+      "id": "83afd66b-40ed-4d2c-9a95-d194815e2d0e",
+      "division_id": "bdea7b3c-7f73-4129-abfb-2b1f7c185fc1",
+      "subtype": "microhood"
+    },
+    {
+      "id": "9db96aa9-8f69-4e38-b9b7-43c9f014996f",
+      "division_id": "5f597b24-5b01-4868-84d3-596111e42c46",
+      "subtype": "microhood"
+    },
+    {
+      "id": "a355d0df-7297-4aa1-8fd0-e42546c47bbf",
+      "division_id": "87aaf449-d1f6-49c1-ab5a-9fb8e50d85df",
+      "subtype": "microhood"
+    },
+    {
+      "id": "aa904b35-351f-4500-88e8-3ae78b6a5085",
+      "division_id": "36ec5ac4-561f-45ce-b5d4-f2555bf8bec7",
+      "subtype": "microhood"
+    },
+    {
+      "id": "d1805a77-f9d4-42b8-af26-8df18cf8cbb7",
+      "division_id": "46bbdd5f-b5c1-4090-946f-74af345c1a5e",
+      "subtype": "microhood"
+    },
+    {
+      "id": "43f69e9e-685d-4135-878a-183e2d218e8e",
+      "division_id": "40749ab9-8879-4c99-a496-89801451ec7d",
+      "subtype": "neighborhood"
+    },
+    {
+      "id": "a0e2d736-e7ca-4c03-a479-f074a0ca3959",
+      "division_id": "a1fd2292-cf73-4fc9-b5b2-1760b3c5163c",
+      "subtype": "neighborhood"
+    },
+    {
+      "id": "c7a2aa3a-92bf-4a50-9cca-0ce320f53ffa",
+      "division_id": "e347f23f-d945-4b09-abb3-7a710b797be5",
+      "subtype": "neighborhood"
+    }
+  ]
+}

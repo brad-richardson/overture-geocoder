@@ -2,6 +2,7 @@
 # Download global divisions using the latest Overture release
 #
 # Usage: ./scripts/download_divisions.sh [RELEASE]
+#        ./scripts/download_divisions.sh --smoke-monaco [RELEASE]
 #
 # If RELEASE is not provided, fetches the latest from STAC catalog.
 # Example: ./scripts/download_divisions.sh 2025-12-17.0
@@ -15,11 +16,31 @@ set -e
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
 
+MODE="global"
+RELEASE=""
+for arg in "$@"; do
+    case "$arg" in
+        --smoke-monaco)
+            MODE="smoke-monaco"
+            ;;
+        [0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9].[0-9]*)
+            if [ -n "$RELEASE" ]; then
+                echo "ERROR: Multiple Overture releases supplied." >&2
+                exit 2
+            fi
+            RELEASE="$arg"
+            ;;
+        *)
+            echo "ERROR: Unknown argument: $arg" >&2
+            exit 2
+            ;;
+    esac
+done
+
 # Use provided release or fetch latest from STAC.
 # No hardcoded fallback: Overture purges releases after 90 days, so any
 # pinned fallback is guaranteed to break eventually. Fail fast instead.
-if [ -n "$1" ]; then
-    RELEASE="$1"
+if [ -n "$RELEASE" ]; then
     echo "Using provided Overture release: $RELEASE"
 else
     echo "Fetching latest Overture release from STAC..."
@@ -37,9 +58,21 @@ mkdir -p "$PROJECT_DIR/exports"
 
 cd "$PROJECT_DIR"
 
+if [ "$MODE" = "smoke-monaco" ]; then
+    exec python3 "$SCRIPT_DIR/download_divisions_smoke.py" \
+        --release "$RELEASE" \
+        --forward-output "$PROJECT_DIR/exports/divisions-global.parquet" \
+        --reverse-output "$PROJECT_DIR/exports/divisions-reverse.parquet" \
+        --profile-output "$PROJECT_DIR/exports/monaco-export-profile.json"
+fi
+
 # Download forward geocoding data
 echo "Downloading forward geocoding data..."
-sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_global.sql | duckdb
+sed \
+    -e "s|__OVERTURE_RELEASE__|$RELEASE|g" \
+    -e "s|__DIVISION_FILTER__|TRUE|g" \
+    -e "s|__OUTPUT_PATH__|exports/divisions-global.parquet|g" \
+    scripts/download_divisions_global.sql | duckdb
 
 # Verify forward data
 if [ ! -f "$PROJECT_DIR/exports/divisions-global.parquet" ]; then
@@ -59,7 +92,12 @@ echo "Forward geocoding: exports/divisions-global.parquet ($ROW_COUNT rows)"
 
 # Download reverse geocoding data (JOINs division + division_area)
 echo "Downloading reverse geocoding data..."
-sed "s|__OVERTURE_RELEASE__|$RELEASE|g" scripts/download_divisions_area.sql | duckdb
+sed \
+    -e "s|__OVERTURE_RELEASE__|$RELEASE|g" \
+    -e "s|__DIVISION_FILTER__|TRUE|g" \
+    -e "s|__AREA_FILTER__|TRUE|g" \
+    -e "s|__OUTPUT_PATH__|exports/divisions-reverse.parquet|g" \
+    scripts/download_divisions_area.sql | duckdb
 
 # Verify reverse data
 if [ ! -f "$PROJECT_DIR/exports/divisions-reverse.parquet" ]; then

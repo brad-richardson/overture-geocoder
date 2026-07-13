@@ -1,0 +1,983 @@
+{
+  "authoritative_baseline": {
+    "forward": {
+      "rendered_sql_sha256": "3389e4eebfe630022f40ba43c241f68ce853802eb40614136fa922b26296f9fb",
+      "rows": 3,
+      "sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1",
+      "size_bytes": 3134
+    },
+    "predicate": "validated country plus exact discovered supplemental IDs without bbox",
+    "reverse": {
+      "rendered_sql_sha256": "6401df6f71df43d86286e50c6e41092ff7b4fd64c17e2c385fdaa313f80c368a",
+      "rows": 3,
+      "sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
+      "size_bytes": 2206
+    },
+    "timing_seconds": 70.047
+  },
+  "comparison": "shared-production-sql; full-global MC filter and no-bbox baseline use schema plus EXCEPT ALL across every output column",
+  "derived_bbox": [
+    7.409026099609375,
+    43.516528083251956,
+    7.532992886138916,
+    43.75191979272461
+  ],
+  "evidence_version": 2,
+  "input_sha256": {
+    "build_shards": "6a24f538037e2c1180c280678312815b071258f2b1690ab763b9e9dcb9d5d199",
+    "contract": "10d9865a47d72470fd5cc5696449299b31b2bc2cd63a4720d0592d250c60f003",
+    "evidence_generator": "f9d246cd4e1b3a358b2cbe49bec6bc3555849a7711f3a7a2c9286ae0f0bf699d",
+    "export_comparator": "39c3b05ef3375845786d57cfbca9cdf3a5784e6820a6886ef20e890bb55d60b1",
+    "forward": "ecfdf0886bd6dba050e596c783aca7bb56456b16ef91050582aa3b46bdf1e27d",
+    "reverse": "50d6a5bbcd32f4edadc98c6617c35fa43577ba1130f51e9148a4c73ead772f54",
+    "smoke_exporter": "ecf3b61250a7d6751143ce158f6f977cbb07234befc6ac44cf3db0db3679036d"
+  },
+  "logical_equivalence_to_full_global": {
+    "built_shards": {
+      "forward": {
+        "legacy_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "legacy_table_row_counts": {
+          "divisions": 3,
+          "divisions_fts": 3,
+          "divisions_fts_config": 1,
+          "divisions_fts_data": 3,
+          "divisions_fts_docsize": 3,
+          "divisions_fts_idx": 1,
+          "metadata": 3
+        },
+        "logical_contents_equal": true,
+        "schema": [
+          [
+            "table",
+            "divisions",
+            "divisions",
+            "CREATE TABLE divisions (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL UNIQUE,\n            version INTEGER NOT NULL DEFAULT 0,\n            type TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            search_name TEXT NOT NULL,\n            search_alias TEXT,\n            search_context TEXT,\n            importance REAL NOT NULL\n        )"
+          ],
+          [
+            "table",
+            "divisions_fts",
+            "divisions_fts",
+            "CREATE VIRTUAL TABLE divisions_fts USING fts5(\n            search_name,\n            search_alias,\n            search_context,\n            content='divisions',\n            content_rowid='rowid',\n            tokenize='unicode61 remove_diacritics 2',\n            prefix='2 3 4'\n        )"
+          ],
+          [
+            "table",
+            "divisions_fts_config",
+            "divisions_fts_config",
+            "CREATE TABLE 'divisions_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+          ],
+          [
+            "table",
+            "divisions_fts_data",
+            "divisions_fts_data",
+            "CREATE TABLE 'divisions_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+          ],
+          [
+            "table",
+            "divisions_fts_docsize",
+            "divisions_fts_docsize",
+            "CREATE TABLE 'divisions_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+          ],
+          [
+            "table",
+            "divisions_fts_idx",
+            "divisions_fts_idx",
+            "CREATE TABLE 'divisions_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+          ],
+          [
+            "table",
+            "metadata",
+            "metadata",
+            "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
+          ],
+          [
+            "trigger",
+            "divisions_ad",
+            "divisions",
+            "CREATE TRIGGER divisions_ad AFTER DELETE ON divisions BEGIN\n            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)\n            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);\n        END"
+          ],
+          [
+            "trigger",
+            "divisions_ai",
+            "divisions",
+            "CREATE TRIGGER divisions_ai AFTER INSERT ON divisions BEGIN\n            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)\n            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);\n        END"
+          ],
+          [
+            "trigger",
+            "divisions_au",
+            "divisions",
+            "CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN\n            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)\n            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);\n            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)\n            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);\n        END"
+          ]
+        ],
+        "subset_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "subset_table_row_counts": {
+          "divisions": 3,
+          "divisions_fts": 3,
+          "divisions_fts_config": 1,
+          "divisions_fts_data": 3,
+          "divisions_fts_docsize": 3,
+          "divisions_fts_idx": 1,
+          "metadata": 3
+        }
+      },
+      "reverse": {
+        "legacy_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "legacy_table_row_counts": {
+          "divisions_reverse": 3,
+          "divisions_reverse_rtree": 3,
+          "divisions_reverse_rtree_node": 1,
+          "divisions_reverse_rtree_parent": 0,
+          "divisions_reverse_rtree_rowid": 3,
+          "metadata": 4
+        },
+        "logical_contents_equal": true,
+        "schema": [
+          [
+            "index",
+            "idx_area",
+            "divisions_reverse",
+            "CREATE INDEX idx_area ON divisions_reverse(area)"
+          ],
+          [
+            "index",
+            "idx_gers_id",
+            "divisions_reverse",
+            "CREATE INDEX idx_gers_id ON divisions_reverse(gers_id)"
+          ],
+          [
+            "table",
+            "divisions_reverse",
+            "divisions_reverse",
+            "CREATE TABLE divisions_reverse (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL,\n            subtype TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            area REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            wkb BLOB\n        )"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree",
+            "divisions_reverse_rtree",
+            "CREATE VIRTUAL TABLE divisions_reverse_rtree USING rtree(\n            id, xmin, xmax, ymin, ymax\n        )"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree_node",
+            "divisions_reverse_rtree_node",
+            "CREATE TABLE \"divisions_reverse_rtree_node\"(nodeno INTEGER PRIMARY KEY,data)"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree_parent",
+            "divisions_reverse_rtree_parent",
+            "CREATE TABLE \"divisions_reverse_rtree_parent\"(nodeno INTEGER PRIMARY KEY,parentnode)"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree_rowid",
+            "divisions_reverse_rtree_rowid",
+            "CREATE TABLE \"divisions_reverse_rtree_rowid\"(rowid INTEGER PRIMARY KEY,nodeno)"
+          ],
+          [
+            "table",
+            "metadata",
+            "metadata",
+            "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
+          ]
+        ],
+        "subset_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "subset_table_row_counts": {
+          "divisions_reverse": 3,
+          "divisions_reverse_rtree": 3,
+          "divisions_reverse_rtree_node": 1,
+          "divisions_reverse_rtree_parent": 0,
+          "divisions_reverse_rtree_rowid": 3,
+          "metadata": 4
+        }
+      },
+      "router": {
+        "legacy_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "legacy_table_row_counts": {
+          "router": 2
+        },
+        "logical_contents_equal": true,
+        "schema": [
+          [
+            "index",
+            "idx_token",
+            "router",
+            "CREATE INDEX idx_token ON router(token)"
+          ],
+          [
+            "table",
+            "router",
+            "router",
+            "CREATE TABLE router(\n            token TEXT NOT NULL,\n            shard_id TEXT NOT NULL,\n            max_importance REAL NOT NULL,\n            PRIMARY KEY(token, shard_id)\n        )"
+          ]
+        ],
+        "subset_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "subset_table_row_counts": {
+          "router": 2
+        }
+      }
+    },
+    "comparison": "schema-and-except-all-every-output-column",
+    "duckdb_python_version": "1.5.1",
+    "equivalence_version": 1,
+    "forward": {
+      "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "legacy_only_rows": 0,
+      "legacy_sha256": "d10ec349066085e05dace272176141d827b245a88bd409e609ba7573e0e478ed",
+      "logical_rows_sha256": "83c79dd025cce65128c407834e5a622577dd5002318b976327dfdd64a45532e5",
+      "rows": 3,
+      "schema": [
+        [
+          "gers_id",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "version",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "subtype",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "class",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "country",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "region",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "population",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "wikidata",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "is_country_capital",
+          "BOOLEAN",
+          "YES"
+        ],
+        [
+          "is_region_capital",
+          "BOOLEAN",
+          "YES"
+        ],
+        [
+          "lon",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "lat",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_xmin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_xmax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "primary_name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "search_name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "search_context",
+          "VARCHAR",
+          "YES"
+        ]
+      ],
+      "subset_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "subset_only_rows": 0,
+      "subset_sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1"
+    },
+    "overture_release": "2026-06-17.0",
+    "reverse": {
+      "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "legacy_only_rows": 0,
+      "legacy_sha256": "d56e2da9c4d123c077f63edf26008471cfaee15c4bd9573e30e89b35b7b63eea",
+      "logical_rows_sha256": "498615eaaf4eb8aedbb4186dd007ba3c5d070f21f7c4e52e38a6c08a0c69be31",
+      "rows": 3,
+      "schema": [
+        [
+          "gers_id",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "version",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "subtype",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "primary_name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "lat",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "lon",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "population",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "country",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "region",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "bbox_xmin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_xmax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "area",
+          "DOUBLE",
+          "YES"
+        ]
+      ],
+      "subset_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "subset_only_rows": 0,
+      "subset_sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d"
+    }
+  },
+  "logical_equivalence_to_no_bbox_baseline": {
+    "built_shards": {
+      "forward": {
+        "legacy_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "legacy_table_row_counts": {
+          "divisions": 3,
+          "divisions_fts": 3,
+          "divisions_fts_config": 1,
+          "divisions_fts_data": 3,
+          "divisions_fts_docsize": 3,
+          "divisions_fts_idx": 1,
+          "metadata": 3
+        },
+        "logical_contents_equal": true,
+        "schema": [
+          [
+            "table",
+            "divisions",
+            "divisions",
+            "CREATE TABLE divisions (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL UNIQUE,\n            version INTEGER NOT NULL DEFAULT 0,\n            type TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            search_name TEXT NOT NULL,\n            search_alias TEXT,\n            search_context TEXT,\n            importance REAL NOT NULL\n        )"
+          ],
+          [
+            "table",
+            "divisions_fts",
+            "divisions_fts",
+            "CREATE VIRTUAL TABLE divisions_fts USING fts5(\n            search_name,\n            search_alias,\n            search_context,\n            content='divisions',\n            content_rowid='rowid',\n            tokenize='unicode61 remove_diacritics 2',\n            prefix='2 3 4'\n        )"
+          ],
+          [
+            "table",
+            "divisions_fts_config",
+            "divisions_fts_config",
+            "CREATE TABLE 'divisions_fts_config'(k PRIMARY KEY, v) WITHOUT ROWID"
+          ],
+          [
+            "table",
+            "divisions_fts_data",
+            "divisions_fts_data",
+            "CREATE TABLE 'divisions_fts_data'(id INTEGER PRIMARY KEY, block BLOB)"
+          ],
+          [
+            "table",
+            "divisions_fts_docsize",
+            "divisions_fts_docsize",
+            "CREATE TABLE 'divisions_fts_docsize'(id INTEGER PRIMARY KEY, sz BLOB)"
+          ],
+          [
+            "table",
+            "divisions_fts_idx",
+            "divisions_fts_idx",
+            "CREATE TABLE 'divisions_fts_idx'(segid, term, pgno, PRIMARY KEY(segid, term)) WITHOUT ROWID"
+          ],
+          [
+            "table",
+            "metadata",
+            "metadata",
+            "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
+          ],
+          [
+            "trigger",
+            "divisions_ad",
+            "divisions",
+            "CREATE TRIGGER divisions_ad AFTER DELETE ON divisions BEGIN\n            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)\n            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);\n        END"
+          ],
+          [
+            "trigger",
+            "divisions_ai",
+            "divisions",
+            "CREATE TRIGGER divisions_ai AFTER INSERT ON divisions BEGIN\n            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)\n            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);\n        END"
+          ],
+          [
+            "trigger",
+            "divisions_au",
+            "divisions",
+            "CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN\n            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)\n            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);\n            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)\n            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);\n        END"
+          ]
+        ],
+        "subset_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "subset_table_row_counts": {
+          "divisions": 3,
+          "divisions_fts": 3,
+          "divisions_fts_config": 1,
+          "divisions_fts_data": 3,
+          "divisions_fts_docsize": 3,
+          "divisions_fts_idx": 1,
+          "metadata": 3
+        }
+      },
+      "reverse": {
+        "legacy_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "legacy_table_row_counts": {
+          "divisions_reverse": 3,
+          "divisions_reverse_rtree": 3,
+          "divisions_reverse_rtree_node": 1,
+          "divisions_reverse_rtree_parent": 0,
+          "divisions_reverse_rtree_rowid": 3,
+          "metadata": 4
+        },
+        "logical_contents_equal": true,
+        "schema": [
+          [
+            "index",
+            "idx_area",
+            "divisions_reverse",
+            "CREATE INDEX idx_area ON divisions_reverse(area)"
+          ],
+          [
+            "index",
+            "idx_gers_id",
+            "divisions_reverse",
+            "CREATE INDEX idx_gers_id ON divisions_reverse(gers_id)"
+          ],
+          [
+            "table",
+            "divisions_reverse",
+            "divisions_reverse",
+            "CREATE TABLE divisions_reverse (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL,\n            subtype TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            area REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            wkb BLOB\n        )"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree",
+            "divisions_reverse_rtree",
+            "CREATE VIRTUAL TABLE divisions_reverse_rtree USING rtree(\n            id, xmin, xmax, ymin, ymax\n        )"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree_node",
+            "divisions_reverse_rtree_node",
+            "CREATE TABLE \"divisions_reverse_rtree_node\"(nodeno INTEGER PRIMARY KEY,data)"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree_parent",
+            "divisions_reverse_rtree_parent",
+            "CREATE TABLE \"divisions_reverse_rtree_parent\"(nodeno INTEGER PRIMARY KEY,parentnode)"
+          ],
+          [
+            "table",
+            "divisions_reverse_rtree_rowid",
+            "divisions_reverse_rtree_rowid",
+            "CREATE TABLE \"divisions_reverse_rtree_rowid\"(rowid INTEGER PRIMARY KEY,nodeno)"
+          ],
+          [
+            "table",
+            "metadata",
+            "metadata",
+            "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
+          ]
+        ],
+        "subset_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "subset_table_row_counts": {
+          "divisions_reverse": 3,
+          "divisions_reverse_rtree": 3,
+          "divisions_reverse_rtree_node": 1,
+          "divisions_reverse_rtree_parent": 0,
+          "divisions_reverse_rtree_rowid": 3,
+          "metadata": 4
+        }
+      },
+      "router": {
+        "legacy_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "legacy_table_row_counts": {
+          "router": 2
+        },
+        "logical_contents_equal": true,
+        "schema": [
+          [
+            "index",
+            "idx_token",
+            "router",
+            "CREATE INDEX idx_token ON router(token)"
+          ],
+          [
+            "table",
+            "router",
+            "router",
+            "CREATE TABLE router(\n            token TEXT NOT NULL,\n            shard_id TEXT NOT NULL,\n            max_importance REAL NOT NULL,\n            PRIMARY KEY(token, shard_id)\n        )"
+          ]
+        ],
+        "subset_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "subset_table_row_counts": {
+          "router": 2
+        }
+      }
+    },
+    "comparison": "schema-and-except-all-every-output-column",
+    "duckdb_python_version": "1.5.1",
+    "equivalence_version": 1,
+    "forward": {
+      "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "legacy_only_rows": 0,
+      "legacy_sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1",
+      "logical_rows_sha256": "83c79dd025cce65128c407834e5a622577dd5002318b976327dfdd64a45532e5",
+      "rows": 3,
+      "schema": [
+        [
+          "gers_id",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "version",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "subtype",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "class",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "country",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "region",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "population",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "wikidata",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "is_country_capital",
+          "BOOLEAN",
+          "YES"
+        ],
+        [
+          "is_region_capital",
+          "BOOLEAN",
+          "YES"
+        ],
+        [
+          "lon",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "lat",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_xmin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_xmax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "primary_name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "search_name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "search_context",
+          "VARCHAR",
+          "YES"
+        ]
+      ],
+      "subset_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "subset_only_rows": 0,
+      "subset_sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1"
+    },
+    "overture_release": "2026-06-17.0",
+    "reverse": {
+      "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "legacy_only_rows": 0,
+      "legacy_sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
+      "logical_rows_sha256": "498615eaaf4eb8aedbb4186dd007ba3c5d070f21f7c4e52e38a6c08a0c69be31",
+      "rows": 3,
+      "schema": [
+        [
+          "gers_id",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "version",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "subtype",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "primary_name",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "lat",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "lon",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "population",
+          "INTEGER",
+          "YES"
+        ],
+        [
+          "country",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "region",
+          "VARCHAR",
+          "YES"
+        ],
+        [
+          "bbox_xmin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymin",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_xmax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "bbox_ymax",
+          "DOUBLE",
+          "YES"
+        ],
+        [
+          "area",
+          "DOUBLE",
+          "YES"
+        ]
+      ],
+      "subset_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
+      "subset_only_rows": 0,
+      "subset_sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d"
+    }
+  },
+  "notes": [
+    "The recurring smoke runtime excludes the one-time no-bbox baseline.",
+    "Metadata-eligible row groups describe the country+bbox fast branch. The saved executed area profile uses the actual rendered ownership OR.",
+    "DuckDB 1.5.1 reports rows_scanned as twice total source rows for these remote nested-column scans, so the raw counter is retained but is not a gate."
+  ],
+  "outputs": {
+    "forward": {
+      "rows": 3,
+      "sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1",
+      "size_bytes": 3134
+    },
+    "reverse": {
+      "rows": 3,
+      "sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
+      "size_bytes": 2206
+    }
+  },
+  "overture_release": "2026-06-17.0",
+  "provenance": {
+    "base_git_sha": "39fa7ecf009b94ed171e80fdeb78d47afd55af28",
+    "command": [
+      "python",
+      "scripts/download_divisions_smoke.py",
+      "--release",
+      "2026-06-17.0",
+      "--forward-output",
+      "/tmp/monaco-hardened-forward.parquet",
+      "--reverse-output",
+      "/tmp/monaco-hardened-reverse.parquet",
+      "--profile-output",
+      "/tmp/monaco-hardened-profile.json",
+      "--authoritative-forward-output",
+      "/tmp/monaco-authoritative-forward.parquet",
+      "--authoritative-reverse-output",
+      "/tmp/monaco-authoritative-reverse.parquet"
+    ],
+    "duckdb_cli_version": "v1.5.1 (Variegata) 7dbb2e646f",
+    "duckdb_python_version": "1.5.1"
+  },
+  "pushdown": {
+    "division": {
+      "duckdb_rows_scanned_counter": 9265582,
+      "metadata_eligible_row_group_bytes": 4885316,
+      "metadata_eligible_row_group_rows": 18337,
+      "metadata_eligible_row_groups": 1,
+      "plan_has_bbox_filter": true,
+      "plan_has_country_filter": true,
+      "plan_sha256": "7d9e68f5772c46d614102851807583dfa17306ecc872414f745e723d30fadff0",
+      "profile_sha256": "6771abcc7477ef99e39901c0ddb694638f67ec9be14d23d889eead54d2554673",
+      "profiled_predicate": "rendered division country/required-ID closure plus bbox",
+      "result_rows": 22,
+      "total_row_group_bytes": 1210094533,
+      "total_row_groups": 256,
+      "total_rows": 4632791
+    },
+    "division_area": {
+      "duckdb_rows_scanned_counter": 1625584,
+      "metadata_eligible_row_group_bytes": 69574709,
+      "metadata_eligible_row_group_rows": 7672,
+      "metadata_eligible_row_groups": 4,
+      "plan_has_bbox_filter": true,
+      "plan_has_country_filter": false,
+      "plan_sha256": "d630555448aebefd680aa44d84f453c34ab9b07472c5e8d04ff8920cd09de8a7",
+      "profile_sha256": "68a784af400d2a8bbfc139299997852030ea152b573d0e3d45cf2f357a738977",
+      "profiled_predicate": "actual rendered country-or-division_id ownership predicate plus bbox",
+      "result_rows": 22,
+      "total_row_group_bytes": 6274762647,
+      "total_row_groups": 544,
+      "total_rows": 1067718
+    }
+  },
+  "rendered_sql_sha256": {
+    "forward": "675432c5a77b2808b98dc0ddd6c2fdff89d07d1a90ac0b6422e22a0c08dd8d94",
+    "reverse": "dd8139455ddbfc168a1bf98f2b7d82671801a1678e798141d3b6271964fe8ad2"
+  },
+  "timings_seconds": {
+    "forward_transform": 3.731,
+    "reverse_transform": 11.447,
+    "total": 42.322
+  },
+  "validated_source": {
+    "division_area_ids": [
+      "0b88c2ba-94d4-4207-9937-4b6e99a16885",
+      "0ffd9ffb-140f-48c9-aa14-248914cbec9a",
+      "3265d6d2-839f-4059-9104-aa1ef8e715db",
+      "354240c6-02ad-4f68-8af5-a5a48bb4d06e",
+      "3a8f3832-413f-4100-ac4a-b626d675ffc9",
+      "43f69e9e-685d-4135-878a-183e2d218e8e",
+      "4fd509b7-ada1-4080-8033-20f4d76199c1",
+      "6aade387-5630-4896-b2a0-6e6e3546dd05",
+      "7a7771da-b962-4be0-9636-d852dce0552f",
+      "83afd66b-40ed-4d2c-9a95-d194815e2d0e",
+      "8774f22d-08f5-4fa8-8e63-be11292e082c",
+      "91bea1fd-628e-4f8a-8e78-06975623bcff",
+      "9db96aa9-8f69-4e38-b9b7-43c9f014996f",
+      "a0e2d736-e7ca-4c03-a479-f074a0ca3959",
+      "a355d0df-7297-4aa1-8fd0-e42546c47bbf",
+      "aa904b35-351f-4500-88e8-3ae78b6a5085",
+      "ac469755-74e6-4bb4-9897-a4e274e9976b",
+      "b7172ffa-1b36-47b6-bda6-f1ec26087df9",
+      "c7a2aa3a-92bf-4a50-9cca-0ce320f53ffa",
+      "d1805a77-f9d4-42b8-af26-8df18cf8cbb7",
+      "d9890d85-6ffe-44f7-bc7d-7fe3e834d6d9",
+      "ee2e308f-6806-4c70-8c89-77a0d85bb4ad"
+    ],
+    "division_area_rows": 22,
+    "division_ids": [
+      "0448061a-a127-41a6-9a6f-3b41cf684b25",
+      "0a067856-c822-4b38-bdbd-4abbb24cacca",
+      "0ce8ff8d-833e-41e1-8d30-f95ea95f1423",
+      "1efb31d3-7308-4665-9951-b374ad637f1a",
+      "2b67f803-4e31-4583-be21-4ae8da54c2b9",
+      "32829689-0af7-4adc-adcc-ced97b9380d6",
+      "36ec5ac4-561f-45ce-b5d4-f2555bf8bec7",
+      "40749ab9-8879-4c99-a496-89801451ec7d",
+      "46bbdd5f-b5c1-4090-946f-74af345c1a5e",
+      "5f597b24-5b01-4868-84d3-596111e42c46",
+      "87aaf449-d1f6-49c1-ab5a-9fb8e50d85df",
+      "8a503959-6fba-456f-9d25-82abcf1a13e7",
+      "8c379db3-e741-4766-95c9-ee2a7d92d984",
+      "9e8c53e0-225f-49e7-81f2-93f51b089cce",
+      "9fac2b6d-7069-4367-bec1-e2161fb58663",
+      "a1fd2292-cf73-4fc9-b5b2-1760b3c5163c",
+      "a7a717cf-b459-47a5-9331-a8b69aba550c",
+      "b40b8b48-1faf-4ca1-8d52-74da5c05a4ba",
+      "bd6f652a-fc6b-41ab-be9f-ac4f09266bb9",
+      "bdea7b3c-7f73-4129-abfb-2b1f7c185fc1",
+      "e347f23f-d945-4b09-abb3-7a710b797be5",
+      "e410dac8-790d-4787-8427-4b992a80ca38"
+    ],
+    "division_rows": 22,
+    "geometry_sha256": {
+      "division_areas": {
+        "0b88c2ba-94d4-4207-9937-4b6e99a16885": "5c755dea6b190da9ad722dd75e174b305c17d32eee913a1f91f21efc7fc740ad",
+        "0ffd9ffb-140f-48c9-aa14-248914cbec9a": "b1e79f06f8d49de17119b2ea561594cc41ba5588937106520a66af9ab8193740",
+        "3265d6d2-839f-4059-9104-aa1ef8e715db": "f4572819445e3f8fb8305cf4213ede7031060e00c491c31ca76a2ee0e2d1fc3a",
+        "354240c6-02ad-4f68-8af5-a5a48bb4d06e": "c7740c55094806997ca725396c589f7f94790b0397eccbbc5c40525dc43e69ba",
+        "3a8f3832-413f-4100-ac4a-b626d675ffc9": "d9b9bb24d340d68b79ead1edf52d25e14046b6064f31b0c6f0ec7a931816db6e",
+        "43f69e9e-685d-4135-878a-183e2d218e8e": "e88af934a16b75836f6ae81834607bda9a0970396db32cc555734156c4d37fa0",
+        "4fd509b7-ada1-4080-8033-20f4d76199c1": "29d00f7e3f8dfd7838c4d3192347657d46310cd4f11618c503889212d8be5d44",
+        "6aade387-5630-4896-b2a0-6e6e3546dd05": "5b3eeeba75c08e3e6f4772d334dd4a8dde13dc9053087695903bac767b4554e2",
+        "7a7771da-b962-4be0-9636-d852dce0552f": "b0ae4eaa05b9f883c00af23cbaf08cd63d13dff8a0dd39d3fa81c9857fd875b5",
+        "83afd66b-40ed-4d2c-9a95-d194815e2d0e": "614251a146158712061a0542ce688740bf498426f0f1207e0889bd485c1c44c6",
+        "8774f22d-08f5-4fa8-8e63-be11292e082c": "b3fd3f7bf1364d5eb3e3af8ba42c536c5401454f62964d73c7c0b7232d438fa9",
+        "91bea1fd-628e-4f8a-8e78-06975623bcff": "82ea1839154cf26d3b0101fc2f53337c66861ba29b0b91bf68817b7174590304",
+        "9db96aa9-8f69-4e38-b9b7-43c9f014996f": "b714b19be7b4155eebd4b26b31b957137473e46a0432c357013d5c99abd3c39e",
+        "a0e2d736-e7ca-4c03-a479-f074a0ca3959": "46e9a0e108fbe9fae67a56421d4d82ff278abab355ae7c97534750a48237ab08",
+        "a355d0df-7297-4aa1-8fd0-e42546c47bbf": "e690db395435819262c2416e83bbf4773b7c186baee830e5604e0d4508f6fad3",
+        "aa904b35-351f-4500-88e8-3ae78b6a5085": "bc1ed63544355415d90d62bff4a71a4fbbb8fd6da2c05a79a05c93a23cf50e3d",
+        "ac469755-74e6-4bb4-9897-a4e274e9976b": "fd0c2a9af7a93b2d74b2f74cc476e7afb1b8f05bed86afebba331d645f510a84",
+        "b7172ffa-1b36-47b6-bda6-f1ec26087df9": "fa7cd8243814d57276771d39974284ffa1e136e50ccaeb3e21ccd1c1042aa568",
+        "c7a2aa3a-92bf-4a50-9cca-0ce320f53ffa": "35289bc4e581434e58dc2848762a0e45b66749c8ebb484ee8afdd2e341e560e2",
+        "d1805a77-f9d4-42b8-af26-8df18cf8cbb7": "8960890f0e4dd94f0328ed0efab61faf8f20f899cd16147c1f5b68c44698efdf",
+        "d9890d85-6ffe-44f7-bc7d-7fe3e834d6d9": "0054289275f6961ce75e6723e7aed3d96f1ba1113966df79b0a1e4a320c587ee",
+        "ee2e308f-6806-4c70-8c89-77a0d85bb4ad": "1a7da98551997e56fd76c358309ce0ca1c2b6486288afeedaa760b242a613c21"
+      },
+      "divisions": {
+        "0448061a-a127-41a6-9a6f-3b41cf684b25": "a9b88a427d27eef4eb6e88fe5ec699a2df3b94f5c4f0274769b289a50993972e",
+        "0a067856-c822-4b38-bdbd-4abbb24cacca": "441d89009707afd16a454ba204e5b70caf1eca18a8b29a108ef98391fef19872",
+        "0ce8ff8d-833e-41e1-8d30-f95ea95f1423": "1cb68f69e7a197d29ffdf27d0cea28714928daced733cbeea277d7b4289bec9c",
+        "1efb31d3-7308-4665-9951-b374ad637f1a": "c1487b7d5c644c7cf793e37bd10445dd72d978c167abb7dc0ff78497091ee9fb",
+        "2b67f803-4e31-4583-be21-4ae8da54c2b9": "a162e411bcfaf6b4be021cfe48da0623f7c88a6412eb981ec3687b031acddac9",
+        "32829689-0af7-4adc-adcc-ced97b9380d6": "7ca5e68ce324686053dfae3f93e57a109e49a90be00b0a80c56b5fd5fcecebc7",
+        "36ec5ac4-561f-45ce-b5d4-f2555bf8bec7": "abce463b716d54f4d47eebbac4df7ecbff8827a6b107c68ed8c478ffbc3f9a3f",
+        "40749ab9-8879-4c99-a496-89801451ec7d": "fadb8da741eb69f3da1ff3e4ffac7c0a2c726c59133b45a91ce864b292c1bdad",
+        "46bbdd5f-b5c1-4090-946f-74af345c1a5e": "c1dec336ff562c46e8078cb4b9217afc257b5b1c01998b1ff59abf995f68c60a",
+        "5f597b24-5b01-4868-84d3-596111e42c46": "5b60be546682ea7c9b3fa4f543710b38c294f51dac88bb48d9578ccc6a32244a",
+        "87aaf449-d1f6-49c1-ab5a-9fb8e50d85df": "3824278842eaa08c5b2c0de78539e1a7f7e2cc47cbab58325d1d70f41002f305",
+        "8a503959-6fba-456f-9d25-82abcf1a13e7": "1d5b1c77b94b17c2eea12c18f2bb35ff4c24c0641271a5f51e823453c820f589",
+        "8c379db3-e741-4766-95c9-ee2a7d92d984": "561804414b3d6f07a83b1bc35843ca12d162773d653bf7381219fd12fed6a6f2",
+        "9e8c53e0-225f-49e7-81f2-93f51b089cce": "a9f98a96b209d2e240e5dbea4b613614a9c0085fb469a69f5a8d2c0d2f2dfb25",
+        "9fac2b6d-7069-4367-bec1-e2161fb58663": "1960aa00df64aebb9426cb9528fcdef438f1c1038d4f71eeb8ccc52394659c4d",
+        "a1fd2292-cf73-4fc9-b5b2-1760b3c5163c": "2beadfa313f3c1a3e42c605dc8571b04ff4d8f1fb568ea7ae7ff8f631d7db3c9",
+        "a7a717cf-b459-47a5-9331-a8b69aba550c": "1e87cb85f8dd94349a8a69aad3c9a55728bb942b492fba1d3f5bdb0d21d5553f",
+        "b40b8b48-1faf-4ca1-8d52-74da5c05a4ba": "d9a5618041cc5a62ac01056812cc18b06c091991e59e921581462b9ee788ac1c",
+        "bd6f652a-fc6b-41ab-be9f-ac4f09266bb9": "2f19f64f024e0782e6ded397b3e32f0c488457a30eaece8f369fc8e71fe5040d",
+        "bdea7b3c-7f73-4129-abfb-2b1f7c185fc1": "64d76168d69c22f8a1b1501f2b601d7f3c434b3361e24fbec2872289e72ed2a5",
+        "e347f23f-d945-4b09-abb3-7a710b797be5": "03227d966324e87487ca1c32a7c70830fa8da86e1fe71541c45658d83ab09097",
+        "e410dac8-790d-4787-8427-4b992a80ca38": "bc47f687acdfb4c5d2815b22f2601b393e1fe494dba967a902cdc378b532dc27"
+      }
+    }
+  }
+}
