@@ -1,7 +1,7 @@
-# Pending Work — 2026-07-12
+# Pending Work — 2026-07-13
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `7e6000e` (`main` after #57). Keep measured evidence
+The code baseline is `62ca869` (`main` after #59). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -35,6 +35,15 @@ preserving branch- or PR-specific history.
   required-ID closure, and bbox-pushdown path. The first merged current-release
   extraction completed in 31.569 seconds and the full shard smoke in 1m52s,
   down from 4m13s and 5m35s respectively.
+- #58 published `router.db` before its metadata, added exact size/SHA fresh-R2
+  reads and SQLite queries for forward, reverse, and router artifacts, and added
+  an isolated preview Worker intended to check current and historical v3 ID
+  responses before strictly cleaning up the Worker and fixed R2 prefix.
+- #59 fixed the two harness assumptions exposed by #58's first merged run:
+  DuckDB 1.5.1 result enumeration now uses `fetchall()`, and a legitimate empty
+  Monaco router is accepted only after exact metadata-count, integrity, schema,
+  index, and queryability checks. The patch passed adversarial review, 287 local
+  tests, and all six pull-request CI jobs.
 
 ### Current production data
 
@@ -45,6 +54,10 @@ preserving branch- or PR-specific history.
   falls through to `HEAD`; no exact-country decision artifact is deployed.
 - Forward search remains division-focused by default. No Places, address, or
   street artifact has been promoted to the production fleet.
+- No production shard fleet was rebuilt or published during this work. The
+  merge-only #59 shard smoke passed. The ID smoke failed before preview Worker
+  deployment because its bounded registry prefixes contained no historical
+  path-null row.
 
 ## Decisions and constraints in force
 
@@ -160,9 +173,26 @@ preserving branch- or PR-specific history.
   and cleanup then took about one minute combined. The global export remains
   the first runtime bottleneck to remove.
 - After #57, the current-release Monaco extraction took 31.569 seconds and the
-  complete shard smoke took 1m52s. The next smoke priority is no longer source
-  extraction: it is validating actual generated-object reads and router
-  publication/discovery, including v3 ID responses through an isolated Worker.
+  complete shard smoke took 1m52s. After #59, exact generated-object and router
+  readback passed. The ID smoke built and published v3 artifacts but stopped
+  before preview Worker deployment because prefixes `000`–`004` contained no
+  retained historical row.
+
+## Pause checkpoint
+
+The original checkpoint paused after merged PR #59 with its merge-only runs in
+progress. The later status check found the shard smoke passed and the ID smoke
+failed before deploying its isolated Worker. A bounded registry sample cannot
+guarantee sparse historical rows, so the immediate follow-up is an explicit
+smoke-only historical sentinel that exercises inventory fan-in, v3 encoding,
+publication, and the isolated Worker path. Production remains intentionally
+unchanged.
+
+After the ID smoke passes, prioritize immutable per-family manifests and atomic
+catalog publication (starting with exact ID file/hash inventories), then build
+the research-only conservative exact-country comparator. Keep the Places
+label/rank audit and Boston address-to-transport spatial join queued after that
+smoke/read and reverse-routing work.
 
 ## Ordered work
 
@@ -172,7 +202,7 @@ forward-geocoding expansion. The Places and address/street prototypes in items
 drive production shard or API changes until the smoke/read path and conservative
 reverse router are settled.
 
-### 1. Query only the Monaco smoke subset
+### 1. Monaco subset and generated-object read smokes (ID follow-up in progress)
 
 The implementation, pinned equivalence proof, and first merged current-release
 run are complete. On Overture
@@ -183,9 +213,13 @@ completed recurring extraction in 44.747 seconds with DuckDB 1.5.1. The first
 post-merge current-release extraction then completed in 31.569 seconds; the
 full R2 shard smoke completed in 1m52s instead of the prior 5m35s.
 
-The next priority is the validated read/router smoke: publish `router.db` before
-metadata references it, read back and query the actual R2 objects, and exercise
-current and historical v3 ID responses through an isolated preview Worker.
+PRs #58 and #59 implemented the validated shard read/router smoke: publish
+`router.db` before metadata references it and read back and query exact actual
+R2 objects. The #59 shard run passed. Its ID run failed while selecting the
+historical v3 case, before catalog upload or preview Worker deployment, because
+the bounded registry sample had no retained historical row. Keep that assertion
+and make the historical smoke input deterministic before declaring the Worker
+path complete.
 
 Keep the completed workflow split, merge-only triggers, narrow production-path
 filters, fixed prefix per smoke family, and cancel-in-progress concurrency.
@@ -299,13 +333,15 @@ and the independent query review pass.
   dictionary to measure cold bytes, heap, and latency. Keep interpolation out
   of scope unless a later experiment proves ordering, parity, and coverage.
 
-### 5. Minor hardening
+### 5. Manifest/catalog and operational hardening (next implementation priority)
 
 - Define and fault-test additive degraded/partial-result signaling: required
   `HEAD` or catalog failure should fail the request; optional regional/Places
   failure should be visibly degraded with a coherent data version.
-- Replace the current single-file build metadata behavior with a complete,
-  immutable, multi-artifact manifest and atomic publication/linking.
+- Replace the current single-file build metadata behavior with complete,
+  immutable, per-family manifests and atomic publication/linking. Start with
+  exact ID per-file/hash inventories, then publish the final release catalog
+  only after every referenced artifact and family manifest exists.
 - Add Worker request-stage timing for catalog, cache, R2, deserialize, FTS, and
   merge. Keep this distinct from the workflow build-stage timings above.
 

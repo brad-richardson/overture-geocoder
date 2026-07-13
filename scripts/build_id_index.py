@@ -88,6 +88,13 @@ RELEASE_THEMES = ["addresses", "base"]
 # columns. The content-addressed dictionary keeps the authoritative theme,
 # type, filename, and historical release strings once per shard set.
 ID_INDEX_FORMAT_VERSION = 3
+
+# The bounded smoke registry prefixes are intentionally selected for fast,
+# predictable source scans. Historical (path-null) rows are sparse, so those
+# prefixes cannot guarantee one is present. This smoke-only row makes the v3
+# historical locator path deterministic without changing production builds.
+SMOKE_HISTORICAL_ID = "00000000-0000-4000-8000-000000000000"
+SMOKE_HISTORICAL_RELEASE = "smoketest-historical"
 ID_LOCATOR_MANIFEST = "id-locator-manifest.json"
 ID_STAGE_INVENTORY_VERSION = 1
 ID_INVENTORY_SET_VERSION = 1
@@ -544,8 +551,35 @@ def _registry_id_query(prefix_len, sub_filter):
     """
 
 
+def _smoke_historical_registry_query():
+    """Return one explicit historical row for the bounded v3 smoke only."""
+    return f"""
+        SELECT
+            '{SMOKE_HISTORICAL_ID}'::UUID as id,
+            0::FLOAT as bbox_xmin, 0::FLOAT as bbox_ymin,
+            0::FLOAT as bbox_xmax, 0::FLOAT as bbox_ymax,
+            NULL::VARCHAR as feature_type,
+            NULL::VARCHAR as filename,
+            '{SMOKE_HISTORICAL_RELEASE}'::VARCHAR as last_seen_release,
+            true::BOOLEAN as registry_member,
+            NULL::VARCHAR as source_theme
+    """
+
+
+def _write_smoke_historical_registry_row(con, dest, prefix_len):
+    """Publish the deterministic historical sentinel into smoke staging."""
+    prefix = SMOKE_HISTORICAL_ID.replace("-", "")[:prefix_len]
+    path = f"{dest}/prefix={prefix}/smoke-historical.parquet"
+    query = _smoke_historical_registry_query()
+    con.execute(f"""
+        COPY ({query}) TO '{path}'
+        (FORMAT PARQUET, COMPRESSION ZSTD, OVERWRITE_OR_IGNORE true);
+    """)
+
+
 def phase_partition_r2(prefix_len, r2_config, version,
-                       prefixes=None, prefix_start=None, prefix_end=None):
+                       prefixes=None, prefix_start=None, prefix_end=None,
+                       smoke_history=False):
     """Partition the Overture registry into per-prefix staging files on R2.
 
     Single COPY ... PARTITION_BY (prefix) pass over the registry per range
@@ -607,6 +641,14 @@ def phase_partition_r2(prefix_len, r2_config, version,
 
         _retry_transient(_do_copy, on_retry=_clear_partial)()
         print(f"  [registry]   sub-range {sub_label} done")
+
+    if smoke_history:
+        _retry_transient(
+            lambda: _write_smoke_historical_registry_row(
+                con, dest, prefix_len
+            )
+        )()
+        print("  [registry]   added smoke-only historical v3 sentinel")
     con.close()
 
     elapsed = time.time() - t0
@@ -2969,7 +3011,8 @@ def build_id_index(args):
             if smoke_prefixes is not None or args.prefixes:
                 # Explicit prefix list (smoke test / patching)
                 phase_partition_r2(args.prefix_len, r2_config, version,
-                                   prefixes=stage_prefixes)
+                                   prefixes=stage_prefixes,
+                                   smoke_history=smoke_prefixes is not None)
             elif args.prefix_start and args.prefix_end:
                 # Contiguous range (CI matrix job)
                 phase_partition_r2(args.prefix_len, r2_config, version,

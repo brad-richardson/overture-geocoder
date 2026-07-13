@@ -135,6 +135,41 @@ def test_registry_query_preserves_path_semantics():
     assert "regexp_extract(path, '(^|/)theme=([^/]+)/', 2)" in q
 
 
+def test_smoke_historical_registry_query_is_explicitly_historical():
+    q = bii._smoke_historical_registry_query()
+    assert f"'{bii.SMOKE_HISTORICAL_ID}'::UUID as id" in q
+    assert "NULL::VARCHAR as filename" in q
+    assert (
+        f"'{bii.SMOKE_HISTORICAL_RELEASE}'::VARCHAR as last_seen_release" in q
+    )
+    assert "true::BOOLEAN as registry_member" in q
+
+
+def test_smoke_historical_registry_row_uses_its_hive_prefix(tmp_path):
+    destination = tmp_path / "staging"
+    (destination / "prefix=000").mkdir(parents=True)
+    con = duckdb.connect()
+    try:
+        bii._write_smoke_historical_registry_row(con, str(destination), 3)
+        row = con.execute(
+            """
+            SELECT CAST(id AS VARCHAR), filename, last_seen_release,
+                   registry_member, prefix
+            FROM read_parquet(?, hive_partitioning=true)
+            """,
+            [str(destination / "prefix=*" / "*.parquet")],
+        ).fetchone()
+    finally:
+        con.close()
+    assert row == (
+        bii.SMOKE_HISTORICAL_ID,
+        None,
+        bii.SMOKE_HISTORICAL_RELEASE,
+        True,
+        "000",
+    )
+
+
 @pytest.mark.parametrize("path", [
     "theme=places/type=place/part-00001.zstd.parquet",
     "/theme=places/type=place/part-00001.zstd.parquet",
