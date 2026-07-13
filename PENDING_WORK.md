@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-12
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `39fa7ec` (`main` after #56). Keep measured evidence
+The code baseline is `7e6000e` (`main` after #57). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -31,6 +31,10 @@ preserving branch- or PR-specific history.
   retained an exact all-claims oracle, rejected the `territorial-primary` and
   ordinary simplified candidates, and added no production router or H3
   dependency.
+- #57 replaced the global Monaco smoke export with the validated country,
+  required-ID closure, and bbox-pushdown path. The first merged current-release
+  extraction completed in 31.569 seconds and the full shard smoke in 1m52s,
+  down from 4m13s and 5m35s respectively.
 
 ### Current production data
 
@@ -155,6 +159,10 @@ preserving branch- or PR-specific history.
   exporting global divisions; both Monaco shard builds, upload, verification,
   and cleanup then took about one minute combined. The global export remains
   the first runtime bottleneck to remove.
+- After #57, the current-release Monaco extraction took 31.569 seconds and the
+  complete shard smoke took 1m52s. The next smoke priority is no longer source
+  extraction: it is validating actual generated-object reads and router
+  publication/discovery, including v3 ID responses through an isolated Worker.
 
 ## Ordered work
 
@@ -166,13 +174,18 @@ reverse router are settled.
 
 ### 1. Query only the Monaco smoke subset
 
-The implementation and pinned equivalence proof are complete. On Overture
+The implementation, pinned equivalence proof, and first merged current-release
+run are complete. On Overture
 `2026-06-17.0`, it validated 22 divisions and all 22 known division-area rows,
 produced the same three forward and three reverse rows as the legacy global
 export, matched the built forward, reverse, and router databases logically, and
-completed recurring extraction in 44.747 seconds with DuckDB 1.5.1. This item
-remains open only for the first merged current-release/R2 smoke and its recorded
-stage timings.
+completed recurring extraction in 44.747 seconds with DuckDB 1.5.1. The first
+post-merge current-release extraction then completed in 31.569 seconds; the
+full R2 shard smoke completed in 1m52s instead of the prior 5m35s.
+
+The next priority is the validated read/router smoke: publish `router.db` before
+metadata references it, read back and query the actual R2 objects, and exercise
+current and historical v3 ID responses through an isolated preview Worker.
 
 Keep the completed workflow split, merge-only triggers, narrow production-path
 filters, fixed prefix per smoke family, and cancel-in-progress concurrency.

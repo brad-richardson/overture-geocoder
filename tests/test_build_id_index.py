@@ -97,6 +97,35 @@ def test_release_query_includes_bucket_partition_key():
     assert "lower(left(replace(id, '-', ''), 3)) as prefix" in q
 
 
+def test_smoke_release_query_filters_prefixes_before_limit():
+    q = bii._release_id_query_for_type(
+        3,
+        "2026-01-01.0",
+        "addresses",
+        "address",
+        limit=50,
+        prefixes=["004", "000", "004"],
+    )
+    prefix_filter = (
+        "AND lower(left(replace(id, '-', ''), 3)) IN ('000', '004')"
+    )
+    assert prefix_filter in q
+    assert q.index(prefix_filter) < q.index("LIMIT 50")
+
+
+@pytest.mark.parametrize("prefixes", [[], ["00"], ["00g"]])
+def test_release_query_rejects_invalid_prefix_filter(prefixes):
+    with pytest.raises(ValueError, match="prefix"):
+        bii._release_id_query_for_type(
+            3,
+            "2026-01-01.0",
+            "addresses",
+            "address",
+            limit=50,
+            prefixes=prefixes,
+        )
+
+
 def test_registry_query_preserves_path_semantics():
     q = bii._registry_id_query(3, "id >= '000'")
     assert "regexp_extract(path, '(^|/)type=([^/]+)/', 2)" in q

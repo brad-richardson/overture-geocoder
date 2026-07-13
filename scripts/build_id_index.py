@@ -683,7 +683,7 @@ def _build_registry_stage_inventory(r2_config, version, release_version, scope):
 
 
 def _release_id_query_for_type(
-    prefix_len, release_version, theme, type_name, limit=None
+    prefix_len, release_version, theme, type_name, limit=None, prefixes=None
 ):
     """Query for release IDs from a specific theme/type.
 
@@ -699,6 +699,21 @@ def _release_id_query_for_type(
     type_literal = type_name.replace("'", "''")
     release_literal = release_version.replace("'", "''")
     limit_clause = f"LIMIT {int(limit)}" if limit else ""
+    prefix_expression = f"lower(left(replace(id, '-', ''), {prefix_len}))"
+    prefix_filter = ""
+    if prefixes is not None:
+        normalized = sorted(set(prefixes))
+        if not normalized:
+            raise ValueError("release prefix filter cannot be empty")
+        expected_width = prefix_len
+        if any(
+            len(prefix) != expected_width
+            or any(char not in "0123456789abcdef" for char in prefix)
+            for prefix in normalized
+        ):
+            raise ValueError("release prefix filter contains an invalid prefix")
+        prefix_values = ", ".join(f"'{prefix}'" for prefix in normalized)
+        prefix_filter = f"AND {prefix_expression} IN ({prefix_values})"
     return f"""
         SELECT
             id::UUID as id,
@@ -709,10 +724,11 @@ def _release_id_query_for_type(
             '{release_literal}'::VARCHAR as last_seen_release,
             false::BOOLEAN as registry_member,
             '{theme.replace("'", "''")}'::VARCHAR as source_theme,
-            lower(left(replace(id, '-', ''), {prefix_len})) as prefix,
+            {prefix_expression} as prefix,
             lower(left(replace(id, '-', ''), 1)) as bucket
         FROM read_parquet({source}, union_by_name=true, filename=true)
         WHERE id IS NOT NULL AND bbox IS NOT NULL AND bbox.xmin IS NOT NULL
+        {prefix_filter}
         {limit_clause}
     """
 
@@ -796,7 +812,7 @@ def _clear_release_staging(r2_config, version, staging_dir):
 
 
 def _partition_release_type(theme, type_name, prefix_len, release_version,
-                            r2_config, version, limit=None):
+                            r2_config, version, limit=None, prefixes=None):
     """Stage a single release theme/type to R2, partitioned into 16 buckets.
 
     PARTITION_BY the first hex char of the prefix: build range jobs then
@@ -828,7 +844,8 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
     )
 
     query = _release_id_query_for_type(
-        prefix_len, release_version, theme, type_name, limit=limit
+        prefix_len, release_version, theme, type_name,
+        limit=limit, prefixes=prefixes,
     )
 
     # Re-run safety: a cancelled run can leave marker-less partial staging
@@ -875,7 +892,9 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
     return (theme, type_name)
 
 
-def phase_partition_release_r2(prefix_len, release_version, r2_config, version, limit=None):
+def phase_partition_release_r2(
+    prefix_len, release_version, r2_config, version, limit=None, prefixes=None
+):
     """Stage release themes to R2, one parquet file per type.
 
     Discovers type= sub-directories under each theme and runs them
@@ -902,7 +921,7 @@ def phase_partition_release_r2(prefix_len, release_version, r2_config, version, 
             f = executor.submit(
                 _partition_release_type,
                 theme, type_name, prefix_len, release_version,
-                r2_config, version, limit=limit,
+                r2_config, version, limit=limit, prefixes=prefixes,
             )
             futures[f] = (theme, type_name)
 
@@ -3013,6 +3032,7 @@ def build_id_index(args):
             phase_partition_release_r2(
                 args.prefix_len, release_version, r2_config, version,
                 limit=smoke_release_limit,
+                prefixes=smoke_prefixes,
             )
             phase_times["Stage base"] = time.time() - t0
 
