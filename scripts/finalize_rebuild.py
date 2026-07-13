@@ -20,7 +20,7 @@ import argparse
 import hashlib
 import json
 import re
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 
 
@@ -47,9 +47,11 @@ def _sha256(path: Path) -> str:
 def _version_key(value: str) -> tuple[int, int, int, int]:
     if not VERSION_RE.fullmatch(value):
         raise ValueError(f"invalid rebuild version {value!r}")
-    date, suffix = value.rsplit(".", 1)
-    year, month, day = (int(part) for part in date.split("-"))
-    return year, month, day, int(suffix)
+    date_part, suffix = value.rsplit(".", 1)
+    year, month, day = (int(part) for part in date_part.split("-"))
+    # Reject syntactically plausible but impossible calendar dates.
+    date_value = date(year, month, day)
+    return date_value.year, date_value.month, date_value.day, int(suffix)
 
 
 def _inventory_by_relative_key(inventory: dict, version: str) -> dict[str, dict]:
@@ -105,16 +107,23 @@ def _verify_sqlite_family(
         raise ValueError(f"{label} inventory mismatch: missing={missing}, extra={extra}")
 
     result = []
+    total_size = 0
+    total_records = 0
     for shard_id, metadata in sorted(items.items()):
         if not isinstance(metadata, dict):
             raise ValueError(f"invalid {label} metadata for {shard_id}")
         key = f"{subdir}/{shard_id}.db"
         entry = inventory[key]
+        if metadata.get("href") != f"./{key}":
+            raise ValueError(f"{key} has an invalid href")
         expected_size = metadata.get("size_bytes")
         expected_sha = metadata.get("sha256")
+        record_count = metadata.get("record_count")
         if entry["size_bytes"] != expected_size:
             raise ValueError(f"{key} size mismatch")
-        if not isinstance(expected_sha, str) or len(expected_sha) != 64:
+        if not isinstance(record_count, int) or record_count < 0:
+            raise ValueError(f"{key} has an invalid record count")
+        if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
             raise ValueError(f"{key} has no valid SHA-256")
         local = readback_dir / key
         if not local.is_file():
@@ -123,6 +132,20 @@ def _verify_sqlite_family(
         if actual_sha != expected_sha:
             raise ValueError(f"{key} SHA-256 mismatch")
         result.append({**entry, "sha256": actual_sha})
+        total_size += expected_size
+        total_records += record_count
+
+    summaries = collection.get("summaries")
+    expected_summary = {
+        "shard_count": len(items),
+        "total_size_bytes": total_size,
+        "total_records": total_records,
+    }
+    if not isinstance(summaries, dict):
+        raise ValueError(f"{label} collection has no summaries")
+    for field, expected in expected_summary.items():
+        if summaries.get(field) != expected:
+            raise ValueError(f"{label} collection {field} mismatch")
     return result
 
 
@@ -182,6 +205,8 @@ def verify_release(
     router = forward.get("router")
     if not isinstance(router, dict):
         raise ValueError("forward collection has no router metadata")
+    if router.get("href") != "./router.db":
+        raise ValueError("router.db has an invalid href")
     router_entry = inventory.get("router.db")
     router_file = readback_dir / "router.db"
     if router_entry is None or not router_file.is_file():
@@ -219,8 +244,11 @@ def verify_release(
             raise ValueError(f"invalid ID metadata href for {prefix}")
         if metadata.get("size_bytes") != entry["size_bytes"] or entry["size_bytes"] <= 0:
             raise ValueError(f"ID shard size mismatch for {prefix}")
+        expected_sha = metadata.get("sha256")
+        if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
+            raise ValueError(f"ID shard {prefix} has no valid producer SHA-256")
         total_id_size += entry["size_bytes"]
-        id_objects.append(entry)
+        id_objects.append({**entry, "sha256": expected_sha})
     if id_collection["summaries"].get("total_size_bytes") != total_id_size:
         raise ValueError("ID collection total_size_bytes mismatch")
 
@@ -286,7 +314,7 @@ def verify_release(
                 "shard_count": len(id_objects),
                 "total_size_bytes": total_id_size,
                 "objects": id_objects,
-                "integrity": "R2 ETag plus producer-validated Parquet schema/footer",
+                "integrity": "producer SHA-256 plus R2 size/ETag and validated Parquet schema/footer",
                 "locator_dictionary": dictionary,
             },
         },
@@ -328,6 +356,9 @@ def build_catalog(*, before_path: Path, version: str, output_path: Path) -> dict
         normalized = dict(link)
         normalized.pop("latest", None)
         versions[child_version] = normalized
+
+    if versions and _version_key(version) <= max(map(_version_key, versions)):
+        raise ValueError(f"candidate version {version} is not newer than the catalog")
 
     versions[version] = {
         "rel": "child",

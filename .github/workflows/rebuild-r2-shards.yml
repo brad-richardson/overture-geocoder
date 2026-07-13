@@ -55,7 +55,8 @@ on:
 # {date}.{n} version from the same published catalog, interleave uploads into
 # one prefix, and clobber each other's catalog publish. Queue instead.
 concurrency:
-  group: rebuild-r2-shards
+  # Shared with any workflow that can mutate the production root catalog.
+  group: r2-production-catalog
   cancel-in-progress: false
 
 env:
@@ -104,9 +105,11 @@ jobs:
 
       - name: Validate build and promotion mode
         id: mode
+        env:
+          COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
         run: |
           BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
-          COUNTRIES="${{ github.event.inputs.countries }}"
+          COUNTRIES="$COUNTRIES_INPUT"
           BUILD_ID="${{ github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false' }}"
           PROMOTE="${{ github.event_name == 'schedule' || github.event.inputs.promote == 'true' }}"
 
@@ -128,8 +131,10 @@ jobs:
 
       - name: Compute version
         id: version
+        env:
+          VERSION_INPUT: ${{ github.event.inputs.version || '' }}
         run: |
-          INPUT="${{ github.event.inputs.version }}"
+          INPUT="$VERSION_INPUT"
           if [ -n "$INPUT" ]; then
             if ! echo "$INPUT" | grep -qE '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
               echo "::error::Invalid version format '$INPUT'. Expected YYYY-MM-DD.N (e.g. 2026-02-25.0)"
@@ -234,27 +239,44 @@ jobs:
 
       - name: Build forward geocoding shards
         if: github.event.inputs.build_type != 'reverse'
+        env:
+          BUILD_VERSION: ${{ needs.prep.outputs.version }}
+          OVERTURE_RELEASE: ${{ needs.prep.outputs.release }}
+          HEAD_THRESHOLD: ${{ github.event.inputs.head_threshold || '100000' }}
+          COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
         run: |
-          ARGS="--version ${{ needs.prep.outputs.version }} --overture-release ${{ needs.prep.outputs.release }}"
-          ARGS="$ARGS --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          if [ -n "${{ github.event.inputs.countries }}" ]; then
-            ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
+          ARGS=(
+            --version "$BUILD_VERSION"
+            --overture-release "$OVERTURE_RELEASE"
+            --head-threshold "$HEAD_THRESHOLD"
+          )
+          if [ -n "$COUNTRIES_INPUT" ]; then
+            ARGS+=(--countries "$COUNTRIES_INPUT")
           fi
-          python scripts/build_shards.py $ARGS
-          mv "shards/${{ needs.prep.outputs.version }}/build-meta.json" \
-            "shards/${{ needs.prep.outputs.version }}/forward-build-meta.json"
+          python scripts/build_shards.py "${ARGS[@]}"
+          mv "shards/${BUILD_VERSION}/build-meta.json" \
+            "shards/${BUILD_VERSION}/forward-build-meta.json"
 
       - name: Build reverse geocoding shards
         if: github.event.inputs.build_type != 'forward'
+        env:
+          BUILD_VERSION: ${{ needs.prep.outputs.version }}
+          OVERTURE_RELEASE: ${{ needs.prep.outputs.release }}
+          HEAD_THRESHOLD: ${{ github.event.inputs.head_threshold || '100000' }}
+          COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
         run: |
-          ARGS="--reverse --version ${{ needs.prep.outputs.version }} --overture-release ${{ needs.prep.outputs.release }}"
-          ARGS="$ARGS --head-threshold ${{ github.event.inputs.head_threshold || '100000' }}"
-          if [ -n "${{ github.event.inputs.countries }}" ]; then
-            ARGS="$ARGS --countries ${{ github.event.inputs.countries }}"
+          ARGS=(
+            --reverse
+            --version "$BUILD_VERSION"
+            --overture-release "$OVERTURE_RELEASE"
+            --head-threshold "$HEAD_THRESHOLD"
+          )
+          if [ -n "$COUNTRIES_INPUT" ]; then
+            ARGS+=(--countries "$COUNTRIES_INPUT")
           fi
-          python scripts/build_shards.py $ARGS
-          mv "shards/${{ needs.prep.outputs.version }}/build-meta.json" \
-            "shards/${{ needs.prep.outputs.version }}/reverse-build-meta.json"
+          python scripts/build_shards.py "${ARGS[@]}"
+          mv "shards/${BUILD_VERSION}/build-meta.json" \
+            "shards/${BUILD_VERSION}/reverse-build-meta.json"
 
       # This job only writes immutable versioned objects. The root catalog is
       # owned exclusively by finalize-release after every family succeeds.
@@ -890,31 +912,84 @@ jobs:
           BASE_URL="https://geocoder.bradr.dev"
 
           publish_catalog() {
-            aws s3 cp "$1" "s3://geocoder-shards/catalog.json" \
-              --endpoint-url "$ENDPOINT" --region auto \
-              --content-type application/json --only-show-errors
+            local source="$1"
+            local attempt
+            for attempt in 1 2 3; do
+              if aws s3 cp "$source" "s3://geocoder-shards/catalog.json" \
+                --endpoint-url "$ENDPOINT" --region auto \
+                --content-type application/json --only-show-errors; then
+                return 0
+              fi
+              sleep $((attempt * 10))
+            done
+            echo "::error::Failed to publish catalog from ${source} after 3 attempts"
+            return 1
           }
 
           smoke_once() {
+            local expected_version="$1"
             local health search reverse gers_id id_json
-            health=$(curl -fsS --max-time 20 "${BASE_URL}/health?rebuild=${VERSION}") || return 1
-            echo "$health" | jq -e --arg v "$VERSION" \
+            health=$(curl -fsS --max-time 20 "${BASE_URL}/health?rebuild=${expected_version}") || return 1
+            echo "$health" | jq -e --arg v "$expected_version" \
               '.status == "ok" and .version == $v' >/dev/null || return 1
 
             search=$(curl -fsS --max-time 20 \
-              "${BASE_URL}/search?q=boston&limit=1&rebuild=${VERSION}") || return 1
-            echo "$search" | jq -e --arg v "$VERSION" \
+              "${BASE_URL}/search?q=boston&limit=1&rebuild=${expected_version}") || return 1
+            echo "$search" | jq -e --arg v "$expected_version" \
               '.data_version == $v and (.results | length) > 0' >/dev/null || return 1
             gers_id=$(echo "$search" | jq -er '.results[0].gers_id') || return 1
 
             reverse=$(curl -fsS --max-time 20 \
-              "${BASE_URL}/reverse?lat=42.36&lon=-71.06&rebuild=${VERSION}") || return 1
-            echo "$reverse" | jq -e --arg v "$VERSION" \
+              "${BASE_URL}/reverse?lat=42.36&lon=-71.06&rebuild=${expected_version}") || return 1
+            echo "$reverse" | jq -e --arg v "$expected_version" \
               '.data_version == $v and (.gers_id | type == "string")' >/dev/null || return 1
 
-            id_json=$(curl -fsS --max-time 30 "${BASE_URL}/id/${gers_id}?rebuild=${VERSION}") || return 1
-            echo "$id_json" | jq -e --arg v "$VERSION" --arg id "$gers_id" \
+            id_json=$(curl -fsS --max-time 30 "${BASE_URL}/id/${gers_id}?rebuild=${expected_version}") || return 1
+            echo "$id_json" | jq -e --arg v "$expected_version" --arg id "$gers_id" \
               '.data_version == $v and .id == $id' >/dev/null || return 1
+          }
+
+          rollback_candidate() {
+            echo "::error::Restoring the exact previous catalog after failed promotion"
+            ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-live.json || return 1
+            if ! cmp /tmp/rebuild-finalize/catalog-next.json \
+              /tmp/rebuild-finalize/catalog-live.json; then
+              echo "::error::Live catalog no longer equals this candidate; refusing rollback clobber"
+              return 1
+            fi
+            publish_catalog /tmp/rebuild-finalize/catalog-before.json || return 1
+            ./scripts/r2_catalog_fetch.sh \
+              /tmp/rebuild-finalize/catalog-rollback-readback.json || return 1
+            cmp /tmp/rebuild-finalize/catalog-before.json \
+              /tmp/rebuild-finalize/catalog-rollback-readback.json || return 1
+
+            # Worker isolates cache catalog.json for up to 300 seconds. Confirm
+            # the prior version is served again before claiming rollback.
+            for attempt in $(seq 1 14); do
+              echo "Rollback smoke attempt ${attempt}/14..."
+              if smoke_once "$PREVIOUS_VERSION"; then
+                echo "Rollback confirmed: production serves ${PREVIOUS_VERSION}."
+                return 0
+              fi
+              sleep 30
+            done
+            echo "::error::R2 rolled back but production did not confirm ${PREVIOUS_VERSION}"
+            return 1
+          }
+
+          rollback_on_exit() {
+            local status=$?
+            trap - EXIT INT TERM
+            if [ "$PUBLISHED" = "true" ]; then
+              set +e
+              rollback_candidate
+              local rollback_status=$?
+              set -e
+              if [ "$rollback_status" -ne 0 ]; then
+                echo "::error::Automatic catalog rollback needs operator attention"
+              fi
+            fi
+            exit "$status"
           }
 
           # Do not overwrite a catalog changed by another maintenance workflow
@@ -927,13 +1002,37 @@ jobs:
             exit 1
           fi
 
+          PREVIOUS_VERSION=$(jq -er \
+            '[.links[] | select(.rel == "child" and .latest == true)][0].href
+             | ltrimstr("./") | split("/")[0]' \
+            /tmp/rebuild-finalize/catalog-before.json)
+
+          # Keep a durable operator-recovery copy outside the immutable release
+          # prefix. The trap handles normal failures; this survives runner loss.
+          aws s3 cp /tmp/rebuild-finalize/catalog-before.json \
+            "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
+            --endpoint-url "$ENDPOINT" --region auto \
+            --content-type application/json --only-show-errors
+          aws s3 cp "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
+            /tmp/rebuild-finalize/catalog-backup-readback.json \
+            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
+          cmp /tmp/rebuild-finalize/catalog-before.json \
+            /tmp/rebuild-finalize/catalog-backup-readback.json
+
           echo "Publishing catalog.json once after all family verification..."
+          PUBLISHED=false
+          trap rollback_on_exit EXIT
+          trap 'exit 130' INT
+          trap 'exit 143' TERM
+          # Treat publication as possibly successful before invoking the CLI:
+          # a connection can fail after R2 accepted the write.
+          PUBLISHED=true
           publish_catalog /tmp/rebuild-finalize/catalog-next.json
 
           PASSED=false
           for attempt in $(seq 1 14); do
             echo "Production smoke attempt ${attempt}/14..."
-            if smoke_once; then
+            if smoke_once "$VERSION"; then
               PASSED=true
               break
             fi
@@ -941,16 +1040,12 @@ jobs:
           done
 
           if [ "$PASSED" != "true" ]; then
-            echo "::error::Production smoke failed; restoring the exact previous catalog"
-            publish_catalog /tmp/rebuild-finalize/catalog-before.json
-            aws s3 cp "s3://geocoder-shards/catalog.json" \
-              /tmp/rebuild-finalize/catalog-rollback-readback.json \
-              --endpoint-url "$ENDPOINT" --region auto --only-show-errors
-            cmp /tmp/rebuild-finalize/catalog-before.json \
-              /tmp/rebuild-finalize/catalog-rollback-readback.json
+            echo "::error::Production smoke failed"
             exit 1
           fi
 
+          PUBLISHED=false
+          trap - EXIT INT TERM
           echo "Production health, search, reverse, and ID all serve ${VERSION}."
 
       - name: Prune only after successful promotion and smoke

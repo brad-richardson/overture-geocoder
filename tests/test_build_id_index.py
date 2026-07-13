@@ -1141,9 +1141,9 @@ def pipeline(monkeypatch):
             ),
         ),
         ("_validate_build_marker_dictionary_sha", None),
-        ("phase_build_r2", [("001", 10, 360, None)]),
+        ("phase_build_r2", [("001", 10, 360, None, "a" * 64)]),
         ("phase_metadata", ({"001": {"record_count": 10}}, 10, [], 3)),
-        ("_gather_shard_info_from_r2", [("001", None, 0, None)]),
+        ("_gather_shard_info_from_r2", [("001", 10, 360, None, "a" * 64)]),
     ]:
         m = mock.Mock(return_value=ret)
         monkeypatch.setattr(bii, name, m)
@@ -1238,6 +1238,13 @@ def test_range_build_writes_range_marker_with_records(pipeline):
         "records": 10,
         "dictionary_sha256": "abc",
         "input_inventory_set_sha256": "d" * 64,
+        "shards": {
+            "001": {
+                "record_count": 10,
+                "size_bytes": 360,
+                "sha256": "a" * 64,
+            }
+        },
     }
 
 

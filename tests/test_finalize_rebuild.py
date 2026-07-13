@@ -50,9 +50,15 @@ def _release_fixture(tmp_path):
             "items": {
                 "AA": {
                     "href": "./shards/AA.db",
+                    "record_count": 1,
                     "size_bytes": len(forward_bytes),
                     "sha256": forward_sha,
                 }
+            },
+            "summaries": {
+                "shard_count": 1,
+                "total_records": 1,
+                "total_size_bytes": len(forward_bytes),
             },
             "router": {
                 "href": "./router.db",
@@ -67,10 +73,16 @@ def _release_fixture(tmp_path):
             "items": {
                 "AA": {
                     "href": "./reverse/AA.db",
+                    "record_count": 1,
                     "size_bytes": len(reverse_bytes),
                     "sha256": reverse_sha,
                 }
-            }
+            },
+            "summaries": {
+                "shard_count": 1,
+                "total_records": 1,
+                "total_size_bytes": len(reverse_bytes),
+            },
         },
     )
 
@@ -87,6 +99,7 @@ def _release_fixture(tmp_path):
         format(value, "03x"): {
             "href": f"./id-index/{value:03x}.parquet",
             "size_bytes": 10 + value,
+            "sha256": hashlib.sha256(f"id-{value:03x}".encode()).hexdigest(),
         }
         for value in range(4096)
     }
@@ -187,6 +200,46 @@ def test_verify_release_rejects_missing_id_shard(tmp_path):
         )
 
 
+@pytest.mark.parametrize(
+    ("file_name", "mutation", "message"),
+    [
+        (
+            "collection.json",
+            lambda value: value["items"]["AA"].update(href="./wrong.db"),
+            "invalid href",
+        ),
+        (
+            "reverse-collection.json",
+            lambda value: value["summaries"].update(total_records=2),
+            "total_records mismatch",
+        ),
+        (
+            "id-collection.json",
+            lambda value: value["items"]["000"].update(sha256="bad"),
+            "producer SHA-256",
+        ),
+    ],
+)
+def test_verify_release_rejects_metadata_integrity_mismatch(
+    tmp_path, file_name, mutation, message
+):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    path = metadata / file_name
+    value = json.loads(path.read_text())
+    mutation(value)
+    _write_json(path, value)
+
+    with pytest.raises(ValueError, match=message):
+        fr.verify_release(
+            version=VERSION,
+            release=RELEASE,
+            inventory_path=inventory,
+            metadata_dir=metadata,
+            readback_dir=readback,
+            output_path=tmp_path / "manifest.json",
+        )
+
+
 def test_build_catalog_publishes_once_and_sorts_numeric_suffixes(tmp_path):
     before = tmp_path / "before.json"
     output = tmp_path / "next.json"
@@ -224,3 +277,19 @@ def test_build_catalog_rejects_existing_version(tmp_path):
     )
     with pytest.raises(ValueError, match="already contains"):
         fr.build_catalog(before_path=before, version=VERSION, output_path=tmp_path / "next.json")
+
+
+def test_build_catalog_rejects_non_monotonic_or_invalid_version(tmp_path):
+    before = tmp_path / "before.json"
+    _write_json(
+        before,
+        {"links": [{"rel": "child", "href": "./2026-07-14.0/collection.json"}]},
+    )
+    with pytest.raises(ValueError, match="not newer"):
+        fr.build_catalog(before_path=before, version=VERSION, output_path=tmp_path / "next.json")
+    with pytest.raises(ValueError):
+        fr.build_catalog(
+            before_path=before,
+            version="2026-02-30.0",
+            output_path=tmp_path / "next.json",
+        )
