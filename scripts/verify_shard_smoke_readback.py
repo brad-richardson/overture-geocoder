@@ -132,6 +132,10 @@ def verify_readback(
         forward_record, reverse_record, router_record
     )):
         raise RuntimeError("smoke collections do not reference MC shards and router")
+    if forward_record.get("href") != "./shards/MC.db":
+        raise RuntimeError("smoke collection MC href is not ./shards/MC.db")
+    if reverse_record.get("href") != "./reverse/MC.db":
+        raise RuntimeError("smoke reverse collection MC href is not ./reverse/MC.db")
     if router_record.get("href") != "./router.db":
         raise RuntimeError("smoke collection router href is not ./router.db")
     _assert_artifact(forward_db, forward_record, "forward MC shard")

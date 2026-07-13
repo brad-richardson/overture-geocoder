@@ -16,10 +16,12 @@ def test_preview_catalog_is_fixed_and_isolated():
     child = next(link for link in catalog["links"] if link["rel"] == "child")
     assert child == {
         "rel": "child",
-        "href": "./smoketest-id/id-collection.json",
+        "href": "./id-collection.json",
         "type": "application/json",
         "latest": True,
     }
+    self_link = next(link for link in catalog["links"] if link["rel"] == "self")
+    assert self_link["href"] == "./catalog.json"
     with pytest.raises(ValueError, match="fixed"):
         preview.build_preview_catalog("2026-07-12.0")
 
@@ -96,5 +98,60 @@ def test_historical_case_cannot_expand_to_current_release():
         preview.bind_expected_releases(
             {"current": {}, "historical": {"last_seen_release_id": 1}},
             {"last_seen_releases": ["2026-06-01.0"]},
+            "2026-06-01.0",
+        )
+
+
+def test_current_case_is_bound_to_exact_dictionary_entry_and_bbox():
+    cases = {
+        "current": {
+            "source_file_id": 2,
+            "registry_member": False,
+            "bbox_xmin": 1.25,
+            "bbox_ymin": 2.5,
+            "bbox_xmax": 3.75,
+            "bbox_ymax": 4.0,
+        },
+        "historical": {
+            "bbox_xmin": 5.0,
+            "bbox_ymin": 6.0,
+            "bbox_xmax": 7.0,
+            "bbox_ymax": 8.0,
+        },
+    }
+    dictionary = {
+        "source_files": [
+            {"theme": "addresses", "feature_type": "address", "filename": "a.parquet"},
+            {"theme": "places", "feature_type": "place", "filename": "b.parquet"},
+        ]
+    }
+    bound = preview.bind_expected_current_locator(
+        cases, dictionary, "2026-06-01.0"
+    )
+    assert bound["current"]["expected_feature_type"] == "place"
+    assert bound["current"]["expected_theme"] == "places"
+    assert bound["current"]["expected_filename"] == "b.parquet"
+    assert bound["current"]["expected_registry_member"] is False
+    assert bound["current"]["expected_overture_path"] == (
+        "release/2026-06-01.0/theme=places/type=place/b.parquet"
+    )
+    assert bound["current"]["expected_bbox"] == {
+        "xmin": 1.25,
+        "ymin": 2.5,
+        "xmax": 3.75,
+        "ymax": 4.0,
+    }
+    assert bound["historical"]["expected_bbox"]["xmin"] == 5.0
+
+
+def test_current_case_rejects_invalid_compact_source_file_id():
+    cases = {
+        "current": {"source_file_id": 2},
+        "historical": {},
+    }
+    with pytest.raises(RuntimeError, match="source-file ID"):
+        preview.bind_expected_current_locator(
+            cases,
+            {"source_files": [{"theme": "places", "feature_type": "place", "filename": "a.parquet"}]},
             "2026-06-01.0",
         )

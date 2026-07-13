@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-12
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `39fa7ec` (`main` after #56). Keep measured evidence
+The code baseline is `7e6000e` (`main` after #57). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 

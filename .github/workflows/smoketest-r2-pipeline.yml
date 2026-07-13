@@ -14,6 +14,7 @@ on:
       - 'scripts/download_divisions_area.sql'
       - 'scripts/download_divisions_global.sql'
       - 'scripts/stac.py'
+      - '.github/workflows/rebuild-r2-shards.yml'
       - '.github/workflows/smoketest-r2-pipeline.yml'
   workflow_dispatch:
 
@@ -171,6 +172,10 @@ jobs:
             --remote --file "$READBACK/collection.json"
           wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/reverse-collection.json" \
             --remote --file "$READBACK/reverse-collection.json"
+          jq -e '.items.MC.href == "./shards/MC.db"' \
+            "$READBACK/collection.json" >/dev/null
+          jq -e '.items.MC.href == "./reverse/MC.db"' \
+            "$READBACK/reverse-collection.json" >/dev/null
           wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/shards/MC.db" \
             --remote --file "$READBACK/MC.db"
           wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/reverse/MC.db" \

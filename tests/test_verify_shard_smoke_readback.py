@@ -72,13 +72,21 @@ def _fixtures(tmp_path):
     collection.write_text(
         json.dumps(
             {
-                "items": {"MC": _record(forward)},
+                "items": {
+                    "MC": {**_record(forward), "href": "./shards/MC.db"}
+                },
                 "router": {**_record(router), "href": "./router.db"},
             }
         )
     )
     reverse_collection.write_text(
-        json.dumps({"items": {"MC": _record(reverse)}})
+        json.dumps(
+            {
+                "items": {
+                    "MC": {**_record(reverse), "href": "./reverse/MC.db"}
+                }
+            }
+        )
     )
     return collection, reverse_collection, forward, reverse, router
 
@@ -94,4 +102,23 @@ def test_fails_on_readback_tampering(tmp_path):
     fixtures = _fixtures(tmp_path)
     fixtures[-1].write_bytes(fixtures[-1].read_bytes() + b"tamper")
     with pytest.raises(RuntimeError, match="readback mismatch"):
+        verify.verify_readback(*fixtures)
+
+
+@pytest.mark.parametrize(
+    ("collection_index", "href", "message"),
+    [
+        (0, "./wrong/MC.db", "collection MC href"),
+        (1, "./wrong/MC.db", "reverse collection MC href"),
+    ],
+)
+def test_rejects_collection_href_that_does_not_match_readback_key(
+    tmp_path, collection_index, href, message
+):
+    fixtures = _fixtures(tmp_path)
+    collection_path = fixtures[collection_index]
+    collection = json.loads(collection_path.read_text())
+    collection["items"]["MC"]["href"] = href
+    collection_path.write_text(json.dumps(collection))
+    with pytest.raises(RuntimeError, match=message):
         verify.verify_readback(*fixtures)

@@ -9,6 +9,7 @@ on:
       - 'scripts/stac.py'
       - 'crates/geocoder-core/**'
       - 'crates/geocoder-worker/**'
+      - '.github/workflows/rebuild-r2-shards.yml'
       - '.github/workflows/smoketest-r2-id.yml'
   workflow_dispatch:
 
@@ -196,6 +197,17 @@ jobs:
           CURRENT_ID=$(jq -er '.current.id' /tmp/id-smoke-preview/id-smoke-cases.json)
           HISTORICAL_ID=$(jq -er '.historical.id' /tmp/id-smoke-preview/id-smoke-cases.json)
           HISTORICAL_RELEASE=$(jq -er '.historical.expected_last_seen_release' /tmp/id-smoke-preview/id-smoke-cases.json)
+          CURRENT_FEATURE_TYPE=$(jq -er '.current.expected_feature_type' /tmp/id-smoke-preview/id-smoke-cases.json)
+          CURRENT_THEME=$(jq -er '.current.expected_theme' /tmp/id-smoke-preview/id-smoke-cases.json)
+          CURRENT_FILENAME=$(jq -er '.current.expected_filename' /tmp/id-smoke-preview/id-smoke-cases.json)
+          CURRENT_OVERTURE_PATH=$(jq -er '.current.expected_overture_path' /tmp/id-smoke-preview/id-smoke-cases.json)
+          CURRENT_REGISTRY_MEMBER=$(jq -r '.current.expected_registry_member' /tmp/id-smoke-preview/id-smoke-cases.json)
+          if [ "$CURRENT_REGISTRY_MEMBER" != "true" ] && [ "$CURRENT_REGISTRY_MEMBER" != "false" ]; then
+            echo "::error::Current smoke case has no boolean registry expectation"
+            exit 1
+          fi
+          CURRENT_BBOX=$(jq -cer '.current.expected_bbox' /tmp/id-smoke-preview/id-smoke-cases.json)
+          HISTORICAL_BBOX=$(jq -cer '.historical.expected_bbox' /tmp/id-smoke-preview/id-smoke-cases.json)
 
           request_id() {
             local id="$1"
@@ -216,29 +228,34 @@ jobs:
           request_id "$CURRENT_ID" /tmp/current-id.json
           request_id "$HISTORICAL_ID" /tmp/historical-id.json
 
-          jq -e --arg id "$CURRENT_ID" --arg release "$OVERTURE_RELEASE" '
+          jq -e \
+            --arg id "$CURRENT_ID" \
+            --arg release "$OVERTURE_RELEASE" \
+            --arg feature_type "$CURRENT_FEATURE_TYPE" \
+            --arg theme "$CURRENT_THEME" \
+            --arg filename "$CURRENT_FILENAME" \
+            --arg overture_path "$CURRENT_OVERTURE_PATH" \
+            --argjson registry_member "$CURRENT_REGISTRY_MEMBER" \
+            --argjson bbox "$CURRENT_BBOX" '
             .id == $id
             and .data_version == "smoketest-id"
-            and (.bbox.xmin | type == "number")
-            and (.bbox.ymin | type == "number")
-            and (.bbox.xmax | type == "number")
-            and (.bbox.ymax | type == "number")
-            and (.feature_type | type == "string" and length > 0)
-            and (.theme | type == "string" and length > 0)
-            and (.filename | type == "string" and endswith(".parquet"))
+            and .bbox == $bbox
+            and .feature_type == $feature_type
+            and .theme == $theme
+            and .filename == $filename
             and .last_seen_release == $release
-            and (.registry_member | type == "boolean")
+            and .registry_member == $registry_member
             and .exists_in_current_release == true
-            and (.overture_path | startswith("release/" + $release + "/theme="))
+            and .overture_path == $overture_path
           ' /tmp/current-id.json
 
-          jq -e --arg id "$HISTORICAL_ID" --arg historical_release "$HISTORICAL_RELEASE" '
+          jq -e \
+            --arg id "$HISTORICAL_ID" \
+            --arg historical_release "$HISTORICAL_RELEASE" \
+            --argjson bbox "$HISTORICAL_BBOX" '
             .id == $id
             and .data_version == "smoketest-id"
-            and (.bbox.xmin | type == "number")
-            and (.bbox.ymin | type == "number")
-            and (.bbox.xmax | type == "number")
-            and (.bbox.ymax | type == "number")
+            and .bbox == $bbox
             and .feature_type == null
             and .theme == null
             and .filename == null
@@ -253,25 +270,40 @@ jobs:
         if: always()
         run: |
           FAILED=0
-          DELETED=0
           for attempt in 1 2 3; do
             DELETE_LOG=$(mktemp)
             if wrangler delete \
               --config crates/geocoder-worker/wrangler.id-smoke.toml \
               --force >"$DELETE_LOG" 2>&1; then
               cat "$DELETE_LOG"
-              DELETED=1
               break
             fi
             cat "$DELETE_LOG"
-            if grep -qiE 'not found|does not exist' "$DELETE_LOG"; then
-              DELETED=1
-              break
+            sleep $((attempt * 5))
+          done
+
+          WORKER_ABSENT=0
+          WORKER_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/geocoder-id-smoke"
+          for attempt in 1 2 3; do
+            if WORKER_STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "$WORKER_API"); then
+              if [ "$WORKER_STATUS" = "404" ]; then
+                WORKER_ABSENT=1
+                break
+              fi
+              if [ "$WORKER_STATUS" = "200" ]; then
+                echo "Attempt ${attempt}: preview Worker still exists"
+              else
+                echo "Attempt ${attempt}: unable to verify preview Worker absence (HTTP ${WORKER_STATUS})"
+              fi
+            else
+              echo "Attempt ${attempt}: unable to verify preview Worker absence (transport error)"
             fi
             sleep $((attempt * 5))
           done
-          if [ "$DELETED" -ne 1 ]; then
-            echo "::error::Failed to delete isolated ID smoke Worker"
+          if [ "$WORKER_ABSENT" -ne 1 ]; then
+            echo "::error::Could not verify that the isolated ID smoke Worker was deleted"
             FAILED=1
           fi
 

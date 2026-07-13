@@ -32,12 +32,12 @@ def build_preview_catalog(version: str) -> dict[str, Any]:
         "links": [
             {
                 "rel": "self",
-                "href": f"./{version}/catalog.json",
+                "href": "./catalog.json",
                 "type": "application/json",
             },
             {
                 "rel": "child",
-                "href": f"./{version}/id-collection.json",
+                "href": "./id-collection.json",
                 "type": "application/json",
                 "latest": True,
             },
@@ -114,6 +114,59 @@ def bind_expected_releases(
     return cases
 
 
+def bind_expected_current_locator(
+    cases: dict[str, Any], dictionary: dict[str, Any], current_release: str
+) -> dict[str, Any]:
+    source_files = dictionary.get("source_files")
+    if not isinstance(source_files, list):
+        raise RuntimeError("ID locator dictionary has no source-file list")
+    source_file_id = cases["current"].get("source_file_id")
+    if (
+        not isinstance(source_file_id, int)
+        or not 1 <= source_file_id <= len(source_files)
+    ):
+        raise RuntimeError("current smoke case has an invalid compact source-file ID")
+    entry = source_files[source_file_id - 1]
+    if not isinstance(entry, dict):
+        raise RuntimeError("current smoke case expands to an invalid source-file entry")
+    theme = entry.get("theme")
+    feature_type = entry.get("feature_type")
+    filename = entry.get("filename")
+    if (
+        not isinstance(theme, str)
+        or not theme
+        or not isinstance(feature_type, str)
+        or not feature_type
+        or not isinstance(filename, str)
+        or not filename.endswith(".parquet")
+    ):
+        raise RuntimeError("current smoke case expands to an invalid source-file entry")
+    current = cases["current"]
+    if not isinstance(current.get("registry_member"), bool):
+        raise RuntimeError("current smoke case has an invalid registry status")
+    current["expected_feature_type"] = feature_type
+    current["expected_theme"] = theme
+    current["expected_filename"] = filename
+    current["expected_registry_member"] = current["registry_member"]
+    current["expected_overture_path"] = (
+        f"release/{current_release}/theme={theme}/type={feature_type}/{filename}"
+    )
+    current["expected_bbox"] = {
+        "xmin": current["bbox_xmin"],
+        "ymin": current["bbox_ymin"],
+        "xmax": current["bbox_xmax"],
+        "ymax": current["bbox_ymax"],
+    }
+    historical = cases["historical"]
+    historical["expected_bbox"] = {
+        "xmin": historical["bbox_xmin"],
+        "ymin": historical["bbox_ymin"],
+        "xmax": historical["bbox_xmax"],
+        "ymax": historical["bbox_ymax"],
+    }
+    return cases
+
+
 def _read_r2_json(
     con: duckdb.DuckDBPyConnection, path: str
 ) -> dict[str, Any]:
@@ -173,6 +226,7 @@ def prepare(
             con, f"s3://{bucket}/{version}/{href.removeprefix('./')}"
         )
         cases = bind_expected_releases(cases, dictionary, release)
+        cases = bind_expected_current_locator(cases, dictionary, release)
     finally:
         con.close()
 
