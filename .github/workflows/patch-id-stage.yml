@@ -75,8 +75,9 @@ jobs:
           fi
           ./scripts/r2_catalog_fetch.sh /tmp/patch-catalog.json
           if jq -e --arg version "$PATCH_VERSION" \
-            '.links[]? | select(.rel == "child") | .href
-             | ltrimstr("./") | split("/")[0] == $version' \
+            'any(.links[]?;
+              .rel == "child" and
+              ((.href | ltrimstr("./") | split("/")[0]) == $version))' \
             /tmp/patch-catalog.json >/dev/null; then
             echo "::error::${PATCH_VERSION} is catalogued and immutable; rebuild under a new version"
             exit 1

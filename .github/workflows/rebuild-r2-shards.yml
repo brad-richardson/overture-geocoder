@@ -1059,17 +1059,17 @@ jobs:
 
   # EXIT traps cannot run after a hard runner loss. This independent job uses
   # the durable before/candidate pair and the same compare-before-swap rule.
-  recover-failed-promotion:
+  post-finalize:
     runs-on: ubuntu-24.04-arm
     needs: [prep, finalize-release]
-    if: >-
-      always() &&
-      needs.prep.outputs.promote == 'true' &&
-      needs.finalize-release.result != 'success'
+    if: always()
     steps:
       - uses: actions/checkout@v7
 
       - name: Recover an interrupted catalog promotion
+        if: >-
+          needs.prep.outputs.promote == 'true' &&
+          needs.finalize-release.result != 'success'
         env:
           VERSION: ${{ needs.prep.outputs.version }}
         run: |
@@ -1128,6 +1128,7 @@ jobs:
 
       - name: Prune only after successful promotion and smoke
         if: >-
+          needs.finalize-release.result == 'success' &&
           needs.prep.outputs.promote == 'true' &&
           github.event_name == 'workflow_dispatch' &&
           github.event.inputs.cleanup_old_versions == 'true'
