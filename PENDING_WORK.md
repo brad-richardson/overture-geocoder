@@ -194,12 +194,15 @@ the research-only conservative exact-country comparator. Keep the Places
 label/rank audit and Boston address-to-transport spatial join queued after that
 smoke/read and reverse-routing work.
 
-## Ordered work
+## Work inventory and execution priority
 
-Finish the shard-smoke and reverse-country work in items 1–2 before resuming
-forward-geocoding expansion. The Places and address/street prototypes in items
-3–4 are retained research baselines, not abandoned work, but they should not
-drive production shard or API changes until the smoke/read path and conservative
+Execute the numbered inventory in this priority order: close the ID follow-up in
+item 1, implement the manifest/catalog foundation in item 5, build the
+research-only country comparator in item 2, and then resume the forward Places
+and address/street work in items 3–4. The item numbers preserve the roadmap's
+subject grouping; they are not the execution sequence. The forward prototypes
+are retained research baselines, not abandoned work, but they should not drive
+production shard or API changes until the smoke/read path and conservative
 reverse router are settled.
 
 ### 1. Monaco subset and generated-object read smokes (ID follow-up in progress)
