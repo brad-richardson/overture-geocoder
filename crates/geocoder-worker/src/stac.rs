@@ -761,17 +761,12 @@ fn resolve_catalog_key(
     };
     if !matches!(environment, Some("smoke" | "preview")) {
         return Err(
-            "CATALOG_KEY_OVERRIDE is allowed only in smoke or preview environments"
-                .to_string(),
+            "CATALOG_KEY_OVERRIDE is allowed only in smoke or preview environments".to_string(),
         );
     }
-    let valid_family = key == "smoketest-id/catalog.json"
-        || key == "smoketest-shards/catalog.json";
+    let valid_family = key == "smoketest-id/catalog.json" || key == "smoketest-shards/catalog.json";
     if !valid_family {
-        return Err(
-            "CATALOG_KEY_OVERRIDE must name a fixed smoketest family catalog"
-                .to_string(),
-        );
+        return Err("CATALOG_KEY_OVERRIDE must name a fixed smoketest family catalog".to_string());
     }
     Ok(key.to_string())
 }
@@ -785,11 +780,8 @@ impl ShardLoader {
             .var("CATALOG_KEY_OVERRIDE")
             .ok()
             .map(|value| value.to_string());
-        let catalog_key = resolve_catalog_key(
-            environment.as_deref(),
-            override_key.as_deref(),
-        )
-        .map_err(Error::RustError)?;
+        let catalog_key = resolve_catalog_key(environment.as_deref(), override_key.as_deref())
+            .map_err(Error::RustError)?;
         Ok(Self {
             bucket,
             cache,
@@ -2163,13 +2155,12 @@ impl ShardLoader {
             .await?
             .ok_or_else(|| not_found(&self.catalog_key))?;
 
-        serde_json::from_str(&text)
-            .map_err(|e| {
-                Error::RustError(format!(
-                    "Failed to parse catalog {}: {}",
-                    self.catalog_key, e
-                ))
-            })
+        serde_json::from_str(&text).map_err(|e| {
+            Error::RustError(format!(
+                "Failed to parse catalog {}: {}",
+                self.catalog_key, e
+            ))
+        })
     }
 
     /// Load a forward collection for a specific version.
@@ -2438,36 +2429,28 @@ mod tests {
 
     #[test]
     fn catalog_key_defaults_to_production_root() {
-        assert_eq!(resolve_catalog_key(Some("production"), None).unwrap(), "catalog.json");
+        assert_eq!(
+            resolve_catalog_key(Some("production"), None).unwrap(),
+            "catalog.json"
+        );
         assert_eq!(resolve_catalog_key(None, None).unwrap(), "catalog.json");
     }
 
     #[test]
     fn catalog_override_is_fixed_prefix_and_preview_only() {
         assert_eq!(
-            resolve_catalog_key(Some("smoke"), Some("smoketest-id/catalog.json"))
-                .unwrap(),
+            resolve_catalog_key(Some("smoke"), Some("smoketest-id/catalog.json")).unwrap(),
             "smoketest-id/catalog.json"
         );
         assert_eq!(
-            resolve_catalog_key(
-                Some("preview"),
-                Some("smoketest-shards/catalog.json")
-            )
-            .unwrap(),
+            resolve_catalog_key(Some("preview"), Some("smoketest-shards/catalog.json")).unwrap(),
             "smoketest-shards/catalog.json"
         );
-        assert!(resolve_catalog_key(
-            Some("production"),
-            Some("smoketest-id/catalog.json")
-        )
-        .is_err());
+        assert!(
+            resolve_catalog_key(Some("production"), Some("smoketest-id/catalog.json")).is_err()
+        );
         assert!(resolve_catalog_key(Some("smoke"), Some("catalog.json")).is_err());
-        assert!(resolve_catalog_key(
-            Some("smoke"),
-            Some("smoketest-id/../catalog.json")
-        )
-        .is_err());
+        assert!(resolve_catalog_key(Some("smoke"), Some("smoketest-id/../catalog.json")).is_err());
     }
     use parquet::record::{Field, Row};
 
