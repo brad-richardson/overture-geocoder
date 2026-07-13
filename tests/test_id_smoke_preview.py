@@ -26,6 +26,33 @@ def test_preview_catalog_is_fixed_and_isolated():
         preview.build_preview_catalog("2026-07-12.0")
 
 
+def test_glob_sources_fetches_non_iterable_duckdb_result_rows():
+    class Result:
+        def fetchall(self):
+            return [("002.parquet",), ("001.parquet",)]
+
+    class Connection:
+        def execute(self, query, params):
+            assert query == "SELECT file FROM glob(?)"
+            assert params == ["*.parquet"]
+            return Result()
+
+    assert preview._glob_sources(Connection(), "*.parquet") == [
+        "001.parquet",
+        "002.parquet",
+    ]
+
+
+def test_glob_sources_accepts_empty_glob(tmp_path):
+    con = duckdb.connect()
+    try:
+        sources = preview._glob_sources(con, str(tmp_path / "*.parquet"))
+    finally:
+        con.close()
+
+    assert sources == []
+
+
 def test_select_preview_cases_requires_current_and_historical_v3_rows(tmp_path):
     shard = tmp_path / "000.parquet"
     con = duckdb.connect()

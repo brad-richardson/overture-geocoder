@@ -206,6 +206,12 @@ def _r2_connection(bucket: str) -> duckdb.DuckDBPyConnection:
     return con
 
 
+def _glob_sources(con: duckdb.DuckDBPyConnection, pattern: str) -> list[str]:
+    return sorted(
+        row[0] for row in con.execute("SELECT file FROM glob(?)", [pattern]).fetchall()
+    )
+
+
 def prepare(
     version: str, release: str, bucket: str, output_dir: Path
 ) -> dict[str, Any]:
@@ -213,7 +219,7 @@ def prepare(
     con = _r2_connection(bucket)
     try:
         pattern = f"s3://{bucket}/{version}/id-index/*.parquet"
-        sources = [row[0] for row in con.execute("SELECT file FROM glob(?)", [pattern])]
+        sources = _glob_sources(con, pattern)
         cases = select_preview_cases(con, sources)
         meta = _read_r2_json(con, f"s3://{bucket}/{version}/id-meta.json")
         reference = meta.get("locator_dictionary")

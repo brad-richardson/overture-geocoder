@@ -60,8 +60,16 @@ def _fixtures(tmp_path):
 
     router = tmp_path / "router.db"
     db = sqlite3.connect(router)
-    db.execute(
-        "CREATE TABLE router(token TEXT, shard_id TEXT, max_importance REAL)"
+    db.executescript(
+        """
+        CREATE TABLE router(
+          token TEXT NOT NULL,
+          shard_id TEXT NOT NULL,
+          max_importance REAL NOT NULL,
+          PRIMARY KEY(token, shard_id)
+        );
+        CREATE INDEX idx_token ON router(token);
+        """
     )
     db.execute("INSERT INTO router VALUES ('monaco', 'MC', 0.8)")
     db.commit()
@@ -75,7 +83,12 @@ def _fixtures(tmp_path):
                 "items": {
                     "MC": {**_record(forward), "href": "./shards/MC.db"}
                 },
-                "router": {**_record(router), "href": "./router.db"},
+                "router": {
+                    **_record(router),
+                    "href": "./router.db",
+                    "token_count": 1,
+                    "pair_count": 1,
+                },
             }
         )
     )
@@ -95,7 +108,77 @@ def test_verifies_hashes_and_queries_fresh_objects(tmp_path):
     report = verify.verify_readback(*_fixtures(tmp_path))
     assert report["forward"]["country"] == "MC"
     assert report["reverse"]["country"] == "MC"
-    assert report["router"]["shard_id"] == "MC"
+    assert report["router"] == {
+        "row_count": 1,
+        "sample": {"token": "monaco", "shard_id": "MC", "importance": 0.8},
+    }
+
+
+def test_accepts_valid_empty_router(tmp_path):
+    fixtures = _fixtures(tmp_path)
+    collection_path, _, _, _, router_path = fixtures
+    db = sqlite3.connect(router_path)
+    db.execute("DELETE FROM router")
+    db.commit()
+    db.close()
+    collection = json.loads(collection_path.read_text())
+    collection["router"] = {
+        **_record(router_path),
+        "href": "./router.db",
+        "token_count": 0,
+        "pair_count": 0,
+    }
+    collection_path.write_text(json.dumps(collection))
+
+    report = verify.verify_readback(*fixtures)
+
+    assert report["router"] == {"row_count": 0, "sample": None}
+
+
+def test_rejects_router_without_required_token_index(tmp_path):
+    router = _fixtures(tmp_path)[-1]
+    db = sqlite3.connect(router)
+    db.execute("DROP INDEX idx_token")
+    db.commit()
+    db.close()
+
+    with pytest.raises(RuntimeError, match="token or primary-key index"):
+        verify._query_router(router, {"token_count": 1, "pair_count": 1})
+
+
+def test_rejects_invalid_nonempty_router_sample(tmp_path):
+    router = _fixtures(tmp_path)[-1]
+    db = sqlite3.connect(router)
+    db.execute("DELETE FROM router")
+    db.execute("INSERT INTO router VALUES ('', 'MC', 0.8)")
+    db.commit()
+    db.close()
+
+    with pytest.raises(RuntimeError, match="invalid sample token"):
+        verify._query_router(router, {"token_count": 1, "pair_count": 1})
+
+
+def test_rejects_router_metadata_count_mismatch(tmp_path):
+    fixtures = _fixtures(tmp_path)
+    collection_path = fixtures[0]
+    collection = json.loads(collection_path.read_text())
+    collection["router"]["pair_count"] = 2
+    collection_path.write_text(json.dumps(collection))
+
+    with pytest.raises(RuntimeError, match="metadata count mismatch"):
+        verify.verify_readback(*fixtures)
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [("pair_count", True), ("token_count", -1), ("pair_count", 1.5)],
+)
+def test_rejects_invalid_router_metadata_counts(tmp_path, key, value):
+    router = _fixtures(tmp_path)[-1]
+    record = {"token_count": 1, "pair_count": 1, key: value}
+
+    with pytest.raises(RuntimeError, match=f"no valid {key}"):
+        verify._query_router(router, record)
 
 
 def test_fails_on_readback_tampering(tmp_path):
