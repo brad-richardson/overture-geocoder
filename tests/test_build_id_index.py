@@ -1001,6 +1001,35 @@ def test_phase_metadata_preserves_exact_sizes_from_metadata_discovery(monkeypatc
     assert collection["summaries"]["total_records"] == 7
 
 
+def test_build_marker_shard_inventory_validates_sha(monkeypatch):
+    monkeypatch.setattr(
+        bii,
+        "_read_current_build_markers",
+        lambda *_: [
+            (
+                "build-000-3ff/_SUCCESS",
+                {
+                    "shards": {
+                        "000": {
+                            "record_count": 7,
+                            "size_bytes": 1234,
+                            "sha256": "a" * 64,
+                        }
+                    }
+                },
+            )
+        ],
+    )
+
+    assert bii._build_marker_shard_inventory({"bucket": "test"}, "v") == {
+        "000": {
+            "record_count": 7,
+            "size_bytes": 1234,
+            "sha256": "a" * 64,
+        }
+    }
+
+
 BUCKETED = [
     "s3://b/v/staging/id-release-addresses-address/bucket=0/data_0.parquet",
     "s3://b/v/staging/id-release-addresses-address/bucket=3/data_0.parquet",
