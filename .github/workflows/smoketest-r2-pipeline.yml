@@ -6,6 +6,10 @@ on:
     paths:
       - 'scripts/build_shards.py'
       - 'scripts/download_divisions.sh'
+      - 'scripts/download_divisions_smoke.py'
+      - 'scripts/monaco_smoke_contract.json'
+      - 'scripts/verify_monaco_export.py'
+      - 'scripts/verify_monaco_evidence.py'
       - 'scripts/download_divisions_area.sql'
       - 'scripts/download_divisions_global.sql'
       - 'scripts/stac.py'
@@ -82,8 +86,50 @@ jobs:
             exit 1
           fi
 
-      - name: Download divisions data
-        run: ./scripts/download_divisions.sh
+      - name: Discover Overture release once
+        run: |
+          RELEASE=$(python3 scripts/stac.py | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
+          if [ -z "$RELEASE" ]; then
+            echo "::error::Failed to discover latest Overture release from STAC"
+            exit 1
+          fi
+          echo "OVERTURE_RELEASE=$RELEASE" >> "$GITHUB_ENV"
+          echo "Overture release: $RELEASE"
+
+      - name: Download Monaco divisions subset
+        run: ./scripts/download_divisions.sh --smoke-monaco "$OVERTURE_RELEASE"
+
+      - name: Verify pinned Monaco equivalence evidence is current
+        run: python scripts/verify_monaco_evidence.py --check docs/plans/2026-07-12-monaco-subset-evidence.json
+
+      - name: Verify extraction pushdown and runtime gates
+        run: |
+          jq -e '
+            .country_code == "MC"
+            and .timings_seconds.total < 60
+            and (0 < .scan_profiles.division.metadata_eligible_row_groups)
+            and (.scan_profiles.division.metadata_eligible_row_groups < .scan_profiles.division.total_row_groups)
+            and (0 < .scan_profiles.division_area.metadata_eligible_row_groups)
+            and (.scan_profiles.division_area.metadata_eligible_row_groups < .scan_profiles.division_area.total_row_groups)
+            and .scan_profiles.division.plan_has_country_filter
+            and .scan_profiles.division.plan_has_bbox_filter
+            and .scan_profiles.division_area.plan_has_bbox_filter
+            and (.scan_profiles.division_area.profiled_predicate == "actual rendered country-or-division_id ownership predicate plus bbox")
+          ' exports/monaco-export-profile.json
+          cat exports/monaco-export-profile.json
+
+      - name: Upload Monaco extraction evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: monaco-extraction-evidence
+          path: |
+            exports/monaco-export-profile.json
+            exports/monaco-division-scan-plan.json
+            exports/monaco-division-scan-profile.json
+            exports/monaco-division-area-scan-plan.json
+            exports/monaco-division-area-scan-profile.json
+          if-no-files-found: warn
 
       - name: Build forward shards (MC only, skip HEAD)
         run: python scripts/build_shards.py --version $SMOKE_VERSION --countries MC --skip-head
@@ -159,5 +205,9 @@ jobs:
           echo "## Forward/Reverse R2 Shard Smoke Test" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Country:** MC (Monaco)" >> $GITHUB_STEP_SUMMARY
+          echo "**Overture release:** ${OVERTURE_RELEASE}" >> $GITHUB_STEP_SUMMARY
           echo "**R2 prefix:** ${SMOKE_VERSION}" >> $GITHUB_STEP_SUMMARY
+          if [ -f exports/monaco-export-profile.json ]; then
+            echo "**Extraction:** $(jq -r '.timings_seconds.total')s; division metadata-eligible row groups $(jq -r '.scan_profiles.division.metadata_eligible_row_groups')/$(jq -r '.scan_profiles.division.total_row_groups'); area metadata-eligible row groups $(jq -r '.scan_profiles.division_area.metadata_eligible_row_groups')/$(jq -r '.scan_profiles.division_area.total_row_groups')" >> $GITHUB_STEP_SUMMARY
+          fi
           echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

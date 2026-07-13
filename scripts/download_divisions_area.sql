@@ -10,7 +10,9 @@
 --
 -- Output: exports/divisions-reverse.parquet
 --
--- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
+-- Note: __OVERTURE_RELEASE__, __DIVISION_FILTER__, __AREA_FILTER__, and
+-- __OUTPUT_PATH__ are placeholders substituted at runtime. Production renders
+-- both filters as TRUE; the merge smoke renders validated Monaco predicates.
 -- The download_divisions.sh script fetches the latest release version from the
 -- Overture STAC catalog and replaces this placeholder via sed before execution.
 -- Example: sed "s|__OVERTURE_RELEASE__|2025-01-01.0|g" ... | duckdb
@@ -76,6 +78,7 @@ COPY (
               subtype IN ('country', 'region', 'county')
               OR (subtype = 'locality' AND COALESCE(population, 0) >= 50000)
           )
+          AND (__DIVISION_FILTER__)
     ),
     areas_all AS (
         SELECT
@@ -95,6 +98,7 @@ COPY (
         -- The materialized eligible-ID join happens before spatial work, so
         -- excluded locality/neighborhood polygons never enter the window.
         WHERE a.subtype IN ('country', 'region', 'county', 'locality')
+          AND (__AREA_FILTER__)
     )
     SELECT
         d.gers_id,
@@ -114,17 +118,17 @@ COPY (
     FROM divisions d
     JOIN areas_all a ON d.gers_id = a.division_id
 )
-TO 'exports/divisions-reverse.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+TO '__OUTPUT_PATH__' (FORMAT PARQUET, COMPRESSION ZSTD);
 
 -- Show count and breakdown
-SELECT COUNT(*) as total_divisions FROM read_parquet('exports/divisions-reverse.parquet');
+SELECT COUNT(*) as total_divisions FROM read_parquet('__OUTPUT_PATH__');
 
 SELECT subtype, COUNT(*) as count
-FROM read_parquet('exports/divisions-reverse.parquet')
+FROM read_parquet('__OUTPUT_PATH__')
 GROUP BY subtype
 ORDER BY count DESC;
 
 -- Show sample records
 SELECT gers_id, subtype, primary_name, lat, lon, area
-FROM read_parquet('exports/divisions-reverse.parquet')
+FROM read_parquet('__OUTPUT_PATH__')
 LIMIT 5;

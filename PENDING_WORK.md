@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-12
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `86cdfce` (`main` after #55). Keep measured evidence
+The code baseline is `39fa7ec` (`main` after #56). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -158,7 +158,21 @@ preserving branch- or PR-specific history.
 
 ## Ordered work
 
+Finish the shard-smoke and reverse-country work in items 1–2 before resuming
+forward-geocoding expansion. The Places and address/street prototypes in items
+3–4 are retained research baselines, not abandoned work, but they should not
+drive production shard or API changes until the smoke/read path and conservative
+reverse router are settled.
+
 ### 1. Query only the Monaco smoke subset
+
+The implementation and pinned equivalence proof are complete. On Overture
+`2026-06-17.0`, it validated 22 divisions and all 22 known division-area rows,
+produced the same three forward and three reverse rows as the legacy global
+export, matched the built forward, reverse, and router databases logically, and
+completed recurring extraction in 44.747 seconds with DuckDB 1.5.1. This item
+remains open only for the first merged current-release/R2 smoke and its recorded
+stage timings.
 
 Keep the completed workflow split, merge-only triggers, narrow production-path
 filters, fixed prefix per smoke family, and cancel-in-progress concurrency.
@@ -171,16 +185,22 @@ run-specific prefixes or a stale-prefix sweeper.
   authoritative correctness filter. Use bbox only as an additional coarse
   Parquet-scan predicate after validating the required rows have present,
   consistent bbox metadata; fail closed if any expected Monaco division, area,
-  or hierarchy row is missing. Confirm pushdown with the query plan and scanned
-  row-group/file reduction rather than inferring it from elapsed time alone.
+  or hierarchy row is missing. Confirm pushdown by profiling the actual rendered
+  predicates, requiring bbox on both scans and country on the division scan, and
+  proving from complete footer statistics that the country+bbox fast branch
+  makes fewer row groups eligible; do not infer it from elapsed time alone.
+  DuckDB may elide an exact ownership branch that is redundant for the current
+  source. Its 1.5.1 `rows_scanned` counter is not a gate: it reports twice the
+  complete source cardinality for these remote nested scans.
 - Preserve the production transformations, geometry, aliases, hierarchy, and
   forward/reverse build paths. The smoke should remain an external-source
   integration test, not become a checked-in fixture.
 - On the pinned same release, require schema, IDs/rows, hierarchy/context,
   aliases, geometry, and built shard contents to match the legacy global export
-  filtered to Monaco. Demonstrate reduced scanned files/row groups and target
-  less than 60 seconds for extraction on the same runner; if that bound is not
-  practical, ratify a replacement before accepting the optimization.
+  filtered to Monaco. Preserve the executed scan profile and demonstrate fewer
+  metadata-eligible row groups, then target less than 60 seconds for extraction
+  on the same runner; if that bound is not practical, ratify a replacement
+  before accepting the optimization.
 - Record total and stage timings on the first post-change merged run. The
   immediate goal is to make source extraction a bounded setup step rather than
   the dominant 4m13s of a 5m35s job.
@@ -232,7 +252,13 @@ unsimplified components. These are proposed starting points, not accepted
 production thresholds; every current candidate fails either correctness or
 bytes.
 
-### 3. Places rank and routing audit
+### 3. Places rank and routing audit (prototype exists; promotion blocked)
+
+The regional CA-bbox builder, opt-in `types=place` request path, bounded routing
+experiments, and fail-closed experimental manifest are implemented. No Places
+artifact is in the production catalog. Promotion remains blocked on reviewed
+ranking labels because confidence measures feature existence rather than fame,
+and the tested brand/category/source-count prominence formula was rejected.
 
 - Produce a compact current-release California audit union, not a shard.
 - Independently label famous unique, local unique, and chain examples across
@@ -242,7 +268,14 @@ bytes.
 - Design explicit low/high-fanout token routing. Only reviewed venue-level fame
   evidence may justify a future unique landmark in `HEAD`.
 
-### 4. Address and street-context evaluation
+### 4. Address and street-context evaluation (research artifacts exist; no serving path)
+
+Current-release address/source extraction, the Massachusetts sizing artifact,
+and the bounded Boston transportation name/connector-component prototype are
+complete. They have no Worker, API, catalog, R2 publication, or production-build
+integration. The next required experiment is the spatial address-to-segment and
+component join; do not begin production forward address/road shards before it
+and the independent query review pass.
 
 - Spatially join the bounded Boston address sample to transportation segments
   and connector components; measure missing and contradictory locality/postcode

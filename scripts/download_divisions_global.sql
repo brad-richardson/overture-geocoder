@@ -6,7 +6,10 @@
 -- localities with population >10k or a Wikidata ID (the latter are pruned by
 -- the shard build when they lack sufficient Wikimedia importance).
 --
--- Note: __OVERTURE_RELEASE__ is a placeholder substituted at runtime.
+-- Note: __OVERTURE_RELEASE__, __DIVISION_FILTER__, and __OUTPUT_PATH__ are
+-- placeholders substituted at runtime. Production renders the filter as TRUE;
+-- the merge smoke renders a validated Monaco country/required-ID predicate
+-- with a conservative bbox envelope.
 -- The download_divisions.sh script fetches the latest release version from the
 -- Overture STAC catalog and replaces this placeholder via sed before execution.
 -- Example: sed "s|__OVERTURE_RELEASE__|2025-01-01.0|g" ... | duckdb
@@ -66,6 +69,7 @@ COPY (
             hive_partitioning = true
         )
         WHERE subtype = 'country'
+          AND (__DIVISION_FILTER__)
     ),
     -- Lookup table for region names (subtype='region')
     -- Extracts: region code -> primary name (e.g., "US-MA" -> "Massachusetts")
@@ -79,6 +83,7 @@ COPY (
         )
         WHERE subtype = 'region'
           AND region IS NOT NULL  -- Some regions don't have codes (territories)
+          AND (__DIVISION_FILTER__)
     )
     SELECT
         d.id as gers_id,
@@ -192,19 +197,20 @@ COPY (
     WHERE (d.subtype IN ('country', 'region', 'county', 'localadmin')
            OR (d.subtype = 'locality' AND (d.population > 10000 OR d.wikidata IS NOT NULL)))
       AND d.names.primary IS NOT NULL
+      AND (__DIVISION_FILTER__)
 )
-TO 'exports/divisions-global.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+TO '__OUTPUT_PATH__' (FORMAT PARQUET, COMPRESSION ZSTD);
 
 -- Show count and breakdown
-SELECT COUNT(*) as total_divisions FROM read_parquet('exports/divisions-global.parquet');
+SELECT COUNT(*) as total_divisions FROM read_parquet('__OUTPUT_PATH__');
 
 SELECT subtype, COUNT(*) as count
-FROM read_parquet('exports/divisions-global.parquet')
+FROM read_parquet('__OUTPUT_PATH__')
 GROUP BY subtype
 ORDER BY count DESC;
 
 SELECT country, COUNT(*) as count
-FROM read_parquet('exports/divisions-global.parquet')
+FROM read_parquet('__OUTPUT_PATH__')
 GROUP BY country
 ORDER BY count DESC
 LIMIT 20;
