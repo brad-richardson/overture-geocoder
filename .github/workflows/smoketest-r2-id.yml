@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - 'scripts/build_id_index.py'
+      - 'scripts/prepare_id_smoke_preview.py'
       - 'scripts/stac.py'
+      - 'crates/geocoder-core/**'
+      - 'crates/geocoder-worker/**'
       - '.github/workflows/smoketest-r2-id.yml'
   workflow_dispatch:
 
@@ -45,6 +48,17 @@ jobs:
 
       - name: Install wrangler
         run: npm install -g wrangler
+
+      - name: Setup Rust for preview Worker
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install preview Worker build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          cargo install worker-build
 
       # Stale staging markers under the fixed prefix would make these
       # resumable phases silently skip, turning the smoke into a no-op.
@@ -129,6 +143,21 @@ jobs:
             --prefix-len 3 \
             --smoke-test
 
+      - name: Prepare isolated preview catalog and v3 cases
+        run: |
+          python scripts/prepare_id_smoke_preview.py \
+            --version "$SMOKE_VERSION" \
+            --release "$OVERTURE_RELEASE" \
+            --output-dir /tmp/id-smoke-preview
+          echo "Current case: $(jq -r '.current.id' /tmp/id-smoke-preview/id-smoke-cases.json)"
+          echo "Historical case: $(jq -r '.historical.id' /tmp/id-smoke-preview/id-smoke-cases.json)"
+
+      - name: Upload isolated preview catalog
+        run: |
+          wrangler r2 object put \
+            "geocoder-shards/${SMOKE_VERSION}/catalog.json" \
+            --file /tmp/id-smoke-preview/catalog.json --remote
+
       - name: Verify ID index uploads
         run: |
           if wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/id-collection.json" --remote --pipe > /dev/null 2>&1; then
@@ -137,28 +166,145 @@ jobs:
             echo "::error::${SMOKE_VERSION}/id-collection.json NOT FOUND"
             exit 1
           fi
+          if wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/catalog.json" --remote --pipe > /dev/null 2>&1; then
+            echo "  ok: ${SMOKE_VERSION}/catalog.json"
+          else
+            echo "::error::${SMOKE_VERSION}/catalog.json NOT FOUND"
+            exit 1
+          fi
           echo "ID index verification passed."
 
-      - name: Cleanup test data from R2
+      - name: Deploy isolated ID preview Worker
+        working-directory: crates/geocoder-worker
+        run: |
+          DEPLOY_LOG=$(mktemp)
+          if ! wrangler deploy --config wrangler.id-smoke.toml \
+            2>&1 | tee "$DEPLOY_LOG"; then
+            echo "::error::Failed to deploy isolated ID smoke Worker"
+            exit 1
+          fi
+          PREVIEW_URL=$(grep -oE 'https://[^[:space:]]+\.workers\.dev' "$DEPLOY_LOG" | tail -1)
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "::error::Wrangler output did not contain the preview Worker URL"
+            exit 1
+          fi
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+          echo "Preview Worker: $PREVIEW_URL"
+
+      - name: Query current and historical v3 IDs through preview Worker
+        run: |
+          CURRENT_ID=$(jq -er '.current.id' /tmp/id-smoke-preview/id-smoke-cases.json)
+          HISTORICAL_ID=$(jq -er '.historical.id' /tmp/id-smoke-preview/id-smoke-cases.json)
+          HISTORICAL_RELEASE=$(jq -er '.historical.expected_last_seen_release' /tmp/id-smoke-preview/id-smoke-cases.json)
+
+          request_id() {
+            local id="$1"
+            local output="$2"
+            local code
+            for attempt in 1 2 3 4 5; do
+              code=$(curl -sS --max-time 30 -o "$output" -w '%{http_code}' \
+                "${PREVIEW_URL}/id/${id}" || true)
+              if [ "$code" = "200" ]; then
+                return 0
+              fi
+              echo "Attempt ${attempt}: /id/${id} returned ${code}: $(cat "$output" 2>/dev/null || true)"
+              sleep 5
+            done
+            return 1
+          }
+
+          request_id "$CURRENT_ID" /tmp/current-id.json
+          request_id "$HISTORICAL_ID" /tmp/historical-id.json
+
+          jq -e --arg id "$CURRENT_ID" --arg release "$OVERTURE_RELEASE" '
+            .id == $id
+            and .data_version == "smoketest-id"
+            and (.bbox.xmin | type == "number")
+            and (.bbox.ymin | type == "number")
+            and (.bbox.xmax | type == "number")
+            and (.bbox.ymax | type == "number")
+            and (.feature_type | type == "string" and length > 0)
+            and (.theme | type == "string" and length > 0)
+            and (.filename | type == "string" and endswith(".parquet"))
+            and .last_seen_release == $release
+            and (.registry_member | type == "boolean")
+            and .exists_in_current_release == true
+            and (.overture_path | startswith("release/" + $release + "/theme="))
+          ' /tmp/current-id.json
+
+          jq -e --arg id "$HISTORICAL_ID" --arg historical_release "$HISTORICAL_RELEASE" '
+            .id == $id
+            and .data_version == "smoketest-id"
+            and (.bbox.xmin | type == "number")
+            and (.bbox.ymin | type == "number")
+            and (.bbox.xmax | type == "number")
+            and (.bbox.ymax | type == "number")
+            and .feature_type == null
+            and .theme == null
+            and .filename == null
+            and .last_seen_release == $historical_release
+            and .registry_member == true
+            and .exists_in_current_release == false
+            and .overture_path == null
+          ' /tmp/historical-id.json
+          echo "Preview Worker returned valid current and historical v3 responses."
+
+      - name: Delete preview Worker and fixed-prefix R2 objects
         if: always()
         run: |
-          echo "Cleaning up ID smoke test data from R2..."
+          FAILED=0
+          DELETED=0
+          for attempt in 1 2 3; do
+            DELETE_LOG=$(mktemp)
+            if wrangler delete \
+              --config crates/geocoder-worker/wrangler.id-smoke.toml \
+              --force >"$DELETE_LOG" 2>&1; then
+              cat "$DELETE_LOG"
+              DELETED=1
+              break
+            fi
+            cat "$DELETE_LOG"
+            if grep -qiE 'not found|does not exist' "$DELETE_LOG"; then
+              DELETED=1
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          if [ "$DELETED" -ne 1 ]; then
+            echo "::error::Failed to delete isolated ID smoke Worker"
+            FAILED=1
+          fi
+
+          echo "Cleaning up all ID smoke objects under ${SMOKE_VERSION}/..."
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
           export AWS_REQUEST_CHECKSUM_CALCULATION=when_required
           export AWS_RESPONSE_CHECKSUM_VALIDATION=when_required
-          # Non-fatal: stale leftovers are removed by the next pre-clean.
-          aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
-            --endpoint-url "https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com" \
-            --region auto | wc -l | xargs -I{} echo "Deleted {} objects from R2." \
-            || echo "::warning::R2 cleanup failed; the next run's pre-clean step will remove leftovers."
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          for attempt in 1 2 3; do
+            aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+              --only-show-errors --endpoint-url "$ENDPOINT" --region auto || true
+            REMAINING=$(aws s3api list-objects-v2 \
+              --bucket geocoder-shards --prefix "${SMOKE_VERSION}/" \
+              --max-keys 1 --query 'KeyCount' --output text \
+              --endpoint-url "$ENDPOINT" --region auto || echo unknown)
+            if [ "$REMAINING" = "0" ]; then
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          if [ "$REMAINING" != "0" ]; then
+            echo "::error::ID smoke cleanup left objects under ${SMOKE_VERSION}/"
+            FAILED=1
+          fi
+          exit "$FAILED"
 
       - name: Summary
         if: always()
         run: |
           echo "## R2 ID Index Smoke Test" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Release-theme limit:** 50 records per type" >> $GITHUB_STEP_SUMMARY
+          echo "**Release-theme limit:** 50 records per type after fixed-prefix filtering" >> $GITHUB_STEP_SUMMARY
           echo "**Overture release:** ${OVERTURE_RELEASE}" >> $GITHUB_STEP_SUMMARY
           echo "**R2 prefix:** ${SMOKE_VERSION}" >> $GITHUB_STEP_SUMMARY
           echo "**Status:** ${{ job.status }}" >> $GITHUB_STEP_SUMMARY

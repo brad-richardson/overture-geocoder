@@ -302,7 +302,26 @@ jobs:
             exit 1
           fi
 
-          # Shards are in place; now upload collection metadata (with retry)
+          # The collection advertises router.db, so publish and verify that
+          # data object before collection.json can make the version visible.
+          ROUTER="shards/${VERSION}/router.db"
+          test -f "$ROUTER"
+          jq -e '.router.href == "./router.db"' \
+            "shards/${VERSION}/collection.json" >/dev/null
+          echo "Uploading ${VERSION}/router.db..."
+          for attempt in 1 2 3; do
+            if wrangler r2 object put "geocoder-shards/${VERSION}/router.db" \
+              --file "$ROUTER" --remote; then
+              break
+            fi
+            if [ "$attempt" -eq 3 ]; then
+              echo "::error::Failed to upload router.db after 3 attempts"
+              exit 1
+            fi
+            sleep $((attempt * 10))
+          done
+
+          # Every referenced data object is now in place; publish metadata.
           echo "Uploading ${VERSION}/collection.json..."
           for attempt in 1 2 3; do
             if wrangler r2 object put "geocoder-shards/${VERSION}/collection.json" \
@@ -419,6 +438,25 @@ jobs:
               echo "  ok: ${VERSION}/shards/HEAD.db"
             else
               echo "::error::${VERSION}/shards/HEAD.db NOT FOUND in R2 after upload"
+              FAILED=1
+            fi
+
+            ROUTER_READBACK_DIR=$(mktemp -d)
+            ROUTER_READBACK="${ROUTER_READBACK_DIR}/router.db"
+            if wrangler r2 object get "geocoder-shards/${VERSION}/router.db" \
+              --remote --file "$ROUTER_READBACK"; then
+              EXPECTED_SIZE=$(jq -er '.router.size_bytes' "shards/${VERSION}/collection.json")
+              EXPECTED_SHA=$(jq -er '.router.sha256' "shards/${VERSION}/collection.json")
+              ACTUAL_SIZE=$(stat -c %s "$ROUTER_READBACK")
+              ACTUAL_SHA=$(sha256sum "$ROUTER_READBACK" | cut -d' ' -f1)
+              if [ "$ACTUAL_SIZE" != "$EXPECTED_SIZE" ] || [ "$ACTUAL_SHA" != "$EXPECTED_SHA" ]; then
+                echo "::error::${VERSION}/router.db size/SHA readback mismatch"
+                FAILED=1
+              else
+                echo "  ok: ${VERSION}/router.db (${ACTUAL_SIZE} bytes, SHA verified)"
+              fi
+            else
+              echo "::error::${VERSION}/router.db NOT FOUND in R2 after upload"
               FAILED=1
             fi
           fi

@@ -10,6 +10,7 @@ on:
       - 'scripts/monaco_smoke_contract.json'
       - 'scripts/verify_monaco_export.py'
       - 'scripts/verify_monaco_evidence.py'
+      - 'scripts/verify_shard_smoke_readback.py'
       - 'scripts/download_divisions_area.sql'
       - 'scripts/download_divisions_global.sql'
       - 'scripts/stac.py'
@@ -139,13 +140,12 @@ jobs:
 
       - name: Upload test shards to R2
         run: |
-          # Upload collection metadata
-          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/collection.json" \
-            --file "shards/${SMOKE_VERSION}/collection.json" --remote
-          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/reverse-collection.json" \
-            --file "shards/${SMOKE_VERSION}/reverse-collection.json" --remote
-
-          # Upload shard databases
+          # Data objects are published before metadata can reference them.
+          # In particular router.db must exist before collection.json exposes
+          # its router record to a reader.
+          test -f "shards/${SMOKE_VERSION}/router.db"
+          jq -e '.router.href == "./router.db"' \
+            "shards/${SMOKE_VERSION}/collection.json" >/dev/null
           for f in shards/${SMOKE_VERSION}/shards/*.db; do
             name=$(basename "$f")
             wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/shards/${name}" \
@@ -156,29 +156,33 @@ jobs:
             wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/reverse/${name}" \
               --file "$f" --remote
           done
+          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/router.db" \
+            --file "shards/${SMOKE_VERSION}/router.db" --remote
 
-      - name: Verify shard uploads
+          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/collection.json" \
+            --file "shards/${SMOKE_VERSION}/collection.json" --remote
+          wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/reverse-collection.json" \
+            --file "shards/${SMOKE_VERSION}/reverse-collection.json" --remote
+
+      - name: Verify and query fresh R2 readbacks
         run: |
-          FAILED=0
-          for key in \
-            "${SMOKE_VERSION}/collection.json" \
-            "${SMOKE_VERSION}/shards/MC.db" \
-            "${SMOKE_VERSION}/reverse-collection.json" \
-            "${SMOKE_VERSION}/reverse/MC.db"
-          do
-            if wrangler r2 object get "geocoder-shards/${key}" --remote --pipe > /dev/null 2>&1; then
-              echo "  ok: ${key}"
-            else
-              echo "  FAIL: ${key}"
-              FAILED=1
-            fi
-          done
-
-          if [ "$FAILED" -eq 1 ]; then
-            echo "::error::Shard smoke test verification failed"
-            exit 1
-          fi
-          echo "Shard verification passed."
+          READBACK=$(mktemp -d)
+          wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/collection.json" \
+            --remote --file "$READBACK/collection.json"
+          wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/reverse-collection.json" \
+            --remote --file "$READBACK/reverse-collection.json"
+          wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/shards/MC.db" \
+            --remote --file "$READBACK/MC.db"
+          wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/reverse/MC.db" \
+            --remote --file "$READBACK/reverse-MC.db"
+          wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/router.db" \
+            --remote --file "$READBACK/router.db"
+          python scripts/verify_shard_smoke_readback.py \
+            --collection "$READBACK/collection.json" \
+            --reverse-collection "$READBACK/reverse-collection.json" \
+            --forward-db "$READBACK/MC.db" \
+            --reverse-db "$READBACK/reverse-MC.db" \
+            --router-db "$READBACK/router.db"
 
       - name: Cleanup test data from R2
         if: always()

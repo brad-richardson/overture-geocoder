@@ -511,6 +511,10 @@ fn build_locator_metadata(
 pub struct ShardLoader {
     bucket: Bucket,
     cache: Cache,
+    /// R2 catalog object. Production always uses the root catalog; an
+    /// explicitly smoke-scoped override lets preview Workers exercise an
+    /// isolated fixed-prefix catalog without making it discoverable live.
+    catalog_key: String,
     /// Execution context for background cache writes via waitUntil.
     /// When absent, cache writes happen inline (slower, but correct).
     ctx: Option<Rc<Context>>,
@@ -744,13 +748,52 @@ macro_rules! with_version_fallback {
     }};
 }
 
+/// Resolve the catalog object without allowing a deployed production Worker
+/// to be redirected. The override is deliberately narrower than a general R2
+/// key: only the fixed smoke-family prefixes used by merge-only workflows are
+/// accepted, and only when the Worker declares a smoke/preview environment.
+fn resolve_catalog_key(
+    environment: Option<&str>,
+    override_key: Option<&str>,
+) -> std::result::Result<String, String> {
+    let Some(key) = override_key else {
+        return Ok("catalog.json".to_string());
+    };
+    if !matches!(environment, Some("smoke" | "preview")) {
+        return Err(
+            "CATALOG_KEY_OVERRIDE is allowed only in smoke or preview environments"
+                .to_string(),
+        );
+    }
+    let valid_family = key == "smoketest-id/catalog.json"
+        || key == "smoketest-shards/catalog.json";
+    if !valid_family {
+        return Err(
+            "CATALOG_KEY_OVERRIDE must name a fixed smoketest family catalog"
+                .to_string(),
+        );
+    }
+    Ok(key.to_string())
+}
+
 impl ShardLoader {
     pub fn new(env: &Env) -> Result<Self> {
         let bucket = env.bucket("SHARDS_BUCKET")?;
         let cache = Cache::default();
+        let environment = env.var("ENVIRONMENT").ok().map(|value| value.to_string());
+        let override_key = env
+            .var("CATALOG_KEY_OVERRIDE")
+            .ok()
+            .map(|value| value.to_string());
+        let catalog_key = resolve_catalog_key(
+            environment.as_deref(),
+            override_key.as_deref(),
+        )
+        .map_err(Error::RustError)?;
         Ok(Self {
             bucket,
             cache,
+            catalog_key,
             ctx: None,
         })
     }
@@ -2116,12 +2159,17 @@ impl ShardLoader {
 
     async fn load_catalog(&self) -> Result<StacCatalog> {
         let text = self
-            .memoized_get_text("catalog.json", CATALOG_CACHE_TTL)
+            .memoized_get_text(&self.catalog_key, CATALOG_CACHE_TTL)
             .await?
-            .ok_or_else(|| not_found("catalog.json"))?;
+            .ok_or_else(|| not_found(&self.catalog_key))?;
 
         serde_json::from_str(&text)
-            .map_err(|e| Error::RustError(format!("Failed to parse catalog: {}", e)))
+            .map_err(|e| {
+                Error::RustError(format!(
+                    "Failed to parse catalog {}: {}",
+                    self.catalog_key, e
+                ))
+            })
     }
 
     /// Load a forward collection for a specific version.
@@ -2387,6 +2435,40 @@ fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn catalog_key_defaults_to_production_root() {
+        assert_eq!(resolve_catalog_key(Some("production"), None).unwrap(), "catalog.json");
+        assert_eq!(resolve_catalog_key(None, None).unwrap(), "catalog.json");
+    }
+
+    #[test]
+    fn catalog_override_is_fixed_prefix_and_preview_only() {
+        assert_eq!(
+            resolve_catalog_key(Some("smoke"), Some("smoketest-id/catalog.json"))
+                .unwrap(),
+            "smoketest-id/catalog.json"
+        );
+        assert_eq!(
+            resolve_catalog_key(
+                Some("preview"),
+                Some("smoketest-shards/catalog.json")
+            )
+            .unwrap(),
+            "smoketest-shards/catalog.json"
+        );
+        assert!(resolve_catalog_key(
+            Some("production"),
+            Some("smoketest-id/catalog.json")
+        )
+        .is_err());
+        assert!(resolve_catalog_key(Some("smoke"), Some("catalog.json")).is_err());
+        assert!(resolve_catalog_key(
+            Some("smoke"),
+            Some("smoketest-id/../catalog.json")
+        )
+        .is_err());
+    }
     use parquet::record::{Field, Row};
 
     const DICTIONARY_SHA: &str = "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef";
