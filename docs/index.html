@@ -182,6 +182,32 @@
       background: rgba(255, 255, 255, 0.1);
     }
 
+    .id-container {
+      margin-bottom: 12px;
+    }
+
+    .id-input {
+      width: 100%;
+      padding: 12px 16px;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      border-radius: 8px;
+      color: #fff;
+      font-family: 'SF Mono', Monaco, monospace;
+      font-size: 12px;
+      outline: none;
+      transition: all 0.2s;
+    }
+
+    .id-input:focus {
+      border-color: #3b82f6;
+      background: rgba(255, 255, 255, 0.1);
+    }
+
+    .id-input::placeholder {
+      color: rgba(255, 255, 255, 0.4);
+    }
+
     .search-btn {
       width: 100%;
       padding: 12px;
@@ -244,6 +270,53 @@
     .result-item:hover {
       background: rgba(255, 255, 255, 0.08);
       border-color: rgba(59, 130, 246, 0.3);
+    }
+
+    .result-actions {
+      display: flex;
+      margin-top: 10px;
+    }
+
+    .id-lookup-btn {
+      padding: 6px 10px;
+      background: rgba(59, 130, 246, 0.16);
+      border: 1px solid rgba(96, 165, 250, 0.35);
+      border-radius: 6px;
+      color: #bfdbfe;
+      cursor: pointer;
+      font-size: 11px;
+      transition: all 0.2s;
+    }
+
+    .id-lookup-btn:hover,
+    .id-lookup-btn:focus-visible {
+      background: rgba(59, 130, 246, 0.28);
+      border-color: rgba(96, 165, 250, 0.65);
+      outline: none;
+    }
+
+    .id-details {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+      font-size: 12px;
+    }
+
+    .id-detail {
+      display: grid;
+      grid-template-columns: minmax(90px, auto) 1fr;
+      gap: 8px;
+      align-items: start;
+    }
+
+    .id-detail-label {
+      color: rgba(255, 255, 255, 0.5);
+    }
+
+    .id-detail-value {
+      color: rgba(255, 255, 255, 0.85);
+      font-family: 'SF Mono', Monaco, monospace;
+      overflow-wrap: anywhere;
     }
 
     .result-name {
@@ -435,12 +508,13 @@
       <h1>Overture Geocoder</h1>
     </div>
 
-    <div class="tabs">
-      <button class="tab active" data-tab="forward">Forward</button>
-      <button class="tab" data-tab="reverse">Reverse</button>
+    <div class="tabs" role="tablist" aria-label="API tester">
+      <button class="tab active" id="forward-tab" data-tab="forward" role="tab" aria-selected="true" aria-controls="forward-panel" tabindex="0">Forward</button>
+      <button class="tab" id="reverse-tab" data-tab="reverse" role="tab" aria-selected="false" aria-controls="reverse-panel" tabindex="-1">Reverse</button>
+      <button class="tab" id="id-tab" data-tab="id" role="tab" aria-selected="false" aria-controls="id-panel" tabindex="-1">ID</button>
     </div>
 
-    <div id="forward-panel">
+    <div id="forward-panel" role="tabpanel" aria-labelledby="forward-tab">
       <div class="search-container">
         <svg class="search-icon" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/>
@@ -454,7 +528,7 @@
       <button class="search-btn" id="search-btn">Search</button>
     </div>
 
-    <div id="reverse-panel" style="display: none;">
+    <div id="reverse-panel" role="tabpanel" aria-labelledby="reverse-tab" hidden>
       <div class="coords-container">
         <div class="coord-input-group">
           <label class="coord-label" for="lat-input">Latitude</label>
@@ -471,15 +545,26 @@
       <button class="search-btn" id="reverse-btn">Lookup Location</button>
     </div>
 
-    <div id="results" class="results"></div>
+    <div id="id-panel" role="tabpanel" aria-labelledby="id-tab" hidden>
+      <div class="id-container">
+        <label class="coord-label" for="id-input">GERS ID</label>
+        <input type="text" class="id-input" id="id-input" placeholder="08b2a100-d664-7fff-0200-a44bcea04b76" autocomplete="off" spellcheck="false" aria-describedby="id-hint">
+      </div>
+      <div class="hint" id="id-hint">
+        <span>Paste an ID or send one here from a geocoding result</span>
+      </div>
+      <button class="search-btn" id="id-btn">Lookup ID</button>
+    </div>
+
+    <div id="results" class="results" aria-live="polite" aria-atomic="true"></div>
   </div>
 
   <div class="info-panel">
-    Powered by <a href="https://overturemaps.org" target="_blank">Overture Maps</a>
+    Powered by <a href="https://overturemaps.org" target="_blank" rel="noopener noreferrer">Overture Maps</a>
     &bull;
-    Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank">OpenStreetMap</a> contributors
+    Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener noreferrer">OpenStreetMap</a> contributors
     &bull;
-    <a href="https://github.com/brad-richardson/overture-geocoder" target="_blank">GitHub</a>
+    <a href="https://github.com/brad-richardson/overture-geocoder" target="_blank" rel="noopener noreferrer">GitHub</a>
   </div>
 
   <script type="module">
@@ -491,15 +576,13 @@
     const MAP_PADDING = 100;
     const FIT_MAX_ZOOM = 14;
     const REVERSE_RESULT_ZOOM = 12;
+    const ID_REQUEST_TIMEOUT_MS = 30000;
     const DEFAULT_CENTER = [-71.0589, 42.3601]; // Boston
     const DEFAULT_ZOOM = 10;
 
     // Allow API URL override via query parameter
     const urlParams = new URLSearchParams(window.location.search);
     const API_BASE_URL = urlParams.get('api') || DEFAULT_API_URL;
-
-    // Initialize Client
-    const geocoder = new OvertureGeocoder({ baseUrl: API_BASE_URL });
 
     // PMTiles URLs from Overture Maps
     const PMTILES_SOURCES = {
@@ -843,16 +926,21 @@
     let currentTab = 'forward';
     let markers = [];
     let popup = null;
+    let activeRequest = null;
+    let requestSequence = 0;
 
     // DOM Elements
     const tabs = document.querySelectorAll('.tab');
     const forwardPanel = document.getElementById('forward-panel');
     const reversePanel = document.getElementById('reverse-panel');
+    const idPanel = document.getElementById('id-panel');
     const searchInput = document.getElementById('search-input');
     const searchBtn = document.getElementById('search-btn');
     const latInput = document.getElementById('lat-input');
     const lonInput = document.getElementById('lon-input');
     const reverseBtn = document.getElementById('reverse-btn');
+    const idInput = document.getElementById('id-input');
+    const idBtn = document.getElementById('id-btn');
     const resultsContainer = document.getElementById('results');
 
     // Inject "Verify Geometry" toggle into reverse panel
@@ -876,37 +964,109 @@
       map.getCanvas().style.cursor = currentTab === 'reverse' ? 'crosshair' : '';
     }
 
-    // Tab switching
-    tabs.forEach(tab => {
-      tab.addEventListener('click', () => {
-        currentTab = tab.dataset.tab;
-        tabs.forEach(t => t.classList.remove('active'));
-        tab.classList.add('active');
+    function cancelActiveRequest() {
+      if (!activeRequest) return;
+      activeRequest.controller.abort();
+      activeRequest.button.disabled = false;
+      activeRequest = null;
+    }
 
-        if (currentTab === 'forward') {
-          forwardPanel.style.display = 'block';
-          reversePanel.style.display = 'none';
-        } else {
-          forwardPanel.style.display = 'block'; // Make sure panel logic handles display
-          forwardPanel.style.display = 'none';
-          reversePanel.style.display = 'block';
-        }
+    function combineSignals(primary, secondary) {
+      const signals = [primary, secondary].filter(Boolean);
+      if (signals.length === 1) return signals[0];
+      if (typeof AbortSignal.any === 'function') return AbortSignal.any(signals);
 
+      const controller = new AbortController();
+      const abort = () => controller.abort();
+      if (signals.some(signal => signal.aborted)) {
+        controller.abort();
+      } else {
+        signals.forEach(signal => signal.addEventListener('abort', abort, { once: true }));
+      }
+      return controller.signal;
+    }
+
+    function beginRequest(button) {
+      cancelActiveRequest();
+
+      const controller = new AbortController();
+      const requestId = ++requestSequence;
+      const requestFetch = (input, init = {}) => {
+        const signal = combineSignals(init.signal, controller.signal);
+        return fetch(input, { ...init, signal });
+      };
+      const client = new OvertureGeocoder({
+        baseUrl: API_BASE_URL,
+        fetch: requestFetch
+      });
+
+      button.disabled = true;
+      activeRequest = { controller, requestId, button };
+      return { client, controller, requestFetch, requestId, button };
+    }
+
+    function isCurrentRequest(request) {
+      return activeRequest?.requestId === request.requestId && !request.controller.signal.aborted;
+    }
+
+    function finishRequest(request) {
+      if (activeRequest?.requestId !== request.requestId) return;
+      request.button.disabled = false;
+      activeRequest = null;
+    }
+
+    function selectTab(tabName, { preserveResults = false } = {}) {
+      currentTab = tabName;
+      tabs.forEach(tab => {
+        const selected = tab.dataset.tab === tabName;
+        tab.classList.toggle('active', selected);
+        tab.setAttribute('aria-selected', String(selected));
+        tab.tabIndex = selected ? 0 : -1;
+      });
+
+      forwardPanel.hidden = tabName !== 'forward';
+      reversePanel.hidden = tabName !== 'reverse';
+      idPanel.hidden = tabName !== 'id';
+
+      cancelActiveRequest();
+      if (!preserveResults) {
         clearResults();
         clearMarkers();
-        updateCursor();
+      }
+      updateCursor();
+    }
+
+    // Tab switching
+    tabs.forEach(tab => {
+      tab.addEventListener('click', () => selectTab(tab.dataset.tab));
+      tab.addEventListener('keydown', event => {
+        const currentIndex = Array.from(tabs).indexOf(tab);
+        let nextIndex;
+        if (event.key === 'ArrowRight') nextIndex = (currentIndex + 1) % tabs.length;
+        if (event.key === 'ArrowLeft') nextIndex = (currentIndex - 1 + tabs.length) % tabs.length;
+        if (event.key === 'Home') nextIndex = 0;
+        if (event.key === 'End') nextIndex = tabs.length - 1;
+        if (nextIndex === undefined) return;
+
+        event.preventDefault();
+        const nextTab = tabs[nextIndex];
+        selectTab(nextTab.dataset.tab);
+        nextTab.focus();
       });
     });
 
     // Forward geocoding
     async function forwardGeocode(query) {
+      const request = beginRequest(searchBtn);
       showLoading();
       clearMarkers();
 
       try {
-        const results = await geocoder.search(query, {
+        const results = await request.client.search(query, {
           limit: SEARCH_LIMIT
         });
+
+        if (!isCurrentRequest(request)) return;
 
         displayForwardResults(results);
 
@@ -915,20 +1075,26 @@
           fitBounds(results);
         }
       } catch (error) {
+        if (!isCurrentRequest(request)) return;
         showError(error.message);
+      } finally {
+        finishRequest(request);
       }
     }
 
     // Reverse geocoding
     async function reverseGeocode(lat, lon) {
+      const request = beginRequest(reverseBtn);
       showLoading();
       clearMarkers();
 
       try {
         const verify = verifyGeometryCheckbox.checked;
-        const results = await geocoder.reverse(lat, lon, {
+        const results = await request.client.reverse(lat, lon, {
           verifyGeometry: verify
         });
+
+        if (!isCurrentRequest(request)) return;
 
         displayReverseResults(results, lat, lon);
 
@@ -951,8 +1117,60 @@
           map.fitBounds(bounds, { padding: MAP_PADDING, maxZoom: FIT_MAX_ZOOM });
         }
       } catch (error) {
+        if (!isCurrentRequest(request)) return;
         showError(error.message);
+      } finally {
+        finishRequest(request);
       }
+    }
+
+    async function lookupId(gersId) {
+      const request = beginRequest(idBtn);
+      const timeoutController = new AbortController();
+      const timeoutId = setTimeout(() => timeoutController.abort(), ID_REQUEST_TIMEOUT_MS);
+      showLoading('Looking up ID...');
+      clearMarkers();
+
+      try {
+        const url = `${API_BASE_URL.replace(/\/$/, '')}/id/${encodeURIComponent(gersId)}`;
+        const response = await request.requestFetch(url, {
+          method: 'GET',
+          headers: { Accept: 'application/json' },
+          signal: timeoutController.signal
+        });
+        if (!isCurrentRequest(request)) return;
+
+        if (response.status === 404) {
+          resultsContainer.innerHTML = '<div class="empty-state">GERS ID not found</div>';
+          return;
+        }
+        if (!response.ok) {
+          throw new Error(`ID lookup failed: ${response.status} ${response.statusText}`);
+        }
+
+        const result = await response.json();
+        if (!isCurrentRequest(request)) return;
+
+        displayIdResult(result);
+        fitIdBounds(result.bbox);
+      } catch (error) {
+        if (!isCurrentRequest(request)) return;
+        if (timeoutController.signal.aborted) {
+          showError('ID lookup timed out. Please try again.');
+        } else {
+          showError(error.message);
+        }
+      } finally {
+        clearTimeout(timeoutId);
+        finishRequest(request);
+      }
+    }
+
+    function lookupResultId(gersId) {
+      if (!gersId) return;
+      idInput.value = gersId;
+      selectTab('id', { preserveResults: true });
+      lookupId(gersId);
     }
 
     // Display forward geocoding results
@@ -969,9 +1187,14 @@
           <div class="result-item" data-index="${index}" data-lat="${result.lat}" data-lon="${result.lon}">
             <div class="result-name">${escapeHtml(result.primary_name)}</div>
             <div class="result-meta">
-              <span class="result-type">${result.type || 'place'}</span>
+              <span class="result-type">${escapeHtml(result.type || 'place')}</span>
               <span class="result-coords">${result.lat.toFixed(5)}, ${result.lon.toFixed(5)}</span>
             </div>
+            ${result.gers_id ? `
+              <div class="result-actions">
+                <button type="button" class="id-lookup-btn" data-id-index="${index}">Test ID API</button>
+              </div>
+            ` : ''}
           </div>
         `;
       });
@@ -992,12 +1215,14 @@
             .setLngLat([lon, lat])
             .setHTML(`
               <div class="popup-title">${escapeHtml(result.primary_name)}</div>
-              <div class="popup-type">${result.type || 'place'}</div>
+              <div class="popup-type">${escapeHtml(result.type || 'place')}</div>
               <div class="popup-coords">${lat.toFixed(5)}, ${lon.toFixed(5)}</div>
             `)
             .addTo(map);
         });
       });
+
+      bindIdLookupButtons(results);
     }
 
     // Display reverse geocoding results
@@ -1029,6 +1254,11 @@
                 `).join('')}
               </div>
             ` : ''}
+            ${result.gers_id ? `
+              <div class="result-actions">
+                <button type="button" class="id-lookup-btn" data-id-index="${index}">Test ID API</button>
+              </div>
+            ` : ''}
           </div>
         `;
       });
@@ -1043,6 +1273,71 @@
           map.flyTo({ center: [lon, lat], zoom: REVERSE_RESULT_ZOOM });
         });
       });
+
+      bindIdLookupButtons(results);
+    }
+
+    function bindIdLookupButtons(results) {
+      document.querySelectorAll('.id-lookup-btn').forEach(button => {
+        button.addEventListener('click', event => {
+          event.stopPropagation();
+          const result = results[Number(button.dataset.idIndex)];
+          lookupResultId(result?.gers_id);
+        });
+      });
+    }
+
+    function displayIdResult(result) {
+      const bbox = result.bbox || {};
+      const details = [
+        ['ID', result.id],
+        ['Data version', result.data_version],
+        ['Bounds', formatBbox(bbox)],
+        ['Theme / type', [result.theme, result.feature_type].filter(Boolean).join(' / ')],
+        ['Current release', formatBoolean(result.exists_in_current_release)],
+        ['Registry member', formatBoolean(result.registry_member)],
+        ['Last seen', result.last_seen_release],
+        ['Source file', result.filename],
+        ['Overture path', result.overture_path]
+      ].filter(([, value]) => value !== undefined && value !== null && value !== '');
+
+      resultsContainer.innerHTML = `
+        <div class="results-header">ID Lookup Result</div>
+        <div class="result-item">
+          <div class="result-name">${escapeHtml(result.id)}</div>
+          <div class="id-details">
+            ${details.map(([label, value]) => `
+              <div class="id-detail">
+                <span class="id-detail-label">${escapeHtml(label)}</span>
+                <span class="id-detail-value">${escapeHtml(value)}</span>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+      `;
+    }
+
+    function formatBoolean(value) {
+      if (value === undefined || value === null) return null;
+      return value ? 'yes' : 'no';
+    }
+
+    function formatBbox(bbox) {
+      const values = [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax];
+      if (!values.every(Number.isFinite)) return null;
+      return values.map(value => value.toFixed(6)).join(', ');
+    }
+
+    function fitIdBounds(bbox) {
+      if (!bbox) return;
+      const values = [bbox.xmin, bbox.ymin, bbox.xmax, bbox.ymax];
+      if (!values.every(Number.isFinite)) return;
+
+      const bounds = new maplibregl.LngLatBounds(
+        [bbox.xmin, bbox.ymin],
+        [bbox.xmax, bbox.ymax]
+      );
+      map.fitBounds(bounds, { padding: MAP_PADDING, maxZoom: FIT_MAX_ZOOM });
     }
 
     // Add markers for results
@@ -1151,11 +1446,11 @@
     }
 
     // Show loading state
-    function showLoading() {
+    function showLoading(message = 'Searching...') {
       resultsContainer.innerHTML = `
         <div class="loading">
           <div class="spinner"></div>
-          <span>Searching...</span>
+          <span>${escapeHtml(message)}</span>
         </div>
       `;
     }
@@ -1166,9 +1461,9 @@
     }
 
     // Escape HTML
-    function escapeHtml(str) {
-      if (!str) return '';
-      return str.replace(/[&<>"']/g, c => ({
+    function escapeHtml(value) {
+      if (value === undefined || value === null) return '';
+      return String(value).replace(/[&<>"']/g, c => ({
         '&': '&amp;',
         '<': '&lt;',
         '>': '&gt;',
@@ -1197,9 +1492,26 @@
     reverseBtn.addEventListener('click', () => {
       const lat = parseFloat(latInput.value);
       const lon = parseFloat(lonInput.value);
-      if (!isNaN(lat) && !isNaN(lon)) {
+      if (Number.isFinite(lat) && Number.isFinite(lon) && lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180) {
         reverseGeocode(lat, lon);
+      } else {
+        showError('Enter a latitude from -90 to 90 and a longitude from -180 to 180.');
       }
+    });
+
+    idBtn.addEventListener('click', () => {
+      const gersId = idInput.value.trim();
+      if (gersId.length >= 2 && gersId.length <= 64) {
+        lookupId(gersId);
+      } else {
+        showError('Enter a GERS ID between 2 and 64 characters.');
+      }
+    });
+
+    idInput.addEventListener('keydown', event => {
+      if (event.key !== 'Enter') return;
+      event.preventDefault();
+      idBtn.click();
     });
 
     // Map click for reverse geocoding
