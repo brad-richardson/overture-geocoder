@@ -349,7 +349,9 @@ impl Database {
                     bbox_xmax: row.get(7)?,
                     bbox_ymax: row.get(8)?,
                     area: row.get(9)?,
-                    wkb: row.get(10)?,
+                    country: row.get(10)?,
+                    region: row.get(11)?,
+                    wkb: row.get(12)?,
                 })
             })?
             .collect::<std::result::Result<Vec<_>, _>>()?
@@ -366,6 +368,8 @@ impl Database {
                     bbox_xmax: row.get(7)?,
                     bbox_ymax: row.get(8)?,
                     area: row.get(9)?,
+                    country: row.get(10)?,
+                    region: row.get(11)?,
                     wkb: None,
                 })
             })?
@@ -454,7 +458,14 @@ impl Database {
         };
 
         // Build hierarchy: the chosen division for its own subtype, plus the
-        // smallest-area division of every other subtype.
+        // smallest-area metadata-compatible division of every other subtype.
+        // This only prevents known country/region-code conflicts; without
+        // parent IDs it cannot prove that a candidate is the anchor's actual
+        // administrative parent. Bboxes can
+        // overlap across borders (and are only a prefilter without WKB), so
+        // never combine candidates whose country or region metadata conflicts
+        // with the chosen result. If the anchor's country is unknown, fail
+        // closed and return only the anchor rather than inventing a hierarchy.
         let mut hierarchy = Vec::new();
         let mut seen_subtypes = HashSet::new();
 
@@ -467,7 +478,10 @@ impl Database {
             });
         }
 
-        for row in &deduped {
+        for row in deduped
+            .iter()
+            .filter(|row| reverse_hierarchy_is_coherent(most_specific, row))
+        {
             if let Some(div_type) = DivisionType::parse(&row.subtype) {
                 if seen_subtypes.insert(div_type) {
                     hierarchy.push(HierarchyEntry {
@@ -530,7 +544,39 @@ struct ReverseDivisionRow {
     bbox_xmax: f64,
     bbox_ymax: f64,
     area: f64,
+    country: Option<String>,
+    region: Option<String>,
     wkb: Option<Vec<u8>>,
+}
+
+/// Whether `candidate` is metadata-compatible with the chosen reverse result.
+/// This rejects known country/region-code conflicts but does not establish a
+/// parent-child relationship between two divisions sharing the same codes.
+fn reverse_hierarchy_is_coherent(
+    anchor: &ReverseDivisionRow,
+    candidate: &ReverseDivisionRow,
+) -> bool {
+    if anchor.gers_id == candidate.gers_id {
+        return true;
+    }
+
+    let Some(anchor_country) = anchor.country.as_deref() else {
+        return false;
+    };
+    if candidate.country.as_deref() != Some(anchor_country) {
+        return false;
+    }
+
+    // A country row is the parent of every region in that country. All other
+    // levels must agree with the anchor's region when the anchor identifies
+    // one; missing metadata cannot prove that a conflicting region is safe.
+    if candidate.subtype.eq_ignore_ascii_case("country") {
+        return true;
+    }
+    match anchor.region.as_deref() {
+        Some(anchor_region) => candidate.region.as_deref() == Some(anchor_region),
+        None => candidate.region.is_none(),
+    }
 }
 
 fn read_u32_wkb(data: &[u8], offset: usize, little: bool) -> Option<u32> {
@@ -1115,5 +1161,95 @@ mod tests {
         let db = db_with(&schema);
         let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
         assert_eq!(result.gers_id, "n-1", "neighborhood highest priority");
+    }
+
+    #[test]
+    fn test_reverse_geocode_legacy_wkb_excludes_cross_country_hierarchy() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-bt', 'locality', 'Thimphu', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'BT', 'BT-15'),
+              (2, 'reg-cn', 'region', 'Tibet', 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'CN', 'CN-XZ'),
+              (3, 'country-cn', 'country', 'China', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 10.0, NULL, 'CN', NULL),
+              (4, 'reg-bt', 'region', 'Thimphu District', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 20.0, NULL, 'BT', 'BT-15'),
+              (5, 'country-bt', 'country', 'Bhutan', 0.0, 0.0, -4.0, -4.0, 4.0, 4.0, 30.0, NULL, 'BT', NULL);
+            ALTER TABLE divisions_reverse ADD COLUMN wkb BLOB;
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        let ids: Vec<&str> = result
+            .hierarchy
+            .iter()
+            .map(|entry| entry.gers_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["loc-bt", "reg-bt", "country-bt"]);
+    }
+
+    #[test]
+    fn test_reverse_geocode_rtree_excludes_wrong_region_in_same_country() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-ny', 'locality', 'Manhattan', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', 'US-NY'),
+              (2, 'reg-nj', 'region', 'New Jersey', 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'US', 'US-NJ'),
+              (3, 'reg-ny', 'region', 'New York', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 2.0, NULL, 'US', 'US-NY'),
+              (4, 'country-us', 'country', 'United States', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 10.0, NULL, 'US', NULL);
+            CREATE VIRTUAL TABLE divisions_reverse_rtree USING rtree(
+                id, xmin, xmax, ymin, ymax
+            );
+            INSERT INTO divisions_reverse_rtree
+                SELECT rowid, bbox_xmin, bbox_xmax, bbox_ymin, bbox_ymax
+                FROM divisions_reverse;
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        let ids: Vec<&str> = result
+            .hierarchy
+            .iter()
+            .map(|entry| entry.gers_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["loc-ny", "reg-ny", "country-us"]);
+    }
+
+    #[test]
+    fn test_reverse_geocode_unknown_anchor_country_fails_closed() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-unknown', 'locality', 'Unknown Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, NULL, NULL),
+              (2, 'reg-us', 'region', 'Some State', 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'US', 'US-XX'),
+              (3, 'country-us', 'country', 'United States', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 10.0, NULL, 'US', NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(result.hierarchy.len(), 1);
+        assert_eq!(result.hierarchy[0].gers_id, "loc-unknown");
+    }
+
+    #[test]
+    fn test_reverse_geocode_same_region_code_is_not_parentage_proof() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-ny', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', 'US-NY'),
+              (2, 'county-overlap', 'county', 'Unrelated Overlap', 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'US', 'US-NY'),
+              (3, 'county-parent', 'county', 'Actual Parent', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 2.0, NULL, 'US', 'US-NY'),
+              (4, 'country-us', 'country', 'United States', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 10.0, NULL, 'US', NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        let county = result
+            .hierarchy
+            .iter()
+            .find(|entry| entry.subtype == "county")
+            .unwrap();
+
+        // Both counties have identical coherence metadata, so the existing
+        // area heuristic still wins. True parentage needs materialized lineage.
+        assert_eq!(county.gers_id, "county-overlap");
     }
 }

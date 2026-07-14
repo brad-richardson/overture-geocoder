@@ -289,6 +289,8 @@ pub const REVERSE_GEOCODE_RTREE_SQL: &str = r#"
             d.bbox_xmax,
             d.bbox_ymax,
             d.area,
+            d.country,
+            d.region,
             ROW_NUMBER() OVER (PARTITION BY d.subtype ORDER BY d.area ASC) AS rn
         FROM divisions_reverse_rtree r
         JOIN divisions_reverse d ON d.rowid = r.id
@@ -299,7 +301,7 @@ pub const REVERSE_GEOCODE_RTREE_SQL: &str = r#"
     )
     SELECT
         gers_id, subtype, primary_name, lat, lon,
-        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, country, region
     FROM candidates
     WHERE rn <= ?3
     ORDER BY area ASC
@@ -321,6 +323,8 @@ pub const REVERSE_GEOCODE_SQL: &str = r#"
             bbox_xmax,
             bbox_ymax,
             area,
+            country,
+            region,
             ROW_NUMBER() OVER (PARTITION BY subtype ORDER BY area ASC) AS rn
         FROM divisions_reverse
         WHERE bbox_xmin <= ?1
@@ -330,7 +334,7 @@ pub const REVERSE_GEOCODE_SQL: &str = r#"
     )
     SELECT
         gers_id, subtype, primary_name, lat, lon,
-        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, country, region
     FROM candidates
     WHERE rn <= ?3
     ORDER BY area ASC
@@ -349,6 +353,8 @@ pub const REVERSE_GEOCODE_RTREE_SQL_WKB: &str = r#"
             d.bbox_xmax,
             d.bbox_ymax,
             d.area,
+            d.country,
+            d.region,
             d.wkb,
             ROW_NUMBER() OVER (PARTITION BY d.subtype ORDER BY d.area ASC) AS rn
         FROM divisions_reverse_rtree r
@@ -360,7 +366,7 @@ pub const REVERSE_GEOCODE_RTREE_SQL_WKB: &str = r#"
     )
     SELECT
         gers_id, subtype, primary_name, lat, lon,
-        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, wkb
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, country, region, wkb
     FROM candidates
     WHERE rn <= ?3
     ORDER BY area ASC
@@ -379,6 +385,8 @@ pub const REVERSE_GEOCODE_SQL_WKB: &str = r#"
             bbox_xmax,
             bbox_ymax,
             area,
+            country,
+            region,
             wkb,
             ROW_NUMBER() OVER (PARTITION BY subtype ORDER BY area ASC) AS rn
         FROM divisions_reverse
@@ -389,7 +397,7 @@ pub const REVERSE_GEOCODE_SQL_WKB: &str = r#"
     )
     SELECT
         gers_id, subtype, primary_name, lat, lon,
-        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, wkb
+        bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area, country, region, wkb
     FROM candidates
     WHERE rn <= ?3
     ORDER BY area ASC
