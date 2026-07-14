@@ -6,6 +6,8 @@ run-level markers; explicit metadata runs must regenerate).
 """
 
 import sys
+import threading
+import time
 from argparse import Namespace
 from pathlib import Path
 from unittest import mock
@@ -19,6 +21,33 @@ sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 import build_id_index as bii
 import gen_id_collection as gic
 import patch_failed_shards as pfs
+
+
+def test_heartbeat_reports_and_stops(capsys):
+    def operation():
+        time.sleep(0.035)
+        return "done"
+
+    assert bii._run_with_heartbeat("slow test", operation, interval=0.01) == "done"
+    output = capsys.readouterr().out
+    assert "slow test: started" in output
+    assert "slow test: still running" in output
+    assert "slow test: completed" in output
+    assert not any(
+        thread.name == "heartbeat-slow test" for thread in threading.enumerate()
+    )
+
+
+def test_heartbeat_stops_when_operation_fails(capsys):
+    def operation():
+        raise RuntimeError("boom")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        bii._run_with_heartbeat("failed test", operation, interval=0.01)
+    assert "failed test: failed" in capsys.readouterr().out
+    assert not any(
+        thread.name == "heartbeat-failed test" for thread in threading.enumerate()
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +230,35 @@ def test_expected_schema_keeps_v1_columns_first():
         "id", "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
         "source_file_id", "last_seen_release_id", "registry_member",
     ]
+
+
+def test_shard_set_schema_reads_are_batched(monkeypatch):
+    class Result:
+        def __init__(self, rows):
+            self.rows = rows
+
+        def fetchall(self):
+            return self.rows
+
+    class Connection:
+        def __init__(self):
+            self.batches = []
+
+        def execute(self, _query, params):
+            batch = params[0]
+            self.batches.append(list(batch))
+            return Result([
+                (path, name, physical_type, "16" if index == 0 else None)
+                for path in batch
+                for index, (name, physical_type) in enumerate(
+                    bii.EXPECTED_SHARD_COLUMNS
+                )
+            ])
+
+    monkeypatch.setattr(bii, "SHARD_SCHEMA_BATCH_SIZE", 2)
+    con = Connection()
+    assert bii._classify_shard_set(con, ["a", "b", "c"]) == 3
+    assert con.batches == [["a", "b"], ["c"]]
 
 
 def test_locator_fixture_uses_compact_ids_and_is_bounded(tmp_path):
@@ -599,6 +657,65 @@ def test_release_inventory_fan_in_rejects_missing_direct_staged_tuple(monkeypatc
         )
 
 
+def test_release_stage_finalizer_requires_exact_discovered_marker_set(monkeypatch):
+    class Connection:
+        def close(self):
+            pass
+
+    types = [("addresses", "address"), ("base", "water")]
+    marker_paths = [
+        "s3://b/v/staging/id-release-addresses-address/_SUCCESS",
+        "s3://b/v/staging/id-release-base-water/_SUCCESS",
+    ]
+    marker = {
+        "status": "complete",
+        "format_version": 3,
+        "partitions": 16,
+        "locator_inventory": {"href": "./inventory.json"},
+    }
+    write = mock.Mock()
+    monkeypatch.setattr(bii, "_discover_release_types", lambda *_: types)
+    monkeypatch.setattr(bii, "_r2_con", lambda *_: Connection())
+    monkeypatch.setattr(bii, "_glob_files", lambda *_: marker_paths)
+    monkeypatch.setattr(bii, "_read_staging_marker", lambda *_: marker)
+    monkeypatch.setattr(bii, "_write_staging_marker", write)
+
+    bii.phase_finalize_release_r2("release", {"bucket": "b"}, "v")
+
+    write.assert_called_once_with(
+        {"bucket": "b"},
+        "v",
+        "id-release",
+        2,
+        extra={"release_types": ["addresses/address", "base/water"]},
+    )
+
+
+def test_release_stage_finalizer_rejects_extra_marker(monkeypatch):
+    class Connection:
+        def close(self):
+            pass
+
+    write = mock.Mock()
+    monkeypatch.setattr(
+        bii, "_discover_release_types", lambda *_: [("addresses", "address")]
+    )
+    monkeypatch.setattr(bii, "_r2_con", lambda *_: Connection())
+    monkeypatch.setattr(
+        bii,
+        "_glob_files",
+        lambda *_: [
+            "s3://b/v/staging/id-release-addresses-address/_SUCCESS",
+            "s3://b/v/staging/id-release-base-retired/_SUCCESS",
+        ],
+    )
+    monkeypatch.setattr(bii, "_write_staging_marker", write)
+
+    with pytest.raises(RuntimeError, match="differs from discovered"):
+        bii.phase_finalize_release_r2("release", {"bucket": "b"}, "v")
+    write.assert_not_called()
+
+
 def test_release_source_inventory_requires_two_identical_listings(monkeypatch):
     monkeypatch.setattr(bii, "TYPE_THEME_MAP", {"place": "places"})
     listing = mock.Mock(
@@ -906,6 +1023,56 @@ def test_release_theme_type_mismatch_fails_before_remote_access():
             "base", "address", 3, "2026-06-17.0", {}, "v")
 
 
+def test_dedicated_release_stage_uses_eight_threads_and_ten_gb(monkeypatch):
+    class Connection:
+        def __init__(self):
+            self.queries = []
+            self.closed = False
+
+        def execute(self, query, *_args):
+            self.queries.append(query)
+            return self
+
+        def fetchone(self):
+            return (8, "9.3 GiB")
+
+        def close(self):
+            self.closed = True
+
+    con = Connection()
+    source_files = [("addresses", "address", "part.parquet")]
+    monkeypatch.setattr(bii, "_read_staging_marker", lambda *_: None)
+    monkeypatch.setattr(bii, "_r2_con", lambda *_: con)
+    monkeypatch.setattr(
+        bii, "_release_type_source_files", lambda *_: source_files
+    )
+    monkeypatch.setattr(bii, "_clear_release_staging", lambda *_: None)
+    monkeypatch.setattr(
+        bii,
+        "_publish_stage_inventory",
+        lambda *_: {"href": "./inventory.json"},
+    )
+    monkeypatch.setattr(bii, "_write_staging_marker", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(
+        bii, "_run_with_heartbeat", lambda _label, operation, **_kwargs: operation()
+    )
+
+    bii._partition_release_type(
+        "addresses",
+        "address",
+        3,
+        "2026-06-17.0",
+        {"bucket": "b"},
+        "v",
+    )
+
+    sql = "\n".join(con.queries)
+    assert "SET threads = 8" in sql
+    assert "SET memory_limit = '10GB'" in sql
+    assert "SET preserve_insertion_order = false" in sql
+    assert con.closed
+
+
 def test_patch_release_discovery_distinguishes_empty_from_error(monkeypatch):
     monkeypatch.setattr(pfs, "_glob_files", lambda *_: [])
     with pytest.raises(RuntimeError, match="No release staging files"):
@@ -1162,6 +1329,8 @@ def pipeline(monkeypatch):
             },
         ),
         ("phase_partition_release_r2", None),
+        ("phase_partition_release_type_r2", None),
+        ("phase_finalize_release_r2", None),
         ("phase_build_locator_dictionary", None),
         (
             "_load_locator_manifest_and_dictionary",
@@ -1427,3 +1596,23 @@ def test_full_run_executes_all_phases_and_markers(pipeline):
         "dictionary_sha256": "abc",
         "input_inventory_set_sha256": "d" * 64,
     }
+
+
+def test_release_type_stage_runs_only_requested_type(pipeline):
+    run, mocks = pipeline
+    run(make_args(phase="stage-base", release_type="base/land_cover"))
+
+    mocks["phase_partition_release_type_r2"].assert_called_once()
+    call = mocks["phase_partition_release_type_r2"].call_args
+    assert call.args[:2] == ("base", "land_cover")
+    mocks["phase_partition_release_r2"].assert_not_called()
+    mocks["phase_finalize_release_r2"].assert_not_called()
+
+
+def test_release_stage_finalize_is_a_separate_barrier(pipeline):
+    run, mocks = pipeline
+    run(make_args(phase="stage-base-finalize"))
+
+    mocks["phase_finalize_release_r2"].assert_called_once()
+    mocks["phase_partition_release_type_r2"].assert_not_called()
+    mocks["phase_partition_release_r2"].assert_not_called()

@@ -85,6 +85,10 @@ REGISTRY_S3 = "s3://overturemaps-us-west-2/registry/"
 RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
 RELEASE_THEMES = ["addresses", "base"]
+HEARTBEAT_INTERVAL_S = 5 * 60
+RELEASE_STAGE_THREADS = 8
+RELEASE_STAGE_MEMORY = "10GB"
+SHARD_SCHEMA_BATCH_SIZE = 256
 
 # ID-index format v3 appends compact locator IDs after the five v1 positional
 # columns. The content-addressed dictionary keeps the authoritative theme,
@@ -119,6 +123,46 @@ TYPE_THEME_MAP = {
     "segment": "transportation",
     "water": "base",
 }
+
+
+def _format_elapsed(seconds):
+    minutes, secs = divmod(int(seconds), 60)
+    return f"{minutes}m{secs:02d}s"
+
+
+def _run_with_heartbeat(label, operation, interval=HEARTBEAT_INTERVAL_S):
+    """Run a blocking operation with bounded, promptly-stopped CI output."""
+    started = time.monotonic()
+    stopped = threading.Event()
+
+    def _report():
+        while not stopped.wait(interval):
+            elapsed = _format_elapsed(time.monotonic() - started)
+            print(f"    {label}: still running ({elapsed} elapsed)", flush=True)
+
+    reporter = threading.Thread(
+        target=_report, name=f"heartbeat-{label}", daemon=True
+    )
+    print(f"    {label}: started", flush=True)
+    reporter.start()
+    try:
+        result = operation()
+    except BaseException:
+        print(
+            f"    {label}: failed after "
+            f"{_format_elapsed(time.monotonic() - started)}",
+            flush=True,
+        )
+        raise
+    finally:
+        stopped.set()
+        reporter.join(timeout=max(1, min(interval, 5)))
+    print(
+        f"    {label}: completed in "
+        f"{_format_elapsed(time.monotonic() - started)}",
+        flush=True,
+    )
+    return result
 
 # Rows per parquet row group in output shards. Every cold /id lookup
 # range-reads one full row group, so this bounds the cold-read size.
@@ -643,7 +687,10 @@ def phase_partition_r2(prefix_len, r2_config, version,
             # rows in the final shards. Clear this sub-range before retrying.
             _clear_staged_registry(r2_config, version, prefix_len, **sub_target)
 
-        _retry_transient(_do_copy, on_retry=_clear_partial)()
+        _run_with_heartbeat(
+            f"[registry] sub-range {sub_label} COPY",
+            _retry_transient(_do_copy, on_retry=_clear_partial),
+        )
         print(f"  [registry]   sub-range {sub_label} done")
 
     if smoke_history:
@@ -881,40 +928,79 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
 
     dest = f"s3://{r2_config['bucket']}/{version}/staging/{staging_dir}"
 
+    phase_durations = {}
+
+    def _timed(label, operation):
+        started = time.monotonic()
+        result = _run_with_heartbeat(
+            f"[release] {theme}/{type_name} {label}", operation
+        )
+        phase_durations[label] = time.monotonic() - started
+        return result
+
     con = _r2_con(r2_config)
-    con.execute("SET memory_limit = '4GB';")
-    con.execute("SET s3_region = 'us-west-2';")
+    try:
+        # A dedicated Actions runner owns this connection. Eight DuckDB
+        # threads modestly oversubscribe its four vCPUs so remote Parquet/R2
+        # waits can overlap, while 10 GB leaves headroom for Python and the OS.
+        con.execute(f"SET memory_limit = '{RELEASE_STAGE_MEMORY}';")
+        con.execute(f"SET threads = {RELEASE_STAGE_THREADS};")
+        con.execute("SET preserve_insertion_order = false;")
+        con.execute("SET s3_region = 'us-west-2';")
+        settings = con.execute(
+            "SELECT current_setting('threads'), current_setting('memory_limit')"
+        ).fetchone()
+        print(
+            f"    [release] {theme}/{type_name} tuning: "
+            f"threads={settings[0]}, memory_limit={settings[1]}",
+            flush=True,
+        )
 
-    source_files_before = _release_type_source_files(
-        con, release_version, theme, type_name
-    )
+        source_files_before = _timed(
+            "source inventory (before)",
+            lambda: _release_type_source_files(
+                con, release_version, theme, type_name
+            ),
+        )
 
-    query = _release_id_query_for_type(
-        prefix_len, release_version, theme, type_name,
-        limit=limit, prefixes=prefixes,
-    )
+        query = _release_id_query_for_type(
+            prefix_len, release_version, theme, type_name,
+            limit=limit, prefixes=prefixes,
+        )
 
-    # Re-run safety: a cancelled run can leave marker-less partial staging
-    # (including legacy single-file data.parquet from older code) that the
-    # build's dual-layout discovery would double-count alongside fresh
-    # buckets. Clear anything unmarked before writing.
-    _clear_release_staging(r2_config, version, staging_dir)
+        # Re-run safety: a cancelled run can leave marker-less partial staging
+        # (including legacy single-file data.parquet from older code) that the
+        # build's dual-layout discovery would double-count alongside fresh
+        # buckets. Clear anything unmarked before writing.
+        _timed(
+            "stale-output cleanup",
+            lambda: _clear_release_staging(r2_config, version, staging_dir),
+        )
 
-    def _do_copy():
-        con.execute(f"""
-            COPY ({query})
-            TO '{dest}'
-            (FORMAT PARQUET, COMPRESSION ZSTD, PARTITION_BY (bucket));
-        """)
+        def _do_copy():
+            con.execute(f"""
+                COPY ({query})
+                TO '{dest}'
+                (FORMAT PARQUET, COMPRESSION ZSTD, PARTITION_BY (bucket));
+            """)
 
-    _retry_transient(
-        _do_copy,
-        on_retry=lambda: _clear_release_staging(r2_config, version, staging_dir),
-    )()
-    source_files_after = _release_type_source_files(
-        con, release_version, theme, type_name
-    )
-    con.close()
+        _timed(
+            "S3-to-R2 COPY",
+            _retry_transient(
+                _do_copy,
+                on_retry=lambda: _clear_release_staging(
+                    r2_config, version, staging_dir
+                ),
+            ),
+        )
+        source_files_after = _timed(
+            "source inventory (after)",
+            lambda: _release_type_source_files(
+                con, release_version, theme, type_name
+            ),
+        )
+    finally:
+        con.close()
 
     if source_files_before != source_files_after:
         raise RuntimeError(
@@ -926,16 +1012,105 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
         {"theme": theme, "feature_type": type_name},
         source_files=source_files_after,
     )
-    inventory_reference = _publish_stage_inventory(r2_config, version, inventory)
+    inventory_reference = _timed(
+        "inventory publication",
+        lambda: _publish_stage_inventory(r2_config, version, inventory),
+    )
+
+    _timed(
+        "success marker publication",
+        lambda: _write_staging_marker(
+            r2_config,
+            version,
+            staging_dir,
+            16,
+            extra={"locator_inventory": inventory_reference},
+        ),
+    )
+    timing_summary = ", ".join(
+        f"{label}={_format_elapsed(duration)}"
+        for label, duration in phase_durations.items()
+    )
+    print(
+        f"    [release] {theme}/{type_name} timing: {timing_summary}",
+        flush=True,
+    )
+    return (theme, type_name)
+
+
+def phase_partition_release_type_r2(
+    theme, type_name, prefix_len, release_version, r2_config, version,
+    limit=None, prefixes=None,
+):
+    """Stage exactly one discovered release type on its dedicated runner."""
+    discovered = set(_discover_release_types(release_version))
+    requested = (theme, type_name)
+    if requested not in discovered:
+        raise RuntimeError(
+            f"Requested release type {theme}/{type_name} was not discovered in "
+            f"release {release_version}"
+        )
+    return _partition_release_type(
+        theme, type_name, prefix_len, release_version, r2_config, version,
+        limit=limit, prefixes=prefixes,
+    )
+
+
+def phase_finalize_release_r2(release_version, r2_config, version):
+    """Prove the exact discovered per-type marker set before fan-in."""
+    types = _discover_release_types(release_version)
+    expected = {f"id-release-{theme}-{type_name}" for theme, type_name in types}
+    con = _r2_con(r2_config)
+    try:
+        marker_paths = _retry_transient(lambda: _glob_files(
+            con,
+            f"s3://{r2_config['bucket']}/{version}/staging/"
+            "id-release-*/_SUCCESS",
+        ))()
+    finally:
+        con.close()
+    actual = {
+        path.split("/staging/", 1)[-1].rsplit("/_SUCCESS", 1)[0]
+        for path in marker_paths
+    }
+    if actual != expected:
+        missing = sorted(expected - actual)
+        extra = sorted(actual - expected)
+        raise RuntimeError(
+            "Release staging marker set differs from discovered release types: "
+            f"missing={missing}, extra={extra}"
+        )
+
+    release_types = []
+    for theme, type_name in types:
+        staging_dir = f"id-release-{theme}-{type_name}"
+        marker = _read_staging_marker(r2_config, version, staging_dir)
+        if not _marker_is_current(marker):
+            raise RuntimeError(
+                f"Required release staging marker {staging_dir} is missing/stale"
+            )
+        if marker.get("partitions") != 16:
+            raise RuntimeError(
+                f"Release marker {staging_dir} has invalid partition count"
+            )
+        if not isinstance(marker.get("locator_inventory"), dict):
+            raise RuntimeError(
+                f"Release marker {staging_dir} has no locator inventory"
+            )
+        release_types.append(f"{theme}/{type_name}")
 
     _write_staging_marker(
         r2_config,
         version,
-        staging_dir,
-        16,
-        extra={"locator_inventory": inventory_reference},
+        "id-release",
+        len(types),
+        extra={"release_types": release_types},
     )
-    return (theme, type_name)
+    print(
+        f"  [release] Verified and finalized {len(types)} types: "
+        f"{', '.join(release_types)}",
+        flush=True,
+    )
 
 
 def phase_partition_release_r2(
@@ -990,7 +1165,7 @@ def phase_partition_release_r2(
         raise RuntimeError(f"Release partitioning failed: {len(errors)} type errors")
 
     print(f"  [release] Done: {len(types)} types in {mins}m{secs:02d}s")
-    _write_staging_marker(r2_config, version, "id-release", len(types))
+    phase_finalize_release_r2(release_version, r2_config, version)
 
 
 # ---------------------------------------------------------------------------
@@ -1816,6 +1991,11 @@ def _shard_schema(con, path):
 def _classify_shard_schema(con, path):
     """Return 1 or 3 for an exact known shard schema; reject everything else."""
     actual, uuid_len = _shard_schema(con, path)
+    return _classify_shard_schema_values(path, actual, uuid_len)
+
+
+def _classify_shard_schema_values(path, actual, uuid_len):
+    """Classify already-read footer values without another remote query."""
     if uuid_len != "16":
         raise RuntimeError(
             f"Shard {path}: uuid column type_length {uuid_len} != 16")
@@ -1829,13 +2009,52 @@ def _classify_shard_schema(con, path):
 
 
 def _classify_shard_set(con, paths):
-    """Inspect every footer and require one exact, uniform format."""
+    """Inspect every footer in bounded batches and require one uniform format."""
     if not paths:
         raise RuntimeError("No ID-index shards found")
     formats = {}
-    for path in paths:
-        format_version = _classify_shard_schema(con, path)
-        formats.setdefault(format_version, []).append(path)
+    total_batches = (len(paths) + SHARD_SCHEMA_BATCH_SIZE - 1) // SHARD_SCHEMA_BATCH_SIZE
+    for batch_index, offset in enumerate(
+        range(0, len(paths), SHARD_SCHEMA_BATCH_SIZE), start=1
+    ):
+        batch = paths[offset:offset + SHARD_SCHEMA_BATCH_SIZE]
+
+        def _read_batch():
+            return con.execute(
+                """
+                SELECT file_name, name, type, type_length
+                FROM parquet_schema(?)
+                WHERE type IS NOT NULL
+                """,
+                [batch],
+            ).fetchall()
+
+        rows = _run_with_heartbeat(
+            f"[metadata] schema batch {batch_index}/{total_batches}",
+            _retry_transient(_read_batch),
+        )
+        schemas = {path: [] for path in batch}
+        uuid_lengths = {}
+        for file_name, name, physical_type, type_length in rows:
+            if file_name not in schemas:
+                raise RuntimeError(
+                    f"Unexpected shard returned by schema scan: {file_name}"
+                )
+            schemas[file_name].append((name, str(physical_type)))
+            if file_name not in uuid_lengths:
+                uuid_lengths[file_name] = str(type_length)
+        for path in batch:
+            if not schemas[path]:
+                raise RuntimeError(f"No physical schema columns found for shard {path}")
+            format_version = _classify_shard_schema_values(
+                path, schemas[path], uuid_lengths.get(path)
+            )
+            formats.setdefault(format_version, []).append(path)
+        print(
+            f"    [metadata] schema progress: "
+            f"{min(offset + len(batch), len(paths))}/{len(paths)} shards",
+            flush=True,
+        )
     if len(formats) != 1:
         detail = ", ".join(
             f"v{version}={len(version_paths)}"
@@ -2611,25 +2830,30 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
         file_list = ", ".join(f"'{p}'" for p in release_files)
         t_dl = time.time()
         dl_con = _r2_con(r2_config)
-        dl_con.execute("SET memory_limit = '4GB';")
+        try:
+            dl_con.execute("SET memory_limit = '4GB';")
 
-        # Hard-fail if the release data cannot be downloaded: skipping it
-        # would silently drop its IDs from the index. Legacy single-file
-        # staging carries a `bucket` column that bucketed files store in
-        # the path instead; select the shared columns explicitly.
-        def _download_release():
-            dl_con.execute(f"""
-                COPY (
-                    SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                           feature_type, filename, last_seen_release,
-                           registry_member, source_theme, prefix
-                    FROM read_parquet([{file_list}], union_by_name=true)
-                    {release_where}
-                    ORDER BY prefix, id
-                ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
-            """)
-        _retry_transient(_download_release)()
-        dl_con.close()
+            # Hard-fail if the release data cannot be downloaded: skipping it
+            # would silently drop its IDs from the index. Legacy single-file
+            # staging carries a `bucket` column that bucketed files store in
+            # the path instead; select the shared columns explicitly.
+            def _download_release():
+                dl_con.execute(f"""
+                    COPY (
+                        SELECT id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                               feature_type, filename, last_seen_release,
+                               registry_member, source_theme, prefix
+                        FROM read_parquet([{file_list}], union_by_name=true)
+                        {release_where}
+                        ORDER BY prefix, id
+                    ) TO '{local_path}' (FORMAT PARQUET, COMPRESSION ZSTD);
+                """)
+            _run_with_heartbeat(
+                "[build] download, range-filter, sort, and merge release staging",
+                _retry_transient(_download_release),
+            )
+        finally:
+            dl_con.close()
 
         size_mb = os.path.getsize(local_path) / 1024 / 1024
         print(f"    merged: {size_mb:.0f} MB ({time.time() - t_dl:.0f}s)")
@@ -2708,22 +2932,28 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     """
     print("  Discovering existing R2 shards...")
     con = _r2_con(r2_config)
+    try:
+        bucket = r2_config["bucket"]
+        glob_path = f"s3://{bucket}/{version}/id-index/*.parquet"
+        # Real listing errors must propagate: silently publishing an empty
+        # collection would break every ID lookup for this version.
+        shard_files = _run_with_heartbeat(
+            "[metadata] list existing R2 shards",
+            _retry_transient(lambda: _glob_files(con, glob_path)),
+        )
 
-    bucket = r2_config["bucket"]
-    glob_path = f"s3://{bucket}/{version}/id-index/*.parquet"
-    # Real listing errors must propagate: silently publishing an empty
-    # collection would break every ID lookup for this version.
-    shard_files = _retry_transient(lambda: _glob_files(con, glob_path))()
-
-    sizes = {}
-    if shard_files:
-        rows = _retry_transient(lambda: con.execute(
-            "SELECT file_name, file_size_bytes FROM parquet_file_metadata(?)",
-            [shard_files],
-        ).fetchall())()
-        sizes = {path: int(size) for path, size in rows}
-
-    con.close()
+        sizes = {}
+        if shard_files:
+            rows = _run_with_heartbeat(
+                "[metadata] read shard file sizes",
+                _retry_transient(lambda: con.execute(
+                    "SELECT file_name, file_size_bytes FROM parquet_file_metadata(?)",
+                    [shard_files],
+                ).fetchall()),
+            )
+            sizes = {path: int(size) for path, size in rows}
+    finally:
+        con.close()
 
     intended_shards = _build_marker_shard_inventory(r2_config, version)
     actual_prefixes = {
@@ -3206,7 +3436,28 @@ def build_id_index(args):
 
     # === Stage base (release themes) ===
     if run_all or "stage-base" in phases:
-        if _r2_release_staging_exists(r2_config, version):
+        release_type = getattr(args, "release_type", None)
+        if release_type:
+            theme, separator, type_name = release_type.partition("/")
+            if not separator or not theme or not type_name or "/" in type_name:
+                raise RuntimeError(
+                    "--release-type must be one theme/type pair, for example "
+                    "base/land_cover"
+                )
+            print(f"\nStage base type: Partition {theme}/{type_name}")
+            t0 = time.time()
+            phase_partition_release_type_r2(
+                theme,
+                type_name,
+                args.prefix_len,
+                release_version,
+                r2_config,
+                version,
+                limit=smoke_release_limit,
+                prefixes=smoke_prefixes,
+            )
+            phase_times[f"Stage base {theme}/{type_name}"] = time.time() - t0
+        elif _r2_release_staging_exists(r2_config, version):
             print(f"\nStage base: Skipped (release staging complete for {version})")
         else:
             print(f"\nStage base: Partition release themes ({', '.join(RELEASE_THEMES)})")
@@ -3217,6 +3468,16 @@ def build_id_index(args):
                 prefixes=smoke_prefixes,
             )
             phase_times["Stage base"] = time.time() - t0
+
+    if "stage-base-finalize" in phases:
+        if getattr(args, "release_type", None):
+            raise RuntimeError(
+                "--release-type cannot be combined with stage-base-finalize"
+            )
+        print("\nStage base finalize: Verify all discovered release types")
+        t0 = time.time()
+        phase_finalize_release_r2(release_version, r2_config, version)
+        phase_times["Stage base finalize"] = time.time() - t0
 
     # === Global locator dictionaries ===
     if run_all or "dictionaries" in phases:
@@ -3439,7 +3700,12 @@ def main():
     # Pipeline control
     p.add_argument("--phase",
                    help="Run specific phase(s): stage-registry, stage-base, "
-                        "dictionaries, build, metadata, or all (comma-separated)")
+                        "stage-base-finalize, dictionaries, build, metadata, "
+                        "or all (comma-separated)")
+    p.add_argument(
+        "--release-type",
+        help="With --phase stage-base, stage one discovered theme/type pair",
+    )
     p.add_argument("--prefix-start",
                    help="Start prefix inclusive (hex, e.g. '000') for range-based parallelism")
     p.add_argument("--prefix-end",

@@ -586,28 +586,22 @@ jobs:
             echo "**Size:** $(du -sh shards/${VERSION}/reverse/ 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
           fi
 
-  id-stage:
+  id-stage-registry:
     runs-on: ubuntu-24.04-arm
     needs: prep
     if: github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false'
     strategy:
       fail-fast: false
+      max-parallel: 4
       matrix:
         include:
-          - name: base
-            phase: stage-base
-            extra_args: ""
           - name: registry-000-3ff
-            phase: stage-registry
             extra_args: "--prefix-start 000 --prefix-end 3ff"
           - name: registry-400-7ff
-            phase: stage-registry
             extra_args: "--prefix-start 400 --prefix-end 7ff"
           - name: registry-800-bff
-            phase: stage-registry
             extra_args: "--prefix-start 800 --prefix-end bff"
           - name: registry-c00-fff
-            phase: stage-registry
             extra_args: "--prefix-start c00 --prefix-end fff"
     steps:
       - uses: actions/checkout@v7
@@ -639,16 +633,101 @@ jobs:
       - name: "Stage: ${{ matrix.name }}"
         run: |
           python -u scripts/build_id_index.py \
-            --phase ${{ matrix.phase }} --prefix-len 3 --workers 8 \
+            --phase stage-registry --prefix-len 3 --workers 8 \
             --version ${{ needs.prep.outputs.version }} \
             --release ${{ needs.prep.outputs.release }} \
             ${{ matrix.extra_args }}
+
+  # Each release type owns a fresh 4-vCPU/16-GB runner. DuckDB uses eight
+  # threads to overlap remote reads/writes and a 10-GB memory limit. All seven
+  # types may run together: their R2 staging prefixes and markers are disjoint.
+  id-stage-release:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+    needs: prep
+    if: github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false'
+    strategy:
+      fail-fast: false
+      max-parallel: 7
+      matrix:
+        release_type:
+          - base/land_cover
+          - addresses/address
+          - base/water
+          - base/infrastructure
+          - base/land
+          - base/land_use
+          - base/bathymetry
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb==1.5.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Report runner capacity
+        run: |
+          echo "CPUs: $(nproc)"
+          free -h
+          df -h / /tmp
+
+      - name: "Stage release: ${{ matrix.release_type }}"
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase stage-base --release-type "${{ matrix.release_type }}" \
+            --prefix-len 3 --workers 1 \
+            --version ${{ needs.prep.outputs.version }} \
+            --release ${{ needs.prep.outputs.release }}
+
+  # Do not let dictionary fan-in observe a partial or stale release stage.
+  # Rediscovery catches release type additions/removals; the barrier requires
+  # the exact per-type marker set before writing the aggregate marker.
+  id-stage-release-finalize:
+    runs-on: ubuntu-24.04-arm
+    needs: [prep, id-stage-release]
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: pip install duckdb==1.5.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+
+      - name: Install wrangler
+        run: npm install -g wrangler
+
+      - name: Verify and finalize release staging
+        run: |
+          python -u scripts/build_id_index.py \
+            --phase stage-base-finalize --prefix-len 3 --workers 1 \
+            --version ${{ needs.prep.outputs.version }} \
+            --release ${{ needs.prep.outputs.release }}
 
   # One global, deterministic dictionary must be published before the four
   # parallel build ranges assign compact IDs. No range may derive IDs alone.
   id-dictionary:
     runs-on: ubuntu-24.04-arm
-    needs: [prep, id-stage]
+    needs: [prep, id-stage-registry, id-stage-release-finalize]
     steps:
       - uses: actions/checkout@v7
 

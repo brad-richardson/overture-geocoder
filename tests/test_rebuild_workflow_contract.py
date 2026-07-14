@@ -56,6 +56,42 @@ def test_existing_version_prefix_is_rejected_before_build_jobs():
     assert collision < rebuild_job
 
 
+def test_release_types_use_seven_dedicated_runners_and_verified_barrier():
+    text = _text()
+    release_job = text[text.index("\n  id-stage-release:"):
+                       text.index("\n  id-stage-release-finalize:")]
+    assert "max-parallel: 7" in release_job
+    assert "timeout-minutes: 180" in release_job
+    for release_type in (
+        "addresses/address",
+        "base/bathymetry",
+        "base/infrastructure",
+        "base/land",
+        "base/land_cover",
+        "base/land_use",
+        "base/water",
+    ):
+        assert f"- {release_type}" in release_job
+    assert '--release-type "${{ matrix.release_type }}"' in release_job
+
+    barrier = text[text.index("\n  id-stage-release-finalize:"):
+                   text.index("\n  id-dictionary:")]
+    assert "needs: [prep, id-stage-release]" in barrier
+    assert "--phase stage-base-finalize" in barrier
+    assert "needs: [prep, id-stage-registry, id-stage-release-finalize]" in text
+
+
+def test_opaque_id_phases_use_application_heartbeats_and_batched_schema_scan():
+    script = (
+        Path(__file__).parent.parent / "scripts" / "build_id_index.py"
+    ).read_text()
+    assert "HEARTBEAT_INTERVAL_S = 5 * 60" in script
+    assert "RELEASE_STAGE_THREADS = 8" in script
+    assert 'RELEASE_STAGE_MEMORY = "10GB"' in script
+    assert "download, range-filter, sort, and merge release staging" in script
+    assert "schema batch {batch_index}/{total_batches}" in script
+
+
 def test_all_production_catalog_writers_share_one_concurrency_lock():
     assert "group: r2-production-catalog" in _text()
     assert "group: r2-production-catalog" in CLEANUP_WORKFLOW.read_text()
