@@ -139,6 +139,7 @@ def schema_sql(
     if expected_rows < 0 or not re.fullmatch(r"[0-9a-f]{64}", source_sha256):
         raise ValueError("invalid release inventory")
     return f"""-- Offline PlanetScale/PostgreSQL Places spike. Not production DDL.
+BEGIN;
 DROP SCHEMA IF EXISTS {SCHEMA} CASCADE;
 CREATE SCHEMA {SCHEMA};
 
@@ -195,6 +196,7 @@ INSERT INTO {SCHEMA}.releases
   (release_id, overture_release, state, expected_rows, source_sha256)
 VALUES ({release}, {overture}, 'loading', {expected_rows},
   {sql_literal(source_sha256)});
+COMMIT;
 """
 
 
@@ -439,10 +441,12 @@ def markdown(report: dict[str, Any]) -> str:
         lines += [
             "No PostgreSQL server was available. There are no measured plans, relation/index sizes, network latency, concurrency results, or PlanetScale cost claims in this report.",
             "Run the command below with a disposable database URL to collect them; it drops only the dedicated `places_planetscale_spike` schema.",
+            "The destructive reset is transaction-wrapped and requires the explicit confirmation flag.",
             "",
             "```sh",
             "python3 scripts/experiment_places_postgres.py exports/experiment/places-raw.parquet \\",
-            '  --database-url "$DATABASE_URL" --schema-out /tmp/places.sql --queries-out /tmp/queries.sql \\',
+            '  --database-url "$DATABASE_URL" --confirm-drop-schema \\',
+            "  --schema-out /tmp/places.sql --queries-out /tmp/queries.sql \\",
             "  --json-out /tmp/places-postgres.json --markdown-out /tmp/places-postgres.md",
             "```",
         ]
@@ -467,6 +471,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--release-id", default="fixture-2025-12-17.0")
     parser.add_argument("--overture-release", default="2025-12-17.0")
     parser.add_argument("--database-url")
+    parser.add_argument(
+        "--confirm-drop-schema",
+        action="store_true",
+        help=f"confirm destructive replacement of the dedicated {SCHEMA} schema",
+    )
     parser.add_argument("--schema-out", type=Path, required=True)
     parser.add_argument("--queries-out", type=Path, required=True)
     parser.add_argument("--json-out", type=Path, required=True)
@@ -485,6 +494,10 @@ def main(argv: list[str] | None = None) -> int:
     args.queries_out.write_text(query_text)
 
     available, psql_detail = usable_psql()
+    if args.database_url and not args.confirm_drop_schema:
+        parser.error(
+            f"--database-url requires --confirm-drop-schema because {SCHEMA} is replaced"
+        )
     if args.database_url and not available:
         parser.error("--database-url requires PostgreSQL psql: " + psql_detail)
     execution = (

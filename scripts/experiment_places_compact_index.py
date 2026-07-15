@@ -702,6 +702,8 @@ def benchmark(
 def markdown(report: dict[str, Any]) -> str:
     build = report["build"]
     comparison = report["comparison"]
+    trie_bytes = comparison.get("existing_trie_bytes")
+    trie_baseline = f"{trie_bytes:,} bytes" if trie_bytes is not None else "not available"
     lines = [
         "# Places compact-index experiment",
         "",
@@ -711,7 +713,7 @@ def markdown(report: dict[str, Any]) -> str:
         f"- Artifact: {build['artifact_bytes']:,} bytes ({build['bytes_per_place']:.1f} bytes/place)",
         f"- Build: {build['build_seconds']:.3f} seconds; {build['tokens']:,} field/token keys",
         f"- SQLite FTS comparator: {comparison['sqlite_bytes']:,} bytes",
-        f"- Existing unproven trie baseline: {comparison.get('existing_trie_bytes', 0):,} bytes",
+        f"- Existing unproven trie baseline: {trie_baseline}",
         f"- Linear shape only: {report['linear_shape_extrapolation']['one_million_places_bytes']:,} bytes at 1M Places; {report['linear_shape_extrapolation']['seventy_five_million_places_bytes']:,} bytes at 75M",
     ]
     historical = comparison.get("existing_fixture_baselines", {})

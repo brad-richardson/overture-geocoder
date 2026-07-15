@@ -85,8 +85,24 @@ def test_exact_prefix_fielded_and_multi_clause_recall(tmp_path):
         shard = experiment.CompactShard(artifact)
         result = shard.query(case)
         expected, ids = experiment.oracle(ordered, case)
-        assert result["candidate_count"] == len(expected)
+        assert set(result["candidate_doc_ids"]) == expected
         assert result["result_ids"] == ids
+
+
+def test_equal_sized_wrong_candidate_set_is_not_complete(tmp_path, monkeypatch):
+    artifact = tmp_path / "places.pcsh"
+    ordered, _ = experiment.build_artifact(places(), artifact, block_entries=2)
+    original_query = experiment.CompactShard.query
+
+    def corrupt_query(self, case, **kwargs):
+        result = original_query(self, case, **kwargs)
+        if result["candidate_doc_ids"]:
+            result["candidate_doc_ids"] = [999_999] + result["candidate_doc_ids"][1:]
+        return result
+
+    monkeypatch.setattr(experiment.CompactShard, "query", corrupt_query)
+    report = experiment.benchmark(ordered, artifact)
+    assert report["summary"]["complete_candidate_recall"] is False
 
 
 def test_prefix_uses_one_contiguous_posting_read(tmp_path):
@@ -163,6 +179,8 @@ def test_cli_writes_reports(tmp_path):
         == 0
     )
     report = json.loads(json_out.read_text())
-    assert report["architecture"]["planet_object_shape_at_75m"]["total_objects"] == 77
+    shape = report["architecture"]["proposed_planet_object_shape_at_75m"]
+    assert shape["shard_objects"] == 75
+    assert shape["measured_by_this_experiment"] is False
     assert report["benchmark"]["summary"]["complete_candidate_recall"] is True
     assert "compact spatial-shard" in markdown_out.read_text()

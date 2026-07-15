@@ -538,6 +538,7 @@ class CompactShard:
             }
         return {
             "candidate_count": len(candidates),
+            "candidate_doc_ids": sorted(candidates),
             "result_ids": [row["id"] for row in results],
             "results": results,
             "range_reads": len(reads),
@@ -592,11 +593,12 @@ def benchmark(
         shard = CompactShard(artifact)
         result = shard.query(case, index_gap=index_gap, record_gap=record_gap)
         expected, expected_ids = oracle(places, case)
+        actual_candidates = set(result.pop("candidate_doc_ids"))
         result.update(
             {
                 "name": case.name,
                 "oracle_candidate_count": len(expected),
-                "complete_candidate_recall": result["candidate_count"] == len(expected),
+                "complete_candidate_recall": actual_candidates == expected,
                 "top_k_exact": result["result_ids"] == expected_ids,
             }
         )
@@ -733,17 +735,17 @@ def main(argv: list[str] | None = None) -> int:
             "partition_target_places": 1_000_000,
             "prefix_strategy": "lexicon range plus contiguous exact-token posting span",
             "record_projection": "id, name, category, locality, region, country, coordinates, quantized confidence",
-            "planet_object_shape_at_75m": {
+            "proposed_planet_object_shape_at_75m": {
                 "shard_objects": math.ceil(75_000_000 / 1_000_000),
                 "manifest_objects": 1,
-                "range_readable_global_head_objects": 1,
-                "total_objects": math.ceil(75_000_000 / 1_000_000) + 2,
+                "measured_by_this_experiment": False,
+                "note": "The compact experiment builds only one spatial shard. A one-object range-readable global head is an unmeasured repack target; the separate head model produced 4,088 objects and 25.1 MB for its 1M sample.",
             },
         },
         "build": build,
         "benchmark": measured,
         "linear_shape_extrapolation": {
-            "warning": "not a forecast; California token and record distributions are not globally representative",
+            "warning": "compact spatial-shard bytes only; excludes the separately modeled global head and is not a forecast because California token and record distributions are not globally representative",
             "seventy_five_million_places_bytes": round(
                 build["bytes_per_place"] * 75_000_000
             ),

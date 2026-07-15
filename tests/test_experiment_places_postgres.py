@@ -39,6 +39,9 @@ def rows():
 
 def test_schema_uses_immutable_release_partition_and_catalog_pointer():
     sql = experiment.schema_sql("fixture-1", "release-1")
+    assert sql.startswith("-- Offline PlanetScale/PostgreSQL Places spike")
+    assert "BEGIN;\nDROP SCHEMA" in sql
+    assert sql.rstrip().endswith("COMMIT;")
     assert "PARTITION BY LIST (release_id)" in sql
     assert "search_document tsvector GENERATED ALWAYS" in sql
     assert "USING gin (search_document)" in sql
@@ -118,3 +121,32 @@ def test_cli_writes_model_only_artifacts(tmp_path, monkeypatch):
     assert report["database_execution"]["measured"] is False
     assert report["unmeasured_claims"]
     assert "model-only" in outputs["report.md"].read_text()
+
+
+def test_database_execution_requires_explicit_destructive_confirmation(
+    tmp_path, monkeypatch
+):
+    source = tmp_path / "places.jsonl"
+    source.write_text(json.dumps({"id": "a", "name": "Cafe"}) + "\n")
+    outputs = [tmp_path / name for name in ("schema.sql", "queries.sql", "out.json", "out.md")]
+    monkeypatch.setattr(experiment, "usable_psql", lambda: (True, "PostgreSQL psql"))
+    try:
+        experiment.main(
+            [
+                str(source),
+                "--database-url",
+                "postgresql://scratch.invalid/db",
+                "--schema-out",
+                str(outputs[0]),
+                "--queries-out",
+                str(outputs[1]),
+                "--json-out",
+                str(outputs[2]),
+                "--markdown-out",
+                str(outputs[3]),
+            ]
+        )
+    except SystemExit as exc:
+        assert exc.code == 2
+    else:
+        raise AssertionError("database execution proceeded without confirmation")

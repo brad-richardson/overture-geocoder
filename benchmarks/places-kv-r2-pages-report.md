@@ -82,4 +82,3 @@ A cold catalog miss adds one KV operation and can break the three-operation typi
 At 1M and 10M monthly queries, the modeled 100–300 GB core plus two linearized Places releases remains below $30 before Worker CPU. At 50M queries, read operations and Worker requests exceed the ceiling. This design therefore needs an explicit traffic/CPU gate and aggressive cache evidence; it is not automatically affordable at arbitrary volume.
 
 Official pricing: [R2](https://developers.cloudflare.com/r2/pricing/), [Workers KV](https://developers.cloudflare.com/kv/platform/pricing/), [Workers](https://developers.cloudflare.com/workers/platform/pricing/).
-

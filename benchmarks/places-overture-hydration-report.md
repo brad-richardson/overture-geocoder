@@ -130,4 +130,3 @@ compact search result
 ```
 
 With a direct row-group locator, the measured network lower bound is approximately 0.1–0.2 seconds for a warm ID lookup plus 0.66 seconds for an uncached 1.07 MB S3 range, before Worker decode. Sub-second is plausible but not yet proven in the Worker runtime. Edge caching of source row groups or selected column chunks would improve repeat requests.
-

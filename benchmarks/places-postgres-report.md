@@ -35,10 +35,12 @@ Warning: not PostgreSQL storage: excludes tuple/TOAST/page overhead, generated t
 
 No PostgreSQL server was available. There are no measured plans, relation/index sizes, network latency, concurrency results, or PlanetScale cost claims in this report.
 Run the command below with a disposable database URL to collect them; it drops only the dedicated `places_planetscale_spike` schema.
+The destructive reset is transaction-wrapped and requires the explicit confirmation flag.
 
 ```sh
 python3 scripts/experiment_places_postgres.py exports/experiment/places-raw.parquet \
-  --database-url "$DATABASE_URL" --schema-out /tmp/places.sql --queries-out /tmp/queries.sql \
+  --database-url "$DATABASE_URL" --confirm-drop-schema \
+  --schema-out /tmp/places.sql --queries-out /tmp/queries.sql \
   --json-out /tmp/places-postgres.json --markdown-out /tmp/places-postgres.md
 ```
 
@@ -54,4 +56,3 @@ Expected plans below are hypotheses, not EXPLAIN output:
 The plausible role is a remotely queried regional Places service, not a whole-loaded edge shard. PostgreSQL removes custom range-planning and publication-object fanout, but introduces a network/database dependency, retained-release index duplication, connection-pool behavior, and operational cost. A decision requires a real PlanetScale development-branch run with representative regional scale, concurrency, cold/warm latency, query plans, index bytes, and labelled ranking—not this 0.98 km² fixture model.
 
 Official references: [Postgres compatibility](https://planetscale.com/docs/postgres/postgres-compatibility), [extensions](https://planetscale.com/docs/postgres/extensions), [branching](https://planetscale.com/docs/postgres/branching), and [connections](https://planetscale.com/docs/postgres/connecting).
-

@@ -1,6 +1,6 @@
 # Places KV/R2 factory scale run
 
-Date: 2026-07-14  
+Date: 2026-07-14
 Overture release: `2026-06-17.0`
 
 This is a bounded build-resource and retrieval-shape experiment on the private
@@ -18,9 +18,14 @@ publish any R2 objects.
 
 ## Real-data extraction
 
-The scratch extractor read the official Places GeoParquet from S3 and wrote a
+The now-committed `scripts/factory_extract_places.py` extractor read the official Places GeoParquet from S3 and wrote a
 minimal projection containing ID, primary name, brand, category, locality,
 region, country, coordinates, and confidence.
+
+The input is a source-order `LIMIT` over the rectangle `-124.5 <= xmin <= -114.0`
+and `32.5 <= ymin <= 42.1`, not a California boundary clip or a randomized,
+globally representative sample. The 1M Parquet SHA-256 is
+`4c4cb3711e806a08801ed87d08c0f2acbc2f7b3f1d69796d65a3824f253c6f84`.
 
 | input | wall time | peak RSS | parquet size |
 |---|---:|---:|---:|
@@ -28,8 +33,8 @@ region, country, coordinates, and confidence.
 | 1,000,000 California-bbox Places | 32.82 s | 553 MiB | 47 MiB |
 
 The repository's existing limited-download shell path was not used after it
-failed immediately due to an unterminated embedded Python string. A corrected
-extractor was staged only in the remote scratch directory.
+failed immediately due to an unterminated embedded Python string. The exact
+factory extractor is now committed so the selection can be audited and rerun.
 
 ## Page planner/build measurements
 
@@ -100,4 +105,3 @@ The next architecture iteration should combine:
    reading every regional tail.
 4. One-million-row build partitions, resumable content-addressed output, and
    8-way factory concurrency as the initial resource envelope.
-

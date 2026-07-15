@@ -1,4 +1,5 @@
 -- Offline PlanetScale/PostgreSQL Places spike. Not production DDL.
+BEGIN;
 DROP SCHEMA IF EXISTS places_planetscale_spike CASCADE;
 CREATE SCHEMA places_planetscale_spike;
 
@@ -55,3 +56,4 @@ INSERT INTO places_planetscale_spike.releases
   (release_id, overture_release, state, expected_rows, source_sha256)
 VALUES ('fixture-2025-12-17.0', '2025-12-17.0', 'loading', 1768,
   'c446d81d97c69cf72fff859fa42112027e01c231e08cfb5d65bedf5dcfcaa81d');
+COMMIT;

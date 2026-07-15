@@ -16,7 +16,9 @@ The top-k head is deliberately not a full-recall API. It is authoritative only f
 
 The run used the isolated `~/tmp/overture-geocoder-kv-r2-spike-20260714` scratch directory on the always-on factory machine. It did not modify either existing remote repository or register the machine as a GitHub Actions runner.
 
-- Input: 1,000,000 California Places from Overture release `2026-06-17.0`
+- Input: 1,000,000 source-order Places in the factory rectangle from Overture release `2026-06-17.0`
+- Selection: `-124.5 <= xmin <= -114.0`, `32.5 <= ymin <= 42.1`; no boundary clip, randomization, or ordering
+- Input SHA-256: `4c4cb3711e806a08801ed87d08c0f2acbc2f7b3f1d69796d65a3824f253c6f84`
 - Wall time: 4:07.02
 - CPU: one core at 100%
 - Peak RSS: 3,950,364 KiB (3.77 GiB)

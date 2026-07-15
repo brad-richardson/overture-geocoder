@@ -102,7 +102,8 @@ def test_benchmark_reports_sqlite_overlap_and_range_bytes(tmp_path):
     assert report["summary"]["query_bytes_touched_max"] < artifact.stat().st_size
 
 
-def test_cli_writes_reproducible_report(tmp_path):
+def test_cli_writes_reproducible_report(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
     source = tmp_path / "places.json"
     source.write_text(
         json.dumps(
@@ -142,4 +143,6 @@ def test_cli_writes_reproducible_report(tmp_path):
     report = json.loads(json_out.read_text())
     assert report["schema_version"] == 1
     assert report["build"]["places"] == 2
-    assert "range-read architecture spike" in markdown_out.read_text()
+    markdown = markdown_out.read_text()
+    assert "range-read architecture spike" in markdown
+    assert "Existing unproven trie baseline: not available" in markdown

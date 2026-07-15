@@ -17,7 +17,11 @@ If the actual commitment is “full planet, all three themes, good fuzzy/relevan
 
 ## Measured artifact
 
-The factory built a real artifact from 1,000,000 California Places in Overture release `2026-06-17.0`.
+The factory built a real artifact from a 1,000,000-row, source-order-limited
+rectangular California-area bbox slice of Overture release `2026-06-17.0`.
+This is not exact California containment or a random/representative sample.
+The input SHA-256 is
+`4c4cb3711e806a08801ed87d08c0f2acbc2f7b3f1d69796d65a3824f253c6f84`.
 
 - Artifact: 116,684,322 bytes (116.7 B/place)
 - Immutable objects: 1
@@ -44,11 +48,16 @@ The correctness result is retrieval correctness, not relevance quality. For exam
 
 Prefixes are not materialized. Matching exact tokens are adjacent in the lexicon and their postings occupy one contiguous byte span per query clause.
 
-At the 75M-place working count, linear shape is approximately:
+At the 75M-place working count, the compact spatial-shard-only linear shape is approximately:
 
 - 8.75 GB per release.
 - 17.50 GB for two releases.
-- 75 shard objects plus one manifest and one range-readable head: about 77 objects/release.
+- 75 shard objects plus one manifest: about 76 measured-format objects/release.
+
+The separate packed-head experiment measured 25.1 MB and 4,088 modeled
+objects for the 1M sample. Repacking that head into one range-readable object
+is a proposed next format, not something built or measured by this experiment;
+head bytes are excluded from the 8.75 GB compact-shard estimate.
 
 This is not a planet forecast. The sample is California-only and flattened to the fields used by the experiment.
 
@@ -137,7 +146,7 @@ These are simple usage estimates before CPU, billing-unit rounding, or cache hit
 ## Release-to-release tradeoffs
 
 - Immutable shards make rollback simple: publish a new manifest, retain the prior manifest/shards, and atomically switch the active release.
-- Approximately 77 objects/release is operationally manageable.
+- Approximately 76 compact-shard/manifest objects per release is operationally manageable; the global-head publication shape remains unproven.
 - Full rebuilds are cheap enough on the factory machine, but full Overture extraction may not be. Changelog-driven shard rebuilding can reduce work, though moved/removed entities and shard-boundary changes complicate correctness.
 - Stable spatial partition boundaries are important. Count-balanced repartitioning every month would churn many otherwise unchanged shards.
 - The full Places schema deprecates/replaces fields over time; the compact format needs explicit schema/version compatibility and rebuild tests.
@@ -164,6 +173,11 @@ These are simple usage estimates before CPU, billing-unit rounding, or cache hit
 ## Reproduction
 
 ```bash
+.venv/bin/python scripts/factory_extract_places.py \
+  --release 2026-06-17.0 \
+  --limit 1000000 \
+  --output exports/places-ca-1m.parquet
+
 .venv/bin/python scripts/experiment_places_compact_shard.py \
   exports/places-ca-1m.parquet \
   --artifact artifacts/places-ca-1m.pcsh \

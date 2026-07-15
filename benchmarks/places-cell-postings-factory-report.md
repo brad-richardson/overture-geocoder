@@ -12,7 +12,7 @@ The experiment supports keeping the packed global top-k head. The next architect
 
 ## Factory runs
 
-All runs used the same 1,000,000 California Places sample from Overture release `2026-06-17.0` in the isolated factory scratch directory. They were single-core model builds and did not alter remote repositories or runner configuration.
+All runs used the same 1,000,000 source-order Places in the factory rectangle (`-124.5 <= xmin <= -114.0`, `32.5 <= ymin <= 42.1`) from Overture release `2026-06-17.0` in the isolated factory scratch directory. The sample was not boundary-clipped, randomized, or ordered; its SHA-256 is `4c4cb3711e806a08801ed87d08c0f2acbc2f7b3f1d69796d65a3824f253c6f84`. Runs were single-core model builds and did not alter remote repositories or runner configuration.
 
 | cell eligibility | bucket layout | cell-local keys | cell-local objects | cell-local bytes | total bytes | worst located ops/bytes |
 |---:|---|---:|---:|---:|---:|---:|

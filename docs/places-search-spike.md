@@ -123,7 +123,10 @@ fixed record offsets, and basic result projections into one range-readable
 binary per spatial partition. Prefix matches map to adjacent lexicon entries
 and one contiguous posting span; prefix unions are not published separately.
 
-On one million California Places from release `2026-06-17.0`:
+On a one-million-row, source-order-limited rectangular California-area bbox
+slice from release `2026-06-17.0` (not exact state containment or a random
+sample; SHA-256
+`4c4cb3711e806a08801ed87d08c0f2acbc2f7b3f1d69796d65a3824f253c6f84`):
 
 | measurement | result |
 |---|---:|
@@ -136,10 +139,12 @@ On one million California Places from release `2026-06-17.0`:
 | retrieval recall against experiment oracle | complete |
 | static-rank top-ten agreement | exact |
 
-A linear 75-million-place shape is approximately 8.75 GB per release. With
-roughly one-million-place partitions, the publication shape is approximately
-75 shard objects plus a manifest and global head, rather than millions of
-small objects.
+A linear 75-million-place compact-shard shape is approximately 8.75 GB per
+release. With roughly one-million-place partitions, that portion of the
+publication is approximately 75 shard objects plus a manifest. The separate
+packed-head experiment measured 25.1 MB and 4,088 modeled objects on its 1M
+sample; repacking it into one range-readable object is a proposal, not a
+measured result, and its bytes are excluded from the 8.75 GB figure.
 
 Balanced modeled reads ranged from four for a category query to twenty for a
 scattered multi-clause query. The compact format solves storage and object
@@ -182,8 +187,9 @@ storage prices, this is the wrong optimization target.
 ### Object and request shape matter more than raw bytes
 
 One-object-per-term and heavily paged layouts turn a modest byte total into
-large publication inventories and many billable reads. Approximately 77
-objects per release is operationally much healthier. Within a shard, scattered
+large publication inventories and many billable reads. Approximately 76
+compact-shard/manifest objects per release is operationally much healthier,
+though the global head still needs a measured repack. Within a shard, scattered
 top results can still create many byte ranges, so document ordering, range
 coalescing, the packed head, and routing remain important.
 
