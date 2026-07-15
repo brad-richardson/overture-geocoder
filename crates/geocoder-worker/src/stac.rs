@@ -41,6 +41,7 @@ const MAX_ROUTER_SHARDS: usize = 2;
 // latency increase is acceptable for the recall improvement.
 const MAX_EXTRA_SHARDS: usize = 3;
 const MAX_PLACES_SHARDS: usize = 2;
+const MAX_REVERSE_ROUTING_DIAGNOSTIC_CANDIDATES: usize = 8;
 const MAX_VERSION_ATTEMPTS: usize = 4; // Max versions to try (latest + fallbacks); 4 keeps
                                        // the newest complete id-index reachable while fresher versions still
                                        // build. Retention (rebuild-r2-shards.yml) keeps only the newest 2
@@ -172,6 +173,41 @@ pub struct SearchResult {
 pub struct ReverseSearchResult {
     pub result: Option<ReverseResult>,
     pub version: String,
+    pub routing: ReverseRoutingDebug,
+}
+
+/// Bounded, coordinate-free diagnostics for reverse country selection.
+///
+/// Candidate IDs are useful for reproducing aggregate-bbox overlaps, but the
+/// list is capped so a malformed collection cannot inflate a response or log.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct ReverseRoutingDebug {
+    pub country_decision: ReverseCountryDecision,
+    pub outcome: ReverseRoutingOutcome,
+    pub bbox_candidate_count: usize,
+    pub bbox_candidates: Vec<String>,
+    pub selected_country: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReverseCountryDecision {
+    UniqueBbox,
+    AmbiguousBbox,
+    Unresolved,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ReverseRoutingOutcome {
+    CountryShard,
+    GlobalFallback,
+    Unresolved,
+}
+
+struct ReverseRouteSelection {
+    shards: Vec<String>,
+    debug: ReverseRoutingDebug,
 }
 
 pub struct IdSearchResult {
@@ -1554,13 +1590,12 @@ impl ShardLoader {
         Vec::new()
     }
 
-    fn select_reverse_shards(
+    fn select_reverse_route(
         collection: &StacCollection,
         lat: f64,
         lon: f64,
-        cf_country: Option<&str>,
-    ) -> Vec<String> {
-        let mut containing: Vec<(String, f64)> = collection
+    ) -> ReverseRouteSelection {
+        let mut containing: Vec<String> = collection
             .items
             .iter()
             .filter_map(|(shard_id, item)| {
@@ -1569,22 +1604,49 @@ impl ShardLoader {
                 }
                 let bbox = item.bbox.as_ref()?;
                 if bbox_contains(lat, lon, bbox) {
-                    Some((shard_id.clone(), bbox_area_deg2(bbox)))
+                    Some(shard_id.clone())
                 } else {
                     None
                 }
             })
             .collect();
+        containing.sort();
+
+        let bbox_candidate_count = containing.len();
+        let bbox_candidates = containing
+            .iter()
+            .take(MAX_REVERSE_ROUTING_DIAGNOSTIC_CANDIDATES)
+            .cloned()
+            .collect();
 
         if containing.is_empty() {
-            return cf_country
-                .filter(|country| Self::collection_has_shard(collection, country))
-                .map(|country| vec![country.to_string()])
-                .unwrap_or_default();
+            // The request coordinates, not the caller's network location, own
+            // reverse routing. An IP country cannot safely resolve a water
+            // point, missing bbox, or coordinate in another country.
+            return ReverseRouteSelection {
+                shards: Vec::new(),
+                debug: ReverseRoutingDebug {
+                    country_decision: ReverseCountryDecision::Unresolved,
+                    outcome: ReverseRoutingOutcome::GlobalFallback,
+                    bbox_candidate_count,
+                    bbox_candidates,
+                    selected_country: None,
+                },
+            };
         }
 
         if containing.len() == 1 {
-            return vec![containing.remove(0).0];
+            let selected_country = containing.remove(0);
+            return ReverseRouteSelection {
+                shards: vec![selected_country.clone()],
+                debug: ReverseRoutingDebug {
+                    country_decision: ReverseCountryDecision::UniqueBbox,
+                    outcome: ReverseRoutingOutcome::CountryShard,
+                    bbox_candidate_count,
+                    bbox_candidates,
+                    selected_country: Some(selected_country),
+                },
+            };
         }
 
         // Country bboxes aggregate disconnected territories and can be much
@@ -1594,7 +1656,26 @@ impl ShardLoader {
         // US bbox can span nearly the whole longitude range. Fall through to
         // the global HEAD shard, whose more-specific admin candidates provide
         // a safer result until exact country polygons/H3 are available.
-        Vec::new()
+        ReverseRouteSelection {
+            shards: Vec::new(),
+            debug: ReverseRoutingDebug {
+                country_decision: ReverseCountryDecision::AmbiguousBbox,
+                outcome: ReverseRoutingOutcome::GlobalFallback,
+                bbox_candidate_count,
+                bbox_candidates,
+                selected_country: None,
+            },
+        }
+    }
+
+    #[cfg(test)]
+    fn select_reverse_shards(
+        collection: &StacCollection,
+        lat: f64,
+        lon: f64,
+        _cf_country: Option<&str>,
+    ) -> Vec<String> {
+        Self::select_reverse_route(collection, lat, lon).shards
     }
 
     /// Reverse geocode a lat/lon coordinate.
@@ -1603,10 +1684,10 @@ impl ShardLoader {
         &self,
         lat: f64,
         lon: f64,
-        cf_country: Option<&str>,
+        _cf_country: Option<&str>,
     ) -> Result<ReverseSearchResult> {
         with_version_fallback!(self, "reverse", version, {
-            self.try_reverse_geocode(version, lat, lon, cf_country)
+            self.try_reverse_geocode(version, lat, lon, _cf_country)
                 .await
         })
     }
@@ -1617,22 +1698,24 @@ impl ShardLoader {
         version: &str,
         lat: f64,
         lon: f64,
-        cf_country: Option<&str>,
+        _cf_country: Option<&str>,
     ) -> Result<ReverseSearchResult> {
         let reverse_collection = self.load_reverse_collection(version).await?;
 
-        // Ambiguous country bboxes fall through to HEAD. This avoids choosing
+        // Ambiguous or unresolved country bboxes fall through to HEAD. This avoids choosing
         // by bbox area or caller IP when disconnected territories inflate a
         // country's aggregate bbox. Exact country polygons/H3 remain future work.
-        for country in Self::select_reverse_shards(&reverse_collection, lat, lon, cf_country) {
+        let mut routing = Self::select_reverse_route(&reverse_collection, lat, lon);
+        for country in &routing.shards {
             match self
-                .query_reverse_shard(version, &country, &reverse_collection, lat, lon)
+                .query_reverse_shard(version, country, &reverse_collection, lat, lon)
                 .await
             {
                 Ok(Some(result)) => {
                     return Ok(ReverseSearchResult {
                         result: Some(result),
                         version: version.to_string(),
+                        routing: routing.debug,
                     })
                 }
                 Ok(None) => {
@@ -1651,9 +1734,15 @@ impl ShardLoader {
         let res = self
             .query_reverse_shard(version, "HEAD", &reverse_collection, lat, lon)
             .await?;
+        routing.debug.outcome = if res.is_some() {
+            ReverseRoutingOutcome::GlobalFallback
+        } else {
+            ReverseRoutingOutcome::Unresolved
+        };
         Ok(ReverseSearchResult {
             result: res,
             version: version.to_string(),
+            routing: routing.debug,
         })
     }
 
@@ -2403,6 +2492,7 @@ fn bbox_contains(lat: f64, lon: f64, bbox: &[f64; 4]) -> bool {
     }
 }
 
+#[cfg(test)]
 fn bbox_area_deg2(bbox: &[f64; 4]) -> f64 {
     let [min_lon, min_lat, max_lon, max_lat] = *bbox;
     let height = (max_lat - min_lat).abs();
@@ -2706,11 +2796,19 @@ mod tests {
     }
 
     #[test]
-    fn test_reverse_selection_falls_back_to_ip_country_without_bboxes() {
+    fn test_reverse_selection_ignores_ip_country_without_coordinate_evidence() {
         let collection = collection_with_bboxes(&[("US", None)]);
 
         let shards = ShardLoader::select_reverse_shards(&collection, 35.68, 139.65, Some("US"));
-        assert_eq!(shards, vec!["US"]);
+        assert_eq!(shards, Vec::<String>::new());
+
+        let route = ShardLoader::select_reverse_route(&collection, 35.68, 139.65);
+        assert_eq!(
+            route.debug.country_decision,
+            ReverseCountryDecision::Unresolved
+        );
+        assert_eq!(route.debug.outcome, ReverseRoutingOutcome::GlobalFallback);
+        assert_eq!(route.debug.selected_country, None);
     }
 
     #[test]
@@ -2736,6 +2834,49 @@ mod tests {
             Vec::<String>::new(),
             "a non-containing IP country must not decide the overlap"
         );
+
+        let route = ShardLoader::select_reverse_route(&collection, 45.0, -100.0);
+        assert_eq!(
+            route.debug.country_decision,
+            ReverseCountryDecision::AmbiguousBbox
+        );
+        assert_eq!(route.debug.bbox_candidate_count, 2);
+        assert_eq!(route.debug.bbox_candidates, vec!["CA", "US"]);
+        assert_eq!(route.debug.selected_country, None);
+    }
+
+    #[test]
+    fn test_thimphu_aggregate_bbox_overlap_is_ambiguous_not_china() {
+        let collection = collection_with_bboxes(&[
+            ("BT", Some([88.7, 26.7, 92.2, 28.4])),
+            ("CN", Some([73.5, 18.0, 135.1, 53.6])),
+        ]);
+
+        let route = ShardLoader::select_reverse_route(&collection, 27.4728, 89.6393);
+        assert!(route.shards.is_empty());
+        assert_eq!(
+            route.debug.country_decision,
+            ReverseCountryDecision::AmbiguousBbox
+        );
+        assert_eq!(route.debug.bbox_candidates, vec!["BT", "CN"]);
+        assert_eq!(route.debug.selected_country, None);
+    }
+
+    #[test]
+    fn test_reverse_routing_diagnostics_are_bounded_and_stably_sorted() {
+        let rows: Vec<(String, Option<[f64; 4]>)> = (0..12)
+            .rev()
+            .map(|index| (format!("C{index:02}"), Some([-1.0, -1.0, 1.0, 1.0])))
+            .collect();
+        let borrowed: Vec<(&str, Option<[f64; 4]>)> =
+            rows.iter().map(|(id, bbox)| (id.as_str(), *bbox)).collect();
+        let collection = collection_with_bboxes(&borrowed);
+
+        let route = ShardLoader::select_reverse_route(&collection, 0.0, 0.0);
+        assert_eq!(route.debug.bbox_candidate_count, 12);
+        assert_eq!(route.debug.bbox_candidates.len(), 8);
+        assert_eq!(route.debug.bbox_candidates.first().unwrap(), "C00");
+        assert_eq!(route.debug.bbox_candidates.last().unwrap(), "C07");
     }
 
     #[test]

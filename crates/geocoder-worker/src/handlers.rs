@@ -177,6 +177,10 @@ pub async fn handle_reverse(
     };
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
+    let include_debug = params
+        .get("debug")
+        .map(|d| d == "1" || d == "true")
+        .unwrap_or(false);
 
     let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
 
@@ -195,6 +199,12 @@ pub async fn handle_reverse(
                         "data_version".to_string(),
                         serde_json::Value::String(search.version.clone()),
                     );
+                    if include_debug {
+                        obj.insert(
+                            "debug".to_string(),
+                            serde_json::json!({ "country_routing": &search.routing }),
+                        );
+                    }
                 }
                 let mut resp = Response::from_json(&body)?;
                 resp.headers_mut()
@@ -203,6 +213,17 @@ pub async fn handle_reverse(
                 Ok(resp)
             }
         },
+        None if include_debug => {
+            let mut resp = Response::from_json(&serde_json::json!({
+                "error": "No results found for coordinates",
+                "data_version": search.version,
+                "debug": { "country_routing": search.routing },
+            }))?
+            .with_status(404);
+            resp.headers_mut()
+                .set("Content-Type", "application/json; charset=utf-8")?;
+            Ok(resp)
+        }
         None => Response::error("No results found for coordinates", 404),
     }
 }
