@@ -1,0 +1,72 @@
+name: Hosted address row-group data spike
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: hosted-address-rowgroup-data-spike
+  cancel-in-progress: false
+
+jobs:
+  bounded-address-projection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned binary dependency
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      - name: Record runner resources
+        run: |
+          {
+            echo "## Hosted address row-group data spike"
+            echo
+            echo '```text'
+            lscpu
+            free -h
+            df -h . /tmp
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Read and project a bounded current-release range
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
+            --release 2026-06-17.0 \
+            --family addresses \
+            --output /tmp/address-rowgroups.parquet \
+            --json-out hosted-rowgroup-report.json \
+            --max-object-bytes 900000000 \
+            --target-rowgroup-uncompressed-bytes 134217728 \
+            --max-rows 1500000 \
+            --max-groups 32 \
+            --max-output-bytes 134217728
+
+      - name: Summarize bounded measurement
+        if: always()
+        run: |
+          {
+            echo
+            echo "### Machine-readable report"
+            echo '```json'
+            test -f hosted-rowgroup-report.json && cat hosted-rowgroup-report.json
+            echo '```'
+            echo
+            echo "The projected Parquet file remains ephemeral on the runner. No artifact, R2 object, catalog, or production state was written."
+          } >> "$GITHUB_STEP_SUMMARY"
