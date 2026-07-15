@@ -1,0 +1,78 @@
+{
+  "input": {
+    "bytes": 204646996,
+    "bytes_per_indexed_row": 148.052033,
+    "records": 1382264,
+    "sha256": "f7ee6db4af3ae185f907de7a5fbad06ca1374edf7561415884e746c8a66e0cee"
+  },
+  "oracle": {
+    "candidate_order_and_ids_preserved": true,
+    "distinct_lookup_keys": 1258445,
+    "maximum_candidate_fanout": 137,
+    "maximum_fanout_id_sha256": "cac637ef1ec7b632de30a3000f8d8b120a98e3480888c8e680e0e41c870cbb53"
+  },
+  "page_rows": 256,
+  "pages": 5400,
+  "provenance": {
+    "commit": "336e65ed0ddb0e708c8b23d0d525028cd2db8336",
+    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29437656817/job/87428254996",
+    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29437656817",
+    "overture_release": "2026-06-17.0"
+  },
+  "resources": {
+    "experiment_peak_rss_bytes": 29798400,
+    "experiment_wall_seconds": 177.86,
+    "hosted_job_wall_seconds": 304
+  },
+  "schema": "overture-address-compression-spike-summary-v1",
+  "variants": {
+    "bare": {
+      "accuracy": "exact normalized candidate keys, coordinates, IDs, and locators; drops display casing and raw address levels",
+      "bytes_per_indexed_row": 46.469552,
+      "compression": "none",
+      "decode_and_verify_seconds": 15.627587,
+      "encode_seconds": 15.08797,
+      "index_bytes": 358774,
+      "linear_all_473m_rows_gb": 21.98,
+      "p50_page_bytes": 11768,
+      "p95_page_bytes": 12398,
+      "total_bytes": 64233189
+    },
+    "bare_gzip": {
+      "accuracy": "exact normalized candidate keys, coordinates, IDs, and locators; drops display casing and raw address levels",
+      "bytes_per_indexed_row": 30.230678,
+      "compression": "independent gzip page",
+      "decode_and_verify_seconds": 15.716732,
+      "encode_seconds": 16.427985,
+      "index_bytes": 358678,
+      "linear_all_473m_rows_gb": 14.299,
+      "p50_page_bytes": 7648,
+      "p95_page_bytes": 8339,
+      "total_bytes": 41786778
+    },
+    "useful": {
+      "accuracy": "lossless relative to reducer: exact keys, display fields, raw address levels, coordinates, IDs, and locators",
+      "bytes_per_indexed_row": 59.679094,
+      "compression": "none",
+      "decode_and_verify_seconds": 20.680762,
+      "encode_seconds": 20.565685,
+      "index_bytes": 359187,
+      "linear_all_473m_rows_gb": 28.228,
+      "p50_page_bytes": 15213,
+      "p95_page_bytes": 16627,
+      "total_bytes": 82492263
+    },
+    "useful_gzip": {
+      "accuracy": "lossless relative to reducer: exact keys, display fields, raw address levels, coordinates, IDs, and locators",
+      "bytes_per_indexed_row": 35.507427,
+      "compression": "independent gzip page",
+      "decode_and_verify_seconds": 22.012824,
+      "encode_seconds": 22.180246,
+      "index_bytes": 358719,
+      "linear_all_473m_rows_gb": 16.795,
+      "p50_page_bytes": 8980,
+      "p95_page_bytes": 10119,
+      "total_bytes": 49080638
+    }
+  }
+}
