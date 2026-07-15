@@ -262,6 +262,17 @@ uses only a tiny static fixture and cannot publish. It is a control-plane smoke:
 it proves only within-job plan reproduction and task inspection, not cross-job
 agreement, source throughput, shuffle, reduce, R2, or the runner data envelope.
 
+PR #68 then exercised one real current-release address range on a standard
+hosted runner. It projected 1,415,000 rows from 24 row groups, wrote a verified
+54,101,306-byte locator-bearing Parquet file in 6.11 seconds, and peaked at
+764,813,312 bytes RSS. The runner received at most 106,639,014 bytes through the
+initial projection and 113,028,870 bytes including three hydration reads, versus
+a 657,344,776-byte source object. This rules out a hidden full-object download
+for that run, while the 2.08x amplification over selected-column compressed
+metadata requires budgeting. The lexicographically first object/range is not a
+global distribution sample; row-group inventory and skew measurements remain a
+gate before selecting matrix size or claiming release throughput.
+
 Every task ID is deterministic from release, producer commit, configuration,
 and input digests. On re-run it verifies an existing done manifest and skips or
 rebuilds just that task. `strategy.max-parallel` starts at four to avoid
