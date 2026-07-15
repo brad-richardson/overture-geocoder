@@ -19,7 +19,10 @@ def test_address_worker_smoke_is_manual_isolated_and_cleans_up():
     assert "cargo install worker-build --version 0.7.5 --locked" in workflow
     assert "ADDRESS_SPIKE_PREFIX:${SMOKE_VERSION}" in workflow
     assert "candidate_count == 137" in workflow
-    assert "wrangler.address-smoke.toml --force" in workflow
+    assert "workers/scripts/geocoder-address-smoke" in workflow
+    assert "--request DELETE" in workflow
+    assert 'if [ "$HTTP_STATUS" != "404" ]' in workflow
+    assert 'test "$HTTP_STATUS" = "200"' in workflow
     assert 's3://geocoder-shards/${SMOKE_VERSION}/' in workflow
     assert 'name = "geocoder-address-smoke"' in config
     assert 'ENVIRONMENT = "address-smoke"' in config
