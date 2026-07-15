@@ -1,7 +1,7 @@
-# Pending Work — 2026-07-14
+# Pending Work — 2026-07-15
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `604ae4e` (`main` after #65). Keep measured evidence
+The code baseline is `55222dc` (`main` after #68). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -64,6 +64,16 @@ preserving branch- or PR-specific history.
   producer, stable split lineage, immutable per-family manifests, resumable
   hash-verified stages, and one atomic multi-family promotion. The factory is an
   offline producer only, never a serving dependency or general CI runner.
+- #67 added the deterministic, non-promoting global build control plane: strict
+  source inventory, map completion, fragment, reduce artifact, record
+  reconciliation, and catalog-candidate contracts plus a public hosted-runner
+  planner smoke.
+- #68 added the bounded current-release address row-group data spike. Its first
+  public hosted run projected 1,415,000 addresses from 24 row groups in 6.11
+  seconds at 764.8 MB peak RSS, wrote 54,101,306 bytes, and measured a 106.6 MB
+  initial runner-network upper bound against a 657.3 MB source object. Source
+  identity, artifact metadata, record count, and three locator hydrations
+  verified; no artifact, R2 object, catalog, or production state was published.
 
 ### Current production data
 
@@ -376,12 +386,30 @@ absent from the historical address input and remain unmeasured.
   explicitly promotion-ineligible until remote object/hash verification,
   rejection policy, and serialized publication exist. The prototype does not
   transfer or publish data.
-- A manual, read-only GitHub-hosted control-plane smoke now exercises the fixture planner
-  on four bounded matrix jobs and records CPU, memory, disk, and wall-time
-  telemetry. It has no cloud credentials, OIDC permission, artifact upload, or
-  promotion path; a successful run proves only that each isolated job can
+- A manual, read-only GitHub-hosted control-plane smoke now exercises the
+  fixture planner on four bounded matrix jobs and records CPU, memory, disk,
+  and wall-time telemetry. It has no cloud credentials, OIDC permission,
+  artifact upload, or promotion path; a successful run proves only that each isolated job can
   reproduce and inspect the static plan. It does not compare jobs or measure
   source I/O, shuffle, reduce, R2, or global data throughput.
+- The first real hosted address projection now proves bounded Parquet range
+  reads are viable for one source shape. Initial receive bytes were 16.2% of the
+  source object and 2.08x the selected-column compressed metadata estimate;
+  total receive including three hydration reads was 113.0 MB. The sample is the
+  first eligible object/range and is explicitly non-representative.
+- At this one-range shape, a diagnostic linearization to the 473M planning count
+  requires 335 covering jobs, 35.6 GB source receive, 18.1 GB projected
+  Parquet, and 89.3 aggregate runner-minutes including observed job overhead.
+  This is not a forecast: it
+  excludes inventory, skew, retries, R2 shuffle, reduce/sort, compact index
+  assembly, division joins, Places, and cross-release publication.
+- Before R2, build row-group inventories across all address objects and choose
+  byte-balanced task ranges, then determine whether staying at or below 128 map
+  jobs is safe. That target implies about 3.70M addresses per task, 2.61x the
+  measured range. Repeat the
+  projection on small/median/large and non-US source objects; reject a plan if
+  any range exceeds hosted memory, disk, runtime, or transfer amplification
+  gates.
 - Extend the prototype with hash-verifying R2 fragment upload/download and clean
   restart behavior without trusting file existence or overwriting completed
   objects.

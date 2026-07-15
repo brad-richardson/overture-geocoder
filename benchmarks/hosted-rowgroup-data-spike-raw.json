@@ -1,0 +1,73 @@
+{
+  "family": "addresses",
+  "limits": {
+    "max_groups": 32,
+    "max_object_bytes": 900000000,
+    "max_output_bytes": 134217728,
+    "max_rows": 1500000,
+    "target_rowgroup_uncompressed_bytes": 134217728
+  },
+  "output": {
+    "bytes": 54101306,
+    "columns": ["id", "street", "number", "unit", "postcode", "postal_city", "address_levels", "country", "geometry", "source_row_group", "source_row_index"],
+    "path": "/tmp/address-rowgroups.parquet",
+    "row_groups": 12,
+    "rows": 1415000,
+    "sha256": "288d93fd0c61cf8f5c4659473977651cc03cc6aeb392762c60feea8e482cf839",
+    "source_inventory_sha256": "cfda72729b296b17545f33568356f0c07dc962a95727319e3f3a219b814c1dd2"
+  },
+  "pyarrow_version": "25.0.0",
+  "release": "2026-06-17.0",
+  "resources": {
+    "disk_free_after": 94429949952,
+    "disk_free_before": 94484041728,
+    "elapsed_seconds": 6.108808771,
+    "hydration_network_received_bytes_upper_bound": 6389856,
+    "hydration_verification_seconds": 0.39365928499999825,
+    "initial_network_received_bytes_upper_bound": 106639014,
+    "metadata_seconds": 0.8033781669999982,
+    "network_measurement_scope": "Linux runner non-loopback interface delta; includes unrelated runner traffic",
+    "peak_rss_bytes": 764813312,
+    "projection_seconds": 0.16821889700002401,
+    "read_and_decode_seconds": 3.137861617999995,
+    "total_network_received_bytes_upper_bound": 113028870,
+    "write_seconds": 0.7339809300000013
+  },
+  "sampling": {
+    "artifact_source_scope": "one source object; global fragments require a source dictionary",
+    "object_policy": "lexicographically first eligible object in the first listing page",
+    "representative": false,
+    "row_group_policy": "contiguous row groups from index zero within fixed limits"
+  },
+  "schema": "overture-hosted-rowgroup-spike-v1",
+  "selection": {
+    "estimated_selected_compressed_bytes": 51341886,
+    "projected_columns": ["id", "street", "number", "unit", "postcode", "postal_city", "address_levels", "country", "geometry"],
+    "row_group_count": 24,
+    "row_groups": [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23],
+    "rowgroup_uncompressed_bytes": 131442662,
+    "rows": 1415000,
+    "selected_uncompressed_bytes": 100466544
+  },
+  "source": {
+    "bytes": 657344776,
+    "etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+    "key": "release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet",
+    "parquet_row_groups": 256,
+    "parquet_rows": 14789737,
+    "schema_columns": ["id", "street", "number", "unit", "postcode", "postal_city", "address_levels", "country", "geometry", "sources", "version", "bbox"],
+    "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet",
+    "version_id": null
+  },
+  "verification": {
+    "artifact_source_metadata_match": true,
+    "hydrated_sample_count": 3,
+    "hydrated_samples": [
+      {"output_row": 0, "source_row_group": 0, "source_row_index": 0},
+      {"output_row": 707500, "source_row_group": 11, "source_row_index": 18594},
+      {"output_row": 1414999, "source_row_group": 23, "source_row_index": 48774}
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
+}
