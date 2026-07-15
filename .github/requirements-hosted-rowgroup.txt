@@ -1,0 +1,4 @@
+numpy==2.3.5 \
+    --hash=sha256:8cba086a43d54ca804ce711b2a940b16e452807acebe7852ff327f1ecd49b0d4
+pyarrow==25.0.0 \
+    --hash=sha256:0222f0071d13313962a88d21bf28b80d355ac39d81bfa6ff3fe00eeaf748e4be
