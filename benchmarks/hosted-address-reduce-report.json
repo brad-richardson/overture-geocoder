@@ -6,7 +6,7 @@
     "maximum_candidate_fanout": 137,
     "record_bytes": 204290891,
     "records": 1382264,
-    "sha256": "49c79fc1bb99b017b68db82a169ce86191b9a3628c15f2dd3a181b1563e2c213",
+    "sha256": "f7ee6db4af3ae185f907de7a5fbad06ca1374edf7561415884e746c8a66e0cee",
     "sparse_bytes": 353425
   },
   "format": {
@@ -39,15 +39,15 @@
     "source_uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet"
   },
   "map_fragments": {
-    "bytes": 204297931,
+    "bytes": 204299191,
     "count": 30,
     "records": 1382264,
-    "seconds": 86.135109433
+    "seconds": 80.843201391
   },
   "provenance": {
-    "commit": "bc74ad53ba2e75bdcfd12f4f8733564b7582c96e",
-    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29426441251/job/87389964705",
-    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29426441251",
+    "commit": "c5b1ab01953d4466d48dd1dd32cef5e168b11e37",
+    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29436633251/job/87424826492",
+    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29436633251",
     "overture_release": "2026-06-17.0"
   },
   "rejections": {
@@ -57,11 +57,12 @@
     "selected_records": 1382264
   },
   "resources": {
-    "conservative_peak_workspace_bytes": 757514510,
-    "job_wall_seconds": 155,
-    "peak_rss_bytes": 705286144,
-    "reduce_assembly_seconds": 25.469878354,
-    "script_elapsed_seconds": 130.159681741,
+    "conservative_peak_workspace_bytes": 757454450,
+    "job_wall_seconds": 158,
+    "projection_peak_rss_bytes": 1533964288,
+    "reducer_peak_rss_bytes": 715354112,
+    "reduce_assembly_seconds": 31.659730257,
+    "script_elapsed_seconds": 129.483184834,
     "swap_events": 0
   },
   "schema": "overture-address-reduce-spike-summary-v1",

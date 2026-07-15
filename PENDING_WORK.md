@@ -89,8 +89,9 @@ preserving branch- or PR-specific history.
 - The follow-on hosted reduce spike projected 3,743,307 current-release rows,
   retained 1,382,264 with both street and number, wrote 30 sorted fragments,
   and assembled and fully scanned a 204,646,996-byte range-readable shard. The
-  complete public-runner job passed in 2m35s at 705.3 MB peak RSS; reduce
-  assembly itself took 25.47 seconds. Compute and disk are encouraging, but the
+  complete public-runner job passed in 2m38s; projection peaked at 1.534 GB RSS,
+  while the reducer peaked at 715.4 MB and its assembly took 31.66 seconds.
+  Compute and disk are encouraging, but the
   deliberately uncompressed 148.1 B/indexed-row shape is rejected as the final
   planet format. R2 shuffle, multi-source dictionaries, and global skew remain
   unmeasured.
@@ -244,7 +245,8 @@ Production `2026-07-13.0` is healthy. PRs #65–69 completed the coordinate-firs
 country-routing correction, compact Places/address design evidence,
 deterministic global control plane, and first real hosted row-group projection.
 The hosted address reducer then passed its current-release 1.38M-row retained
-range in 2m35s with 705.3 MB peak RSS and exact maximum-fanout verification.
+range in 2m38s with 1.534 GB projection peak RSS, 715.4 MB reducer peak RSS,
+and exact maximum-fanout verification.
 
 The next active format gate is storage shape. Hosted reducer compute is
 encouraging, while exact fragment verification, global skew, multi-source
@@ -444,7 +446,8 @@ strings raised storage to 148.1 B/indexed row.
   gates.
 - The first hosted reduce run proves the local fragment/sort/merge/verify
   envelope at 1.38M retained rows: 30 fragments, 204.3 MB fragment bytes,
-  204.6 MB final bytes, 25.47-second merge/assembly, 705.3 MB peak RSS, and a
+  204.6 MB final bytes, 31.66-second merge/assembly, 715.4 MB reducer peak RSS,
+  and a
   757.5 MB conservative workspace estimate. It preserves raw address levels and
   exact source row-group/row locators. Its 148.1 B/row encoding repeats strings
   and would linearly diagnose 70.0 GB if applied to all 473M planning rows; do
