@@ -77,8 +77,8 @@ preserving branch- or PR-specific history.
 - The follow-on hosted reduce spike projected 3,743,307 current-release rows,
   retained 1,382,264 with both street and number, wrote 30 sorted fragments,
   and assembled and fully scanned a 204,646,996-byte range-readable shard. The
-  complete public-runner job passed in 2m33s at 708.8 MB peak RSS; reduce
-  assembly itself took 21.62 seconds. Compute and disk are encouraging, but the
+  complete public-runner job passed in 2m35s at 705.3 MB peak RSS; reduce
+  assembly itself took 25.47 seconds. Compute and disk are encouraging, but the
   deliberately uncompressed 148.1 B/indexed-row shape is rejected as the final
   planet format. R2 shuffle, multi-source dictionaries, and global skew remain
   unmeasured.
@@ -426,7 +426,7 @@ absent from the historical address input and remain unmeasured.
   gates.
 - The first hosted reduce run proves the local fragment/sort/merge/verify
   envelope at 1.38M retained rows: 30 fragments, 204.3 MB fragment bytes,
-  204.6 MB final bytes, 21.62-second merge/assembly, 708.8 MB peak RSS, and a
+  204.6 MB final bytes, 25.47-second merge/assembly, 705.3 MB peak RSS, and a
   757.5 MB conservative workspace estimate. It preserves raw address levels and
   exact source row-group/row locators. Its 148.1 B/row encoding repeats strings
   and would linearly diagnose 70.0 GB if applied to all 473M planning rows; do

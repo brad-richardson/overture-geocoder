@@ -1,7 +1,7 @@
 # Hosted address reduce-stage spike
 
 Date: 2026-07-15
-GitHub Actions run: [29425679528](https://github.com/brad-richardson/overture-geocoder/actions/runs/29425679528)
+GitHub Actions run: [29426441251](https://github.com/brad-richardson/overture-geocoder/actions/runs/29426441251)
 
 ## Verdict
 
@@ -9,8 +9,8 @@ The reduce stage is computationally viable on a standard public GitHub-hosted
 runner. This deliberately simple storage encoding is not viable as the final
 planet format without compression or a smaller supported record set.
 
-The complete job passed in 2m33s. The Python map-fragment sort, streaming k-way
-merge, assembly, and full verification used 708,841,472 bytes peak RSS and a
+The complete job passed in 2m35s. The Python map-fragment sort, streaming k-way
+merge, assembly, and full verification used 705,286,144 bytes peak RSS and a
 conservative 757,514,510-byte local workspace estimate. The reducer therefore
 has substantial headroom against the hosted runner's 16 GB RAM and 14 GB disk.
 R2 fragment upload/download remains unmeasured.
@@ -39,11 +39,11 @@ streaming k-way merge + sparse directory + full verification
 | missing street or number | 2,361,043 (63.07%) |
 | invalid Point geometry | 0 |
 | map fragments | 30 |
-| fragment build/sort | 86.14 seconds |
-| reduce merge/assembly | 21.62 seconds |
-| reducer script including verification | 125.98 seconds |
-| complete hosted job | 2m33s |
-| peak RSS | 708.8 MB |
+| fragment build/sort | 86.86 seconds |
+| reduce merge/assembly | 25.47 seconds |
+| reducer script including verification | 130.16 seconds |
+| complete hosted job | 2m35s |
+| peak RSS | 705.3 MB |
 | conservative workspace | 757.5 MB |
 | final artifact | 204,646,996 bytes |
 | bytes per indexed row | 148.1 |
@@ -60,7 +60,8 @@ The reducer streams one record from each sorted fragment through a heap; it does
 not load the partition into memory. The final shard has a front sparse directory
 every 256 rows, followed by sorted length-delimited records. Verification scanned
 the complete artifact for ordering and count agreement and compared three exact
-candidate sets with the merge oracle. No artifact was uploaded or published.
+candidate sets and their ID digests with the merge oracle, including the
+137-candidate maximum-fanout key. No artifact was uploaded or published.
 
 ## Storage/accuracy tradeoff
 

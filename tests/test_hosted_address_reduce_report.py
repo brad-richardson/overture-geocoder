@@ -34,11 +34,13 @@ def test_reduce_evidence_is_bound_to_successful_ephemeral_run():
     verification = report["verification"]
     markdown = MARKDOWN.read_text()
 
-    assert provenance["commit"] == "3b0bd51d6f5b619d033cdf36b64ec576c169e602"
-    assert provenance["github_actions_run"].endswith("/29425679528")
+    assert provenance["commit"] == "bc74ad53ba2e75bdcfd12f4f8733564b7582c96e"
+    assert provenance["github_actions_run"].endswith("/29426441251")
     assert verification == {
         "exact_candidate_sets": 3,
         "full_sorted_scan": True,
+        "highest_fanout_candidate_count": 137,
+        "highest_fanout_id_digest_match": True,
         "record_count_match": True,
     }
     assert "R2 fragment upload/download remains unmeasured" in markdown

@@ -45,9 +45,9 @@
     "seconds": 86.135109433
   },
   "provenance": {
-    "commit": "3b0bd51d6f5b619d033cdf36b64ec576c169e602",
-    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29425679528/job/87387342095",
-    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29425679528",
+    "commit": "bc74ad53ba2e75bdcfd12f4f8733564b7582c96e",
+    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29426441251/job/87389964705",
+    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29426441251",
     "overture_release": "2026-06-17.0"
   },
   "rejections": {
@@ -58,16 +58,18 @@
   },
   "resources": {
     "conservative_peak_workspace_bytes": 757514510,
-    "job_wall_seconds": 153,
-    "peak_rss_bytes": 708841472,
-    "reduce_assembly_seconds": 21.621958438,
-    "script_elapsed_seconds": 125.976987866,
+    "job_wall_seconds": 155,
+    "peak_rss_bytes": 705286144,
+    "reduce_assembly_seconds": 25.469878354,
+    "script_elapsed_seconds": 130.159681741,
     "swap_events": 0
   },
   "schema": "overture-address-reduce-spike-summary-v1",
   "verification": {
     "exact_candidate_sets": 3,
     "full_sorted_scan": true,
+    "highest_fanout_candidate_count": 137,
+    "highest_fanout_id_digest_match": true,
     "record_count_match": true
   }
 }
