@@ -31,7 +31,19 @@ def test_text_encoding_preserves_unicode():
     assert encoded[1:].decode() == "Montréal"
 
 
-@pytest.mark.parametrize("value", [" İstanbul ", "ΟΣ", "Cafe\u0301", "  MAIN\tSt  "])
+@pytest.mark.parametrize(
+    "value",
+    [
+        " İstanbul ",
+        "ΟΣ",
+        "Cafe\u0301",
+        "  MAIN\tSt  ",
+        "A\u00a0B",
+        "A\u2003B",
+        "A\u202fB",
+        "A\u3000B",
+    ],
+)
 def test_python_and_duckdb_normalization_contract_match(value):
     connection = duckdb.connect()
     actual = connection.execute(
@@ -39,6 +51,11 @@ def test_python_and_duckdb_normalization_contract_match(value):
     ).fetchone()[0]
     connection.close()
     assert actual == experiment.normalize(value)
+
+
+@pytest.mark.parametrize("space", ["\u00a0", "\u2003", "\u202f", "\u3000"])
+def test_normalization_preserves_non_ascii_space(space):
+    assert experiment.normalize(f"A{space}B") == f"a{space}b"
 
 
 def test_chain_encoding_uses_compact_uuid_bytes():

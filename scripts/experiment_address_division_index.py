@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import shutil
 import struct
 import tempfile
@@ -112,14 +113,16 @@ def encode_chain(signature: str) -> bytes:
 
 def normalize_expression(column: str) -> str:
     return (
-        "TRANSLATE(NFC_NORMALIZE(REGEXP_REPLACE(TRIM(COALESCE(CAST("
-        f"{column} AS VARCHAR), '')), '\\s+', ' ', 'g')), "
+        "TRANSLATE(TRIM(REGEXP_REPLACE(NFC_NORMALIZE(COALESCE(CAST("
+        f"{column} AS VARCHAR), '')), '[\\x09-\\x0D ]+', ' ', 'g')), "
         "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
     )
 
 
 def normalize(value: str | None) -> str:
-    normalized = " ".join(unicodedata.normalize("NFC", value or "").strip().split())
+    normalized = re.sub(
+        r"[\x09-\x0D ]+", " ", unicodedata.normalize("NFC", value or "")
+    ).strip(" ")
     return normalized.translate(str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"))
 
 

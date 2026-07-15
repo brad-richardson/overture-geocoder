@@ -168,7 +168,7 @@ addresses/{country_or_XW}/{postcode_prefix_or_cell}/{split_path}
 - Store feature ID, coordinates, number, unit, normalized street key, compact
   source-label reference, raw-address-level dictionary ID, derived division-chain
   ID, and source locator.
-- The first format normalizes with NFC, collapsed whitespace, and ASCII-only
+- The first format normalizes with NFC, collapsed ASCII whitespace, and ASCII-only
   case folding so DuckDB, Python, and a future Worker agree byte-for-byte.
   Full Unicode case-insensitive matching requires a separately versioned,
   cross-runtime multilingual normalization contract and golden corpus.
