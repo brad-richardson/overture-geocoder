@@ -1,0 +1,120 @@
+{
+  "addresses": "exports/US-MA.parquet",
+  "artifact": {
+    "bytes": 114699538,
+    "components": {
+      "chain_blob": 32625,
+      "context_blob": 39405,
+      "context_offsets": 12568,
+      "record_blob": 109155185,
+      "street_blob": 4465587,
+      "street_offsets": 993912
+    },
+    "path": "artifacts/addresses-ma-division.oadr",
+    "shape": {
+      "invalid_feature_ids": 0,
+      "maximum_record_group_bytes": 133013,
+      "median_record_group_bytes": 340
+    }
+  },
+  "database": {
+    "address_columns": [
+      "bbox_xmax",
+      "bbox_xmin",
+      "bbox_ymax",
+      "bbox_ymin",
+      "city",
+      "display_name",
+      "gers_id",
+      "lat",
+      "lon",
+      "number",
+      "postal_city",
+      "postcode",
+      "search_text",
+      "state",
+      "street",
+      "unit"
+    ],
+    "join_seconds": 39.118482790421695
+  },
+  "date": "2026-07-14",
+  "division_area_rows": 635,
+  "division_areas": "exports/US-MA-division-areas-2026-06-17.parquet",
+  "division_release": "2026-06-17.0",
+  "elapsed_seconds": 73.65657419105992,
+  "metrics": {
+    "candidate_ambiguity": {
+      "address_subtype_pairs": 11345463,
+      "ambiguous_pairs": 45602,
+      "max_candidates": 2
+    },
+    "context_stability": {
+      "address_rows": 3634040,
+      "contexts": 1570,
+      "median_dominant_share": 1.0,
+      "p90_dominant_share": 1.0,
+      "rows_on_dominant_chain": 3492728,
+      "unanimous_contexts": 859
+    },
+    "division_coverage": {
+      "addresses": 3634040,
+      "distinct_chains": 614,
+      "requiring_chain_override": 141312,
+      "using_context_dominant_chain": 3492728,
+      "with_any_division": 3633628
+    },
+    "division_subtypes": [
+      {
+        "distinct_divisions": 1,
+        "linked_addresses": 3608421,
+        "source_label_matches": 0,
+        "subtype": "region"
+      },
+      {
+        "distinct_divisions": 14,
+        "linked_addresses": 3608421,
+        "source_label_matches": 11442,
+        "subtype": "county"
+      },
+      {
+        "distinct_divisions": 43,
+        "linked_addresses": 475579,
+        "source_label_matches": 263108,
+        "subtype": "macrohood"
+      },
+      {
+        "distinct_divisions": 360,
+        "linked_addresses": 3620529,
+        "source_label_matches": 3296233,
+        "subtype": "locality"
+      },
+      {
+        "distinct_divisions": 111,
+        "linked_addresses": 31775,
+        "source_label_matches": 0,
+        "subtype": "neighborhood"
+      },
+      {
+        "distinct_divisions": 9,
+        "linked_addresses": 738,
+        "source_label_matches": 0,
+        "subtype": "microhood"
+      }
+    ],
+    "inventory": {
+      "contexts": 1570,
+      "distinct_street_names": 54396,
+      "division_chains": 614,
+      "indexed_addresses": 3634040,
+      "street_groups": 124238
+    },
+    "street_group_shape": {
+      "maximum": 4008,
+      "median": 12.0,
+      "minimum": 1,
+      "p90": 61.0,
+      "p99": 314.0
+    }
+  }
+}
