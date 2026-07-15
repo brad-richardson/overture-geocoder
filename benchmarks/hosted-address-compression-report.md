@@ -13,9 +13,10 @@ reduce artifact and measured **35.51 B/indexed row**, 76.0% below the naive
 whole shard or Parquet row group.
 
 This is promising bounded evidence, not approval for planet publication. The
-next gate is a real Worker range-read/decode prototype plus global completeness
-and skew sampling. In particular, Python gzip timing is not Worker timing, and
-the measured source range retained only addresses with both street and number.
+follow-up [Worker decoder spike](hosted-address-worker-decoder-report.md) passed:
+434 ms cold wall time and 156 ms warm median for the 137-candidate oracle. The
+remaining gate is global completeness and skew sampling; the measured source
+range retained only addresses with both street and number.
 
 ## Measured formats
 
@@ -80,8 +81,8 @@ hosted projection + reduce + four-format job passed in 5m01s.
 
 Before treating this as a design:
 
-1. Implement the page decoder in the Worker and measure cold/warm R2 range
-   reads, gzip inflate CPU, candidate fanout, and cache behavior.
+1. Repeat the Worker measurement with a representative large side index,
+   multiple page-size tails, and more than one request geography.
 2. Sample small/median/large and non-US objects to measure structured-address
    retention, dictionary behavior, page-size tails, and shard skew.
 3. Include multi-source filepath dictionaries and real byte-balanced reduce
