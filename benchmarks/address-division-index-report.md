@@ -101,6 +101,10 @@ Official schema references: [Address](https://docs.overturemaps.org/schema/refer
 
 ## Next gate
 
+The bounded global producer, partitioning, promotion, and stop-gate proposal is
+documented in
+[`docs/plans/2026-07-14-global-places-address-processing-design.md`](../docs/plans/2026-07-14-global-places-address-processing-design.md).
+
 1. Repeat on one current-release country/region extract carrying source filepath
    and row-group locator fields.
 2. Preserve raw `address_levels` and measure their dictionary cost separately
