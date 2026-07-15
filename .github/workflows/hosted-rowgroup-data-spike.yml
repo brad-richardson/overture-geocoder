@@ -1,4 +1,4 @@
-name: Hosted address row-group data spike
+name: Hosted address map/reduce data spike
 
 on:
   workflow_dispatch:
@@ -11,9 +11,9 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  bounded-address-projection:
+  bounded-address-map-reduce:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 90
     env:
       PYTHONHASHSEED: "0"
       LC_ALL: C.UTF-8
@@ -35,7 +35,7 @@ jobs:
       - name: Record runner resources
         run: |
           {
-            echo "## Hosted address row-group data spike"
+            echo "## Hosted address map/reduce data spike"
             echo
             echo '```text'
             lscpu
@@ -53,20 +53,39 @@ jobs:
             --output /tmp/address-rowgroups.parquet \
             --json-out hosted-rowgroup-report.json \
             --max-object-bytes 900000000 \
-            --target-rowgroup-uncompressed-bytes 134217728 \
-            --max-rows 1500000 \
-            --max-groups 32 \
-            --max-output-bytes 134217728
+            --target-rowgroup-uncompressed-bytes 350000000 \
+            --max-rows 3750000 \
+            --max-groups 64 \
+            --max-output-bytes 400000000
+
+      - name: Build sorted map fragments and reduce one compact shard
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v python scripts/experiment_address_reduce.py \
+            --input /tmp/address-rowgroups.parquet \
+            --output /tmp/address-reduced.aidx \
+            --json-out hosted-address-reduce-report.json \
+            --work-dir /tmp \
+            --max-rows 4000000 \
+            --fragment-rows 128000 \
+            --sparse-stride 256 \
+            --max-artifact-bytes 1000000000 \
+            --max-workspace-bytes 12000000000
 
       - name: Summarize bounded measurement
         if: always()
         run: |
           {
             echo
-            echo "### Machine-readable report"
+            echo "### Projection report"
             echo '```json'
             test -f hosted-rowgroup-report.json && cat hosted-rowgroup-report.json
             echo '```'
             echo
-            echo "The projected Parquet file remains ephemeral on the runner. No artifact, R2 object, catalog, or production state was written."
+            echo "### Reduce report"
+            echo '```json'
+            test -f hosted-address-reduce-report.json && cat hosted-address-reduce-report.json
+            echo '```'
+            echo
+            echo "The projected input, map fragments, and reduced shard remain ephemeral on the runner. R2 shuffle latency is not measured. No artifact was uploaded and no catalog or production state was written."
           } >> "$GITHUB_STEP_SUMMARY"
