@@ -1,20 +1,31 @@
 {
+  "address_release": "unknown-historical",
+  "address_source_sha256": "b93f26145d0e0b8aeb7895a382dbc71a719a98a0f7aecefeb3ab731682781bcc",
   "addresses": "exports/US-MA.parquet",
   "artifact": {
-    "bytes": 114699538,
+    "bytes": 159252812,
     "components": {
-      "chain_blob": 32625,
+      "chain_blob": 33156,
+      "chain_offsets": 4952,
       "context_blob": 39405,
       "context_offsets": 12568,
-      "record_blob": 109155185,
-      "street_blob": 4465587,
+      "label_blob": 4203341,
+      "label_offsets": 993912,
+      "record_blob": 119501119,
+      "record_offsets": 29072328,
+      "street_blob": 4397745,
       "street_offsets": 993912
     },
     "path": "artifacts/addresses-ma-division.oadr",
+    "sha256": "88d839df7d2c9e77acd24a75c0173e1a9dd40284d8ed76d0ce9cc15983fdc0ff",
     "shape": {
-      "invalid_feature_ids": 0,
-      "maximum_record_group_bytes": 133013,
-      "median_record_group_bytes": 340
+      "maximum_record_group_bytes": 141029,
+      "median_record_group_bytes": 372
+    },
+    "verification": {
+      "exact_candidate_set": true,
+      "sample_candidate_count": 1,
+      "strict_reader_validation": true
     }
   },
   "database": {
@@ -36,32 +47,38 @@
       "street",
       "unit"
     ],
-    "join_seconds": 39.118482790421695
+    "join_seconds": 100.31318005593494,
+    "memory_limit": "12GB",
+    "threads": 4
   },
   "date": "2026-07-14",
   "division_area_rows": 635,
   "division_areas": "exports/US-MA-division-areas-2026-06-17.parquet",
   "division_release": "2026-06-17.0",
-  "elapsed_seconds": 73.65657419105992,
+  "division_source_sha256": "c3880d29addfef361760ce758271cf11ccd1393e101f7d35069feeee6d85b54e",
+  "duckdb_version": "1.5.4",
+  "elapsed_seconds": 135.68769399495795,
   "metrics": {
     "candidate_ambiguity": {
       "address_subtype_pairs": 11345463,
       "ambiguous_pairs": 45602,
-      "max_candidates": 2
+      "boundary_addresses": 0,
+      "max_candidates": 2,
+      "unmatched_addresses": 412
     },
     "context_stability": {
       "address_rows": 3634040,
       "contexts": 1570,
       "median_dominant_share": 1.0,
       "p90_dominant_share": 1.0,
-      "rows_on_dominant_chain": 3492728,
-      "unanimous_contexts": 859
+      "rows_on_dominant_chain": 3492465,
+      "unanimous_contexts": 851
     },
     "division_coverage": {
       "addresses": 3634040,
-      "distinct_chains": 614,
-      "requiring_chain_override": 141312,
-      "using_context_dominant_chain": 3492728,
+      "distinct_chains": 618,
+      "requiring_chain_override": 141575,
+      "using_context_dominant_chain": 3492465,
       "with_any_division": 3633628
     },
     "division_subtypes": [
@@ -84,14 +101,14 @@
         "subtype": "macrohood"
       },
       {
-        "distinct_divisions": 360,
-        "linked_addresses": 3620529,
+        "distinct_divisions": 363,
+        "linked_addresses": 3666068,
         "source_label_matches": 3296233,
         "subtype": "locality"
       },
       {
         "distinct_divisions": 111,
-        "linked_addresses": 31775,
+        "linked_addresses": 31838,
         "source_label_matches": 0,
         "subtype": "neighborhood"
       },
@@ -105,8 +122,9 @@
     "inventory": {
       "contexts": 1570,
       "distinct_street_names": 54396,
-      "division_chains": 614,
+      "division_chains": 618,
       "indexed_addresses": 3634040,
+      "source_label_sets": 124238,
       "street_groups": 124238
     },
     "street_group_shape": {

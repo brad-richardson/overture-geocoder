@@ -7,11 +7,11 @@ Date: 2026-07-14
 This is a design for the next implementation spike, not approval to publish a
 planet release.
 
-Use the always-on factory as an offline, pull-based producer. It reads a pinned
-Overture release, builds bounded immutable shard artifacts, verifies them, and
-uploads them to an unpublished R2 prefix. Cloudflare Workers continue to serve
-R2; the factory is never on the request path and is not registered as a general
-GitHub Actions runner.
+Target standard GitHub-hosted runners as the self-sustaining producer, using
+source-aware map/reduce jobs and R2 for intermediate fragments and final
+artifacts. Keep the always-on factory as a reference benchmark and optional
+manual fallback, not a required publisher. Cloudflare Workers continue to serve
+R2; neither build environment is ever on the request path.
 
 Build Places and addresses as separate families. They have different routing,
 index, ranking, and correctness requirements and should share only the release,
@@ -27,7 +27,7 @@ justify a production build.
 | family | working count | measured compact shape | linear one-release diagnostic | important exclusion |
 |---|---:|---:|---:|---|
 | Places | 75M | 116.7 B/place on a 1M California-area sample | 8.75 GB, about 75 spatial shards | global head, aliases, multilingual coverage, typo index |
-| addresses | 473M | 31.6 B/address on 3.63M Massachusetts rows | 14.93 GB; roughly 120–240 shards at the proposed 2–4M-row target | source locators, raw address levels, parser indexes |
+| addresses | 473M | 43.8 B/address on a reader-verified 3.63M Massachusetts artifact | 20.73 GB; roughly 120–240 shards at the proposed 2–4M-row target | source locators, raw address levels, parser indexes |
 | existing ID index | 3.59B registry rows plus 944M current address/base rows | current production artifact | 138.6 GB, 4,096 shards | unchanged by this design initially |
 
 These are planning numbers, not forecasts. The producer must inventory each
@@ -38,8 +38,8 @@ Measured factory envelopes:
 
 - Places 1M compact build: 23.2 seconds for final artifact assembly; the earlier
   Python page model peaked near 3.5 GiB.
-- Address + division build: 3.63M rows in 73.7 seconds, including a 39.1-second
-  spatial join; the experiment peaked around 9.3 GB.
+- Address + division build: 3.63M rows in 135.7 seconds with 4 threads and a
+  12 GB DuckDB limit, including a 100.3-second boundary-inclusive spatial join.
 - Factory capacity: 20 logical CPUs, 62 GiB RAM, and roughly 1.4 TiB free during
   the experiments. Production limits remain 12 CPU, 48 GiB working memory, and
   700 GiB temporary disk.
@@ -60,11 +60,10 @@ flowchart LR
     J --> K[Workers + R2 serving]
 ```
 
-The producer has no inbound port and no serving responsibility. Initially a
-human starts it over SSH. If orchestration is automated later, a narrowly scoped
-outbound process may poll for signed build requests; it must execute only the
-fixed producer command and use R2 credentials limited to staging release
-prefixes. GitHub-hosted CI remains responsible for tests and small smoke builds.
+The producer has no inbound port and no serving responsibility. Scheduled or
+manually dispatched GitHub workflows run only code merged to the protected
+default branch. The factory remains manually invoked and never registers as a
+runner for this public repository.
 
 Cloudflare responsibilities stay intentionally small:
 
@@ -114,9 +113,11 @@ no verified object is copied or renamed. A release manifest contains:
 - Family totals and verification results.
 
 The root catalog changes once, after all required families and the ID index are
-complete. Partial builds never become latest. Retention runs only after live
-health, search, reverse, and ID smoke checks pass. Keep at least three complete
-releases through the first global rehearsals.
+complete. Finalization is serialized with the existing production concurrency
+group and uses a monotonic expected-current/version precondition; a slower older
+build cannot overwrite a newer root pointer. Partial builds never become latest.
+Retention runs only after live health, search, reverse, and ID smoke checks pass.
+Keep at least three complete releases through the first global rehearsals.
 
 ## Partitioning rules
 
@@ -159,8 +160,8 @@ index. Prefer country, postcode prefix, locality, then a stable spatial fallback
 addresses/{country_or_XW}/{postcode_prefix_or_cell}/{split_path}
 ```
 
-- Target 2–4M rows and roughly 64–160 MB per shard. The measured 3.63M-row
-  artifact is 115 MB, so address cardinality does not require one object per
+- Target 2–4M rows and roughly 88–176 MB per shard. The measured 3.63M-row
+  reader-verified artifact is 159 MB, so address cardinality does not require one object per
   million rows.
 - Split an oversized postcode group deterministically by locality/spatial child;
   never split a street group across shards unless it alone exceeds the hard cap.
@@ -220,7 +221,54 @@ continues; it never trusts file existence alone.
    remote query smokes, publish one release manifest, atomically update the root
    catalog, run live smokes, then make retention eligible.
 
-## Factory scheduling and storage envelope
+## GitHub-hosted producer shape
+
+For this public repository, standard `ubuntu-latest` runners are free and have
+4 CPU, 16 GB RAM, and 14 GB SSD. Each hosted job is limited to six hours; a
+workflow matrix is limited to 256 jobs, and the Free-plan standard-runner
+concurrency is 20. Those limits make a bounded producer plausible but rule out
+the monolithic 40 GB-memory experiment process. See GitHub's
+[hosted-runner specifications](https://docs.github.com/en/actions/reference/runners/github-hosted-runners)
+and [Actions limits](https://docs.github.com/en/actions/reference/limits).
+
+Use a two-level source-aware map/reduce plan:
+
+1. An inventory job pins the release and assigns each source object/row-group
+   range to one of at most 128 map tasks.
+2. Map tasks read each source range once, project/normalize rows, assign stable
+   target partitions, and upload small content-addressed fragments plus a done
+   manifest directly to an unpublished R2 prefix.
+3. Separate Places and address reduce workflows each stay below the 256-job
+   matrix limit. A reduce task downloads only one target partition's fragments,
+   externally sorts within the 14 GB disk ceiling, builds/verifies its shard,
+   uploads it to R2, and deletes local state.
+4. A final job reads manifests from R2 rather than GitHub artifacts, verifies the
+   exact expected inventory, and requests serialized promotion.
+
+Every task ID is deterministic from release, producer commit, configuration,
+and input digests. On re-run it verifies an existing done manifest and skips or
+rebuilds just that task. `strategy.max-parallel` starts at four to avoid
+amplifying Overture S3 scans and R2 requests; throughput is increased only from
+measured evidence. GitHub artifact storage and cache are not cross-job data
+planes: their plan limits are far smaller than projected fragments.
+
+GitHub OIDC supplies short-lived workflow identity (`id-token: write`).
+Cloudflare R2 currently documents temporary credentials derived by a trusted
+server from a parent R2 token, not direct native GitHub federation. A small
+credential-broker Worker can validate issuer, audience, repository, default
+branch/environment, workflow SHA, and run claims, then mint 15-minute
+prefix-scoped R2 credentials. The parent never enters GitHub. See GitHub's
+[OIDC claim reference](https://docs.github.com/en/actions/reference/security/oidc)
+and Cloudflare's [R2 temporary-credential guidance](https://developers.cloudflare.com/r2/api/s3/temporary-credentials/).
+The first workflow spike may use the repository's existing staging-only R2
+secret, but production automation is blocked on the broker and revocation test.
+
+Never run publishing credentials on `pull_request` or `pull_request_target`,
+never check out fork code in a privileged job, validate all dispatch inputs as
+data rather than shell, pin third-party actions by commit SHA, and require a
+protected `production-publisher` environment for final promotion.
+
+## Factory reference envelope
 
 Use separate worker pools because the measured memory profiles differ:
 

@@ -54,9 +54,10 @@ preserving branch- or PR-specific history.
   Places architecture experiments in a reviewed decision record. Its compact
   spatial-shard direction retains a minimal useful result projection; Places
   serving and relevance remain experimental.
-- The address/division spike built a 114,699,538-byte compact artifact from
-  3,634,040 keyable Massachusetts addresses (31.6 B/address), including a
-  39.12-second point-in-polygon join to 635 current-release division areas. It
+- The address/division spike built a 159,252,812-byte reader-verified compact
+  artifact from 3,634,040 keyable Massachusetts addresses (43.8 B/address),
+  including a 100.31-second boundary-inclusive point-in-polygon join to 635
+  current-release division areas under 4 threads and a 12 GB limit. It
   proves a structured exact-address storage shape, not global parsing, fuzzy
   matching, interpolation, or production readiness.
 - The global Places/address processing design specifies a pull-based bounded
@@ -345,9 +346,10 @@ production catalog.
 
 The Massachusetts compact artifact confirms that structured address repetition
 can fit a much denser format than Places. Its hot record contains ID,
-coordinates, number, unit, and a normally-zero division-chain override; context
-and street strings are dictionary/group encoded. Source locators and raw address
-levels were absent from the historical address input and remain unmeasured.
+coordinates, number, unit, a source-label-set reference, and a normally-zero
+division-chain override; indexed dictionaries preserve source display labels and
+all covered division memberships. Source locators and raw address levels were
+absent from the historical address input and remain unmeasured.
 
 - Repeat on current-release Massachusetts and one non-US country while carrying
   filepath, row-group locator, raw `address_levels`, and `postal_city`.
