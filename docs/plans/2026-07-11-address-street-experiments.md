@@ -182,6 +182,28 @@ Official schema references:
 Until those pass, do not add interpolation, promote address/road shards, or
 change the public API/default types.
 
+## Compact address and division-link follow-up
+
+The compact address experiment in
+[`address-division-index-report.md`](../../benchmarks/address-division-index-report.md)
+built a real 114.7 MB binary from 3,634,040 keyable Massachusetts addresses,
+or 31.6 bytes/address. It grouped source address labels by postal context and
+street while retaining address ID, coordinates, number, and unit in the leaf.
+
+An offline point-in-polygon join against 635 current-release Massachusetts
+division areas attached region/county/locality and smaller-area division IDs.
+The join took 39.1 seconds, produced 614 distinct division chains, and linked
+3,633,628 addresses to at least one area. A dictionary-coded dominant chain per
+postal context covered 3,492,728 records; 141,312 records required an override.
+The chain table itself was only 32.6 KB.
+
+This supports division links as derived context and routing metadata. It does
+not support replacing source `address_levels` or `postal_city`, because those
+are country-dependent addressing labels rather than guaranteed administrative
+units. The next address gate is a current-release artifact containing raw
+address levels plus source locators, followed by an independently labelled
+one-line parsing benchmark.
+
 ## Current-release source follow-up
 
 The first acceptance experiment has a completed bounded result in
