@@ -253,14 +253,21 @@ candidate-group-aligned gzip pages targeting 256 rows preserved the full reducer
 response at 35.50 B/indexed row, with 8.98 KB p50 pages. The conservative
 all-473M-row diagnostic is 16.79 GB for addresses and about 25.54 GB combined
 with the current 8.75 GB Places diagnostic. This is bounded evidence, not a
-planet forecast. Next prove Worker range-read/gzip decode cost and sample global
-completeness/skew before any R2 credentials, upload, or promotion behavior.
+planet forecast. The isolated Worker decoder then served the lossless
+synthetic fixture sized to the observed 137-candidate maximum fanout in 434 ms
+for the first run-unique lookup and a 156 ms subsequent median. It decoded all
+records but returned only a compact verification body; Cache API hits were not
+instrumented. Strict cleanup removed both the Worker and its run-specific R2
+objects. Worker gzip/range-read cost is therefore not the immediate stop
+condition. Next sample global completeness, page tails, side-index scale, and
+shard skew before any catalog or production promotion behavior.
 
 ## Work inventory and execution priority
 
-Execute the remaining inventory in this order: finish the address format and
-global-completeness gates in items 4–5; measure Worker range reads; then add a
-hash-verifying R2 shuffle/resume spike. Keep Places relevance/global-head work
+Execute the remaining inventory in this order: finish the address
+global-completeness and skew gates in items 4–5; repeat Worker reads against a
+representative large index; then add a hash-verifying R2 shuffle/resume spike.
+Keep Places relevance/global-head work
 and the research-only exact-country comparator queued behind that bounded
 address decision. The item numbers preserve subject grouping rather than
 execution order. None of these experiments authorizes a production rebuild.

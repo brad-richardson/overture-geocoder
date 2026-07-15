@@ -1,0 +1,39 @@
+{
+  "cleanup": {
+    "r2_prefix_empty": true,
+    "worker_deleted": true
+  },
+  "fixture": {
+    "candidate_count": 137,
+    "data_bytes": 985,
+    "index_bytes": 60,
+    "page_offset": 64,
+    "page_bytes": 921,
+    "origin": "synthetic fixture sized to the observed 137-candidate maximum fanout",
+    "response_fidelity": "all records decoded with IDs, exact display fields, raw address levels, coordinates, and source locators; compact HTTP verification contains candidate count, first full record, and last ID"
+  },
+  "provenance": {
+    "commit": "b390704fca0f0f57adee9140368f896ecfe5a148",
+    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29445012372/job/87453195064",
+    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29445012372",
+    "runner": "ubuntu-24.04-arm in northcentralus"
+  },
+  "samples": [
+    {"attempt": 1, "sample_class": "first_run_unique_lookup", "server_milliseconds": 341, "wall_milliseconds": 434.450},
+    {"attempt": 2, "sample_class": "subsequent", "server_milliseconds": 30, "wall_milliseconds": 156.161},
+    {"attempt": 3, "sample_class": "subsequent", "server_milliseconds": 33, "wall_milliseconds": 158.005},
+    {"attempt": 4, "sample_class": "subsequent", "server_milliseconds": 32, "wall_milliseconds": 196.447},
+    {"attempt": 5, "sample_class": "subsequent", "server_milliseconds": 13, "wall_milliseconds": 56.976},
+    {"attempt": 6, "sample_class": "subsequent", "server_milliseconds": 16, "wall_milliseconds": 55.935}
+  ],
+  "schema": "overture-address-worker-decoder-report-v1",
+  "summary": {
+    "first_run_unique_lookup_server_milliseconds": 341,
+    "first_run_unique_lookup_wall_milliseconds": 434.450,
+    "subsequent_median_server_milliseconds": 30,
+    "subsequent_median_wall_milliseconds": 156.161,
+    "subsequent_min_server_milliseconds": 13,
+    "subsequent_min_wall_milliseconds": 55.935
+  },
+  "verdict": "pass-bounded"
+}
