@@ -14,9 +14,11 @@ whole shard or Parquet row group.
 
 This is promising bounded evidence, not approval for planet publication. The
 follow-up [Worker decoder spike](hosted-address-worker-decoder-report.md) passed:
-434 ms cold wall time and 156 ms warm median for the 137-candidate oracle. The
-remaining gate is global completeness and skew sampling; the measured source
-range retained only addresses with both street and number.
+434 ms for the first run-unique lookup and a 156 ms subsequent median for a
+synthetic fixture sized to the observed 137-candidate maximum fanout. Cache hits
+were not instrumented. The remaining gate is global completeness and skew
+sampling; the measured source range retained only addresses with both street
+and number.
 
 ## Measured formats
 
