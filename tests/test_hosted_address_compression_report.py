@@ -15,8 +15,10 @@ def test_compression_evidence_reconciles_and_preserves_oracle():
     assert report["schema"] == "overture-address-compression-spike-summary-v1"
     assert report["input"]["bytes_per_indexed_row"] == round(report["input"]["bytes"] / rows, 6)
     assert report["oracle"] == {
+        "candidate_groups_never_cross_pages": True,
         "candidate_order_and_ids_preserved": True,
         "distinct_lookup_keys": 1258445,
+        "indexed_candidate_sets_verified": 3,
         "maximum_candidate_fanout": 137,
         "maximum_fanout_id_sha256": "cac637ef1ec7b632de30a3000f8d8b120a98e3480888c8e680e0e41c870cbb53",
     }
@@ -29,8 +31,8 @@ def test_compression_evidence_is_bound_to_ephemeral_public_run():
     provenance = report["provenance"]
     markdown = MARKDOWN.read_text()
 
-    assert provenance["commit"] == "336e65ed0ddb0e708c8b23d0d525028cd2db8336"
-    assert provenance["github_actions_run"].endswith("/29437656817")
+    assert provenance["commit"] == "75ad75ce56de93b540eb266788037ea9d7d95379"
+    assert provenance["github_actions_run"].endswith("/29442273324")
     assert "not a global\nforecast" in markdown
     assert "No R2 object, artifact upload, catalog, or production state was written" in markdown
 

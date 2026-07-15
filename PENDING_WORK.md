@@ -248,10 +248,10 @@ The hosted address reducer then passed its current-release 1.38M-row retained
 range in 2m38s with 1.534 GB projection peak RSS, 715.4 MB reducer peak RSS,
 and exact maximum-fanout verification.
 
-The first address storage gate now has a credible path: independent 256-row
-gzip pages with front-coded keys and page-local dictionaries preserved the full
-reducer response at 35.51 B/indexed row, with 8.98 KB p50 pages. The conservative
-all-473M-row diagnostic is 16.80 GB for addresses and about 25.55 GB combined
+The first address storage gate now has a credible path: independent,
+candidate-group-aligned gzip pages targeting 256 rows preserved the full reducer
+response at 35.50 B/indexed row, with 8.98 KB p50 pages. The conservative
+all-473M-row diagnostic is 16.79 GB for addresses and about 25.54 GB combined
 with the current 8.75 GB Places diagnostic. This is bounded evidence, not a
 planet forecast. Next prove Worker range-read/gzip decode cost and sample global
 completeness/skew before any R2 credentials, upload, or promotion behavior.

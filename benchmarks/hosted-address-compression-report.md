@@ -1,15 +1,15 @@
 # Hosted address format/compression spike
 
 Date: 2026-07-15  
-GitHub Actions run: [29437656817](https://github.com/brad-richardson/overture-geocoder/actions/runs/29437656817)
+GitHub Actions run: [29442273324](https://github.com/brad-richardson/overture-geocoder/actions/runs/29442273324)
 
 ## Verdict
 
 The storage gate is no longer an immediate reason to abandon the address
 experiment. A range-local, self-contained response preserved every field in the
 reduce artifact and measured **35.51 B/indexed row**, 76.0% below the naive
-148.05 B baseline. Its independent 256-row gzip pages were 8.98 KB at p50 and
-10.12 KB at p95, so a lookup can fetch and inflate one small page rather than a
+148.05 B baseline. Its group-aligned gzip pages target 256 rows and measured
+8.98 KB at p50 and 10.11 KB at p95, so a lookup can fetch and inflate one small page rather than a
 whole shard or Parquet row group.
 
 This is promising bounded evidence, not approval for planet publication. The
@@ -25,10 +25,10 @@ preserves original display strings and every raw `address_levels` value.
 
 | format | response fidelity | bytes/row | total | p50 page | p95 page | full decode + verification |
 |---|---|---:|---:|---:|---:|---:|
-| bare | normalized only | 46.47 | 64.23 MB | 11.77 KB | 12.40 KB | 15.63 s |
-| bare + gzip | normalized only | 30.23 | 41.79 MB | 7.65 KB | 8.34 KB | 15.72 s |
-| useful | lossless vs reducer | 59.68 | 82.49 MB | 15.21 KB | 16.63 KB | 20.68 s |
-| **useful + gzip** | **lossless vs reducer** | **35.51** | **49.08 MB** | **8.98 KB** | **10.12 KB** | **22.01 s** |
+| bare | normalized only | 46.47 | 64.23 MB | 11.77 KB | 12.42 KB | 15.50 s |
+| bare + gzip | normalized only | 30.23 | 41.78 MB | 7.65 KB | 8.34 KB | 15.50 s |
+| useful | lossless vs reducer | 59.67 | 82.48 MB | 15.22 KB | 16.65 KB | 20.39 s |
+| **useful + gzip** | **lossless vs reducer** | **35.50** | **49.07 MB** | **8.98 KB** | **10.11 KB** | **21.75 s** |
 
 The bare gzip format saves only 5.28 B/row (2.50 GB across all 473M planning
 rows) versus useful gzip while discarding display fidelity and raw context. That
@@ -41,7 +41,7 @@ Each page is independently decodable:
 
 ```text
 sparse side index: first normalized key -> byte offset + byte length
-data page (256 rows):
+data page (target 256 rows; never split an exact-candidate group):
   page-local display-string dictionary
   page-local address-level-sequence dictionary
   front-coded normalized keys
@@ -50,31 +50,33 @@ data page (256 rows):
   optional independent gzip envelope
 ```
 
-The side index was only 358,719 bytes for 1,382,264 rows. The full experiment
-decoded and hashed every generated record back to its source representation,
-including the exact 137-candidate maximum-fanout group. No result truncation or
+The side index was only 359,010 bytes for 1,382,264 rows. The full experiment
+decoded and hashed every generated record back to its source representation.
+It also executed indexed lookups for three oracle groups, including the exact
+137-candidate maximum-fanout group, and verified that candidate groups never
+cross page boundaries. No result truncation or
 lossy coordinate change was introduced; coordinates were already E7 integers
 in the reducer baseline.
 
 ## Planet-scale diagnostics
 
-Linearizing the winning 35.51 B shape across all 473M planning rows gives
-16.80 GB for one address release. Adding the existing 8.75 GB compact Places
-diagnostic gives about **25.55 GB**, leaving roughly 14.45 GB under the 40 GB
+Linearizing the winning 35.50 B shape across all 473M planning rows gives
+16.79 GB for one address release. Adding the existing 8.75 GB compact Places
+diagnostic gives about **25.54 GB**, leaving roughly 14.46 GB under the 40 GB
 combined stop gate for catalogs, skew, aliases, and estimation error.
 
 If the measured 36.93% structured-address retention happened to hold globally,
 the address portion would be about 6.20 GB. It almost certainly will not hold
-uniformly, so 16.80 GB is the more useful conservative diagnostic—not a global
+uniformly, so 16.79 GB is the more useful conservative diagnostic—not a global
 forecast. At the winning density, 2–4M-row immutable shards are about 71–142 MB,
 inside the prior 96–192 MB neighborhood without exploding object count.
 
 ## Processing and remaining risks
 
 The format pass processed and fully verified all 1.38M rows and four variants
-in 2m58s with 29.8 MB peak RSS. Per-variant useful-gzip encoding accounted for
-22.18 seconds; decode and verification accounted for 22.01 seconds. The entire
-hosted projection + reduce + four-format job passed in 5m04s.
+in 2m55s with 33.9 MB peak RSS. Per-variant useful-gzip encoding accounted for
+21.92 seconds; decode and verification accounted for 21.75 seconds. The entire
+hosted projection + reduce + four-format job passed in 5m01s.
 
 Before treating this as a design:
 
@@ -85,7 +87,7 @@ Before treating this as a design:
 3. Include multi-source filepath dictionaries and real byte-balanced reduce
    partitions; this run binds one source object outside row records.
 4. Budget catalogs, release overlap, aliases, and retries. Do not spend the
-   apparent 14.45 GB headroom before those measurements.
+   apparent 14.46 GB headroom before those measurements.
 5. Keep hydration optional. The useful page is already a meaningful response;
    Overture Parquet/zstd decoding is not on the normal query path.
 
