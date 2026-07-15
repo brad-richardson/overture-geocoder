@@ -327,6 +327,9 @@ def build_fragments(
             "partition_id": SPIKE_PARTITION_ID,
             "sorted_by": "country/general/specific/postal_city/postcode/street/number/unit/id",
         }
+        header_size = len(FRAGMENT_MAGIC) + 4 + len(canonical_json(header))
+        if input_bytes + fragment_bytes + header_size > max_workspace_bytes:
+            raise ValueError("map fragment workspace exceeds hard byte cap")
         with path.open("wb") as output:
             write_envelope(output, FRAGMENT_MAGIC, header)
             for _, payload in records:
@@ -447,6 +450,7 @@ def build_artifact(
         fragment_bytes += manifest_bytes
         seen_indexes.add(index)
         seen_paths.add(path)
+    fragments = sorted(fragments, key=lambda item: item["index"])
     readers = [FragmentReader(Path(item["path"])) for item in fragments]
     try:
         source_digests = {reader.header["source_inventory_sha256"] for reader in readers}
@@ -506,16 +510,22 @@ def build_artifact(
                     current_count += 1
                     current_id_digest.update(uuid.UUID(key[-1]).bytes)
                     if rows % sparse_stride == 0:
-                        sparse_file.write(encode_uvarint(rows))
-                        sparse_file.write(encode_uvarint(record_file.tell()))
                         key_payload = key_prefix_payload(key)
                         if len(key_payload) > MAX_SPARSE_KEY_BYTES:
                             raise ValueError("sparse key exceeds hard byte cap")
-                        projected_sparse = input_bytes + fragment_bytes + record_file.tell() + sparse_file.tell() + len(key_payload) + 30
+                        sparse_entry = (
+                            encode_uvarint(rows)
+                            + encode_uvarint(record_file.tell())
+                            + encode_uvarint(len(key_payload))
+                            + key_payload
+                        )
+                        projected_sparse = (
+                            input_bytes + fragment_bytes + record_file.tell()
+                            + sparse_file.tell() + len(sparse_entry)
+                        )
                         if projected_sparse > max_workspace_bytes:
                             raise ValueError("reduce workspace exceeds hard byte cap")
-                        sparse_file.write(encode_uvarint(len(key_payload)))
-                        sparse_file.write(key_payload)
+                        sparse_file.write(sparse_entry)
                     if len(payload) > MAX_RECORD_BYTES:
                         raise ValueError("artifact record exceeds hard byte cap")
                     projected_records = input_bytes + fragment_bytes + record_file.tell() + sparse_file.tell() + 4 + len(payload)
@@ -606,9 +616,16 @@ class AddressReduceArtifact:
         self.header = read_envelope(self.file, ARTIFACT_MAGIC)
         if self.header.get("format") != FORMAT_VERSION:
             raise ValueError("unsupported reduce artifact format")
-        for field in ("records", "sparse_stride", "sparse_bytes", "record_bytes"):
-            if type(self.header.get(field)) is not int or self.header[field] <= 0:
+        for field in ("records", "sparse_bytes", "record_bytes"):
+            if type(self.header.get(field)) is not int or self.header[field] < 0:
                 raise ValueError(f"invalid reduce artifact {field}")
+        if type(self.header.get("sparse_stride")) is not int or self.header["sparse_stride"] <= 0:
+            raise ValueError("invalid reduce artifact sparse_stride")
+        if self.header["records"] == 0:
+            if self.header["sparse_bytes"] != 0 or self.header["record_bytes"] != 0:
+                raise ValueError("empty reduce artifact has non-empty sections")
+        elif self.header["sparse_bytes"] == 0 or self.header["record_bytes"] == 0:
+            raise ValueError("non-empty reduce artifact has an empty section")
         fragment_digests = self.header.get("fragment_sha256")
         if (
             not isinstance(fragment_digests, list)
@@ -638,7 +655,7 @@ class AddressReduceArtifact:
             if position != len(payload):
                 raise ValueError("invalid sparse key")
             self.sparse.append((tuple(key), ordinal, offset))
-        if self.file.tell() != end or not self.sparse:
+        if self.file.tell() != end or (self.header["records"] > 0 and not self.sparse):
             raise ValueError("invalid sparse directory")
         previous_key: tuple[str, ...] | None = None
         previous_offset = -1
@@ -701,16 +718,26 @@ class AddressReduceArtifact:
     ) -> list[dict[str, Any]]:
         if len(key) != KEY_FIELDS:
             raise ValueError(f"lookup key must have {KEY_FIELDS} fields")
-        if max_candidates <= 0 or max_scan_bytes <= 0:
-            raise ValueError("lookup caps must be positive")
+        if (
+            type(max_candidates) is not int or max_candidates <= 0
+            or type(max_scan_bytes) is not int or max_scan_bytes <= 0
+        ):
+            raise ValueError("lookup caps must be positive integers")
         normalized = tuple(normalize(value) for value in key)
+        if self.header["records"] == 0:
+            return []
         directory_keys = [item[0] for item in self.sparse]
         block = max(0, bisect.bisect_left(directory_keys, normalized) - 1)
         offset = self.sparse[block][2]
         scan_start = offset
         results = []
         while offset < self.header["record_bytes"]:
-            if offset - scan_start > max_scan_bytes:
+            self.file.seek(self.records_start + offset)
+            encoded_length = self.file.read(4)
+            if len(encoded_length) != 4:
+                raise ValueError("truncated artifact record")
+            next_size = struct.unpack("<I", encoded_length)[0]
+            if offset - scan_start + 4 + next_size > max_scan_bytes:
                 raise ValueError("lookup exceeds hard scan-byte cap")
             record, offset = self._record_at(offset)
             prefix = record["key"][:KEY_FIELDS]

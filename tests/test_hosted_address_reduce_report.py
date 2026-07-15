@@ -34,8 +34,8 @@ def test_reduce_evidence_is_bound_to_successful_ephemeral_run():
     verification = report["verification"]
     markdown = MARKDOWN.read_text()
 
-    assert provenance["commit"] == "bc74ad53ba2e75bdcfd12f4f8733564b7582c96e"
-    assert provenance["github_actions_run"].endswith("/29426441251")
+    assert provenance["commit"] == "c5b1ab01953d4466d48dd1dd32cef5e168b11e37"
+    assert provenance["github_actions_run"].endswith("/29436633251")
     assert verification == {
         "exact_candidate_sets": 3,
         "full_sorted_scan": True,

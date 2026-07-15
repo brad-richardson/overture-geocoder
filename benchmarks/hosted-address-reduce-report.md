@@ -13,8 +13,8 @@ The complete job passed in 2m38s. Projection peaked at 1,533,964,288 bytes RSS;
 the Python map-fragment sort, streaming k-way merge, assembly, and full
 verification peaked at 715,354,112 bytes RSS and used a conservative
 757,454,450-byte local workspace estimate. Both stages therefore have
-substantial headroom against the hosted runner's 16 GB RAM and 14 GB disk. R2
-fragment upload/download remains unmeasured.
+substantial headroom against the hosted runner's 16 GB RAM and 14 GB disk.
+R2 fragment upload/download remains unmeasured.
 
 ## Measured flow
 

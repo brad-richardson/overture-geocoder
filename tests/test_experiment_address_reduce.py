@@ -344,3 +344,64 @@ def test_artifact_header_length_is_bounded(tmp_path):
     )
     with pytest.raises(ValueError, match="header exceeds"):
         experiment.AddressReduceArtifact(path)
+
+
+def test_fragment_inventory_order_does_not_change_artifact(tmp_path):
+    digest = "a" * 64
+    fragments = [
+        write_fragment(
+            tmp_path / "a.bin",
+            [sample_record(feature_id=str(uuid.UUID(int=1)))],
+            digest,
+            0,
+        ),
+        write_fragment(
+            tmp_path / "b.bin",
+            [sample_record(feature_id=str(uuid.UUID(int=2)), number="11")],
+            digest,
+            1,
+        ),
+    ]
+    source = {
+        "source_inventory_sha256": digest,
+        "source_uri": "s3://example/source.parquet",
+        "source_etag": "etag",
+        "release": "2026-06-17.0",
+        "family": "addresses",
+    }
+    outputs = [tmp_path / "forward.aidx", tmp_path / "reverse.aidx"]
+    for inventory, output in ((fragments, outputs[0]), (list(reversed(fragments)), outputs[1])):
+        experiment.build_artifact(
+            inventory, output, source=source, sparse_stride=2,
+            max_artifact_bytes=1_000_000, max_workspace_bytes=2_000_000,
+            input_bytes=0,
+        )
+    assert outputs[0].read_bytes() == outputs[1].read_bytes()
+
+
+def test_empty_partition_has_canonical_readable_artifact(tmp_path):
+    digest = "a" * 64
+    fragment = write_fragment(tmp_path / "empty.bin", [], digest, 0)
+    source = {
+        "source_inventory_sha256": digest,
+        "source_uri": "s3://example/source.parquet",
+        "source_etag": "etag",
+        "release": "2026-06-17.0",
+        "family": "addresses",
+    }
+    output = tmp_path / "empty.aidx"
+    report = experiment.build_artifact(
+        [fragment], output, source=source, sparse_stride=2,
+        max_artifact_bytes=1_000_000, max_workspace_bytes=2_000_000,
+        input_bytes=0,
+    )
+    with experiment.AddressReduceArtifact(output) as artifact:
+        assert artifact.lookup(("US", "MA", "", "", "", "Main", "1", "")) == []
+        assert artifact.verify([]) == {
+            "full_sorted_scan": True,
+            "record_count_match": True,
+            "exact_candidate_sets": 0,
+        }
+    assert report["rows"] == 0
+    assert report["record_bytes"] == 0
+    assert report["sparse_bytes"] == 0
