@@ -72,6 +72,21 @@ jobs:
             --max-artifact-bytes 1000000000 \
             --max-workspace-bytes 12000000000
 
+      - name: Compare range-readable address formats and compression
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v python scripts/experiment_address_compression.py \
+            --input /tmp/address-reduced.aidx \
+            --output-dir /tmp/address-compression \
+            --json-out hosted-address-compression-report.json \
+            --page-rows 256 \
+            --planning-rows 473000000 \
+            --max-input-bytes 1000000000 \
+            --max-output-bytes 1000000000 \
+            --max-workspace-bytes 6000000000 \
+            --max-page-bytes 8388608 \
+            --max-page-rows 10000
+
       - name: Summarize bounded measurement
         if: always()
         run: |
@@ -85,6 +100,11 @@ jobs:
             echo "### Reduce report"
             echo '```json'
             test -f hosted-address-reduce-report.json && cat hosted-address-reduce-report.json
+            echo '```'
+            echo
+            echo "### Format/compression report"
+            echo '```json'
+            test -f hosted-address-compression-report.json && cat hosted-address-compression-report.json
             echo '```'
             echo
             echo "The projected input, map fragments, and reduced shard remain ephemeral on the runner. R2 shuffle latency is not measured. No artifact was uploaded and no catalog or production state was written."

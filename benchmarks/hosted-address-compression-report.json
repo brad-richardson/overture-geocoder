@@ -1,0 +1,84 @@
+{
+  "input": {
+    "bytes": 204646996,
+    "bytes_per_indexed_row": 148.052033,
+    "records": 1382264,
+    "sha256": "f7ee6db4af3ae185f907de7a5fbad06ca1374edf7561415884e746c8a66e0cee"
+  },
+  "oracle": {
+    "candidate_groups_never_cross_pages": true,
+    "candidate_order_and_ids_preserved": true,
+    "distinct_lookup_keys": 1258445,
+    "indexed_candidate_sets_verified": 3,
+    "maximum_candidate_fanout": 137,
+    "maximum_fanout_id_sha256": "cac637ef1ec7b632de30a3000f8d8b120a98e3480888c8e680e0e41c870cbb53"
+  },
+  "page_rows": 256,
+  "pages": 5392,
+  "provenance": {
+    "commit": "75ad75ce56de93b540eb266788037ea9d7d95379",
+    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29442273324/job/87443952571",
+    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29442273324",
+    "overture_release": "2026-06-17.0"
+  },
+  "resources": {
+    "experiment_peak_rss_bytes": 33865728,
+    "experiment_wall_seconds": 175.48,
+    "hosted_job_wall_seconds": 301
+  },
+  "schema": "overture-address-compression-spike-summary-v1",
+  "variants": {
+    "bare": {
+      "accuracy": "exact normalized candidate keys, coordinates, IDs, and locators; drops display casing and raw address levels",
+      "bytes_per_indexed_row": 46.469138,
+      "compression": "none",
+      "decode_and_verify_seconds": 15.499629,
+      "encode_seconds": 14.651807,
+      "index_bytes": 359066,
+      "indexed_candidate_sets_verified": 3,
+      "linear_all_473m_rows_gb": 21.98,
+      "p50_page_bytes": 11774,
+      "p95_page_bytes": 12419,
+      "total_bytes": 64232616
+    },
+    "bare_gzip": {
+      "accuracy": "exact normalized candidate keys, coordinates, IDs, and locators; drops display casing and raw address levels",
+      "bytes_per_indexed_row": 30.22913,
+      "compression": "independent gzip page",
+      "decode_and_verify_seconds": 15.495305,
+      "encode_seconds": 16.077623,
+      "index_bytes": 358969,
+      "indexed_candidate_sets_verified": 3,
+      "linear_all_473m_rows_gb": 14.298,
+      "p50_page_bytes": 7654,
+      "p95_page_bytes": 8344,
+      "total_bytes": 41784638
+    },
+    "useful": {
+      "accuracy": "lossless relative to reducer: exact keys, display fields, raw address levels, coordinates, IDs, and locators",
+      "bytes_per_indexed_row": 59.672211,
+      "compression": "none",
+      "decode_and_verify_seconds": 20.388224,
+      "encode_seconds": 20.285666,
+      "index_bytes": 359489,
+      "indexed_candidate_sets_verified": 3,
+      "linear_all_473m_rows_gb": 28.225,
+      "p50_page_bytes": 15220,
+      "p95_page_bytes": 16652,
+      "total_bytes": 82482749
+    },
+    "useful_gzip": {
+      "accuracy": "lossless relative to reducer: exact keys, display fields, raw address levels, coordinates, IDs, and locators",
+      "bytes_per_indexed_row": 35.502976,
+      "compression": "independent gzip page",
+      "decode_and_verify_seconds": 21.748513,
+      "encode_seconds": 21.920154,
+      "index_bytes": 359010,
+      "indexed_candidate_sets_verified": 3,
+      "linear_all_473m_rows_gb": 16.793,
+      "p50_page_bytes": 8983,
+      "p95_page_bytes": 10109,
+      "total_bytes": 49074485
+    }
+  }
+}

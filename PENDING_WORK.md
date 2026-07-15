@@ -248,16 +248,13 @@ The hosted address reducer then passed its current-release 1.38M-row retained
 range in 2m38s with 1.534 GB projection peak RSS, 715.4 MB reducer peak RSS,
 and exact maximum-fanout verification.
 
-The next active format gate is storage shape. Hosted reducer compute is
-encouraging, while exact fragment verification, global skew, multi-source
-locators, bounded Worker fanout, and R2 shuffle/resume remain unresolved. The
-first reducer encoding is 148.1 B/indexed row and is rejected for planet
-publication. Next
-preserve the same current-release candidate oracle while measuring dictionary/
-prefix compression, raw-address-level and source-locator dictionaries, and a
-bare but useful hot response. Do not add R2 credentials or promotion behavior
-until the address estimate leaves credible room under the combined 40 GB
-Places/address stop gate.
+The first address storage gate now has a credible path: independent,
+candidate-group-aligned gzip pages targeting 256 rows preserved the full reducer
+response at 35.50 B/indexed row, with 8.98 KB p50 pages. The conservative
+all-473M-row diagnostic is 16.79 GB for addresses and about 25.54 GB combined
+with the current 8.75 GB Places diagnostic. This is bounded evidence, not a
+planet forecast. Next prove Worker range-read/gzip decode cost and sample global
+completeness/skew before any R2 credentials, upload, or promotion behavior.
 
 ## Work inventory and execution priority
 
