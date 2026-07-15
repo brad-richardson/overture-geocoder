@@ -64,11 +64,19 @@ curl "https://geocoder.bradr.dev/search?q=boston&limit=1"
 |-----------|------|---------|-------------|
 | `lat` | float | required | Latitude (-90 to 90); used for reverse lookup and country-shard routing |
 | `lon` | float | required | Longitude (-180 to 180) |
+| `format` | string | json | Response format: `json` or `geojson` |
+| `debug` | bool | false | For JSON responses, include bounded country-routing diagnostics |
 
 **Example:**
 ```bash
 curl "https://geocoder.bradr.dev/reverse?lat=42.3601&lon=-71.0589"
 ```
+
+With `debug=true`, `debug.country_routing` reports the bbox decision, final
+country-shard/global-fallback outcome, candidate count, at most eight sorted
+candidate shard IDs, and the selected country when one was selected. Requested
+coordinates own this decision; the caller's IP country is not a substitute for
+missing or ambiguous geometric evidence.
 
 ### GERS ID Lookup
 
@@ -127,6 +135,15 @@ graph LR
     R2 --> SQLite[SQLite Shards]
     R2 --> Parquet[Parquet ID Index]
 ```
+
+## Experimental Places search
+
+The completed architecture spike selects a compact, range-readable spatial
+binary plus a small packed global head as the next Places/POI direction. It
+establishes a workable storage and release-build shape, but not production
+relevance or a finished Worker reader. See the
+[Places search spike decision](docs/places-search-spike.md) for the experiments,
+measured tradeoffs, rejected designs, and next implementation gate.
 
 ## Performance
 

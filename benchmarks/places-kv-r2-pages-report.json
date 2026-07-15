@@ -1,0 +1,1775 @@
+{
+  "schema_version": 1,
+  "fixture": {
+    "places": 1768,
+    "scope": "input Places corpus; measured page serialization",
+    "human_label_status": "no independent labels; recall is exact agreement with a brute-force fixture oracle"
+  },
+  "architecture": {
+    "kv": "two tiny keys: active/rollback release pointer and format/page-target metadata; assumed edge-cached",
+    "r2": "immutable lexical, 4096-way hash-bucket posting roots/overflow, and result pages; term hash derives the root key",
+    "direct_prefix_lengths": [
+      2,
+      3,
+      4
+    ],
+    "overflow": "bucket root identifies deterministic overflow pages; every page is traversed before ranking; no cap/truncation"
+  },
+  "configurations": {
+    "uniform_16k": {
+      "inventory": {
+        "targets_bytes": {
+          "lexical": 16384,
+          "posting": 16384,
+          "result": 16384
+        },
+        "objects": 6189,
+        "published_bytes": 562822,
+        "max_object_bytes": 16369,
+        "components": {
+          "lexical": {
+            "pages": 1996,
+            "bytes": 76140
+          },
+          "exact_postings": {
+            "pages": 1991,
+            "bytes": 136647
+          },
+          "prefix_postings": {
+            "pages": 2192,
+            "bytes": 196195
+          },
+          "results": {
+            "pages": 10,
+            "bytes": 153840
+          }
+        },
+        "kv_directory_bytes": 173,
+        "kv_keys": 2
+      },
+      "warm_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 32744,
+          "useful_bytes": 151,
+          "page_amplification": 216.8476821192053,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 16869,
+          "useful_bytes": 591,
+          "page_amplification": 28.543147208121827,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 7,
+          "kv_operations": 0,
+          "total_operations": 7,
+          "bytes_transferred": 72340,
+          "useful_bytes": 980,
+          "page_amplification": 73.81632653061224,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 5,
+          "kv_operations": 0,
+          "total_operations": 5,
+          "bytes_transferred": 65839,
+          "useful_bytes": 1246,
+          "page_amplification": 52.840288924558585,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 7,
+          "kv_operations": 0,
+          "total_operations": 7,
+          "bytes_transferred": 76271,
+          "useful_bytes": 11507,
+          "page_amplification": 6.628226297036586,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 4,
+          "kv_operations": 0,
+          "total_operations": 4,
+          "bytes_transferred": 32799,
+          "useful_bytes": 182,
+          "page_amplification": 180.21428571428572,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "cold_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 32744,
+          "useful_bytes": 151,
+          "page_amplification": 216.8476821192053,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 16869,
+          "useful_bytes": 591,
+          "page_amplification": 28.543147208121827,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 7,
+          "kv_operations": 1,
+          "total_operations": 8,
+          "bytes_transferred": 72340,
+          "useful_bytes": 980,
+          "page_amplification": 73.81632653061224,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 5,
+          "kv_operations": 1,
+          "total_operations": 6,
+          "bytes_transferred": 65839,
+          "useful_bytes": 1246,
+          "page_amplification": 52.840288924558585,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 7,
+          "kv_operations": 1,
+          "total_operations": 8,
+          "bytes_transferred": 76271,
+          "useful_bytes": 11507,
+          "page_amplification": 6.628226297036586,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 4,
+          "kv_operations": 1,
+          "total_operations": 5,
+          "bytes_transferred": 32799,
+          "useful_bytes": 182,
+          "page_amplification": 180.21428571428572,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "warm_gates": {
+        "routing_cache": "warm-catalog",
+        "typical_max_operations": 7,
+        "typical_max_bytes": 72340,
+        "typical_pass": false,
+        "worst_max_operations": 7,
+        "worst_max_bytes": 76271,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "cold_gates": {
+        "routing_cache": "cold-kv",
+        "typical_max_operations": 8,
+        "typical_max_bytes": 72340,
+        "typical_pass": false,
+        "worst_max_operations": 8,
+        "worst_max_bytes": 76271,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "synthetic_high_fanout_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 92,
+        "posting_pages": 93,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 94,
+        "bytes_transferred": 1518827,
+        "page_amplification": 1.0119037149557617,
+        "worst_gate_pass": false
+      },
+      "synthetic_high_fanout_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 92,
+        "posting_pages": 93,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 95,
+        "bytes_transferred": 1518827,
+        "page_amplification": 1.0119037149557617,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 92,
+        "posting_pages": 93,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 103,
+        "bytes_transferred": 1666283,
+        "page_amplification": 1.1101448406353267,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 92,
+        "posting_pages": 93,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 104,
+        "bytes_transferred": 1666283,
+        "page_amplification": 1.1101448406353267,
+        "worst_gate_pass": false
+      }
+    },
+    "uniform_64k": {
+      "inventory": {
+        "targets_bytes": {
+          "lexical": 65536,
+          "posting": 65536,
+          "result": 65536
+        },
+        "objects": 6182,
+        "published_bytes": 562654,
+        "max_object_bytes": 65468,
+        "components": {
+          "lexical": {
+            "pages": 1996,
+            "bytes": 76140
+          },
+          "exact_postings": {
+            "pages": 1991,
+            "bytes": 136647
+          },
+          "prefix_postings": {
+            "pages": 2192,
+            "bytes": 196195
+          },
+          "results": {
+            "pages": 3,
+            "bytes": 153672
+          }
+        },
+        "kv_directory_bytes": 173,
+        "kv_keys": 2
+      },
+      "warm_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 2,
+          "kv_operations": 0,
+          "total_operations": 2,
+          "bytes_transferred": 65534,
+          "useful_bytes": 151,
+          "page_amplification": 434.0,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 66017,
+          "useful_bytes": 591,
+          "page_amplification": 111.70389170896784,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 5,
+          "kv_operations": 0,
+          "total_operations": 5,
+          "bytes_transferred": 153867,
+          "useful_bytes": 980,
+          "page_amplification": 157.00714285714287,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 131429,
+          "useful_bytes": 1246,
+          "page_amplification": 105.48073836276083,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 5,
+          "kv_operations": 0,
+          "total_operations": 5,
+          "bytes_transferred": 141836,
+          "useful_bytes": 11507,
+          "page_amplification": 12.326062396801946,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 65589,
+          "useful_bytes": 182,
+          "page_amplification": 360.3791208791209,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "cold_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 2,
+          "kv_operations": 1,
+          "total_operations": 3,
+          "bytes_transferred": 65534,
+          "useful_bytes": 151,
+          "page_amplification": 434.0,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 66017,
+          "useful_bytes": 591,
+          "page_amplification": 111.70389170896784,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 5,
+          "kv_operations": 1,
+          "total_operations": 6,
+          "bytes_transferred": 153867,
+          "useful_bytes": 980,
+          "page_amplification": 157.00714285714287,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 131429,
+          "useful_bytes": 1246,
+          "page_amplification": 105.48073836276083,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 5,
+          "kv_operations": 1,
+          "total_operations": 6,
+          "bytes_transferred": 141836,
+          "useful_bytes": 11507,
+          "page_amplification": 12.326062396801946,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 65589,
+          "useful_bytes": 182,
+          "page_amplification": 360.3791208791209,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "warm_gates": {
+        "routing_cache": "warm-catalog",
+        "typical_max_operations": 5,
+        "typical_max_bytes": 153867,
+        "typical_pass": false,
+        "worst_max_operations": 5,
+        "worst_max_bytes": 141836,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "cold_gates": {
+        "routing_cache": "cold-kv",
+        "typical_max_operations": 6,
+        "typical_max_bytes": 153867,
+        "typical_pass": false,
+        "worst_max_operations": 6,
+        "worst_max_bytes": 141836,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "synthetic_high_fanout_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 23,
+        "posting_pages": 24,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 25,
+        "bytes_transferred": 1566188,
+        "page_amplification": 1.0434575205202004,
+        "worst_gate_pass": false
+      },
+      "synthetic_high_fanout_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 23,
+        "posting_pages": 24,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 26,
+        "bytes_transferred": 1566188,
+        "page_amplification": 1.0434575205202004,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 23,
+        "posting_pages": 24,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 34,
+        "bytes_transferred": 2156012,
+        "page_amplification": 1.4364220232384608,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 23,
+        "posting_pages": 24,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 35,
+        "bytes_transferred": 2156012,
+        "page_amplification": 1.4364220232384608,
+        "worst_gate_pass": false
+      }
+    },
+    "uniform_256k": {
+      "inventory": {
+        "targets_bytes": {
+          "lexical": 262144,
+          "posting": 262144,
+          "result": 262144
+        },
+        "objects": 6180,
+        "published_bytes": 562606,
+        "max_object_bytes": 153624,
+        "components": {
+          "lexical": {
+            "pages": 1996,
+            "bytes": 76140
+          },
+          "exact_postings": {
+            "pages": 1991,
+            "bytes": 136647
+          },
+          "prefix_postings": {
+            "pages": 2192,
+            "bytes": 196195
+          },
+          "results": {
+            "pages": 1,
+            "bytes": 153624
+          }
+        },
+        "kv_directory_bytes": 176,
+        "kv_keys": 2
+      },
+      "warm_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 2,
+          "kv_operations": 0,
+          "total_operations": 2,
+          "bytes_transferred": 153690,
+          "useful_bytes": 151,
+          "page_amplification": 1017.8145695364238,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 154173,
+          "useful_bytes": 591,
+          "page_amplification": 260.8680203045685,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 153819,
+          "useful_bytes": 980,
+          "page_amplification": 156.95816326530613,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 2,
+          "kv_operations": 0,
+          "total_operations": 2,
+          "bytes_transferred": 154122,
+          "useful_bytes": 1246,
+          "page_amplification": 123.69341894060994,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 4,
+          "kv_operations": 0,
+          "total_operations": 4,
+          "bytes_transferred": 164529,
+          "useful_bytes": 11507,
+          "page_amplification": 14.298166333536109,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 153745,
+          "useful_bytes": 182,
+          "page_amplification": 844.7527472527472,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "cold_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 2,
+          "kv_operations": 1,
+          "total_operations": 3,
+          "bytes_transferred": 153690,
+          "useful_bytes": 151,
+          "page_amplification": 1017.8145695364238,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 154173,
+          "useful_bytes": 591,
+          "page_amplification": 260.8680203045685,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 153819,
+          "useful_bytes": 980,
+          "page_amplification": 156.95816326530613,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 2,
+          "kv_operations": 1,
+          "total_operations": 3,
+          "bytes_transferred": 154122,
+          "useful_bytes": 1246,
+          "page_amplification": 123.69341894060994,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 4,
+          "kv_operations": 1,
+          "total_operations": 5,
+          "bytes_transferred": 164529,
+          "useful_bytes": 11507,
+          "page_amplification": 14.298166333536109,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 153745,
+          "useful_bytes": 182,
+          "page_amplification": 844.7527472527472,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "warm_gates": {
+        "routing_cache": "warm-catalog",
+        "typical_max_operations": 3,
+        "typical_max_bytes": 154173,
+        "typical_pass": true,
+        "worst_max_operations": 4,
+        "worst_max_bytes": 164529,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "cold_gates": {
+        "routing_cache": "cold-kv",
+        "typical_max_operations": 4,
+        "typical_max_bytes": 154173,
+        "typical_pass": false,
+        "worst_max_operations": 5,
+        "worst_max_bytes": 164529,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "synthetic_high_fanout_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 8,
+        "bytes_transferred": 1762354,
+        "page_amplification": 1.1741512098923357,
+        "worst_gate_pass": true
+      },
+      "synthetic_high_fanout_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 9,
+        "bytes_transferred": 1762354,
+        "page_amplification": 1.1741512098923357,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 17,
+        "bytes_transferred": 4121650,
+        "page_amplification": 2.746009220765377,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 18,
+        "bytes_transferred": 4121650,
+        "page_amplification": 2.746009220765377,
+        "worst_gate_pass": false
+      }
+    },
+    "hybrid_16k_256k_64k": {
+      "inventory": {
+        "targets_bytes": {
+          "lexical": 16384,
+          "posting": 262144,
+          "result": 65536
+        },
+        "objects": 6182,
+        "published_bytes": 562654,
+        "max_object_bytes": 65468,
+        "components": {
+          "lexical": {
+            "pages": 1996,
+            "bytes": 76140
+          },
+          "exact_postings": {
+            "pages": 1991,
+            "bytes": 136647
+          },
+          "prefix_postings": {
+            "pages": 2192,
+            "bytes": 196195
+          },
+          "results": {
+            "pages": 3,
+            "bytes": 153672
+          }
+        },
+        "kv_directory_bytes": 174,
+        "kv_keys": 2
+      },
+      "warm_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 2,
+          "kv_operations": 0,
+          "total_operations": 2,
+          "bytes_transferred": 65534,
+          "useful_bytes": 151,
+          "page_amplification": 434.0,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 66017,
+          "useful_bytes": 591,
+          "page_amplification": 111.70389170896784,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 5,
+          "kv_operations": 0,
+          "total_operations": 5,
+          "bytes_transferred": 153867,
+          "useful_bytes": 980,
+          "page_amplification": 157.00714285714287,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 131429,
+          "useful_bytes": 1246,
+          "page_amplification": 105.48073836276083,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 5,
+          "kv_operations": 0,
+          "total_operations": 5,
+          "bytes_transferred": 141836,
+          "useful_bytes": 11507,
+          "page_amplification": 12.326062396801946,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 0,
+          "total_operations": 3,
+          "bytes_transferred": 65589,
+          "useful_bytes": 182,
+          "page_amplification": 360.3791208791209,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "cold_queries": [
+        {
+          "name": "starbucks_exact",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 2,
+          "kv_operations": 1,
+          "total_operations": 3,
+          "bytes_transferred": 65534,
+          "useful_bytes": 151,
+          "page_amplification": 434.0,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        },
+        {
+          "name": "warfield_hotel_tokens",
+          "tier": "typical",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 149,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 66017,
+          "useful_bytes": 591,
+          "page_amplification": 111.70389170896784,
+          "result_ids": [
+            "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+            "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+          ]
+        },
+        {
+          "name": "golden_gate_prefix",
+          "tier": "typical",
+          "candidate_count": 9,
+          "oracle_candidate_count": 9,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 29,
+          "r2_operations": 5,
+          "kv_operations": 1,
+          "total_operations": 6,
+          "bytes_transferred": 153867,
+          "useful_bytes": 980,
+          "page_amplification": 157.00714285714287,
+          "result_ids": [
+            "9716e3b5-67c0-496b-b08c-7aa42ba40ead",
+            "4e5e7c20-1fd7-47bc-a5bb-e65c9a06405f",
+            "44912862-9bc4-4d34-b635-3a54d90d8ade",
+            "018a5859-0500-4c81-aef1-2731b382dc31",
+            "8d53c4cc-26d9-487b-a6d5-23cb4f87ace9",
+            "4117b848-50e8-4b1b-b015-3f704cef263c",
+            "a3235dd8-5c0e-4562-951d-688ae00c18e3",
+            "83d8ed3b-3444-46fe-9bea-d45675f399be",
+            "6173f999-1522-4c8e-a75d-525ce36cd671"
+          ]
+        },
+        {
+          "name": "hotel_category",
+          "tier": "typical",
+          "candidate_count": 125,
+          "oracle_candidate_count": 125,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 146,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 131429,
+          "useful_bytes": 1246,
+          "page_amplification": 105.48073836276083,
+          "result_ids": [
+            "7bf71585-9d47-41de-8dd0-f29ba0f9255d",
+            "071d266f-8907-4d85-b4e5-fd906d8cf806",
+            "d9ebfe2f-b606-4123-8685-0832242dcf05",
+            "1811b036-985c-4e9a-a65c-bd79058ca7da",
+            "073ea526-d775-449e-88f7-9def0f203c82",
+            "b3b95378-2a72-4266-8f3c-c2acfb3d7735",
+            "0abda0ed-dcb9-4fbf-b275-f8eb56835b25",
+            "d9323ca7-1f6e-48cd-a013-18b560206631",
+            "c888dd84-0ae3-46d2-a85d-d43cde769899",
+            "4dbe77df-723b-4bf1-a50f-c2d929d36b94"
+          ]
+        },
+        {
+          "name": "sf_cafe_context",
+          "tier": "worst_supported",
+          "candidate_count": 53,
+          "oracle_candidate_count": 53,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 3579,
+          "r2_operations": 5,
+          "kv_operations": 1,
+          "total_operations": 6,
+          "bytes_transferred": 141836,
+          "useful_bytes": 11507,
+          "page_amplification": 12.326062396801946,
+          "result_ids": [
+            "75ea5687-a4f7-47f9-a44e-cfec75984a70",
+            "4e825ab0-cbd9-4013-96ce-b57929950318",
+            "acba3d42-264d-4eeb-91b9-eced511c6751",
+            "84d0273a-f7f9-43ed-9090-dea30bfba2bb",
+            "23f60f89-40e9-4600-bc87-9c7b78f56f8d",
+            "ecc457b5-368e-4e1b-ae55-c0905953fbce",
+            "df69386d-60d5-4ee2-a95e-0bc6117c33c6",
+            "96362664-5790-467c-92aa-d799b4a201e8",
+            "95abee61-ba2c-4c32-889b-8b2638fd04dc",
+            "878b52bb-656d-438a-83b1-b58008864442"
+          ]
+        },
+        {
+          "name": "starbucks_long_prefix",
+          "tier": "worst_supported",
+          "candidate_count": 2,
+          "oracle_candidate_count": 2,
+          "complete_fixture_recall": true,
+          "posting_entries_traversed": 2,
+          "r2_operations": 3,
+          "kv_operations": 1,
+          "total_operations": 4,
+          "bytes_transferred": 65589,
+          "useful_bytes": 182,
+          "page_amplification": 360.3791208791209,
+          "result_ids": [
+            "8523df93-31d9-4df2-9362-584d098101a4",
+            "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+          ]
+        }
+      ],
+      "warm_gates": {
+        "routing_cache": "warm-catalog",
+        "typical_max_operations": 5,
+        "typical_max_bytes": 153867,
+        "typical_pass": false,
+        "worst_max_operations": 5,
+        "worst_max_bytes": 141836,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "cold_gates": {
+        "routing_cache": "cold-kv",
+        "typical_max_operations": 6,
+        "typical_max_bytes": 153867,
+        "typical_pass": false,
+        "worst_max_operations": 6,
+        "worst_max_bytes": 141836,
+        "worst_pass": true,
+        "complete_fixture_recall": true
+      },
+      "synthetic_high_fanout_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 8,
+        "bytes_transferred": 1565746,
+        "page_amplification": 1.0431630423195821,
+        "worst_gate_pass": true
+      },
+      "synthetic_high_fanout_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results co-located in one full result page",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 1,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 9,
+        "bytes_transferred": 1565746,
+        "page_amplification": 1.0431630423195821,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_warm": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 17,
+        "bytes_transferred": 2155570,
+        "page_amplification": 1.4361275450378423,
+        "worst_gate_pass": false
+      },
+      "synthetic_scattered_results_cold": {
+        "synthetic": true,
+        "distribution": "500,000 documents share one brand token; top-10 results occupy ten full result pages",
+        "posting_count": 500000,
+        "posting_root_pages": 1,
+        "posting_overflow_pages": 6,
+        "posting_pages": 7,
+        "result_pages": 10,
+        "decoded_posting_count": 500000,
+        "full_traversal": true,
+        "total_operations": 18,
+        "bytes_transferred": 2155570,
+        "page_amplification": 1.4361275450378423,
+        "worst_gate_pass": false
+      }
+    }
+  },
+  "selected_configuration": "uniform_256k",
+  "selection_gate_passed": true,
+  "linear_shape_only": {
+    "fixture_published_bytes_per_place": 318.2160633484163,
+    "one_global_release_gb_at_75m": 23.86620475113122,
+    "two_retained_global_releases_gb": 47.73240950226244,
+    "warning": "not a forecast; token, language, field, fanout, and compression distributions can differ globally"
+  },
+  "pricing": {
+    "as_of": "2026-07-14",
+    "workers_base_monthly_usd": 5.0,
+    "workers_included_requests": 10000000,
+    "workers_additional_per_million_usd": 0.3,
+    "workers_included_cpu_ms": 30000000,
+    "workers_additional_cpu_million_ms_usd": 0.02,
+    "r2_standard_storage_gb_month_usd": 0.015,
+    "r2_included_storage_gb_month": 10,
+    "r2_class_a_per_million_usd": 4.5,
+    "r2_included_class_a": 1000000,
+    "r2_class_b_per_million_usd": 0.36,
+    "r2_included_class_b": 10000000,
+    "kv_included_storage_gb_month": 1,
+    "kv_storage_gb_month_usd": 0.5,
+    "kv_included_reads": 10000000,
+    "kv_reads_per_million_usd": 0.5,
+    "sources": {
+      "r2": "https://developers.cloudflare.com/r2/pricing/",
+      "kv": "https://developers.cloudflare.com/kv/platform/pricing/",
+      "workers": "https://developers.cloudflare.com/workers/platform/pricing/"
+    }
+  },
+  "cost_model": {
+    "selected_typical_average_r2_ops": 2.5,
+    "kv_read_fraction_assumption": 0.01,
+    "scenarios": [
+      {
+        "queries": 1000000,
+        "storage_gb": 147.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 5.0,
+        "r2_class_b_usd": 0.0,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 2.07,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 7.07,
+        "under_30_usd": true,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 1000000,
+        "storage_gb": 247.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 5.0,
+        "r2_class_b_usd": 0.0,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 3.57,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 8.57,
+        "under_30_usd": true,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 1000000,
+        "storage_gb": 347.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 5.0,
+        "r2_class_b_usd": 0.0,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 5.069999999999999,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 10.07,
+        "under_30_usd": true,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 10000000,
+        "storage_gb": 147.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 5.0,
+        "r2_class_b_usd": 5.3999999999999995,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 2.07,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 12.469999999999999,
+        "under_30_usd": true,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 10000000,
+        "storage_gb": 247.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 5.0,
+        "r2_class_b_usd": 5.3999999999999995,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 3.57,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 13.969999999999999,
+        "under_30_usd": true,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 10000000,
+        "storage_gb": 347.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 5.0,
+        "r2_class_b_usd": 5.3999999999999995,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 5.069999999999999,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 15.469999999999999,
+        "under_30_usd": true,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 50000000,
+        "storage_gb": 147.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 17.0,
+        "r2_class_b_usd": 41.4,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 2.07,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 60.47,
+        "under_30_usd": false,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 50000000,
+        "storage_gb": 247.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 17.0,
+        "r2_class_b_usd": 41.4,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 3.57,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 61.97,
+        "under_30_usd": false,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 50000000,
+        "storage_gb": 347.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 17.0,
+        "r2_class_b_usd": 41.4,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 5.069999999999999,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 63.47,
+        "under_30_usd": false,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      }
+    ],
+    "kv_cache_sensitivity_at_50m_queries_200gb_core": [
+      {
+        "queries": 50000000,
+        "storage_gb": 247.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.0,
+        "workers_usd": 17.0,
+        "r2_class_b_usd": 41.4,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 3.57,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 61.97,
+        "under_30_usd": false,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 50000000,
+        "storage_gb": 247.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 0.01,
+        "workers_usd": 17.0,
+        "r2_class_b_usd": 41.4,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 3.57,
+        "kv_usd": 0.0,
+        "total_usd_lower_bound": 61.97,
+        "under_30_usd": false,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      },
+      {
+        "queries": 50000000,
+        "storage_gb": 247.73240950226244,
+        "average_r2_ops_per_query": 2.5,
+        "kv_reads_per_query_assumption": 1.0,
+        "workers_usd": 17.0,
+        "r2_class_b_usd": 41.4,
+        "r2_class_a_usd": 0.0,
+        "class_a_writes_assumption": 99236,
+        "r2_storage_usd": 3.57,
+        "kv_usd": 20.0,
+        "total_usd_lower_bound": 81.97,
+        "under_30_usd": false,
+        "excluded": "Workers CPU overage, logs, and any non-Cloudflare costs"
+      }
+    ],
+    "publication_object_sensitivity": [
+      {
+        "posting_buckets_per_family": 4096,
+        "modeled_objects_per_release": 99236,
+        "monthly_one_release_class_a_usd": 0.0,
+        "warning": "linear fixture payload pages plus fixed exact/prefix roots; global token skew is unknown"
+      },
+      {
+        "posting_buckets_per_family": 65536,
+        "modeled_objects_per_release": 222116,
+        "monthly_one_release_class_a_usd": 0.0,
+        "warning": "linear fixture payload pages plus fixed exact/prefix roots; global token skew is unknown"
+      },
+      {
+        "posting_buckets_per_family": 1000000,
+        "modeled_objects_per_release": 2091044,
+        "monthly_one_release_class_a_usd": 9.0,
+        "warning": "linear fixture payload pages plus fixed exact/prefix roots; global token skew is unknown"
+      }
+    ],
+    "rejected_direct_term_linear_objects_per_release": 262160633,
+    "publication_model": "one new global Places release written per month; current+rollback both retained for storage",
+    "rounding": "billable GB and million-operation units rounded upward after documented included usage",
+    "cost_gate_interpretation": "lower bound because Workers CPU is unmeasured; any scenario above $30 fails, below $30 still needs CPU evidence"
+  }
+}

@@ -6,7 +6,9 @@ use geocoder_core::{GeocoderQuery, GeocoderResult, LocationBias, ReverseResult};
 use serde::Serialize;
 use worker::*;
 
-use crate::stac::{SearchDebugInfo, ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
+use crate::stac::{
+    ReverseRoutingDebug, SearchDebugInfo, ShardLoader, UserLocation, NOT_FOUND_SENTINEL,
+};
 
 const MAX_QUERY_LENGTH: usize = 200;
 const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
@@ -177,6 +179,10 @@ pub async fn handle_reverse(
     };
 
     let format = params.get("format").map(|f| f.as_str()).unwrap_or("json");
+    let include_debug = params
+        .get("debug")
+        .map(|d| d == "1" || d == "true")
+        .unwrap_or(false);
 
     let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
 
@@ -189,13 +195,7 @@ pub async fn handle_reverse(
         Some(r) => match format {
             "geojson" => reverse_to_geojson_response(&r, &search.version),
             _ => {
-                let mut body = serde_json::to_value(&r).unwrap_or(serde_json::json!({}));
-                if let Some(obj) = body.as_object_mut() {
-                    obj.insert(
-                        "data_version".to_string(),
-                        serde_json::Value::String(search.version.clone()),
-                    );
-                }
+                let body = reverse_json_body(&r, &search.version, &search.routing, include_debug);
                 let mut resp = Response::from_json(&body)?;
                 resp.headers_mut()
                     .set("Content-Type", "application/json; charset=utf-8")?;
@@ -203,8 +203,46 @@ pub async fn handle_reverse(
                 Ok(resp)
             }
         },
+        None if include_debug => {
+            let body = reverse_not_found_json(&search.version, &search.routing);
+            let mut resp = Response::from_json(&body)?.with_status(404);
+            resp.headers_mut()
+                .set("Content-Type", "application/json; charset=utf-8")?;
+            resp.headers_mut().set("X-Data-Version", &search.version)?;
+            Ok(resp)
+        }
         None => Response::error("No results found for coordinates", 404),
     }
+}
+
+fn reverse_json_body(
+    result: &ReverseResult,
+    data_version: &str,
+    routing: &ReverseRoutingDebug,
+    include_debug: bool,
+) -> serde_json::Value {
+    let mut body = serde_json::to_value(result).unwrap_or(serde_json::json!({}));
+    if let Some(obj) = body.as_object_mut() {
+        obj.insert(
+            "data_version".to_string(),
+            serde_json::Value::String(data_version.to_string()),
+        );
+        if include_debug {
+            obj.insert(
+                "debug".to_string(),
+                serde_json::json!({ "country_routing": routing }),
+            );
+        }
+    }
+    body
+}
+
+fn reverse_not_found_json(data_version: &str, routing: &ReverseRoutingDebug) -> serde_json::Value {
+    serde_json::json!({
+        "error": "No results found for coordinates",
+        "data_version": data_version,
+        "debug": { "country_routing": routing },
+    })
 }
 
 pub async fn handle_id_lookup(
@@ -406,6 +444,18 @@ fn reverse_to_geojson_response(result: &ReverseResult, data_version: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::stac::{ReverseCountryDecision, ReverseRoutingOutcome};
+    use geocoder_core::types::HierarchyEntry;
+
+    fn reverse_routing_fixture() -> ReverseRoutingDebug {
+        ReverseRoutingDebug {
+            country_decision: ReverseCountryDecision::AmbiguousBbox,
+            outcome: ReverseRoutingOutcome::GlobalFallback,
+            bbox_candidate_count: 2,
+            bbox_candidates: vec!["CA".to_string(), "US".to_string()],
+            selected_country: None,
+        }
+    }
 
     #[test]
     fn test_parse_types_default_when_missing() {
@@ -469,5 +519,47 @@ mod tests {
         );
         assert!(is_id_index_unavailable(&message));
         assert!(!is_id_index_unavailable("invalid id-index metadata"));
+    }
+
+    #[test]
+    fn test_reverse_not_found_json_preserves_routing_contract() {
+        let body = reverse_not_found_json("2026-06-17.0", &reverse_routing_fixture());
+
+        assert_eq!(body["data_version"], "2026-06-17.0");
+        assert_eq!(body["debug"]["country_routing"]["bbox_candidate_count"], 2);
+        assert_eq!(
+            body["debug"]["country_routing"]["outcome"],
+            "global_fallback"
+        );
+    }
+
+    #[test]
+    fn test_reverse_json_debug_is_opt_in() {
+        let result = ReverseResult {
+            gers_id: "place-1".to_string(),
+            primary_name: "Example".to_string(),
+            subtype: "locality".to_string(),
+            lat: 42.0,
+            lon: -71.0,
+            bbox: [-71.1, 41.9, -70.9, 42.1],
+            distance_km: 0.1,
+            confidence: "high".to_string(),
+            hierarchy: vec![HierarchyEntry {
+                gers_id: "country-1".to_string(),
+                subtype: "country".to_string(),
+                name: "Exampleland".to_string(),
+            }],
+        };
+
+        let plain = reverse_json_body(&result, "2026-06-17.0", &reverse_routing_fixture(), false);
+        let debug = reverse_json_body(&result, "2026-06-17.0", &reverse_routing_fixture(), true);
+
+        assert_eq!(plain["gers_id"], "place-1");
+        assert_eq!(plain["data_version"], "2026-06-17.0");
+        assert!(plain.get("debug").is_none());
+        assert_eq!(
+            debug["debug"]["country_routing"]["country_decision"],
+            "ambiguous_bbox"
+        );
     }
 }
