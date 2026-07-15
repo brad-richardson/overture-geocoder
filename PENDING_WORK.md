@@ -246,8 +246,11 @@ deterministic global control plane, and first real hosted row-group projection.
 The hosted address reducer then passed its current-release 1.38M-row retained
 range in 2m35s with 705.3 MB peak RSS and exact maximum-fanout verification.
 
-The active blocker is storage shape, not hosted compute. The first reducer
-encoding is 148.1 B/indexed row and is rejected for planet publication. Next
+The next active format gate is storage shape. Hosted reducer compute is
+encouraging, while exact fragment verification, global skew, multi-source
+locators, bounded Worker fanout, and R2 shuffle/resume remain unresolved. The
+first reducer encoding is 148.1 B/indexed row and is rejected for planet
+publication. Next
 preserve the same current-release candidate oracle while measuring dictionary/
 prefix compression, raw-address-level and source-locator dictionaries, and a
 bare but useful hot response. Do not add R2 credentials or promotion behavior
