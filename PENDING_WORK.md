@@ -1,7 +1,7 @@
-# Pending Work — 2026-07-13
+# Pending Work — 2026-07-14
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `04b527b` (`main` after #60). Keep measured evidence
+The code baseline is `604ae4e` (`main` after #65). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -49,14 +49,29 @@ preserving branch- or PR-specific history.
   passed every build/read stage, returned valid current and historical v3
   responses through the isolated Worker, and verified Worker plus R2 cleanup in
   8m35s.
+- #65 corrected reverse country routing so caller IP cannot override coordinate
+  evidence, added bounded routing diagnostics and regressions, and preserved the
+  Places architecture experiments in a reviewed decision record. Its compact
+  spatial-shard direction retains a minimal useful result projection; Places
+  serving and relevance remain experimental.
+- The address/division spike built a 114,699,538-byte compact artifact from
+  3,634,040 keyable Massachusetts addresses (31.6 B/address), including a
+  39.12-second point-in-polygon join to 635 current-release division areas. It
+  proves a structured exact-address storage shape, not global parsing, fuzzy
+  matching, interpolation, or production readiness.
+- The global Places/address processing design specifies a pull-based bounded
+  producer, stable split lineage, immutable per-family manifests, resumable
+  hash-verified stages, and one atomic multi-family promotion. The factory is an
+  offline producer only, never a serving dependency or general CI runner.
 
 ### Current production data
 
 - Production data remains `2026-07-02.3`; no fleet rebuild is currently planned.
 - Existing ID shards are v1. The v3 reader remains backward compatible and uses
   the legacy response path when the new metadata is absent.
-- Reverse routing uses country bboxes only as a guardrail. Ambiguous overlap
-  falls through to `HEAD`; no exact-country decision artifact is deployed.
+- Reverse routing uses request coordinates and country bboxes only as a
+  guardrail. Ambiguous overlap falls through to `HEAD`; caller IP is diagnostic
+  context only and no exact-country decision artifact is deployed.
 - Forward search remains division-focused by default. No Places, address, or
   street artifact has been promoted to the production fleet.
 - No production shard fleet was rebuilt or published during this work. The
@@ -85,10 +100,11 @@ preserving branch- or PR-specific history.
    the linked parent `division` and must be joined explicitly. `X*` values are
    permitted synthetic Overture country codes, not malformed ISO codes; route
    them only under an explicit mapping/policy and otherwise use `HEAD`.
-5. Keep Places regional and `HEAD` division-focused. Confidence measures feature
-   existence, not venue fame; brand/category priors and raw source count are not
-   adequate fame signals. Chains and other high-fanout names require query
-   geography or caller location.
+5. Keep Places regional and `HEAD` division-focused until the range-readable
+   global-head format and independently labelled relevance suite pass.
+   Confidence measures feature existence, not venue fame; brand/category priors
+   and raw source count are not adequate fame signals. Chains and other
+   high-fanout names require query geography or caller location.
 6. Use transportation name/connector components for street topology,
    addresses/divisions for locality and postcode context, and a separate
    regional candidate store for exact numbered/unit addresses. Do not
@@ -307,51 +323,63 @@ unsimplified components. These are proposed starting points, not accepted
 production thresholds; every current candidate fails either correctness or
 bytes.
 
-### 3. Places rank and routing audit (prototype exists; promotion blocked)
+### 3. Places compact serving path (storage selected; relevance and head blocked)
 
-The regional CA-bbox builder, opt-in `types=place` request path, bounded routing
-experiments, and fail-closed experimental manifest are implemented. No Places
-artifact is in the production catalog. Promotion remains blocked on reviewed
-ranking labels because confidence measures feature existence rather than fame,
-and the tested brand/category/source-count prominence formula was rejected.
+The compact spatial-shard experiment built a real 116,684,322-byte artifact from
+a reproducibly extracted one-million-row California-area sample. Exact candidate
+sets and static top-ten results matched its oracle. Its 116.7 B/place result
+linearly diagnoses about 8.75 GB for 75M Places, excluding the global head,
+aliases, multilingual coverage, and typo support. No Places artifact is in the
+production catalog.
 
-- Produce a compact current-release California audit union, not a shard.
-- Independently label famous unique, local unique, and chain examples across
-  sources, confidence deciles, and taxonomy branches.
-- Stratify rank quality by root source and exact-name/alias fanout; compare
-  byte-capped regional policies with soft taxonomy/geographic coverage floors.
-- Design explicit low/high-fanout token routing. Only reviewed venue-level fame
-  evidence may justify a future unique landmark in `HEAD`.
+- Build the proposed range-readable global head; the prior experiment measured
+  4,088 modeled objects and 25.1 MB for the 1M sample, so a one-object head is
+  still unproven.
+- Independently label brand, local-name, category-near-me, ambiguous-context,
+  famous unique, and chain-name queries across dissimilar regions.
+- Measure Worker range reads, cache behavior, result locality, and explicit
+  unsupported broad/tail-query behavior before enabling `place` by default.
+- Add multilingual aliases only as a separately budgeted format decision.
 
-### 4. Address and street-context evaluation (research artifacts exist; no serving path)
+### 4. Address compact serving path (storage promising; parsing and locators blocked)
 
-Current-release address/source extraction, the Massachusetts sizing artifact,
-and the bounded Boston transportation name/connector-component prototype are
-complete. They have no Worker, API, catalog, R2 publication, or production-build
-integration. The next required experiment is the spatial address-to-segment and
-component join; do not begin production forward address/road shards before it
-and the independent query review pass.
+The Massachusetts compact artifact confirms that structured address repetition
+can fit a much denser format than Places. Its hot record contains ID,
+coordinates, number, unit, and a normally-zero division-chain override; context
+and street strings are dictionary/group encoded. Source locators and raw address
+levels were absent from the historical address input and remain unmeasured.
 
-- Spatially join the bounded Boston address sample to transportation segments
-  and connector components; measure missing and contradictory locality/postcode
-  context.
-- Review 50–100 repeated-name, alias, boundary, unit, postcode, and context
-  queries independently.
-- Only then build a temporary regional exact-address candidate store and street
-  dictionary to measure cold bytes, heap, and latency. Keep interpolation out
-  of scope unless a later experiment proves ordering, parity, and coverage.
+- Repeat on current-release Massachusetts and one non-US country while carrying
+  filepath, row-group locator, raw `address_levels`, and `postal_city`.
+- Implement a structured exact-address endpoint first. Evaluate a bounded US
+  one-line parser independently; do not claim one universal global grammar.
+- Review repeated-name, boundary, unit, postcode, duplicate, ambiguous-key, and
+  no-result queries. Preserve all candidates and do not infer ranges.
+- Measure Worker exact/prefix/ambiguous/no-result range reads before any catalog
+  integration. Roads remain out of scope except for a later evidence-backed
+  association join.
 
-### 5. Manifest/catalog and operational hardening (next implementation priority)
+### 5. Global producer and hosted-runner feasibility (next implementation priority)
 
-- Define and fault-test additive degraded/partial-result signaling: required
-  `HEAD` or catalog failure should fail the request; optional regional/Places
-  failure should be visibly degraded with a coherent data version.
-- Replace the current single-file build metadata behavior with complete,
-  immutable, per-family manifests and atomic publication/linking. Start with
-  exact ID per-file/hash inventories, then publish the final release catalog
-  only after every referenced artifact and family manifest exists.
-- Add Worker request-stage timing for catalog, cache, R2, deserialize, FTS, and
-  merge. Keep this distinct from the workflow build-stage timings above.
+- Implement deterministic source-inventory, task-state, artifact-manifest, and
+  final fan-in schemas. A clean restart must verify hashes and resume without
+  trusting file existence or overwriting completed objects.
+- Spike a GitHub-hosted producer using bounded matrix partitions and R2 as the
+  cross-job artifact store. Measure runner disk/RAM/runtime, source-download
+  amplification, concurrency, retry/resume behavior, and total Actions minutes.
+- Keep credentials short-lived and least-privileged. Prefer GitHub OIDC to a
+  broker or narrowly scoped rotating R2 credentials if Cloudflare supports the
+  required trust path; never require a key stored on the factory.
+- Fan in exact family inventories and update the root catalog only after every
+  required artifact verifies. Partial or failed matrix runs remain
+  undiscoverable.
+- Define and fault-test additive degraded/partial-result signaling and Worker
+  request-stage timings separately from build-stage timings.
+
+The initial global stop gates are 12 hours, 12 CPU on the factory equivalent,
+48 GiB RAM, 700 GiB temporary disk, and 40 GB combined compact Places/address
+output per release. Hosted runners have much smaller per-job limits, so the
+spike must prove partition independence rather than attempting a monolithic job.
 
 ### 6. Consider production exact-country integration only if a future candidate passes
 
