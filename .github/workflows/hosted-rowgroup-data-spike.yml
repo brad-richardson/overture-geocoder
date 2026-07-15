@@ -80,7 +80,12 @@ jobs:
             --output-dir /tmp/address-compression \
             --json-out hosted-address-compression-report.json \
             --page-rows 256 \
-            --planning-rows 473000000
+            --planning-rows 473000000 \
+            --max-input-bytes 1000000000 \
+            --max-output-bytes 1000000000 \
+            --max-workspace-bytes 6000000000 \
+            --max-page-bytes 8388608 \
+            --max-page-rows 10000
 
       - name: Summarize bounded measurement
         if: always()

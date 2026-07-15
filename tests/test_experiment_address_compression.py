@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 import uuid
+import gzip
 from pathlib import Path
 
 
@@ -31,8 +32,8 @@ def record(index: int, *, number: str = "10"):
     }
 
 
-def write_baseline(path: Path):
-    records = [record(1), record(2), record(3, number="11")]
+def write_baseline(path: Path, records=None):
+    records = records or [record(1), record(2), record(3, number="11")]
     payloads = [reduce.encode_record({**item, "address_levels": item["address_levels"]}) for item in records]
     sparse = reduce.encode_uvarint(0) + reduce.encode_uvarint(0)
     key = reduce.key_prefix_payload(records[0]["key"])
@@ -65,13 +66,47 @@ def test_page_formats_round_trip_fidelity_and_tradeoffs():
 
 def test_full_experiment_preserves_oracle_and_measures_every_variant(tmp_path):
     baseline = tmp_path / "baseline.aidx"
-    write_baseline(baseline)
+    records = [record(index) for index in range(1, 6)] + [record(6, number="11")]
+    write_baseline(baseline, records)
     report = compression.run(baseline, tmp_path / "variants", page_rows=2, planning_rows=1000)
 
-    assert report["input"]["records"] == 3
+    assert report["input"]["records"] == 6
     assert report["oracle"]["distinct_lookup_keys"] == 2
-    assert report["oracle"]["maximum_candidate_fanout"] == 2
+    assert report["oracle"]["maximum_candidate_fanout"] == 5
+    assert report["oracle"]["candidate_groups_never_cross_pages"] is True
+    assert report["pages"] == 2
     assert set(report["variants"]) == set(compression.VARIANTS)
     assert all(item["full_decode_digest_match"] for item in report["variants"].values())
+    key = records[0]["key"][:8]
+    for name, config in compression.VARIANTS.items():
+        candidates = compression.indexed_lookup(
+            tmp_path / "variants" / f"{name}.bin",
+            tmp_path / "variants" / f"{name}.idx",
+            key, useful=config["useful"], compressed=config["gzip"],
+            max_index_bytes=1_000_000, max_page_bytes=1_000_000,
+        )
+        assert [item["id"] for item in candidates] == [item["id"] for item in records[:5]]
     assert "drops display casing" in report["variants"]["bare"]["accuracy"]
     assert "lossless" in report["variants"]["useful_gzip"]["accuracy"]
+
+
+def test_compression_caps_and_bounded_gzip_decode(tmp_path):
+    baseline = tmp_path / "baseline.aidx"
+    write_baseline(baseline)
+    try:
+        compression.run(
+            baseline, tmp_path / "variants", page_rows=2, planning_rows=1000,
+            max_input_bytes=baseline.stat().st_size - 1,
+        )
+    except ValueError as error:
+        assert "input exceeds" in str(error)
+    else:
+        raise AssertionError("input cap was ignored")
+
+    compressed = gzip.compress(b"x" * 100, mtime=0)
+    try:
+        compression.decompress_gzip_bounded(compressed, 99)
+    except ValueError as error:
+        assert "decoded compression page exceeds" in str(error)
+    else:
+        raise AssertionError("decoded page cap was ignored")

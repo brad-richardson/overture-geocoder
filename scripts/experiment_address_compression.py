@@ -10,6 +10,7 @@ Pages are independent so a Worker never needs to inflate an entire shard.
 from __future__ import annotations
 
 import argparse
+import bisect
 import gzip
 import hashlib
 import json
@@ -18,6 +19,7 @@ import statistics
 import struct
 import time
 import uuid
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -41,6 +43,7 @@ VARIANTS = {
     "useful": {"useful": True, "gzip": False},
     "useful_gzip": {"useful": True, "gzip": True},
 }
+MAX_INDEX_KEY_BYTES = 64 * 1024
 
 
 def common_prefix(left: bytes, right: bytes) -> int:
@@ -200,9 +203,114 @@ def percentile(values: list[int], fraction: float) -> int:
     return sorted(values)[min(len(values) - 1, math.ceil(len(values) * fraction) - 1)]
 
 
-def run(input_path: Path, output_dir: Path, *, page_rows: int, planning_rows: int) -> dict[str, Any]:
+def decompress_gzip_bounded(payload: bytes, max_bytes: int) -> bytes:
+    decoder = zlib.decompressobj(16 + zlib.MAX_WBITS)
+    decoded = decoder.decompress(payload, max_bytes + 1)
+    if len(decoded) > max_bytes or decoder.unconsumed_tail or not decoder.eof:
+        raise ValueError("decoded compression page exceeds hard byte cap")
+    decoded += decoder.flush()
+    if len(decoded) > max_bytes:
+        raise ValueError("decoded compression page exceeds hard byte cap")
+    return decoded
+
+
+def read_index(path: Path, *, max_bytes: int) -> list[dict[str, Any]]:
+    if path.stat().st_size > max_bytes:
+        raise ValueError("compression index exceeds hard byte cap")
+    payload = path.read_bytes()
+    if not payload.startswith(INDEX_MAGIC):
+        raise ValueError("invalid compression index magic")
+    position = len(INDEX_MAGIC)
+    entries = []
+    previous_key: tuple[str, ...] | None = None
+    previous_offset = -1
+    while position < len(payload):
+        offset, position = decode_uvarint(payload, position)
+        length, position = decode_uvarint(payload, position)
+        rows, position = decode_uvarint(payload, position)
+        key_length, position = decode_uvarint(payload, position)
+        end = position + key_length
+        if key_length > MAX_INDEX_KEY_BYTES or end > len(payload):
+            raise ValueError("compression index key is outside hard bounds")
+        key_payload = payload[position:end]
+        key_position = 0
+        key = []
+        for _ in range(8):
+            value, key_position = decode_text(key_payload, key_position)
+            key.append(value)
+        if key_position != len(key_payload):
+            raise ValueError("invalid compression index key")
+        normalized = tuple(key)
+        if rows <= 0 or length <= 4 or offset <= previous_offset:
+            raise ValueError("invalid compression index page extent")
+        if previous_key is not None and normalized <= previous_key:
+            raise ValueError("compression index keys are not strictly increasing")
+        entries.append({"key": normalized, "offset": offset, "length": length, "rows": rows})
+        previous_key = normalized
+        previous_offset = offset
+        position = end
+    if not entries:
+        raise ValueError("compression index is empty")
+    return entries
+
+
+def indexed_lookup(
+    data_path: Path,
+    index_path: Path,
+    key: tuple[str, ...],
+    *,
+    useful: bool,
+    compressed: bool,
+    max_index_bytes: int,
+    max_page_bytes: int,
+) -> list[dict[str, Any]]:
+    entries = read_index(index_path, max_bytes=max_index_bytes)
+    keys = [entry["key"] for entry in entries]
+    page_index = bisect.bisect_right(keys, key) - 1
+    if page_index < 0:
+        return []
+    entry = entries[page_index]
+    if entry["length"] > max_page_bytes + 4:
+        raise ValueError("stored compression page exceeds hard byte cap")
+    with data_path.open("rb") as source:
+        source.seek(entry["offset"])
+        encoded_length = source.read(4)
+        if len(encoded_length) != 4:
+            raise ValueError("truncated compression page length")
+        length = struct.unpack("<I", encoded_length)[0]
+        if length + 4 != entry["length"] or length > max_page_bytes:
+            raise ValueError("compression page differs from index")
+        stored = source.read(length)
+        if len(stored) != length:
+            raise ValueError("truncated compression page")
+    payload = decompress_gzip_bounded(stored, max_page_bytes) if compressed else stored
+    if len(payload) > max_page_bytes:
+        raise ValueError("decoded compression page exceeds hard byte cap")
+    return [record for record in decode_page(payload, useful=useful) if record["key"][:8] == key]
+
+
+def run(
+    input_path: Path,
+    output_dir: Path,
+    *,
+    page_rows: int,
+    planning_rows: int,
+    max_input_bytes: int = 1_000_000_000,
+    max_output_bytes: int = 1_000_000_000,
+    max_workspace_bytes: int = 6_000_000_000,
+    max_page_bytes: int = 8 * 1024 * 1024,
+    max_page_rows: int = 10_000,
+) -> dict[str, Any]:
     if page_rows <= 0 or page_rows > 4096:
         raise ValueError("page rows must be between 1 and 4096")
+    if min(planning_rows, max_input_bytes, max_output_bytes, max_workspace_bytes, max_page_bytes, max_page_rows) <= 0:
+        raise ValueError("compression planning values and hard caps must be positive")
+    input_bytes = input_path.stat().st_size
+    if input_bytes > max_input_bytes:
+        raise ValueError("compression input exceeds hard byte cap")
+    with AddressReduceArtifact(input_path) as artifact:
+        if artifact.header["records"] == 0:
+            raise ValueError("empty reduce artifacts do not require compression pages")
     output_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     states: dict[str, dict[str, Any]] = {}
@@ -230,22 +338,43 @@ def run(input_path: Path, output_dir: Path, *, page_rows: int, planning_rows: in
     previous_key: tuple[str, ...] | None = None
     group_count = 0
     group_digest = hashlib.sha256()
+    verification_groups: list[dict[str, Any]] = []
+    maximum_group: dict[str, Any] | None = None
 
     def finish_group() -> None:
-        nonlocal distinct_keys, max_fanout, max_group_digest
+        nonlocal distinct_keys, max_fanout, max_group_digest, maximum_group
         if previous_key is None:
             return
         distinct_keys += 1
+        group = {"key": previous_key, "count": group_count, "id_sha256": group_digest.hexdigest()}
+        if len(verification_groups) < 2:
+            verification_groups.append(group)
+        if maximum_group is None or group_count > maximum_group["count"]:
+            maximum_group = group
         if group_count > max_fanout:
             max_fanout = group_count
             max_group_digest = group_digest.hexdigest()
 
     with AddressReduceArtifact(input_path) as artifact:
         offset = 0
-        while offset < artifact.header["record_bytes"]:
+        pending: dict[str, Any] | None = None
+        while pending is not None or offset < artifact.header["record_bytes"]:
             page = []
-            while len(page) < page_rows and offset < artifact.header["record_bytes"]:
-                record, offset = artifact._record_at(offset)
+            if pending is not None:
+                page.append(pending)
+                pending = None
+            while offset < artifact.header["record_bytes"]:
+                record, next_offset = artifact._record_at(offset)
+                key = record["key"][:8]
+                if page and len(page) >= page_rows and key != page[-1]["key"][:8]:
+                    pending = record
+                    offset = next_offset
+                    break
+                page.append(record)
+                offset = next_offset
+                if len(page) > max_page_rows:
+                    raise ValueError("candidate group exceeds hard page-row cap")
+            for record in page:
                 key = record["key"][:8]
                 if key != previous_key:
                     finish_group()
@@ -256,15 +385,21 @@ def run(input_path: Path, output_dir: Path, *, page_rows: int, planning_rows: in
                 group_digest.update(uuid.UUID(record["id"]).bytes)
                 digest_record(source_bare, record, useful=False)
                 digest_record(source_useful, record, useful=True)
-                page.append(record)
                 rows += 1
             for name, state in states.items():
                 config = state["config"]
                 encode_started = time.monotonic()
                 raw = encode_page(page, useful=config["useful"])
+                if len(raw) > max_page_bytes:
+                    raise ValueError("decoded compression page exceeds hard byte cap")
                 stored = gzip.compress(raw, compresslevel=6, mtime=0) if config["gzip"] else raw
+                if len(stored) > max_page_bytes:
+                    raise ValueError("stored compression page exceeds hard byte cap")
                 state["encode_seconds"] += time.monotonic() - encode_started
                 page_offset = state["data"].tell()
+                projected_variant = page_offset + 4 + len(stored) + state["index"].tell() + MAX_INDEX_KEY_BYTES
+                if projected_variant > max_output_bytes:
+                    raise ValueError("compression variant exceeds hard output byte cap")
                 state["data"].write(struct.pack("<I", len(stored)))
                 state["data"].write(stored)
                 first_key = b"".join(encode_text(value) for value in page[0]["key"][:8])
@@ -274,14 +409,24 @@ def run(input_path: Path, output_dir: Path, *, page_rows: int, planning_rows: in
                 state["index"].write(encode_uvarint(len(first_key)))
                 state["index"].write(first_key)
                 state["page_bytes"].append(4 + len(stored))
+                workspace = input_bytes + sum(
+                    item["data"].tell() + item["index"].tell() for item in states.values()
+                )
+                if workspace > max_workspace_bytes:
+                    raise ValueError("compression workspace exceeds hard byte cap")
                 verify_started = time.monotonic()
-                decoded_payload = gzip.decompress(stored) if config["gzip"] else stored
+                decoded_payload = (
+                    decompress_gzip_bounded(stored, max_page_bytes)
+                    if config["gzip"] else stored
+                )
                 decoded = decode_page(decoded_payload, useful=config["useful"])
                 for record in decoded:
                     digest_record(state["digest"], record, useful=config["useful"])
                 state["decode_verify_seconds"] += time.monotonic() - verify_started
             pages += 1
         finish_group()
+        if maximum_group is not None and all(group["key"] != maximum_group["key"] for group in verification_groups):
+            verification_groups.append(maximum_group)
         if rows != artifact.header["records"]:
             raise ValueError("compression input record count does not reconcile")
 
@@ -318,6 +463,18 @@ def run(input_path: Path, output_dir: Path, *, page_rows: int, planning_rows: in
             "index_sha256": sha256_file(state["index_path"]),
             "full_decode_digest_match": True,
         }
+        for group in verification_groups:
+            candidates = indexed_lookup(
+                state["data_path"], state["index_path"], group["key"],
+                useful=config["useful"], compressed=config["gzip"],
+                max_index_bytes=max_output_bytes, max_page_bytes=max_page_bytes,
+            )
+            candidate_digest = hashlib.sha256()
+            for candidate in candidates:
+                candidate_digest.update(uuid.UUID(candidate["id"]).bytes)
+            if len(candidates) != group["count"] or candidate_digest.hexdigest() != group["id_sha256"]:
+                raise ValueError(f"{name} indexed lookup differs from candidate oracle")
+        variants[name]["indexed_candidate_sets_verified"] = len(verification_groups)
     baseline_bytes = input_path.stat().st_size
     return {
         "schema": "overture-address-compression-spike-v1",
@@ -330,12 +487,19 @@ def run(input_path: Path, output_dir: Path, *, page_rows: int, planning_rows: in
             "distinct_lookup_keys": distinct_keys, "maximum_candidate_fanout": max_fanout,
             "maximum_fanout_id_sha256": max_group_digest,
             "candidate_order_and_ids_preserved": True,
+            "candidate_groups_never_cross_pages": True,
+            "indexed_candidate_sets_verified": len(verification_groups),
         },
         "planning": {
             "rows": planning_rows,
             "warning": "linear all-row diagnostics are not global forecasts; the measured source range retained only rows with street and number",
         },
         "elapsed_seconds": round(time.monotonic() - started, 6),
+        "limits": {
+            "max_input_bytes": max_input_bytes, "max_output_bytes_per_variant": max_output_bytes,
+            "max_workspace_bytes": max_workspace_bytes, "max_page_bytes": max_page_bytes,
+            "max_page_rows": max_page_rows,
+        },
         "limitations": [
             "one purposively selected source-object range, not globally representative",
             "gzip support and latency are measured locally in Python, not in a Cloudflare Worker",
@@ -352,8 +516,18 @@ def main() -> None:
     parser.add_argument("--json-out", type=Path, required=True)
     parser.add_argument("--page-rows", type=int, default=256)
     parser.add_argument("--planning-rows", type=int, default=473_000_000)
+    parser.add_argument("--max-input-bytes", type=int, default=1_000_000_000)
+    parser.add_argument("--max-output-bytes", type=int, default=1_000_000_000)
+    parser.add_argument("--max-workspace-bytes", type=int, default=6_000_000_000)
+    parser.add_argument("--max-page-bytes", type=int, default=8 * 1024 * 1024)
+    parser.add_argument("--max-page-rows", type=int, default=10_000)
     args = parser.parse_args()
-    report = run(args.input, args.output_dir, page_rows=args.page_rows, planning_rows=args.planning_rows)
+    report = run(
+        args.input, args.output_dir, page_rows=args.page_rows, planning_rows=args.planning_rows,
+        max_input_bytes=args.max_input_bytes, max_output_bytes=args.max_output_bytes,
+        max_workspace_bytes=args.max_workspace_bytes, max_page_bytes=args.max_page_bytes,
+        max_page_rows=args.max_page_rows,
+    )
     args.json_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     print(json.dumps(report, sort_keys=True))
 
