@@ -47,6 +47,7 @@ COPY (
     AND names.primary IS NOT NULL AND COALESCE(operating_status, 'open') != 'permanently_closed'
     ORDER BY confidence DESC NULLS LAST LIMIT {limit}
 ) TO 'exports/places-CA-bbox.parquet' (FORMAT PARQUET, COMPRESSION ZSTD);
+""")
 PY
 else
 echo "Downloading the full experimental CA bbox slice (not an exact CA boundary)..."
