@@ -1,0 +1,114 @@
+name: Global data control-plane smoke
+
+# This is deliberately a read-only, non-publishing experiment. It exercises the
+# deterministic planner on a small hosted-runner matrix and reports process
+# usage. R2 is the intended fragment data plane; GitHub artifacts and caches are
+# intentionally not used here.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: global-data-control-plane-smoke-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan-partition:
+    name: Plan fixture address map task ${{ matrix.map_index }} of 4
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix:
+        map_index: [0, 1, 2, 3]
+    env:
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+      SPIKE_RELEASE: "2026-07-02.3"
+      SPIKE_DATASET: addresses
+      SPIKE_MAP_INDEX: ${{ matrix.map_index }}
+    steps:
+      - name: Check out the requested revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Record hosted-runner resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo "## Hosted-runner control-plane smoke: map task ${{ matrix.map_index }}"
+            echo
+            echo '```text'
+            uname -a
+            lscpu
+            free -h
+            df -h . /tmp
+            ulimit -a
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Build deterministic partition plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$SPIKE_RELEASE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$ ]]
+          mkdir -p spike-output
+          /usr/bin/time -v python scripts/global_build_manifest.py plan \
+            --inventory tests/fixtures/global-source-inventory.json \
+            --release "$SPIKE_RELEASE" \
+            --producer-commit "$GITHUB_SHA" \
+            --family "$SPIKE_DATASET" \
+            --map-tasks 4 \
+            --partitions 8 \
+            --output spike-output/global-plan.json \
+            2> "spike-output/time-${SPIKE_MAP_INDEX}.txt"
+
+      - name: Verify deterministic planner output
+        shell: bash
+        run: |
+          set -euo pipefail
+          first="spike-output/global-plan.json"
+          second="spike-output/global-plan-repeat.json"
+          python scripts/global_build_manifest.py plan \
+            --inventory tests/fixtures/global-source-inventory.json \
+            --release "$SPIKE_RELEASE" \
+            --producer-commit "$GITHUB_SHA" \
+            --family "$SPIKE_DATASET" \
+            --map-tasks 4 \
+            --partitions 8 \
+            --output "$second"
+          cmp "$first" "$second"
+          python -m json.tool "$first" > /dev/null
+          sha256sum "$first"
+          python scripts/global_build_manifest.py describe-task \
+            --plan "$first" \
+            --kind map \
+            --index "$SPIKE_MAP_INDEX" \
+            > "spike-output/map-task-${SPIKE_MAP_INDEX}.json"
+          python -m json.tool "spike-output/map-task-${SPIKE_MAP_INDEX}.json" > /dev/null
+
+      - name: Summarize measurements
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo
+            echo "### Planner resource usage"
+            echo '```text'
+            test -f "spike-output/time-${SPIKE_MAP_INDEX}.txt" && \
+              cat "spike-output/time-${SPIKE_MAP_INDEX}.txt"
+            echo '```'
+            echo
+            echo "No artifact was uploaded and no production state was changed."
+            echo "This static-fixture planner smoke does not measure source I/O, shuffle, reduce, R2, or global producer throughput."
+            echo "Future staging may use GitHub OIDC to request short-lived, prefix-scoped R2 credentials from a broker. That path is intentionally disabled in this workflow; no long-lived cloud secret or id-token permission is present."
+          } >> "$GITHUB_STEP_SUMMARY"

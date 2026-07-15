@@ -1,0 +1,35 @@
+{
+  "schema": "overture-global-source-inventory-v1",
+  "release": "2026-07-02.3",
+  "family": "addresses",
+  "theme": "addresses",
+  "type": "address",
+  "schema_version": "2026-07-02.3",
+  "discovery": {
+    "kind": "test-fixture",
+    "source": "tests/fixtures/global-source-inventory.json"
+  },
+  "objects": [
+  {
+    "uri": "s3://overturemaps-us-west-2/release/2026-07-02.3/theme=addresses/type=address/part-00000.parquet",
+    "etag": "fixture-etag-00000",
+    "bytes": 1048576,
+    "records": 10000,
+    "row_groups": 4
+  },
+  {
+    "uri": "s3://overturemaps-us-west-2/release/2026-07-02.3/theme=addresses/type=address/part-00001.parquet",
+    "etag": "fixture-etag-00001",
+    "bytes": 2097152,
+    "records": 20000,
+    "row_groups": 8
+  },
+  {
+    "uri": "s3://overturemaps-us-west-2/release/2026-07-02.3/theme=addresses/type=address/part-00002.parquet",
+    "etag": "fixture-etag-00002",
+    "bytes": 3145728,
+    "records": 30000,
+    "row_groups": 12
+  }
+  ]
+}

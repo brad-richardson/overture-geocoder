@@ -249,6 +249,19 @@ Use a two-level source-aware map/reduce plan:
 4. A final job reads manifests from R2 rather than GitHub artifacts, verifies the
    exact expected inventory, and requests serialized promotion.
 
+The initial control-plane implementation is
+[`scripts/global_build_manifest.py`](../../scripts/global_build_manifest.py).
+It deterministically assigns source objects, defines map completion and reduce
+artifact contracts, validates release/family/schema provenance, reconciles
+inventory, selection, rejection, fragment, and artifact record totals, binds
+reduce artifacts to exact per-partition fragment digests, and emits a catalog
+candidate carrying the expected previous-catalog digest. Every candidate remains
+promotion-ineligible until remote object/hash verification, rejection policy,
+and serialized compare-and-swap publication are implemented. The accompanying manual hosted-runner workflow
+uses only a tiny static fixture and cannot publish. It is a control-plane smoke:
+it proves only within-job plan reproduction and task inspection, not cross-job
+agreement, source throughput, shuffle, reduce, R2, or the runner data envelope.
+
 Every task ID is deterministic from release, producer commit, configuration,
 and input digests. On re-run it verifies an existing done manifest and skips or
 rebuilds just that task. `strategy.max-parallel` starts at four to avoid
