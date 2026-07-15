@@ -103,6 +103,10 @@ strict local reader verifies an exact candidate set against DuckDB. Prefix
 street lookup follows adjacent sorted street entries. This does not yet
 supply a robust parser for arbitrary one-line input.
 
+Normalization is deliberately NFC + collapsed whitespace + ASCII-only case
+folding so the DuckDB builder and reader agree for every Unicode string. This
+does not yet provide case-insensitive matching for non-ASCII scripts.
+
 ## Linear diagnostics, not forecasts
 
 At the measured 43.8 B/address, 473M addresses would be

@@ -168,6 +168,10 @@ addresses/{country_or_XW}/{postcode_prefix_or_cell}/{split_path}
 - Store feature ID, coordinates, number, unit, normalized street key, compact
   source-label reference, raw-address-level dictionary ID, derived division-chain
   ID, and source locator.
+- The first format normalizes with NFC, collapsed whitespace, and ASCII-only
+  case folding so DuckDB, Python, and a future Worker agree byte-for-byte.
+  Full Unicode case-insensitive matching requires a separately versioned,
+  cross-runtime multilingual normalization contract and golden corpus.
 - Keep source `address_levels` and `postal_city` authoritative. A spatially
   derived division chain is additional context, never a replacement.
 - Group records by context and street; binary-search number and unit inside a
@@ -257,7 +261,11 @@ Cloudflare R2 currently documents temporary credentials derived by a trusted
 server from a parent R2 token, not direct native GitHub federation. A small
 credential-broker Worker can validate issuer, audience, repository, default
 branch/environment, workflow SHA, and run claims, then mint 15-minute
-prefix-scoped R2 credentials. The parent never enters GitHub. See GitHub's
+prefix-scoped R2 credentials. Jobs must request a fresh credential before each
+download, upload, or multipart phase; long-running SDK clients use a refreshing
+credential provider and renew before expiry rather than caching one credential
+for the life of the job. A phase must abort and retry if it cannot renew before
+starting a transfer. The parent never enters GitHub. See GitHub's
 [OIDC claim reference](https://docs.github.com/en/actions/reference/security/oidc)
 and Cloudflare's [R2 temporary-credential guidance](https://developers.cloudflare.com/r2/api/s3/temporary-credentials/).
 The first workflow spike may use the repository's existing staging-only R2

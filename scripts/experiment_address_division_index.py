@@ -112,13 +112,15 @@ def encode_chain(signature: str) -> bytes:
 
 def normalize_expression(column: str) -> str:
     return (
-        "LOWER(NFC_NORMALIZE(REGEXP_REPLACE(TRIM(COALESCE(CAST("
-        f"{column} AS VARCHAR), '')), '\\s+', ' ', 'g')))"
+        "TRANSLATE(NFC_NORMALIZE(REGEXP_REPLACE(TRIM(COALESCE(CAST("
+        f"{column} AS VARCHAR), '')), '\\s+', ' ', 'g')), "
+        "'ABCDEFGHIJKLMNOPQRSTUVWXYZ', 'abcdefghijklmnopqrstuvwxyz')"
     )
 
 
 def normalize(value: str | None) -> str:
-    return " ".join(unicodedata.normalize("NFC", value or "").strip().split()).lower()
+    normalized = " ".join(unicodedata.normalize("NFC", value or "").strip().split())
+    return normalized.translate(str.maketrans("ABCDEFGHIJKLMNOPQRSTUVWXYZ", "abcdefghijklmnopqrstuvwxyz"))
 
 
 def sql_literal(value: Path | str) -> str:

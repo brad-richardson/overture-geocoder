@@ -355,6 +355,9 @@ absent from the historical address input and remain unmeasured.
   filepath, row-group locator, raw `address_levels`, and `postal_city`.
 - Implement a structured exact-address endpoint first. Evaluate a bounded US
   one-line parser independently; do not claim one universal global grammar.
+- Keep the initial NFC/whitespace/ASCII-case normalization contract identical in
+  DuckDB, Python, and Worker code. Multilingual case-insensitivity is blocked on
+  a separately versioned cross-runtime golden corpus.
 - Review repeated-name, boundary, unit, postcode, duplicate, ambiguous-key, and
   no-result queries. Preserve all candidates and do not infer ranges.
 - Measure Worker exact/prefix/ambiguous/no-result range reads before any catalog

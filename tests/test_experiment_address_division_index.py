@@ -31,6 +31,16 @@ def test_text_encoding_preserves_unicode():
     assert encoded[1:].decode() == "Montréal"
 
 
+@pytest.mark.parametrize("value", [" İstanbul ", "ΟΣ", "Cafe\u0301", "  MAIN\tSt  "])
+def test_python_and_duckdb_normalization_contract_match(value):
+    connection = duckdb.connect()
+    actual = connection.execute(
+        f"SELECT {experiment.normalize_expression('?')}", [value]
+    ).fetchone()[0]
+    connection.close()
+    assert actual == experiment.normalize(value)
+
+
 def test_chain_encoding_uses_compact_uuid_bytes():
     signature = (
         "region:00000000-0000-0000-0000-000000000001|"
