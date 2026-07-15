@@ -49,6 +49,18 @@ preserving branch- or PR-specific history.
   passed every build/read stage, returned valid current and historical v3
   responses through the isolated Worker, and verified Worker plus R2 cleanup in
   8m35s.
+- #61 added immutable-prefix protection, exact release readback, atomic catalog
+  promotion, production health/search/reverse/ID smoke, rollback, and guarded
+  retention. Rebuild run `29286993689` completed in 3h34m28s and safely
+  promoted production data version `2026-07-13.0`; cleanup was intentionally
+  disabled for that first hardened rehearsal.
+- #63 published a GitHub Pages tester for health, forward, reverse, and ID APIs.
+  #64 hardened the reverse benchmark and made returned hierarchies internally
+  country-consistent.
+- Commit `55d6498` split release staging into seven concurrent per-type Actions
+  jobs with exact marker fan-in, bounded DuckDB resources, application
+  heartbeats, per-phase timings, connection cleanup, and batched metadata
+  validation. Its CI and external-source/R2 smokes passed.
 - #65 corrected reverse country routing so caller IP cannot override coordinate
   evidence, added bounded routing diagnostics and regressions, and preserved the
   Places architecture experiments in a reviewed decision record. Its compact
@@ -85,18 +97,19 @@ preserving branch- or PR-specific history.
 
 ### Current production data
 
-- Production data remains `2026-07-02.3`; no fleet rebuild is currently planned.
-- Existing ID shards are v1. The v3 reader remains backward compatible and uses
-  the legacy response path when the new metadata is absent.
+- Production serves data version `2026-07-13.0`, built from Overture release
+  `2026-06-17.0`. No additional fleet rebuild is currently approved.
+- The production ID index is v3 with compact locator metadata. The reader
+  remains backward compatible with v1 artifacts and uses the legacy response
+  path when new metadata is absent.
 - Reverse routing uses request coordinates and country bboxes only as a
   guardrail. Ambiguous overlap falls through to `HEAD`; caller IP is diagnostic
   context only and no exact-country decision artifact is deployed.
 - Forward search remains division-focused by default. No Places, address, or
   street artifact has been promoted to the production fleet.
-- No production shard fleet was rebuilt or published during this work. The
-  merge-only #59 shard smoke and #60 ID smoke passed. The latter used only the
-  fixed smoke prefix and isolated Worker; it did not publish a production v3
-  fleet.
+- The hardened `2026-07-13.0` rebuild and promotion passed production health,
+  search, reverse, and ID checks. Later Places/address/global-producer
+  experiments remained read-only or ephemeral and did not modify production.
 
 ## Decisions and constraints in force
 
@@ -227,29 +240,28 @@ preserving branch- or PR-specific history.
 
 ## Pause checkpoint
 
-The original checkpoint paused after merged PR #59 with its merge-only runs in
-progress. The later status check found the shard smoke passed and the ID smoke
-failed before deploying its isolated Worker. PR #60 retained the bounded real
-registry sample and added an explicit smoke-only historical sentinel; inventory
-fan-in, v3 encoding, publication, both isolated Worker response classes, and
-strict cleanup then passed. Production remains intentionally unchanged.
+Production `2026-07-13.0` is healthy. PRs #65–69 completed the coordinate-first
+country-routing correction, compact Places/address design evidence,
+deterministic global control plane, and first real hosted row-group projection.
+The hosted address reducer then passed its current-release 1.38M-row retained
+range in 2m35s with 705.3 MB peak RSS and exact maximum-fanout verification.
 
-Next prioritize immutable per-family manifests and atomic catalog publication
-(starting with exact ID file/hash inventories), then build
-the research-only conservative exact-country comparator. Keep the Places
-label/rank audit and Boston address-to-transport spatial join queued after that
-smoke/read and reverse-routing work.
+The active blocker is storage shape, not hosted compute. The first reducer
+encoding is 148.1 B/indexed row and is rejected for planet publication. Next
+preserve the same current-release candidate oracle while measuring dictionary/
+prefix compression, raw-address-level and source-locator dictionaries, and a
+bare but useful hot response. Do not add R2 credentials or promotion behavior
+until the address estimate leaves credible room under the combined 40 GB
+Places/address stop gate.
 
 ## Work inventory and execution priority
 
-Execute the remaining numbered inventory in this priority order: implement the
-manifest/catalog foundation in item 5, build the
-research-only country comparator in item 2, and then resume the forward Places
-and address/street work in items 3–4. The item numbers preserve the roadmap's
-subject grouping; they are not the execution sequence. The forward prototypes
-are retained research baselines, not abandoned work, but they should not drive
-production shard or API changes until the smoke/read path and conservative
-reverse router are settled.
+Execute the remaining inventory in this order: finish the address format and
+global-completeness gates in items 4–5; measure Worker range reads; then add a
+hash-verifying R2 shuffle/resume spike. Keep Places relevance/global-head work
+and the research-only exact-country comparator queued behind that bounded
+address decision. The item numbers preserve subject grouping rather than
+execution order. None of these experiments authorizes a production rebuild.
 
 ### 1. Monaco subset and generated-object read smokes (completed)
 
@@ -366,17 +378,20 @@ production catalog.
   unsupported broad/tail-query behavior before enabling `place` by default.
 - Add multilingual aliases only as a separately budgeted format decision.
 
-### 4. Address compact serving path (storage promising; parsing and locators blocked)
+### 4. Address compact serving path (compute viable; compact format blocked)
 
 The Massachusetts compact artifact confirms that structured address repetition
 can fit a much denser format than Places. Its hot record contains ID,
 coordinates, number, unit, a source-label-set reference, and a normally-zero
 division-chain override; indexed dictionaries preserve source display labels and
-all covered division memberships. Source locators and raw address levels were
-absent from the historical address input and remain unmeasured.
+all covered division memberships. The hosted reducer subsequently preserved raw
+address levels and exact source row-group/row locators, but its naive repeated
+strings raised storage to 148.1 B/indexed row.
 
-- Repeat on current-release Massachusetts and one non-US country while carrying
-  filepath, row-group locator, raw `address_levels`, and `postal_city`.
+- Keep the current-release reducer candidate oracle and compare dictionary/
+  prefix-compressed strings, address-level sequence IDs, multi-source IDs, and
+  a bare useful hot response. Repeat the winning format on current-release
+  Massachusetts and at least one non-US country.
 - Implement a structured exact-address endpoint first. Evaluate a bounded US
   one-line parser independently; do not claim one universal global grammar.
 - Keep the initial NFC/ASCII-whitespace/ASCII-case normalization contract identical in
@@ -388,7 +403,7 @@ absent from the historical address input and remain unmeasured.
   integration. Roads remain out of scope except for a later evidence-backed
   association join.
 
-### 5. Global producer and hosted-runner feasibility (next implementation priority)
+### 5. Global producer and hosted-runner feasibility (format gate active)
 
 - The first control-plane prototype now creates deterministic source inventory,
   map/reduce task, map-completion, artifact, and catalog-candidate manifests.
