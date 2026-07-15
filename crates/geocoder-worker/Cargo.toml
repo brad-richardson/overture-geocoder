@@ -27,6 +27,7 @@ futures = "0.3"
 # Parquet reading (snappy only, minimal features for wasm32)
 parquet = { version = "54", default-features = false, features = ["snap"] }
 bytes = "1"
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
 
 # WASM compatibility
 getrandom = { version = "0.2", features = ["js"] }
