@@ -1,0 +1,53 @@
+{
+  "schema_version": 1,
+  "input": "exports/experiment/places-raw.parquet",
+  "source_sha256": "c446d81d97c69cf72fff859fa42112027e01c231e08cfb5d65bedf5dcfcaa81d",
+  "release_id": "fixture-2025-12-17.0",
+  "overture_release": "2025-12-17.0",
+  "postgres_schema": "places_planetscale_spike",
+  "postgres_execution_available": false,
+  "psql_detail": "PATH psql is not PostgreSQL psql",
+  "fixture_model": {
+    "row_count": 1768,
+    "logical_field_payload_bytes": 139439,
+    "logical_field_payload_bytes_per_place": 78.86821266968326,
+    "token_occurrences": 14288,
+    "unique_field_tokens": 2781,
+    "model_candidate_counts": {
+      "name_prefix_starb": 2,
+      "token_exact_warfield_hotel": 2,
+      "token_prefix_golden_gate": 9,
+      "category_hotel": 125,
+      "sf_context_cafe_prefix": 53
+    },
+    "linear_shape_only": {
+      "one_million_logical_payload_bytes": 78868213,
+      "seventy_five_million_logical_payload_bytes": 5915115950,
+      "warning": "not PostgreSQL storage: excludes tuple/TOAST/page overhead, generated tsvector, GIN/B-tree indexes, WAL, replicas, and release retention"
+    }
+  },
+  "representative_queries": {
+    "name_prefix": "SELECT gers_id, name, category, locality, region, country, lat, lon, confidence FROM places_planetscale_spike.places WHERE release_id = 'fixture-2025-12-17.0' AND normalized_name LIKE 'starb%' ORDER BY confidence DESC, gers_id LIMIT 10",
+    "token_exact": "SELECT gers_id, name, category, locality, region, country, lat, lon, confidence FROM places_planetscale_spike.places WHERE release_id = 'fixture-2025-12-17.0' AND search_document @@ plainto_tsquery('simple', 'warfield hotel') ORDER BY ts_rank_cd(search_document, plainto_tsquery('simple', 'warfield hotel')) DESC, confidence DESC, gers_id LIMIT 10",
+    "token_prefix": "SELECT gers_id, name, category, locality, region, country, lat, lon, confidence FROM places_planetscale_spike.places WHERE release_id = 'fixture-2025-12-17.0' AND search_document @@ to_tsquery('simple', 'golden & gat:*') ORDER BY ts_rank_cd(search_document, to_tsquery('simple', 'golden & gat:*')) DESC, confidence DESC, gers_id LIMIT 10",
+    "category": "SELECT gers_id, name, category, locality, region, country, lat, lon, confidence FROM places_planetscale_spike.places WHERE release_id = 'fixture-2025-12-17.0' AND category = 'hotel' ORDER BY confidence DESC, gers_id LIMIT 10",
+    "context_token": "SELECT gers_id, name, category, locality, region, country, lat, lon, confidence FROM places_planetscale_spike.places WHERE release_id = 'fixture-2025-12-17.0' AND country = 'US' AND region = 'CA' AND locality = 'San Francisco' AND search_document @@ to_tsquery('simple', 'cafe:*') ORDER BY ts_rank_cd(search_document, to_tsquery('simple', 'cafe:*')) DESC, confidence DESC, gers_id LIMIT 10"
+  },
+  "expected_unmeasured_plans": {
+    "name_prefix": "B-tree range/index scan on normalized_name text_pattern_ops",
+    "token_exact": "GIN bitmap index scan on search_document followed by top-k ranking",
+    "token_prefix": "GIN bitmap index scan on search_document followed by top-k ranking",
+    "category": "B-tree index scan on category followed by confidence sort",
+    "context_token": "planner-dependent bitmap combination or one selective index plus filter across context B-tree and FTS GIN"
+  },
+  "database_execution": {
+    "measured": false,
+    "reason": "no --database-url supplied; PATH psql is not PostgreSQL psql"
+  },
+  "unmeasured_claims": [
+    "PostgreSQL heap, generated tsvector, GIN and B-tree index bytes",
+    "query plans and latency",
+    "network and connection-pool overhead",
+    "PlanetScale performance, concurrency, replicas, and cost"
+  ]
+}

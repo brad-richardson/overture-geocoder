@@ -1,0 +1,376 @@
+{
+  "schema_version": 1,
+  "input": "exports/experiment/places-raw.parquet",
+  "limitations": [
+    "bounded fixture; no global byte forecast",
+    "SQLite top-k overlap is not labelled relevance",
+    "range count is simulated and does not include HTTP/R2 latency",
+    "no multilingual aliases unless present in flattened input fields"
+  ],
+  "build": {
+    "build_seconds": 0.020387625030707568,
+    "places": 1768,
+    "tokens": 2781,
+    "artifact_bytes": 230576,
+    "bytes_per_place": 130.4162895927602,
+    "components": {
+      "directory": 2501,
+      "lexicon": 29757,
+      "postings": 32351,
+      "record_offsets": 14152,
+      "records": 151815
+    }
+  },
+  "comparison": {
+    "sqlite_bytes": 512000,
+    "existing_trie_bytes": 121426,
+    "existing_trie_provenance": "commit 5b85a52 scripts/experiment_places_addresses.py; full-primary-name radix prefix only",
+    "existing_fixture_baselines": {
+      "region": 794624,
+      "tiered_index": 647168,
+      "tiered_detail": 503808,
+      "prefix_only": 405504,
+      "minimal": 221184,
+      "trie": 121426
+    }
+  },
+  "benchmark": {
+    "queries": [
+      {
+        "query": "Golden Gate Bridge",
+        "compact_ids": [],
+        "sqlite_ids": [],
+        "sqlite_top_k_recall": null,
+        "unique_bytes": 11900,
+        "range_reads": 12,
+        "candidates": 0,
+        "optimistic_coalesced_1k_range_reads": 6,
+        "optimistic_coalesced_1k_bytes": 12077
+      },
+      {
+        "query": "Disneyland",
+        "compact_ids": [],
+        "sqlite_ids": [],
+        "sqlite_top_k_recall": null,
+        "unique_bytes": 9445,
+        "range_reads": 6,
+        "candidates": 0,
+        "optimistic_coalesced_1k_range_reads": 4,
+        "optimistic_coalesced_1k_bytes": 9445
+      },
+      {
+        "query": "Tartine Manufactory",
+        "compact_ids": [],
+        "sqlite_ids": [],
+        "sqlite_top_k_recall": null,
+        "unique_bytes": 6975,
+        "range_reads": 5,
+        "candidates": 0,
+        "optimistic_coalesced_1k_range_reads": 4,
+        "optimistic_coalesced_1k_bytes": 6975
+      },
+      {
+        "query": "Starbucks",
+        "compact_ids": [
+          "8523df93-31d9-4df2-9362-584d098101a4",
+          "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+        ],
+        "sqlite_ids": [
+          "8523df93-31d9-4df2-9362-584d098101a4",
+          "9cb0e7b1-3a3b-4e4c-aa5b-988c514553f7"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 7145,
+        "range_reads": 10,
+        "candidates": 2,
+        "optimistic_coalesced_1k_range_reads": 8,
+        "optimistic_coalesced_1k_bytes": 7409
+      },
+      {
+        "query": "McDonald's",
+        "compact_ids": [],
+        "sqlite_ids": [],
+        "sqlite_top_k_recall": null,
+        "unique_bytes": 9482,
+        "range_reads": 6,
+        "candidates": 0,
+        "optimistic_coalesced_1k_range_reads": 4,
+        "optimistic_coalesced_1k_bytes": 9482
+      },
+      {
+        "query": "Warfield Hotel",
+        "compact_ids": [
+          "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+          "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+        ],
+        "sqlite_ids": [
+          "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+          "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 11357,
+        "range_reads": 16,
+        "candidates": 2,
+        "optimistic_coalesced_1k_range_reads": 9,
+        "optimistic_coalesced_1k_bytes": 11563
+      },
+      {
+        "query": "warfield hot",
+        "compact_ids": [
+          "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+          "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+        ],
+        "sqlite_ids": [
+          "0afdc8dd-819f-4a23-bf1e-6c187bddb382",
+          "478dd30f-9335-4c15-85f7-b9e22bcd1752"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 11363,
+        "range_reads": 18,
+        "candidates": 2,
+        "optimistic_coalesced_1k_range_reads": 9,
+        "optimistic_coalesced_1k_bytes": 11569
+      },
+      {
+        "query": "YOTEL San Francisco",
+        "compact_ids": [
+          "3cbf3321-9bce-46ce-97a2-0fd68f85509a"
+        ],
+        "sqlite_ids": [
+          "3cbf3321-9bce-46ce-97a2-0fd68f85509a"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 18215,
+        "range_reads": 19,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 12,
+        "optimistic_coalesced_1k_bytes": 18221
+      },
+      {
+        "query": "yotel san fra",
+        "compact_ids": [
+          "3cbf3321-9bce-46ce-97a2-0fd68f85509a"
+        ],
+        "sqlite_ids": [
+          "3cbf3321-9bce-46ce-97a2-0fd68f85509a"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 18269,
+        "range_reads": 25,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 12,
+        "optimistic_coalesced_1k_bytes": 18275
+      },
+      {
+        "query": "Music City Hotel - Home of the San Francisco Music Hall of Fame",
+        "compact_ids": [
+          "c770e84a-1e76-44f3-afac-e0a6cb0a6080"
+        ],
+        "sqlite_ids": [
+          "c770e84a-1e76-44f3-afac-e0a6cb0a6080"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 29088,
+        "range_reads": 68,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 16,
+        "optimistic_coalesced_1k_bytes": 32461
+      },
+      {
+        "query": "music city hotel home of the san francisco music hall of fam",
+        "compact_ids": [
+          "c770e84a-1e76-44f3-afac-e0a6cb0a6080"
+        ],
+        "sqlite_ids": [
+          "c770e84a-1e76-44f3-afac-e0a6cb0a6080"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 29102,
+        "range_reads": 70,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 16,
+        "optimistic_coalesced_1k_bytes": 32753
+      },
+      {
+        "query": "Best Western Red Coach Inn",
+        "compact_ids": [
+          "1811b036-985c-4e9a-a65c-bd79058ca7da"
+        ],
+        "sqlite_ids": [
+          "1811b036-985c-4e9a-a65c-bd79058ca7da"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 16952,
+        "range_reads": 25,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 13,
+        "optimistic_coalesced_1k_bytes": 16952
+      },
+      {
+        "query": "Courtyard by Marriott San Francisco Union Square",
+        "compact_ids": [
+          "d9323ca7-1f6e-48cd-a013-18b560206631"
+        ],
+        "sqlite_ids": [
+          "d9323ca7-1f6e-48cd-a013-18b560206631"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 26870,
+        "range_reads": 29,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 17,
+        "optimistic_coalesced_1k_bytes": 27520
+      },
+      {
+        "query": "courtyard by marriott san francisco union squ",
+        "compact_ids": [
+          "d9323ca7-1f6e-48cd-a013-18b560206631"
+        ],
+        "sqlite_ids": [
+          "d9323ca7-1f6e-48cd-a013-18b560206631"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 26870,
+        "range_reads": 29,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 17,
+        "optimistic_coalesced_1k_bytes": 27520
+      },
+      {
+        "query": "Hotel Adagio, Autograph Collection",
+        "compact_ids": [
+          "c888dd84-0ae3-46d2-a85d-d43cde769899"
+        ],
+        "sqlite_ids": [
+          "c888dd84-0ae3-46d2-a85d-d43cde769899"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 16059,
+        "range_reads": 20,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 9,
+        "optimistic_coalesced_1k_bytes": 18196
+      },
+      {
+        "query": "hotel adagio autograph col",
+        "compact_ids": [
+          "c888dd84-0ae3-46d2-a85d-d43cde769899"
+        ],
+        "sqlite_ids": [
+          "c888dd84-0ae3-46d2-a85d-d43cde769899"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 17375,
+        "range_reads": 28,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 9,
+        "optimistic_coalesced_1k_bytes": 19494
+      },
+      {
+        "query": "Luz Hotel",
+        "compact_ids": [
+          "b3b95378-2a72-4266-8f3c-c2acfb3d7735"
+        ],
+        "sqlite_ids": [
+          "b3b95378-2a72-4266-8f3c-c2acfb3d7735"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 11257,
+        "range_reads": 14,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 10,
+        "optimistic_coalesced_1k_bytes": 11257
+      },
+      {
+        "query": "luz hot",
+        "compact_ids": [
+          "b3b95378-2a72-4266-8f3c-c2acfb3d7735"
+        ],
+        "sqlite_ids": [
+          "b3b95378-2a72-4266-8f3c-c2acfb3d7735"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 11263,
+        "range_reads": 16,
+        "candidates": 1,
+        "optimistic_coalesced_1k_range_reads": 10,
+        "optimistic_coalesced_1k_bytes": 11263
+      },
+      {
+        "query": "San Francisco Proper",
+        "compact_ids": [
+          "8ece77e8-614b-4727-94da-ec69db8aa6d9",
+          "24aa62cf-2b85-4202-a347-f48aa41ae445",
+          "6c507c4e-eb8e-48d5-8acc-6a99be7d2847",
+          "a15ae0a6-0099-435e-b825-2f9d28180690",
+          "80ae58ff-63e6-4e12-985a-7d305981cf55",
+          "62c003f8-0b72-4c57-a9f2-dd7d73a20229"
+        ],
+        "sqlite_ids": [
+          "24aa62cf-2b85-4202-a347-f48aa41ae445",
+          "8ece77e8-614b-4727-94da-ec69db8aa6d9",
+          "a15ae0a6-0099-435e-b825-2f9d28180690",
+          "80ae58ff-63e6-4e12-985a-7d305981cf55",
+          "6c507c4e-eb8e-48d5-8acc-6a99be7d2847",
+          "62c003f8-0b72-4c57-a9f2-dd7d73a20229"
+        ],
+        "sqlite_top_k_recall": 1.0,
+        "unique_bytes": 22470,
+        "range_reads": 32,
+        "candidates": 6,
+        "optimistic_coalesced_1k_range_reads": 16,
+        "optimistic_coalesced_1k_bytes": 24481
+      },
+      {
+        "query": "san francisco pro",
+        "compact_ids": [
+          "8ece77e8-614b-4727-94da-ec69db8aa6d9",
+          "61a85e23-ce5d-4318-b8ad-b1c324a684b0",
+          "0d81f6cc-5570-410f-889c-66943402c7b7",
+          "df415d92-5039-4b9c-b6b0-58f1752e14fe",
+          "bd4493b5-9dc9-442e-8ae0-5ab2df67724b",
+          "fb76a939-2934-4cd9-a91b-cdf0538e7e62",
+          "65aa3bae-be26-430a-bdfa-d6d0b559fc13",
+          "24aa62cf-2b85-4202-a347-f48aa41ae445",
+          "c01cf8c0-c474-4465-9659-9a2e224943a1",
+          "6aaa6ab9-3293-42ce-b06b-fe5b55d87135"
+        ],
+        "sqlite_ids": [
+          "24aa62cf-2b85-4202-a347-f48aa41ae445",
+          "8ece77e8-614b-4727-94da-ec69db8aa6d9",
+          "6aaa6ab9-3293-42ce-b06b-fe5b55d87135",
+          "bd4493b5-9dc9-442e-8ae0-5ab2df67724b",
+          "c01cf8c0-c474-4465-9659-9a2e224943a1",
+          "65aa3bae-be26-430a-bdfa-d6d0b559fc13",
+          "fb76a939-2934-4cd9-a91b-cdf0538e7e62",
+          "fef5ec27-a520-45ad-a3ef-4c11b4ffb240",
+          "9faa86c8-a943-478a-b450-ffcade88e946",
+          "b3633a38-6cf3-4158-9ad1-8282a54629a7"
+        ],
+        "sqlite_top_k_recall": 0.7,
+        "unique_bytes": 22952,
+        "range_reads": 53,
+        "candidates": 42,
+        "optimistic_coalesced_1k_range_reads": 23,
+        "optimistic_coalesced_1k_bytes": 26437
+      }
+    ],
+    "summary": {
+      "query_count": 20,
+      "sqlite_nonempty_queries": 16,
+      "mean_sqlite_top_k_recall": 0.98125,
+      "min_sqlite_top_k_recall": 0.7,
+      "query_bytes_touched_p50": 16952,
+      "query_bytes_touched_max": 29102,
+      "range_reads_max": 70,
+      "optimistic_coalesced_1k_range_reads_max": 23,
+      "optimistic_coalesced_1k_bytes_max": 32753
+    }
+  },
+  "verdict": "do not replace SQLite yet; byte shape is promising, but remote range fanout and top-k ranking divergence need another design iteration",
+  "linear_shape_extrapolation": {
+    "warning": "not a forecast; fixture density, token fanout, languages, and field coverage are unrepresentative",
+    "one_million_places_bytes": 130416290,
+    "seventy_five_million_places_bytes": 9781221719
+  }
+}
