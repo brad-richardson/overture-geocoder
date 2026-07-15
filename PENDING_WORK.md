@@ -366,9 +366,25 @@ absent from the historical address input and remain unmeasured.
 
 ### 5. Global producer and hosted-runner feasibility (next implementation priority)
 
-- Implement deterministic source-inventory, task-state, artifact-manifest, and
-  final fan-in schemas. A clean restart must verify hashes and resume without
-  trusting file existence or overwriting completed objects.
+- The first control-plane prototype now creates deterministic source inventory,
+  map/reduce task, map-completion, artifact, and catalog-candidate manifests.
+  Source inventories pin discovery provenance, release, family, schema, object
+  identity, and Parquet record counts. Fan-in reconciles source, selected,
+  rejected, fragment, and artifact records; binds each reduce artifact to its
+  exact per-partition fragment digest; and carries an expected previous-catalog
+  digest for a later serialized compare-and-swap promotion. Every candidate is
+  explicitly promotion-ineligible until remote object/hash verification,
+  rejection policy, and serialized publication exist. The prototype does not
+  transfer or publish data.
+- A manual, read-only GitHub-hosted control-plane smoke now exercises the fixture planner
+  on four bounded matrix jobs and records CPU, memory, disk, and wall-time
+  telemetry. It has no cloud credentials, OIDC permission, artifact upload, or
+  promotion path; a successful run proves only that each isolated job can
+  reproduce and inspect the static plan. It does not compare jobs or measure
+  source I/O, shuffle, reduce, R2, or global data throughput.
+- Extend the prototype with hash-verifying R2 fragment upload/download and clean
+  restart behavior without trusting file existence or overwriting completed
+  objects.
 - Spike a GitHub-hosted producer using bounded matrix partitions and R2 as the
   cross-job artifact store. Measure runner disk/RAM/runtime, source-download
   amplification, concurrency, retry/resume behavior, and total Actions minutes.
