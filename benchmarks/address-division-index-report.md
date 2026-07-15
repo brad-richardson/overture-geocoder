@@ -22,9 +22,9 @@ storage.
 - Division areas: 635 from Overture release `2026-06-17.0`
 - Division input SHA-256: `c3880d29addfef361760ce758271cf11ccd1393e101f7d35069feeee6d85b54e`
 - DuckDB: `1.5.4`; 4 threads; memory limit `12GB`
-- Producer commit: `3d4fb96775a2fee046355b1139ee9b4a5dd5f3f6`
-- Division spatial join: 102.05 seconds
-- Total experiment: 137.47 seconds
+- Producer commit: `73db3424d8c22fd1c4d15276d1836b6250f8db67`
+- Division spatial join: 101.16 seconds
+- Total experiment: 150.04 seconds
 - Artifact: 159,252,812 bytes (43.8 B/address)
 - Artifact SHA-256: `88d839df7d2c9e77acd24a75c0173e1a9dd40284d8ed76d0ce9cc15983fdc0ff`
 - Strict reader/oracle verification: True
@@ -113,7 +113,7 @@ At the measured 43.8 B/address, 473M addresses would be
 about 20.73 GB per release before source-locator
 metadata, country-specific parser indexes, manifests, or rollback retention.
 Massachusetts source and unit distributions are not globally representative.
-A purely linear processing diagnostic is about 4.97 factory-hours;
+A purely linear processing diagnostic is about 5.42 factory-hours;
 global polygon density, extraction, sorting, upload, and country-specific work
 make that a lower-confidence shape rather than a build-time forecast.
 
