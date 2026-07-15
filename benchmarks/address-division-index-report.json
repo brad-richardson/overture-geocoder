@@ -47,7 +47,7 @@
       "street",
       "unit"
     ],
-    "join_seconds": 100.31318005593494,
+    "join_seconds": 102.05283188913018,
     "memory_limit": "12GB",
     "threads": 4
   },
@@ -57,7 +57,7 @@
   "division_release": "2026-06-17.0",
   "division_source_sha256": "c3880d29addfef361760ce758271cf11ccd1393e101f7d35069feeee6d85b54e",
   "duckdb_version": "1.5.4",
-  "elapsed_seconds": 135.68769399495795,
+  "elapsed_seconds": 137.47124547604471,
   "metrics": {
     "candidate_ambiguity": {
       "address_subtype_pairs": 11345463,
@@ -134,5 +134,6 @@
       "p90": 61.0,
       "p99": 314.0
     }
-  }
+  },
+  "producer_commit": "3d4fb96775a2fee046355b1139ee9b4a5dd5f3f6"
 }

@@ -38,8 +38,8 @@ Measured factory envelopes:
 
 - Places 1M compact build: 23.2 seconds for final artifact assembly; the earlier
   Python page model peaked near 3.5 GiB.
-- Address + division build: 3.63M rows in 135.7 seconds with 4 threads and a
-  12 GB DuckDB limit, including a 100.3-second boundary-inclusive spatial join.
+- Address + division build: 3.63M rows in 137.5 seconds with 4 threads and a
+  12 GB DuckDB limit, including a 102.1-second boundary-inclusive spatial join.
 - Factory capacity: 20 logical CPUs, 62 GiB RAM, and roughly 1.4 TiB free during
   the experiments. Production limits remain 12 CPU, 48 GiB working memory, and
   700 GiB temporary disk.

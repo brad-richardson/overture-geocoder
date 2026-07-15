@@ -56,7 +56,7 @@ preserving branch- or PR-specific history.
   serving and relevance remain experimental.
 - The address/division spike built a 159,252,812-byte reader-verified compact
   artifact from 3,634,040 keyable Massachusetts addresses (43.8 B/address),
-  including a 100.31-second boundary-inclusive point-in-polygon join to 635
+  including a 102.05-second boundary-inclusive point-in-polygon join to 635
   current-release division areas under 4 threads and a 12 GB limit. It
   proves a structured exact-address storage shape, not global parsing, fuzzy
   matching, interpolation, or production readiness.
