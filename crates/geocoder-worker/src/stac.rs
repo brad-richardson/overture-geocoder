@@ -15,6 +15,11 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use worker::*;
 
+use crate::address_pages::{
+    decode_useful_gzip_range, parse_useful_gzip_header, AddressPageIndex, AddressPageRecord,
+    MAX_INDEX_BYTES,
+};
+
 // Cache TTLs for different resource types
 const CATALOG_CACHE_TTL: u64 = 300; // 5 minutes - need fresh version pointers
                                     // SQLite shards and collection JSON under a {version}/ prefix are never
@@ -1010,6 +1015,57 @@ impl ShardLoader {
             .await;
 
         Ok(Some(bytes))
+    }
+
+    /// Experimental exact-address storage path.
+    ///
+    /// The caller supplies immutable versioned object keys and an already
+    /// normalized eight-field address key. The small side index is edge-cached,
+    /// then exactly one group-aligned gzip page is range-read and decoded under
+    /// the hard limits in `address_pages`. This is deliberately not routed yet:
+    /// the spike must measure real Worker/R2 latency before becoming an API.
+    pub(crate) async fn lookup_address_page_spike(
+        &self,
+        index_key: &str,
+        data_key: &str,
+        lookup_key: &[String; 8],
+    ) -> Result<Vec<AddressPageRecord>> {
+        let index_bytes = self
+            .cached_get(index_key, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(index_key))?;
+        if index_bytes.len() > MAX_INDEX_BYTES {
+            return Err(Error::RustError(
+                "Address page index exceeds Worker hard byte cap".into(),
+            ));
+        }
+        let index = AddressPageIndex::parse(&index_bytes)
+            .map_err(|error| Error::RustError(format!("Invalid address page index: {error}")))?;
+        let Some(extent) = index.find(lookup_key).cloned() else {
+            return Ok(Vec::new());
+        };
+
+        // Validate the object envelope independently from the index. A 4 KiB
+        // immutable range is enough for the producer's capped JSON header and
+        // is edge-cached separately from candidate pages.
+        let header = self
+            .cached_range_read(data_key, 0, 4096)
+            .await?
+            .ok_or_else(|| not_found(data_key))?;
+        parse_useful_gzip_header(&header)
+            .map_err(|error| Error::RustError(format!("Invalid address page data: {error}")))?;
+
+        let page = self
+            .cached_range_read(data_key, extent.offset, extent.length)
+            .await?
+            .ok_or_else(|| not_found(format!("{} range", data_key)))?;
+        if page.len() as u64 != extent.length {
+            return Err(Error::RustError(
+                "Address page range length differs from index".into(),
+            ));
+        }
+        decode_useful_gzip_range(&page, extent.rows, lookup_key)
+            .map_err(|error| Error::RustError(format!("Invalid address page: {error}")))
     }
 
     /// Fetch small JSON text with an isolate-level memo in front of the edge

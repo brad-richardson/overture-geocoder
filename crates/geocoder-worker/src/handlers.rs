@@ -13,6 +13,8 @@ use crate::stac::{
 const MAX_QUERY_LENGTH: usize = 200;
 const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
 const MAX_TOKEN_COUNT: usize = 10;
+const ADDRESS_SPIKE_INDEX_KEY: &str = "smoketest-address/useful_gzip.idx";
+const ADDRESS_SPIKE_DATA_KEY: &str = "smoketest-address/useful_gzip.bin";
 
 fn is_id_index_unavailable(err_msg: &str) -> bool {
     err_msg.contains(NOT_FOUND_SENTINEL) && err_msg.contains("id-index")
@@ -59,6 +61,46 @@ fn parse_types_param(raw: Option<&String>) -> HashSet<String> {
             .map(|t| t.to_string())
             .collect(),
     }
+}
+
+/// Isolated smoke-only entry point for the experimental address page reader.
+/// Production and unrelated preview environments receive a plain 404.
+pub async fn handle_address_page_spike(
+    _req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
+    if ctx
+        .env
+        .var("ENVIRONMENT")
+        .ok()
+        .is_none_or(|value| value.to_string() != "address-smoke")
+    {
+        return Response::error("Not found", 404);
+    }
+    let key = [
+        "us",
+        "ma",
+        "stoneham",
+        "stoneham",
+        "02180",
+        "main street",
+        "10",
+        "",
+    ]
+    .map(str::to_string);
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
+    let records = loader
+        .lookup_address_page_spike(ADDRESS_SPIKE_INDEX_KEY, ADDRESS_SPIKE_DATA_KEY, &key)
+        .await?;
+    let body = serde_json::json!({
+        "schema": "overture-address-worker-spike-v1",
+        "candidate_count": records.len(),
+        "first": records.first(),
+        "last_id": records.last().map(|record| record.id.as_str()),
+    });
+    let mut response = Response::from_json(&body)?;
+    response.headers_mut().set("Cache-Control", "no-store")?;
+    Ok(response)
 }
 
 /// Search request handler.

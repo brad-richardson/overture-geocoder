@@ -4,6 +4,7 @@
 
 use worker::*;
 
+mod address_pages;
 mod handlers;
 mod stac;
 
@@ -63,6 +64,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
         .get_async("/id/:gers_id", handlers::handle_id_lookup)
+        .get_async("/__address-page-spike", handlers::handle_address_page_spike)
         .get_async("/health", handlers::handle_health)
         .get("/", |_, _| {
             Response::ok(concat!(
@@ -116,6 +118,7 @@ fn request_endpoint(path: &str) -> &'static str {
         "/health" => "health",
         "/" => "root",
         path if path.starts_with("/id/") => "id",
+        "/__address-page-spike" => "address_page_spike",
         _ => "other",
     }
 }
@@ -169,6 +172,10 @@ mod tests {
         assert_eq!(request_endpoint("/search"), "search");
         assert_eq!(request_endpoint("/reverse"), "reverse");
         assert_eq!(request_endpoint("/id/abc-123"), "id");
+        assert_eq!(
+            request_endpoint("/__address-page-spike"),
+            "address_page_spike"
+        );
         assert_eq!(request_endpoint("/unexpected"), "other");
     }
 
