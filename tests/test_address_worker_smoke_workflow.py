@@ -1,3 +1,4 @@
+import subprocess
 from pathlib import Path
 
 
@@ -19,7 +20,11 @@ def test_address_worker_smoke_is_manual_isolated_and_cleans_up():
     assert "cargo install worker-build --version 0.7.5 --locked" in workflow
     assert "ADDRESS_SPIKE_PREFIX:${SMOKE_VERSION}" in workflow
     assert "candidate_count == 137" in workflow
-    assert "wrangler.address-smoke.toml --force" in workflow
+    assert "workers/scripts/geocoder-address-smoke" in workflow
+    assert "--request DELETE" in workflow
+    assert 'if [ "$HTTP_STATUS" != "404" ]' in workflow
+    assert 'test "$HTTP_STATUS" = "200"' in workflow
+    assert "--write-out '%{http_code} %{time_total}\\n'" in workflow
     assert 's3://geocoder-shards/${SMOKE_VERSION}/' in workflow
     assert 'name = "geocoder-address-smoke"' in config
     assert 'ENVIRONMENT = "address-smoke"' in config
@@ -27,6 +32,22 @@ def test_address_worker_smoke_is_manual_isolated_and_cleans_up():
     assert "routes" not in config
     global_env = workflow.split("jobs:", 1)[0]
     assert "secrets." not in global_env
+
+
+def test_measurement_status_and_time_read_survives_strict_bash_eof_handling():
+    completed = subprocess.run(
+        [
+            "bash",
+            "-euo",
+            "pipefail",
+            "-c",
+            'read -r status elapsed < <(printf "200 0.125\\n"); '
+            'test "$status" = 200; test "$elapsed" = 0.125',
+        ],
+        check=False,
+    )
+
+    assert completed.returncode == 0
 
 
 def test_spike_endpoint_is_not_advertised_as_a_public_api():
