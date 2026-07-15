@@ -273,6 +273,25 @@ metadata requires budgeting. The lexicographically first object/range is not a
 global distribution sample; row-group inventory and skew measurements remain a
 gate before selecting matrix size or claiming release throughput.
 
+The follow-on reduce spike exercised 3,743,307 projected rows in the same
+ephemeral hosted job. It retained 1,382,264 rows with both street and number,
+wrote 30 independently sorted fragments, streamed a k-way merge into one
+range-readable shard, and performed a full sorted/count scan plus three exact
+candidate-set checks. The complete job passed in 2m33s; the reducer peaked at
+708,841,472 bytes RSS with a conservative 757,514,510-byte workspace estimate,
+and merge/assembly took 21.62 seconds. This supports the hosted compute/disk
+shape but does not measure R2 shuffle.
+
+The resulting 204,646,996-byte artifact cost 148.1 B per indexed row because it
+kept raw address levels and exact source locators while naively repeating
+normalized and display strings. That encoding is not a planet candidate: it
+would linearly diagnose about 70.0 GB for all 473M planning rows and would make
+a 2-4M-row shard roughly 296-592 MB. The next format spike must preserve the
+same candidate oracle while dictionary/prefix-compressing lookup/display
+strings, address-level sequences, and multi-source IDs. A bare hot record may
+make full Overture hydration optional, but the normal response must remain
+useful without live S3 Parquet/zstd decoding.
+
 Every task ID is deterministic from release, producer commit, configuration,
 and input digests. On re-run it verifies an existing done manifest and skips or
 rebuilds just that task. `strategy.max-parallel` starts at four to avoid

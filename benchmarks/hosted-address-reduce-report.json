@@ -1,0 +1,73 @@
+{
+  "artifact": {
+    "bytes": 204646996,
+    "bytes_per_indexed_row": 148.052033,
+    "distinct_lookup_keys": 1258445,
+    "maximum_candidate_fanout": 137,
+    "record_bytes": 204290891,
+    "records": 1382264,
+    "sha256": "49c79fc1bb99b017b68db82a169ce86191b9a3628c15f2dd3a181b1563e2c213",
+    "sparse_bytes": 353425
+  },
+  "format": {
+    "kept_fields": [
+      "id",
+      "coordinates",
+      "country",
+      "postal_city",
+      "postcode",
+      "street",
+      "number",
+      "unit",
+      "raw_address_levels",
+      "source_row_group",
+      "source_row_index"
+    ],
+    "limitations": [
+      "display and normalized strings are not dictionary or prefix compressed",
+      "source filepath is bound once in the shard header because this run used one source object",
+      "division enrichment and a one-line parser are absent"
+    ],
+    "sparse_stride": 256
+  },
+  "input": {
+    "bytes": 143863947,
+    "records": 3743307,
+    "sha256": "0844fcd88c278ca810c599dc902e114a8f9d81c70222bec00ded49ae529724d1",
+    "source_etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+    "source_inventory_sha256": "cfda72729b296b17545f33568356f0c07dc962a95727319e3f3a219b814c1dd2",
+    "source_uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet"
+  },
+  "map_fragments": {
+    "bytes": 204297931,
+    "count": 30,
+    "records": 1382264,
+    "seconds": 86.135109433
+  },
+  "provenance": {
+    "commit": "3b0bd51d6f5b619d033cdf36b64ec576c169e602",
+    "github_actions_job": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29425679528/job/87387342095",
+    "github_actions_run": "https://github.com/brad-richardson/overture-geocoder/actions/runs/29425679528",
+    "overture_release": "2026-06-17.0"
+  },
+  "rejections": {
+    "invalid_geometry": 0,
+    "missing_street_or_number": 2361043,
+    "selected_fraction": 0.369262794,
+    "selected_records": 1382264
+  },
+  "resources": {
+    "conservative_peak_workspace_bytes": 757514510,
+    "job_wall_seconds": 153,
+    "peak_rss_bytes": 708841472,
+    "reduce_assembly_seconds": 21.621958438,
+    "script_elapsed_seconds": 125.976987866,
+    "swap_events": 0
+  },
+  "schema": "overture-address-reduce-spike-summary-v1",
+  "verification": {
+    "exact_candidate_sets": 3,
+    "full_sorted_scan": true,
+    "record_count_match": true
+  }
+}

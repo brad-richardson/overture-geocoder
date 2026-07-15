@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-15
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `55222dc` (`main` after #68). Keep measured evidence
+The code baseline is `8c9b00d` (`main` after #69). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -74,6 +74,14 @@ preserving branch- or PR-specific history.
   initial runner-network upper bound against a 657.3 MB source object. Source
   identity, artifact metadata, record count, and three locator hydrations
   verified; no artifact, R2 object, catalog, or production state was published.
+- The follow-on hosted reduce spike projected 3,743,307 current-release rows,
+  retained 1,382,264 with both street and number, wrote 30 sorted fragments,
+  and assembled and fully scanned a 204,646,996-byte range-readable shard. The
+  complete public-runner job passed in 2m33s at 708.8 MB peak RSS; reduce
+  assembly itself took 21.62 seconds. Compute and disk are encouraging, but the
+  deliberately uncompressed 148.1 B/indexed-row shape is rejected as the final
+  planet format. R2 shuffle, multi-source dictionaries, and global skew remain
+  unmeasured.
 
 ### Current production data
 
@@ -190,6 +198,12 @@ preserving branch- or PR-specific history.
 - Exact-name address context covered 4,391 of 5,832 clusters (75.29%) only as a
   diagnostic. A spatial address-to-segment/component join is still required;
   shared connector IDs, not visual crossings, define graph connectivity.
+- In the hosted reduce range, only 1,382,264 of 3,743,307 projected rows
+  (36.93%) had both non-empty street and number; 2,361,043 were explicitly
+  rejected and no Point geometries were invalid. This one source-object range
+  is not globally representative. Excluding incomplete rows is a defensible
+  exact-address scope but a potentially severe coverage choice, not harmless
+  compression.
 
 ### ID locator and smoke runtime
 
@@ -410,6 +424,19 @@ absent from the historical address input and remain unmeasured.
   projection on small/median/large and non-US source objects; reject a plan if
   any range exceeds hosted memory, disk, runtime, or transfer amplification
   gates.
+- The first hosted reduce run proves the local fragment/sort/merge/verify
+  envelope at 1.38M retained rows: 30 fragments, 204.3 MB fragment bytes,
+  204.6 MB final bytes, 21.62-second merge/assembly, 708.8 MB peak RSS, and a
+  757.5 MB conservative workspace estimate. It preserves raw address levels and
+  exact source row-group/row locators. Its 148.1 B/row encoding repeats strings
+  and would linearly diagnose 70.0 GB if applied to all 473M planning rows; do
+  not promote that encoding or relax the 40 GB stop gate.
+- Next keep the same exact-candidate oracle while dictionary/prefix-compressing
+  normalized/display strings, raw address-level sequences, and multi-source
+  locator IDs. Compare a self-contained useful response against a bare hot
+  record with optional Overture hydration. Mandatory live hydration is not an
+  acceptable dependency until bounded Worker zstd/Parquet range decoding is
+  proven.
 - Extend the prototype with hash-verifying R2 fragment upload/download and clean
   restart behavior without trusting file existence or overwriting completed
   objects.

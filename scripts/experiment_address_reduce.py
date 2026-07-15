@@ -392,15 +392,24 @@ def build_artifact(
             current_prefix: tuple[str, ...] | None = None
             current_count = max_fanout = distinct_keys = 0
             verification_groups: list[dict[str, Any]] = []
+            maximum_group: dict[str, Any] | None = None
+            current_id_digest = hashlib.sha256()
 
             def finish_group() -> None:
-                nonlocal max_fanout, distinct_keys
+                nonlocal max_fanout, distinct_keys, maximum_group
                 if current_prefix is None:
                     return
                 distinct_keys += 1
                 max_fanout = max(max_fanout, current_count)
-                if len(verification_groups) < 3:
-                    verification_groups.append({"key": list(current_prefix), "count": current_count})
+                group = {
+                    "key": list(current_prefix),
+                    "count": current_count,
+                    "id_sha256": current_id_digest.hexdigest(),
+                }
+                if len(verification_groups) < 2:
+                    verification_groups.append(group)
+                if maximum_group is None or current_count > maximum_group["count"]:
+                    maximum_group = group
 
             with record_path.open("wb") as record_file, sparse_path.open("wb") as sparse_file:
                 while heap:
@@ -412,7 +421,9 @@ def build_artifact(
                         finish_group()
                         current_prefix = prefix
                         current_count = 0
+                        current_id_digest = hashlib.sha256()
                     current_count += 1
+                    current_id_digest.update(uuid.UUID(key[-1]).bytes)
                     if rows % sparse_stride == 0:
                         sparse_file.write(encode_uvarint(rows))
                         sparse_file.write(encode_uvarint(record_file.tell()))
@@ -427,6 +438,10 @@ def build_artifact(
                     if item is not None:
                         heapq.heappush(heap, (item[0], reader_index, item[1]))
                 finish_group()
+            if maximum_group is not None and all(
+                group["key"] != maximum_group["key"] for group in verification_groups
+            ):
+                verification_groups.append(maximum_group)
 
             record_bytes = record_path.stat().st_size
             sparse_bytes = sparse_path.stat().st_size
@@ -569,7 +584,14 @@ class AddressReduceArtifact:
         if offset != self.header["record_bytes"] or count != self.header["records"]:
             raise ValueError("artifact record inventory does not reconcile")
         for group in groups:
-            if len(self.lookup(tuple(group["key"]))) != group["count"]:
+            candidates = self.lookup(tuple(group["key"]))
+            candidate_digest = hashlib.sha256()
+            for candidate in candidates:
+                candidate_digest.update(uuid.UUID(candidate["id"]).bytes)
+            if (
+                len(candidates) != group["count"]
+                or candidate_digest.hexdigest() != group["id_sha256"]
+            ):
                 raise ValueError("artifact lookup differs from reduce oracle")
         return {"full_sorted_scan": True, "record_count_match": True, "exact_candidate_sets": len(groups)}
 
