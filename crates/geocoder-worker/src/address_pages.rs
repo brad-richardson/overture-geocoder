@@ -18,6 +18,7 @@ pub(crate) const MAX_KEY_BYTES: usize = 64 * 1024;
 pub(crate) const MAX_STORED_PAGE_BYTES: usize = 256 * 1024;
 pub(crate) const MAX_DECODED_PAGE_BYTES: usize = 1024 * 1024;
 pub(crate) const MAX_PAGE_ROWS: usize = 10_000;
+pub(crate) const MAX_MATERIALIZED_RESULT_BYTES: usize = 8 * 1024 * 1024;
 const MAX_DICTIONARY_STRINGS: usize = 100_000;
 const MAX_DICTIONARY_STRING_BYTES: usize = 64 * 1024;
 const MAX_ADDRESS_LEVELS: usize = 64;
@@ -288,6 +289,7 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
 
     let mut previous: [Vec<u8>; 8] = Default::default();
     let mut records = Vec::with_capacity(rows);
+    let mut materialized_bytes = 0_usize;
     let mut previous_full_key: Option<([String; 8], [u8; 16])> = None;
     for _ in 0..rows {
         let key_values = (0..8)
@@ -337,6 +339,30 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
             .try_into()
             .map_err(|_| AddressPageError::new("address display field count differs"))?;
         let sequence_id = dictionary_id(&mut cursor, sequences.len())?;
+        // Dictionary references are compact on disk but cloning them into the
+        // response can amplify memory dramatically. Charge conservative String,
+        // Vec, key, display, and context storage before allocating any clones.
+        let string_bytes = key.iter().map(String::len).sum::<usize>()
+            + display
+                .iter()
+                .map(|index| strings[*index].len())
+                .sum::<usize>()
+            + sequences[sequence_id]
+                .iter()
+                .map(|index| strings[*index].len())
+                .sum::<usize>();
+        let allocation_overhead = 256_usize
+            .checked_add(sequences[sequence_id].len().saturating_mul(32))
+            .ok_or_else(|| AddressPageError::new("materialized address size overflows"))?;
+        materialized_bytes = materialized_bytes
+            .checked_add(string_bytes)
+            .and_then(|value| value.checked_add(allocation_overhead))
+            .ok_or_else(|| AddressPageError::new("materialized address size overflows"))?;
+        if materialized_bytes > MAX_MATERIALIZED_RESULT_BYTES {
+            return Err(AddressPageError::new(
+                "materialized address page exceeds Worker heap budget",
+            ));
+        }
         records.push(AddressPageRecord {
             key,
             id: format_uuid(id_bytes),
@@ -557,6 +583,50 @@ mod tests {
         framed
     }
 
+    fn dictionary_amplification_fixture() -> Vec<u8> {
+        let huge = "x".repeat(MAX_DICTIONARY_STRING_BYTES);
+        let mut raw = uvarint(32);
+        raw.extend(uvarint(2));
+        raw.extend(text(""));
+        raw.extend(text(&huge));
+        raw.extend(uvarint(1));
+        raw.extend(uvarint(1));
+        raw.extend(uvarint(1));
+        let mut previous = [
+            Vec::<u8>::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+            Vec::new(),
+        ];
+        for id in 1..=32_u8 {
+            for field in &mut previous {
+                raw.extend(uvarint(field.len() as u64));
+                raw.extend(uvarint(0));
+            }
+            let mut uuid = [0_u8; 16];
+            uuid[15] = id;
+            raw.extend(uuid);
+            raw.extend(0_i32.to_le_bytes());
+            raw.extend(0_i32.to_le_bytes());
+            raw.extend(uvarint(0));
+            raw.extend(uvarint(u64::from(id)));
+            // Six display fields all reference the huge string, as does context.
+            for dictionary_id in [1_u64, 1, 1, 1, 1, 1, 0] {
+                raw.extend(uvarint(dictionary_id));
+            }
+        }
+        let mut encoder = GzEncoder::new(Vec::new(), Compression::new(6));
+        encoder.write_all(&raw).unwrap();
+        let stored = encoder.finish().unwrap();
+        let mut framed = (stored.len() as u32).to_le_bytes().to_vec();
+        framed.extend(stored);
+        framed
+    }
+
     #[test]
     fn parses_index_and_selects_predecessor_page() {
         let index = AddressPageIndex::parse(&index_fixture()).unwrap();
@@ -604,5 +674,13 @@ mod tests {
         bytes.extend((header.len() as u32).to_le_bytes());
         bytes.extend(header);
         assert_eq!(parse_useful_gzip_header(&bytes).unwrap(), 256);
+    }
+
+    #[test]
+    fn rejects_small_dictionary_page_with_extreme_heap_amplification() {
+        let page = dictionary_amplification_fixture();
+        assert!(page.len() < 4096);
+        let error = decode_useful_gzip_range(&page, 32, &key("10")).unwrap_err();
+        assert!(error.to_string().contains("heap budget"));
     }
 }

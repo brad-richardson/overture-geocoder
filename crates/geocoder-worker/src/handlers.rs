@@ -13,8 +13,6 @@ use crate::stac::{
 const MAX_QUERY_LENGTH: usize = 200;
 const MIN_AUTOCOMPLETE_QUERY_CHARS: usize = 2;
 const MAX_TOKEN_COUNT: usize = 10;
-const ADDRESS_SPIKE_INDEX_KEY: &str = "smoketest-address/useful_gzip.idx";
-const ADDRESS_SPIKE_DATA_KEY: &str = "smoketest-address/useful_gzip.bin";
 
 fn is_id_index_unavailable(err_msg: &str) -> bool {
     err_msg.contains(NOT_FOUND_SENTINEL) && err_msg.contains("id-index")
@@ -69,14 +67,23 @@ pub async fn handle_address_page_spike(
     _req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
 ) -> Result<Response> {
-    if ctx
+    let environment_ok = ctx
         .env
         .var("ENVIRONMENT")
         .ok()
-        .is_none_or(|value| value.to_string() != "address-smoke")
-    {
+        .is_some_and(|value| value.to_string() == "address-smoke");
+    if !environment_ok {
         return Response::error("Not found", 404);
     }
+    let prefix = ctx
+        .env
+        .var("ADDRESS_SPIKE_PREFIX")
+        .ok()
+        .map(|value| value.to_string())
+        .filter(|value| valid_address_smoke_prefix(value))
+        .ok_or_else(|| Error::RustError("Invalid address smoke prefix".into()))?;
+    let index_key = format!("{prefix}/useful_gzip.idx");
+    let data_key = format!("{prefix}/useful_gzip.bin");
     let key = [
         "us",
         "ma",
@@ -90,7 +97,7 @@ pub async fn handle_address_page_spike(
     .map(str::to_string);
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let records = loader
-        .lookup_address_page_spike(ADDRESS_SPIKE_INDEX_KEY, ADDRESS_SPIKE_DATA_KEY, &key)
+        .lookup_address_page_spike(&index_key, &data_key, &key)
         .await?;
     let body = serde_json::json!({
         "schema": "overture-address-worker-spike-v1",
@@ -101,6 +108,18 @@ pub async fn handle_address_page_spike(
     let mut response = Response::from_json(&body)?;
     response.headers_mut().set("Cache-Control", "no-store")?;
     Ok(response)
+}
+
+fn valid_address_smoke_prefix(value: &str) -> bool {
+    value
+        .strip_prefix("smoketest-address-")
+        .is_some_and(|suffix| {
+            !suffix.is_empty()
+                && suffix.len() <= 64
+                && suffix
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '-')
+        })
 }
 
 /// Search request handler.
@@ -506,6 +525,16 @@ mod tests {
         assert!(parsed.contains("locality"));
         assert!(parsed.contains("country"));
         assert!(parsed.contains("neighborhood"));
+    }
+
+    #[test]
+    fn address_smoke_prefix_is_unique_and_strictly_bounded() {
+        assert!(valid_address_smoke_prefix("smoketest-address-12345-2"));
+        assert!(!valid_address_smoke_prefix("smoketest-address"));
+        assert!(!valid_address_smoke_prefix("smoketest-address-production"));
+        assert!(!valid_address_smoke_prefix(
+            "smoketest-address-12/../catalog"
+        ));
     }
 
     #[test]

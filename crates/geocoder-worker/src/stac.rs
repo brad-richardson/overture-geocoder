@@ -1017,6 +1017,60 @@ impl ShardLoader {
         Ok(Some(bytes))
     }
 
+    /// Read at most `max_bytes` from the start of an object and only cache the
+    /// result after proving the object did not fill a `max + 1` sentinel range.
+    /// This prevents a corrupt index from being fully materialized by
+    /// `cached_get` before its size cap can be checked.
+    async fn cached_bounded_prefix_read(
+        &self,
+        key: &str,
+        max_bytes: usize,
+        ttl: u64,
+    ) -> Result<Option<Bytes>> {
+        let sentinel_length = max_bytes
+            .checked_add(1)
+            .ok_or_else(|| Error::RustError("Bounded prefix length overflow".into()))?;
+        let cache_key = format!("{}{}__bounded-prefix-{}", CACHE_PREFIX, key, max_bytes);
+        let request = Request::new(&cache_key, Method::Get)?;
+        if let Some(mut response) = self.cache.get(&request, false).await? {
+            let bytes = response.bytes().await?;
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            if bytes.len() > max_bytes {
+                return Err(Error::RustError("Cached bounded prefix exceeds cap".into()));
+            }
+            return Ok(Some(Bytes::from(bytes)));
+        }
+        let obj = self
+            .bucket
+            .get(key)
+            .range(worker::Range::OffsetWithLength {
+                offset: 0,
+                length: sentinel_length as u64,
+            })
+            .execute()
+            .await?;
+        let Some(obj) = obj else {
+            self.cache_put_bytes_background(cache_key, Bytes::new(), NEGATIVE_CACHE_TTL)
+                .await;
+            return Ok(None);
+        };
+        let body = obj
+            .body()
+            .ok_or_else(|| Error::RustError("Empty bounded-prefix body".into()))?;
+        let bytes = Bytes::from(body.bytes().await?);
+        if bytes.len() > max_bytes {
+            return Err(Error::RustError(format!(
+                "R2 object {} exceeds bounded prefix cap",
+                key
+            )));
+        }
+        self.cache_put_bytes_background(cache_key, bytes.clone(), ttl)
+            .await;
+        Ok(Some(bytes))
+    }
+
     /// Experimental exact-address storage path.
     ///
     /// The caller supplies immutable versioned object keys and an already
@@ -1031,14 +1085,9 @@ impl ShardLoader {
         lookup_key: &[String; 8],
     ) -> Result<Vec<AddressPageRecord>> {
         let index_bytes = self
-            .cached_get(index_key, IMMUTABLE_CACHE_TTL)
+            .cached_bounded_prefix_read(index_key, MAX_INDEX_BYTES, IMMUTABLE_CACHE_TTL)
             .await?
             .ok_or_else(|| not_found(index_key))?;
-        if index_bytes.len() > MAX_INDEX_BYTES {
-            return Err(Error::RustError(
-                "Address page index exceeds Worker hard byte cap".into(),
-            ));
-        }
         let index = AddressPageIndex::parse(&index_bytes)
             .map_err(|error| Error::RustError(format!("Invalid address page index: {error}")))?;
         let Some(extent) = index.find(lookup_key).cloned() else {
