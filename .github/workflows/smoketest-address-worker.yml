@@ -135,7 +135,7 @@ jobs:
             for propagation_attempt in $(seq 1 12); do
               read -r HTTP_STATUS TIME_TOTAL < <(curl --silent --show-error \
                 --dump-header "$HEADERS" --output "$BODY" \
-                --write-out '%{http_code} %{time_total}' \
+                --write-out '%{http_code} %{time_total}\n' \
                 "${PREVIEW_URL}/__address-page-spike")
               if [ "$HTTP_STATUS" = "200" ]; then
                 break
