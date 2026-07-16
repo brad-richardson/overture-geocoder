@@ -1,0 +1,169 @@
+{
+  "schema_version": 1,
+  "input": "exports/places-ca-1m.parquet",
+  "input_sha256": "0bc3f28887b2d93a0a204d036d97d141395270978189870909e20713dd74a786",
+  "wall_seconds": 27.968027124996297,
+  "input_places": 1000000,
+  "head_parameters": {
+    "cell_degrees": 0.25,
+    "head_target_bytes": 65536,
+    "head_bucket_count_seed": 4096,
+    "head_minimum_candidates": 64,
+    "head_limit": 10
+  },
+  "baseline_bucket_head": {
+    "objects": 4090,
+    "bytes": 26088333,
+    "bytes_per_place": 26.088333,
+    "final_bucket_count": 4096,
+    "keys": 26051,
+    "bucket_size_distribution": {
+      "min": 606,
+      "max": 18068,
+      "mean": 6378.565525672371,
+      "median": 6126.5
+    }
+  },
+  "single_object_head": {
+    "build_seconds": 0.7340798750519753,
+    "object_bytes": 25753724,
+    "objects": 1,
+    "preamble_bytes": 12,
+    "directory_bytes": 177,
+    "key_index_bytes": 385153,
+    "entries_bytes": 25368382,
+    "key_count": 26051,
+    "entry_size_distribution": {
+      "count": 26051,
+      "min": 558,
+      "max": 1604,
+      "mean": 973.7968600053741,
+      "median": 966,
+      "p90": 1107.0,
+      "total": 25368382
+    }
+  },
+  "reads_model": {
+    "baseline_4090obj": "hash key -> one bucket object; a hit or a miss both read the whole bucket (all keys hashing there)",
+    "single_resident": "release manifest resolves the object layout and the key index is cached; a hit is one entry read, a miss is zero reads",
+    "single_cold": "read the whole key index once, then the entry; a miss stops after the index read. Excludes the object's own 12-byte preamble + 177-byte JSON directory, assumed resolved from the resident edge-cached release manifest"
+  },
+  "benchmark": {
+    "queries": [
+      {
+        "name": "starbucks_exact",
+        "kind": "hit",
+        "value": "starbucks",
+        "prefix": false,
+        "field": null,
+        "head_key": "e:starbucks",
+        "head_candidates": 10,
+        "baseline_4090obj": {
+          "reads": 1,
+          "bytes": 6624
+        },
+        "single_resident": {
+          "reads": 1,
+          "bytes": 791
+        },
+        "single_cold": {
+          "reads": 2,
+          "bytes": 385944
+        },
+        "results_agree_resident_vs_cold": true,
+        "overfetch_ratio_baseline_vs_resident": 8.374209860935524
+      },
+      {
+        "name": "warfield_hotel_tokens",
+        "kind": "ineligible",
+        "value": "warfield",
+        "prefix": false,
+        "field": null,
+        "head_key": "e:warfield",
+        "note": "not a single unfielded clause; head not consulted"
+      },
+      {
+        "name": "golden_gate_prefix",
+        "kind": "ineligible",
+        "value": "golden",
+        "prefix": false,
+        "field": null,
+        "head_key": "e:golden",
+        "note": "not a single unfielded clause; head not consulted"
+      },
+      {
+        "name": "hotel_category",
+        "kind": "ineligible",
+        "value": "hotel",
+        "prefix": false,
+        "field": "category",
+        "head_key": null,
+        "note": "not a single unfielded clause; head not consulted"
+      },
+      {
+        "name": "sf_cafe_context",
+        "kind": "ineligible",
+        "value": "san",
+        "prefix": false,
+        "field": "context",
+        "head_key": null,
+        "note": "not a single unfielded clause; head not consulted"
+      },
+      {
+        "name": "starbucks_long_prefix",
+        "kind": "hit",
+        "value": "starbu",
+        "prefix": true,
+        "field": null,
+        "head_key": "p:starbu",
+        "head_candidates": 10,
+        "baseline_4090obj": {
+          "reads": 1,
+          "bytes": 4545
+        },
+        "single_resident": {
+          "reads": 1,
+          "bytes": 791
+        },
+        "single_cold": {
+          "reads": 2,
+          "bytes": 385944
+        },
+        "results_agree_resident_vs_cold": true,
+        "overfetch_ratio_baseline_vs_resident": 5.745891276864728
+      },
+      {
+        "name": "absent_exact_miss",
+        "kind": "eligible_miss",
+        "value": "zzunlikelyheadtoken",
+        "prefix": false,
+        "field": null,
+        "head_key": "e:zzunlikelyheadtoken",
+        "head_candidates": 0,
+        "baseline_4090obj": {
+          "reads": 1,
+          "bytes": 5073
+        },
+        "single_resident": {
+          "reads": 0,
+          "bytes": 0
+        },
+        "single_cold": {
+          "reads": 1,
+          "bytes": 385153
+        },
+        "results_agree_resident_vs_cold": true
+      }
+    ],
+    "summary": {
+      "hit_query_count": 2,
+      "baseline_max_reads": 1,
+      "baseline_max_bytes": 6624,
+      "resident_max_reads": 1,
+      "resident_max_bytes": 791,
+      "cold_max_reads": 2,
+      "cold_max_bytes": 385944,
+      "mean_overfetch_ratio_baseline_vs_resident": 7.060050568900126
+    }
+  }
+}
