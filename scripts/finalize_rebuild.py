@@ -17,7 +17,6 @@ restore the retained catalog if production smoke checks fail.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import json
 import os
 import re
@@ -30,6 +29,11 @@ import urllib.error
 import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).parent))
+# The finalizer's SHA-256-of-file is the shared pipeline helper; the local
+# alias keeps this script's call sites and monkeypatch surface stable.
+from common import sha256_file as _sha256  # noqa: E402,F401
 
 
 VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
@@ -48,14 +52,6 @@ def _load_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
-
-
-def _sha256(path: Path) -> str:
-    digest = hashlib.sha256()
-    with path.open("rb") as src:
-        for chunk in iter(lambda: src.read(1024 * 1024), b""):
-            digest.update(chunk)
-    return digest.hexdigest()
 
 
 def _version_key(value: str) -> tuple[int, int, int, int]:

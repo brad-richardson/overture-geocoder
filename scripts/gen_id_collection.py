@@ -9,7 +9,6 @@ Usage:
 """
 
 import argparse
-import json
 import os
 import subprocess
 import sys
@@ -23,7 +22,10 @@ sys.path.insert(0, str(Path(__file__).parent))
 from build_id_index import (
     _classify_shard_set,
     _format_metadata,
-    _load_locator_dictionary_reference,
+)
+from common import write_json
+from id_index_protocol import (
+    _load_locator_dictionary_binding,
     _validate_build_marker_dictionary_sha,
 )
 from stac import get_latest_release
@@ -107,13 +109,20 @@ def main():
     # Shared validator checks exact order, physical types, UUID length, and
     # uniform format for every footer before either metadata object is written.
     format_version = _classify_shard_set(con, shard_files)
-    dictionary_reference = (
-        _load_locator_dictionary_reference(r2_config, version, release_version)
-        if format_version >= 3 else None
-    )
-    if dictionary_reference is not None:
+    dictionary_reference = None
+    if format_version >= 3:
+        # Load the manifest-bound dictionary reference and its input inventory
+        # set SHA through the protocol module, then require every build marker
+        # to match both — the same fail-closed pair phase_metadata enforces.
+        dictionary_reference, input_inventory_set_sha256 = (
+            _load_locator_dictionary_binding(r2_config, version, release_version)
+        )
         _validate_build_marker_dictionary_sha(
-            r2_config, version, dictionary_reference["sha256"])
+            r2_config,
+            version,
+            dictionary_reference["sha256"],
+            input_inventory_set_sha256,
+        )
     format_metadata = _format_metadata(
         format_version, release_version, dictionary_reference)
 
@@ -154,9 +163,7 @@ def main():
     }
 
     tmp = Path("tmp-id-collection.json")
-    tmp.parent.mkdir(parents=True, exist_ok=True)
-    with open(tmp, "w") as f:
-        json.dump(collection, f, indent=2)
+    write_json(tmp, collection)
     print(f"  Generated {tmp} ({len(shard_infos)} items)")
 
     # Upload via wrangler
@@ -179,8 +186,7 @@ def main():
         **format_metadata,
     }
     tmp_meta = Path("tmp-id-meta.json")
-    with open(tmp_meta, "w") as f:
-        json.dump(meta, f)
+    write_json(tmp_meta, meta)
     meta_key = f"{bucket}/{version}/id-meta.json"
     result = subprocess.run(
         ["wrangler", "r2", "object", "put", meta_key,
