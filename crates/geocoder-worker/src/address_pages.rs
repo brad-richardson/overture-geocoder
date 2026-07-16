@@ -3,62 +3,40 @@
 //! This module deliberately has no route. `ShardLoader` uses it to prove the
 //! exact R2 index -> range -> bounded gzip -> useful-record path without
 //! exposing an unfinished address API.
+//!
+//! The framing, side-index, caps, and cursor primitives now live in the shared
+//! [`geocoder_core::pages`] range-reader core; this module keeps only the
+//! address-specific record payload (front-coded 8-field key, display
+//! dictionary, raw address levels, heap-amplification budget) on top of them.
 
-use std::fmt;
 use std::io::{Cursor, Read};
 
 use flate2::bufread::GzDecoder;
+use geocoder_core::pages::{strip_stored_page_frame, ByteReader, PageCaps, PageError, PageIndex};
 use serde::{Deserialize, Serialize};
 
+/// Address side-index / data-object magics. Format-specific, so they stay here
+/// rather than in the payload-agnostic core.
 pub(crate) const INDEX_MAGIC: &[u8; 8] = b"OACIX01\0";
 pub(crate) const DATA_MAGIC: &[u8; 8] = b"OACMP01\0";
-pub(crate) const MAX_INDEX_BYTES: usize = 4 * 1024 * 1024;
-pub(crate) const MAX_INDEX_ENTRIES: usize = 65_536;
-pub(crate) const MAX_KEY_BYTES: usize = 64 * 1024;
-pub(crate) const MAX_STORED_PAGE_BYTES: usize = 256 * 1024;
-pub(crate) const MAX_DECODED_PAGE_BYTES: usize = 1024 * 1024;
-pub(crate) const MAX_PAGE_ROWS: usize = 10_000;
-pub(crate) const MAX_MATERIALIZED_RESULT_BYTES: usize = 8 * 1024 * 1024;
-const MAX_DICTIONARY_STRINGS: usize = 100_000;
-const MAX_DICTIONARY_STRING_BYTES: usize = 64 * 1024;
+
+/// Address decode budgets: the single shared preset.
+const CAPS: PageCaps = PageCaps::ADDRESS;
+/// Re-exported for the R2 bounded-prefix read in `stac::cache`.
+pub(crate) const MAX_INDEX_BYTES: usize = CAPS.max_index_bytes;
+/// Largest framed candidate-page range (stored payload + length prefix). The
+/// coalescing planner budget for a single address page span.
+pub(crate) const MAX_STORED_PAGE_RANGE: u64 =
+    (CAPS.max_stored_page_bytes + geocoder_core::pages::STORED_LEN_PREFIX) as u64;
+const MAX_DICTIONARY_STRING_BYTES: usize = CAPS.max_dictionary_string_bytes;
+/// Largest raw `address_levels` sequence length (address-specific).
 const MAX_ADDRESS_LEVELS: usize = 64;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AddressPageError(String);
+type Result<T> = std::result::Result<T, PageError>;
 
-impl AddressPageError {
-    fn new(message: impl Into<String>) -> Self {
-        Self(message.into())
-    }
-}
-
-impl fmt::Display for AddressPageError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for AddressPageError {}
-
-type Result<T> = std::result::Result<T, AddressPageError>;
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub(crate) struct AddressPageExtent {
-    pub offset: u64,
-    pub length: u64,
-    pub rows: usize,
-}
-
-#[derive(Debug, Clone)]
-struct IndexEntry {
-    key: [String; 8],
-    extent: AddressPageExtent,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct AddressPageIndex {
-    entries: Vec<IndexEntry>,
-}
+/// The parsed address side index: a first-key -> page directory keyed by the
+/// normalized eight-field address key.
+pub(crate) type AddressPageIndex = PageIndex<[String; 8]>;
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct AddressPageRecord {
@@ -84,153 +62,76 @@ struct DataHeader {
     page_rows: usize,
 }
 
+/// Parse and validate the capped JSON header at the front of a data object.
 pub(crate) fn parse_useful_gzip_header(bytes: &[u8]) -> Result<usize> {
     if bytes.len() < DATA_MAGIC.len() + 4 || &bytes[..DATA_MAGIC.len()] != DATA_MAGIC {
-        return Err(AddressPageError::new("invalid address data magic"));
+        return Err(PageError::new("invalid address data magic"));
     }
     let header_len = u32::from_le_bytes(
         bytes[DATA_MAGIC.len()..DATA_MAGIC.len() + 4]
             .try_into()
             .expect("four-byte slice"),
     ) as usize;
-    if header_len > MAX_KEY_BYTES || DATA_MAGIC.len() + 4 + header_len > bytes.len() {
-        return Err(AddressPageError::new(
-            "address data header is outside hard bounds",
-        ));
+    if header_len > CAPS.max_key_bytes || DATA_MAGIC.len() + 4 + header_len > bytes.len() {
+        return Err(PageError::new("address data header is outside hard bounds"));
     }
     let header: DataHeader =
         serde_json::from_slice(&bytes[DATA_MAGIC.len() + 4..DATA_MAGIC.len() + 4 + header_len])
-            .map_err(|_| AddressPageError::new("invalid address data header JSON"))?;
+            .map_err(|_| PageError::new("invalid address data header JSON"))?;
     if header.format != 1 || header.variant != "useful_gzip" {
-        return Err(AddressPageError::new("unsupported address data format"));
+        return Err(PageError::new("unsupported address data format"));
     }
     if header.page_rows == 0 || header.page_rows > 4096 {
-        return Err(AddressPageError::new("invalid address page-row target"));
+        return Err(PageError::new("invalid address page-row target"));
     }
     Ok(header.page_rows)
 }
 
-impl AddressPageIndex {
-    pub(crate) fn parse(bytes: &[u8]) -> Result<Self> {
-        if bytes.len() > MAX_INDEX_BYTES {
-            return Err(AddressPageError::new("address index exceeds hard byte cap"));
-        }
-        if !bytes.starts_with(INDEX_MAGIC) {
-            return Err(AddressPageError::new("invalid address index magic"));
-        }
-        let mut cursor = SliceCursor::new(bytes, INDEX_MAGIC.len());
-        let mut entries = Vec::new();
-        let mut previous_key: Option<[String; 8]> = None;
-        let mut previous_end = 0_u64;
-        while !cursor.is_empty() {
-            if entries.len() >= MAX_INDEX_ENTRIES {
-                return Err(AddressPageError::new("address index entry cap exceeded"));
-            }
-            let offset = cursor.uvarint()?;
-            let length = cursor.uvarint()?;
-            let rows = usize::try_from(cursor.uvarint()?)
-                .map_err(|_| AddressPageError::new("address page row count is too large"))?;
-            let key_len = usize::try_from(cursor.uvarint()?)
-                .map_err(|_| AddressPageError::new("address index key is too large"))?;
-            if key_len > MAX_KEY_BYTES {
-                return Err(AddressPageError::new(
-                    "address index key exceeds hard byte cap",
-                ));
-            }
-            let key_bytes = cursor.take(key_len)?;
-            let mut key_cursor = SliceCursor::new(key_bytes, 0);
-            let key_values = (0..8)
-                .map(|_| key_cursor.text(MAX_DICTIONARY_STRING_BYTES))
-                .collect::<Result<Vec<_>>>()?;
-            let key: [String; 8] = key_values
-                .try_into()
-                .map_err(|_| AddressPageError::new("address index key field count differs"))?;
-            if !key_cursor.is_empty() {
-                return Err(AddressPageError::new(
-                    "address index key has trailing bytes",
-                ));
-            }
-            if rows == 0
-                || rows > MAX_PAGE_ROWS
-                || length <= 4
-                || length > (MAX_STORED_PAGE_BYTES + 4) as u64
-            {
-                return Err(AddressPageError::new(
-                    "address index page extent is outside hard bounds",
-                ));
-            }
-            let end = offset
-                .checked_add(length)
-                .ok_or_else(|| AddressPageError::new("address index page extent overflows"))?;
-            if offset < previous_end {
-                return Err(AddressPageError::new("address index page extents overlap"));
-            }
-            if previous_key.as_ref().is_some_and(|old| key <= *old) {
-                return Err(AddressPageError::new(
-                    "address index keys are not strictly increasing",
-                ));
-            }
-            previous_key = Some(key.clone());
-            previous_end = end;
-            entries.push(IndexEntry {
-                key,
-                extent: AddressPageExtent {
-                    offset,
-                    length,
-                    rows,
-                },
-            });
-        }
-        if entries.is_empty() {
-            return Err(AddressPageError::new("address index is empty"));
-        }
-        Ok(Self { entries })
-    }
-
-    pub(crate) fn find(&self, key: &[String; 8]) -> Option<&AddressPageExtent> {
-        let position = self.entries.partition_point(|entry| entry.key <= *key);
-        position
-            .checked_sub(1)
-            .map(|index| &self.entries[index].extent)
-    }
+/// Parse the address side index using the shared generic index reader, with the
+/// address eight-field key decode/comparison supplied here.
+pub(crate) fn parse_address_index(bytes: &[u8]) -> Result<AddressPageIndex> {
+    PageIndex::parse(bytes, &CAPS, INDEX_MAGIC, parse_address_index_key)
 }
 
+fn parse_address_index_key(bytes: &[u8]) -> Result<[String; 8]> {
+    let mut reader = ByteReader::new(bytes, 0);
+    let mut values: Vec<String> = Vec::with_capacity(8);
+    for _ in 0..8 {
+        values.push(reader.text(MAX_DICTIONARY_STRING_BYTES)?);
+    }
+    if !reader.is_empty() {
+        return Err(PageError::new("address index key has trailing bytes"));
+    }
+    values
+        .try_into()
+        .map_err(|_| PageError::new("address index key field count differs"))
+}
+
+/// Decode one framed + gzipped page and return only the records matching
+/// `lookup_key`. The stored frame, decode budgets, and cursor primitives come
+/// from the shared core; the record shape is address-specific.
 pub(crate) fn decode_useful_gzip_range(
     bytes: &[u8],
     expected_rows: usize,
     lookup_key: &[String; 8],
 ) -> Result<Vec<AddressPageRecord>> {
-    if bytes.len() < 4 || bytes.len() > MAX_STORED_PAGE_BYTES + 4 {
-        return Err(AddressPageError::new(
-            "stored address page is outside hard bounds",
-        ));
-    }
-    let stored_len = u32::from_le_bytes(bytes[..4].try_into().expect("four-byte slice")) as usize;
-    if stored_len != bytes.len() - 4 {
-        return Err(AddressPageError::new(
-            "address page length differs from range",
-        ));
-    }
-    let mut decoder = GzDecoder::new(Cursor::new(&bytes[4..]));
+    let inner = strip_stored_page_frame(bytes, &CAPS)?;
+    let mut decoder = GzDecoder::new(Cursor::new(inner));
     let mut decoded = Vec::new();
     decoder
         .by_ref()
-        .take((MAX_DECODED_PAGE_BYTES + 1) as u64)
+        .take((CAPS.max_decoded_page_bytes + 1) as u64)
         .read_to_end(&mut decoded)
-        .map_err(|_| AddressPageError::new("invalid gzip address page"))?;
-    if decoded.len() > MAX_DECODED_PAGE_BYTES {
-        return Err(AddressPageError::new(
-            "decoded address page exceeds hard byte cap",
-        ));
+        .map_err(|_| PageError::new("invalid gzip address page"))?;
+    if decoded.len() > CAPS.max_decoded_page_bytes {
+        return Err(PageError::new("decoded address page exceeds hard byte cap"));
     }
-    if decoder.get_ref().position() != stored_len as u64 {
-        return Err(AddressPageError::new(
-            "gzip address page has trailing bytes",
-        ));
+    if decoder.get_ref().position() != inner.len() as u64 {
+        return Err(PageError::new("gzip address page has trailing bytes"));
     }
     let records = decode_useful_page(&decoded)?;
     if records.len() != expected_rows {
-        return Err(AddressPageError::new(
+        return Err(PageError::new(
             "decoded address row count differs from index",
         ));
     }
@@ -238,51 +139,45 @@ pub(crate) fn decode_useful_gzip_range(
         .into_iter()
         .filter(|record| &record.key == lookup_key)
         .collect();
-    if matches.len() > MAX_PAGE_ROWS {
-        return Err(AddressPageError::new("address candidate cap exceeded"));
+    if matches.len() > CAPS.max_page_rows {
+        return Err(PageError::new("address candidate cap exceeded"));
     }
     Ok(matches)
 }
 
 fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
-    let mut cursor = SliceCursor::new(bytes, 0);
-    let rows = usize::try_from(cursor.uvarint()?)
-        .map_err(|_| AddressPageError::new("address page row count is too large"))?;
-    if rows == 0 || rows > MAX_PAGE_ROWS {
-        return Err(AddressPageError::new(
+    let mut reader = ByteReader::new(bytes, 0);
+    let rows = usize::try_from(reader.uvarint()?)
+        .map_err(|_| PageError::new("address page row count is too large"))?;
+    if rows == 0 || rows > CAPS.max_page_rows {
+        return Err(PageError::new(
             "address page row count is outside hard bounds",
         ));
     }
-    let string_count = usize::try_from(cursor.uvarint()?)
-        .map_err(|_| AddressPageError::new("address dictionary count is too large"))?;
-    if string_count > MAX_DICTIONARY_STRINGS {
-        return Err(AddressPageError::new(
-            "address dictionary entry cap exceeded",
-        ));
+    let string_count = usize::try_from(reader.uvarint()?)
+        .map_err(|_| PageError::new("address dictionary count is too large"))?;
+    if string_count > CAPS.max_dictionary_strings {
+        return Err(PageError::new("address dictionary entry cap exceeded"));
     }
     let mut strings = Vec::with_capacity(string_count);
     for _ in 0..string_count {
-        strings.push(cursor.text(MAX_DICTIONARY_STRING_BYTES)?);
+        strings.push(reader.text(MAX_DICTIONARY_STRING_BYTES)?);
     }
-    let sequence_count = usize::try_from(cursor.uvarint()?)
-        .map_err(|_| AddressPageError::new("address sequence count is too large"))?;
+    let sequence_count = usize::try_from(reader.uvarint()?)
+        .map_err(|_| PageError::new("address sequence count is too large"))?;
     if sequence_count > rows {
-        return Err(AddressPageError::new(
-            "address sequence count exceeds row count",
-        ));
+        return Err(PageError::new("address sequence count exceeds row count"));
     }
     let mut sequences = Vec::with_capacity(sequence_count);
     for _ in 0..sequence_count {
-        let count = usize::try_from(cursor.uvarint()?)
-            .map_err(|_| AddressPageError::new("address level count is too large"))?;
+        let count = usize::try_from(reader.uvarint()?)
+            .map_err(|_| PageError::new("address level count is too large"))?;
         if count > MAX_ADDRESS_LEVELS {
-            return Err(AddressPageError::new(
-                "address level count exceeds hard cap",
-            ));
+            return Err(PageError::new("address level count exceeds hard cap"));
         }
         let mut sequence = Vec::with_capacity(count);
         for _ in 0..count {
-            sequence.push(dictionary_id(&mut cursor, strings.len())?);
+            sequence.push(dictionary_id(&mut reader, strings.len())?);
         }
         sequences.push(sequence);
     }
@@ -292,53 +187,41 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
     let mut materialized_bytes = 0_usize;
     let mut previous_full_key: Option<([String; 8], [u8; 16])> = None;
     for _ in 0..rows {
-        let key_values = (0..8)
-            .map(|field| -> Result<String> {
-                let prefix = usize::try_from(cursor.uvarint()?)
-                    .map_err(|_| AddressPageError::new("front-code prefix is too large"))?;
-                let suffix_len = usize::try_from(cursor.uvarint()?)
-                    .map_err(|_| AddressPageError::new("front-code suffix is too large"))?;
-                if prefix > previous[field].len() || suffix_len > MAX_DICTIONARY_STRING_BYTES {
-                    return Err(AddressPageError::new(
-                        "front-coded key is outside hard bounds",
-                    ));
-                }
-                let suffix = cursor.take(suffix_len)?;
-                previous[field].truncate(prefix);
-                previous[field].extend_from_slice(suffix);
-                String::from_utf8(previous[field].clone())
-                    .map_err(|_| AddressPageError::new("front-coded key is not UTF-8"))
-            })
-            .collect::<Result<Vec<_>>>()?;
+        let mut key_values: Vec<String> = Vec::with_capacity(8);
+        for field in previous.iter_mut() {
+            reader.apply_front_coding(field, MAX_DICTIONARY_STRING_BYTES)?;
+            key_values.push(
+                String::from_utf8(field.clone())
+                    .map_err(|_| PageError::new("front-coded key is not UTF-8"))?,
+            );
+        }
         let key: [String; 8] = key_values
             .try_into()
-            .map_err(|_| AddressPageError::new("address key field count differs"))?;
-        let id_bytes: [u8; 16] = cursor.take(16)?.try_into().expect("sixteen-byte slice");
+            .map_err(|_| PageError::new("address key field count differs"))?;
+        let id_bytes: [u8; 16] = reader.take(16)?.try_into().expect("sixteen-byte slice");
         if previous_full_key
             .as_ref()
             .is_some_and(|(old_key, old_id)| (&key, &id_bytes) < (old_key, old_id))
         {
-            return Err(AddressPageError::new("address page records are not sorted"));
+            return Err(PageError::new("address page records are not sorted"));
         }
         previous_full_key = Some((key.clone(), id_bytes));
-        let longitude = cursor.i32_le()? as f64 / 10_000_000.0;
-        let latitude = cursor.i32_le()? as f64 / 10_000_000.0;
+        let longitude = reader.i32_le()? as f64 / 10_000_000.0;
+        let latitude = reader.i32_le()? as f64 / 10_000_000.0;
         if !(-180.0..=180.0).contains(&longitude) || !(-90.0..=90.0).contains(&latitude) {
-            return Err(AddressPageError::new(
+            return Err(PageError::new(
                 "address coordinates are outside valid bounds",
             ));
         }
-        let source_row_group = u32::try_from(cursor.uvarint()?)
-            .map_err(|_| AddressPageError::new("source row group is too large"))?;
-        let source_row_index = u32::try_from(cursor.uvarint()?)
-            .map_err(|_| AddressPageError::new("source row index is too large"))?;
-        let display_values = (0..6)
-            .map(|_| dictionary_id(&mut cursor, strings.len()))
-            .collect::<Result<Vec<_>>>()?;
-        let display: [usize; 6] = display_values
-            .try_into()
-            .map_err(|_| AddressPageError::new("address display field count differs"))?;
-        let sequence_id = dictionary_id(&mut cursor, sequences.len())?;
+        let source_row_group = u32::try_from(reader.uvarint()?)
+            .map_err(|_| PageError::new("source row group is too large"))?;
+        let source_row_index = u32::try_from(reader.uvarint()?)
+            .map_err(|_| PageError::new("source row index is too large"))?;
+        let mut display = [0_usize; 6];
+        for slot in display.iter_mut() {
+            *slot = dictionary_id(&mut reader, strings.len())?;
+        }
+        let sequence_id = dictionary_id(&mut reader, sequences.len())?;
         // Dictionary references are compact on disk but cloning them into the
         // response can amplify memory dramatically. Charge conservative String,
         // Vec, key, display, and context storage before allocating any clones.
@@ -353,19 +236,19 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
                 .sum::<usize>();
         let allocation_overhead = 256_usize
             .checked_add(sequences[sequence_id].len().saturating_mul(32))
-            .ok_or_else(|| AddressPageError::new("materialized address size overflows"))?;
+            .ok_or_else(|| PageError::new("materialized address size overflows"))?;
         materialized_bytes = materialized_bytes
             .checked_add(string_bytes)
             .and_then(|value| value.checked_add(allocation_overhead))
-            .ok_or_else(|| AddressPageError::new("materialized address size overflows"))?;
-        if materialized_bytes > MAX_MATERIALIZED_RESULT_BYTES {
-            return Err(AddressPageError::new(
+            .ok_or_else(|| PageError::new("materialized address size overflows"))?;
+        if materialized_bytes > CAPS.max_materialized_bytes {
+            return Err(PageError::new(
                 "materialized address page exceeds Worker heap budget",
             ));
         }
         records.push(AddressPageRecord {
             key,
-            id: format_uuid(id_bytes),
+            id: geocoder_core::pages::format_uuid(id_bytes),
             longitude,
             latitude,
             source_row_group,
@@ -382,90 +265,19 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
                 .collect(),
         });
     }
-    if !cursor.is_empty() {
-        return Err(AddressPageError::new(
-            "address page has trailing decoded bytes",
-        ));
+    if !reader.is_empty() {
+        return Err(PageError::new("address page has trailing decoded bytes"));
     }
     Ok(records)
 }
 
-fn dictionary_id(cursor: &mut SliceCursor<'_>, count: usize) -> Result<usize> {
-    let id = usize::try_from(cursor.uvarint()?)
-        .map_err(|_| AddressPageError::new("address dictionary ID is too large"))?;
+fn dictionary_id(reader: &mut ByteReader<'_>, count: usize) -> Result<usize> {
+    let id = usize::try_from(reader.uvarint()?)
+        .map_err(|_| PageError::new("address dictionary ID is too large"))?;
     if id >= count {
-        return Err(AddressPageError::new(
-            "address dictionary ID is out of range",
-        ));
+        return Err(PageError::new("address dictionary ID is out of range"));
     }
     Ok(id)
-}
-
-fn format_uuid(bytes: [u8; 16]) -> String {
-    format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        bytes[8], bytes[9], bytes[10], bytes[11], bytes[12], bytes[13], bytes[14], bytes[15]
-    )
-}
-
-struct SliceCursor<'a> {
-    bytes: &'a [u8],
-    position: usize,
-}
-
-impl<'a> SliceCursor<'a> {
-    fn new(bytes: &'a [u8], position: usize) -> Self {
-        Self { bytes, position }
-    }
-
-    fn is_empty(&self) -> bool {
-        self.position == self.bytes.len()
-    }
-
-    fn take(&mut self, length: usize) -> Result<&'a [u8]> {
-        let end = self
-            .position
-            .checked_add(length)
-            .ok_or_else(|| AddressPageError::new("address payload extent overflows"))?;
-        if end > self.bytes.len() {
-            return Err(AddressPageError::new("truncated address payload"));
-        }
-        let result = &self.bytes[self.position..end];
-        self.position = end;
-        Ok(result)
-    }
-
-    fn uvarint(&mut self) -> Result<u64> {
-        let mut value = 0_u64;
-        for shift in (0..=63).step_by(7) {
-            let byte = *self.take(1)?.first().expect("one-byte slice");
-            if shift == 63 && byte > 1 {
-                return Err(AddressPageError::new("address varint overflows"));
-            }
-            value |= u64::from(byte & 0x7f) << shift;
-            if byte & 0x80 == 0 {
-                return Ok(value);
-            }
-        }
-        Err(AddressPageError::new("invalid address varint"))
-    }
-
-    fn text(&mut self, max_bytes: usize) -> Result<String> {
-        let length = usize::try_from(self.uvarint()?)
-            .map_err(|_| AddressPageError::new("address text is too large"))?;
-        if length > max_bytes {
-            return Err(AddressPageError::new("address text exceeds hard byte cap"));
-        }
-        String::from_utf8(self.take(length)?.to_vec())
-            .map_err(|_| AddressPageError::new("address text is not UTF-8"))
-    }
-
-    fn i32_le(&mut self) -> Result<i32> {
-        Ok(i32::from_le_bytes(
-            self.take(4)?.try_into().expect("four-byte slice"),
-        ))
-    }
 }
 
 #[cfg(test)]
@@ -629,11 +441,12 @@ mod tests {
 
     #[test]
     fn parses_index_and_selects_predecessor_page() {
-        let index = AddressPageIndex::parse(&index_fixture()).unwrap();
+        let index = parse_address_index(&index_fixture()).unwrap();
         assert!(index.find(&key("09")).is_none());
         assert_eq!(index.find(&key("10")).unwrap().offset, 100);
         assert_eq!(index.find(&key("10a")).unwrap().offset, 100);
         assert_eq!(index.find(&key("11")).unwrap().offset, 200);
+        assert_eq!(index.find(&key("11")).unwrap().rows, 1);
     }
 
     #[test]
@@ -656,7 +469,7 @@ mod tests {
             .unwrap();
         index[second] = 120;
         index[second + 1] = 0;
-        assert!(AddressPageIndex::parse(&index).is_err());
+        assert!(parse_address_index(&index).is_err());
 
         let page = useful_page_fixture(2);
         assert!(decode_useful_gzip_range(&page, 3, &key("10")).is_err());
@@ -682,5 +495,29 @@ mod tests {
         assert!(page.len() < 4096);
         let error = decode_useful_gzip_range(&page, 32, &key("10")).unwrap_err();
         assert!(error.to_string().contains("heap budget"));
+    }
+
+    /// Cross-language fixture: the committed `plain_page.bin` (produced by the
+    /// Python `encode_page(useful=True)`) must decode to the same address
+    /// records here. This pins the address record payload contract the same way
+    /// the core fixtures pin the framing/extension contract.
+    #[test]
+    fn decodes_committed_plain_page_fixture() {
+        let plain = include_bytes!("../../../tests/fixtures/pages/plain_page.bin");
+        let records = decode_useful_page(plain).unwrap();
+        assert_eq!(records.len(), fixture::RECORD_COUNT);
+        assert_eq!(records[0].street, "Main Street");
+        assert_eq!(records[0].country, "US");
+        assert_eq!(records[0].address_levels, ["MA", "Cambridge"]);
+        // Records are sorted by (key, id); the number field increments.
+        assert_eq!(records[0].number, "10");
+        assert_eq!(records[1].number, "11");
+    }
+
+    mod fixture {
+        /// Record count baked into `tests/fixtures/pages/*` by the generator
+        /// `tests/generate_page_fixtures.py`; kept in sync via the Python
+        /// byte-for-byte regeneration test.
+        pub(super) const RECORD_COUNT: usize = 3;
     }
 }

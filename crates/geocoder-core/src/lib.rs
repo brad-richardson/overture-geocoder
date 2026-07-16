@@ -6,6 +6,7 @@
 pub mod database;
 pub mod error;
 pub mod geo;
+pub mod pages;
 pub mod query;
 pub mod routing;
 pub mod types;
