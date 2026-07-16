@@ -21,17 +21,16 @@ from build_shards import (
     FALLBACK_REGION_SUFFIX,
     SHARD_SIZE_THRESHOLD_BYTES,
     WIKI_IMPORTANCE_WEIGHT,
+    CountryBboxAccumulator,
+    bbox_contains_lon,
     build_country_shard,
+    build_global_router,
     build_head_shard,
-    build_places_shard,
-    build_places_shards,
     build_reverse_country_shard,
     build_reverse_head_shard,
     build_search_alias,
     build_shard_schema,
     compute_importance,
-    compute_places_importance,
-    compute_places_stored_importance,
     dedup_localities,
     enrich_parquet_with_wiki_importance,
     get_reverse_input_metrics,
@@ -40,7 +39,9 @@ from build_shards import (
     validate_country_code,
     validate_population_threshold,
     validate_region_code,
+    version_timestamp,
     write_build_meta,
+    _router_normalize,
 )
 
 import duckdb
@@ -676,165 +677,6 @@ class TestEndToEndShardBuild:
         assert info["record_count"] == len(ids)
 
 
-class TestPlacesShardBuild:
-    @staticmethod
-    def write_places_parquet(path: Path):
-        duckdb.sql(f"""
-            COPY (
-                SELECT * FROM (VALUES
-                    ('confidence-only', 1, 'Confidence Only', 34.0, -118.0,
-                     -118.01, 33.99, -117.99, 34.01, 'US', 'US-CA', 'Los Angeles',
-                     NULL, NULL, NULL, NULL, 0.99, NULL, NULL, 'open'),
-                    ('prominent-place', 1, 'Prominent Place', 37.6, -122.4,
-                     -122.41, 37.59, -122.39, 37.61, 'US', 'US-CA', 'San Francisco',
-                     'airport', 'transport', 'Known Brand', 'Q123', 0.70, NULL, NULL, 'open'),
-                    ('closed-place', 1, 'Closed Place', 37.7, -122.3,
-                     -122.31, 37.69, -122.29, 37.71, 'US', 'US-CA', 'San Francisco',
-                     'airport', 'transport', 'Closed Brand', 'Q999', 1.0, NULL, NULL,
-                     'permanently_closed')
-                ) AS t(
-                    gers_id, version, primary_name, lat, lon,
-                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                    country, region, locality,
-                    category_primary, basic_category,
-                    brand_name, brand_wikidata, confidence,
-                    search_name_base, search_context_base, operating_status
-                )
-            ) TO '{path}' (FORMAT PARQUET)
-        """)
-
-    def test_sampling_and_stored_ranking_are_independent(self, tmp_path):
-        source = tmp_path / "places.parquet"
-        self.write_places_parquet(source)
-        shard_path = tmp_path / "US-CA-places.db"
-
-        info = build_places_shard(
-            source,
-            shard_path,
-            "test",
-            region_code="US-CA",
-            limit=1,
-            sampling_strategy="experimental-prominence",
-        )
-
-        db = sqlite3.connect(shard_path)
-        rows = db.execute(
-            "SELECT gers_id, type, importance FROM divisions"
-        ).fetchall()
-        db.close()
-        assert info["record_count"] == 1
-        # The rejected prominence baseline selects this row, but default stored
-        # importance remains confidence-only.
-        assert rows == [("prominent-place", "place", pytest.approx(0.7))]
-        assert compute_places_importance(
-            0.70, "Known Brand", "Q123", "airport", None
-        ) == pytest.approx(0.9)
-        assert compute_places_stored_importance(
-            "experimental-prominence",
-            0.70,
-            "Known Brand",
-            "Q123",
-            "airport",
-            None,
-        ) == pytest.approx(0.9)
-
-    def test_permanently_closed_flat_places_are_excluded(self, tmp_path):
-        source = tmp_path / "places.parquet"
-        self.write_places_parquet(source)
-        shard_path = tmp_path / "US-CA-places.db"
-
-        info = build_places_shard(source, shard_path, "test", region_code="US-CA")
-
-        db = sqlite3.connect(shard_path)
-        ids = {row[0] for row in db.execute("SELECT gers_id FROM divisions")}
-        db.close()
-        assert info["record_count"] == 2
-        assert ids == {"confidence-only", "prominent-place"}
-
-    def test_collection_uses_worker_visible_shard_id_and_href(self, tmp_path):
-        source = tmp_path / "places.parquet"
-        self.write_places_parquet(source)
-        version_dir = tmp_path / "test-version"
-        version_dir.mkdir()
-        (version_dir / "collection.json").write_text("""{
-            "items": {
-                "HEAD": {
-                    "record_count": 2,
-                    "size_bytes": 100,
-                    "href": "./shards/HEAD.db",
-                    "bbox": [-180, -90, 180, 90]
-                }
-            },
-            "summaries": {}
-        }""")
-        args = SimpleNamespace(
-            places_parquet=source,
-            places_region="US-CA",
-            places_limit=1,
-            places_sampling_strategy="experimental-prominence",
-            places_ranking_strategy="confidence",
-            experimental_places_bbox_slice=True,
-            overture_release=None,
-        )
-
-        infos = build_places_shards(args, "test-version", version_dir)
-
-        assert set(infos) == {"EXPERIMENT-CA-BBOX-places"}
-        places_collection = json.loads(
-            (version_dir / "places-collection.json").read_text()
-        )
-        item = places_collection["items"]["EXPERIMENT-CA-BBOX-places"]
-        assert item["href"] == (
-            "./places-experimental/EXPERIMENT-CA-BBOX-places.db"
-        )
-        assert item["sha256"]
-        assert places_collection["extent"]["spatial"]["bbox"] == [item["bbox"]]
-        assert next(
-            link for link in places_collection["links"] if link["rel"] == "self"
-        )["href"] == "./places-collection.json"
-        forward_collection = json.loads(
-            (version_dir / "collection.json").read_text()
-        )
-        assert "EXPERIMENT-CA-BBOX-places" not in forward_collection["items"]
-        assert forward_collection["summaries"] == {}
-
-    def test_places_bbox_build_requires_explicit_non_promotable_acknowledgement(
-        self, tmp_path
-    ):
-        args = SimpleNamespace(
-            places_parquet=tmp_path / "missing.parquet",
-            places_region="US-CA",
-            places_limit=None,
-            places_sampling_strategy=None,
-            experimental_places_bbox_slice=False,
-        )
-        with pytest.raises(ValueError, match="non-promotable|cannot be promoted"):
-            build_places_shards(args, "test-version", tmp_path)
-
-    def test_places_limit_requires_explicit_sampling_strategy(self, tmp_path):
-        source = tmp_path / "places.parquet"
-        self.write_places_parquet(source)
-        with pytest.raises(ValueError, match="explicit strategy"):
-            build_places_shard(
-                source,
-                tmp_path / "slice.db",
-                "test",
-                region_code="US-CA",
-                limit=1,
-            )
-
-    def test_places_download_preserves_all_root_sources_and_bbox_label(self):
-        sql = (
-            Path(__file__).parent.parent / "scripts" / "download_places.sql"
-        ).read_text()
-        assert "overture_release" in sql
-        assert "sources," in sql
-        assert "root_sources" in sql
-        assert "root_source_count" in sql
-        assert "list_extract(list_filter(sources" not in sql.lower()
-        assert "places-CA-bbox.parquet" in sql
-
-
 class TestReverseShardBuild:
     def test_keeps_city_and_disjoint_area_components(self, tmp_path):
         """Reverse shards preserve city rows and every stored bbox component."""
@@ -952,31 +794,35 @@ class TestBuildMeta:
         assert meta["overture_release"] == "2026-06-17.0"
         assert meta["record_counts"]["total_records"] == 2
 
-    def test_places_build_records_places_input(self, tmp_path):
-        places_input = tmp_path / "places.parquet"
-        places_input.write_bytes(b"test")
+    def test_division_build_records_division_sources(self, tmp_path):
         args = SimpleNamespace(
             parquet=DIVISIONS_PARQUET,
-            places_parquet=places_input,
-            places=True,
             reverse=False,
             overture_release="2026-06-17.0",
+            head_threshold=100_000,
+            no_wiki_importance=False,
+            no_router=False,
+            countries="US",
+            head_only=False,
+            skip_head=False,
         )
         out = write_build_meta(
             "test-version",
             tmp_path,
-            {"US-CA-places": {"record_count": 1, "size_bytes": 4}},
+            {"US": {"record_count": 1, "size_bytes": 4}},
             args,
         )
 
         meta = json.loads(out.read_text())
-        assert meta["input"] == {"parquet": str(places_input), "size_bytes": 4}
-        assert meta["args"]["places"] is True
-        assert meta["division_s3_paths"] == []
         assert meta["source_s3_paths"] == [
             "s3://overturemaps-us-west-2/release/2026-06-17.0/"
-            "theme=places/type=place/*"
+            "theme=divisions/type=division/*",
+            "s3://overturemaps-us-west-2/release/2026-06-17.0/"
+            "theme=divisions/type=division_area/*",
         ]
+        assert meta["division_s3_paths"] == meta["source_s3_paths"]
+        # Places args no longer leak into the division build metadata.
+        assert "places" not in meta["args"]
 
 
 class TestVersionSortKey:
@@ -1000,3 +846,240 @@ class TestConstants:
 
     def test_fallback_region_suffix(self):
         assert FALLBACK_REGION_SUFFIX == "XX"
+
+
+class TestBboxContainsLon:
+    def test_unwrapped(self):
+        assert bbox_contains_lon(0.0, -10.0, 10.0)
+        assert not bbox_contains_lon(20.0, -10.0, 10.0)
+
+    def test_wrapped_matches_worker_convention(self):
+        # min_lon > max_lon wraps the antimeridian: [170, 180] u [-180, -66]
+        assert bbox_contains_lon(175.0, 170.0, -66.0)
+        assert bbox_contains_lon(-140.0, 170.0, -66.0)
+        assert not bbox_contains_lon(0.0, 170.0, -66.0)
+
+
+class TestCountryBboxAccumulator:
+    def test_antimeridian_country_wraps_and_excludes_lon_zero(self):
+        # US/Aleutians shape: components just east of +180, just west of -180,
+        # and the mainland. Plain min/max would report a near-global span.
+        acc = CountryBboxAccumulator()
+        for xmin, ymin, xmax, ymax in [
+            (170.0, 51.0, 179.0, 53.0),   # eastern Aleutians
+            (-180.0, 51.0, -140.0, 53.0),  # western Aleutians
+            (-125.0, 25.0, -66.0, 49.0),   # mainland
+        ]:
+            acc.add(xmin, ymin, xmax, ymax)
+        box = acc.result()
+        min_lon, min_lat, max_lon, max_lat = box
+        # Wrapped bbox (min_lon > max_lon), latitude plain min/max.
+        assert min_lon > max_lon
+        assert (min_lat, max_lat) == (25.0, 53.0)
+        # west edge = westmost eastern component, east edge = eastmost western
+        assert (min_lon, max_lon) == (170.0, -66.0)
+        # Must NOT span the prime meridian, but must cover both hemispheres.
+        assert not bbox_contains_lon(0.0, min_lon, max_lon)
+        assert bbox_contains_lon(175.0, min_lon, max_lon)
+        assert bbox_contains_lon(-140.0, min_lon, max_lon)
+        assert bbox_contains_lon(-70.0, min_lon, max_lon)
+
+    def test_normal_country_stays_unwrapped(self):
+        acc = CountryBboxAccumulator()
+        for xmin, ymin, xmax, ymax in [(-5.0, 42.0, 3.0, 51.0), (1.0, 43.0, 8.0, 50.0)]:
+            acc.add(xmin, ymin, xmax, ymax)
+        box = acc.result()
+        assert box == [-5.0, 42.0, 8.0, 51.0]
+        assert box[0] < box[2]  # unwrapped
+        assert bbox_contains_lon(0.0, box[0], box[2])
+
+    def test_wide_single_hemisphere_stays_unwrapped(self):
+        # A genuinely wide but non-wrapping cluster (no eastern component)
+        # keeps plain min/max even if the span is large.
+        acc = CountryBboxAccumulator()
+        acc.add(-160.0, 20.0, -60.0, 60.0)
+        box = acc.result()
+        assert box == [-160.0, 20.0, -60.0, 60.0]
+
+    def test_empty_keeps_sentinel(self):
+        assert CountryBboxAccumulator().result() == [180.0, 90.0, -180.0, -90.0]
+
+
+class TestReverseAntimeridianBbox:
+    def test_wrapped_bbox_flows_into_reverse_collection(self, tmp_path):
+        source = tmp_path / "reverse.parquet"
+        duckdb.sql(f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    ('us', 1, 'country', 'United States', 60.0, -100.0, 300000000,
+                     'US', 'US-AK', 170.0, 51.0, 179.0, 53.0, 10.0),
+                    ('us', 1, 'country', 'United States', 60.0, -100.0, 300000000,
+                     'US', 'US-AK', -180.0, 51.0, -140.0, 53.0, 10.0),
+                    ('us', 1, 'country', 'United States', 40.0, -100.0, 300000000,
+                     'US', 'US-XX', -125.0, 25.0, -66.0, 49.0, 100.0)
+                ) AS t(
+                    gers_id, version, subtype, primary_name, lat, lon, population,
+                    country, region, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
+                )
+            ) TO '{source}' (FORMAT PARQUET)
+        """)
+        info = build_reverse_country_shard(source, "US", tmp_path / "US.db", "test")
+        box = info["bbox"]
+        assert box[0] > box[2]  # wrapped
+        assert not bbox_contains_lon(0.0, box[0], box[2])
+
+        from build_shards import generate_stac_collection
+
+        collection = generate_stac_collection(
+            "test", {"US": info}, {"US": "abc"}, "reverse"
+        )
+        assert collection["items"]["US"]["bbox"] == box
+
+
+class TestVersionTimestamp:
+    def test_derived_from_version(self):
+        assert version_timestamp("2026-06-17.0") == "2026-06-17T00:00:00+00:00"
+        assert version_timestamp("2026-02-25.10") == "2026-02-25T00:00:00+00:00"
+
+    def test_unparseable_falls_back_to_epoch(self):
+        assert version_timestamp("test") == "1970-01-01T00:00:00+00:00"
+        assert version_timestamp("") == "1970-01-01T00:00:00+00:00"
+
+
+class TestShardDeterminism:
+    def test_rebuild_is_byte_identical(self, enriched_parquet, tmp_path):
+        a = tmp_path / "US_a.db"
+        b = tmp_path / "US_b.db"
+        build_country_shard(enriched_parquet, "US", a, "2026-06-17.0")
+        build_country_shard(enriched_parquet, "US", b, "2026-06-17.0")
+        assert a.read_bytes() == b.read_bytes()
+
+    def test_created_at_is_version_derived(self, enriched_parquet, tmp_path):
+        path = tmp_path / "US.db"
+        build_country_shard(enriched_parquet, "US", path, "2026-06-17.0")
+        db = sqlite3.connect(path)
+        (created_at,) = db.execute(
+            "SELECT value FROM metadata WHERE key = 'created_at'"
+        ).fetchone()
+        db.close()
+        assert created_at == version_timestamp("2026-06-17.0")
+
+    def test_insertion_order_is_gers_id_sorted(self, enriched_parquet, tmp_path):
+        path = tmp_path / "US.db"
+        build_country_shard(enriched_parquet, "US", path, "test")
+        db = sqlite3.connect(path)
+        ids = [r[0] for r in db.execute("SELECT gers_id FROM divisions ORDER BY rowid")]
+        db.close()
+        assert ids == sorted(ids)
+
+
+ROUTER_PARQUET_COLUMNS = (
+    "gers_id, subtype, class, population, wiki_importance, "
+    "is_country_capital, is_region_capital, primary_name, search_name, "
+    "country, region"
+)
+
+
+def write_router_enriched_parquet(path: Path):
+    """Enriched (wiki_importance present) parquet with non-HEAD localities."""
+    duckdb.sql(f"""
+        COPY (SELECT * FROM (VALUES
+            ('b1', 'locality', 'city', 50000, CAST(NULL AS DOUBLE),
+             false, false, 'Boston', 'boston', 'US', 'US-MA'),
+            ('m1', 'locality', 'city', 50000, CAST(NULL AS DOUBLE),
+             false, false, 'Manchester', 'manchester', 'GB', 'GB-ENG')
+        ) AS t({ROUTER_PARQUET_COLUMNS})) TO '{path}' (FORMAT PARQUET)
+    """)
+
+
+def read_router_rows(path: Path):
+    db = sqlite3.connect(path)
+    rows = db.execute("SELECT token, shard_id FROM router").fetchall()
+    db.close()
+    return rows
+
+
+class TestRouterNormalization:
+    def _cases(self):
+        fixture = (
+            Path(__file__).parent / "fixtures" / "router_normalization_cases.json"
+        )
+        return json.loads(fixture.read_text())
+
+    def test_matches_fixture_every_case(self):
+        cases = self._cases()
+        assert cases, "fixture must not be empty"
+        for case in cases:
+            assert _router_normalize(case["input"]) == case["normalized"], case
+
+    def test_in_table_diacritics_folded(self):
+        # Ported from the worker fold table (stac.rs).
+        assert _router_normalize("München") == "munchen"
+        assert _router_normalize("Ñuñoa") == "nunoa"
+        assert _router_normalize("Åland") == "aland"
+
+    def test_out_of_table_diacritics_preserved(self):
+        # The worker preserves these; the builder must too, byte-for-byte.
+        assert _router_normalize("Češka") == "češka"
+        assert _router_normalize("Řež") == "řež"
+        assert _router_normalize("Straße") == "straße"
+
+
+class TestRouterTokenContract:
+    def test_only_worker_reachable_tokens_are_emitted(self, tmp_path):
+        parquet = tmp_path / "enriched.parquet"
+        write_router_enriched_parquet(parquet)
+        build_global_router(parquet, tmp_path / "router.db", 100_000, "test")
+        tokens = {t for t, _ in read_router_rows(tmp_path / "router.db")}
+
+        # Dead weight: 2-char country codes and hyphenated region codes never
+        # survive the worker tokenizer, so they must not be stored.
+        assert {"us", "gb", "ma", "ny", "us-ma", "gb-eng"} & tokens == set()
+        # Every stored token is worker-reachable: >= 3 chars, contains a letter,
+        # and is a single alphanumeric run.
+        for tok in tokens:
+            assert len(tok) >= 3
+            assert any(c.isalpha() for c in tok)
+            assert tok.isalnum()
+            assert _router_normalize(tok) == tok
+
+    def test_reachable_subdivision_suffix_and_names_route(self, tmp_path):
+        parquet = tmp_path / "enriched.parquet"
+        write_router_enriched_parquet(parquet)
+        build_global_router(parquet, tmp_path / "router.db", 100_000, "test")
+        rows = read_router_rows(tmp_path / "router.db")
+        by_token = {}
+        for tok, sid in rows:
+            by_token.setdefault(tok, set()).add(sid)
+
+        assert "boston" in by_token and by_token["boston"] == {"US", "US-MA"}
+        assert "manchester" in by_token
+        # GB-ENG -> "eng" is a 3-letter subdivision code the worker CAN produce.
+        assert "eng" in by_token and by_token["eng"] == {"GB", "GB-ENG"}
+
+
+class TestRouterRawSchemaFallback:
+    def test_builds_from_raw_export_without_wiki_importance(self, tmp_path):
+        # Raw divisions export: no wiki_importance column, but search_name and
+        # the capital flags are present (search_name, NOT the never-existing
+        # search_text the old fallback selected).
+        raw = tmp_path / "raw.parquet"
+        duckdb.sql(f"""
+            COPY (SELECT * FROM (VALUES
+                ('b1', 'locality', 'city', 50000, false, false,
+                 'Boston', 'Boston', 'boston', 'US', 'US-MA'),
+                ('m1', 'locality', 'city', 50000, false, false,
+                 'Manchester', 'Manchester', 'manchester', 'GB', 'GB-ENG')
+            ) AS t(gers_id, subtype, class, population, is_country_capital,
+                   is_region_capital, name, primary_name, search_name,
+                   country, region)) TO '{raw}' (FORMAT PARQUET)
+        """)
+        info = build_global_router(raw, tmp_path / "router.db", 100_000, "test")
+        assert info["enriched"] is False
+        assert info["pair_count"] > 0
+        tokens = {t for t, _ in read_router_rows(tmp_path / "router.db")}
+        # search_name was actually read (the old fallback referenced the
+        # nonexistent search_text column and produced nothing usable).
+        assert "boston" in tokens
+        assert "manchester" in tokens
+        assert "eng" in tokens

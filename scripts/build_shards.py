@@ -47,7 +47,6 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
-import unicodedata
 import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
@@ -177,43 +176,38 @@ WIKI_LOCALITY_KEEP_THRESHOLD = 0.5
 # where 0.5 admitted ~60k and tripled HEAD's size.
 HEAD_WIKI_IMPORTANCE_THRESHOLD = 0.65
 
-# ---------------------------------------------------------------------------
-# Places prototype constants
-# ---------------------------------------------------------------------------
-PLACES_CA_BBOX = {
-    "xmin": -124.5,
-    "xmax": -114.0,
-    "ymin": 32.5,
-    "ymax": 42.1,
-}
-PLACES_CA_BBOX_SLICE_ID = "EXPERIMENT-CA-BBOX-places"
-
-PLACES_CONFIDENCE_WEIGHT = 0.5
-PLACES_BRAND_BONUS = 0.20
-PLACES_BRAND_WIKIDATA_BONUS = 0.10
-PLACES_HIGH_CONFIDENCE_BONUS = 0.10
-PLACES_HIGH_CONFIDENCE_THRESHOLD = 0.90
-
-PLACES_CATEGORY_PRIOR = {
-    "airport": 0.25,
-    "national_park": 0.20,
-    "university": 0.15,
-    "hospital": 0.12,
-    "stadium": 0.12,
-    "museum": 0.10,
-    "hotel": 0.05,
-    "restaurant": 0.02,
-}
+# The Places (POI) prototype lives in scripts/experiment_places_shard.py: its
+# extractor is a fixed California bounding rectangle (not an exact US-CA
+# boundary) and is explicitly non-promotable, so it is kept out of this
+# production shard build.
 
 # Router constants
 ROUTER_TOKEN_MIN_LEN = 3
 ROUTER_MAX_SHARDS_PER_TOKEN = 3
 
 
+# Latin-1 diacritic fold table ported byte-for-byte from the worker's
+# RouterDb::fold_diacritic (crates/geocoder-worker/src/stac.rs). The builder
+# MUST fold exactly what the worker folds — no more, no less — so stored
+# router tokens match the tokens the worker derives from a query. A full NFD
+# strip (the previous implementation) folded out-of-table diacritics the
+# worker preserves (č, ř, ş, ě, ...), silently desyncing the two sides.
+_ROUTER_FOLD_TABLE = {
+    'à': 'a', 'á': 'a', 'â': 'a', 'ã': 'a', 'ä': 'a', 'å': 'a',
+    'è': 'e', 'é': 'e', 'ê': 'e', 'ë': 'e',
+    'ì': 'i', 'í': 'i', 'î': 'i', 'ï': 'i',
+    'ò': 'o', 'ó': 'o', 'ô': 'o', 'õ': 'o', 'ö': 'o', 'ø': 'o',
+    'ù': 'u', 'ú': 'u', 'û': 'u', 'ü': 'u',
+    'ç': 'c',
+    'ñ': 'n',
+    'ý': 'y', 'ÿ': 'y',
+}
+
+
 def _router_normalize(s: str) -> str:
-    return ''.join(
-        c for c in unicodedata.normalize('NFD', s) if not unicodedata.combining(c)
-    ).lower()
+    """Mirror the worker's RouterDb::normalize_token: trim, lowercase, then
+    fold only the diacritics in _ROUTER_FOLD_TABLE (see stac.rs)."""
+    return ''.join(_ROUTER_FOLD_TABLE.get(c, c) for c in s.strip().lower())
 
 
 def _router_tokenize(text: str | None) -> set[str]:
@@ -260,20 +254,25 @@ def build_global_router(
                 is_country_capital, is_region_capital,
                 primary_name, search_name, country, region
             FROM read_parquet('{parquet_str}')
+            ORDER BY gers_id
         """)
         enriched = True
-    except Exception:
-        print("  Router: enriched columns not found, falling back to raw parquet schema")
+    except duckdb.Error:
+        # Raw divisions export (pre wiki-importance enrichment): the only
+        # missing column is wiki_importance. It still carries search_name and
+        # the capital flags (see download_divisions_global.sql), so route on
+        # those rather than discarding them; only wiki_importance is nulled.
+        print("  Router: no wiki_importance column, routing raw divisions export")
         cursor = con.execute(f"""
             SELECT
                 subtype, class, population,
                 CAST(NULL AS DOUBLE) AS wiki_importance,
-                CAST(NULL AS BOOLEAN) AS is_country_capital,
-                CAST(NULL AS BOOLEAN) AS is_region_capital,
+                is_country_capital, is_region_capital,
                 COALESCE(primary_name, name) AS primary_name,
-                COALESCE(CAST(search_text AS VARCHAR), '') AS search_name,
+                COALESCE(CAST(search_name AS VARCHAR), '') AS search_name,
                 country, region
             FROM read_parquet('{parquet_str}')
+            ORDER BY gers_id
         """)
         enriched = False
 
@@ -337,14 +336,16 @@ def build_global_router(
             if importance >= 0.30 and search_name:
                 tokens |= _router_tokenize(search_name)
 
-            if country:
-                tokens.add(country.lower())
+            # Only emit tokens the worker's tokenizer (RouterDb::tokenize_query)
+            # can actually produce: runs of >= ROUTER_TOKEN_MIN_LEN alphanumeric
+            # chars containing a letter. 2-char country codes ("us") and
+            # hyphenated region codes ("us-ny") never survive it, so they were
+            # unreachable dead rows. Routing region through _router_tokenize
+            # keeps the 3+ letter subdivision codes that do survive
+            # (GB-ENG -> "eng") and drops the rest; country codes are always
+            # two chars and contribute nothing.
             if region:
-                tokens.add(region.lower())
-                if '-' in region:
-                    parts = region.lower().split('-')
-                    if len(parts[-1]) >= 2:
-                        tokens.add(parts[-1])
+                tokens |= _router_tokenize(region)
 
             for token in tokens:
                 shard_dict = token_map.setdefault(token, {})
@@ -353,13 +354,19 @@ def build_global_router(
                     if prev is None or importance > prev:
                         shard_dict[sid] = importance
 
-    print(f"  Router: scanned {total_rows:,} rows, kept {kept_rows:,} for routing")
+    schema = "enriched" if enriched else "raw divisions"
+    print(f"  Router: scanned {total_rows:,} rows ({schema} schema), "
+          f"kept {kept_rows:,} for routing")
     print(f"  Router: {len(token_map):,} unique tokens before pruning")
 
     for token in list(token_map.keys()):
         shards = token_map[token]
         if len(shards) > ROUTER_MAX_SHARDS_PER_TOKEN:
-            top = sorted(shards.items(), key=lambda x: x[1], reverse=True)[:ROUTER_MAX_SHARDS_PER_TOKEN]
+            # Break importance ties on shard_id so pruning is deterministic
+            # rather than dependent on scan/dict insertion order.
+            top = sorted(
+                shards.items(), key=lambda x: (-x[1], x[0])
+            )[:ROUTER_MAX_SHARDS_PER_TOKEN]
             token_map[token] = dict(top)
 
     total_pairs = sum(len(v) for v in token_map.values())
@@ -383,6 +390,9 @@ def build_global_router(
     for token, shard_dict in token_map.items():
         for sid, imp in shard_dict.items():
             batch.append((token, sid, imp))
+    # Insert in a stable (token, shard_id) order so router.db bytes are
+    # reproducible regardless of dict iteration order.
+    batch.sort(key=lambda r: (r[0], r[1]))
 
     db.executemany("INSERT INTO router VALUES (?, ?, ?)", batch)
     db.execute("CREATE INDEX idx_token ON router(token);")
@@ -397,6 +407,7 @@ def build_global_router(
         "token_count": len(token_map),
         "pair_count": total_pairs,
         "version": version,
+        "enriched": enriched,
     }
 
 
@@ -601,6 +612,22 @@ def version_sort_key(version: str) -> tuple[str, int]:
     return (version, 0)
 
 
+def version_timestamp(version: str) -> str:
+    """Deterministic ISO-8601 timestamp anchored to the version being built.
+
+    Shard bytes must be byte-reproducible from identical inputs, so the
+    `created_at` metadata (and STAC temporal extent) is derived from the data
+    version ('YYYY-MM-DD.N') rather than wall-clock time. Unparseable versions
+    (e.g. test fixtures) fall back to the epoch date so output stays stable.
+    """
+    date_part = version.split(".")[0] if version else ""
+    try:
+        dt = datetime.strptime(date_part, "%Y-%m-%d").replace(tzinfo=timezone.utc)
+    except ValueError:
+        dt = datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return dt.isoformat()
+
+
 def spill_safe_connect(memory_limit: str = "10GB") -> "duckdb.DuckDBPyConnection":
     """In-memory DuckDB connection hardened for the CI runner.
 
@@ -728,9 +755,10 @@ def partition_by_country(
         where += f" AND country IN ({codes})"
 
     con = spill_safe_connect()
-    # Partitioned COPY keeps a write buffer per country; row order within
-    # partitions is irrelevant (shard builds re-query), and preserving
-    # insertion order is the main memory amplifier in COPY.
+    # Partitioned COPY keeps a write buffer per country; the physical row order
+    # within partitions does not affect determinism because every shard build
+    # re-queries its partition with ORDER BY gers_id. Preserving insertion
+    # order is the main memory amplifier in COPY, so leave it off here.
     con.execute("SET preserve_insertion_order = false;")
 
     # WRITE_PARTITION_COLUMNS keeps the country column in the data files so
@@ -785,7 +813,7 @@ def get_regions_for_country(parquet_path: Path, country_code: str) -> list[tuple
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}'
         GROUP BY region
-        ORDER BY cnt DESC
+        ORDER BY cnt DESC, region
     """).fetchall()
     con.close()
 
@@ -1084,6 +1112,80 @@ def prepare_division_rows(rows: list[tuple]) -> list[tuple]:
     return prepared
 
 
+# A country/region bbox is aggregated from its component (division_area)
+# bboxes. Plain min/max longitude reports a near-global span for countries
+# that wrap the antimeridian (US via the Aleutians, RU, FJ, NZ): a component
+# sits just east of +180 and another just west of -180, so min_lon collapses
+# to ~-180 and max_lon to ~+180. That inflated span makes every such country
+# overlap most queries and leaves the worker's wrapped-bbox reader path dead.
+ANTIMERIDIAN_SPAN_THRESHOLD = 180.0
+
+
+def bbox_contains_lon(lon: float, min_lon: float, max_lon: float) -> bool:
+    """Longitude half of the worker's bbox_contains (stac.rs): a bbox with
+    min_lon > max_lon wraps the antimeridian, covering
+    [min_lon, 180] u [-180, max_lon]."""
+    if min_lon <= max_lon:
+        return min_lon <= lon <= max_lon
+    return lon >= min_lon or lon <= max_lon
+
+
+class CountryBboxAccumulator:
+    """Accumulate a [min_lon, min_lat, max_lon, max_lat] bbox from component
+    bboxes, wrapping longitude across the antimeridian when the plain span
+    would otherwise be near-global.
+
+    When the plain min/max longitude span exceeds 180 deg, the country wraps
+    the antimeridian, and a minimal circular cover is emitted as a wrapped
+    bbox [min_lon > max_lon] matching the worker reader's convention: the west
+    edge is the westmost fully-eastern component and the east edge is the
+    eastmost fully-western component. Latitude is always plain min/max.
+    """
+
+    def __init__(self) -> None:
+        self.min_lon = 180.0
+        self.min_lat = 90.0
+        self.max_lon = -180.0
+        self.max_lat = -90.0
+        # Circular-cover edges (None until a component lands in that hemisphere).
+        self._east_min_lon: float | None = None  # min xmin among xmin > 0
+        self._west_max_lon: float | None = None  # max xmax among xmax < 0
+
+    def add(self, xmin, ymin, xmax, ymax) -> None:
+        xmin, ymin = float(xmin), float(ymin)
+        xmax, ymax = float(xmax), float(ymax)
+        self.min_lon = min(self.min_lon, xmin)
+        self.min_lat = min(self.min_lat, ymin)
+        self.max_lon = max(self.max_lon, xmax)
+        self.max_lat = max(self.max_lat, ymax)
+        if xmin > 0.0:
+            self._east_min_lon = (
+                xmin if self._east_min_lon is None
+                else min(self._east_min_lon, xmin)
+            )
+        if xmax < 0.0:
+            self._west_max_lon = (
+                xmax if self._west_max_lon is None
+                else max(self._west_max_lon, xmax)
+            )
+
+    def result(self) -> list[float]:
+        # No rows accumulated: preserve the historical empty-bbox sentinel.
+        if self.min_lon > self.max_lon:
+            return [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
+        wraps = (
+            (self.max_lon - self.min_lon) > ANTIMERIDIAN_SPAN_THRESHOLD
+            and self._east_min_lon is not None
+            and self._west_max_lon is not None
+        )
+        if wraps:
+            return [
+                self._east_min_lon, self.min_lat,
+                self._west_max_lon, self.max_lat,
+            ]
+        return [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
+
+
 def build_region_shard(
     parquet_path: Path,
     country_code: str,
@@ -1126,16 +1228,19 @@ def build_region_shard(
     else:
         region_filter = f"region = '{region_code}'"
 
-    # Query divisions for this region
+    # Query divisions for this region. ORDER BY gers_id makes shard bytes
+    # reproducible from identical inputs (the SQLite insertion order is the
+    # sorted order regardless of the source parquet's physical row order).
     cursor = con.execute(f"""
         SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}' AND {region_filter}
+        ORDER BY gers_id
     """)
 
     # Stream rows in chunks
     count = 0
-    bbox = [180.0, 90.0, -180.0, -90.0]  # [min_lon, min_lat, max_lon, max_lat]
+    bbox_acc = CountryBboxAccumulator()
     FETCH_SIZE = 50000
 
     while True:
@@ -1146,10 +1251,7 @@ def build_region_shard(
         # Update bbox from this batch
         for row in rows:
             b = BBOX_XMIN_INDEX
-            bbox[0] = min(bbox[0], float(row[b]))      # bbox_xmin
-            bbox[1] = min(bbox[1], float(row[b + 1]))  # bbox_ymin
-            bbox[2] = max(bbox[2], float(row[b + 2]))  # bbox_xmax
-            bbox[3] = max(bbox[3], float(row[b + 3]))  # bbox_ymax
+            bbox_acc.add(row[b], row[b + 1], row[b + 2], row[b + 3])
 
         # Derive search_alias and precomputed importance
         prepared = prepare_division_rows(rows)
@@ -1163,7 +1265,7 @@ def build_region_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('region', ?)", (region_code,))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
-               (datetime.now(timezone.utc).isoformat(),))
+               (version_timestamp(version),))
 
     # Optimize FTS and compact database
     db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
@@ -1177,7 +1279,7 @@ def build_region_shard(
         "region": region_code,
         "record_count": count,
         "size_bytes": output_path.stat().st_size,
-        "bbox": bbox,
+        "bbox": bbox_acc.result(),
     }
 
 
@@ -1267,17 +1369,20 @@ def build_country_shard(
 
     build_shard_schema(db)
 
-    # Query divisions for this country
+    # Query divisions for this country. ORDER BY gers_id makes shard bytes
+    # reproducible from identical inputs regardless of the source parquet's
+    # physical row order.
     # Note: DuckDB requires file paths in the query string, but country_code is validated above
     cursor = con.execute(f"""
         SELECT {FORWARD_SHARD_SELECT}
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}'
+        ORDER BY gers_id
     """)
 
     # Stream rows in chunks to avoid loading entire dataset into memory
     count = 0
-    bbox = [180.0, 90.0, -180.0, -90.0]  # [min_lon, min_lat, max_lon, max_lat]
+    bbox_acc = CountryBboxAccumulator()
     FETCH_SIZE = 50000
 
     while True:
@@ -1288,10 +1393,7 @@ def build_country_shard(
         # Update bbox from this batch
         for row in rows:
             b = BBOX_XMIN_INDEX
-            bbox[0] = min(bbox[0], float(row[b]))      # bbox_xmin
-            bbox[1] = min(bbox[1], float(row[b + 1]))  # bbox_ymin
-            bbox[2] = max(bbox[2], float(row[b + 2]))  # bbox_xmax
-            bbox[3] = max(bbox[3], float(row[b + 3]))  # bbox_ymax
+            bbox_acc.add(row[b], row[b + 1], row[b + 2], row[b + 3])
 
         # Derive search_alias and precomputed importance
         prepared = prepare_division_rows(rows)
@@ -1304,7 +1406,7 @@ def build_country_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('country', ?)", (country_code,))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
-               (datetime.now(timezone.utc).isoformat(),))
+               (version_timestamp(version),))
 
     # Optimize FTS and compact database for WASM deserialize compatibility
     db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
@@ -1317,7 +1419,7 @@ def build_country_shard(
         "country": country_code,
         "record_count": count,
         "size_bytes": output_path.stat().st_size,
-        "bbox": bbox,
+        "bbox": bbox_acc.result(),
     }
 
 
@@ -1357,6 +1459,7 @@ def build_head_shard(
                    OR wiki_importance >= {HEAD_WIKI_IMPORTANCE_THRESHOLD}
                )
            )
+        ORDER BY gers_id
     """)
 
     # Stream rows in chunks to avoid loading entire dataset into memory
@@ -1381,7 +1484,7 @@ def build_head_shard(
                (str(population_threshold),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
-               (datetime.now(timezone.utc).isoformat(),))
+               (version_timestamp(version),))
 
     # Optimize FTS and compact database for WASM deserialize compatibility
     db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
@@ -1521,10 +1624,11 @@ def build_reverse_country_shard(
             region
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}'
+        ORDER BY gers_id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
     """)
 
     count = 0
-    bbox = [180.0, 90.0, -180.0, -90.0]
+    bbox_acc = CountryBboxAccumulator()
     FETCH_SIZE = 50000
 
     while True:
@@ -1534,11 +1638,8 @@ def build_reverse_country_shard(
 
         prepared_rows = prepare_reverse_rows(rows)
         for row in prepared_rows:
-            # Update bbox
-            bbox[0] = min(bbox[0], row[5])  # bbox_xmin
-            bbox[1] = min(bbox[1], row[6])  # bbox_ymin
-            bbox[2] = max(bbox[2], row[7])  # bbox_xmax
-            bbox[3] = max(bbox[3], row[8])  # bbox_ymax
+            # Update bbox (row layout: ..., bbox_xmin[5], ymin[6], xmax[7], ymax[8])
+            bbox_acc.add(row[5], row[6], row[7], row[8])
 
         db.executemany("""
             INSERT INTO divisions_reverse (
@@ -1557,7 +1658,7 @@ def build_reverse_country_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('type', ?)", ("reverse",))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
-               (datetime.now(timezone.utc).isoformat(),))
+               (version_timestamp(version),))
 
     db.commit()
     db.execute("VACUUM")
@@ -1568,7 +1669,7 @@ def build_reverse_country_shard(
         "country": country_code,
         "record_count": count,
         "size_bytes": output_path.stat().st_size,
-        "bbox": bbox,
+        "bbox": bbox_acc.result(),
     }
 
 
@@ -1611,6 +1712,7 @@ def build_reverse_head_shard(
         FROM read_parquet('{parquet_str}')
         WHERE subtype IN ('country', 'region', 'county')
            OR (population IS NOT NULL AND population >= {population_threshold})
+        ORDER BY gers_id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
     """)
 
     count = 0
@@ -1640,7 +1742,7 @@ def build_reverse_head_shard(
                (str(population_threshold),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
-               (datetime.now(timezone.utc).isoformat(),))
+               (version_timestamp(version),))
 
     db.commit()
     db.execute("VACUUM")
@@ -1682,9 +1784,11 @@ def generate_stac_collection(
         region_sharded: Dict of country_code -> list of region shard IDs
                         e.g., {"CN": ["CN-GD", "CN-BJ", ...], "IN": [...]}
     """
-    # Calculate overall bbox and temporal extent
+    # Calculate overall bbox and temporal extent. The temporal extent is
+    # anchored to the version (not wall-clock) so collection.json is
+    # reproducible from identical inputs.
     overall_bbox = [-180.0, -90.0, 180.0, 90.0]
-    now = datetime.now(timezone.utc).isoformat()
+    now = version_timestamp(version)
 
     # Embed item metadata directly in collection (reduces R2 fetches)
     items = {}
@@ -1792,34 +1896,6 @@ def get_wiki_importance_sha(path: Path) -> str | None:
         return None
 
 
-def get_version_from_catalog(catalog_path: Path = SHARDS_DIR / "catalog.json") -> str | None:
-    """Read latest version from a shards STAC catalog (local file)."""
-    if not catalog_path.exists():
-        return None
-    try:
-        with open(catalog_path) as f:
-            catalog = json.load(f)
-        for link in catalog.get("links", []):
-            if link.get("rel") == "child" and link.get("latest") is True:
-                href = link.get("href", "")
-                parts = href.strip("./").split("/")
-                if parts:
-                    return parts[0]
-        versions = []
-        for link in catalog.get("links", []):
-            if link.get("rel") == "child":
-                href = link.get("href", "")
-                parts = href.strip("./").split("/")
-                if parts and parts[0]:
-                    versions.append(parts[0])
-        if versions:
-            versions.sort(key=version_sort_key, reverse=True)
-            return versions[0]
-    except Exception:
-        return None
-    return None
-
-
 def write_build_meta(
     version: str,
     version_dir: Path,
@@ -1827,20 +1903,13 @@ def write_build_meta(
     args,
 ) -> Path:
     """Write shards/{version}/build-meta.json with reproducibility info."""
-    is_places = bool(getattr(args, "places", False))
     overture_release = getattr(args, "overture_release", None)
     if overture_release:
-        if is_places:
-            division_s3_paths = []
-            source_s3_paths = [
-                f"s3://overturemaps-us-west-2/release/{overture_release}/theme=places/type=place/*"
-            ]
-        else:
-            division_s3_paths = [
-                f"s3://overturemaps-us-west-2/release/{overture_release}/theme=divisions/type=division/*",
-                f"s3://overturemaps-us-west-2/release/{overture_release}/theme=divisions/type=division_area/*",
-            ]
-            source_s3_paths = division_s3_paths.copy()
+        division_s3_paths = [
+            f"s3://overturemaps-us-west-2/release/{overture_release}/theme=divisions/type=division/*",
+            f"s3://overturemaps-us-west-2/release/{overture_release}/theme=divisions/type=division_area/*",
+        ]
+        source_s3_paths = division_s3_paths.copy()
     else:
         division_s3_paths = []
         source_s3_paths = []
@@ -1849,11 +1918,7 @@ def write_build_meta(
     if isinstance(wiki_file, str):
         wiki_file = Path(wiki_file)
 
-    parquet_path = (
-        getattr(args, "places_parquet", Path("exports/places-CA-bbox.parquet"))
-        if is_places
-        else getattr(args, "parquet", DIVISIONS_PARQUET)
-    )
+    parquet_path = getattr(args, "parquet", DIVISIONS_PARQUET)
     if bool(getattr(args, "reverse", False)) and parquet_path == DIVISIONS_PARQUET:
         parquet_path = DIVISIONS_REVERSE_PARQUET
     input_size = None
@@ -1910,16 +1975,6 @@ def write_build_meta(
         },
         "args": {
             "reverse": bool(getattr(args, "reverse", False)),
-            "places": is_places,
-            "experimental_places_bbox_slice": bool(
-                getattr(args, "experimental_places_bbox_slice", False)
-            ),
-            "places_sampling_strategy": getattr(
-                args, "places_sampling_strategy", None
-            ),
-            "places_ranking_strategy": getattr(
-                args, "places_ranking_strategy", "confidence"
-            ),
             "no_wiki_importance": bool(getattr(args, "no_wiki_importance", False)),
             "no_router": bool(getattr(args, "no_router", False)),
             "countries": getattr(args, "countries", None),
@@ -2271,461 +2326,6 @@ def build_reverse_shards(args, version: str, version_dir: Path) -> dict:
     return shard_infos
 
 
-
-# ---------------------------------------------------------------------------
-# Places prototype
-# ---------------------------------------------------------------------------
-
-def compute_places_importance(
-    confidence: float | None,
-    brand_name: str | None,
-    brand_wikidata: str | None,
-    category_primary: str | None,
-    basic_category: str | None,
-) -> float:
-    conf = float(confidence) if confidence is not None else 0.5
-    conf = max(0.0, min(1.0, conf))
-    importance = conf * PLACES_CONFIDENCE_WEIGHT
-    if brand_name:
-        importance += PLACES_BRAND_BONUS
-        if brand_wikidata:
-            importance += PLACES_BRAND_WIKIDATA_BONUS
-    if conf >= PLACES_HIGH_CONFIDENCE_THRESHOLD:
-        importance += PLACES_HIGH_CONFIDENCE_BONUS
-    cat = (category_primary or basic_category or "").lower()
-    if cat in PLACES_CATEGORY_PRIOR:
-        importance += PLACES_CATEGORY_PRIOR[cat]
-    return min(1.0, importance)
-
-
-def compute_places_stored_importance(
-    ranking_strategy: str,
-    confidence: float | None,
-    brand_name: str | None,
-    brand_wikidata: str | None,
-    category_primary: str | None,
-    basic_category: str | None,
-) -> float:
-    """Compute stored/query importance independently from sample selection."""
-    if ranking_strategy == "neutral":
-        return 0.5
-    if ranking_strategy == "confidence":
-        conf = float(confidence) if confidence is not None else 0.5
-        return max(0.0, min(1.0, conf))
-    if ranking_strategy == "experimental-prominence":
-        return compute_places_importance(
-            confidence,
-            brand_name,
-            brand_wikidata,
-            category_primary,
-            basic_category,
-        )
-    raise ValueError(f"unknown places ranking strategy: {ranking_strategy}")
-
-
-def places_importance_sql(
-    confidence_expr: str,
-    brand_name_expr: str,
-    brand_wikidata_expr: str,
-    category_primary_expr: str,
-    basic_category_expr: str,
-) -> str:
-    """Return the SQL equivalent of compute_places_importance()."""
-    category_cases = " ".join(
-        f"WHEN '{category}' THEN {prior}"
-        for category, prior in PLACES_CATEGORY_PRIOR.items()
-    )
-    category_expr = (
-        f"LOWER(COALESCE({category_primary_expr}, {basic_category_expr}, ''))"
-    )
-    return f"""
-        LEAST(1.0,
-            LEAST(1.0, GREATEST(0.0, COALESCE({confidence_expr}, 0.5)))
-                * {PLACES_CONFIDENCE_WEIGHT}
-            + CASE WHEN {brand_name_expr} IS NOT NULL AND {brand_name_expr} != ''
-                THEN {PLACES_BRAND_BONUS} ELSE 0 END
-            + CASE WHEN {brand_name_expr} IS NOT NULL AND {brand_name_expr} != ''
-                         AND {brand_wikidata_expr} IS NOT NULL
-                         AND {brand_wikidata_expr} != ''
-                THEN {PLACES_BRAND_WIKIDATA_BONUS} ELSE 0 END
-            + CASE WHEN COALESCE({confidence_expr}, 0.5)
-                         >= {PLACES_HIGH_CONFIDENCE_THRESHOLD}
-                THEN {PLACES_HIGH_CONFIDENCE_BONUS} ELSE 0 END
-            + CASE {category_expr} {category_cases} ELSE 0 END
-        )
-    """.strip()
-
-
-def _places_flat_columns(parquet_path: Path) -> set[str] | None:
-    try:
-        con = duckdb.connect()
-        cols = [r[0] for r in con.execute(f"DESCRIBE SELECT * FROM read_parquet('{str(parquet_path.resolve())}') LIMIT 0").fetchall()]
-        con.close()
-        needed = {"gers_id", "primary_name", "lat", "lon"}
-        column_set = set(cols)
-        return column_set if needed.issubset(column_set) else None
-    except Exception:
-        return None
-
-
-def build_places_shard(
-    parquet_path: Path | str,
-    output_path: Path,
-    version: str,
-    region_code: str = "US-CA",
-    limit: int | None = None,
-    sampling_strategy: str | None = None,
-    ranking_strategy: str = "confidence",
-) -> dict:
-    region_code = validate_region_code(region_code)
-    if limit is not None and limit <= 0:
-        raise ValueError("places limit must be greater than zero")
-    if limit is not None and sampling_strategy not in {
-        "confidence",
-        "experimental-prominence",
-    }:
-        raise ValueError(
-            "places sampling requires an explicit strategy: confidence or "
-            "experimental-prominence"
-        )
-    if ranking_strategy not in {
-        "neutral",
-        "confidence",
-        "experimental-prominence",
-    }:
-        raise ValueError(f"unknown places ranking strategy: {ranking_strategy}")
-
-    if isinstance(parquet_path, str) and parquet_path.startswith("s3://"):
-        parquet_str = parquet_path
-        is_flat = False
-        flat_columns: set[str] = set()
-    else:
-        pp = Path(parquet_path) if not isinstance(parquet_path, Path) else parquet_path
-        try:
-            exists = pp.exists()
-        except Exception:
-            exists = False
-        if exists:
-            parquet_str = str(pp.resolve())
-            detected_columns = _places_flat_columns(pp)
-            is_flat = detected_columns is not None
-            flat_columns = detected_columns or set()
-        else:
-            parquet_str = str(parquet_path)
-            is_flat = False
-            flat_columns = set()
-
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    if output_path.exists():
-        output_path.unlink()
-
-    con = duckdb.connect()
-    db = sqlite3.connect(output_path)
-    build_shard_schema(db)
-
-    if is_flat:
-        status_predicate = (
-            "COALESCE(operating_status, 'open') != 'permanently_closed'"
-            if "operating_status" in flat_columns
-            else "TRUE"
-        )
-        importance_expr = places_importance_sql(
-            "confidence",
-            "brand_name",
-            "brand_wikidata",
-            "category_primary",
-            "basic_category",
-        )
-        if limit:
-            sampling_order = (
-                f"{importance_expr} DESC, confidence DESC NULLS LAST, gers_id"
-                if sampling_strategy == "experimental-prominence"
-                else "confidence DESC NULLS LAST, gers_id"
-            )
-            query = f"""
-                SELECT
-                    gers_id, version, primary_name, lat, lon,
-                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                    country, region, locality,
-                    category_primary, basic_category,
-                    brand_name, brand_wikidata, confidence,
-                    COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
-                    COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
-                FROM read_parquet('{parquet_str}')
-                WHERE {status_predicate}
-                ORDER BY {sampling_order}
-                LIMIT {int(limit)}
-            """
-        else:
-            query = f"""
-                SELECT
-                    gers_id, version, primary_name, lat, lon,
-                    bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                    country, region, locality,
-                    category_primary, basic_category,
-                    brand_name, brand_wikidata, confidence,
-                    COALESCE(CAST(search_name_base AS VARCHAR), LOWER(primary_name)) as search_name_base,
-                    COALESCE(CAST(search_context_base AS VARCHAR), LOWER(CONCAT_WS(' ', locality, region, country))) as search_context_base
-                FROM read_parquet('{parquet_str}')
-                WHERE {status_predicate}
-            """
-        cursor = con.execute(query)
-    else:
-        if region_code != "US-CA":
-            db.close()
-            con.close()
-            output_path.unlink(missing_ok=True)
-            raise ValueError(
-                "raw Overture places extraction currently supports only US-CA; "
-                "provide a flattened, region-filtered parquet for other regions"
-            )
-        print("  Places source appears to be raw Overture places parquet, using nested extraction...")
-        limit_clause = f"LIMIT {int(limit)}" if limit else ""
-        importance_expr = places_importance_sql(
-            "confidence",
-            "brand.names.primary",
-            "brand.wikidata",
-            "categories.primary",
-            "basic_category",
-        )
-        order_clause = ""
-        if limit:
-            order_clause = (
-                f"ORDER BY {importance_expr} DESC, confidence DESC NULLS LAST, id"
-                if sampling_strategy == "experimental-prominence"
-                else "ORDER BY confidence DESC NULLS LAST, id"
-            )
-        query = f"""
-            SELECT
-                id as gers_id,
-                version,
-                names.primary as primary_name,
-                ST_X(geometry) as lon,
-                ST_Y(geometry) as lat,
-                bbox.xmin as bbox_xmin,
-                bbox.ymin as bbox_ymin,
-                bbox.xmax as bbox_xmax,
-                bbox.ymax as bbox_ymax,
-                COALESCE(addresses[1].country, '') as country,
-                COALESCE(addresses[1].region, '') as region,
-                COALESCE(addresses[1].locality, '') as locality,
-                categories.primary as category_primary,
-                basic_category,
-                brand.names.primary as brand_name,
-                brand.wikidata as brand_wikidata,
-                confidence,
-                LOWER(CONCAT_WS(' ', names.primary, brand.names.primary, categories.primary, basic_category)) as search_name_base,
-                LOWER(CONCAT_WS(' ', addresses[1].locality, addresses[1].region, addresses[1].country, categories.primary, basic_category)) as search_context_base
-            FROM read_parquet('{parquet_str}', hive_partitioning=true)
-            WHERE bbox.xmin BETWEEN {PLACES_CA_BBOX['xmin']} AND {PLACES_CA_BBOX['xmax']}
-              AND bbox.ymin BETWEEN {PLACES_CA_BBOX['ymin']} AND {PLACES_CA_BBOX['ymax']}
-              AND names.primary IS NOT NULL
-              AND COALESCE(operating_status, 'open') != 'permanently_closed'
-            {order_clause}
-            {limit_clause}
-        """
-        con.execute("INSTALL spatial; LOAD spatial;")
-        cursor = con.execute(query)
-
-    count = 0
-    bbox = [180.0, 90.0, -180.0, -90.0]
-    FETCH_SIZE = 50000
-
-    while True:
-        rows = cursor.fetchmany(FETCH_SIZE)
-        if not rows:
-            break
-        prepared = []
-        for r in rows:
-            try:
-                (gers_id, version_num, primary_name, lat, lon,
-                 bxmin, bymin, bxmax, bymax,
-                 country, region, locality,
-                 cat_primary, basic_cat,
-                 brand_name, brand_wikidata, confidence,
-                 search_name_base, search_context_base) = r
-            except ValueError:
-                continue
-            if not gers_id or not primary_name:
-                continue
-            try:
-                lat_f = float(lat)
-                lon_f = float(lon)
-                bxmin_f = float(bxmin)
-                bymin_f = float(bymin)
-                bxmax_f = float(bxmax)
-                bymax_f = float(bymax)
-            except Exception:
-                continue
-
-            bbox[0] = min(bbox[0], bxmin_f)
-            bbox[1] = min(bbox[1], bymin_f)
-            bbox[2] = max(bbox[2], bxmax_f)
-            bbox[3] = max(bbox[3], bymax_f)
-
-            search_name = (search_name_base or primary_name.lower()).strip()
-            if not search_name:
-                search_name = primary_name.lower()
-            search_context = (search_context_base or f"{locality} {region} {country}".strip().lower()).strip()
-            search_alias = build_search_alias(primary_name, search_name)
-
-            if isinstance(version_num, int):
-                ver = version_num
-            else:
-                try:
-                    ver = int(version_num) if version_num is not None else 0
-                except Exception:
-                    ver = 0
-
-            importance = compute_places_stored_importance(
-                ranking_strategy,
-                confidence,
-                brand_name,
-                brand_wikidata,
-                cat_primary,
-                basic_cat,
-            )
-
-            c = (country or "US")[:2] or "US"
-            reg = region or "US-CA"
-            if len(reg) == 2 and c == "US":
-                reg = f"US-{reg}"
-
-            prepared.append((
-                gers_id, ver, "place", primary_name, lat_f, lon_f,
-                bxmin_f, bymin_f, bxmax_f, bymax_f,
-                None, c, reg,
-                search_name, search_alias, search_context, importance,
-            ))
-
-        if prepared:
-            db.executemany(DIVISIONS_INSERT_SQL, prepared)
-            count += len(prepared)
-
-    db.execute("INSERT OR REPLACE INTO metadata VALUES ('version', ?)", (version,))
-    db.execute("INSERT OR REPLACE INTO metadata VALUES ('region', ?)", (region_code,))
-    db.execute("INSERT OR REPLACE INTO metadata VALUES ('type', ?)", ("places",))
-    db.execute(
-        "INSERT OR REPLACE INTO metadata VALUES ('experimental_scope', ?)",
-        ("ca-bbox-not-state-boundary",),
-    )
-    db.execute(
-        "INSERT OR REPLACE INTO metadata VALUES ('sampling_strategy', ?)",
-        (sampling_strategy or "none",),
-    )
-    db.execute(
-        "INSERT OR REPLACE INTO metadata VALUES ('ranking_strategy', ?)",
-        (ranking_strategy,),
-    )
-    db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
-    db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
-               (datetime.now(timezone.utc).isoformat(),))
-
-    db.execute("INSERT INTO divisions_fts(divisions_fts) VALUES('optimize')")
-    db.commit()
-    db.execute("VACUUM")
-    db.close()
-    con.close()
-
-    return {
-        "country": region_code.split("-", 1)[0],
-        "region": region_code,
-        "record_count": count,
-        "size_bytes": output_path.stat().st_size,
-        "bbox": bbox,
-    }
-
-
-def build_places_shards(args, version: str, version_dir: Path) -> dict:
-    if not bool(getattr(args, "experimental_places_bbox_slice", False)):
-        raise ValueError(
-            "Places output is only a CA-bbox experiment; pass "
-            "--experimental-places-bbox-slice to acknowledge it is not an exact "
-            "US-CA shard and cannot be promoted"
-        )
-    places_subdir = version_dir / "places-experimental"
-    parquet_path = getattr(
-        args, "places_parquet", Path("exports/places-CA-bbox.parquet")
-    )
-    region_code = validate_region_code(getattr(args, "places_region", "US-CA"))
-    limit: int | None = getattr(args, "places_limit", None)
-    sampling_strategy: str | None = getattr(args, "places_sampling_strategy", None)
-    ranking_strategy: str = getattr(args, "places_ranking_strategy", "confidence")
-    if limit is not None and limit <= 0:
-        raise ValueError("--places-limit must be greater than zero")
-    if region_code != "US-CA":
-        raise ValueError(
-            "the current experimental bbox extractor is fixed to the US-CA bbox"
-        )
-    if limit is not None and sampling_strategy is None:
-        raise ValueError(
-            "--places-limit requires --places-sampling-strategy; the old composed "
-            "prominence formula is a rejected experimental baseline"
-        )
-
-    # Handle S3 case: parquet_path may be string or Path that doesn't exist
-    is_s3 = isinstance(parquet_path, str) and str(parquet_path).startswith("s3://")
-    if not is_s3:
-        pp_check = Path(parquet_path) if not isinstance(parquet_path, Path) else parquet_path
-        try:
-            exists = pp_check.exists()
-        except Exception:
-            exists = False
-        if not exists:
-            print(f"Places parquet not found: {parquet_path}")
-            print("Generating via direct S3 read for CA bbox (may take a few minutes)...")
-            release = getattr(args, "overture_release", None) or "2026-06-17.0"
-            parquet_path = f"s3://overturemaps-us-west-2/release/{release}/theme=places/type=place/*"
-            args.places_parquet = parquet_path
-            is_s3 = True
-
-    output_path = places_subdir / f"{PLACES_CA_BBOX_SLICE_ID}.db"
-    print(f"Building experimental CA bbox Places slice from {parquet_path}")
-    print("  WARNING: this is a rectangle, not an exact California state shard")
-    print(f"  Stored/query ranking strategy: {ranking_strategy}")
-    if ranking_strategy == "experimental-prominence":
-        print("  WARNING: stored ranking uses the rejected prominence baseline")
-    if limit:
-        print(f"  Sampling limit: {limit:,}; strategy: {sampling_strategy}")
-        if sampling_strategy == "experimental-prominence":
-            print("  WARNING: experimental-prominence is a rejected baseline")
-
-    info = build_places_shard(
-        parquet_path,
-        output_path,
-        version,
-        region_code=region_code,
-        limit=limit,
-        sampling_strategy=sampling_strategy,
-        ranking_strategy=ranking_strategy,
-    )
-    size_mb = info["size_bytes"] / 1024 / 1024
-    print(f"  {region_code}: {info['record_count']:,} records, {size_mb:.1f} MB")
-
-    shard_id = PLACES_CA_BBOX_SLICE_ID
-    shard_hash = hash_file(output_path)
-    collection = generate_stac_collection(
-        version,
-        {shard_id: info},
-        {shard_id: shard_hash},
-        "places-experimental",
-    )
-    collection["id"] = f"geocoder-places-experimental-bbox-{version}"
-    collection["title"] = f"Overture Places Experimental CA Bbox {version}"
-    collection["description"] = (
-        "Non-promotable Places experiment for the CA bounding rectangle; "
-        "not an exact California shard"
-    )
-    collection["extent"]["spatial"]["bbox"] = [info["bbox"]]
-    for link in collection["links"]:
-        if link.get("rel") == "self":
-            link["href"] = "./places-collection.json"
-    write_json(version_dir / "places-collection.json", collection)
-
-    return {shard_id: info}
-
-
-
 def main():
     parser = argparse.ArgumentParser(description="Build geocoder shards")
     parser.add_argument("--version", help="Version string (default: date-based with suffix)")
@@ -2750,41 +2350,12 @@ def main():
                         help="Local cache path for the wikimedia importance file "
                              f"(default: {WIKIMEDIA_IMPORTANCE_FILE}; downloaded "
                              "from nominatim.org when missing)")
-    parser.add_argument("--places", action="store_true",
-                        help="Build places (POI) prototype shards")
-    parser.add_argument(
-        "--experimental-places-bbox-slice",
-        action="store_true",
-        help="Acknowledge Places output is a non-promotable CA bbox experiment",
-    )
-    parser.add_argument("--places-region", type=str, default="US-CA",
-                        help="Places region code e.g. US-CA (default: US-CA)")
-    parser.add_argument("--places-parquet", type=Path, default=Path("exports/places-CA-bbox.parquet"),
-                        help="Input parquet for places (flattened or raw Overture places)")
-    parser.add_argument("--places-limit", type=int, default=None,
-                        help="Experimental sampling limit; requires an explicit strategy")
-    parser.add_argument(
-        "--places-sampling-strategy",
-        choices=("confidence", "experimental-prominence"),
-        default=None,
-        help="Explicit Places sampling order; prominence is a rejected baseline",
-    )
-    parser.add_argument(
-        "--places-ranking-strategy",
-        choices=("neutral", "confidence", "experimental-prominence"),
-        default="confidence",
-        help=(
-            "Stored/query importance, independent of sampling; rejected prominence "
-            "must be selected explicitly"
-        ),
-    )
     parser.add_argument("--overture-release", type=str, default=None,
-                        help="Overture release tag for build metadata and places S3 fallback "
+                        help="Overture release tag for build metadata "
                              "(e.g., 2026-06-17.0)")
     args = parser.parse_args()
 
-    is_places = getattr(args, "places", False)
-    if not is_places and not args.reverse and not args.parquet.exists():
+    if not args.reverse and not args.parquet.exists():
         print(f"Error: {args.parquet} not found")
         print("Run: ./scripts/download_divisions.sh")
         sys.exit(1)
@@ -2797,11 +2368,6 @@ def main():
         shard_type = "reverse"
         collection_file = "reverse-collection.json"
         shards_subdir = "reverse"
-    elif is_places:
-        shard_infos = build_places_shards(args, version, version_dir)
-        shard_type = "places-experimental"
-        collection_file = "places-collection.json"
-        shards_subdir = "places-experimental"
     else:
         shard_infos = build_forward_shards(args, version, version_dir)
         shard_type = "forward"
@@ -2809,7 +2375,7 @@ def main():
         shards_subdir = "shards"
 
     # Update root catalog (only for forward shards, reverse has its own collection)
-    if not args.reverse and not is_places:
+    if not args.reverse:
         existing_versions = [version]
         catalog_path = SHARDS_DIR / "catalog.json"
         if catalog_path.exists():

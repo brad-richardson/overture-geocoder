@@ -1,8 +1,14 @@
 #!/usr/bin/env python3
 """Extract the bounded Overture Places projection used by factory spikes.
 
-Rows come from a rectangular California-area bbox and a source-order LIMIT.
-This is neither exact California containment nor a random/representative sample.
+Rows come from a rectangular California-area bbox and a deterministic
+id-ordered LIMIT (ORDER BY id before LIMIT, with insertion order preserved),
+so repeated runs over one release are byte-reproducible. This is still neither
+exact California containment nor a random/representative sample.
+
+Note: SHAs pinned by earlier spikes predate this determinism fix -- the prior
+extractor used a nondeterministic source-order LIMIT across parallel threads --
+and will not match this version's output.
 """
 
 from __future__ import annotations
@@ -38,7 +44,9 @@ def main() -> None:
     connection.execute("SET s3_region='us-west-2'")
     connection.execute("SET memory_limit='8GB'")
     connection.execute("SET threads=4")
-    connection.execute("SET preserve_insertion_order=false")
+    # Deterministic output: preserve the ORDER BY id ordering through the COPY
+    # so the same release always yields byte-identical parquet.
+    connection.execute("SET preserve_insertion_order=true")
     connection.execute(
         f"""
         COPY (
@@ -58,6 +66,7 @@ def main() -> None:
             AND bbox.ymin BETWEEN 32.5 AND 42.1
             AND names.primary IS NOT NULL
             AND COALESCE(operating_status, 'open') != 'permanently_closed'
+          ORDER BY id
           LIMIT {args.limit}
         ) TO '{output_sql}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """

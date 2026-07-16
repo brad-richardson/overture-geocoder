@@ -1,19 +1,19 @@
 {
   "authoritative_baseline": {
     "forward": {
-      "rendered_sql_sha256": "3389e4eebfe630022f40ba43c241f68ce853802eb40614136fa922b26296f9fb",
+      "rendered_sql_sha256": "4094ac6ac96fb0445888420e02c85757358a13e44d623fe0dccd570fc85047e0",
       "rows": 3,
       "sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1",
       "size_bytes": 3134
     },
     "predicate": "validated country plus exact discovered supplemental IDs without bbox",
     "reverse": {
-      "rendered_sql_sha256": "6401df6f71df43d86286e50c6e41092ff7b4fd64c17e2c385fdaa313f80c368a",
+      "rendered_sql_sha256": "9a497771595e2d300b014a75a4dd6dc5037349408ae3645fac5ba6cd278fcf28",
       "rows": 3,
       "sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
       "size_bytes": 2206
     },
-    "timing_seconds": 70.047
+    "timing_seconds": 69.689
   },
   "comparison": "shared-production-sql; full-global MC filter and no-bbox baseline use schema plus EXCEPT ALL across every output column",
   "derived_bbox": [
@@ -24,7 +24,7 @@
   ],
   "evidence_version": 2,
   "input_sha256": {
-    "build_shards": "6a24f538037e2c1180c280678312815b071258f2b1690ab763b9e9dcb9d5d199",
+    "build_shards": "c1eb531b8198b0f99f6bc91c16de704fd2a51a7514981460a1c39c6116079c7e",
     "contract": "10d9865a47d72470fd5cc5696449299b31b2bc2cd63a4720d0592d250c60f003",
     "evidence_generator": "f9d246cd4e1b3a358b2cbe49bec6bc3555849a7711f3a7a2c9286ae0f0bf699d",
     "export_comparator": "39c3b05ef3375845786d57cfbca9cdf3a5784e6820a6886ef20e890bb55d60b1",
@@ -35,7 +35,7 @@
   "logical_equivalence_to_full_global": {
     "built_shards": {
       "forward": {
-        "legacy_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "legacy_snapshot_sha256": "95c0369536cde6aaf59ceeeac9dc41efd806119c014fbaf8a8044d7a0c2ccd54",
         "legacy_table_row_counts": {
           "divisions": 3,
           "divisions_fts": 3,
@@ -108,7 +108,7 @@
             "CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN\n            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)\n            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);\n            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)\n            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);\n        END"
           ]
         ],
-        "subset_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "subset_snapshot_sha256": "95c0369536cde6aaf59ceeeac9dc41efd806119c014fbaf8a8044d7a0c2ccd54",
         "subset_table_row_counts": {
           "divisions": 3,
           "divisions_fts": 3,
@@ -120,7 +120,7 @@
         }
       },
       "reverse": {
-        "legacy_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "legacy_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
         "legacy_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -180,7 +180,7 @@
             "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
           ]
         ],
-        "subset_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "subset_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
         "subset_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -191,9 +191,9 @@
         }
       },
       "router": {
-        "legacy_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "legacy_snapshot_sha256": "99ddf99772a47f4fdb03d63e449c0c85b8f1ef62403871470fafdaedd351eef3",
         "legacy_table_row_counts": {
-          "router": 2
+          "router": 1
         },
         "logical_contents_equal": true,
         "schema": [
@@ -210,9 +210,9 @@
             "CREATE TABLE router(\n            token TEXT NOT NULL,\n            shard_id TEXT NOT NULL,\n            max_importance REAL NOT NULL,\n            PRIMARY KEY(token, shard_id)\n        )"
           ]
         ],
-        "subset_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "subset_snapshot_sha256": "99ddf99772a47f4fdb03d63e449c0c85b8f1ef62403871470fafdaedd351eef3",
         "subset_table_row_counts": {
-          "router": 2
+          "router": 1
         }
       }
     },
@@ -222,7 +222,7 @@
     "forward": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "d10ec349066085e05dace272176141d827b245a88bd409e609ba7573e0e478ed",
+      "legacy_sha256": "5c9525a76344a6e9bd97a12182d79514c230c1b6872fc22bfe47e8337b68621c",
       "logical_rows_sha256": "83c79dd025cce65128c407834e5a622577dd5002318b976327dfdd64a45532e5",
       "rows": 3,
       "schema": [
@@ -335,7 +335,7 @@
     "reverse": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "d56e2da9c4d123c077f63edf26008471cfaee15c4bd9573e30e89b35b7b63eea",
+      "legacy_sha256": "96ad0c339d3c7819d554782ae173b218103f63000a6e2b63069ce69ee5747e89",
       "logical_rows_sha256": "498615eaaf4eb8aedbb4186dd007ba3c5d070f21f7c4e52e38a6c08a0c69be31",
       "rows": 3,
       "schema": [
@@ -418,7 +418,7 @@
   "logical_equivalence_to_no_bbox_baseline": {
     "built_shards": {
       "forward": {
-        "legacy_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "legacy_snapshot_sha256": "95c0369536cde6aaf59ceeeac9dc41efd806119c014fbaf8a8044d7a0c2ccd54",
         "legacy_table_row_counts": {
           "divisions": 3,
           "divisions_fts": 3,
@@ -491,7 +491,7 @@
             "CREATE TRIGGER divisions_au AFTER UPDATE ON divisions BEGIN\n            INSERT INTO divisions_fts(divisions_fts, rowid, search_name, search_alias, search_context)\n            VALUES ('delete', old.rowid, old.search_name, old.search_alias, old.search_context);\n            INSERT INTO divisions_fts(rowid, search_name, search_alias, search_context)\n            VALUES (new.rowid, new.search_name, new.search_alias, new.search_context);\n        END"
           ]
         ],
-        "subset_snapshot_sha256": "ea6e0334d17edeaa5c8690446bb3d7a5c1af5572880ec959a0d5780d3a3c7bc1",
+        "subset_snapshot_sha256": "95c0369536cde6aaf59ceeeac9dc41efd806119c014fbaf8a8044d7a0c2ccd54",
         "subset_table_row_counts": {
           "divisions": 3,
           "divisions_fts": 3,
@@ -503,7 +503,7 @@
         }
       },
       "reverse": {
-        "legacy_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "legacy_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
         "legacy_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -563,7 +563,7 @@
             "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
           ]
         ],
-        "subset_snapshot_sha256": "2edb92c0a254bdb62553f3d44ba8469f3c17c4e7935e3972111c9584de9ac43f",
+        "subset_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
         "subset_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -574,9 +574,9 @@
         }
       },
       "router": {
-        "legacy_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "legacy_snapshot_sha256": "99ddf99772a47f4fdb03d63e449c0c85b8f1ef62403871470fafdaedd351eef3",
         "legacy_table_row_counts": {
-          "router": 2
+          "router": 1
         },
         "logical_contents_equal": true,
         "schema": [
@@ -593,9 +593,9 @@
             "CREATE TABLE router(\n            token TEXT NOT NULL,\n            shard_id TEXT NOT NULL,\n            max_importance REAL NOT NULL,\n            PRIMARY KEY(token, shard_id)\n        )"
           ]
         ],
-        "subset_snapshot_sha256": "9ab7a3d1b5f0d8c29f510d8767357a7f9b3f963ec5103c3284cb544892b3179e",
+        "subset_snapshot_sha256": "99ddf99772a47f4fdb03d63e449c0c85b8f1ef62403871470fafdaedd351eef3",
         "subset_table_row_counts": {
-          "router": 2
+          "router": 1
         }
       }
     },
@@ -817,22 +817,22 @@
   },
   "overture_release": "2026-06-17.0",
   "provenance": {
-    "base_git_sha": "39fa7ecf009b94ed171e80fdeb78d47afd55af28",
+    "base_git_sha": "4b7468fd8c4d625b6c8ac3f593dcf36b46276d2d",
     "command": [
       "python",
       "scripts/download_divisions_smoke.py",
       "--release",
       "2026-06-17.0",
       "--forward-output",
-      "/tmp/monaco-hardened-forward.parquet",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-hardened-forward.parquet",
       "--reverse-output",
-      "/tmp/monaco-hardened-reverse.parquet",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-hardened-reverse.parquet",
       "--profile-output",
-      "/tmp/monaco-hardened-profile.json",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-hardened-profile.json",
       "--authoritative-forward-output",
-      "/tmp/monaco-authoritative-forward.parquet",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-authoritative-forward.parquet",
       "--authoritative-reverse-output",
-      "/tmp/monaco-authoritative-reverse.parquet"
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-authoritative-reverse.parquet"
     ],
     "duckdb_cli_version": "v1.5.1 (Variegata) 7dbb2e646f",
     "duckdb_python_version": "1.5.1"
@@ -846,7 +846,7 @@
       "plan_has_bbox_filter": true,
       "plan_has_country_filter": true,
       "plan_sha256": "7d9e68f5772c46d614102851807583dfa17306ecc872414f745e723d30fadff0",
-      "profile_sha256": "6771abcc7477ef99e39901c0ddb694638f67ec9be14d23d889eead54d2554673",
+      "profile_sha256": "32778adc0294497a2970d467c3dcef60714ed03e9643c7ed862791b0d5867371",
       "profiled_predicate": "rendered division country/required-ID closure plus bbox",
       "result_rows": 22,
       "total_row_group_bytes": 1210094533,
@@ -861,7 +861,7 @@
       "plan_has_bbox_filter": true,
       "plan_has_country_filter": false,
       "plan_sha256": "d630555448aebefd680aa44d84f453c34ab9b07472c5e8d04ff8920cd09de8a7",
-      "profile_sha256": "68a784af400d2a8bbfc139299997852030ea152b573d0e3d45cf2f357a738977",
+      "profile_sha256": "e66fb26616cfef284a19716e7eb20e30543d203d8b9f3a796ebab134e170bd0e",
       "profiled_predicate": "actual rendered country-or-division_id ownership predicate plus bbox",
       "result_rows": 22,
       "total_row_group_bytes": 6274762647,
@@ -870,13 +870,13 @@
     }
   },
   "rendered_sql_sha256": {
-    "forward": "675432c5a77b2808b98dc0ddd6c2fdff89d07d1a90ac0b6422e22a0c08dd8d94",
-    "reverse": "dd8139455ddbfc168a1bf98f2b7d82671801a1678e798141d3b6271964fe8ad2"
+    "forward": "694cda41ca51954c5c2afa0bea4ac983d1dcf1a3cf166d758fccab925fecc007",
+    "reverse": "ea657b398c8829551b2640298fe067e8d7581605e715d43a04c4bc6886d83ea4"
   },
   "timings_seconds": {
-    "forward_transform": 3.731,
-    "reverse_transform": 11.447,
-    "total": 42.322
+    "forward_transform": 3.82,
+    "reverse_transform": 12.748,
+    "total": 45.449
   },
   "validated_source": {
     "division_area_ids": [
