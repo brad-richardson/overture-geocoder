@@ -1,0 +1,120 @@
+name: Smoke Test Verified R2 Shuffle Resume
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoketest-r2-shuffle
+  cancel-in-progress: false
+
+env:
+  SHUFFLE_PREFIX: smoke/r2-shuffle/${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Build deterministic map fragments and manifests
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/r2-shuffle/source /tmp/r2-shuffle/restore
+          for index in 0 1 2 3; do
+            printf 'map-fragment-%s\n' "$index" > "/tmp/r2-shuffle/source/fragment-${index}.bin"
+          done
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$SHUFFLE_PREFIX" \
+            --output /tmp/r2-shuffle/partial.json \
+            /tmp/r2-shuffle/source/fragment-0.bin
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$SHUFFLE_PREFIX" \
+            --output /tmp/r2-shuffle/full.json \
+            /tmp/r2-shuffle/source/fragment-*.bin
+
+      - name: Upload partial completion, then resume the full shuffle twice
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$SHUFFLE_PREFIX" --manifest /tmp/r2-shuffle/partial.json \
+            --report /tmp/r2-shuffle/partial-upload.json
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$SHUFFLE_PREFIX" --manifest /tmp/r2-shuffle/full.json \
+            --report /tmp/r2-shuffle/full-upload.json
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$SHUFFLE_PREFIX" --manifest /tmp/r2-shuffle/full.json \
+            --report /tmp/r2-shuffle/resumed-upload.json
+          jq -e '
+            [.artifacts[].status] == ["existing_verified", "existing_verified", "existing_verified", "existing_verified"]
+          ' /tmp/r2-shuffle/resumed-upload.json
+
+      - name: Restore from empty and stale local state
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          rm -rf /tmp/r2-shuffle/restore
+          python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
+            --manifest /tmp/r2-shuffle/full.json --output-dir /tmp/r2-shuffle/restore \
+            --report /tmp/r2-shuffle/empty-restore.json
+          printf 'stale\n' > /tmp/r2-shuffle/restore/fragment-2.bin
+          python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
+            --manifest /tmp/r2-shuffle/full.json --output-dir /tmp/r2-shuffle/restore \
+            --report /tmp/r2-shuffle/stale-restore.json
+          for index in 0 1 2 3; do
+            cmp "/tmp/r2-shuffle/source/fragment-${index}.bin" \
+              "/tmp/r2-shuffle/restore/fragment-${index}.bin"
+          done
+
+      - name: Summarize verified resume measurement
+        if: always()
+        run: |
+          {
+            echo "## Hash-verifying R2 shuffle and resume"
+            echo
+            echo '```json'
+            test -f /tmp/r2-shuffle/resumed-upload.json && cat /tmp/r2-shuffle/resumed-upload.json
+            test -f /tmp/r2-shuffle/stale-restore.json && cat /tmp/r2-shuffle/stale-restore.json
+            echo '```'
+            echo
+            echo "Run-unique, non-promoting prefix: ${SHUFFLE_PREFIX}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete isolated shuffle objects
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${SHUFFLE_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${SHUFFLE_PREFIX}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"

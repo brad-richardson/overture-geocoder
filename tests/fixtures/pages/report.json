@@ -1,12 +1,12 @@
 {
   "files": {
     "extended_page.bin": {
-      "bytes": 279,
-      "sha256": "575fc7fb06b17a05d31489a92e657e9ad32f679874f23463be1196aac3a165ca"
+      "bytes": 282,
+      "sha256": "9348b82b5937ad373818cd026e71f8e031506b808c1f39a38baaddc2e3c29326"
     },
     "plain_page.bin": {
-      "bytes": 235,
-      "sha256": "0020958957352b4a642db4dd43a42e3ce09bb8084fc2b04fbc5d3c265188b93c"
+      "bytes": 238,
+      "sha256": "7af3e2316d953d315710f6f3dbb26dbef766b287ac0ca7bd2f1f5192ac6f319f"
     },
     "truncated_extended_page.bin": {
       "bytes": 2,

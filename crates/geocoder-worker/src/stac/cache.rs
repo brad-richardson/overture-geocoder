@@ -10,13 +10,28 @@ use worker::*;
 
 #[cfg(feature = "address-spike")]
 use crate::address_pages::{
-    decode_useful_gzip_range, parse_address_index, parse_useful_gzip_header, AddressPageRecord,
-    MAX_INDEX_BYTES, MAX_STORED_PAGE_RANGE,
+    decode_useful_gzip_range_measured, parse_address_index, parse_useful_gzip_header,
+    AddressPageDecode, AddressPageRecord, MAX_INDEX_BYTES, MAX_STORED_PAGE_RANGE,
 };
 #[cfg(feature = "address-spike")]
-use crate::range_reader::RangeReader;
+use crate::range_reader::{RangeReadMetrics, RangeReader};
 
 use super::{not_found, ShardLoader};
+
+pub(crate) struct CacheRangeRead {
+    pub bytes: Bytes,
+    pub cache_hit: bool,
+}
+
+#[cfg(feature = "address-spike")]
+pub(crate) struct AddressPageLookup {
+    pub records: Vec<AddressPageRecord>,
+    pub read_metrics: RangeReadMetrics,
+    pub index_bytes: usize,
+    pub stored_page_bytes: usize,
+    pub decoded_page_bytes: usize,
+    pub materialized_page_bytes: usize,
+}
 
 // Cache TTLs for different resource types
 pub(crate) const CATALOG_CACHE_TTL: u64 = 300; // 5 minutes - need fresh version pointers
@@ -135,6 +150,18 @@ impl ShardLoader {
         offset: u64,
         length: u64,
     ) -> Result<Option<Bytes>> {
+        Ok(self
+            .cached_range_read_measured(key, offset, length)
+            .await?
+            .map(|read| read.bytes))
+    }
+
+    pub(crate) async fn cached_range_read_measured(
+        &self,
+        key: &str,
+        offset: u64,
+        length: u64,
+    ) -> Result<Option<CacheRangeRead>> {
         let cache_key = format!("{}{}__r{}-{}", CACHE_PREFIX, key, offset, length);
 
         let request = Request::new(&cache_key, Method::Get)?;
@@ -144,7 +171,10 @@ impl ShardLoader {
                 return Ok(None);
             }
             console_log!("Cache HIT range: {} ({}..{})", key, offset, offset + length);
-            return Ok(Some(Bytes::from(bytes)));
+            return Ok(Some(CacheRangeRead {
+                bytes: Bytes::from(bytes),
+                cache_hit: true,
+            }));
         }
 
         let obj = self
@@ -165,7 +195,10 @@ impl ShardLoader {
         self.cache_put_bytes_background(cache_key, bytes.clone(), ID_INDEX_CACHE_TTL)
             .await;
 
-        Ok(Some(bytes))
+        Ok(Some(CacheRangeRead {
+            bytes,
+            cache_hit: false,
+        }))
     }
 
     /// Read at most `max_bytes` from the start of an object and only cache the
@@ -173,12 +206,12 @@ impl ShardLoader {
     /// This prevents a corrupt index from being fully materialized by
     /// `cached_get` before its size cap can be checked.
     #[cfg(feature = "address-spike")]
-    pub(crate) async fn cached_bounded_prefix_read(
+    pub(crate) async fn cached_bounded_prefix_read_measured(
         &self,
         key: &str,
         max_bytes: usize,
         ttl: u64,
-    ) -> Result<Option<Bytes>> {
+    ) -> Result<Option<CacheRangeRead>> {
         let sentinel_length = max_bytes
             .checked_add(1)
             .ok_or_else(|| Error::RustError("Bounded prefix length overflow".into()))?;
@@ -192,7 +225,10 @@ impl ShardLoader {
             if bytes.len() > max_bytes {
                 return Err(Error::RustError("Cached bounded prefix exceeds cap".into()));
             }
-            return Ok(Some(Bytes::from(bytes)));
+            return Ok(Some(CacheRangeRead {
+                bytes: Bytes::from(bytes),
+                cache_hit: true,
+            }));
         }
         let obj = self
             .bucket
@@ -220,7 +256,10 @@ impl ShardLoader {
         }
         self.cache_put_bytes_background(cache_key, bytes.clone(), ttl)
             .await;
-        Ok(Some(bytes))
+        Ok(Some(CacheRangeRead {
+            bytes,
+            cache_hit: false,
+        }))
     }
 
     /// Experimental exact-address storage path.
@@ -236,10 +275,10 @@ impl ShardLoader {
         index_key: &str,
         data_key: &str,
         lookup_key: &[String; 8],
-    ) -> Result<Vec<AddressPageRecord>> {
+    ) -> Result<AddressPageLookup> {
         use geocoder_core::pages::ByteRange;
 
-        let index_reader = RangeReader::new(self, index_key);
+        let mut index_reader = RangeReader::new(self, index_key);
         let index_bytes = index_reader
             .bounded_prefix(MAX_INDEX_BYTES, IMMUTABLE_CACHE_TTL)
             .await?
@@ -247,13 +286,20 @@ impl ShardLoader {
         let index = parse_address_index(&index_bytes)
             .map_err(|error| Error::RustError(format!("Invalid address page index: {error}")))?;
         let Some(extent) = index.find(lookup_key).copied() else {
-            return Ok(Vec::new());
+            return Ok(AddressPageLookup {
+                records: Vec::new(),
+                read_metrics: index_reader.metrics(),
+                index_bytes: index_bytes.len(),
+                stored_page_bytes: 0,
+                decoded_page_bytes: 0,
+                materialized_page_bytes: 0,
+            });
         };
 
         // Validate the object envelope independently from the index. A 4 KiB
         // immutable range is enough for the producer's capped JSON header and
         // is edge-cached separately from candidate pages.
-        let data_reader = RangeReader::new(self, data_key);
+        let mut data_reader = RangeReader::new(self, data_key);
         let header = data_reader
             .range(0, 4096)
             .await?
@@ -273,14 +319,23 @@ impl ShardLoader {
             .await?
             .into_iter()
             .next()
-            .ok_or_else(|| not_found(format!("{} range", data_key)))?;
-        if page.len() as u64 != extent.length {
-            return Err(Error::RustError(
-                "Address page range length differs from index".into(),
-            ));
-        }
-        decode_useful_gzip_range(&page, extent.rows, lookup_key)
-            .map_err(|error| Error::RustError(format!("Invalid address page: {error}")))
+            .ok_or_else(|| Error::RustError("Address range plan returned no page".into()))?;
+        let decode = decode_useful_gzip_range_measured(&page, extent.rows, lookup_key)
+            .map_err(|error| Error::RustError(format!("Invalid address page: {error}")))?;
+        let AddressPageDecode {
+            records,
+            stored_bytes,
+            decoded_bytes,
+            materialized_bytes,
+        } = decode;
+        Ok(AddressPageLookup {
+            records,
+            read_metrics: index_reader.metrics().add(data_reader.metrics()),
+            index_bytes: index_bytes.len(),
+            stored_page_bytes: stored_bytes,
+            decoded_page_bytes: decoded_bytes,
+            materialized_page_bytes: materialized_bytes,
+        })
     }
 
     /// Fetch small JSON text with an isolate-level memo in front of the edge

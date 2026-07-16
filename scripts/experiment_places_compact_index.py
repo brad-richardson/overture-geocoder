@@ -41,16 +41,61 @@ FIELDS = ("name", "brand", "category", "context")
 FIELD_IDS = {name: number for number, name in enumerate(FIELDS)}
 FIELD_WEIGHTS = {"name": 8, "brand": 6, "category": 3, "context": 1}
 TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
+TOKENIZER_VERSION = "nfkd-latin-fold-cjk-bigram-v2"
+
+
+def _is_latin(character: str) -> bool:
+    return "LATIN" in unicodedata.name(character, "")
+
+
+def _is_cjk(character: str) -> bool:
+    codepoint = ord(character)
+    return (
+        0x3400 <= codepoint <= 0x4DBF
+        or 0x4E00 <= codepoint <= 0x9FFF
+        or 0x3040 <= codepoint <= 0x30FF
+        or 0x31F0 <= codepoint <= 0x31FF
+        or 0xAC00 <= codepoint <= 0xD7AF
+    )
 
 
 def normalize(value: Any) -> str:
-    text = unicodedata.normalize("NFKD", str(value or "").strip().lower())
-    folded = "".join(char for char in text if not unicodedata.combining(char))
-    return " ".join(TOKEN_RE.findall(folded))
+    text = unicodedata.normalize("NFKD", str(value or "").strip().casefold())
+    folded = []
+    last_base = ""
+    for character in text:
+        if unicodedata.combining(character):
+            # Preserve Japanese voicing marks (dakuten/handakuten) and other
+            # non-Latin distinctions, while retaining the established
+            # accent-insensitive behavior for Latin names such as Café.
+            if last_base and _is_latin(last_base):
+                continue
+        else:
+            last_base = character
+        folded.append(character)
+    normalized = unicodedata.normalize("NFC", "".join(folded))
+    return " ".join(TOKEN_RE.findall(normalized))
 
 
 def tokens(value: Any) -> tuple[str, ...]:
-    return tuple(dict.fromkeys(normalize(value).split()))
+    result = []
+    for token in normalize(value).split():
+        result.append(token)
+        start = 0
+        while start < len(token):
+            if not _is_cjk(token[start]):
+                start += 1
+                continue
+            end = start + 1
+            while end < len(token) and _is_cjk(token[end]):
+                end += 1
+            run = token[start:end]
+            if len(run) == 1:
+                result.append(run)
+            else:
+                result.extend(run[index : index + 2] for index in range(len(run) - 1))
+            start = end
+    return tuple(dict.fromkeys(result))
 
 
 def encode_varint(value: int) -> bytes:
@@ -703,7 +748,9 @@ def markdown(report: dict[str, Any]) -> str:
     build = report["build"]
     comparison = report["comparison"]
     trie_bytes = comparison.get("existing_trie_bytes")
-    trie_baseline = f"{trie_bytes:,} bytes" if trie_bytes is not None else "not available"
+    trie_baseline = (
+        f"{trie_bytes:,} bytes" if trie_bytes is not None else "not available"
+    )
     lines = [
         "# Places compact-index experiment",
         "",

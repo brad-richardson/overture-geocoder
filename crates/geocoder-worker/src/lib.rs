@@ -7,7 +7,9 @@ use worker::*;
 #[cfg(feature = "address-spike")]
 mod address_pages;
 mod handlers;
-#[cfg(feature = "address-spike")]
+#[cfg(feature = "places-spike")]
+mod places_pages;
+#[cfg(any(feature = "address-spike", feature = "places-spike"))]
 mod range_reader;
 mod stac;
 
@@ -70,6 +72,8 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // wasm bundles omit both the route and the decoder module.
     #[cfg(feature = "address-spike")]
     let router = router.get_async("/__address-page-spike", handlers::handle_address_page_spike);
+    #[cfg(feature = "places-spike")]
+    let router = router.get_async("/__places-page-spike", handlers::handle_places_page_spike);
 
     let result = router
         .get_async("/health", handlers::handle_health)
@@ -126,6 +130,7 @@ fn request_endpoint(path: &str) -> &'static str {
         "/" => "root",
         path if path.starts_with("/id/") => "id",
         "/__address-page-spike" => "address_page_spike",
+        "/__places-page-spike" => "places_page_spike",
         _ => "other",
     }
 }
@@ -182,6 +187,10 @@ mod tests {
         assert_eq!(
             request_endpoint("/__address-page-spike"),
             "address_page_spike"
+        );
+        assert_eq!(
+            request_endpoint("/__places-page-spike"),
+            "places_page_spike"
         );
         assert_eq!(request_endpoint("/unexpected"), "other");
     }

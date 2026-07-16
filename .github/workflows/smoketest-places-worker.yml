@@ -1,0 +1,198 @@
+name: Smoke Test Places Worker Read Chain
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: smoketest-places-worker
+  cancel-in-progress: true
+
+env:
+  SMOKE_VERSION: smoketest-places-${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 90
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38de10e7b70166bc74ed198c30 # v6
+        with:
+          node-version: "24"
+
+      - name: Set up Rust and Worker build
+        uses: dtolnay/rust-toolchain@4be7066ada62dd38de10e7b70166bc74ed198c30 # stable
+        with:
+          toolchain: stable
+          targets: wasm32-unknown-unknown
+
+      - name: Install smoke tools
+        run: |
+          pip install duckdb==1.5.1
+          npm install -g wrangler@4.111.0
+          cargo install worker-build --version 0.7.5 --locked
+
+      - name: Extract three current-release regional samples
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/places-worker-smoke
+          python scripts/experiment_places_partition_extract.py \
+            --release 2026-06-17.0 --limit 50000 \
+            --xmin -71.25 --xmax -70.85 --ymin 42.15 --ymax 42.55 \
+            --output /tmp/places-worker-smoke/boston.parquet
+          python scripts/experiment_places_partition_extract.py \
+            --release 2026-06-17.0 --limit 50000 \
+            --xmin 139.45 --xmax 140.05 --ymin 35.45 --ymax 35.95 \
+            --output /tmp/places-worker-smoke/tokyo.parquet
+          python scripts/experiment_places_partition_extract.py \
+            --release 2026-06-17.0 --limit 50000 \
+            --xmin -99.45 --xmax -98.85 --ymin 19.15 --ymax 19.75 \
+            --output /tmp/places-worker-smoke/mexico-city.parquet
+
+      - name: Build compact shards, packed head, and local exact oracles
+        run: |
+          set -euo pipefail
+          python scripts/prepare_places_worker_smoke.py \
+            --input /tmp/places-worker-smoke/boston.parquet \
+            --input /tmp/places-worker-smoke/tokyo.parquet \
+            --input /tmp/places-worker-smoke/mexico-city.parquet \
+            --output-dir /tmp/places-worker-smoke/artifacts
+          jq -e '
+            (.cases | any(.head_hit == true))
+            and (.cases | any(.head_hit == false))
+            and (.cases | any(.name == "cjk_exact"))
+          ' /tmp/places-worker-smoke/artifacts/report.json
+
+      - name: Upload and verify isolated R2 objects
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          for name in shard-0.pcsh shard-1.pcsh shard-2.pcsh head.phrp; do
+            wrangler r2 object put "geocoder-shards/${SMOKE_VERSION}/${name}" \
+              --file "/tmp/places-worker-smoke/artifacts/${name}" --remote
+            wrangler r2 object get "geocoder-shards/${SMOKE_VERSION}/${name}" \
+              --remote --pipe > "/tmp/readback-${name}"
+            cmp "/tmp/places-worker-smoke/artifacts/${name}" "/tmp/readback-${name}"
+          done
+
+      - name: Deploy isolated Places preview Worker
+        working-directory: crates/geocoder-worker
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          DEPLOY_LOG=$(mktemp)
+          wrangler deploy --config wrangler.places-smoke.toml \
+            --var ENVIRONMENT:places-smoke \
+            --var "PLACES_SPIKE_PREFIX:${SMOKE_VERSION}" \
+            2>&1 | tee "$DEPLOY_LOG"
+          PREVIEW_URL=$(grep -oE 'https://[^[:space:]]+\.workers\.dev' "$DEPLOY_LOG" | tail -1)
+          test -n "$PREVIEW_URL"
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+
+      - name: Wait for preview propagation
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 12); do
+            if curl --fail --silent --show-error "${PREVIEW_URL}/" >/dev/null; then
+              exit 0
+            fi
+            sleep 5
+          done
+          exit 1
+
+      - name: Measure cold and warm head and shard chains
+        run: |
+          set -euo pipefail
+          : > /tmp/places-worker-timings.jsonl
+          jq -c '.cases[]' /tmp/places-worker-smoke/artifacts/report.json | while read -r CASE; do
+            NAME=$(jq -r '.name' <<< "$CASE")
+            TOKEN=$(jq -r '.token | @uri' <<< "$CASE")
+            PREFIX=$(jq -r 'if .prefix then "1" else "0" end' <<< "$CASE")
+            EXPECTED_IDS=$(jq -c '.result_ids' <<< "$CASE")
+            EXPECTED_HEAD=$(jq -r '.head_hit' <<< "$CASE")
+            for attempt in 1 2 3 4 5 6; do
+              BODY=$(mktemp)
+              HEADERS=$(mktemp)
+              read -r STATUS TOTAL < <(curl --silent --show-error \
+                --dump-header "$HEADERS" --output "$BODY" \
+                --write-out '%{http_code} %{time_total}\n' \
+                "${PREVIEW_URL}/__places-page-spike?token=${TOKEN}&prefix=${PREFIX}")
+              test "$STATUS" = "200"
+              jq -e --argjson ids "$EXPECTED_IDS" --argjson head "$EXPECTED_HEAD" '
+                .schema == "overture-places-worker-spike-v1"
+                and [.results[].id] == $ids
+                and .head_hit == $head
+                and .head_consulted == true
+                and .read_metrics.logical_ranges >= 3
+                and (if $head then (.shards | length) == 0
+                     else (.shards | length) == 3 end)
+              ' "$BODY"
+              SERVER_TIMING=$(awk 'BEGIN{IGNORECASE=1} /^server-timing:/ {sub(/\r$/, ""); print substr($0, index($0,$2)); exit}' "$HEADERS")
+              jq -cn --arg name "$NAME" --argjson attempt "$attempt" \
+                --argjson time_total "$TOTAL" --arg server_timing "$SERVER_TIMING" \
+                --slurpfile response "$BODY" \
+                '{case:$name,attempt:$attempt,time_total_seconds:$time_total,
+                  server_timing:$server_timing,read_metrics:$response[0].read_metrics,
+                  head_hit:$response[0].head_hit}' >> /tmp/places-worker-timings.jsonl
+            done
+          done
+          jq -s '{schema:"overture-places-worker-latency-spike-v1",samples:.}' \
+            /tmp/places-worker-timings.jsonl > /tmp/places-worker-latency.json
+
+      - name: Summarize measurement
+        if: always()
+        run: |
+          {
+            echo "## Places Worker compact-shard/head smoke"
+            echo
+            echo '```json'
+            test -f /tmp/places-worker-smoke/artifacts/report.json && \
+              cat /tmp/places-worker-smoke/artifacts/report.json
+            test -f /tmp/places-worker-latency.json && cat /tmp/places-worker-latency.json
+            echo '```'
+            echo
+            echo "Three real regional samples, one run-isolated packed head, no catalog or production writes."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete preview Worker and isolated R2 objects
+        if: always()
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+        run: |
+          set +e
+          FAILED=0
+          WORKER_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/geocoder-places-smoke"
+          STATUS=$(curl --silent --show-error --request DELETE --output /dev/null \
+            --write-out '%{http_code}' -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            "$WORKER_API")
+          if [ "$STATUS" != "200" ] && [ "$STATUS" != "404" ]; then FAILED=1; fi
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${SMOKE_VERSION}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${SMOKE_VERSION}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          if [ "$REMAINING" != "0" ]; then FAILED=1; fi
+          exit "$FAILED"

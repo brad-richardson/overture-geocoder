@@ -44,6 +44,7 @@ pub(crate) struct AddressPageRecord {
     pub id: String,
     pub longitude: f64,
     pub latitude: f64,
+    pub source_object_index: u32,
     pub source_row_group: u32,
     pub source_row_index: u32,
     pub country: String,
@@ -53,6 +54,14 @@ pub(crate) struct AddressPageRecord {
     pub number: String,
     pub unit: String,
     pub address_levels: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct AddressPageDecode {
+    pub records: Vec<AddressPageRecord>,
+    pub stored_bytes: usize,
+    pub decoded_bytes: usize,
+    pub materialized_bytes: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,7 +87,7 @@ pub(crate) fn parse_useful_gzip_header(bytes: &[u8]) -> Result<usize> {
     let header: DataHeader =
         serde_json::from_slice(&bytes[DATA_MAGIC.len() + 4..DATA_MAGIC.len() + 4 + header_len])
             .map_err(|_| PageError::new("invalid address data header JSON"))?;
-    if header.format != 1 || header.variant != "useful_gzip" {
+    if header.format != 2 || header.variant != "useful_gzip" {
         return Err(PageError::new("unsupported address data format"));
     }
     if header.page_rows == 0 || header.page_rows > 4096 {
@@ -110,11 +119,20 @@ fn parse_address_index_key(bytes: &[u8]) -> Result<[String; 8]> {
 /// Decode one framed + gzipped page and return only the records matching
 /// `lookup_key`. The stored frame, decode budgets, and cursor primitives come
 /// from the shared core; the record shape is address-specific.
+#[cfg(test)]
 pub(crate) fn decode_useful_gzip_range(
     bytes: &[u8],
     expected_rows: usize,
     lookup_key: &[String; 8],
 ) -> Result<Vec<AddressPageRecord>> {
+    Ok(decode_useful_gzip_range_measured(bytes, expected_rows, lookup_key)?.records)
+}
+
+pub(crate) fn decode_useful_gzip_range_measured(
+    bytes: &[u8],
+    expected_rows: usize,
+    lookup_key: &[String; 8],
+) -> Result<AddressPageDecode> {
     let inner = strip_stored_page_frame(bytes, &CAPS)?;
     let mut decoder = GzDecoder::new(Cursor::new(inner));
     let mut decoded = Vec::new();
@@ -129,7 +147,7 @@ pub(crate) fn decode_useful_gzip_range(
     if decoder.get_ref().position() != inner.len() as u64 {
         return Err(PageError::new("gzip address page has trailing bytes"));
     }
-    let records = decode_useful_page(&decoded)?;
+    let (records, materialized_bytes) = decode_useful_page_measured(&decoded)?;
     if records.len() != expected_rows {
         return Err(PageError::new(
             "decoded address row count differs from index",
@@ -142,10 +160,20 @@ pub(crate) fn decode_useful_gzip_range(
     if matches.len() > CAPS.max_page_rows {
         return Err(PageError::new("address candidate cap exceeded"));
     }
-    Ok(matches)
+    Ok(AddressPageDecode {
+        records: matches,
+        stored_bytes: bytes.len(),
+        decoded_bytes: decoded.len(),
+        materialized_bytes,
+    })
 }
 
+#[cfg(test)]
 fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
+    Ok(decode_useful_page_measured(bytes)?.0)
+}
+
+fn decode_useful_page_measured(bytes: &[u8]) -> Result<(Vec<AddressPageRecord>, usize)> {
     let mut reader = ByteReader::new(bytes, 0);
     let rows = usize::try_from(reader.uvarint()?)
         .map_err(|_| PageError::new("address page row count is too large"))?;
@@ -213,6 +241,8 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
                 "address coordinates are outside valid bounds",
             ));
         }
+        let source_object_index = u32::try_from(reader.uvarint()?)
+            .map_err(|_| PageError::new("source object index is too large"))?;
         let source_row_group = u32::try_from(reader.uvarint()?)
             .map_err(|_| PageError::new("source row group is too large"))?;
         let source_row_index = u32::try_from(reader.uvarint()?)
@@ -251,6 +281,7 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
             id: geocoder_core::pages::format_uuid(id_bytes),
             longitude,
             latitude,
+            source_object_index,
             source_row_group,
             source_row_index,
             country: strings[display[0]].clone(),
@@ -268,7 +299,7 @@ fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
     if !reader.is_empty() {
         return Err(PageError::new("address page has trailing decoded bytes"));
     }
-    Ok(records)
+    Ok((records, materialized_bytes))
 }
 
 fn dictionary_id(reader: &mut ByteReader<'_>, count: usize) -> Result<usize> {
@@ -380,6 +411,7 @@ mod tests {
             raw.extend(uuid);
             raw.extend((-710_999_000_i32).to_le_bytes());
             raw.extend(424_801_000_i32.to_le_bytes());
+            raw.extend(uvarint(0));
             raw.extend(uvarint(12));
             raw.extend(uvarint(id as u64));
             // country, city, postcode, street, number, unit, level sequence
@@ -424,6 +456,7 @@ mod tests {
             raw.extend(uuid);
             raw.extend(0_i32.to_le_bytes());
             raw.extend(0_i32.to_le_bytes());
+            raw.extend(uvarint(0));
             raw.extend(uvarint(0));
             raw.extend(uvarint(u64::from(id)));
             // Six display fields all reference the huge string, as does context.
@@ -482,7 +515,7 @@ mod tests {
 
     #[test]
     fn validates_data_header_before_page_reads() {
-        let header = br#"{"format":1,"variant":"useful_gzip","page_rows":256}"#;
+        let header = br#"{"format":2,"variant":"useful_gzip","page_rows":256}"#;
         let mut bytes = DATA_MAGIC.to_vec();
         bytes.extend((header.len() as u32).to_le_bytes());
         bytes.extend(header);

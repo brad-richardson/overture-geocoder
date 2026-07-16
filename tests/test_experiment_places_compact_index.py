@@ -52,6 +52,19 @@ def test_varint_round_trip():
         assert experiment.decode_varint(encoded) == (value, len(encoded))
 
 
+def test_cjk_bigrams_preserve_dakuten_and_latin_accents_still_fold():
+    assert experiment.normalize("スターバックス") == "スターバックス"
+    assert experiment.normalize("スターハックス") == "スターハックス"
+    assert experiment.tokens("東京タワー") == (
+        "東京タワー",
+        "東京",
+        "京タ",
+        "タワ",
+        "ワー",
+    )
+    assert experiment.normalize("Café") == "cafe"
+
+
 def test_record_round_trip_uses_only_result_fields():
     place = places()[0]
     result = experiment.decode_record(experiment.encode_record(place))

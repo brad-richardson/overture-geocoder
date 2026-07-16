@@ -16,7 +16,7 @@ env:
 jobs:
   smoke:
     runs-on: ubuntu-24.04-arm
-    timeout-minutes: 30
+    timeout-minutes: 90
     steps:
       - name: Check out without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -43,6 +43,8 @@ jobs:
         run: |
           npm install -g wrangler@4.111.0
           cargo install worker-build --version 0.7.5 --locked
+          python -m pip install --only-binary=:all: --require-hashes \
+            -r .github/requirements-hosted-rowgroup.txt
 
       - name: Pre-clean fixed smoke prefix
         env:
@@ -71,11 +73,46 @@ jobs:
             --region auto)
           test "$REMAINING" = "0"
 
-      - name: Build deterministic address page fixture
+      - name: Build representative current-release address shard
         run: |
-          python scripts/prepare_address_worker_smoke.py \
-            --output-dir /tmp/address-worker-smoke
-          cat /tmp/address-worker-smoke/report.json
+          set -euo pipefail
+          mkdir -p /tmp/address-worker-smoke
+          /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
+            --release 2026-06-17.0 --family addresses \
+            --inventory-report benchmarks/address-rowgroup-inventory-report.json \
+            --task-index 48 \
+            --output /tmp/address-worker-smoke/projected.parquet \
+            --json-out /tmp/address-worker-smoke/projection-report.json \
+            --target-rowgroup-uncompressed-bytes 350000000 \
+            --max-rows 4000000 --max-groups 72 --max-output-bytes 500000000
+          /usr/bin/time -v python scripts/experiment_address_reduce.py \
+            --input /tmp/address-worker-smoke/projected.parquet \
+            --output /tmp/address-worker-smoke/reduced.aidx \
+            --json-out /tmp/address-worker-smoke/reduce-report.json \
+            --work-dir /tmp --max-rows 4000000 --fragment-rows 128000 \
+            --sparse-stride 256 --max-artifact-bytes 1000000000 \
+            --max-workspace-bytes 12000000000
+          /usr/bin/time -v python scripts/experiment_address_compression.py \
+            --input /tmp/address-worker-smoke/reduced.aidx \
+            --output-dir /tmp/address-worker-smoke \
+            --json-out /tmp/address-worker-smoke/report.json \
+            --page-rows 256 --planning-rows 473576753 \
+            --max-input-bytes 1000000000 --max-output-bytes 1000000000 \
+            --max-workspace-bytes 6000000000 --max-page-bytes 8388608 \
+            --max-page-rows 10000
+          LOOKUP_QUERY=$(jq -r '
+            .oracle.verification_groups | max_by(.count) | .key |
+            map(@uri) | map("k=" + .) | join("&")
+          ' /tmp/address-worker-smoke/report.json)
+          EXPECTED_COUNT=$(jq -r '.oracle.verification_groups | max_by(.count) | .count' \
+            /tmp/address-worker-smoke/report.json)
+          EXPECTED_DIGEST=$(jq -r '.oracle.verification_groups | max_by(.count) | .id_sha256' \
+            /tmp/address-worker-smoke/report.json)
+          test -n "$LOOKUP_QUERY"
+          test "$EXPECTED_COUNT" -gt 0
+          echo "LOOKUP_QUERY=$LOOKUP_QUERY" >> "$GITHUB_ENV"
+          echo "EXPECTED_COUNT=$EXPECTED_COUNT" >> "$GITHUB_ENV"
+          echo "EXPECTED_DIGEST=$EXPECTED_DIGEST" >> "$GITHUB_ENV"
 
       - name: Upload and verify isolated R2 fixture
         env:
@@ -136,7 +173,7 @@ jobs:
               read -r HTTP_STATUS TIME_TOTAL < <(curl --silent --show-error \
                 --dump-header "$HEADERS" --output "$BODY" \
                 --write-out '%{http_code} %{time_total}\n' \
-                "${PREVIEW_URL}/__address-page-spike")
+                "${PREVIEW_URL}/__address-page-spike?${LOOKUP_QUERY}")
               if [ "$HTTP_STATUS" = "200" ]; then
                 break
               fi
@@ -149,18 +186,39 @@ jobs:
             done
             test "$HTTP_STATUS" = "200"
             jq -e '
-              .schema == "overture-address-worker-spike-v1"
-              and .candidate_count == 137
-              and .first.street == "Main Street"
-              and .first.address_levels == ["MA", "Middlesex", "Stoneham"]
-              and .last_id == "00000000-0000-0000-0000-000000000089"
+              .schema == "overture-address-worker-spike-v2"
+              and .candidate_count == (env.EXPECTED_COUNT | tonumber)
+              and (.ids | length) == .candidate_count
+              and .first.source_object_index >= 0
+              and .index_bytes > 0
+              and .stored_page_bytes > 0
+              and .decoded_page_bytes > 0
+              and .materialized_page_bytes > 0
+              and .read_metrics.logical_ranges == 3
             ' "$BODY"
+            python - "$BODY" "$EXPECTED_DIGEST" <<'PY'
+          import hashlib
+          import json
+          import sys
+          import uuid
+
+          body = json.load(open(sys.argv[1]))
+          digest = hashlib.sha256()
+          for value in body["ids"]:
+              digest.update(uuid.UUID(value).bytes)
+          if digest.hexdigest() != sys.argv[2]:
+              raise SystemExit("Worker candidate IDs differ from producer oracle")
+          PY
             SERVER_TIMING=$(awk 'BEGIN{IGNORECASE=1} /^server-timing:/ {sub(/\r$/, ""); print substr($0, index($0,$2)); exit}' "$HEADERS")
             jq -cn --argjson attempt "$attempt" --argjson time_total "$TIME_TOTAL" \
               --arg server_timing "$SERVER_TIMING" \
               '{attempt:$attempt,time_total_seconds:$time_total,server_timing:$server_timing}' \
               >> /tmp/address-worker-timings.jsonl
           done
+          jq -e '.candidate_count == 0 and .ids == []' <(
+            curl --fail --silent --show-error \
+              "${PREVIEW_URL}/__address-page-spike?k=zzzz&k=&k=&k=&k=&k=&k=&k="
+          )
           jq -s '{schema:"overture-address-worker-latency-spike-v1", samples:.}' \
             /tmp/address-worker-timings.jsonl | tee /tmp/address-worker-latency.json
 
@@ -171,11 +229,13 @@ jobs:
             echo "## Address Worker page-reader smoke"
             echo
             echo '```json'
+            test -f /tmp/address-worker-smoke/projection-report.json && cat /tmp/address-worker-smoke/projection-report.json
+            test -f /tmp/address-worker-smoke/reduce-report.json && cat /tmp/address-worker-smoke/reduce-report.json
             test -f /tmp/address-worker-smoke/report.json && cat /tmp/address-worker-smoke/report.json
             test -f /tmp/address-worker-latency.json && cat /tmp/address-worker-latency.json
             echo '```'
             echo
-            echo "The fixture uses a fixed isolated prefix and preview Worker; cleanup is mandatory and no catalog or production state is written."
+            echo "The representative shard uses a run-isolated prefix and preview Worker; cleanup is mandatory and no catalog or production state is written."
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Delete preview Worker and fixed-prefix objects

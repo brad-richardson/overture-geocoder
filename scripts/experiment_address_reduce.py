@@ -23,12 +23,12 @@ import time
 import unicodedata
 import uuid
 from pathlib import Path
-from typing import Any, BinaryIO, Iterator
+from typing import Any, BinaryIO
 
 
 FRAGMENT_MAGIC = b"OAMAP01\0"
 ARTIFACT_MAGIC = b"OARED01\0"
-FORMAT_VERSION = 1
+FORMAT_VERSION = 2
 KEY_FIELDS = 8
 MAX_HEADER_BYTES = 1024 * 1024
 MAX_RECORD_BYTES = 1024 * 1024
@@ -154,7 +154,12 @@ def encode_record(record: dict[str, Any]) -> bytes:
     pieces.extend(
         (
             feature_id_bytes(record["id"]),
-            struct.pack("<ii", round(record["lon"] * 10_000_000), round(record["lat"] * 10_000_000)),
+            struct.pack(
+                "<ii",
+                round(record["lon"] * 10_000_000),
+                round(record["lat"] * 10_000_000),
+            ),
+            encode_uvarint(record["source_object_index"]),
             encode_uvarint(record["source_row_group"]),
             encode_uvarint(record["source_row_index"]),
             encode_text(record["country"]),
@@ -182,6 +187,7 @@ def decode_record(payload: bytes) -> dict[str, Any]:
     position += 16
     lon, lat = struct.unpack_from("<ii", payload, position)
     position += 8
+    source_object_index, position = decode_uvarint(payload, position)
     source_row_group, position = decode_uvarint(payload, position)
     source_row_index, position = decode_uvarint(payload, position)
     display = []
@@ -200,6 +206,7 @@ def decode_record(payload: bytes) -> dict[str, Any]:
         "id": feature_id,
         "lon": lon / 10_000_000,
         "lat": lat / 10_000_000,
+        "source_object_index": source_object_index,
         "source_row_group": source_row_group,
         "source_row_index": source_row_index,
         "country": display[0],
@@ -239,29 +246,46 @@ def read_envelope(source: BinaryIO, magic: bytes) -> dict[str, Any]:
         raise ValueError("invalid file header") from exc
 
 
-def projected_metadata(parquet: Any) -> dict[str, str]:
+def projected_metadata(parquet: Any) -> dict[str, Any]:
     metadata = parquet.schema_arrow.metadata or {}
     required = (
         b"overture.source_inventory_sha256",
-        b"overture.source_uri",
-        b"overture.source_etag",
+        b"overture.source_inventory_json",
         b"overture.release",
         b"overture.family",
     )
     missing = [key.decode() for key in required if key not in metadata]
     if missing:
         raise ValueError(f"projected input is missing source metadata: {missing}")
-    return {key.decode().removeprefix("overture."): metadata[key].decode() for key in required}
+    inventory = json.loads(metadata[b"overture.source_inventory_json"])
+    digest = hashlib.sha256(canonical_json(inventory)).hexdigest()
+    stored_digest = metadata[b"overture.source_inventory_sha256"].decode()
+    if digest != stored_digest:
+        raise ValueError("projected source inventory digest differs from its JSON")
+    release = metadata[b"overture.release"].decode()
+    family = metadata[b"overture.family"].decode()
+    if inventory.get("release") != release or inventory.get("family") != family:
+        raise ValueError("projected source inventory identity differs")
+    return {
+        "source_inventory_sha256": stored_digest,
+        "source_inventory": inventory,
+        "release": release,
+        "family": family,
+    }
 
 
-def batch_records(batch: Any) -> tuple[list[tuple[tuple[str, ...], bytes]], dict[str, int]]:
+def batch_records(
+    batch: Any,
+) -> tuple[list[tuple[tuple[str, ...], bytes]], dict[str, int]]:
     columns = {name: batch.column(name).to_pylist() for name in batch.schema.names}
     encoded: list[tuple[tuple[str, ...], bytes]] = []
     rejected = {"missing_street_or_number": 0, "invalid_geometry": 0}
     for index in range(batch.num_rows):
         street = columns["street"][index]
         number = columns["number"][index]
-        if not normalize(street) or not normalize(str(number) if number is not None else ""):
+        if not normalize(street) or not normalize(
+            str(number) if number is not None else ""
+        ):
             rejected["missing_street_or_number"] += 1
             continue
         point = point_coordinates(columns["geometry"][index])
@@ -272,13 +296,22 @@ def batch_records(batch: Any) -> tuple[list[tuple[tuple[str, ...], bytes]], dict
             "id": str(columns["id"][index]),
             "street": str(street),
             "number": str(number),
-            "unit": "" if columns["unit"][index] is None else str(columns["unit"][index]),
-            "postcode": "" if columns["postcode"][index] is None else str(columns["postcode"][index]),
-            "postal_city": "" if columns["postal_city"][index] is None else str(columns["postal_city"][index]),
-            "country": "" if columns["country"][index] is None else str(columns["country"][index]),
+            "unit": ""
+            if columns["unit"][index] is None
+            else str(columns["unit"][index]),
+            "postcode": ""
+            if columns["postcode"][index] is None
+            else str(columns["postcode"][index]),
+            "postal_city": ""
+            if columns["postal_city"][index] is None
+            else str(columns["postal_city"][index]),
+            "country": ""
+            if columns["country"][index] is None
+            else str(columns["country"][index]),
             "address_levels": address_level_values(columns["address_levels"][index]),
             "lon": point[0],
             "lat": point[1],
+            "source_object_index": int(columns["source_object_index"][index]),
             "source_row_group": int(columns["source_row_group"][index]),
             "source_row_index": int(columns["source_row_index"][index]),
         }
@@ -335,7 +368,9 @@ def build_fragments(
             for _, payload in records:
                 if len(payload) > MAX_RECORD_BYTES:
                     raise ValueError("fragment record exceeds hard byte cap")
-                projected = input_bytes + fragment_bytes + output.tell() + 4 + len(payload)
+                projected = (
+                    input_bytes + fragment_bytes + output.tell() + 4 + len(payload)
+                )
                 if projected > max_workspace_bytes:
                     raise ValueError("map fragment workspace exceeds hard byte cap")
                 output.write(struct.pack("<I", len(payload)))
@@ -353,7 +388,9 @@ def build_fragments(
                 "sha256": sha256_file(path),
             }
         )
-    if input_rows != parquet.metadata.num_rows or input_rows != selected_rows + sum(rejected.values()):
+    if input_rows != parquet.metadata.num_rows or input_rows != selected_rows + sum(
+        rejected.values()
+    ):
         raise ValueError("map fragment accounting does not reconcile")
     return {
         "source": metadata,
@@ -453,7 +490,9 @@ def build_artifact(
     fragments = sorted(fragments, key=lambda item: item["index"])
     readers = [FragmentReader(Path(item["path"])) for item in fragments]
     try:
-        source_digests = {reader.header["source_inventory_sha256"] for reader in readers}
+        source_digests = {
+            reader.header["source_inventory_sha256"] for reader in readers
+        }
         if source_digests != {source["source_inventory_sha256"]}:
             raise ValueError("fragment source inventories differ")
         for manifest, reader in zip(fragments, readers):
@@ -468,7 +507,9 @@ def build_artifact(
             item = reader.next()
             if item is not None:
                 heapq.heappush(heap, (item[0], index, item[1]))
-        with tempfile.TemporaryDirectory(prefix="address-reduce-", dir=output_path.parent) as temp_name:
+        with tempfile.TemporaryDirectory(
+            prefix="address-reduce-", dir=output_path.parent
+        ) as temp_name:
             temp = Path(temp_name)
             record_path = temp / "records.bin"
             sparse_path = temp / "sparse.bin"
@@ -496,7 +537,10 @@ def build_artifact(
                 if maximum_group is None or current_count > maximum_group["count"]:
                     maximum_group = group
 
-            with record_path.open("wb") as record_file, sparse_path.open("wb") as sparse_file:
+            with (
+                record_path.open("wb") as record_file,
+                sparse_path.open("wb") as sparse_file,
+            ):
                 while heap:
                     key, reader_index, payload = heapq.heappop(heap)
                     if previous is not None and key < previous:
@@ -520,15 +564,25 @@ def build_artifact(
                             + key_payload
                         )
                         projected_sparse = (
-                            input_bytes + fragment_bytes + record_file.tell()
-                            + sparse_file.tell() + len(sparse_entry)
+                            input_bytes
+                            + fragment_bytes
+                            + record_file.tell()
+                            + sparse_file.tell()
+                            + len(sparse_entry)
                         )
                         if projected_sparse > max_workspace_bytes:
                             raise ValueError("reduce workspace exceeds hard byte cap")
                         sparse_file.write(sparse_entry)
                     if len(payload) > MAX_RECORD_BYTES:
                         raise ValueError("artifact record exceeds hard byte cap")
-                    projected_records = input_bytes + fragment_bytes + record_file.tell() + sparse_file.tell() + 4 + len(payload)
+                    projected_records = (
+                        input_bytes
+                        + fragment_bytes
+                        + record_file.tell()
+                        + sparse_file.tell()
+                        + 4
+                        + len(payload)
+                    )
                     if projected_records > max_workspace_bytes:
                         raise ValueError("reduce workspace exceeds hard byte cap")
                     record_file.write(struct.pack("<I", len(payload)))
@@ -557,15 +611,34 @@ def build_artifact(
                 "record_bytes": record_bytes,
                 "source": source,
                 "fragment_sha256": [item["sha256"] for item in fragments],
-                "fields": ["id", "coordinates", "country", "postal_city", "postcode", "street", "number", "unit", "raw_address_levels", "source_row_group", "source_row_index"],
+                "fields": [
+                    "id",
+                    "coordinates",
+                    "country",
+                    "postal_city",
+                    "postcode",
+                    "street",
+                    "number",
+                    "unit",
+                    "raw_address_levels",
+                    "source_object_index",
+                    "source_row_group",
+                    "source_row_index",
+                ],
             }
             header_bytes = canonical_json(header)
             projected_artifact_bytes = (
-                len(ARTIFACT_MAGIC) + 4 + len(header_bytes)
-                + sparse_bytes + record_bytes
+                len(ARTIFACT_MAGIC)
+                + 4
+                + len(header_bytes)
+                + sparse_bytes
+                + record_bytes
             )
             peak_workspace_estimate = (
-                input_bytes + fragment_bytes + record_bytes + sparse_bytes
+                input_bytes
+                + fragment_bytes
+                + record_bytes
+                + sparse_bytes
                 + projected_artifact_bytes
             )
             if projected_artifact_bytes > max_artifact_bytes:
@@ -575,8 +648,10 @@ def build_artifact(
             temporary_output: Path | None = None
             try:
                 with tempfile.NamedTemporaryFile(
-                    prefix=f".{output_path.name}.", suffix=".tmp",
-                    dir=output_path.parent, delete=False,
+                    prefix=f".{output_path.name}.",
+                    suffix=".tmp",
+                    dir=output_path.parent,
+                    delete=False,
                 ) as output:
                     temporary_output = Path(output.name)
                     write_envelope(output, ARTIFACT_MAGIC, header)
@@ -619,7 +694,10 @@ class AddressReduceArtifact:
         for field in ("records", "sparse_bytes", "record_bytes"):
             if type(self.header.get(field)) is not int or self.header[field] < 0:
                 raise ValueError(f"invalid reduce artifact {field}")
-        if type(self.header.get("sparse_stride")) is not int or self.header["sparse_stride"] <= 0:
+        if (
+            type(self.header.get("sparse_stride")) is not int
+            or self.header["sparse_stride"] <= 0
+        ):
             raise ValueError("invalid reduce artifact sparse_stride")
         if self.header["records"] == 0:
             if self.header["sparse_bytes"] != 0 or self.header["record_bytes"] != 0:
@@ -719,8 +797,10 @@ class AddressReduceArtifact:
         if len(key) != KEY_FIELDS:
             raise ValueError(f"lookup key must have {KEY_FIELDS} fields")
         if (
-            type(max_candidates) is not int or max_candidates <= 0
-            or type(max_scan_bytes) is not int or max_scan_bytes <= 0
+            type(max_candidates) is not int
+            or max_candidates <= 0
+            or type(max_scan_bytes) is not int
+            or max_scan_bytes <= 0
         ):
             raise ValueError("lookup caps must be positive integers")
         normalized = tuple(normalize(value) for value in key)
@@ -772,7 +852,11 @@ class AddressReduceArtifact:
                 or candidate_digest.hexdigest() != group["id_sha256"]
             ):
                 raise ValueError("artifact lookup differs from reduce oracle")
-        return {"full_sorted_scan": True, "record_count_match": True, "exact_candidate_sets": len(groups)}
+        return {
+            "full_sorted_scan": True,
+            "record_count_match": True,
+            "exact_candidate_sets": len(groups),
+        }
 
 
 def peak_rss_bytes() -> int:
@@ -786,27 +870,43 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     disk_before = shutil.disk_usage(args.work_dir)
     if disk_before.free < args.max_workspace_bytes:
         raise ValueError("free disk is below configured workspace reservation")
-    with tempfile.TemporaryDirectory(prefix="address-map-fragments-", dir=args.work_dir) as name:
+    with tempfile.TemporaryDirectory(
+        prefix="address-map-fragments-", dir=args.work_dir
+    ) as name:
         fragment_dir = Path(name)
         map_report = build_fragments(
-            args.input, fragment_dir,
-            fragment_rows=args.fragment_rows, max_rows=args.max_rows,
-            max_workspace_bytes=args.max_workspace_bytes, input_bytes=input_bytes,
+            args.input,
+            fragment_dir,
+            fragment_rows=args.fragment_rows,
+            max_rows=args.max_rows,
+            max_workspace_bytes=args.max_workspace_bytes,
+            input_bytes=input_bytes,
         )
         reduce_report = build_artifact(
-            map_report["fragments"], args.output,
-            source=map_report["source"], sparse_stride=args.sparse_stride,
+            map_report["fragments"],
+            args.output,
+            source=map_report["source"],
+            sparse_stride=args.sparse_stride,
             max_artifact_bytes=args.max_artifact_bytes,
-            max_workspace_bytes=args.max_workspace_bytes, input_bytes=input_bytes,
+            max_workspace_bytes=args.max_workspace_bytes,
+            input_bytes=input_bytes,
         )
         with AddressReduceArtifact(args.output) as artifact:
             verification = artifact.verify(reduce_report["verification_groups"])
         fragment_bytes = sum(item["bytes"] for item in map_report["fragments"])
     report = {
         "schema": "overture-address-reduce-spike-v1",
-        "input": {"path": str(args.input), "bytes": input_bytes, "sha256": sha256_file(args.input)},
+        "input": {
+            "path": str(args.input),
+            "bytes": input_bytes,
+            "sha256": sha256_file(args.input),
+        },
         "map_fragments": {**map_report, "bytes": fragment_bytes},
-        "reduce": {**reduce_report, "path": str(args.output), "verification": verification},
+        "reduce": {
+            **reduce_report,
+            "path": str(args.output),
+            "verification": verification,
+        },
         "resources": {
             "elapsed_seconds": time.monotonic() - started,
             "peak_rss_bytes": peak_rss_bytes(),
@@ -844,7 +944,16 @@ def main() -> None:
     parser.add_argument("--max-artifact-bytes", type=int, default=1_000_000_000)
     parser.add_argument("--max-workspace-bytes", type=int, default=12_000_000_000)
     args = parser.parse_args()
-    if min(args.max_rows, args.fragment_rows, args.sparse_stride, args.max_artifact_bytes, args.max_workspace_bytes) <= 0:
+    if (
+        min(
+            args.max_rows,
+            args.fragment_rows,
+            args.sparse_stride,
+            args.max_artifact_bytes,
+            args.max_workspace_bytes,
+        )
+        <= 0
+    ):
         raise SystemExit("all limits must be positive")
     print(json.dumps(run(args), sort_keys=True))
 

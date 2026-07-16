@@ -69,7 +69,9 @@ def test_country_disagreement_is_gated_before_locality():
 
 def test_exact_agreement_requires_raw_equality():
     assert (
-        convergence.classify_agreement(row(al_locality="Cambridge", cont_locality="Cambridge"))
+        convergence.classify_agreement(
+            row(al_locality="Cambridge", cont_locality="Cambridge")
+        )
         == "exact_agreement"
     )
 
@@ -189,7 +191,9 @@ def test_taxonomy_counts_cover_every_bucket_and_sum_to_total():
         ),  # finer_granularity_neighborhood
         row(al_locality="East Cambridge"),  # postal_city_vs_containment
         row(has_address_levels=False),  # missing_address_levels
-        row(cont_any=False, cont_region="", cont_county="", cont_locality=""),  # outside
+        row(
+            cont_any=False, cont_region="", cont_county="", cont_locality=""
+        ),  # outside
         row(cont_country="CA"),  # country_disagreement
         row(al_locality="Somerville", postal_city="Somerville"),  # unresolved
     ]
@@ -270,6 +274,7 @@ def extended_page_fixture():
             "id": str(uuid.UUID(int=7)),
             "lon": -71.1,
             "lat": 42.37,
+            "source_object_index": 0,
             "source_row_group": 0,
             "source_row_index": 0,
             "country": "US",
@@ -299,9 +304,7 @@ def test_stored_extended_page_decodes_with_no_out_of_band_knowledge():
     assert [item["id"] for item in records] == [page[0]["id"]]
     assert records[0]["address_levels"] == page[0]["address_levels"]
     assert records[0]["street"] == page[0]["street"]
-    assert set(extension[0]["division_gers_ids"]) == set(
-        page[0]["division_gers_ids"]
-    )
+    assert set(extension[0]["division_gers_ids"]) == set(page[0]["division_gers_ids"])
     assert extension[0]["match_method"] == convergence.MATCH_METHOD_INTERIOR
     assert extension[0]["match_confidence"] == 2
 
@@ -344,6 +347,7 @@ def storage_record(index: int, *, number: str, ids):
         "number": number,
         "unit": "",
         "address_levels": ["MA", "Cambridge"],
+        "source_object_index": 0,
         "source_row_group": 0,
         "source_row_index": index,
         "division_gers_ids": [str(uuid.UUID(int=i)) for i in ids],
@@ -379,8 +383,9 @@ def test_measure_storage_reports_positive_division_delta():
     assert result["rows"] == 8
     assert result["extended_bytes_per_row"] > result["baseline_bytes_per_row"]
     assert result["delta_bytes_per_row"] > 0
-    assert result["linear_extended_all_planning_rows_gb"] >= (
-        result["linear_baseline_all_planning_rows_gb"]
+    assert (
+        result["linear_extended_all_planning_rows_gb"]
+        >= (result["linear_baseline_all_planning_rows_gb"])
     )
 
 

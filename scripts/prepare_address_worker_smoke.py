@@ -33,6 +33,7 @@ def record(index: int) -> dict:
         "id": feature_id,
         "lon": -71.0999 + index / 10_000_000,
         "lat": 42.4801,
+        "source_object_index": 0,
         "source_row_group": 12,
         "source_row_index": index,
         "country": "US",
@@ -50,7 +51,7 @@ def build(output_dir: Path) -> dict:
     records = [record(index) for index in range(1, CANDIDATES + 1)]
     raw = encode_page(records, useful=True)
     stored = gzip.compress(raw, compresslevel=6, mtime=0)
-    header = canonical_json({"format": 1, "variant": "useful_gzip", "page_rows": 256})
+    header = canonical_json({"format": 2, "variant": "useful_gzip", "page_rows": 256})
     data = DATA_MAGIC + struct.pack("<I", len(header)) + header
     page_offset = len(data)
     page = struct.pack("<I", len(stored)) + stored
@@ -80,7 +81,9 @@ def build(output_dir: Path) -> dict:
         "page_offset": page_offset,
         "page_length": len(page),
     }
-    (output_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    (output_dir / "report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 

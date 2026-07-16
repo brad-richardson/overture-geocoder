@@ -1,0 +1,36 @@
+from pathlib import Path
+
+
+ROOT = Path(__file__).parents[1]
+WORKFLOW = ROOT / ".github" / "workflows" / "smoketest-places-worker.yml"
+CONFIG = ROOT / "crates" / "geocoder-worker" / "wrangler.places-smoke.toml"
+
+
+def test_places_smoke_is_manual_real_three_shard_and_isolated():
+    workflow = WORKFLOW.read_text()
+    config = CONFIG.read_text()
+    trigger = workflow[workflow.index("on:") : workflow.index("permissions:")]
+
+    assert "workflow_dispatch:" in trigger
+    assert "push:" not in trigger
+    assert "contents: read" in workflow
+    assert "persist-credentials: false" in workflow
+    assert "2026-06-17.0" in workflow
+    assert workflow.count("experiment_places_partition_extract.py") == 3
+    assert "prepare_places_worker_smoke.py" in workflow
+    assert "shard-0.pcsh shard-1.pcsh shard-2.pcsh head.phrp" in workflow
+    assert "cjk_exact" in workflow
+    assert "head_hit" in workflow
+    assert "workers/scripts/geocoder-places-smoke" in workflow
+    assert "s3://geocoder-shards/${SMOKE_VERSION}/" in workflow
+    assert 'name = "geocoder-places-smoke"' in config
+    assert 'ENVIRONMENT = "places-smoke"' in config
+    assert 'command = "worker-build --release --features places-spike"' in config
+    assert "routes" not in config
+
+
+def test_places_spike_endpoint_is_not_advertised_as_public():
+    worker = (ROOT / "crates" / "geocoder-worker" / "src" / "lib.rs").read_text()
+
+    assert '.get_async("/__places-page-spike"' in worker
+    assert '"endpoints":["/search","/reverse","/id/:id"]' in worker

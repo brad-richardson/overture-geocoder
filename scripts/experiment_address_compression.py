@@ -54,7 +54,9 @@ def common_prefix(left: bytes, right: bytes) -> int:
     return index
 
 
-def encode_front_key(key: tuple[str, ...], previous: tuple[bytes, ...]) -> tuple[bytes, tuple[bytes, ...]]:
+def encode_front_key(
+    key: tuple[str, ...], previous: tuple[bytes, ...]
+) -> tuple[bytes, tuple[bytes, ...]]:
     pieces = []
     encoded = tuple(value.encode("utf-8") for value in key)
     for value, old in zip(encoded, previous):
@@ -64,7 +66,9 @@ def encode_front_key(key: tuple[str, ...], previous: tuple[bytes, ...]) -> tuple
     return b"".join(pieces), encoded
 
 
-def decode_front_key(payload: bytes, position: int, previous: tuple[bytes, ...]) -> tuple[tuple[str, ...], tuple[bytes, ...], int]:
+def decode_front_key(
+    payload: bytes, position: int, previous: tuple[bytes, ...]
+) -> tuple[tuple[str, ...], tuple[bytes, ...], int]:
     values = []
     encoded = []
     for old in previous:
@@ -80,13 +84,20 @@ def decode_front_key(payload: bytes, position: int, previous: tuple[bytes, ...])
     return tuple(values), tuple(encoded), position
 
 
-def core_payload(record: dict[str, Any], previous: tuple[bytes, ...]) -> tuple[bytes, tuple[bytes, ...]]:
+def core_payload(
+    record: dict[str, Any], previous: tuple[bytes, ...]
+) -> tuple[bytes, tuple[bytes, ...]]:
     key_payload, encoded = encode_front_key(record["key"][:8], previous)
     payload = b"".join(
         (
             key_payload,
             uuid.UUID(record["id"]).bytes,
-            struct.pack("<ii", round(record["lon"] * 10_000_000), round(record["lat"] * 10_000_000)),
+            struct.pack(
+                "<ii",
+                round(record["lon"] * 10_000_000),
+                round(record["lat"] * 10_000_000),
+            ),
+            encode_uvarint(record.get("source_object_index", 0)),
             encode_uvarint(record["source_row_group"]),
             encode_uvarint(record["source_row_index"]),
         )
@@ -94,7 +105,11 @@ def core_payload(record: dict[str, Any], previous: tuple[bytes, ...]) -> tuple[b
     return payload, encoded
 
 
-def page_dictionaries(records: list[dict[str, Any]]) -> tuple[list[str], list[tuple[int, ...]], dict[str, int], dict[tuple[int, ...], int]]:
+def page_dictionaries(
+    records: list[dict[str, Any]],
+) -> tuple[
+    list[str], list[tuple[int, ...]], dict[str, int], dict[tuple[int, ...], int]
+]:
     strings = sorted(
         {
             value
@@ -106,8 +121,18 @@ def page_dictionaries(records: list[dict[str, Any]]) -> tuple[list[str], list[tu
         }
     )
     string_ids = {value: index for index, value in enumerate(strings)}
-    sequences = sorted({tuple(string_ids[value] for value in record["address_levels"]) for record in records})
-    return strings, sequences, string_ids, {value: index for index, value in enumerate(sequences)}
+    sequences = sorted(
+        {
+            tuple(string_ids[value] for value in record["address_levels"])
+            for record in records
+        }
+    )
+    return (
+        strings,
+        sequences,
+        string_ids,
+        {value: index for index, value in enumerate(sequences)},
+    )
 
 
 def encode_page(records: list[dict[str, Any]], *, useful: bool) -> bytes:
@@ -127,7 +152,9 @@ def encode_page(records: list[dict[str, Any]], *, useful: bool) -> bytes:
         core, previous = core_payload(record, previous)
         pieces.append(core)
         if useful:
-            pieces.extend(encode_uvarint(string_ids[record[field]]) for field in DISPLAY_FIELDS)
+            pieces.extend(
+                encode_uvarint(string_ids[record[field]]) for field in DISPLAY_FIELDS
+            )
             sequence = tuple(string_ids[value] for value in record["address_levels"])
             pieces.append(encode_uvarint(sequence_ids[sequence]))
     return b"".join(pieces)
@@ -159,16 +186,21 @@ def decode_page(payload: bytes, *, useful: bool) -> list[dict[str, Any]]:
         key, previous, position = decode_front_key(payload, position, previous)
         if position + 24 > len(payload):
             raise ValueError("truncated compressed address core")
-        feature_id = str(uuid.UUID(bytes=payload[position:position + 16]))
+        feature_id = str(uuid.UUID(bytes=payload[position : position + 16]))
         position += 16
         lon, lat = struct.unpack_from("<ii", payload, position)
         position += 8
+        object_index, position = decode_uvarint(payload, position)
         row_group, position = decode_uvarint(payload, position)
         row_index, position = decode_uvarint(payload, position)
         record: dict[str, Any] = {
-            "key": key + (feature_id,), "id": feature_id,
-            "lon": lon / 10_000_000, "lat": lat / 10_000_000,
-            "source_row_group": row_group, "source_row_index": row_index,
+            "key": key + (feature_id,),
+            "id": feature_id,
+            "lon": lon / 10_000_000,
+            "lat": lat / 10_000_000,
+            "source_object_index": object_index,
+            "source_row_group": row_group,
+            "source_row_index": row_index,
         }
         if useful:
             display = []
@@ -181,7 +213,9 @@ def decode_page(payload: bytes, *, useful: bool) -> list[dict[str, Any]]:
             if sequence_id >= len(sequences):
                 raise ValueError("address-level sequence ID is out of range")
             record.update(zip(DISPLAY_FIELDS, display))
-            record["address_levels"] = [strings[value] for value in sequences[sequence_id]]
+            record["address_levels"] = [
+                strings[value] for value in sequences[sequence_id]
+            ]
         records.append(record)
     if position != len(payload):
         raise ValueError("trailing compressed page bytes")
@@ -190,8 +224,13 @@ def decode_page(payload: bytes, *, useful: bool) -> list[dict[str, Any]]:
 
 def digest_record(digest: Any, record: dict[str, Any], *, useful: bool) -> None:
     fields: list[Any] = [
-        list(record["key"]), record["id"], record["lon"], record["lat"],
-        record["source_row_group"], record["source_row_index"],
+        list(record["key"]),
+        record["id"],
+        record["lon"],
+        record["lat"],
+        record.get("source_object_index", 0),
+        record["source_row_group"],
+        record["source_row_index"],
     ]
     if useful:
         fields.extend(record[field] for field in DISPLAY_FIELDS)
@@ -245,7 +284,9 @@ def read_index(path: Path, *, max_bytes: int) -> list[dict[str, Any]]:
             raise ValueError("invalid compression index page extent")
         if previous_key is not None and normalized <= previous_key:
             raise ValueError("compression index keys are not strictly increasing")
-        entries.append({"key": normalized, "offset": offset, "length": length, "rows": rows})
+        entries.append(
+            {"key": normalized, "offset": offset, "length": length, "rows": rows}
+        )
         previous_key = normalized
         previous_offset = offset
         position = end
@@ -286,7 +327,11 @@ def indexed_lookup(
     payload = decompress_gzip_bounded(stored, max_page_bytes) if compressed else stored
     if len(payload) > max_page_bytes:
         raise ValueError("decoded compression page exceeds hard byte cap")
-    return [record for record in decode_page(payload, useful=useful) if record["key"][:8] == key]
+    return [
+        record
+        for record in decode_page(payload, useful=useful)
+        if record["key"][:8] == key
+    ]
 
 
 def run(
@@ -303,7 +348,17 @@ def run(
 ) -> dict[str, Any]:
     if page_rows <= 0 or page_rows > 4096:
         raise ValueError("page rows must be between 1 and 4096")
-    if min(planning_rows, max_input_bytes, max_output_bytes, max_workspace_bytes, max_page_bytes, max_page_rows) <= 0:
+    if (
+        min(
+            planning_rows,
+            max_input_bytes,
+            max_output_bytes,
+            max_workspace_bytes,
+            max_page_bytes,
+            max_page_rows,
+        )
+        <= 0
+    ):
         raise ValueError("compression planning values and hard caps must be positive")
     input_bytes = input_path.stat().st_size
     if input_bytes > max_input_bytes:
@@ -317,15 +372,20 @@ def run(
     for name, config in VARIANTS.items():
         data_path = output_dir / f"{name}.bin"
         index_path = output_dir / f"{name}.idx"
-        header = canonical_json({"format": 1, "variant": name, "page_rows": page_rows})
+        header = canonical_json({"format": 2, "variant": name, "page_rows": page_rows})
         data_file = data_path.open("wb")
         data_file.write(DATA_MAGIC + struct.pack("<I", len(header)) + header)
         index_file = index_path.open("wb")
         index_file.write(INDEX_MAGIC)
         states[name] = {
-            "config": config, "data_path": data_path, "index_path": index_path,
-            "data": data_file, "index": index_file, "page_bytes": [],
-            "encode_seconds": 0.0, "decode_verify_seconds": 0.0,
+            "config": config,
+            "data_path": data_path,
+            "index_path": index_path,
+            "data": data_file,
+            "index": index_file,
+            "page_bytes": [],
+            "encode_seconds": 0.0,
+            "decode_verify_seconds": 0.0,
             "digest": hashlib.sha256(),
         }
 
@@ -346,7 +406,11 @@ def run(
         if previous_key is None:
             return
         distinct_keys += 1
-        group = {"key": previous_key, "count": group_count, "id_sha256": group_digest.hexdigest()}
+        group = {
+            "key": previous_key,
+            "count": group_count,
+            "id_sha256": group_digest.hexdigest(),
+        }
         if len(verification_groups) < 2:
             verification_groups.append(group)
         if maximum_group is None or group_count > maximum_group["count"]:
@@ -392,12 +456,22 @@ def run(
                 raw = encode_page(page, useful=config["useful"])
                 if len(raw) > max_page_bytes:
                     raise ValueError("decoded compression page exceeds hard byte cap")
-                stored = gzip.compress(raw, compresslevel=6, mtime=0) if config["gzip"] else raw
+                stored = (
+                    gzip.compress(raw, compresslevel=6, mtime=0)
+                    if config["gzip"]
+                    else raw
+                )
                 if len(stored) > max_page_bytes:
                     raise ValueError("stored compression page exceeds hard byte cap")
                 state["encode_seconds"] += time.monotonic() - encode_started
                 page_offset = state["data"].tell()
-                projected_variant = page_offset + 4 + len(stored) + state["index"].tell() + MAX_INDEX_KEY_BYTES
+                projected_variant = (
+                    page_offset
+                    + 4
+                    + len(stored)
+                    + state["index"].tell()
+                    + MAX_INDEX_KEY_BYTES
+                )
                 if projected_variant > max_output_bytes:
                     raise ValueError("compression variant exceeds hard output byte cap")
                 state["data"].write(struct.pack("<I", len(stored)))
@@ -410,14 +484,16 @@ def run(
                 state["index"].write(first_key)
                 state["page_bytes"].append(4 + len(stored))
                 workspace = input_bytes + sum(
-                    item["data"].tell() + item["index"].tell() for item in states.values()
+                    item["data"].tell() + item["index"].tell()
+                    for item in states.values()
                 )
                 if workspace > max_workspace_bytes:
                     raise ValueError("compression workspace exceeds hard byte cap")
                 verify_started = time.monotonic()
                 decoded_payload = (
                     decompress_gzip_bounded(stored, max_page_bytes)
-                    if config["gzip"] else stored
+                    if config["gzip"]
+                    else stored
                 )
                 decoded = decode_page(decoded_payload, useful=config["useful"])
                 for record in decoded:
@@ -425,7 +501,9 @@ def run(
                 state["decode_verify_seconds"] += time.monotonic() - verify_started
             pages += 1
         finish_group()
-        if maximum_group is not None and all(group["key"] != maximum_group["key"] for group in verification_groups):
+        if maximum_group is not None and all(
+            group["key"] != maximum_group["key"] for group in verification_groups
+        ):
             verification_groups.append(maximum_group)
         if rows != artifact.header["records"]:
             raise ValueError("compression input record count does not reconcile")
@@ -445,47 +523,68 @@ def run(
         variants[name] = {
             "accuracy": (
                 "lossless relative to the reducer: exact candidate keys, display fields, raw address levels, coordinates, IDs, and locators"
-                if config["useful"] else
-                "exact candidate keys, normalized response fields, coordinates, IDs, and locators; drops display casing and raw address levels"
+                if config["useful"]
+                else "exact candidate keys, normalized response fields, coordinates, IDs, and locators; drops display casing and raw address levels"
             ),
             "compression": "independent gzip page" if config["gzip"] else "none",
-            "data_bytes": data_bytes, "index_bytes": index_bytes, "total_bytes": total,
+            "data_bytes": data_bytes,
+            "index_bytes": index_bytes,
+            "total_bytes": total,
             "bytes_per_indexed_row": round(total / rows, 6),
             "encode_seconds": round(state["encode_seconds"], 6),
             "decode_and_verify_seconds": round(state["decode_verify_seconds"], 6),
             "range_page_bytes": {
                 "mean": round(statistics.mean(page_bytes), 3),
-                "p50": percentile(page_bytes, 0.50), "p95": percentile(page_bytes, 0.95),
+                "p50": percentile(page_bytes, 0.50),
+                "p95": percentile(page_bytes, 0.95),
                 "max": max(page_bytes),
             },
-            "linear_all_planning_rows_gb": round(total / rows * planning_rows / 1_000_000_000, 3),
+            "linear_all_planning_rows_gb": round(
+                total / rows * planning_rows / 1_000_000_000, 3
+            ),
             "sha256": sha256_file(state["data_path"]),
             "index_sha256": sha256_file(state["index_path"]),
             "full_decode_digest_match": True,
         }
         for group in verification_groups:
             candidates = indexed_lookup(
-                state["data_path"], state["index_path"], group["key"],
-                useful=config["useful"], compressed=config["gzip"],
-                max_index_bytes=max_output_bytes, max_page_bytes=max_page_bytes,
+                state["data_path"],
+                state["index_path"],
+                group["key"],
+                useful=config["useful"],
+                compressed=config["gzip"],
+                max_index_bytes=max_output_bytes,
+                max_page_bytes=max_page_bytes,
             )
             candidate_digest = hashlib.sha256()
             for candidate in candidates:
                 candidate_digest.update(uuid.UUID(candidate["id"]).bytes)
-            if len(candidates) != group["count"] or candidate_digest.hexdigest() != group["id_sha256"]:
+            if (
+                len(candidates) != group["count"]
+                or candidate_digest.hexdigest() != group["id_sha256"]
+            ):
                 raise ValueError(f"{name} indexed lookup differs from candidate oracle")
         variants[name]["indexed_candidate_sets_verified"] = len(verification_groups)
     baseline_bytes = input_path.stat().st_size
     return {
         "schema": "overture-address-compression-spike-v1",
         "input": {
-            "path": str(input_path), "bytes": baseline_bytes, "sha256": sha256_file(input_path),
-            "records": rows, "bytes_per_indexed_row": round(baseline_bytes / rows, 6),
+            "path": str(input_path),
+            "bytes": baseline_bytes,
+            "sha256": sha256_file(input_path),
+            "records": rows,
+            "bytes_per_indexed_row": round(baseline_bytes / rows, 6),
         },
-        "page_rows": page_rows, "pages": pages, "variants": variants,
+        "page_rows": page_rows,
+        "pages": pages,
+        "variants": variants,
         "oracle": {
-            "distinct_lookup_keys": distinct_keys, "maximum_candidate_fanout": max_fanout,
+            "distinct_lookup_keys": distinct_keys,
+            "maximum_candidate_fanout": max_fanout,
             "maximum_fanout_id_sha256": max_group_digest,
+            "verification_groups": [
+                {**group, "key": list(group["key"])} for group in verification_groups
+            ],
             "candidate_order_and_ids_preserved": True,
             "candidate_groups_never_cross_pages": True,
             "indexed_candidate_sets_verified": len(verification_groups),
@@ -496,8 +595,10 @@ def run(
         },
         "elapsed_seconds": round(time.monotonic() - started, 6),
         "limits": {
-            "max_input_bytes": max_input_bytes, "max_output_bytes_per_variant": max_output_bytes,
-            "max_workspace_bytes": max_workspace_bytes, "max_page_bytes": max_page_bytes,
+            "max_input_bytes": max_input_bytes,
+            "max_output_bytes_per_variant": max_output_bytes,
+            "max_workspace_bytes": max_workspace_bytes,
+            "max_page_bytes": max_page_bytes,
             "max_page_rows": max_page_rows,
         },
         "limitations": [
@@ -523,9 +624,14 @@ def main() -> None:
     parser.add_argument("--max-page-rows", type=int, default=10_000)
     args = parser.parse_args()
     report = run(
-        args.input, args.output_dir, page_rows=args.page_rows, planning_rows=args.planning_rows,
-        max_input_bytes=args.max_input_bytes, max_output_bytes=args.max_output_bytes,
-        max_workspace_bytes=args.max_workspace_bytes, max_page_bytes=args.max_page_bytes,
+        args.input,
+        args.output_dir,
+        page_rows=args.page_rows,
+        planning_rows=args.planning_rows,
+        max_input_bytes=args.max_input_bytes,
+        max_output_bytes=args.max_output_bytes,
+        max_workspace_bytes=args.max_workspace_bytes,
+        max_page_bytes=args.max_page_bytes,
         max_page_rows=args.max_page_rows,
     )
     args.json_out.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")

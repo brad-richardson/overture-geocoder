@@ -13,6 +13,8 @@ default = []
 # Experimental smoke-only address page decoder. Gated out of production wasm
 # bundles; enabled only by the address smoke deploy (wrangler.address-smoke.toml).
 address-spike = ["dep:flate2"]
+# Experimental smoke-only compact Places payload reader.
+places-spike = []
 
 [dependencies]
 # Cloudflare Workers

@@ -15,17 +15,24 @@ def test_address_worker_smoke_is_manual_isolated_and_cleans_up():
     assert "push:" not in workflow
     assert "permissions:\n  contents: read" in workflow
     assert "persist-credentials: false" in workflow
-    assert "SMOKE_VERSION: smoketest-address-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
+    assert (
+        "SMOKE_VERSION: smoketest-address-${{ github.run_id }}-${{ github.run_attempt }}"
+        in workflow
+    )
     assert "npm install -g wrangler@4.111.0" in workflow
     assert "cargo install worker-build --version 0.7.5 --locked" in workflow
     assert "ADDRESS_SPIKE_PREFIX:${SMOKE_VERSION}" in workflow
-    assert "candidate_count == 137" in workflow
+    assert "benchmarks/address-rowgroup-inventory-report.json" in workflow
+    assert "--task-index 48" in workflow
+    assert "EXPECTED_DIGEST" in workflow
+    assert "Worker candidate IDs differ from producer oracle" in workflow
+    assert ".read_metrics.logical_ranges == 3" in workflow
     assert "workers/scripts/geocoder-address-smoke" in workflow
     assert "--request DELETE" in workflow
     assert 'if [ "$HTTP_STATUS" != "404" ]' in workflow
     assert 'test "$HTTP_STATUS" = "200"' in workflow
     assert "--write-out '%{http_code} %{time_total}\\n'" in workflow
-    assert 's3://geocoder-shards/${SMOKE_VERSION}/' in workflow
+    assert "s3://geocoder-shards/${SMOKE_VERSION}/" in workflow
     assert 'name = "geocoder-address-smoke"' in config
     assert 'ENVIRONMENT = "address-smoke"' in config
     assert 'command = "worker-build --release --features address-spike"' in config

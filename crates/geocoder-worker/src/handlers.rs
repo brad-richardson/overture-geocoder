@@ -65,7 +65,7 @@ fn parse_types_param(raw: Option<&String>) -> HashSet<String> {
 /// Production and unrelated preview environments receive a plain 404.
 #[cfg(feature = "address-spike")]
 pub async fn handle_address_page_spike(
-    _req: Request,
+    req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
 ) -> Result<Response> {
     let environment_ok = ctx
@@ -85,26 +85,33 @@ pub async fn handle_address_page_spike(
         .ok_or_else(|| Error::RustError("Invalid address smoke prefix".into()))?;
     let index_key = format!("{prefix}/useful_gzip.idx");
     let data_key = format!("{prefix}/useful_gzip.bin");
-    let key = [
-        "us",
-        "ma",
-        "stoneham",
-        "stoneham",
-        "02180",
-        "main street",
-        "10",
-        "",
-    ]
-    .map(str::to_string);
+    let values: Vec<String> = req
+        .url()?
+        .query_pairs()
+        .filter(|(name, _)| name == "k")
+        .map(|(_, value)| value.into_owned())
+        .collect();
+    if values.len() != 8 || values.iter().any(|value| value.len() > 512) {
+        return Response::error("Expected exactly eight bounded k parameters", 400);
+    }
+    let key: [String; 8] = values
+        .try_into()
+        .map_err(|_| Error::RustError("Address smoke key field count differs".into()))?;
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
-    let records = loader
+    let lookup = loader
         .lookup_address_page_spike(&index_key, &data_key, &key)
         .await?;
     let body = serde_json::json!({
-        "schema": "overture-address-worker-spike-v1",
-        "candidate_count": records.len(),
-        "first": records.first(),
-        "last_id": records.last().map(|record| record.id.as_str()),
+        "schema": "overture-address-worker-spike-v2",
+        "candidate_count": lookup.records.len(),
+        "first": lookup.records.first(),
+        "last_id": lookup.records.last().map(|record| record.id.as_str()),
+        "ids": lookup.records.iter().map(|record| record.id.as_str()).collect::<Vec<_>>(),
+        "read_metrics": lookup.read_metrics,
+        "index_bytes": lookup.index_bytes,
+        "stored_page_bytes": lookup.stored_page_bytes,
+        "decoded_page_bytes": lookup.decoded_page_bytes,
+        "materialized_page_bytes": lookup.materialized_page_bytes,
     });
     let mut response = Response::from_json(&body)?;
     response.headers_mut().set("Cache-Control", "no-store")?;
@@ -115,6 +122,122 @@ pub async fn handle_address_page_spike(
 fn valid_address_smoke_prefix(value: &str) -> bool {
     value
         .strip_prefix("smoketest-address-")
+        .is_some_and(|suffix| {
+            !suffix.is_empty()
+                && suffix.len() <= 64
+                && suffix
+                    .chars()
+                    .all(|character| character.is_ascii_digit() || character == '-')
+        })
+}
+
+#[cfg(feature = "places-spike")]
+pub async fn handle_places_page_spike(
+    req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
+    let environment_ok = ctx
+        .env
+        .var("ENVIRONMENT")
+        .ok()
+        .is_some_and(|value| value.to_string() == "places-smoke");
+    if !environment_ok {
+        return Response::error("Not found", 404);
+    }
+    let prefix = ctx
+        .env
+        .var("PLACES_SPIKE_PREFIX")
+        .ok()
+        .map(|value| value.to_string())
+        .filter(|value| valid_places_smoke_prefix(value))
+        .ok_or_else(|| Error::RustError("Invalid Places smoke prefix".into()))?;
+    let url = req.url()?;
+    let token = url
+        .query_pairs()
+        .find(|(name, _)| name == "token")
+        .map(|(_, value)| value.into_owned())
+        .unwrap_or_default();
+    let prefix_query = url
+        .query_pairs()
+        .find(|(name, _)| name == "prefix")
+        .is_some_and(|(_, value)| value == "1");
+    if token.is_empty() || token.len() > 4096 {
+        return Response::error("Expected one bounded normalized token", 400);
+    }
+
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
+    let head = loader
+        .lookup_places_head_spike(&format!("{prefix}/head.phrp"), &token, prefix_query)
+        .await?;
+    if head.hit {
+        let body = serde_json::json!({
+            "schema": "overture-places-worker-spike-v1",
+            "candidate_count": head.results.len(),
+            "results": head.results,
+            "read_metrics": head.read_metrics,
+            "shards": [],
+            "head_consulted": true,
+            "head_hit": true,
+            "head_stages": {
+                "directory": head.directory_metrics,
+                "index": head.index_metrics,
+                "entry": head.entry_metrics,
+            },
+        });
+        let mut response = Response::from_json(&body)?;
+        response.headers_mut().set("Cache-Control", "no-store")?;
+        return Ok(response);
+    }
+    let mut shard_reports = Vec::new();
+    let mut results = Vec::new();
+    let mut candidate_count = 0_usize;
+    let mut metrics = head.read_metrics;
+    for index in 0..3 {
+        let key = format!("{prefix}/shard-{index}.pcsh");
+        let lookup = loader
+            .lookup_places_shard_spike(&key, &token, prefix_query)
+            .await?;
+        candidate_count = candidate_count.saturating_add(lookup.candidate_count);
+        metrics = metrics.add(lookup.read_metrics);
+        results.extend(lookup.results.iter().cloned());
+        shard_reports.push(serde_json::json!({
+            "shard": index,
+            "candidate_count": lookup.candidate_count,
+            "read_metrics": lookup.read_metrics,
+            "stages": lookup.stages,
+            "tokenizer_version": lookup.tokenizer_version,
+        }));
+    }
+    results.sort_by(|left, right| {
+        right
+            .confidence
+            .total_cmp(&left.confidence)
+            .then(left.id.cmp(&right.id))
+    });
+    results.truncate(10);
+    let body = serde_json::json!({
+        "schema": "overture-places-worker-spike-v1",
+        "candidate_count": candidate_count,
+        "results": results,
+        "read_metrics": metrics,
+        "shards": shard_reports,
+        "head_consulted": true,
+        "head_hit": false,
+        "head_stages": {
+            "directory": head.directory_metrics,
+            "index": head.index_metrics,
+            "entry": head.entry_metrics,
+        },
+    });
+    let mut response = Response::from_json(&body)?;
+    response.headers_mut().set("Cache-Control", "no-store")?;
+    Ok(response)
+}
+
+#[cfg(feature = "places-spike")]
+fn valid_places_smoke_prefix(value: &str) -> bool {
+    value
+        .strip_prefix("smoketest-places-")
         .is_some_and(|suffix| {
             !suffix.is_empty()
                 && suffix.len() <= 64
