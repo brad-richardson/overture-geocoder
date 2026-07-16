@@ -201,6 +201,28 @@ def test_verify_release_rejects_missing_id_shard(tmp_path):
         )
 
 
+def test_verify_release_rejects_unexpected_version_object(tmp_path):
+    # An object under the version prefix that no family or root file accounts
+    # for (e.g. half-cleaned staging residue) got no content verification, so
+    # the exact-inventory gate must fail closed and name it rather than bless
+    # it in the manifest.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry("staging/build-000-3ff/_SUCCESS", 12))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="not an exact match") as excinfo:
+        fr.verify_release(
+            version=VERSION,
+            release=RELEASE,
+            inventory_path=inventory,
+            metadata_dir=metadata,
+            readback_dir=readback,
+            output_path=tmp_path / "manifest.json",
+        )
+    assert "staging/build-000-3ff/_SUCCESS" in str(excinfo.value)
+
+
 @pytest.mark.parametrize(
     ("file_name", "mutation", "message"),
     [
@@ -299,25 +321,26 @@ def test_verify_release_rejects_single_part_etag_content_md5_mismatch(tmp_path):
         )
 
 
-def test_verify_release_skips_multipart_etag_content_md5_check(tmp_path):
+def test_verify_release_rejects_multipart_etag_with_content_md5(tmp_path):
     metadata, readback, inventory = _release_fixture(tmp_path)
     content_md5 = hashlib.md5(b"000").hexdigest()
-    # Multipart ETags are not the object MD5, so a non-matching one must not
-    # fail closed.
+    # The producer only ever uploads ID shards single-part with a Content-MD5,
+    # so a multipart ("-<parts>") ETag on a shard whose marker records a
+    # content_md5 is evidence of out-of-band replacement and must fail closed.
     _bind_id_shard(
         metadata, inventory, "000",
         content_md5=content_md5, etag='"deadbeefdeadbeefdeadbeefdeadbeef-4"',
     )
 
-    manifest = fr.verify_release(
-        version=VERSION,
-        release=RELEASE,
-        inventory_path=inventory,
-        metadata_dir=metadata,
-        readback_dir=readback,
-        output_path=tmp_path / "manifest.json",
-    )
-    assert manifest["families"]["id"]["shard_count"] == 4096
+    with pytest.raises(ValueError, match="single-part pipeline"):
+        fr.verify_release(
+            version=VERSION,
+            release=RELEASE,
+            inventory_path=inventory,
+            metadata_dir=metadata,
+            readback_dir=readback,
+            output_path=tmp_path / "manifest.json",
+        )
 
 
 def test_verify_release_passes_without_content_md5(tmp_path):

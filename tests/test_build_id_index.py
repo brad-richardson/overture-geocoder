@@ -1424,7 +1424,10 @@ def test_gather_fails_closed_on_stale_etag(monkeypatch):
         bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
 
 
-def test_gather_skips_multipart_etag_check(monkeypatch):
+def test_gather_fails_closed_on_multipart_etag(monkeypatch):
+    """The producer only uploads ID shards single-part with a Content-MD5, so a
+    multipart ETag on a shard whose marker records a content_md5 is out-of-band
+    replacement, not this pipeline's own upload, and must fail closed."""
     intended = {
         "000": {"record_count": 7, "size_bytes": 1234, "sha256": "a" * 64,
                 "content_md5": "b" * 32},
@@ -1433,8 +1436,8 @@ def test_gather_skips_multipart_etag_check(monkeypatch):
         monkeypatch, intended,
         {"v/id-index/000.parquet": "deadbeefdeadbeefdeadbeefdeadbeef-4"},
     )
-    results = bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
-    assert results[0][5] == "b" * 32
+    with pytest.raises(RuntimeError, match="Re-run the patch"):
+        bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
 
 
 def test_gather_without_content_md5_keeps_size_only_behavior(monkeypatch):

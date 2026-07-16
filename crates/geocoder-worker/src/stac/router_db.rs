@@ -79,7 +79,7 @@ impl RouterDb {
         for (idx, token) in tokens.iter().enumerate() {
             let weight = 1.0 + (idx as f64 / total) * 0.5;
             if let Ok(mut stmt) = self.conn.prepare(
-                "SELECT shard_id, max_importance FROM router WHERE token = ?1 ORDER BY max_importance DESC LIMIT 4",
+                "SELECT shard_id, max_importance FROM router WHERE token = ?1 ORDER BY max_importance DESC, shard_id ASC LIMIT 4",
             ) {
                 if let Ok(rows) = stmt.query_map([token], |row| {
                     Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
@@ -96,7 +96,7 @@ impl RouterDb {
                 let weight = 1.0 + (idx as f64 / total) * 0.5;
                 let pattern = format!("{}%", token);
                 if let Ok(mut stmt) = self.conn.prepare(
-                    "SELECT shard_id, max_importance FROM router WHERE token LIKE ?1 ORDER BY max_importance DESC LIMIT 3",
+                    "SELECT shard_id, max_importance FROM router WHERE token LIKE ?1 ORDER BY max_importance DESC, shard_id ASC LIMIT 3",
                 ) {
                     if let Ok(rows) = stmt.query_map([pattern], |row| {
                         Ok((row.get::<_, String>(0)?, row.get::<_, f64>(1)?))
@@ -110,7 +110,15 @@ impl RouterDb {
             }
         }
         let mut ranked: Vec<(String, f64)> = scores.into_iter().collect();
-        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        // Score descending, then shard_id ascending as a deterministic
+        // tiebreak: a locality contributing identical importance to its
+        // country and region shards must not let the 2-shard cap pick
+        // engine/hash-order-dependent winners.
+        ranked.sort_by(|a, b| {
+            b.1.partial_cmp(&a.1)
+                .unwrap_or(std::cmp::Ordering::Equal)
+                .then_with(|| a.0.cmp(&b.0))
+        });
         ranked
             .into_iter()
             .take(MAX_ROUTER_SHARDS)
@@ -228,6 +236,38 @@ mod tests {
                 expected,
                 "normalization diverged for {input:?}"
             );
+        }
+    }
+
+    #[test]
+    fn test_router_tie_selection_is_deterministic() {
+        // A locality that contributes identical importance to two shards (its
+        // country and its region) leaves the 2-shard cap to a tie. The
+        // ORDER BY + comparator tiebreak must pick the same shard every run,
+        // regardless of insertion or hash order.
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "CREATE TABLE router(token TEXT NOT NULL, shard_id TEXT NOT NULL, max_importance REAL NOT NULL, PRIMARY KEY(token, shard_id));",
+        )
+        .unwrap();
+        // Insert the higher shard_id first so a stable result cannot come from
+        // insertion order alone.
+        for (token, shard, imp) in [
+            ("springfield", "US-OR", 0.5_f64),
+            ("springfield", "US-IL", 0.5_f64),
+        ] {
+            conn.execute(
+                "INSERT INTO router VALUES (?1, ?2, ?3)",
+                rusqlite::params![token, shard, imp],
+            )
+            .unwrap();
+        }
+        let router = RouterDb { conn };
+        let shards = router.lookup_shards("Springfield");
+        assert_eq!(shards, vec!["US-IL".to_string(), "US-OR".to_string()]);
+        // Stable across repeated lookups.
+        for _ in 0..8 {
+            assert_eq!(router.lookup_shards("Springfield"), shards);
         }
     }
 

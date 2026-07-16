@@ -564,6 +564,17 @@ Deferred deliberately; none block the current experiment tracks.
   directory (`build_country_h3_index.py`, `extract_country_router.sql`), whose
   current output format was judged unfit to wire in (duplicated simplified
   boundary polys, dateline-inconsistent classification).
+- Catalog promotion is serialized only by the shared workflow concurrency
+  group; the publish itself is fetch/compare then unconditional write, not an
+  object-level CAS against manual or external writers. Before broader automated
+  publication, adopt R2 conditional writes (If-Match) or a single serialized
+  publisher.
+- The reverse WKB path remains deliberately partial even after the data-gated
+  probe: reverse HEAD carries no geometry and exact containment applies after
+  the per-subtype candidate cap, so it can discard a true ninth candidate. Keep
+  it experimental until a complete candidate oracle exists; the
+  lineage-by-identity hierarchy fetch (in review) removes the cap pressure for
+  parentage.
 
 ## Deferred geocoder feature-gap review
 

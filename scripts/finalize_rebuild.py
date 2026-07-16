@@ -263,9 +263,9 @@ def verify_release(
             raise ValueError(f"ID shard {prefix} has no valid producer SHA-256")
         shard_object = {**entry, "sha256": expected_sha}
         # Older markers predate the content MD5. When the producer recorded
-        # one and R2 stored the object whole (a single-part upload's ETag is
-        # its MD5, with no "-<parts>" suffix), bind the two so a byte-level
-        # replacement cannot slip through with a matching size.
+        # one, the shard was uploaded single-part with a Content-MD5, so R2
+        # stored it whole and its ETag is that MD5 (no "-<parts>" suffix).
+        # Binding the two rejects a byte-level replacement that keeps the size.
         content_md5 = metadata.get("content_md5")
         if content_md5 is not None:
             if not isinstance(content_md5, str) or not re.fullmatch(
@@ -273,7 +273,18 @@ def verify_release(
             ):
                 raise ValueError(f"ID shard {prefix} has an invalid content MD5")
             etag = entry["etag"]
-            if "-" not in etag and etag != content_md5:
+            # The producer never multipart-uploads ID shards, so a "-<parts>"
+            # ETag on a shard whose marker recorded a content MD5 is itself
+            # evidence of an out-of-band replacement: fail closed rather than
+            # skip the integrity binding. Legacy md5-less entries above keep
+            # the compatibility skip.
+            if "-" in etag:
+                raise ValueError(
+                    f"ID shard {prefix} has a multipart ETag ({etag}) but its "
+                    f"marker records a content MD5: the shard was not produced "
+                    f"by the single-part pipeline"
+                )
+            if etag != content_md5:
                 raise ValueError(
                     f"ID shard {prefix} ETag does not match producer content MD5"
                 )
@@ -318,9 +329,24 @@ def verify_release(
         "id-locator-manifest.json",
         dictionary_key,
     }
-    missing_root = sorted(required_root - set(inventory))
-    if missing_root:
-        raise ValueError(f"required release objects are missing: {missing_root}")
+    # The version prefix must contain exactly the objects this release
+    # verified: the required root files above, every forward and reverse SQLite
+    # shard, and all 4096 ID shards. Anything extra (half-cleaned staging/,
+    # stray uploads) or missing fails closed so an operator removes the residue
+    # and re-runs finalize; release-manifest.json is uploaded only afterward,
+    # so it is legitimately absent from this listing.
+    expected_keys = set(required_root)
+    expected_keys |= {f"shards/{shard_id}.db" for shard_id in _collection_items(forward, "forward")}
+    expected_keys |= {f"reverse/{shard_id}.db" for shard_id in _collection_items(reverse, "reverse")}
+    expected_keys |= expected_id_keys
+    actual_keys = set(inventory)
+    if actual_keys != expected_keys:
+        missing = sorted(expected_keys - actual_keys)[:20]
+        unexpected = sorted(actual_keys - expected_keys)[:20]
+        raise ValueError(
+            f"version {version} object inventory is not an exact match: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
 
     manifest = {
         "schema_version": 1,
@@ -353,9 +379,11 @@ def verify_release(
                 "locator_dictionary": dictionary,
             },
         },
-        # release-manifest.json itself is uploaded from this payload afterward,
-        # so this is intentionally the complete verified input set rather than
-        # a self-referential inventory.
+        # Exact-set equality above proved every key under the version prefix
+        # is one this release content-verified, so the whole inventory is the
+        # verified object set. release-manifest.json is uploaded from this
+        # payload afterward, so it is intentionally absent rather than being a
+        # self-referential inventory.
         "verified_version_objects": [inventory[key] for key in sorted(inventory)],
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)

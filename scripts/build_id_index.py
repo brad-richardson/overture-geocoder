@@ -3088,8 +3088,10 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     # object whose bytes predate the marker's sha256/content_md5. Bind the
     # single-part ETag (== content MD5 for the producer's whole-object uploads)
     # to the marker here, at metadata time, instead of relying on finalize's
-    # fail-closed check alone. Older markers without content_md5 keep the
-    # size-only behavior.
+    # fail-closed check alone. A multipart ETag on a shard whose marker carries
+    # a content_md5 is itself out-of-band replacement (the producer never
+    # multipart-uploads these) and fails closed. Older markers without
+    # content_md5 keep the size-only behavior.
     etags = {}
     if any(info.get("content_md5") for info in intended_shards.values()):
         etags = _list_r2_object_etags(r2_config, f"{version}/id-index/")
@@ -3111,7 +3113,16 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
                     f"ID shard {prefix} missing from R2 ETag listing; "
                     f"cannot bind its bytes to the producer marker"
                 )
-            if "-" not in etag and etag != content_md5:
+            if "-" in etag:
+                raise RuntimeError(
+                    f"ID shard {prefix} has a multipart ETag {etag} but its "
+                    f"marker records content MD5 {content_md5}: the R2 object "
+                    f"was not produced by the single-part pipeline (likely a "
+                    f"crashed --prefixes patch between range-marker rewrites). "
+                    f"Re-run the patch for the range covering prefix {prefix} "
+                    f"before publishing metadata."
+                )
+            if etag != content_md5:
                 raise RuntimeError(
                     f"ID shard {prefix} ETag {etag} does not match producer "
                     f"marker content MD5 {content_md5}: the R2 object's bytes "
