@@ -28,7 +28,7 @@ def test_address_worker_smoke_is_manual_isolated_and_cleans_up():
     assert 's3://geocoder-shards/${SMOKE_VERSION}/' in workflow
     assert 'name = "geocoder-address-smoke"' in config
     assert 'ENVIRONMENT = "address-smoke"' in config
-    assert 'command = "worker-build --release"' in config
+    assert 'command = "worker-build --release --features address-spike"' in config
     assert "routes" not in config
     global_env = workflow.split("jobs:", 1)[0]
     assert "secrets." not in global_env
