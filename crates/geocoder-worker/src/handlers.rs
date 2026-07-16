@@ -63,6 +63,7 @@ fn parse_types_param(raw: Option<&String>) -> HashSet<String> {
 
 /// Isolated smoke-only entry point for the experimental address page reader.
 /// Production and unrelated preview environments receive a plain 404.
+#[cfg(feature = "address-spike")]
 pub async fn handle_address_page_spike(
     _req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
@@ -110,6 +111,7 @@ pub async fn handle_address_page_spike(
     Ok(response)
 }
 
+#[cfg(feature = "address-spike")]
 fn valid_address_smoke_prefix(value: &str) -> bool {
     value
         .strip_prefix("smoketest-address-")
@@ -501,7 +503,7 @@ fn reverse_to_geojson_response(result: &ReverseResult, data_version: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stac::reverse::{ReverseCountryDecision, ReverseRoutingOutcome};
+    use geocoder_core::routing::{ReverseCountryDecision, ReverseRoutingOutcome};
     use geocoder_core::types::HierarchyEntry;
 
     fn reverse_routing_fixture() -> ReverseRoutingDebug {
@@ -523,6 +525,7 @@ mod tests {
         assert!(parsed.contains("neighborhood"));
     }
 
+    #[cfg(feature = "address-spike")]
     #[test]
     fn address_smoke_prefix_is_unique_and_strictly_bounded() {
         assert!(valid_address_smoke_prefix("smoketest-address-12345-2"));

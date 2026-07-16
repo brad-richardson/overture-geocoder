@@ -8,6 +8,7 @@ use bytes::Bytes;
 use geocoder_core::Database;
 use worker::*;
 
+#[cfg(feature = "address-spike")]
 use crate::address_pages::{
     decode_useful_gzip_range, parse_useful_gzip_header, AddressPageIndex, AddressPageRecord,
     MAX_INDEX_BYTES,
@@ -169,6 +170,7 @@ impl ShardLoader {
     /// result after proving the object did not fill a `max + 1` sentinel range.
     /// This prevents a corrupt index from being fully materialized by
     /// `cached_get` before its size cap can be checked.
+    #[cfg(feature = "address-spike")]
     async fn cached_bounded_prefix_read(
         &self,
         key: &str,
@@ -226,6 +228,7 @@ impl ShardLoader {
     /// then exactly one group-aligned gzip page is range-read and decoded under
     /// the hard limits in `address_pages`. This is deliberately not routed yet:
     /// the spike must measure real Worker/R2 latency before becoming an API.
+    #[cfg(feature = "address-spike")]
     pub(crate) async fn lookup_address_page_spike(
         &self,
         index_key: &str,

@@ -20,7 +20,7 @@ pub(crate) mod reverse;
 pub(crate) mod router_db;
 
 pub use forward::{SearchDebugInfo, UserLocation};
-pub use reverse::ReverseRoutingDebug;
+pub use geocoder_core::routing::ReverseRoutingDebug;
 
 /// Sentinel marking missing-resource errors. Version fallback and the
 /// handlers' 503 mapping key off this exact marker rather than matching

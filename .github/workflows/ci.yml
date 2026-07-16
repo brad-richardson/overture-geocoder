@@ -45,6 +45,9 @@ jobs:
       - name: Run tests
         working-directory: crates
         run: cargo test
+      - name: Run feature-gated worker tests
+        working-directory: crates
+        run: cargo test -p geocoder-worker --features address-spike
 
   python-pipeline:
     name: Python Pipeline

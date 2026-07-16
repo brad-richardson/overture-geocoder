@@ -4,6 +4,7 @@
 
 use worker::*;
 
+#[cfg(feature = "address-spike")]
 mod address_pages;
 mod handlers;
 mod stac;
@@ -58,13 +59,17 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
 
     // Context rides along as router data so handlers can schedule
     // background cache writes via waitUntil.
-    let router = Router::with_data(std::rc::Rc::new(ctx));
-
-    let result = router
+    let router = Router::with_data(std::rc::Rc::new(ctx))
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
-        .get_async("/id/:gers_id", handlers::handle_id_lookup)
-        .get_async("/__address-page-spike", handlers::handle_address_page_spike)
+        .get_async("/id/:gers_id", handlers::handle_id_lookup);
+
+    // The address-page spike route ships only in the smoke build; production
+    // wasm bundles omit both the route and the decoder module.
+    #[cfg(feature = "address-spike")]
+    let router = router.get_async("/__address-page-spike", handlers::handle_address_page_spike);
+
+    let result = router
         .get_async("/health", handlers::handle_health)
         .get("/", |_, _| {
             Response::ok(concat!(
