@@ -1,10 +1,9 @@
 # Pending Work — 2026-07-16
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `4b7468f` (`main` after #74) plus the 2026-07-16
-review-fix and consolidation branch. Keep measured evidence separate from
-decisions and proposed work so this file can be updated without preserving
-branch- or PR-specific history.
+The code baseline is `01d7c3e` (`main` after #79). Keep measured evidence
+separate from decisions and proposed work so this file can be updated without
+preserving branch- or PR-specific history.
 
 ## Baseline
 
@@ -131,6 +130,43 @@ branch- or PR-specific history.
   documented in `docs/rebuild-recovery.md`; the Places experiment moved out of
   `build_shards.py`; and the Monaco equivalence evidence regenerated with a
   real `2026-06-17.0` run (drift 0, subset smoke 45.4 s).
+
+- #75 landed the full review pass above after two adversarial review rounds
+  (one internal, one independent) that added: a true minimal-circular-cover
+  antimeridian bbox (the first cut could exclude central territory for a
+  France-shaped composition), ETag/content-MD5 binding at both metadata and
+  finalize time with multipart ETags failing closed, Greek final-sigma
+  normalization parity, an O(1) `has_wkb` metadata flag, exact version-prefix
+  inventory equality at finalize, forward-router tie determinism, and a
+  390-second deletion grace covering the compounded catalog + text-memo TTLs.
+- #76 moved the pure reverse-routing logic into `geocoder_core::routing`
+  (primitive `(shard_id, bbox)` seam; worker keeps a thin STAC adapter) and put
+  the address-spike decoder plus `flate2` behind an off-by-default
+  `address-spike` cargo feature enabled only by the smoke build — the
+  production wasm bundle no longer ships spike code.
+- #77 extracted the ID-index marker/inventory protocol into
+  `scripts/id_index_protocol.py` (attest/verify single home; bii re-exports
+  keep the import surface stable), added a fail-closed build-phase
+  reconciliation of staged files against per-type markers (build previously
+  trusted raw globs), added `scripts/common.py`, and fixed a latent TypeError
+  in `gen_id_collection.py`'s v3 dictionary validation.
+- #78 decided the divergent address formats with measured evidence: converge
+  the division-joined spike INTO the division-free lookup-safe format; raw
+  `address_levels` stay the source of truth and divisions ride as an optional
+  self-describing per-page extension (dictionary + per-row index + one
+  match-method byte, +0.311 B/row measured including framing). On a 189,248-row
+  Boston-core box (40k sampled), genuine cross-context conflicts were 0.24%;
+  the once-headline 14.35% "disagreement" decomposed to 14.11% valid
+  finer-granularity neighborhood labels — measured proof that overwriting
+  source labels with containment would be wrong.
+- #79 materialized division lineage into reverse shards: the ordered primary
+  hierarchy path (root→…→self; verified single-hierarchy for all 55,517
+  reverse-eligible divisions in 2026-06-17.0) rides as a nullable column, and
+  hierarchy assembly becomes an exact by-identity lookup resolved by chain
+  position — immune to the per-subtype candidate cap and to same-subtype
+  straddles — with the old heuristic preserved byte-for-byte for legacy shards
+  and for any malformed/oversized chain. Takes effect at the next fleet
+  rebuild.
 
 ### Current production data
 
@@ -531,50 +567,112 @@ ambiguity rate after that rebuild before sizing the exact-country work.
 
 ### 7. Engineering follow-ups from the 2026-07-16 review
 
-Deferred deliberately; none block the current experiment tracks.
+Completed by #75–#79: lineage materialization, routing-to-core, the
+`address-spike` cargo feature, the marker-protocol module plus build-staging
+guard, `common.py`, and the address-format convergence decision. Still open,
+none blocking the current experiment tracks:
 
-- Materialize division lineage (`parent_division_id` or per-level parent
-  columns) into reverse shards at build time and replace the query-time
-  hierarchy-coherence heuristic with an exact lookup. The heuristic's own test
-  pins a wrong-county answer as its documented ceiling, and the top-8
-  per-subtype cap can drop the true region near dense borders.
+- Rehearse the new Python promotion path once before or with the July 25 run:
+  a manual dispatch with `promote=false` exercises build + verify + manifest
+  without touching the catalog; the promote/recover/prune subcommands are
+  unit-tested but have not yet run against live R2.
 - Decide the reverse `wkb` column's future: populate locality-scale geometry
-  (the containment cap must then apply after filtering, not before) or drop
-  the column and its query path. It is now correctly dormant either way.
+  (containment must then apply before the per-subtype cap, and HEAD needs
+  geometry too) or drop the column and its query path. Correctly dormant
+  either way; keep experimental until a complete candidate oracle exists.
 - Replace the hardcoded seven-type ID matrix with a discovery job emitting the
   matrix via `fromJSON`; today an Overture type addition fails the monthly run
   closed until a workflow edit.
-- Extract the marker/inventory protocol from `build_id_index.py` into one
-  module with a single attest/verify pair every consumer calls (build still
-  trusts staging globs), then split staging/build/metadata into separate
-  scripts sharing it.
-- Extract `scripts/common.py` for the sha256/write_json/version-key helpers
-  duplicated across roughly nine scripts.
-- Move the pure routing functions (`select_reverse_route`, `bbox_contains`,
-  `normalize_lon`, `distance_to_bbox`) from the worker into geocoder-core so
-  the CLI and offline evaluation exercise production routing exactly.
-- Put the address-spike decoder and its `flate2` dependency behind a cargo
-  feature so the production wasm bundle stops shipping dead spike code.
-- Converge the two address formats (division-joined spike vs division-free
-  hosted pipeline) before any catalog integration; they currently coexist with
-  no reconciliation decision.
-- Re-enable shellcheck/pyflakes in the CI actionlint job after a dedicated
-  quoting cleanup of the 71 pre-existing findings in the large workflows.
-- Remove or consume the unconsumed research artifacts in the pipeline
-  directory (`build_country_h3_index.py`, `extract_country_router.sql`), whose
-  current output format was judged unfit to wire in (duplicated simplified
-  boundary polys, dateline-inconsistent classification).
+- Split `build_id_index.py`'s staging/build/metadata phases into separate
+  scripts sharing `id_index_protocol.py` (the module extraction landed; the
+  CLI flag matrix is still the main source of dangerous state combinations).
+- Convert `build_shards.py` to `scripts/common.py` helpers at its next
+  evidence-regenerating change (the pinned Monaco hash makes standalone
+  conversion needlessly expensive).
 - Catalog promotion is serialized only by the shared workflow concurrency
   group; the publish itself is fetch/compare then unconditional write, not an
   object-level CAS against manual or external writers. Before broader automated
   publication, adopt R2 conditional writes (If-Match) or a single serialized
   publisher.
-- The reverse WKB path remains deliberately partial even after the data-gated
-  probe: reverse HEAD carries no geometry and exact containment applies after
-  the per-subtype candidate cap, so it can discard a true ninth candidate. Keep
-  it experimental until a complete candidate oracle exists; the
-  lineage-by-identity hierarchy fetch (in review) removes the cap pressure for
-  parentage.
+- Re-enable shellcheck/pyflakes in the CI actionlint job after a dedicated
+  quoting cleanup of the 71 pre-existing findings in the large workflows.
+- Remove or consume the unconsumed research artifacts in the pipeline
+  directory (`build_country_h3_index.py`, `extract_country_router.sql`), whose
+  current output format was judged unfit to wire in.
+- After the July 25 rebuild: re-measure the multi-bbox ambiguous-route share
+  (wrapped antimeridian bboxes should sharply reduce it) and verify
+  lineage-path hierarchies serve correctly, then re-size the exact-country
+  comparator work against the new baseline before investing in it.
+
+### 8. Architecture direction: one binary family, one reader, one publisher
+
+The largest structural risk going forward is quiet divergence, and #78 showed
+the antidote works: measure, decide, converge. Three convergences should be
+explicit decisions rather than defaults:
+
+- **One range-readable binary family and one Worker range-reader core.**
+  Addresses (lookup-safe gzip pages + self-describing extensions, decoder
+  already measured at 434 ms cold / 156 ms median) and Places (compact
+  spatial shard: lexicon, postings, records) should share a single reader
+  core — checksum validation, bounded range coalescing, cache policy, page
+  framing — with the format-specific payloads behind it. Building a second
+  bespoke reader for Places would recreate the two-address-formats drift one
+  level up. Decide the shared-core seam before the Places Worker prototype
+  starts.
+- **One publication path.** The repo now carries three manifest/fan-in systems
+  (rebuild finalizer, ID-index inventory chain, global build control plane).
+  The control plane's per-family manifests should absorb address/Places family
+  publication, with `finalize_rebuild.py promote` (plus a future If-Match CAS)
+  as the only catalog writer. Do not let a fourth publication mechanism
+  appear.
+- **Offline/online logic parity.** Routing now lives in geocoder-core; the
+  same treatment should follow for any logic a future evaluation harness needs
+  (reranking, hierarchy assembly) so relevance work measures exactly what
+  production serves.
+
+### 9. Places geocoding: assessment (2026-07-16)
+
+Position, from the July review and spike evidence:
+
+- **The storage direction is settled and right.** Compact ~1M-place immutable
+  spatial binaries plus a packed global head beat every measured alternative
+  (per-token objects, KV/R2 pages, cell-local duplication) on object inventory
+  and read fanout, and PostgreSQL was reasonably rejected on idle-cost grounds.
+  Storage is a non-issue: Places + addresses + rollback is roughly 50 GB,
+  under a dollar a month at R2 prices. Nothing in the spike needs re-litigating
+  at the storage layer.
+- **The dominant unmeasured risk is serial read-chain latency, not bytes.**
+  A query walks lexicon → postings → record index → records: at least four
+  *dependent* R2 round-trips before the first result, and every published
+  number is a simulated local-disk read. At plausible warm edge RTTs the
+  modeled 4–20 reads per query spans "fine" to "fatal." This is the first
+  thing the prototype must measure, and the format should be laid out for it
+  from the start (co-locate lexicon and posting spans, embed top results in
+  the head, coalesce aggressively).
+- **Relevance is the product risk.** Retrieval-correctness oracles prove
+  encoding fidelity, not answer quality; no labeled evaluation exists. Keep
+  the launch contract literal — name/brand tokens, last-token prefix,
+  structured category, explicit lat/lon or context — and treat `coffee near
+  me` as out of scope until a query planner, category aliases, and distance
+  ranking exist and are evaluated.
+- **Sequencing: reader first, shared with addresses.** The address track has
+  already measured a real Worker decoder and a lookup-safe page format with a
+  self-describing extension. Build the shared range-reader core there, then
+  make the Places compact shard its second payload (see §8). Before the
+  three-shard prototype, run the two cheapest de-riskers: the single-object
+  head repack (the current "1 read / 4–6 KiB" head number comes from a
+  4,088-object layout) and one non-California partition build (East Asia or
+  similar) to test bytes/place and posting-skew stability under multilingual
+  names.
+- **Get real query data early.** Head hit rate, fanout distribution, and the
+  no-result rate all depend on a traffic distribution that does not exist. A
+  small gated beta with query logging — even divisions + addresses only —
+  would inform every later Places decision more than another synthetic
+  benchmark.
+- The spike's own implementation gate (three real shards, Worker reader,
+  measured p50/p95, labeled relevance at five, explicit stop conditions)
+  remains the right bar. Nothing above weakens it; the shared-reader decision
+  strengthens it by making the latency measurement reusable.
 
 ## Deferred geocoder feature-gap review
 
