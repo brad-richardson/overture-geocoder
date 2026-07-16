@@ -10,9 +10,11 @@ use worker::*;
 
 #[cfg(feature = "address-spike")]
 use crate::address_pages::{
-    decode_useful_gzip_range, parse_useful_gzip_header, AddressPageIndex, AddressPageRecord,
-    MAX_INDEX_BYTES,
+    decode_useful_gzip_range, parse_address_index, parse_useful_gzip_header, AddressPageRecord,
+    MAX_INDEX_BYTES, MAX_STORED_PAGE_RANGE,
 };
+#[cfg(feature = "address-spike")]
+use crate::range_reader::RangeReader;
 
 use super::{not_found, ShardLoader};
 
@@ -171,7 +173,7 @@ impl ShardLoader {
     /// This prevents a corrupt index from being fully materialized by
     /// `cached_get` before its size cap can be checked.
     #[cfg(feature = "address-spike")]
-    async fn cached_bounded_prefix_read(
+    pub(crate) async fn cached_bounded_prefix_read(
         &self,
         key: &str,
         max_bytes: usize,
@@ -235,29 +237,42 @@ impl ShardLoader {
         data_key: &str,
         lookup_key: &[String; 8],
     ) -> Result<Vec<AddressPageRecord>> {
-        let index_bytes = self
-            .cached_bounded_prefix_read(index_key, MAX_INDEX_BYTES, IMMUTABLE_CACHE_TTL)
+        use geocoder_core::pages::ByteRange;
+
+        let index_reader = RangeReader::new(self, index_key);
+        let index_bytes = index_reader
+            .bounded_prefix(MAX_INDEX_BYTES, IMMUTABLE_CACHE_TTL)
             .await?
             .ok_or_else(|| not_found(index_key))?;
-        let index = AddressPageIndex::parse(&index_bytes)
+        let index = parse_address_index(&index_bytes)
             .map_err(|error| Error::RustError(format!("Invalid address page index: {error}")))?;
-        let Some(extent) = index.find(lookup_key).cloned() else {
+        let Some(extent) = index.find(lookup_key).copied() else {
             return Ok(Vec::new());
         };
 
         // Validate the object envelope independently from the index. A 4 KiB
         // immutable range is enough for the producer's capped JSON header and
         // is edge-cached separately from candidate pages.
-        let header = self
-            .cached_range_read(data_key, 0, 4096)
+        let data_reader = RangeReader::new(self, data_key);
+        let header = data_reader
+            .range(0, 4096)
             .await?
             .ok_or_else(|| not_found(data_key))?;
         parse_useful_gzip_header(&header)
             .map_err(|error| Error::RustError(format!("Invalid address page data: {error}")))?;
 
-        let page = self
-            .cached_range_read(data_key, extent.offset, extent.length)
+        // Route the candidate page through the shared coalescing planner. Today
+        // this is one want -> one range read; the same primitive serves the
+        // Places compact shard's future multi-span lexicon/postings reads.
+        let want = ByteRange {
+            offset: extent.offset,
+            length: extent.length,
+        };
+        let page = data_reader
+            .coalesced(&[want], 0, MAX_STORED_PAGE_RANGE)
             .await?
+            .into_iter()
+            .next()
             .ok_or_else(|| not_found(format!("{} range", data_key)))?;
         if page.len() as u64 != extent.length {
             return Err(Error::RustError(

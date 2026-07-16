@@ -1,0 +1,50 @@
+{
+  "files": {
+    "extended_page.bin": {
+      "bytes": 279,
+      "sha256": "575fc7fb06b17a05d31489a92e657e9ad32f679874f23463be1196aac3a165ca"
+    },
+    "plain_page.bin": {
+      "bytes": 235,
+      "sha256": "0020958957352b4a642db4dd43a42e3ce09bb8084fc2b04fbc5d3c265188b93c"
+    },
+    "truncated_extended_page.bin": {
+      "bytes": 2,
+      "sha256": "657d5968648a6eec955b96710ca5dabe4ee40389b3ae85c516930074f4c1fceb"
+    }
+  },
+  "lookup_keys": [
+    [
+      "us",
+      "ma",
+      "cambridge",
+      "cambridge",
+      "02139",
+      "main street",
+      "10",
+      ""
+    ],
+    [
+      "us",
+      "ma",
+      "cambridge",
+      "cambridge",
+      "02139",
+      "main street",
+      "11",
+      ""
+    ],
+    [
+      "us",
+      "ma",
+      "cambridge",
+      "cambridge",
+      "02139",
+      "main street",
+      "11",
+      ""
+    ]
+  ],
+  "record_count": 3,
+  "schema": "overture-page-fixture-v1"
+}

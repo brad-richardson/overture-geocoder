@@ -7,6 +7,8 @@ use worker::*;
 #[cfg(feature = "address-spike")]
 mod address_pages;
 mod handlers;
+#[cfg(feature = "address-spike")]
+mod range_reader;
 mod stac;
 
 #[event(fetch)]
