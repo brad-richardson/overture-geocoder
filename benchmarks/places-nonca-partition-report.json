@@ -1,0 +1,722 @@
+{
+  "schema_version": 1,
+  "baseline": {
+    "label": "california",
+    "input": "exports/places-ca-1m.parquet",
+    "places": 1000000,
+    "wall_seconds": 131.90928716689814,
+    "build": {
+      "build_seconds": 48.56646641693078,
+      "artifact_bytes": 116416996,
+      "bytes_per_place": 116.416996,
+      "objects": 1,
+      "tokens": 209784,
+      "components": {
+        "directory": 68687,
+        "lexicon": 2282681,
+        "postings": 26355765,
+        "record_index": 8000000,
+        "records": 79709863
+      }
+    },
+    "avg_distinct_tokens_per_place": 7.688767,
+    "posting_skew_top_k": [
+      {
+        "token": "us",
+        "frequency": 960061,
+        "share_of_postings": 0.12486540429694384,
+        "script": "latin"
+      },
+      {
+        "token": "ca",
+        "frequency": 868670,
+        "share_of_postings": 0.11297910315138955,
+        "script": "latin"
+      },
+      {
+        "token": "san",
+        "frequency": 122082,
+        "share_of_postings": 0.015877968470107105,
+        "script": "latin"
+      },
+      {
+        "token": "nv",
+        "frequency": 75253,
+        "share_of_postings": 0.00978739504006299,
+        "script": "latin"
+      },
+      {
+        "token": "los",
+        "frequency": 74552,
+        "share_of_postings": 0.009696223074518971,
+        "script": "latin"
+      },
+      {
+        "token": "angeles",
+        "frequency": 68137,
+        "share_of_postings": 0.008861889038905718,
+        "script": "latin"
+      },
+      {
+        "token": "s",
+        "frequency": 60727,
+        "share_of_postings": 0.007898145437363365,
+        "script": "latin"
+      },
+      {
+        "token": "las",
+        "frequency": 46800,
+        "share_of_postings": 0.006086801693951709,
+        "script": "latin"
+      },
+      {
+        "token": "vegas",
+        "frequency": 45825,
+        "share_of_postings": 0.0059599933253277155,
+        "script": "latin"
+      },
+      {
+        "token": "diego",
+        "frequency": 40234,
+        "share_of_postings": 0.005232828618684894,
+        "script": "latin"
+      },
+      {
+        "token": "mx",
+        "frequency": 40054,
+        "share_of_postings": 0.005209417842938926,
+        "script": "latin"
+      },
+      {
+        "token": "santa",
+        "frequency": 39798,
+        "share_of_postings": 0.005176122517433549,
+        "script": "latin"
+      },
+      {
+        "token": "the",
+        "frequency": 39207,
+        "share_of_postings": 0.0050992571370676205,
+        "script": "latin"
+      },
+      {
+        "token": "and",
+        "frequency": 36550,
+        "share_of_postings": 0.00475368807508408,
+        "script": "latin"
+      },
+      {
+        "token": "of",
+        "frequency": 33145,
+        "share_of_postings": 0.004310834233889517,
+        "script": "latin"
+      },
+      {
+        "token": "center",
+        "frequency": 31441,
+        "share_of_postings": 0.004089212223494352,
+        "script": "latin"
+      },
+      {
+        "token": "beach",
+        "frequency": 31338,
+        "share_of_postings": 0.0040758160573730485,
+        "script": "latin"
+      },
+      {
+        "token": "francisco",
+        "frequency": 30546,
+        "share_of_postings": 0.003972808644090789,
+        "script": "latin"
+      },
+      {
+        "token": "inc",
+        "frequency": 29884,
+        "share_of_postings": 0.003886709013291728,
+        "script": "latin"
+      },
+      {
+        "token": "city",
+        "frequency": 29116,
+        "share_of_postings": 0.0037868230367755972,
+        "script": "latin"
+      },
+      {
+        "token": "valley",
+        "frequency": 25589,
+        "share_of_postings": 0.0033281018920198776,
+        "script": "latin"
+      },
+      {
+        "token": "park",
+        "frequency": 24907,
+        "share_of_postings": 0.00323940106391571,
+        "script": "latin"
+      },
+      {
+        "token": "real_estate_agent",
+        "frequency": 23398,
+        "share_of_postings": 0.003043140727245344,
+        "script": "latin"
+      },
+      {
+        "token": "sacramento",
+        "frequency": 20696,
+        "share_of_postings": 0.0026917189713253115,
+        "script": "latin"
+      },
+      {
+        "token": "la",
+        "frequency": 19766,
+        "share_of_postings": 0.0025707632966378096,
+        "script": "latin"
+      }
+    ],
+    "posting_skew_summary": {
+      "max_frequency": 960061,
+      "top10_share_of_postings": 0.30724575214725586,
+      "singletons": 131597,
+      "singleton_proportion": 0.627297601342333
+    },
+    "record_size_distribution": {
+      "min": 38,
+      "p50": 78,
+      "mean": 79.709863,
+      "p90": 97,
+      "p99": 118,
+      "max": 345,
+      "total": 79709863
+    },
+    "script_mix": {
+      "lexicon_tokens": 209784,
+      "cjk_dominant_tokens": 1203,
+      "cjk_dominant_proportion": 0.005734469740304313,
+      "by_script": {
+        "digit": {
+          "tokens": 6208,
+          "token_proportion": 0.029592342600007628,
+          "mean_chars": 5.143524484536083,
+          "median_chars": 5.0,
+          "max_chars": 20
+        },
+        "han": {
+          "tokens": 1051,
+          "token_proportion": 0.005009914960149487,
+          "mean_chars": 5.313035204567079,
+          "median_chars": 4,
+          "max_chars": 21
+        },
+        "kana": {
+          "tokens": 152,
+          "token_proportion": 0.0007245547801548259,
+          "mean_chars": 7.2894736842105265,
+          "median_chars": 6.0,
+          "max_chars": 19
+        },
+        "latin": {
+          "tokens": 200355,
+          "token_proportion": 0.95505376959158,
+          "mean_chars": 7.412732399990018,
+          "median_chars": 7,
+          "max_chars": 55
+        },
+        "other": {
+          "tokens": 2,
+          "token_proportion": 9.533615528352973e-06,
+          "mean_chars": 2,
+          "median_chars": 2.0,
+          "max_chars": 3
+        },
+        "other_letter": {
+          "tokens": 2016,
+          "token_proportion": 0.009609884452579796,
+          "mean_chars": 5.884920634920635,
+          "median_chars": 5.0,
+          "max_chars": 33
+        }
+      }
+    },
+    "cjk_name_examples": [
+      {
+        "name": "Mr.Z Noodle House 這小館",
+        "tokens": [
+          "mr",
+          "z",
+          "noodle",
+          "house",
+          "這小館"
+        ],
+        "token_count": 5,
+        "name_chars": 21
+      },
+      {
+        "name": "南京盐水鸭 / Nanjing Duck House",
+        "tokens": [
+          "南京盐水鸭",
+          "nanjing",
+          "duck",
+          "house"
+        ],
+        "token_count": 4,
+        "name_chars": 26
+      },
+      {
+        "name": "YinTang/Oden Spicy Hot Pot - Arcadia 隱燙黑輪麻辣燙",
+        "tokens": [
+          "yintang",
+          "oden",
+          "spicy",
+          "hot",
+          "pot",
+          "arcadia",
+          "隱燙黑輪麻辣燙"
+        ],
+        "token_count": 7,
+        "name_chars": 44
+      },
+      {
+        "name": "Spicy Home 那家川菜",
+        "tokens": [
+          "spicy",
+          "home",
+          "那家川菜"
+        ],
+        "token_count": 3,
+        "name_chars": 15
+      }
+    ],
+    "normalization_probes": [
+      {
+        "input": "ガ",
+        "normalized": "カ",
+        "nfkd_note": "voiced kana lose their dakuten under NFKD + combining strip"
+      },
+      {
+        "input": "カ",
+        "normalized": "カ",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "パ",
+        "normalized": "ハ",
+        "nfkd_note": "voiced kana lose their dakuten under NFKD + combining strip"
+      },
+      {
+        "input": "ハ",
+        "normalized": "ハ",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "東京",
+        "normalized": "東京",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "ﾄｳｷｮｳ",
+        "normalized": "トウキョウ",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "Ｔｏｋｙｏ",
+        "normalized": "tokyo",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      }
+    ],
+    "fixed_case_oracle": {
+      "complete_candidate_recall": true,
+      "top_k_exact": true,
+      "nonempty_query_count": 6,
+      "note": "fixed CASES are English/California-shaped; oracle equivalence still validates the shard build on this partition"
+    },
+    "derived_oracle": {
+      "cases": [
+        {
+          "name": "top_han_exact",
+          "value": "長者安居協會",
+          "prefix": false,
+          "candidate_count": 8,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        },
+        {
+          "name": "top_han_prefix",
+          "value": "長",
+          "prefix": true,
+          "candidate_count": 8,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        },
+        {
+          "name": "top_latin_exact",
+          "value": "us",
+          "prefix": false,
+          "candidate_count": 960061,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        },
+        {
+          "name": "top_kana_exact",
+          "value": "サンリオ",
+          "prefix": false,
+          "candidate_count": 4,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        }
+      ],
+      "complete_candidate_recall": true,
+      "top_k_exact": true
+    }
+  },
+  "candidate": {
+    "label": "tokyo",
+    "input": "exports/places-tokyo-1m.parquet",
+    "places": 1000000,
+    "wall_seconds": 77.46153304097243,
+    "build": {
+      "build_seconds": 20.31544641708024,
+      "artifact_bytes": 122947224,
+      "bytes_per_place": 122.947224,
+      "objects": 1,
+      "tokens": 736628,
+      "components": {
+        "directory": 424693,
+        "lexicon": 13158925,
+        "postings": 17986299,
+        "record_index": 8000000,
+        "records": 83377307
+      }
+    },
+    "avg_distinct_tokens_per_place": 4.98839,
+    "posting_skew_top_k": [
+      {
+        "token": "jp",
+        "frequency": 999996,
+        "share_of_postings": 0.20046467898460224,
+        "script": "latin"
+      },
+      {
+        "token": "東京都",
+        "frequency": 116666,
+        "share_of_postings": 0.02338750578844076,
+        "script": "han"
+      },
+      {
+        "token": "japanese_restaurant",
+        "frequency": 88444,
+        "share_of_postings": 0.017729968987990112,
+        "script": "latin"
+      },
+      {
+        "token": "神奈川県",
+        "frequency": 45696,
+        "share_of_postings": 0.009160470612762836,
+        "script": "han"
+      },
+      {
+        "token": "convenience_store",
+        "frequency": 36577,
+        "share_of_postings": 0.007332425892923368,
+        "script": "latin"
+      },
+      {
+        "token": "港区",
+        "frequency": 35189,
+        "share_of_postings": 0.007054179805508391,
+        "script": "han"
+      },
+      {
+        "token": "埼玉県",
+        "frequency": 33960,
+        "share_of_postings": 0.0068078077295480105,
+        "script": "han"
+      },
+      {
+        "token": "渋谷区",
+        "frequency": 33383,
+        "share_of_postings": 0.006692139147099565,
+        "script": "han"
+      },
+      {
+        "token": "rental_kiosks",
+        "frequency": 30898,
+        "share_of_postings": 0.006193982427195949,
+        "script": "latin"
+      },
+      {
+        "token": "新宿区",
+        "frequency": 30657,
+        "share_of_postings": 0.006145670246311936,
+        "script": "han"
+      },
+      {
+        "token": "bar",
+        "frequency": 30457,
+        "share_of_postings": 0.006105577150142631,
+        "script": "latin"
+      },
+      {
+        "token": "千代田区",
+        "frequency": 26262,
+        "share_of_postings": 0.005264624457991456,
+        "script": "han"
+      },
+      {
+        "token": "中央区",
+        "frequency": 26151,
+        "share_of_postings": 0.0052423727896174915,
+        "script": "han"
+      },
+      {
+        "token": "千葉県",
+        "frequency": 25705,
+        "share_of_postings": 0.005152965185159941,
+        "script": "han"
+      },
+      {
+        "token": "atms",
+        "frequency": 25032,
+        "share_of_postings": 0.00501805191655023,
+        "script": "latin"
+      },
+      {
+        "token": "cafe",
+        "frequency": 24395,
+        "share_of_postings": 0.004890355405250993,
+        "script": "latin"
+      },
+      {
+        "token": "restaurant",
+        "frequency": 24205,
+        "share_of_postings": 0.004852266963890153,
+        "script": "latin"
+      },
+      {
+        "token": "世田谷区",
+        "frequency": 22335,
+        "share_of_postings": 0.00447739651470715,
+        "script": "han"
+      },
+      {
+        "token": "hair_salon",
+        "frequency": 20377,
+        "share_of_postings": 0.0040848851032096525,
+        "script": "latin"
+      },
+      {
+        "token": "タイトー",
+        "frequency": 19251,
+        "share_of_postings": 0.003859160971776465,
+        "script": "kana"
+      },
+      {
+        "token": "タイトートリンコ",
+        "frequency": 19209,
+        "share_of_postings": 0.0038507414215809108,
+        "script": "kana"
+      },
+      {
+        "token": "pharmacy",
+        "frequency": 17520,
+        "share_of_postings": 0.003512155224431129,
+        "script": "latin"
+      },
+      {
+        "token": "台東区",
+        "frequency": 16079,
+        "share_of_postings": 0.0032232844665312857,
+        "script": "han"
+      },
+      {
+        "token": "横浜市",
+        "frequency": 15950,
+        "share_of_postings": 0.003197424419502084,
+        "script": "han"
+      },
+      {
+        "token": "beauty_salon",
+        "frequency": 15837,
+        "share_of_postings": 0.0031747718201664264,
+        "script": "latin"
+      }
+    ],
+    "posting_skew_summary": {
+      "max_frequency": 999996,
+      "top10_share_of_postings": 0.2909688296223832,
+      "singletons": 601425,
+      "singleton_proportion": 0.8164568818996835
+    },
+    "record_size_distribution": {
+      "min": 37,
+      "p50": 82,
+      "mean": 83.377307,
+      "p90": 106,
+      "p99": 135,
+      "max": 321,
+      "total": 83377307
+    },
+    "script_mix": {
+      "lexicon_tokens": 736628,
+      "cjk_dominant_tokens": 633353,
+      "cjk_dominant_proportion": 0.8598003334111655,
+      "by_script": {
+        "digit": {
+          "tokens": 2259,
+          "token_proportion": 0.003066676802945313,
+          "mean_chars": 4.966356795042054,
+          "median_chars": 4,
+          "max_chars": 105
+        },
+        "han": {
+          "tokens": 329006,
+          "token_proportion": 0.44663792307650535,
+          "mean_chars": 6.747800951958323,
+          "median_chars": 6.0,
+          "max_chars": 43
+        },
+        "kana": {
+          "tokens": 304347,
+          "token_proportion": 0.4131624103346601,
+          "mean_chars": 8.371953723874393,
+          "median_chars": 8,
+          "max_chars": 51
+        },
+        "latin": {
+          "tokens": 98736,
+          "token_proportion": 0.1340378046992512,
+          "mean_chars": 7.4841901636687735,
+          "median_chars": 7.0,
+          "max_chars": 55
+        },
+        "other": {
+          "tokens": 31,
+          "token_proportion": 4.2083656879727624e-05,
+          "mean_chars": 3.4516129032258065,
+          "median_chars": 2,
+          "max_chars": 13
+        },
+        "other_letter": {
+          "tokens": 2249,
+          "token_proportion": 0.003053101429758304,
+          "mean_chars": 5.885726989773232,
+          "median_chars": 5,
+          "max_chars": 33
+        }
+      }
+    },
+    "cjk_name_examples": [
+      {
+        "name": "ゲオ御殿場店",
+        "tokens": [
+          "ケオ御殿場店"
+        ],
+        "token_count": 1,
+        "name_chars": 6
+      },
+      {
+        "name": "スターバックス",
+        "tokens": [
+          "スターハックス"
+        ],
+        "token_count": 1,
+        "name_chars": 7
+      },
+      {
+        "name": "クアハウス山小屋",
+        "tokens": [
+          "クアハウス山小屋"
+        ],
+        "token_count": 1,
+        "name_chars": 8
+      },
+      {
+        "name": "ゴルフパートナー南浦和店",
+        "tokens": [
+          "コルフハートナー南浦和店"
+        ],
+        "token_count": 1,
+        "name_chars": 12
+      }
+    ],
+    "normalization_probes": [
+      {
+        "input": "ガ",
+        "normalized": "カ",
+        "nfkd_note": "voiced kana lose their dakuten under NFKD + combining strip"
+      },
+      {
+        "input": "カ",
+        "normalized": "カ",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "パ",
+        "normalized": "ハ",
+        "nfkd_note": "voiced kana lose their dakuten under NFKD + combining strip"
+      },
+      {
+        "input": "ハ",
+        "normalized": "ハ",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "東京",
+        "normalized": "東京",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "ﾄｳｷｮｳ",
+        "normalized": "トウキョウ",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      },
+      {
+        "input": "Ｔｏｋｙｏ",
+        "normalized": "tokyo",
+        "nfkd_note": "halfwidth/fullwidth folded to ascii/base form"
+      }
+    ],
+    "fixed_case_oracle": {
+      "complete_candidate_recall": true,
+      "top_k_exact": true,
+      "nonempty_query_count": 4,
+      "note": "fixed CASES are English/California-shaped; oracle equivalence still validates the shard build on this partition"
+    },
+    "derived_oracle": {
+      "cases": [
+        {
+          "name": "top_han_exact",
+          "value": "東京都",
+          "prefix": false,
+          "candidate_count": 116666,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        },
+        {
+          "name": "top_han_prefix",
+          "value": "東",
+          "prefix": true,
+          "candidate_count": 138912,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        },
+        {
+          "name": "top_latin_exact",
+          "value": "jp",
+          "prefix": false,
+          "candidate_count": 999996,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        },
+        {
+          "name": "top_kana_exact",
+          "value": "タイトー",
+          "prefix": false,
+          "candidate_count": 19251,
+          "complete_candidate_recall": true,
+          "top_k_exact": true
+        }
+      ],
+      "complete_candidate_recall": true,
+      "top_k_exact": true
+    }
+  }
+}
