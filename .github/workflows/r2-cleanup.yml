@@ -3,8 +3,10 @@ name: R2 One-Time Cleanup
 # One-time purge of accumulated debris (2026-06): staging leftovers the old
 # pipeline never deleted, an orphaned partial version, and two catalog
 # versions beyond the worker's MAX_VERSION_ATTEMPTS fallback window (3 at
-# the time of this cleanup; widened to 4 since).
-# Deletes only an explicit allowlist, catalog-first, with guards.
+# the time of that cleanup; the window is now 4, and the retention floor below
+# tracks it).
+# Deletes only an explicit allowlist, catalog-first, with guards, and waits out
+# the worker catalog cache TTL between the catalog publish and any deletion.
 
 on:
   workflow_dispatch:
@@ -41,6 +43,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.inputs.confirm == 'CLEANUP'
     steps:
+      - uses: actions/checkout@v7
+
       - name: Prune catalog and verify
         run: |
           set -euo pipefail
@@ -51,28 +55,13 @@ jobs:
           # Keep a timestamped backup in the bucket before editing
           S3 s3 cp /tmp/catalog.json "s3://$BUCKET/backups/catalog-$(date -u +%Y%m%dT%H%M%S).json"
 
-          python3 - "$PRUNE_VERSIONS" <<'EOF'
-          import json, sys
-          prune = set(sys.argv[1].split())
-          with open('/tmp/catalog.json') as f:
-              catalog = json.load(f)
-          before = len(catalog['links'])
-          kept, removed = [], []
-          for link in catalog['links']:
-              version = link.get('href', '').strip('./').split('/')[0]
-              if link.get('rel') == 'child' and version in prune:
-                  assert not link.get('latest'), f"refusing to prune latest: {version}"
-                  removed.append(version)
-              else:
-                  kept.append(link)
-          catalog['links'] = kept
-          children = [l for l in kept if l.get('rel') == 'child']
-          assert len(children) >= 3, f"would leave only {len(children)} versions"
-          assert any(l.get('latest') for l in children), "no latest flag would remain"
-          print(f"removed {removed}, {len(children)} children remain")
-          with open('/tmp/catalog-new.json', 'w') as f:
-              json.dump(catalog, f, indent=2)
-          EOF
+          # Shared prune_catalog.py enforces the retention floor (>= the worker's
+          # MAX_VERSION_ATTEMPTS fallback depth) and refuses to drop the latest
+          # link. Same implementation the rebuild finalizer's retention prune
+          # uses; the allowlist mode removes exactly the requested versions.
+          python3 scripts/prune_catalog.py allowlist \
+            --catalog /tmp/catalog.json --prune "$PRUNE_VERSIONS" --floor 4 \
+            --output /tmp/catalog-new.json
 
           if python3 -c "
           import json
@@ -104,6 +93,15 @@ jobs:
             [ "$code" = "200" ] || { echo "::error::live check failed: $path"; exit 1; }
           done
 
+      - name: Wait out worker catalog cache TTL
+        # A worker can still serve the pre-prune catalog for up to
+        # CATALOG_CACHE_TTL (300s, crates/geocoder-worker/src/stac/cache.rs)
+        # plus the in-isolate text memo TTL (TEXT_MEMO_TTL_MS, 60s) and fall
+        # back onto a version we are about to delete. Wait out that combined
+        # worst-case staleness (360s + margin) after publishing the pruned
+        # catalog, before any deletion.
+        run: sleep 390
+
       - name: Delete pruned and orphaned prefixes
         run: |
           set -euo pipefail
@@ -112,11 +110,12 @@ jobs:
 
           S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-live.json
           for version in $PRUNE_VERSIONS $ORPHAN_PREFIXES; do
-            # Guard: never delete anything the live catalog still references
-            if grep -q "$version" /tmp/catalog-live.json; then
-              echo "::error::$version still referenced by catalog.json - aborting"
-              exit 1
-            fi
+            # Guard: never delete anything the live catalog still references.
+            # Exact child link-target comparison (not a substring grep, which
+            # could both false-match a version embedded in another link and
+            # miss the real reference). Exits non-zero if still referenced.
+            python3 scripts/prune_catalog.py assert-unreferenced \
+              --catalog /tmp/catalog-live.json --version "$version"
             echo "Deleting s3://$BUCKET/$version/ ..."
             S3 s3 rm "s3://$BUCKET/$version/" --recursive --only-show-errors
           done

@@ -10,6 +10,7 @@ Usage:
 """
 
 import argparse
+import json
 import os
 import sys
 import time
@@ -97,6 +98,49 @@ def _local_release_path(remote_path, file_index, pid=None):
     return f"/tmp/patch-release-{name}-{file_index}-{pid or os.getpid()}.parquet"
 
 
+def _assert_target_version_unpublished(con, bucket, version, force_unsafe):
+    """Refuse to overwrite shards in an already-published, immutable version.
+
+    A catalogued version — or one that already carries a release manifest —
+    is live and immutable: patching it would silently mutate data the catalog
+    guarantees. Fail closed unless the operator explicitly passes
+    --force-unsafe.
+    """
+    reason = None
+    if _glob_files(con, f"s3://{bucket}/{version}/release-manifest.json"):
+        reason = f"a release manifest exists at {version}/release-manifest.json"
+    elif _glob_files(con, f"s3://{bucket}/catalog.json"):
+        raw = con.execute(
+            f"SELECT content FROM read_text('s3://{bucket}/catalog.json')"
+        ).fetchone()[0]
+        try:
+            catalog = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise RuntimeError(
+                f"Unreadable catalog.json in {bucket}: {exc}") from exc
+        for link in catalog.get("links", []):
+            if not isinstance(link, dict) or link.get("rel") != "child":
+                continue
+            href = link.get("href")
+            if isinstance(href, str) and href.strip("./").split("/", 1)[0] == version:
+                reason = f"catalog.json references version {version}"
+                break
+    if reason is None:
+        return
+    if not force_unsafe:
+        print(
+            f"Refusing to patch published version {version}: {reason}. "
+            "Published versions are immutable; build a new version instead. "
+            "Pass --force-unsafe to override (this mutates live data)."
+        )
+        sys.exit(1)
+    print(
+        "WARNING: --force-unsafe set; overwriting shards in published version "
+        f"{version} ({reason}). This mutates immutable, live-catalogued data "
+        "and can corrupt readers that rely on the release manifest."
+    )
+
+
 def main():
     parser = argparse.ArgumentParser(description="Patch failed ID index shards")
     parser.add_argument("--staging-prefixes", nargs="+", required=True,
@@ -105,6 +149,10 @@ def main():
     parser.add_argument("--release", required=True,
                         help="Pinned Overture release represented by the staging data")
     parser.add_argument("--bucket", default="geocoder-shards")
+    parser.add_argument(
+        "--force-unsafe", action="store_true",
+        help="Overwrite shards even in a published/catalogued version "
+             "(mutates immutable live data)")
     args = parser.parse_args()
 
     r2_config = get_r2_config()
@@ -115,6 +163,9 @@ def main():
 
     con = r2_con(r2_config)
     con.execute("SET memory_limit = '4GB';")
+
+    # Fail closed before any write if this version is already published.
+    _assert_target_version_unpublished(con, bucket, version, args.force_unsafe)
 
     # Patch builds must reuse the exact immutable global dictionary. A subset
     # is never allowed to renumber IDs or introduce unseen tuples/releases.

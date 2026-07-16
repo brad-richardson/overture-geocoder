@@ -1,5 +1,9 @@
 name: Patch ID Stage
 
+# Recovery ritual, the "Re-run failed jobs" publication path, and the
+# two-dispatch stale-marker trap are documented in docs/rebuild-recovery.md.
+# Read it before dispatching a patch: pass prefixes AND run_build=true together.
+
 on:
   workflow_dispatch:
     inputs:
