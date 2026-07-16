@@ -1,7 +1,7 @@
 # Pending Work — 2026-07-16
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `01d7c3e` (`main` after #79). Keep measured evidence
+The code baseline is `0aa9822` (`main` after #82). Keep measured evidence
 separate from decisions and proposed work so this file can be updated without
 preserving branch- or PR-specific history.
 
@@ -167,6 +167,26 @@ preserving branch- or PR-specific history.
   straddles — with the old heuristic preserved byte-for-byte for legacy shards
   and for any malformed/oversized chain. Takes effect at the next fleet
   rebuild.
+- #81 built the shared range-reader core decided in §8: a payload-agnostic
+  page module in `geocoder-core` (bounds-checked byte cursor, generic capped
+  side-index, extended-page framing byte-matched to the Python codec via
+  committed cross-language fixtures, and a fuzz-verified range-coalescing
+  planner), with the feature-gated address spike refactored onto it as the
+  first consumer — behavior, caps, cache keys, and route gating pinned
+  unchanged. Adversarial review (2M-case coalescer fuzz, fixture
+  regeneration, wasm32 trace) approved with note-level items only.
+- #82 ran the two Places de-riskers from §9. Single-object head repack: the
+  4,090-object packed head fits ONE range-readable object at 25,753,724
+  bytes (385 KB key index + entries), slightly smaller than the bucket
+  layout, with mean hit overfetch 7.1x in the bucket baseline's disfavor and
+  a disclosed 385 KB resident-index cost. Non-CA partition: a deterministic
+  1M-row Tokyo-metro sample holds 122.9 B/place vs California's 116.4 with
+  components rebalanced (lexicon 2.3→13.2 B/place); the lexicon triples with
+  82% singletons and 86% CJK-dominant tokens, and the oracle (complete
+  recall, exact top-k) passes on both partitions — storage and layout
+  generalize; tokenization does not (space-free CJK names collapse to one
+  token, NFKD strips dakuten). Review recomputed every headline number and
+  approved.
 
 ### Current production data
 
@@ -603,6 +623,15 @@ none blocking the current experiment tracks:
   (wrapped antimeridian bboxes should sharply reduce it) and verify
   lineage-path hierarchies serve correctly, then re-size the exact-country
   comparator work against the new baseline before investing in it.
+- Before the Places payload lands on the shared reader core (#81 review
+  notes): replace the unchecked `as usize`/add in `range_reader.rs` slicing
+  with `checked_add`/`try_from` (safe today only because the address preset
+  caps a read at 256 KiB; a payload with a large `max_range_len` could
+  overflow on 32-bit wasm), and either generalize or relocate the
+  address-specific division-extension decode in the core (its dictionary has
+  no explicit entry cap and a Places extension would today require editing
+  the core, not supplying a preset). Also drop the now-dead `not_found`
+  fallback and redundant length recheck in `cache.rs`.
 
 ### 8. Architecture direction: one binary family, one reader, one publisher
 
@@ -617,8 +646,9 @@ explicit decisions rather than defaults:
   core — checksum validation, bounded range coalescing, cache policy, page
   framing — with the format-specific payloads behind it. Building a second
   bespoke reader for Places would recreate the two-address-formats drift one
-  level up. Decide the shared-core seam before the Places Worker prototype
-  starts.
+  level up. **Done in #81**: the core lives in `geocoder_core::pages` with
+  the address spike as its first consumer; the Places compact shard is the
+  intended second payload (harden the two §7 reader notes first).
 - **One publication path.** The repo now carries three manifest/fan-in systems
   (rebuild finalizer, ID-index inventory chain, global build control plane).
   The control plane's per-family manifests should absorb address/Places family
@@ -655,15 +685,19 @@ Position, from the July review and spike evidence:
   structured category, explicit lat/lon or context — and treat `coffee near
   me` as out of scope until a query planner, category aliases, and distance
   ranking exist and are evaluated.
-- **Sequencing: reader first, shared with addresses.** The address track has
-  already measured a real Worker decoder and a lookup-safe page format with a
-  self-describing extension. Build the shared range-reader core there, then
-  make the Places compact shard its second payload (see §8). Before the
-  three-shard prototype, run the two cheapest de-riskers: the single-object
-  head repack (the current "1 read / 4–6 KiB" head number comes from a
-  4,088-object layout) and one non-California partition build (East Asia or
-  similar) to test bytes/place and posting-skew stability under multilingual
-  names.
+- **Sequencing: reader first, shared with addresses.** Done through the
+  de-riskers: #81 landed the shared range-reader core with the address
+  payload, and #82 answered both cheap de-risking questions favorably — the
+  global head fits one range-readable object (25.75 MB, ~7x less hit
+  overfetch than the bucket layout), and bytes/place is stable on a Tokyo
+  partition (122.9 vs 116.4). Next in this track, in order: (1) the two §7
+  reader hardening notes; (2) CJK segmentation — the Tokyo build proved
+  storage generalizes but the tokenizer does not (single-token space-free
+  names, NFKD dakuten stripping); a segmentation/normalization decision must
+  precede any multilingual serving claim; (3) the Places compact shard as
+  the core's second payload, building toward the three-shard Worker
+  prototype with real measured read-chain latency (the dominant unmeasured
+  risk below).
 - **Get real query data early.** Head hit rate, fanout distribution, and the
   no-result rate all depend on a traffic distribution that does not exist. A
   small gated beta with query logging — even divisions + addresses only —
