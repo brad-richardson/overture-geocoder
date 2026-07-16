@@ -5,7 +5,7 @@
 use std::cell::OnceCell;
 use std::path::Path;
 
-use rusqlite::{params, Connection, OpenFlags};
+use rusqlite::{params, params_from_iter, Connection, OpenFlags};
 
 use crate::error::Result;
 use crate::geo::haversine_distance;
@@ -19,13 +19,19 @@ use crate::types::{
     DivisionRow, DivisionType, GeocoderQuery, GeocoderResult, HierarchyEntry, ReverseResult,
 };
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 /// When tie-breaking reverse geocode candidates by centroid distance, only
 /// consider candidates whose area is within this factor of the smallest.
 /// Prevents a distant-but-slightly-larger division from displacing a
 /// genuinely containing one, while still correcting bbox-overlap false hits.
 const REVERSE_TIEBREAK_AREA_FACTOR: f64 = 4.0;
+
+/// Maximum entries accepted from a stored lineage chain. A well-formed
+/// Overture primary hierarchy path is at most a handful of levels; anything
+/// longer is malformed and falls back to the heuristic. The cap also bounds
+/// the chain-fetch `IN` list far below SQLITE_LIMIT_VARIABLE_NUMBER.
+const MAX_LINEAGE_CHAIN: usize = 64;
 
 /// A SQLite database connection for geocoding queries.
 pub struct Database {
@@ -37,6 +43,10 @@ pub struct Database {
     has_static_importance: OnceCell<bool>,
     /// Whether the reverse shard has a `wkb` geometry column for exact containment.
     has_wkb: OnceCell<bool>,
+    /// Whether the reverse shard carries the materialized `lineage_ids` ancestor
+    /// chain (new build). When present, reverse hierarchy assembly resolves
+    /// parentage by exact ancestor membership instead of the code heuristic.
+    has_lineage: OnceCell<bool>,
 }
 
 impl Database {
@@ -66,6 +76,7 @@ impl Database {
             has_rtree: OnceCell::new(),
             has_static_importance: OnceCell::new(),
             has_wkb: OnceCell::new(),
+            has_lineage: OnceCell::new(),
         })
     }
 
@@ -152,6 +163,19 @@ impl Database {
                 )
                 .map(|value| value == "1")
                 .unwrap_or(false)
+        })
+    }
+
+    /// Whether the reverse shard exposes the `lineage_ids` column (new build).
+    /// Probed by preparing a statement against the column; legacy shards fail
+    /// the prepare and keep the country/region-code coherence heuristic. Unlike
+    /// `has_wkb`, mere column presence is sufficient: an all-NULL column is
+    /// handled per-row (a NULL chain falls back to the heuristic for that row).
+    fn has_lineage(&self) -> bool {
+        *self.has_lineage.get_or_init(|| {
+            self.conn
+                .prepare("SELECT lineage_ids FROM divisions_reverse LIMIT 0")
+                .is_ok()
         })
     }
 
@@ -470,48 +494,14 @@ impl Database {
                 .unwrap_or(smallest)
         };
 
-        // Build hierarchy: the chosen division for its own subtype, plus the
-        // smallest-area metadata-compatible division of every other subtype.
-        // This only prevents known country/region-code conflicts; without
-        // parent IDs it cannot prove that a candidate is the anchor's actual
-        // administrative parent. Bboxes can
-        // overlap across borders (and are only a prefilter without WKB), so
-        // never combine candidates whose country or region metadata conflicts
-        // with the chosen result. If the anchor's country is unknown, fail
-        // closed and return only the anchor rather than inventing a hierarchy.
-        let mut hierarchy = Vec::new();
-        let mut seen_subtypes = HashSet::new();
-
-        if let Some(div_type) = DivisionType::parse(&most_specific.subtype) {
-            seen_subtypes.insert(div_type);
-            hierarchy.push(HierarchyEntry {
-                gers_id: most_specific.gers_id.clone(),
-                subtype: most_specific.subtype.clone(),
-                name: most_specific.primary_name.clone(),
-            });
-        }
-
-        for row in deduped
-            .iter()
-            .filter(|row| reverse_hierarchy_is_coherent(most_specific, row))
-        {
-            if let Some(div_type) = DivisionType::parse(&row.subtype) {
-                if seen_subtypes.insert(div_type) {
-                    hierarchy.push(HierarchyEntry {
-                        gers_id: row.gers_id.clone(),
-                        subtype: row.subtype.clone(),
-                        name: row.primary_name.clone(),
-                    });
-                }
-            }
-        }
-
-        // Sort hierarchy by priority (most specific first)
-        hierarchy.sort_by_key(|h| {
-            DivisionType::parse(&h.subtype)
-                .map(|dt| dt.priority())
-                .unwrap_or(10)
-        });
+        // Build hierarchy. When the shard carries the materialized lineage
+        // chain, resolve parents by exact ancestor membership (fetching them by
+        // gers_id, which is independent of the per-subtype candidate cap).
+        // Otherwise fall back to the country/region-code coherence heuristic,
+        // which only prevents known conflicts and cannot prove true parentage.
+        let hierarchy = self
+            .lineage_hierarchy(most_specific)
+            .unwrap_or_else(|| heuristic_hierarchy(most_specific, &deduped));
 
         // Calculate distance from query point to division centroid
         let distance_km = haversine_distance(lat, lon, most_specific.lat, most_specific.lon);
@@ -542,6 +532,119 @@ impl Database {
             hierarchy,
         }))
     }
+
+    /// Build the reverse hierarchy from the shard's materialized lineage chain
+    /// (the primary hierarchy path, an ordered JSON array root -> ... -> self).
+    ///
+    /// Returns `None` when the shard has no `lineage_ids` column, the anchor
+    /// row carries no usable chain (NULL, empty, malformed, or implausibly
+    /// long), or any lineage SQL fails — lineage is an enrichment, so every
+    /// failure on this path degrades to the heuristic instead of failing the
+    /// request. When a chain is present the anchor's ancestors are fetched
+    /// directly by their GERS IDs (indexed by `idx_gers_id`). Because this
+    /// lookup is keyed on identity rather than the point-in-bbox candidate
+    /// window, a true region/country ancestor is always included even where it
+    /// would rank below the per-subtype `REVERSE_CANDIDATES_PER_SUBTYPE` cut
+    /// at a dense border — the exact test both replaces the heuristic and
+    /// closes the cap gap without widening the candidate scan. Same-subtype
+    /// collisions resolve by chain position (first occurrence in the ordered
+    /// primary path), never by ID ordering.
+    fn lineage_hierarchy(&self, anchor: &ReverseDivisionRow) -> Option<Vec<HierarchyEntry>> {
+        if !self.has_lineage() {
+            return None;
+        }
+
+        // The chain is identical across a division's antimeridian splits, so
+        // any non-NULL row for the anchor's gers_id is authoritative. This
+        // statement is constant, so it is cached; `.ok()?` maps both SQL
+        // errors and a missing chain to the heuristic fallback.
+        let raw: String = self
+            .conn
+            .prepare_cached(
+                "SELECT lineage_ids FROM divisions_reverse \
+                 WHERE gers_id = ?1 AND lineage_ids IS NOT NULL LIMIT 1",
+            )
+            .ok()?
+            .query_row(params![anchor.gers_id], |row| row.get(0))
+            .ok()?;
+        let chain: Vec<String> = serde_json::from_str(&raw).ok()?;
+        // An empty chain proves no parentage (treat like NULL), and a chain
+        // longer than any real administrative path is malformed; the cap also
+        // keeps the dynamic IN list far below SQLITE_LIMIT_VARIABLE_NUMBER.
+        if chain.is_empty() || chain.len() > MAX_LINEAGE_CHAIN {
+            return None;
+        }
+
+        let mut hierarchy = Vec::new();
+        let mut seen_subtypes = HashSet::new();
+        if let Some(div_type) = DivisionType::parse(&anchor.subtype) {
+            seen_subtypes.insert(div_type);
+            hierarchy.push(HierarchyEntry {
+                gers_id: anchor.gers_id.clone(),
+                subtype: anchor.subtype.clone(),
+                name: anchor.primary_name.clone(),
+            });
+        }
+
+        // Distinct ancestors, excluding the anchor itself (already added),
+        // preserving chain order (root -> ... -> self) for the collision
+        // resolution below. Chains are tiny, so the linear dedup is fine.
+        let mut wanted: Vec<&str> = Vec::new();
+        for id in chain.iter().map(String::as_str) {
+            if id != anchor.gers_id && !wanted.contains(&id) {
+                wanted.push(id);
+            }
+        }
+
+        if !wanted.is_empty() {
+            // Dynamic arity, so this statement is intentionally not cached.
+            let placeholders = vec!["?"; wanted.len()].join(", ");
+            let sql = format!(
+                "SELECT gers_id, subtype, primary_name FROM divisions_reverse \
+                 WHERE gers_id IN ({placeholders}) ORDER BY gers_id, rowid"
+            );
+            let mut stmt = self.conn.prepare(&sql).ok()?;
+            let rows = stmt
+                .query_map(params_from_iter(wanted.iter()), |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                })
+                .ok()?
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .ok()?;
+            // First row per gers_id (antimeridian splits duplicate metadata).
+            let mut by_id: HashMap<&str, (&str, &str)> = HashMap::new();
+            for (gers_id, subtype, primary_name) in &rows {
+                by_id
+                    .entry(gers_id.as_str())
+                    .or_insert((subtype.as_str(), primary_name.as_str()));
+            }
+            // Resolve same-subtype collisions by chain position: scan the
+            // ordered primary path and keep the first entry per subtype, so
+            // the display hierarchy's parent wins over any other ancestor
+            // (never the lexicographically-smallest GERS ID).
+            for id in &wanted {
+                let Some((subtype, name)) = by_id.get(id) else {
+                    continue;
+                };
+                if let Some(div_type) = DivisionType::parse(subtype) {
+                    if seen_subtypes.insert(div_type) {
+                        hierarchy.push(HierarchyEntry {
+                            gers_id: (*id).to_string(),
+                            subtype: (*subtype).to_string(),
+                            name: (*name).to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        sort_hierarchy(&mut hierarchy);
+        Some(hierarchy)
+    }
 }
 
 /// Raw reverse geocoding row from the database.
@@ -560,6 +663,60 @@ struct ReverseDivisionRow {
     country: Option<String>,
     region: Option<String>,
     wkb: Option<Vec<u8>>,
+}
+
+/// Sort hierarchy entries most-specific first by division-type priority.
+fn sort_hierarchy(hierarchy: &mut [HierarchyEntry]) {
+    hierarchy.sort_by_key(|entry| {
+        DivisionType::parse(&entry.subtype)
+            .map(|dt| dt.priority())
+            .unwrap_or(10)
+    });
+}
+
+/// Legacy hierarchy assembly for shards without a materialized lineage chain.
+///
+/// The anchor is the chosen division for its own subtype; every other subtype
+/// contributes its smallest-area *metadata-compatible* candidate. This only
+/// prevents known country/region-code conflicts — without parent IDs it cannot
+/// prove a candidate is the anchor's actual administrative parent. Bboxes can
+/// overlap across borders (and are only a prefilter without WKB), so candidates
+/// whose country/region metadata conflicts with the anchor are never combined.
+/// If the anchor's country is unknown, it fails closed and returns only the
+/// anchor rather than inventing a hierarchy.
+fn heuristic_hierarchy(
+    anchor: &ReverseDivisionRow,
+    deduped: &[ReverseDivisionRow],
+) -> Vec<HierarchyEntry> {
+    let mut hierarchy = Vec::new();
+    let mut seen_subtypes = HashSet::new();
+
+    if let Some(div_type) = DivisionType::parse(&anchor.subtype) {
+        seen_subtypes.insert(div_type);
+        hierarchy.push(HierarchyEntry {
+            gers_id: anchor.gers_id.clone(),
+            subtype: anchor.subtype.clone(),
+            name: anchor.primary_name.clone(),
+        });
+    }
+
+    for row in deduped
+        .iter()
+        .filter(|row| reverse_hierarchy_is_coherent(anchor, row))
+    {
+        if let Some(div_type) = DivisionType::parse(&row.subtype) {
+            if seen_subtypes.insert(div_type) {
+                hierarchy.push(HierarchyEntry {
+                    gers_id: row.gers_id.clone(),
+                    subtype: row.subtype.clone(),
+                    name: row.primary_name.clone(),
+                });
+            }
+        }
+    }
+
+    sort_hierarchy(&mut hierarchy);
+    hierarchy
 }
 
 /// Whether `candidate` is metadata-compatible with the chosen reverse result.
@@ -1389,8 +1546,12 @@ mod tests {
         assert_eq!(result.hierarchy[0].gers_id, "loc-unknown");
     }
 
+    /// Two counties share the anchor's country and region code, and the wrong
+    /// one has the smaller area. Without a lineage column the coherence
+    /// heuristic cannot tell them apart, so the smaller-area overlap still wins:
+    /// this documents the ceiling of the legacy path (byte-for-byte behavior).
     #[test]
-    fn test_reverse_geocode_same_region_code_is_not_parentage_proof() {
+    fn test_reverse_geocode_same_region_code_heuristic_ceiling() {
         let schema = format!(
             r#"{REVERSE_SCHEMA}
             INSERT INTO divisions_reverse VALUES
@@ -1401,6 +1562,7 @@ mod tests {
             "#
         );
         let db = db_with(&schema);
+        assert!(!db.has_lineage());
         let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
         let county = result
             .hierarchy
@@ -1409,7 +1571,203 @@ mod tests {
             .unwrap();
 
         // Both counties have identical coherence metadata, so the existing
-        // area heuristic still wins. True parentage needs materialized lineage.
+        // area heuristic still wins the smaller-area overlap. True parentage
+        // needs the materialized lineage chain (see the lineage test below).
         assert_eq!(county.gers_id, "county-overlap");
+    }
+
+    /// Same fixture, but the shard now carries a lineage chain (the ordered
+    /// primary hierarchy path, root -> ... -> self). The anchor's chain names
+    /// `county-parent` (not the smaller `county-overlap`), so exact ancestor
+    /// membership must flip the old wrong-county choice to the true parent —
+    /// even though the true parent has the larger area.
+    #[test]
+    fn test_reverse_geocode_lineage_selects_true_parent() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN lineage_ids TEXT;
+            INSERT INTO divisions_reverse
+              (rowid, gers_id, subtype, primary_name, lat, lon,
+               bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area,
+               population, country, region, lineage_ids)
+            VALUES
+              (1, 'loc-ny', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', 'US-NY', '["country-us","county-parent","loc-ny"]'),
+              (2, 'county-overlap', 'county', 'Unrelated Overlap', 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'US', 'US-NY', NULL),
+              (3, 'county-parent', 'county', 'Actual Parent', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 2.0, NULL, 'US', 'US-NY', NULL),
+              (4, 'country-us', 'country', 'United States', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 10.0, NULL, 'US', NULL, NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        assert!(db.has_lineage());
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(result.gers_id, "loc-ny");
+        let county = result
+            .hierarchy
+            .iter()
+            .find(|entry| entry.subtype == "county")
+            .unwrap();
+        assert_eq!(
+            county.gers_id, "county-parent",
+            "exact lineage must choose the true parent over the smaller overlap"
+        );
+        // The unrelated overlap must not appear anywhere in the hierarchy.
+        assert!(result
+            .hierarchy
+            .iter()
+            .all(|entry| entry.gers_id != "county-overlap"));
+        // Full exact chain, most-specific first.
+        let ids: Vec<&str> = result
+            .hierarchy
+            .iter()
+            .map(|entry| entry.gers_id.as_str())
+            .collect();
+        assert_eq!(ids, vec!["loc-ny", "county-parent", "country-us"]);
+    }
+
+    /// A city straddling two counties: both are genuine chain members, but the
+    /// hierarchy must report the primary path's county — the one listed
+    /// earlier in the ordered chain — not the lexicographically-smallest GERS
+    /// ID. `county-a-secondary` sorts before `county-b-primary`, so an
+    /// ID-ordered resolution would pick the wrong county; chain-position
+    /// resolution must pick `county-b-primary`.
+    #[test]
+    fn test_reverse_geocode_lineage_straddling_counties_primary_path_wins() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN lineage_ids TEXT;
+            INSERT INTO divisions_reverse
+              (rowid, gers_id, subtype, primary_name, lat, lon,
+               bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area,
+               population, country, region, lineage_ids)
+            VALUES
+              (1, 'loc-straddle', 'locality', 'Straddle City', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', 'US-NY', '["country-us","county-b-primary","county-a-secondary","loc-straddle"]'),
+              (2, 'county-a-secondary', 'county', 'Secondary County', 0.0, 0.0, -1.0, -1.0, 1.0, 1.0, 1.0, NULL, 'US', 'US-NY', NULL),
+              (3, 'county-b-primary', 'county', 'Primary County', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 2.0, NULL, 'US', 'US-NY', NULL),
+              (4, 'country-us', 'country', 'United States', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 10.0, NULL, 'US', NULL, NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        let county = result
+            .hierarchy
+            .iter()
+            .find(|entry| entry.subtype == "county")
+            .unwrap();
+        assert_eq!(
+            county.gers_id, "county-b-primary",
+            "same-subtype collisions must resolve by chain position, not ID order"
+        );
+    }
+
+    /// An empty `[]` chain proves nothing and must behave exactly like NULL:
+    /// fall back to the heuristic (which assembles coherent parents from the
+    /// candidate window) instead of emitting a bare-anchor hierarchy.
+    #[test]
+    fn test_reverse_geocode_lineage_empty_chain_falls_back_to_heuristic() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN lineage_ids TEXT;
+            INSERT INTO divisions_reverse
+              (rowid, gers_id, subtype, primary_name, lat, lon,
+               bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area,
+               population, country, region, lineage_ids)
+            VALUES
+              (1, 'loc-empty', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', 'US-NY', '[]'),
+              (2, 'reg-ny', 'region', 'New York', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 2.0, NULL, 'US', 'US-NY', NULL),
+              (3, 'country-us', 'country', 'United States', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 10.0, NULL, 'US', NULL, NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        let ids: Vec<&str> = result
+            .hierarchy
+            .iter()
+            .map(|entry| entry.gers_id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["loc-empty", "reg-ny", "country-us"],
+            "an empty chain must fall back to the heuristic hierarchy"
+        );
+    }
+
+    /// A chain longer than MAX_LINEAGE_CHAIN is malformed (no real admin path
+    /// is that deep) and must fall back to the heuristic instead of expanding
+    /// into an unbounded IN list.
+    #[test]
+    fn test_reverse_geocode_lineage_overlong_chain_falls_back_to_heuristic() {
+        let chain: Vec<String> = (0..=MAX_LINEAGE_CHAIN)
+            .map(|i| format!("\"junk-{i}\""))
+            .collect();
+        let chain_json = format!("[{}]", chain.join(","));
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN lineage_ids TEXT;
+            INSERT INTO divisions_reverse
+              (rowid, gers_id, subtype, primary_name, lat, lon,
+               bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area,
+               population, country, region, lineage_ids)
+            VALUES
+              (1, 'loc-long', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', 'US-NY', '{chain_json}'),
+              (2, 'reg-ny', 'region', 'New York', 0.0, 0.0, -2.0, -2.0, 2.0, 2.0, 2.0, NULL, 'US', 'US-NY', NULL),
+              (3, 'country-us', 'country', 'United States', 0.0, 0.0, -3.0, -3.0, 3.0, 3.0, 10.0, NULL, 'US', NULL, NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        let ids: Vec<&str> = result
+            .hierarchy
+            .iter()
+            .map(|entry| entry.gers_id.as_str())
+            .collect();
+        assert_eq!(
+            ids,
+            vec!["loc-long", "reg-ny", "country-us"],
+            "an overlong chain must fall back to the heuristic hierarchy"
+        );
+    }
+
+    /// A region ancestor ranked out of the per-subtype candidate window (its
+    /// bbox loses the `area ASC` race to many same-subtype overlaps) is still
+    /// resolved, because lineage members are fetched by exact gers_id rather
+    /// than surviving the `rn <= REVERSE_CANDIDATES_PER_SUBTYPE` cut.
+    #[test]
+    fn test_reverse_geocode_lineage_recovers_capped_region() {
+        let mut schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN lineage_ids TEXT;
+            INSERT INTO divisions_reverse
+              (rowid, gers_id, subtype, primary_name, lat, lon,
+               bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area,
+               population, country, region, lineage_ids)
+            VALUES
+              (1, 'loc-anchor', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.001, NULL, 'US', 'US-NY', '["country-us","reg-true","loc-anchor"]'),
+              (2, 'reg-true', 'region', 'True Region', 0.0, 0.0, -9.0, -9.0, 9.0, 9.0, 324.0, NULL, 'US', 'US-NY', NULL),
+              (3, 'country-us', 'country', 'United States', 0.0, 0.0, -9.5, -9.5, 9.5, 9.5, 361.0, NULL, 'US', NULL, NULL);
+            "#
+        );
+        // Ten smaller-area decoy regions all overlap the point and out-rank the
+        // true region under `area ASC`, pushing it past the rn cap of 8.
+        for i in 0..10 {
+            let side = 1.0 + f64::from(i) * 0.1;
+            schema.push_str(&format!(
+                "INSERT INTO divisions_reverse \
+                 (gers_id, subtype, primary_name, lat, lon, bbox_xmin, bbox_ymin, \
+                  bbox_xmax, bbox_ymax, area, population, country, region, lineage_ids) \
+                 VALUES ('decoy-{i}', 'region', 'Decoy {i}', 0.0, 0.0, -{side}, -{side}, \
+                 {side}, {side}, {area}, NULL, 'US', 'US-ZZ', NULL);\n",
+                area = side * side * 4.0,
+            ));
+        }
+        let db = db_with(&schema);
+        assert!(db.has_lineage());
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(result.gers_id, "loc-anchor");
+        let region = result
+            .hierarchy
+            .iter()
+            .find(|entry| entry.subtype == "region")
+            .expect("the true region ancestor must be present despite the cap");
+        assert_eq!(region.gers_id, "reg-true");
     }
 }
