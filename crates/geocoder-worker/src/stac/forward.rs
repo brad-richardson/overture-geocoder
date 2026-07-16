@@ -6,8 +6,9 @@ use serde::Serialize;
 use worker::*;
 
 use super::cache::IMMUTABLE_CACHE_TTL;
+use geocoder_core::routing::distance_to_bbox;
+
 use super::catalog::{with_version_fallback, StacCollection, StacItem};
-use super::reverse::distance_to_bbox;
 use super::router_db::RouterDb;
 use super::{not_found, ShardLoader};
 

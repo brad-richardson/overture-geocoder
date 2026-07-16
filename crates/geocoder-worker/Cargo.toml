@@ -8,6 +8,12 @@ description = "Cloudflare Worker for Overture geocoding"
 [lib]
 crate-type = ["cdylib"]
 
+[features]
+default = []
+# Experimental smoke-only address page decoder. Gated out of production wasm
+# bundles; enabled only by the address smoke deploy (wrangler.address-smoke.toml).
+address-spike = ["dep:flate2"]
+
 [dependencies]
 # Cloudflare Workers
 worker = "0.7"
@@ -27,7 +33,9 @@ futures = "0.3"
 # Parquet reading (snappy only, minimal features for wasm32)
 parquet = { version = "54", default-features = false, features = ["snap"] }
 bytes = "1"
-flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# Only pulled in by the `address-spike` feature (the smoke-only address page
+# decoder); off by default so production wasm bundles stay lean.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
 
 # WASM compatibility
 getrandom = { version = "0.2", features = ["js"] }
