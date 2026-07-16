@@ -2,7 +2,7 @@
 //!
 //! Pure geometry and decision logic, deliberately free of any Cloudflare
 //! Worker or STAC types so the production Worker, the CLI, and offline
-//! evaluation all exercise identical routing. Callers adapt their own shard
+//! evaluation can share identical routing. Callers adapt their own shard
 //! metadata into `(shard_id, bbox)` pairs; this module owns the antimeridian
 //! bbox math and the ambiguous-overlap fallthrough policy.
 
