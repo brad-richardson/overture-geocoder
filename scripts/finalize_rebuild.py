@@ -19,13 +19,27 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
+import signal
+import subprocess
+import sys
+import tempfile
+import time
+import urllib.error
+import urllib.request
 from datetime import date, datetime, timezone
 from pathlib import Path
 
 
 VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
 ID_PREFIX_RE = re.compile(r"^[0-9a-f]{3}$")
+
+# Root discovery catalog + durable operator-recovery backups.
+BUCKET = "geocoder-shards"
+CATALOG_KEY = "catalog.json"
+BACKUP_PREFIX = "backups"
+BASE_URL_DEFAULT = "https://geocoder.bradr.dev"
 
 
 def _load_json(path: Path) -> dict:
@@ -247,8 +261,25 @@ def verify_release(
         expected_sha = metadata.get("sha256")
         if not isinstance(expected_sha, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_sha):
             raise ValueError(f"ID shard {prefix} has no valid producer SHA-256")
+        shard_object = {**entry, "sha256": expected_sha}
+        # Older markers predate the content MD5. When the producer recorded
+        # one and R2 stored the object whole (a single-part upload's ETag is
+        # its MD5, with no "-<parts>" suffix), bind the two so a byte-level
+        # replacement cannot slip through with a matching size.
+        content_md5 = metadata.get("content_md5")
+        if content_md5 is not None:
+            if not isinstance(content_md5, str) or not re.fullmatch(
+                r"[0-9a-f]{32}", content_md5
+            ):
+                raise ValueError(f"ID shard {prefix} has an invalid content MD5")
+            etag = entry["etag"]
+            if "-" not in etag and etag != content_md5:
+                raise ValueError(
+                    f"ID shard {prefix} ETag does not match producer content MD5"
+                )
+            shard_object["content_md5"] = content_md5
         total_id_size += entry["size_bytes"]
-        id_objects.append({**entry, "sha256": expected_sha})
+        id_objects.append(shard_object)
     if id_collection["summaries"].get("total_size_bytes") != total_id_size:
         raise ValueError("ID collection total_size_bytes mismatch")
 
@@ -314,7 +345,11 @@ def verify_release(
                 "shard_count": len(id_objects),
                 "total_size_bytes": total_id_size,
                 "objects": id_objects,
-                "integrity": "producer SHA-256 plus R2 size/ETag and validated Parquet schema/footer",
+                "integrity": (
+                    "producer SHA-256 and R2 size; single-part ETag verified "
+                    "against the producer content MD5 when the inventory "
+                    "records one"
+                ),
                 "locator_dictionary": dictionary,
             },
         },
@@ -375,6 +410,416 @@ def build_catalog(*, before_path: Path, version: str, output_path: Path) -> dict
     return catalog
 
 
+# ---------------------------------------------------------------------------
+# Atomic promotion, rollback, and crash-window recovery.
+#
+# These reimplement the finalize-release "promote and smoke" bash step and the
+# post-finalize "recover" bash step so their guards live in a unit-tested layer
+# rather than only in YAML + shell comments. All R2 and production-HTTP I/O is
+# behind a small client so the orchestration can be exercised with a fake.
+# ---------------------------------------------------------------------------
+
+
+class PromotionError(RuntimeError):
+    """A promotion guard failed; the workflow step must exit non-zero."""
+
+
+class RecoveryError(RuntimeError):
+    """Crash-window recovery could not safely reconcile the catalog."""
+
+
+class PromotionInterrupted(Exception):
+    """Raised from a SIGTERM handler so the finally/rollback path still runs.
+
+    Mirrors the bash ``trap 'exit 143' TERM`` -> EXIT-trap rollback: a TERM
+    while a publish is outstanding must trigger the same rollback that a normal
+    failure does, not a bare process kill.
+    """
+
+
+def _load_json_bytes(data: bytes) -> dict:
+    value = json.loads(data)
+    if not isinstance(value, dict):
+        raise ValueError("catalog must contain a JSON object")
+    return value
+
+
+def _latest_version(catalog: dict) -> str:
+    """Return the version of the ``latest`` child link (mirrors the jq guard)."""
+    for link in catalog.get("links", []):
+        if (
+            isinstance(link, dict)
+            and link.get("rel") == "child"
+            and link.get("latest") is True
+        ):
+            href = link.get("href")
+            if not isinstance(href, str) or not href:
+                raise ValueError("latest child link has no href")
+            return href.strip("./").split("/")[0]
+    raise ValueError("catalog has no latest child")
+
+
+def _get_json(base_url: str, path: str, timeout: float) -> dict:
+    """GET a JSON body, raising (like ``curl -f``) on any non-2xx status."""
+    request = urllib.request.Request(base_url + path, headers={"Accept": "application/json"})
+    with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 (fixed host)
+        body = response.read()
+    value = json.loads(body)
+    if not isinstance(value, dict):
+        raise ValueError("expected a JSON object response")
+    return value
+
+
+def _smoke_production(base_url: str, version: str) -> bool:
+    """health + a forward search + a reverse + an ID lookup, all pinned to
+    ``version`` via the ``rebuild`` cache-buster. Ports the bash ``smoke_once``.
+    """
+    try:
+        health = _get_json(base_url, f"/health?rebuild={version}", 20)
+        if health.get("status") != "ok" or health.get("version") != version:
+            return False
+
+        search = _get_json(base_url, f"/search?q=boston&limit=1&rebuild={version}", 20)
+        results = search.get("results")
+        if search.get("data_version") != version or not isinstance(results, list) or not results:
+            return False
+        first = results[0]
+        gers_id = first.get("gers_id") if isinstance(first, dict) else None
+        if not isinstance(gers_id, str) or not gers_id:
+            return False
+
+        reverse = _get_json(base_url, f"/reverse?lat=42.36&lon=-71.06&rebuild={version}", 20)
+        if reverse.get("data_version") != version or not isinstance(reverse.get("gers_id"), str):
+            return False
+
+        id_json = _get_json(base_url, f"/id/{gers_id}?rebuild={version}", 30)
+        if id_json.get("data_version") != version or id_json.get("id") != gers_id:
+            return False
+        return True
+    except (urllib.error.URLError, OSError, ValueError):
+        # URLError covers HTTPError (>=400) and connection/timeout failures;
+        # OSError covers socket timeouts; ValueError covers JSON decode errors.
+        return False
+
+
+def _health_production(base_url: str, version: str, cache_buster: str) -> bool:
+    """health-only check (ports the bash recovery-loop curl)."""
+    try:
+        health = _get_json(base_url, f"/health?{cache_buster}", 20)
+        return health.get("status") == "ok" and health.get("version") == version
+    except (urllib.error.URLError, OSError, ValueError):
+        return False
+
+
+class R2Client:
+    """Production client: shells out to the aws CLI and to
+    ``scripts/r2_catalog_fetch.sh`` (whose two-consecutive-404 rule keeps an
+    outage from being read as an empty catalog), and hits the production HTTPS
+    endpoint with urllib for smoke checks.
+    """
+
+    def __init__(
+        self,
+        *,
+        bucket: str,
+        endpoint: str,
+        base_url: str,
+        repo_root: Path,
+        publish_attempts: int = 3,
+        sleep=time.sleep,
+    ) -> None:
+        self.bucket = bucket
+        self.endpoint = endpoint
+        self.base_url = base_url
+        self.repo_root = Path(repo_root)
+        self.publish_attempts = publish_attempts
+        self._sleep = sleep
+
+    def _aws(self, *args: str, capture: bool = False):
+        cmd = ["aws", *args, "--endpoint-url", self.endpoint, "--region", "auto"]
+        return subprocess.run(cmd, check=True, text=True, capture_output=capture)
+
+    def fetch_catalog(self) -> bytes | None:
+        script = self.repo_root / "scripts" / "r2_catalog_fetch.sh"
+        with tempfile.TemporaryDirectory() as work:
+            dest = Path(work) / "catalog.json"
+            result = subprocess.run(["bash", str(script), str(dest)], text=True)
+            if result.returncode != 0:
+                # Transient failure after retries; never treat as empty.
+                raise PromotionError(
+                    "catalog fetch failed (transient); refusing to proceed"
+                )
+            if not dest.exists():
+                return None  # genuinely absent (first deploy)
+            return dest.read_bytes()
+
+    def publish_catalog(self, data: bytes) -> None:
+        with tempfile.TemporaryDirectory() as work:
+            src = Path(work) / "catalog.json"
+            src.write_bytes(data)
+            dest = f"s3://{self.bucket}/{CATALOG_KEY}"
+            for attempt in range(1, self.publish_attempts + 1):
+                try:
+                    self._aws(
+                        "s3", "cp", str(src), dest,
+                        "--content-type", "application/json", "--only-show-errors",
+                    )
+                    return
+                except subprocess.CalledProcessError:
+                    if attempt >= self.publish_attempts:
+                        raise PromotionError(
+                            f"Failed to publish catalog after {self.publish_attempts} attempts"
+                        )
+                    self._sleep(attempt * 10)
+
+    def put_backup(self, name: str, data: bytes) -> None:
+        key = f"s3://{self.bucket}/{BACKUP_PREFIX}/{name}"
+        with tempfile.TemporaryDirectory() as work:
+            src = Path(work) / "src.json"
+            src.write_bytes(data)
+            self._aws(
+                "s3", "cp", str(src), key,
+                "--content-type", "application/json", "--only-show-errors",
+            )
+            readback = Path(work) / "readback.json"
+            self._aws("s3", "cp", key, str(readback), "--only-show-errors")
+            if readback.read_bytes() != data:
+                raise PromotionError(f"durable backup readback mismatch for {name}")
+
+    def get_backup(self, name: str) -> bytes:
+        key = f"s3://{self.bucket}/{BACKUP_PREFIX}/{name}"
+        with tempfile.TemporaryDirectory() as work:
+            dest = Path(work) / "obj.json"
+            self._aws("s3", "cp", key, str(dest), "--only-show-errors")
+            return dest.read_bytes()
+
+    def backup_exists(self, name: str) -> bool:
+        result = self._aws(
+            "s3api", "list-objects-v2", "--bucket", self.bucket,
+            "--prefix", f"{BACKUP_PREFIX}/{name}", "--max-keys", "1",
+            "--query", "KeyCount", "--output", "text",
+            capture=True,
+        )
+        return result.stdout.strip() != "0"
+
+    def delete_version(self, version: str) -> None:
+        self._aws(
+            "s3", "rm", f"s3://{self.bucket}/{version}/",
+            "--recursive", "--only-show-errors",
+        )
+
+    def smoke(self, version: str) -> bool:
+        return _smoke_production(self.base_url, version)
+
+    def health(self, version: str, *, cache_buster: str) -> bool:
+        return _health_production(self.base_url, version, cache_buster)
+
+
+def _confirm_serving(check, version, *, attempts, interval, sleep, log, label) -> bool:
+    """Poll ``check(version)`` up to ``attempts`` times, sleeping between tries.
+
+    Note: unlike the bash loop, this does not sleep after the final failed
+    attempt (a trailing sleep only delays reporting the failure).
+    """
+    for attempt in range(1, attempts + 1):
+        log(f"{label} attempt {attempt}/{attempts}...")
+        if check(version):
+            return True
+        if attempt < attempts:
+            sleep(interval)
+    return False
+
+
+def _install_promotion_signal_handlers():
+    def _raise(signum, _frame):
+        raise PromotionInterrupted(signum)
+
+    previous = {}
+    for sig in (signal.SIGTERM,):
+        try:
+            previous[sig] = signal.signal(sig, _raise)
+        except (ValueError, OSError):
+            pass  # not in the main thread / unsupported platform
+
+    def _restore():
+        for sig, handler in previous.items():
+            try:
+                signal.signal(sig, handler)
+            except (ValueError, OSError):
+                pass
+
+    return _restore
+
+
+def promote(
+    client,
+    *,
+    version: str,
+    before_bytes: bytes,
+    candidate_bytes: bytes,
+    smoke_attempts: int = 14,
+    smoke_interval: int = 30,
+    sleep=time.sleep,
+    log=print,
+    manage_signals: bool = True,
+) -> None:
+    """Atomically publish ``candidate`` as the production catalog and smoke it,
+    rolling back to ``before`` on failure. Faithful port of the bash step; each
+    guard below maps 1:1 to a bash guard.
+    """
+    _version_key(version)  # reject an impossible version before touching R2
+    before = _load_json_bytes(before_bytes)
+    previous_version = _latest_version(before)
+
+    # Compare-before-swap: refuse to clobber a catalog another workflow changed
+    # while this finalizer was reading and hashing the candidate fleet.
+    prepublish = client.fetch_catalog()
+    if prepublish is None:
+        raise PromotionError("catalog.json absent at publish time; refusing to promote")
+    if prepublish != before_bytes:
+        raise PromotionError("catalog.json changed during finalization; refusing to clobber it")
+
+    # Durable operator-recovery copies outside the immutable release prefix. The
+    # in-process rollback handles normal failures; these survive runner loss and
+    # are what post-finalize `recover` keys off of.
+    client.put_backup(f"catalog-before-{version}.json", before_bytes)
+    client.put_backup(f"catalog-candidate-{version}.json", candidate_bytes)
+
+    def _rollback() -> None:
+        log("::error::Restoring the exact previous catalog after failed promotion")
+        live = client.fetch_catalog()
+        if live != candidate_bytes:
+            raise PromotionError(
+                "Live catalog no longer equals this candidate; refusing rollback clobber"
+            )
+        client.publish_catalog(before_bytes)
+        readback = client.fetch_catalog()
+        if readback != before_bytes:
+            raise PromotionError("rollback readback did not equal the previous catalog")
+        # The worker isolate-caches catalog.json for up to CATALOG_CACHE_TTL;
+        # confirm the prior version is served again before claiming rollback.
+        if not _confirm_serving(
+            client.smoke, previous_version,
+            attempts=smoke_attempts, interval=smoke_interval,
+            sleep=sleep, log=log, label="Rollback smoke",
+        ):
+            raise PromotionError(
+                f"R2 rolled back but production did not confirm {previous_version}"
+            )
+        log(f"Rollback confirmed: production serves {previous_version}.")
+
+    published = False
+    restore_signals = _install_promotion_signal_handlers() if manage_signals else None
+    try:
+        log("Publishing catalog.json once after all family verification...")
+        # Treat publication as possibly successful before invoking the client:
+        # a connection can fail after R2 accepted the write.
+        published = True
+        client.publish_catalog(candidate_bytes)
+        if not _confirm_serving(
+            client.smoke, version,
+            attempts=smoke_attempts, interval=smoke_interval,
+            sleep=sleep, log=log, label="Production smoke",
+        ):
+            raise PromotionError("Production smoke failed")
+        published = False
+        log(f"Production health, search, reverse, and ID all serve {version}.")
+    except BaseException:
+        if published:
+            try:
+                _rollback()
+            except BaseException as rollback_error:  # noqa: BLE001
+                log(
+                    "::error::Automatic catalog rollback needs operator attention: "
+                    f"{rollback_error}"
+                )
+        raise
+    finally:
+        if restore_signals is not None:
+            restore_signals()
+
+
+def recover(
+    client,
+    *,
+    version: str,
+    health_attempts: int = 14,
+    health_interval: int = 30,
+    sleep=time.sleep,
+    log=print,
+) -> None:
+    """Reconcile the catalog after a promotion that a hard runner loss cut off
+    between publish and smoke. Uses the durable before/candidate pair and the
+    same compare-before-swap refusal guard. Faithful port of the bash step.
+    """
+    _version_key(version)
+    before_name = f"catalog-before-{version}.json"
+    candidate_name = f"catalog-candidate-{version}.json"
+
+    if not client.backup_exists(candidate_name):
+        log("Promotion never reached durable candidate publication; nothing to recover.")
+        return
+
+    before_bytes = client.get_backup(before_name)
+    candidate_bytes = client.get_backup(candidate_name)
+    live = client.fetch_catalog()
+    if live is None:
+        raise RecoveryError("live catalog absent during recovery; refusing to proceed")
+
+    if live == before_bytes:
+        log("Previous catalog is already restored.")
+    elif live == candidate_bytes:
+        client.publish_catalog(before_bytes)
+        restored = client.fetch_catalog()
+        if restored != before_bytes:
+            raise RecoveryError("restore readback did not equal the previous catalog")
+    else:
+        raise RecoveryError(
+            "Live catalog is neither the interrupted candidate nor its predecessor; "
+            "refusing to clobber it"
+        )
+
+    previous_version = _latest_version(_load_json_bytes(before_bytes))
+    for attempt in range(1, health_attempts + 1):
+        if client.health(previous_version, cache_buster=f"recovery={version}-{attempt}"):
+            log(f"Recovery confirmed: production serves {previous_version}.")
+            return
+        if attempt < health_attempts:
+            sleep(health_interval)
+    raise RecoveryError("Catalog restored in R2 but cached production did not recover")
+
+
+def _build_client_from_env(args) -> R2Client:
+    account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
+    endpoint = (
+        getattr(args, "endpoint", None)
+        or os.environ.get("R2_ENDPOINT")
+        or (f"https://{account}.r2.cloudflarestorage.com" if account else None)
+    )
+    if not endpoint:
+        raise SystemExit(
+            "::error::R2 endpoint unknown: set CLOUDFLARE_ACCOUNT_ID or pass --endpoint"
+        )
+    base_url = getattr(args, "base_url", None) or os.environ.get(
+        "GEOCODER_BASE_URL", BASE_URL_DEFAULT
+    )
+    bucket = getattr(args, "bucket", None) or os.environ.get("R2_BUCKET", BUCKET)
+    # Let r2_catalog_fetch.sh + aws use the R2 S3 credentials when the caller
+    # only exported the R2_* names.
+    for aws_name, r2_name in (
+        ("AWS_ACCESS_KEY_ID", "R2_ACCESS_KEY_ID"),
+        ("AWS_SECRET_ACCESS_KEY", "R2_SECRET_ACCESS_KEY"),
+    ):
+        if not os.environ.get(aws_name) and os.environ.get(r2_name):
+            os.environ[aws_name] = os.environ[r2_name]
+    return R2Client(
+        bucket=bucket,
+        endpoint=endpoint,
+        base_url=base_url,
+        repo_root=Path(__file__).resolve().parent.parent,
+    )
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -392,7 +837,42 @@ def main() -> None:
     catalog.add_argument("--version", required=True)
     catalog.add_argument("--output", type=Path, required=True)
 
+    promote_p = subparsers.add_parser("promote")
+    promote_p.add_argument("--version", required=True)
+    promote_p.add_argument("--before", type=Path, required=True)
+    promote_p.add_argument("--candidate", type=Path, required=True)
+    promote_p.add_argument("--base-url", default=None)
+    promote_p.add_argument("--endpoint", default=None)
+    promote_p.add_argument("--bucket", default=None)
+
+    recover_p = subparsers.add_parser("recover")
+    recover_p.add_argument("--version", required=True)
+    recover_p.add_argument("--base-url", default=None)
+    recover_p.add_argument("--endpoint", default=None)
+    recover_p.add_argument("--bucket", default=None)
+
     args = parser.parse_args()
+    if args.command == "promote":
+        client = _build_client_from_env(args)
+        try:
+            promote(
+                client,
+                version=args.version,
+                before_bytes=args.before.read_bytes(),
+                candidate_bytes=args.candidate.read_bytes(),
+            )
+        except (PromotionError, RecoveryError) as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            sys.exit(1)
+        return
+    if args.command == "recover":
+        client = _build_client_from_env(args)
+        try:
+            recover(client, version=args.version)
+        except RecoveryError as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            sys.exit(1)
+        return
     if args.command == "verify":
         manifest = verify_release(
             version=args.version,

@@ -7,6 +7,27 @@ on:
   workflow_call:
 
 jobs:
+  actionlint:
+    name: Actionlint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install actionlint
+        env:
+          ACTIONLINT_VERSION: "1.7.7"
+        run: |
+          curl -fsSL -o download-actionlint.bash \
+            "https://raw.githubusercontent.com/rhysd/actionlint/v${ACTIONLINT_VERSION}/scripts/download-actionlint.bash"
+          bash download-actionlint.bash "${ACTIONLINT_VERSION}"
+      - name: Run actionlint
+        # Native actionlint checks (workflow syntax, ${{ }} expressions, job
+        # needs-graph, action inputs, matrix) must pass. The shellcheck and
+        # pyflakes integrations are disabled for now: the existing workflows
+        # carry ~70 pre-existing shellcheck quoting findings (mostly SC2086)
+        # that need a dedicated cleanup pass. Re-enable by dropping the empty
+        # -shellcheck=/-pyflakes= flags once those are fixed.
+        run: ./actionlint -color -shellcheck= -pyflakes=
+
   rust:
     name: Rust (Crates)
     runs-on: ubuntu-latest

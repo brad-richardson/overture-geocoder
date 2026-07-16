@@ -984,157 +984,18 @@ jobs:
       - name: Atomically promote and smoke production
         if: needs.prep.outputs.promote == 'true'
         run: |
-          VERSION="${{ needs.prep.outputs.version }}"
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BASE_URL="https://geocoder.bradr.dev"
 
-          publish_catalog() {
-            local source="$1"
-            local attempt
-            for attempt in 1 2 3; do
-              if aws s3 cp "$source" "s3://geocoder-shards/catalog.json" \
-                --endpoint-url "$ENDPOINT" --region auto \
-                --content-type application/json --only-show-errors; then
-                return 0
-              fi
-              sleep $((attempt * 10))
-            done
-            echo "::error::Failed to publish catalog from ${source} after 3 attempts"
-            return 1
-          }
-
-          smoke_once() {
-            local expected_version="$1"
-            local health search reverse gers_id id_json
-            health=$(curl -fsS --max-time 20 "${BASE_URL}/health?rebuild=${expected_version}") || return 1
-            echo "$health" | jq -e --arg v "$expected_version" \
-              '.status == "ok" and .version == $v' >/dev/null || return 1
-
-            search=$(curl -fsS --max-time 20 \
-              "${BASE_URL}/search?q=boston&limit=1&rebuild=${expected_version}") || return 1
-            echo "$search" | jq -e --arg v "$expected_version" \
-              '.data_version == $v and (.results | length) > 0' >/dev/null || return 1
-            gers_id=$(echo "$search" | jq -er '.results[0].gers_id') || return 1
-
-            reverse=$(curl -fsS --max-time 20 \
-              "${BASE_URL}/reverse?lat=42.36&lon=-71.06&rebuild=${expected_version}") || return 1
-            echo "$reverse" | jq -e --arg v "$expected_version" \
-              '.data_version == $v and (.gers_id | type == "string")' >/dev/null || return 1
-
-            id_json=$(curl -fsS --max-time 30 "${BASE_URL}/id/${gers_id}?rebuild=${expected_version}") || return 1
-            echo "$id_json" | jq -e --arg v "$expected_version" --arg id "$gers_id" \
-              '.data_version == $v and .id == $id' >/dev/null || return 1
-          }
-
-          rollback_candidate() {
-            echo "::error::Restoring the exact previous catalog after failed promotion"
-            ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-live.json || return 1
-            if ! cmp /tmp/rebuild-finalize/catalog-next.json \
-              /tmp/rebuild-finalize/catalog-live.json; then
-              echo "::error::Live catalog no longer equals this candidate; refusing rollback clobber"
-              return 1
-            fi
-            publish_catalog /tmp/rebuild-finalize/catalog-before.json || return 1
-            ./scripts/r2_catalog_fetch.sh \
-              /tmp/rebuild-finalize/catalog-rollback-readback.json || return 1
-            cmp /tmp/rebuild-finalize/catalog-before.json \
-              /tmp/rebuild-finalize/catalog-rollback-readback.json || return 1
-
-            # Worker isolates cache catalog.json for up to 300 seconds. Confirm
-            # the prior version is served again before claiming rollback.
-            for attempt in $(seq 1 14); do
-              echo "Rollback smoke attempt ${attempt}/14..."
-              if smoke_once "$PREVIOUS_VERSION"; then
-                echo "Rollback confirmed: production serves ${PREVIOUS_VERSION}."
-                return 0
-              fi
-              sleep 30
-            done
-            echo "::error::R2 rolled back but production did not confirm ${PREVIOUS_VERSION}"
-            return 1
-          }
-
-          rollback_on_exit() {
-            local status=$?
-            trap - EXIT INT TERM
-            if [ "$PUBLISHED" = "true" ]; then
-              set +e
-              rollback_candidate
-              local rollback_status=$?
-              set -e
-              if [ "$rollback_status" -ne 0 ]; then
-                echo "::error::Automatic catalog rollback needs operator attention"
-              fi
-            fi
-            exit "$status"
-          }
-
-          # Do not overwrite a catalog changed by another maintenance workflow
-          # while this finalizer was reading and hashing the candidate fleet.
-          ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-prepublish.json
-          test -s /tmp/rebuild-finalize/catalog-prepublish.json
-          if ! cmp /tmp/rebuild-finalize/catalog-before.json \
-            /tmp/rebuild-finalize/catalog-prepublish.json; then
-            echo "::error::catalog.json changed during finalization; refusing to clobber it"
-            exit 1
-          fi
-
-          PREVIOUS_VERSION=$(jq -er \
-            '[.links[] | select(.rel == "child" and .latest == true)][0].href
-             | ltrimstr("./") | split("/")[0]' \
-            /tmp/rebuild-finalize/catalog-before.json)
-
-          # Keep a durable operator-recovery copy outside the immutable release
-          # prefix. The trap handles normal failures; this survives runner loss.
-          aws s3 cp /tmp/rebuild-finalize/catalog-before.json \
-            "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
-            --endpoint-url "$ENDPOINT" --region auto \
-            --content-type application/json --only-show-errors
-          aws s3 cp "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
-            /tmp/rebuild-finalize/catalog-backup-readback.json \
-            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
-          cmp /tmp/rebuild-finalize/catalog-before.json \
-            /tmp/rebuild-finalize/catalog-backup-readback.json
-          aws s3 cp /tmp/rebuild-finalize/catalog-next.json \
-            "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
-            --endpoint-url "$ENDPOINT" --region auto \
-            --content-type application/json --only-show-errors
-          aws s3 cp "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
-            /tmp/rebuild-finalize/catalog-candidate-backup-readback.json \
-            --endpoint-url "$ENDPOINT" --region auto --only-show-errors
-          cmp /tmp/rebuild-finalize/catalog-next.json \
-            /tmp/rebuild-finalize/catalog-candidate-backup-readback.json
-
-          echo "Publishing catalog.json once after all family verification..."
-          PUBLISHED=false
-          trap rollback_on_exit EXIT
-          trap 'exit 130' INT
-          trap 'exit 143' TERM
-          # Treat publication as possibly successful before invoking the CLI:
-          # a connection can fail after R2 accepted the write.
-          PUBLISHED=true
-          publish_catalog /tmp/rebuild-finalize/catalog-next.json
-
-          PASSED=false
-          for attempt in $(seq 1 14); do
-            echo "Production smoke attempt ${attempt}/14..."
-            if smoke_once "$VERSION"; then
-              PASSED=true
-              break
-            fi
-            sleep 30
-          done
-
-          if [ "$PASSED" != "true" ]; then
-            echo "::error::Production smoke failed"
-            exit 1
-          fi
-
-          PUBLISHED=false
-          trap - EXIT INT TERM
-          echo "Production health, search, reverse, and ID all serve ${VERSION}."
+          # Compare-before-swap catalog publish, durable before/candidate
+          # backups, one publish with retries, production health/search/reverse/
+          # ID smoke, and rollback on smoke failure now live in the unit-tested
+          # promote path so those guards are not pinned only in bash. This exits
+          # non-zero (after attempting rollback) if promotion fails.
+          python scripts/finalize_rebuild.py promote \
+            --version "${{ needs.prep.outputs.version }}" \
+            --before /tmp/rebuild-finalize/catalog-before.json \
+            --candidate /tmp/rebuild-finalize/catalog-next.json
 
   # EXIT traps cannot run after a hard runner loss. This independent job uses
   # the durable before/candidate pair and the same compare-before-swap rule.
@@ -1154,56 +1015,13 @@ jobs:
         run: |
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
-          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
-          BASE_URL="https://geocoder.bradr.dev"
 
-          COUNT=$(aws s3api list-objects-v2 \
-            --bucket geocoder-shards \
-            --prefix "backups/catalog-candidate-${VERSION}.json" \
-            --max-keys 1 --query 'KeyCount' --output text \
-            --endpoint-url "$ENDPOINT" --region auto)
-          if [ "$COUNT" = "0" ]; then
-            echo "Promotion never reached durable candidate publication; nothing to recover."
-            exit 0
-          fi
-
-          aws s3 cp "s3://geocoder-shards/backups/catalog-before-${VERSION}.json" \
-            /tmp/catalog-before.json --endpoint-url "$ENDPOINT" \
-            --region auto --only-show-errors
-          aws s3 cp "s3://geocoder-shards/backups/catalog-candidate-${VERSION}.json" \
-            /tmp/catalog-candidate.json --endpoint-url "$ENDPOINT" \
-            --region auto --only-show-errors
-          ./scripts/r2_catalog_fetch.sh /tmp/catalog-live.json
-
-          if cmp /tmp/catalog-before.json /tmp/catalog-live.json; then
-            echo "Previous catalog is already restored."
-          elif cmp /tmp/catalog-candidate.json /tmp/catalog-live.json; then
-            aws s3 cp /tmp/catalog-before.json \
-              "s3://geocoder-shards/catalog.json" \
-              --endpoint-url "$ENDPOINT" --region auto \
-              --content-type application/json --only-show-errors
-            ./scripts/r2_catalog_fetch.sh /tmp/catalog-restored.json
-            cmp /tmp/catalog-before.json /tmp/catalog-restored.json
-          else
-            echo "::error::Live catalog is neither the interrupted candidate nor its predecessor; refusing to clobber it"
-            exit 1
-          fi
-
-          PREVIOUS_VERSION=$(jq -er \
-            '[.links[] | select(.rel == "child" and .latest == true)][0].href
-             | ltrimstr("./") | split("/")[0]' /tmp/catalog-before.json)
-          for attempt in $(seq 1 14); do
-            HEALTH=$(curl -fsS --max-time 20 \
-              "${BASE_URL}/health?recovery=${VERSION}-${attempt}") || true
-            if echo "$HEALTH" | jq -e --arg version "$PREVIOUS_VERSION" \
-              '.status == "ok" and .version == $version' >/dev/null; then
-              echo "Recovery confirmed: production serves ${PREVIOUS_VERSION}."
-              exit 0
-            fi
-            sleep 30
-          done
-          echo "::error::Catalog restored in R2 but cached production did not recover"
-          exit 1
+          # Crash-window reconciliation using the durable before/candidate pair
+          # and the same compare-before-swap refusal guard. EXIT traps cannot run
+          # after a hard runner loss, so this independent job restores the prior
+          # catalog and confirms cached production recovered. No-op when the
+          # promotion never reached durable candidate publication.
+          python3 scripts/finalize_rebuild.py recover --version "$VERSION"
 
       - name: Prune only after successful promotion and smoke
         if: >-
@@ -1212,7 +1030,11 @@ jobs:
           github.event_name == 'workflow_dispatch' &&
           github.event.inputs.cleanup_old_versions == 'true'
         run: |
-          KEEP_VERSIONS=3
+          # Retain at least the worker's fallback depth. The worker probes up to
+          # MAX_VERSION_ATTEMPTS (4, crates/geocoder-worker/src/stac/catalog.rs)
+          # catalog children when the latest version is unreachable, so keeping
+          # fewer than 4 could strand a fallback attempt on a pruned prefix.
+          KEEP_VERSIONS=4
           CURRENT="${{ needs.prep.outputs.version }}"
           export AWS_ACCESS_KEY_ID="$R2_ACCESS_KEY_ID"
           export AWS_SECRET_ACCESS_KEY="$R2_SECRET_ACCESS_KEY"
@@ -1220,44 +1042,16 @@ jobs:
 
           ./scripts/r2_catalog_fetch.sh /tmp/rebuild-finalize/catalog-promoted.json
           test -s /tmp/rebuild-finalize/catalog-promoted.json
-          python3 - "$KEEP_VERSIONS" "$CURRENT" <<'PY'
-          import json
-          import re
-          import sys
 
-          keep_count = int(sys.argv[1])
-          current = sys.argv[2]
-          path = "/tmp/rebuild-finalize/catalog-promoted.json"
-          with open(path) as src:
-              catalog = json.load(src)
-          version_re = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
-          children = []
-          static = []
-          for link in catalog.get("links", []):
-              if link.get("rel") != "child":
-                  static.append(link)
-                  continue
-              version = link["href"].strip("./").split("/", 1)[0]
-              if not version_re.fullmatch(version):
-                  raise RuntimeError(f"invalid catalog version {version!r}")
-              date, suffix = version.rsplit(".", 1)
-              key = tuple(map(int, date.split("-"))) + (int(suffix),)
-              children.append((key, version, link))
-          children.sort(reverse=True)
-          if not children or children[0][1] != current:
-              raise RuntimeError("current build is not catalog latest")
-          if len(children) < keep_count:
-              raise RuntimeError("refusing to prune below retention floor")
-          kept = children[:keep_count]
-          dropped = children[keep_count:]
-          catalog["links"] = static + [link for _, _, link in kept]
-          with open("/tmp/rebuild-finalize/catalog-pruned.json", "w") as dst:
-              json.dump(catalog, dst, indent=2)
-              dst.write("\n")
-          with open("/tmp/rebuild-finalize/prune-versions.txt", "w") as dst:
-              for _, version, _ in dropped:
-                  dst.write(version + "\n")
-          PY
+          # Retention invariants (current must be catalog latest, never fall
+          # below the floor) live in the tested prune_catalog.py, shared with the
+          # R2 cleanup workflow. It writes the pruned catalog and the exact list
+          # of versions to delete; the just-promoted CURRENT is always kept.
+          python3 scripts/prune_catalog.py retain \
+            --catalog /tmp/rebuild-finalize/catalog-promoted.json \
+            --keep "$KEEP_VERSIONS" --current "$CURRENT" \
+            --output /tmp/rebuild-finalize/catalog-pruned.json \
+            --dropped /tmp/rebuild-finalize/prune-versions.txt
 
           if [ ! -s /tmp/rebuild-finalize/prune-versions.txt ]; then
             echo "Nothing to prune."
@@ -1270,6 +1064,14 @@ jobs:
             "s3://geocoder-shards/catalog.json" \
             --endpoint-url "$ENDPOINT" --region auto \
             --content-type application/json --only-show-errors
+
+          # A worker can still hold the pre-prune catalog cached for up to
+          # CATALOG_CACHE_TTL (300s, crates/geocoder-worker/src/stac/cache.rs)
+          # and fall back onto one of the versions we are about to delete. Wait
+          # out that TTL (300s + margin) after publishing the pruned catalog and
+          # before removing any objects.
+          sleep 330
+
           while read -r VERSION; do
             test "$VERSION" != "$CURRENT"
             echo "Deleting retired version ${VERSION}/"
