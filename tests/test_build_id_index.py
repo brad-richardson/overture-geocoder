@@ -5,6 +5,7 @@ marker semantics of the main pipeline (patch runs must never read or write
 run-level markers; explicit metadata runs must regenerate).
 """
 
+import json
 import sys
 import threading
 import time
@@ -240,6 +241,19 @@ def test_shard_set_schema_reads_are_batched(monkeypatch):
         def fetchall(self):
             return self.rows
 
+    def rows_for(path):
+        # Emit each file's columns with id deliberately last and the UUID
+        # type_length only on the id row. A positional reader (first row = id,
+        # first row carries the length) would misread the length as None and
+        # reject a valid shard, so this pins order-independent classification.
+        reordered = (
+            bii.EXPECTED_SHARD_COLUMNS[1:] + bii.EXPECTED_SHARD_COLUMNS[:1]
+        )
+        return [
+            (path, name, physical_type, "16" if name == "id" else None)
+            for name, physical_type in reordered
+        ]
+
     class Connection:
         def __init__(self):
             self.batches = []
@@ -247,13 +261,10 @@ def test_shard_set_schema_reads_are_batched(monkeypatch):
         def execute(self, _query, params):
             batch = params[0]
             self.batches.append(list(batch))
-            return Result([
-                (path, name, physical_type, "16" if index == 0 else None)
-                for path in batch
-                for index, (name, physical_type) in enumerate(
-                    bii.EXPECTED_SHARD_COLUMNS
-                )
-            ])
+            rows = []
+            for path in batch:
+                rows.extend(rows_for(path))
+            return Result(rows)
 
     monkeypatch.setattr(bii, "SHARD_SCHEMA_BATCH_SIZE", 2)
     con = Connection()
@@ -716,6 +727,31 @@ def test_release_stage_finalizer_rejects_extra_marker(monkeypatch):
     write.assert_not_called()
 
 
+def test_release_stage_finalizer_rejects_marker_without_staged_data(monkeypatch):
+    class Connection:
+        def close(self):
+            pass
+
+    def fake_glob(_con, pattern):
+        # Marker is present but its partitioned/legacy staged files are gone.
+        if pattern.endswith("/_SUCCESS"):
+            return ["s3://b/v/staging/id-release-addresses-address/_SUCCESS"]
+        return []
+
+    write = mock.Mock()
+    monkeypatch.setattr(
+        bii, "_discover_release_types", lambda *_: [("addresses", "address")]
+    )
+    monkeypatch.setattr(bii, "_r2_con", lambda *_: Connection())
+    monkeypatch.setattr(bii, "_glob_files", fake_glob)
+    monkeypatch.setattr(bii, "_read_staging_marker", mock.Mock())
+    monkeypatch.setattr(bii, "_write_staging_marker", write)
+
+    with pytest.raises(RuntimeError, match="no staged files"):
+        bii.phase_finalize_release_r2("release", {"bucket": "b"}, "v")
+    write.assert_not_called()
+
+
 def test_release_source_inventory_requires_two_identical_listings(monkeypatch):
     monkeypatch.setattr(bii, "TYPE_THEME_MAP", {"place": "places"})
     listing = mock.Mock(
@@ -1057,6 +1093,8 @@ def test_dedicated_release_stage_uses_eight_threads_and_ten_gb(monkeypatch):
         bii, "_run_with_heartbeat", lambda _label, operation, **_kwargs: operation()
     )
 
+    # Dedicated path passes no tuning overrides: it must take the full-runner
+    # defaults (8 threads / 10 GB).
     bii._partition_release_type(
         "addresses",
         "address",
@@ -1067,10 +1105,57 @@ def test_dedicated_release_stage_uses_eight_threads_and_ten_gb(monkeypatch):
     )
 
     sql = "\n".join(con.queries)
+    assert f"SET threads = {bii.RELEASE_STAGE_THREADS}" in sql
+    assert f"SET memory_limit = '{bii.RELEASE_STAGE_MEMORY}'" in sql
     assert "SET threads = 8" in sql
     assert "SET memory_limit = '10GB'" in sql
     assert "SET preserve_insertion_order = false" in sql
     assert con.closed
+
+
+def test_concurrent_release_stage_stays_within_host_memory_budget(monkeypatch):
+    # The concurrent path shares one runner: its worst-case footprint is
+    # max_workers x per-connection memory. That product must stay under the
+    # 16 GB runner (~12 GB, leaving headroom for Python and the OS) or the
+    # pool can host-OOM the whole job.
+    def gigabytes(value):
+        assert value.endswith("GB")
+        return int(value[:-2])
+
+    budget = (
+        bii.CONCURRENT_RELEASE_STAGE_MAX_WORKERS
+        * gigabytes(bii.CONCURRENT_RELEASE_STAGE_MEMORY)
+    )
+    assert budget <= 12
+
+    calls = []
+
+    def fake_partition(theme, type_name, *_args, memory_limit=None, threads=None,
+                       **_kwargs):
+        calls.append((theme, type_name, memory_limit, threads))
+        return (theme, type_name)
+
+    types = [
+        ("addresses", "address"),
+        ("base", "water"),
+        ("base", "land"),
+        ("places", "place"),
+    ]
+    monkeypatch.setattr(bii, "_discover_release_types", lambda *_: types)
+    monkeypatch.setattr(bii, "_ensure_httpfs_installed", lambda *_: None)
+    monkeypatch.setattr(bii, "phase_finalize_release_r2", lambda *_: None)
+    monkeypatch.setattr(bii, "_partition_release_type", fake_partition)
+
+    bii.phase_partition_release_r2(3, "2026-06-17.0", {"bucket": "b"}, "v")
+
+    assert len(calls) == len(types)
+    # Every worker connection is handed the small concurrent tuning, never the
+    # dedicated 10 GB / 8-thread budget.
+    assert all(
+        memory_limit == bii.CONCURRENT_RELEASE_STAGE_MEMORY
+        and threads == bii.CONCURRENT_RELEASE_STAGE_THREADS
+        for _, _, memory_limit, threads in calls
+    )
 
 
 def test_patch_release_discovery_distinguishes_empty_from_error(monkeypatch):
@@ -1096,6 +1181,86 @@ def test_patch_bucketed_release_downloads_use_unique_temp_paths():
     ]
     assert len(set(paths)) == len(remote_files)
     assert all("id-release-addresses-address" in path for path in paths)
+
+
+class _CatalogConnection:
+    """Minimal DuckDB stand-in returning one catalog.json body."""
+
+    def __init__(self, catalog):
+        self._catalog = catalog
+
+    def execute(self, _query, *_args):
+        return self
+
+    def fetchone(self):
+        return (json.dumps(self._catalog),)
+
+
+def test_patch_refuses_when_release_manifest_exists(monkeypatch):
+    monkeypatch.setattr(
+        pfs,
+        "_glob_files",
+        lambda _con, pattern: (
+            ["s3://b/2026-07-13.0/release-manifest.json"]
+            if "release-manifest" in pattern
+            else []
+        ),
+    )
+    with pytest.raises(SystemExit):
+        pfs._assert_target_version_unpublished(
+            object(), "b", "2026-07-13.0", force_unsafe=False
+        )
+
+
+def test_patch_refuses_when_catalog_references_version(monkeypatch):
+    monkeypatch.setattr(
+        pfs,
+        "_glob_files",
+        lambda _con, pattern: (
+            [] if "release-manifest" in pattern else ["s3://b/catalog.json"]
+        ),
+    )
+    con = _CatalogConnection(
+        {"links": [{"rel": "child", "href": "./2026-07-13.0/collection.json"}]}
+    )
+    with pytest.raises(SystemExit):
+        pfs._assert_target_version_unpublished(
+            con, "b", "2026-07-13.0", force_unsafe=False
+        )
+
+
+def test_patch_allows_unpublished_version(monkeypatch):
+    monkeypatch.setattr(
+        pfs,
+        "_glob_files",
+        lambda _con, pattern: (
+            [] if "release-manifest" in pattern else ["s3://b/catalog.json"]
+        ),
+    )
+    con = _CatalogConnection(
+        {"links": [{"rel": "child", "href": "./2026-07-02.0/collection.json"}]}
+    )
+    # A version absent from the catalog and without a manifest is safe.
+    pfs._assert_target_version_unpublished(
+        con, "b", "2026-07-13.0", force_unsafe=False
+    )
+
+
+def test_patch_force_unsafe_overrides_published(monkeypatch, capsys):
+    monkeypatch.setattr(
+        pfs,
+        "_glob_files",
+        lambda _con, pattern: (
+            ["s3://b/2026-07-13.0/release-manifest.json"]
+            if "release-manifest" in pattern
+            else []
+        ),
+    )
+    # --force-unsafe proceeds but must print a loud warning.
+    pfs._assert_target_version_unpublished(
+        object(), "b", "2026-07-13.0", force_unsafe=True
+    )
+    assert "WARNING" in capsys.readouterr().out
 
 
 def test_gen_collection_metadata_never_upgrades_v1_schema():
@@ -1166,6 +1331,33 @@ def test_phase_metadata_preserves_exact_sizes_from_metadata_discovery(monkeypatc
     assert collection["items"]["000"]["size_bytes"] == 1234
     assert collection["summaries"]["total_size_bytes"] == 1234
     assert collection["summaries"]["total_records"] == 7
+
+
+def test_phase_metadata_records_content_md5_when_present(monkeypatch):
+    uploaded = {}
+
+    def capture(path, key):
+        uploaded[key] = __import__("json").loads(path.read_text())
+        return None
+
+    monkeypatch.setattr(bii, "_detect_output_shard_format", lambda *_: 1)
+    monkeypatch.setattr(bii, "_upload_to_r2", capture)
+    bii.phase_metadata(
+        [
+            ("000", 1, 32, None, "a" * 64, "b" * 32),
+            ("001", 1, 32, None, "c" * 64, None),
+        ],
+        3,
+        "v",
+        "2026-06-17.0",
+        {"bucket": "test"},
+    )
+
+    items = uploaded["test/v/id-collection.json"]["items"]
+    # Present MD5 flows into the item; a missing one is simply omitted so
+    # older markers stay backward compatible.
+    assert items["000"]["content_md5"] == "b" * 32
+    assert "content_md5" not in items["001"]
 
 
 def test_build_marker_shard_inventory_validates_sha(monkeypatch):
@@ -1364,9 +1556,9 @@ def pipeline(monkeypatch):
             ),
         ),
         ("_validate_build_marker_dictionary_sha", None),
-        ("phase_build_r2", [("001", 10, 360, None, "a" * 64)]),
+        ("phase_build_r2", [("001", 10, 360, None, "a" * 64, "b" * 32)]),
         ("phase_metadata", ({"001": {"record_count": 10}}, 10, [], 3)),
-        ("_gather_shard_info_from_r2", [("001", 10, 360, None, "a" * 64)]),
+        ("_gather_shard_info_from_r2", [("001", 10, 360, None, "a" * 64, "b" * 32)]),
     ]:
         m = mock.Mock(return_value=ret)
         monkeypatch.setattr(bii, name, m)
@@ -1436,17 +1628,76 @@ def test_legacy_marker_never_skips_v3_stage_or_build(pipeline):
     mocks["phase_build_r2"].assert_called_once()
 
 
-def test_patch_build_bypasses_markers_and_rebuilds(pipeline):
+def test_patch_build_updates_containing_range_marker(pipeline, monkeypatch):
     run, mocks = pipeline
-    # Even with a stale bare "build" marker present, a patch build must run
+    # Even with a stale bare "build" marker present, a patch build must run.
     mocks["_read_staging_marker"].return_value = {"status": "complete"}
+    stale_shards = {
+        "001": {"record_count": 1, "size_bytes": 5, "sha256": "c" * 64},
+    }
+    monkeypatch.setattr(
+        bii,
+        "_read_current_build_markers",
+        lambda *_: [
+            (
+                "s3://b/v/staging/build-000-3ff/_SUCCESS",
+                {
+                    "dictionary_sha256": "abc",
+                    "input_inventory_set_sha256": "d" * 64,
+                    "shards": stale_shards,
+                },
+            )
+        ],
+    )
     run(make_args(phase="build", prefixes="001"))
 
+    # No suffix-less "build" marker is consulted or written.
     assert "build" not in read_marker_keys(mocks)
+    assert "build" not in written_marker_keys(mocks)
     mocks["phase_build_r2"].assert_called_once()
     assert mocks["phase_build_r2"].call_args.kwargs["prefixes"] == ["001"]
-    # No bare "build" marker: it would block future patches and be
-    # double-counted by _sum_build_marker_records' build*/_SUCCESS glob
+
+    # The rebuilt prefix's entry is refreshed inside its containing range
+    # marker (fresh size/sha/content_md5), and only that marker is rewritten.
+    assert written_marker_keys(mocks) == ["build-000-3ff"]
+    extra = mocks["_write_staging_marker"].call_args.kwargs["extra"]
+    assert extra["shards"]["001"] == {
+        "record_count": 10,
+        "size_bytes": 360,
+        "sha256": "a" * 64,
+        "content_md5": "b" * 32,
+    }
+    assert extra["records"] == 10
+    assert extra["dictionary_sha256"] == "abc"
+
+
+def test_patch_build_without_containing_marker_fails(pipeline, monkeypatch):
+    run, mocks = pipeline
+    mocks["_read_staging_marker"].return_value = {"status": "complete"}
+    # The only range marker covers c00-fff, so patched prefix 001 has no home.
+    monkeypatch.setattr(
+        bii,
+        "_read_current_build_markers",
+        lambda *_: [
+            (
+                "s3://b/v/staging/build-c00-fff/_SUCCESS",
+                {
+                    "dictionary_sha256": "abc",
+                    "input_inventory_set_sha256": "d" * 64,
+                    "shards": {
+                        "c00": {
+                            "record_count": 1,
+                            "size_bytes": 5,
+                            "sha256": "c" * 64,
+                        }
+                    },
+                },
+            )
+        ],
+    )
+    with pytest.raises(RuntimeError, match="no containing build-range marker"):
+        run(make_args(phase="build", prefixes="001"))
+    # A failed patch must not rewrite the unrelated range marker.
     assert written_marker_keys(mocks) == []
 
 
@@ -1466,6 +1717,7 @@ def test_range_build_writes_range_marker_with_records(pipeline):
                 "record_count": 10,
                 "size_bytes": 360,
                 "sha256": "a" * 64,
+                "content_md5": "b" * 32,
             }
         },
     }

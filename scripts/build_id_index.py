@@ -86,8 +86,17 @@ RELEASE_S3 = "s3://overturemaps-us-west-2/release/"
 # Release themes with IDs not in the registry
 RELEASE_THEMES = ["addresses", "base"]
 HEARTBEAT_INTERVAL_S = 5 * 60
+# Dedicated one-type-per-runner staging: a runner owns its DuckDB connection,
+# so it may take 8 threads and 10 GB.
 RELEASE_STAGE_THREADS = 8
 RELEASE_STAGE_MEMORY = "10GB"
+# Concurrent staging (all types on one 16 GB runner via a small thread pool):
+# each worker connection must fit alongside its siblings. Keep
+# CONCURRENT_RELEASE_STAGE_MAX_WORKERS * per-connection GB comfortably under
+# the runner's memory so the pool cannot host-OOM.
+CONCURRENT_RELEASE_STAGE_THREADS = 4
+CONCURRENT_RELEASE_STAGE_MEMORY = "4GB"
+CONCURRENT_RELEASE_STAGE_MAX_WORKERS = 3
 SHARD_SCHEMA_BATCH_SIZE = 256
 
 # ID-index format v3 appends compact locator IDs after the five v1 positional
@@ -427,8 +436,6 @@ def _delete_r2_keys(r2_config, keys):
     env = os.environ.copy()
     env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
     env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
-    env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
-    env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
     env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
     endpoint = f"https://{r2_config['endpoint']}"
@@ -905,7 +912,9 @@ def _clear_release_staging(r2_config, version, staging_dir):
 
 
 def _partition_release_type(theme, type_name, prefix_len, release_version,
-                            r2_config, version, limit=None, prefixes=None):
+                            r2_config, version, limit=None, prefixes=None,
+                            memory_limit=RELEASE_STAGE_MEMORY,
+                            threads=RELEASE_STAGE_THREADS):
     """Stage a single release theme/type to R2, partitioned into 16 buckets.
 
     PARTITION_BY the first hex char of the prefix: build range jobs then
@@ -940,11 +949,13 @@ def _partition_release_type(theme, type_name, prefix_len, release_version,
 
     con = _r2_con(r2_config)
     try:
-        # A dedicated Actions runner owns this connection. Eight DuckDB
-        # threads modestly oversubscribe its four vCPUs so remote Parquet/R2
-        # waits can overlap, while 10 GB leaves headroom for Python and the OS.
-        con.execute(f"SET memory_limit = '{RELEASE_STAGE_MEMORY}';")
-        con.execute(f"SET threads = {RELEASE_STAGE_THREADS};")
+        # Tuning is caller-supplied so the dedicated one-type-per-runner path
+        # can claim the whole runner (10 GB / 8 threads) while the concurrent
+        # path stays within a shared runner's memory: several connections run
+        # at once, so each takes a fraction of RAM (see
+        # CONCURRENT_RELEASE_STAGE_* and phase_partition_release_r2).
+        con.execute(f"SET memory_limit = '{memory_limit}';")
+        con.execute(f"SET threads = {threads};")
         con.execute("SET preserve_insertion_order = false;")
         con.execute("SET s3_region = 'us-west-2';")
         settings = con.execute(
@@ -1060,12 +1071,22 @@ def phase_finalize_release_r2(release_version, r2_config, version):
     """Prove the exact discovered per-type marker set before fan-in."""
     types = _discover_release_types(release_version)
     expected = {f"id-release-{theme}-{type_name}" for theme, type_name in types}
+    staging_base = f"s3://{r2_config['bucket']}/{version}/staging"
     con = _r2_con(r2_config)
     try:
         marker_paths = _retry_transient(lambda: _glob_files(
             con,
-            f"s3://{r2_config['bucket']}/{version}/staging/"
-            "id-release-*/_SUCCESS",
+            f"{staging_base}/id-release-*/_SUCCESS",
+        ))()
+        # A _SUCCESS marker is only trustworthy if its staged data still
+        # exists: a marker whose partitioned/legacy files were cleared or
+        # never landed would otherwise pass fan-in and silently drop a type.
+        staged_paths = _retry_transient(lambda: _glob_files(
+            con,
+            f"{staging_base}/id-release-*/bucket=*/*.parquet",
+        ))() + _retry_transient(lambda: _glob_files(
+            con,
+            f"{staging_base}/id-release-*/data.parquet",
         ))()
     finally:
         con.close()
@@ -1079,6 +1100,16 @@ def phase_finalize_release_r2(release_version, r2_config, version):
         raise RuntimeError(
             "Release staging marker set differs from discovered release types: "
             f"missing={missing}, extra={extra}"
+        )
+    staged_dirs = {
+        path.split("/staging/", 1)[-1].split("/", 1)[0]
+        for path in staged_paths
+    }
+    missing_data = sorted(expected - staged_dirs)
+    if missing_data:
+        raise RuntimeError(
+            "Release staging markers present but no staged files for: "
+            f"{missing_data}"
         )
 
     release_types = []
@@ -1133,16 +1164,21 @@ def phase_partition_release_r2(
     t0 = time.time()
     errors = []
 
-    # Capped at 3: each worker connection carries a 4GB DuckDB memory limit,
-    # and 6 workers on a 16GB runner plausibly host-OOMed the stage-base job
-    # (the runner died with no logs). 3 x 4GB leaves comfortable headroom.
-    with ThreadPoolExecutor(max_workers=min(len(types), 3)) as executor:
+    # All types share one runner here, so each connection is given a small
+    # memory limit and the pool is capped so the concurrent footprint
+    # (CONCURRENT_RELEASE_STAGE_MAX_WORKERS x CONCURRENT_RELEASE_STAGE_MEMORY)
+    # stays well under the runner's RAM. An earlier 6-worker/10 GB combination
+    # host-OOMed the stage-base job (the runner died with no logs).
+    max_workers = min(len(types), CONCURRENT_RELEASE_STAGE_MAX_WORKERS)
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
         futures = {}
         for theme, type_name in types:
             f = executor.submit(
                 _partition_release_type,
                 theme, type_name, prefix_len, release_version,
                 r2_config, version, limit=limit, prefixes=prefixes,
+                memory_limit=CONCURRENT_RELEASE_STAGE_MEMORY,
+                threads=CONCURRENT_RELEASE_STAGE_THREADS,
             )
             futures[f] = (theme, type_name)
 
@@ -1198,6 +1234,20 @@ def _upload_to_r2(local_path, r2_key, retries=3):
 def _file_sha256(path):
     """Return the SHA-256 of an exact output object before it is uploaded."""
     digest = hashlib.sha256()
+    with open(path, "rb") as src:
+        for chunk in iter(lambda: src.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _file_md5_hex(path):
+    """Return the hex MD5 of an output object.
+
+    R2 stores this as the single-part object ETag, so recording it lets the
+    finalizer bind each catalogued shard to the exact bytes the producer
+    uploaded (see _upload_id_shard_to_r2's Content-MD5 header).
+    """
+    digest = hashlib.md5(usedforsecurity=False)
     with open(path, "rb") as src:
         for chunk in iter(lambda: src.read(1024 * 1024), b""):
             digest.update(chunk)
@@ -1976,16 +2026,27 @@ EXPECTED_SHARD_COLUMNS = V1_SHARD_COLUMNS + [
     ("last_seen_release_id", "INT32"),
     ("registry_member", "BOOLEAN"),
 ]
+# parquet_schema row order (especially across a batched multi-file scan) is
+# not guaranteed, so the classifier compares the name->type mapping rather
+# than arrival order. Positional correctness of the written files is
+# guaranteed by the fixed COPY column list in phase_build_r2.
+V1_SHARD_SCHEMA = dict(V1_SHARD_COLUMNS)
+EXPECTED_SHARD_SCHEMA = dict(EXPECTED_SHARD_COLUMNS)
 
 
 def _shard_schema(con, path):
-    """Read ordered physical leaf columns and UUID length from one footer."""
+    """Read physical leaf columns and the UUID length from one footer.
+
+    Row order is not relied upon: the id column is found by name.
+    """
     rows = con.execute(f"""
         SELECT name, type, type_length
         FROM parquet_schema('{path}')
         WHERE type IS NOT NULL
     """).fetchall()
-    return [(r[0], str(r[1])) for r in rows], str(rows[0][2]) if rows else None
+    columns = [(r[0], str(r[1])) for r in rows]
+    uuid_len = next((str(r[2]) for r in rows if r[0] == "id"), None)
+    return columns, uuid_len
 
 
 def _classify_shard_schema(con, path):
@@ -1995,17 +2056,25 @@ def _classify_shard_schema(con, path):
 
 
 def _classify_shard_schema_values(path, actual, uuid_len):
-    """Classify already-read footer values without another remote query."""
+    """Classify already-read footer columns without another remote query.
+
+    `actual` is an unordered list of (name, physical_type) leaf columns.
+    """
     if uuid_len != "16":
         raise RuntimeError(
             f"Shard {path}: uuid column type_length {uuid_len} != 16")
-    if actual == V1_SHARD_COLUMNS:
+    schema = dict(actual)
+    if len(schema) != len(actual):
+        raise RuntimeError(
+            f"Shard {path}: duplicate column names in schema {actual}")
+    if schema == V1_SHARD_SCHEMA:
         return 1
-    if actual == EXPECTED_SHARD_COLUMNS:
+    if schema == EXPECTED_SHARD_SCHEMA:
         return ID_INDEX_FORMAT_VERSION
     raise RuntimeError(
-        f"Shard schema mismatch for {path}: got {actual}, expected "
-        f"v1={V1_SHARD_COLUMNS} or v3={EXPECTED_SHARD_COLUMNS}")
+        f"Shard schema mismatch for {path}: got {sorted(schema.items())}, "
+        f"expected v1={sorted(V1_SHARD_SCHEMA.items())} or "
+        f"v3={sorted(EXPECTED_SHARD_SCHEMA.items())}")
 
 
 def _classify_shard_set(con, paths):
@@ -2041,7 +2110,9 @@ def _classify_shard_set(con, paths):
                     f"Unexpected shard returned by schema scan: {file_name}"
                 )
             schemas[file_name].append((name, str(physical_type)))
-            if file_name not in uuid_lengths:
+            # Bind the UUID length to the id column explicitly: the first
+            # arriving row for a file is not guaranteed to be id.
+            if name == "id":
                 uuid_lengths[file_name] = str(type_length)
         for path in batch:
             if not schemas[path]:
@@ -2319,7 +2390,7 @@ def _worker_build_r2_batch(args_tuple):
                     )
 
             if not sources:
-                results.append((prefix, 0, 0, None, None))
+                results.append((prefix, 0, 0, None, None, None))
                 continue
 
             union_query = " UNION ALL ".join(sources)
@@ -2333,7 +2404,7 @@ def _worker_build_r2_batch(args_tuple):
                 f"SELECT COUNT(*) FROM ({union_query})"
             ).fetchone()[0]
             if count == 0:
-                results.append((prefix, 0, 0, None, None))
+                results.append((prefix, 0, 0, None, None, None))
                 continue
 
             # Sort locally so the producer can hash the exact bytes that are
@@ -2366,6 +2437,7 @@ def _worker_build_r2_batch(args_tuple):
                 )
                 size = os.path.getsize(local_output)
                 sha256 = _file_sha256(local_output)
+                content_md5 = _file_md5_hex(local_output)
                 err = _upload_id_shard_to_r2(
                     Path(local_output), r2_config, version, prefix
                 )
@@ -2382,7 +2454,7 @@ def _worker_build_r2_batch(args_tuple):
                         source_dictionary_count, release_dictionary_count,
                     )
                 )()
-                results.append((prefix, count, size, None, sha256))
+                results.append((prefix, count, size, None, sha256, content_md5))
             finally:
                 try:
                     os.unlink(local_output)
@@ -2400,7 +2472,7 @@ def _worker_build_r2_batch(args_tuple):
         return results
 
     except Exception as e:
-        return [(p, 0, 0, str(e), None) for p in output_prefixes]
+        return [(p, 0, 0, str(e), None, None) for p in output_prefixes]
 
 
 def _discover_release_staging_files(con, r2_config, version):
@@ -2978,7 +3050,8 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
         if size != intended["size_bytes"]:
             raise RuntimeError(f"ID shard {prefix} size differs from producer marker")
         results.append(
-            (prefix, intended["record_count"], size, None, intended["sha256"])
+            (prefix, intended["record_count"], size, None, intended["sha256"],
+             intended.get("content_md5"))
         )
 
     print(f"  Found {len(results)} shards")
@@ -3024,14 +3097,143 @@ def _build_marker_shard_inventory(r2_config, version):
                 raise RuntimeError(f"Invalid size for ID shard {prefix}")
             if not isinstance(sha256, str) or not re.fullmatch(r"[0-9a-f]{64}", sha256):
                 raise RuntimeError(f"Invalid SHA-256 for ID shard {prefix}")
-            combined[prefix] = {
+            entry = {
                 "record_count": record_count,
                 "size_bytes": size_bytes,
                 "sha256": sha256,
             }
+            # Older markers predate the content MD5; carry it only when the
+            # producer recorded a well-formed hex digest so the finalizer can
+            # bind the R2 ETag without breaking backward compatibility.
+            content_md5 = info.get("content_md5")
+            if content_md5 is not None:
+                if not isinstance(content_md5, str) or not re.fullmatch(
+                    r"[0-9a-f]{32}", content_md5
+                ):
+                    raise RuntimeError(
+                        f"Invalid content MD5 for ID shard {prefix}"
+                    )
+                entry["content_md5"] = content_md5
+            combined[prefix] = entry
     if not combined:
         raise RuntimeError("No current ID build marker shard inventory exists")
     return combined
+
+
+def _shard_marker_entry(result):
+    """Build one producer shard inventory entry, recording MD5 when present."""
+    entry = {
+        "record_count": result[1],
+        "size_bytes": result[2],
+        "sha256": result[4],
+    }
+    content_md5 = result[5] if len(result) > 5 else None
+    if content_md5:
+        entry["content_md5"] = content_md5
+    return entry
+
+
+def _build_marker_range(staging_dir):
+    """Return the inclusive (start, end) prefix ints a build marker covers.
+
+    A suffix-less "build" marker (a completed full run) covers every prefix
+    (end is None); "build-<start>-<end>" covers that hex range.
+    """
+    suffix = staging_dir[len("build"):]
+    if not suffix:
+        return (0, None)
+    if not suffix.startswith("-"):
+        raise RuntimeError(f"Unrecognized build marker directory {staging_dir!r}")
+    start, separator, end = suffix[1:].partition("-")
+    if not separator:
+        raise RuntimeError(f"Invalid build marker range in {staging_dir!r}")
+    return (int(start, 16), int(end, 16))
+
+
+def _prefix_in_build_range(prefix, prefix_range):
+    start, end = prefix_range
+    value = int(prefix, 16)
+    return start <= value and (end is None or value <= end)
+
+
+def _patch_update_build_markers(
+    r2_config, version, results, dictionary_sha256, input_inventory_set_sha256
+):
+    """Fold patched shards back into their containing build-range markers.
+
+    A `--prefixes` patch build overwrites R2 shards but owns no range marker.
+    Producer markers are the finalizer's canonical size/sha/content_md5
+    source, so each rebuilt prefix's entry is refreshed in the marker whose
+    range contains it and that marker is rewritten (its shard data was already
+    uploaded by phase_build_r2). A prefix with no containing range marker means
+    that range was never built as a whole; refuse rather than publish an
+    inconsistent inventory.
+    """
+    rebuilt = {
+        result[0]: _shard_marker_entry(result)
+        for result in results
+        if result[1] > 0
+    }
+    if not rebuilt:
+        return
+    ranges = []
+    for marker_path, marker in _read_current_build_markers(r2_config, version):
+        staging_dir = marker_path.split("/staging/", 1)[-1].rsplit(
+            "/_SUCCESS", 1)[0]
+        ranges.append((staging_dir, _build_marker_range(staging_dir), marker))
+
+    touched = {}
+    for prefix, entry in sorted(rebuilt.items()):
+        containing = [
+            (staging_dir, marker)
+            for staging_dir, prefix_range, marker in ranges
+            if _prefix_in_build_range(prefix, prefix_range)
+        ]
+        if not containing:
+            raise RuntimeError(
+                f"Patched prefix {prefix} has no containing build-range marker "
+                f"for {version}; rebuild the whole range instead"
+            )
+        if len(containing) > 1:
+            names = ", ".join(name for name, _ in containing)
+            raise RuntimeError(
+                f"Patched prefix {prefix} maps to multiple build-range markers "
+                f"({names}); build ranges must be disjoint"
+            )
+        staging_dir, marker = containing[0]
+        if marker.get("dictionary_sha256") != dictionary_sha256:
+            raise RuntimeError(
+                f"Build marker {staging_dir} does not match the patch locator "
+                "manifest SHA"
+            )
+        if marker.get("input_inventory_set_sha256") != input_inventory_set_sha256:
+            raise RuntimeError(
+                f"Build marker {staging_dir} does not match the patch locator "
+                "input inventory set SHA"
+            )
+        shards = marker.get("shards")
+        if not isinstance(shards, dict) or not shards:
+            raise RuntimeError(
+                f"Build marker {staging_dir} has no shard inventory to patch"
+            )
+        shards[prefix] = entry
+        touched[staging_dir] = marker
+
+    for staging_dir, marker in touched.items():
+        shards = marker["shards"]
+        _write_staging_marker(
+            r2_config,
+            version,
+            staging_dir,
+            len(shards),
+            extra={
+                "records": sum(s["record_count"] for s in shards.values()),
+                "dictionary_sha256": dictionary_sha256,
+                "input_inventory_set_sha256": input_inventory_set_sha256,
+                "shards": shards,
+            },
+        )
+        print(f"  Updated build marker {staging_dir} for patched prefixes")
 
 
 def _validate_build_marker_dictionary_sha(
@@ -3170,17 +3372,23 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
     for result in results:
         prefix, count, size, err = result[:4]
         sha256 = result[4] if len(result) > 4 else None
+        content_md5 = result[5] if len(result) > 5 else None
         if err:
             errors.append((prefix, err))
         elif count is None:
             # Shard exists but per-shard count unknown (metadata-only run)
-            shard_infos[prefix] = {"size_bytes": size, "sha256": sha256}
+            shard_infos[prefix] = {
+                "size_bytes": size,
+                "sha256": sha256,
+                "content_md5": content_md5,
+            }
             counts_known = False
         elif count > 0:
             shard_infos[prefix] = {
                 "record_count": count,
                 "size_bytes": size,
                 "sha256": sha256,
+                "content_md5": content_md5,
             }
             total_records += count
 
@@ -3229,6 +3437,7 @@ def phase_metadata(results, prefix_len, version, release_version, r2_config):
                     ("record_count", s.get("record_count")),
                     ("size_bytes", s.get("size_bytes")),
                     ("sha256", s.get("sha256")),
+                    ("content_md5", s.get("content_md5")),
                 ] if v
             }
             for p, s in sorted(shard_infos.items())
@@ -3558,15 +3767,23 @@ def build_id_index(args):
                         "dictionary_sha256": build_dictionary_sha256,
                         "input_inventory_set_sha256": build_inventory_set_sha256,
                         "shards": {
-                            result[0]: {
-                                "record_count": result[1],
-                                "size_bytes": result[2],
-                                "sha256": result[4],
-                            }
+                            result[0]: _shard_marker_entry(result)
                             for result in results
                             if result[1] > 0
                         },
                     },
+                )
+            else:
+                # A patch build overwrote a subset of shards. Refresh their
+                # entries in the containing build-range marker(s) so the
+                # producer inventory the finalizer trusts stays consistent
+                # with the bytes now in R2.
+                _patch_update_build_markers(
+                    r2_config,
+                    version,
+                    results,
+                    build_dictionary_sha256,
+                    build_inventory_set_sha256,
                 )
 
     # === Metadata ===
