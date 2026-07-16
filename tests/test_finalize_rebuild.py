@@ -656,6 +656,22 @@ def test_prune_retention_refuses_below_floor():
         pc.prune_by_retention(catalog, keep=4, current="2026-07-14.0")
 
 
+def test_prune_retention_rejects_keep_below_one():
+    # keep=0 would drop EVERY version; the guard must fire before any
+    # catalog mutation is computed.
+    catalog = _catalog([("2026-07-14.0", True), ("2026-07-13.0", False)])
+    for keep in (0, -1):
+        with pytest.raises(pc.PruneError, match="keep must be >= 1"):
+            pc.prune_by_retention(catalog, keep=keep, current="2026-07-14.0")
+
+
+def test_prune_allowlist_rejects_floor_below_one():
+    catalog = _catalog([("2026-07-14.0", True), ("2026-07-13.0", False)])
+    for floor in (0, -1):
+        with pytest.raises(pc.PruneError, match="floor must be >= 1"):
+            pc.prune_by_allowlist(catalog, prune={"2026-07-13.0"}, floor=floor)
+
+
 def test_prune_allowlist_removes_requested_and_keeps_floor():
     catalog = _catalog(
         [

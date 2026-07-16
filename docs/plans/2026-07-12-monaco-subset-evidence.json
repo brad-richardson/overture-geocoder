@@ -1,19 +1,19 @@
 {
   "authoritative_baseline": {
     "forward": {
-      "rendered_sql_sha256": "4094ac6ac96fb0445888420e02c85757358a13e44d623fe0dccd570fc85047e0",
+      "rendered_sql_sha256": "07aa9a57d8a0a866697d9384cb38b99b830ec131bcb0f66aca5f4ca421b7efc8",
       "rows": 3,
       "sha256": "0c164599e5e433a6ab5cdb91e72a14b5e7a9843f83e0d1f8205e9543b87986d1",
       "size_bytes": 3134
     },
     "predicate": "validated country plus exact discovered supplemental IDs without bbox",
     "reverse": {
-      "rendered_sql_sha256": "9a497771595e2d300b014a75a4dd6dc5037349408ae3645fac5ba6cd278fcf28",
+      "rendered_sql_sha256": "08ded61ae3536ab09e62641b92bed10483685f6a502567c4a6cd96d31fc91622",
       "rows": 3,
       "sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
       "size_bytes": 2206
     },
-    "timing_seconds": 69.689
+    "timing_seconds": 75.442
   },
   "comparison": "shared-production-sql; full-global MC filter and no-bbox baseline use schema plus EXCEPT ALL across every output column",
   "derived_bbox": [
@@ -24,7 +24,7 @@
   ],
   "evidence_version": 2,
   "input_sha256": {
-    "build_shards": "c1eb531b8198b0f99f6bc91c16de704fd2a51a7514981460a1c39c6116079c7e",
+    "build_shards": "126206c5a6b5c5500eb0b2419817bd790f5500b00e8f0e50b92e2963fc6107b2",
     "contract": "10d9865a47d72470fd5cc5696449299b31b2bc2cd63a4720d0592d250c60f003",
     "evidence_generator": "f9d246cd4e1b3a358b2cbe49bec6bc3555849a7711f3a7a2c9286ae0f0bf699d",
     "export_comparator": "39c3b05ef3375845786d57cfbca9cdf3a5784e6820a6886ef20e890bb55d60b1",
@@ -222,7 +222,7 @@
     "forward": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "5c9525a76344a6e9bd97a12182d79514c230c1b6872fc22bfe47e8337b68621c",
+      "legacy_sha256": "b714a609db5cb249060456cb14cba4ac60e7b4170da805088b5c620e01e02409",
       "logical_rows_sha256": "83c79dd025cce65128c407834e5a622577dd5002318b976327dfdd64a45532e5",
       "rows": 3,
       "schema": [
@@ -335,7 +335,7 @@
     "reverse": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "96ad0c339d3c7819d554782ae173b218103f63000a6e2b63069ce69ee5747e89",
+      "legacy_sha256": "33a9599d7fbf8f4e6270081155942cb130e77d083e750afbe85328262882b1ae",
       "logical_rows_sha256": "498615eaaf4eb8aedbb4186dd007ba3c5d070f21f7c4e52e38a6c08a0c69be31",
       "rows": 3,
       "schema": [
@@ -817,22 +817,22 @@
   },
   "overture_release": "2026-06-17.0",
   "provenance": {
-    "base_git_sha": "4b7468fd8c4d625b6c8ac3f593dcf36b46276d2d",
+    "base_git_sha": "c2cb06ed0ab93e2066f72b0a26109099f27adb55",
     "command": [
       "python",
       "scripts/download_divisions_smoke.py",
       "--release",
       "2026-06-17.0",
       "--forward-output",
-      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-hardened-forward.parquet",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/run3/monaco-hardened-forward.parquet",
       "--reverse-output",
-      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-hardened-reverse.parquet",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/run3/monaco-hardened-reverse.parquet",
       "--profile-output",
-      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-hardened-profile.json",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/run3/monaco-hardened-profile.json",
       "--authoritative-forward-output",
-      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-authoritative-forward.parquet",
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/run3/monaco-authoritative-forward.parquet",
       "--authoritative-reverse-output",
-      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/work/monaco-authoritative-reverse.parquet"
+      "/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/63731594-3d4a-4883-945d-ccfef449de14/scratchpad/run3/monaco-authoritative-reverse.parquet"
     ],
     "duckdb_cli_version": "v1.5.1 (Variegata) 7dbb2e646f",
     "duckdb_python_version": "1.5.1"
@@ -846,7 +846,7 @@
       "plan_has_bbox_filter": true,
       "plan_has_country_filter": true,
       "plan_sha256": "7d9e68f5772c46d614102851807583dfa17306ecc872414f745e723d30fadff0",
-      "profile_sha256": "32778adc0294497a2970d467c3dcef60714ed03e9643c7ed862791b0d5867371",
+      "profile_sha256": "1defa41d7e7cf11861920aa181972929acf88967cb59b65bab770f8ac6836d04",
       "profiled_predicate": "rendered division country/required-ID closure plus bbox",
       "result_rows": 22,
       "total_row_group_bytes": 1210094533,
@@ -861,7 +861,7 @@
       "plan_has_bbox_filter": true,
       "plan_has_country_filter": false,
       "plan_sha256": "d630555448aebefd680aa44d84f453c34ab9b07472c5e8d04ff8920cd09de8a7",
-      "profile_sha256": "e66fb26616cfef284a19716e7eb20e30543d203d8b9f3a796ebab134e170bd0e",
+      "profile_sha256": "de324a69905418f93041c69723141612ccdf40e3b6c572717c5e4e9ea836ad4d",
       "profiled_predicate": "actual rendered country-or-division_id ownership predicate plus bbox",
       "result_rows": 22,
       "total_row_group_bytes": 6274762647,
@@ -870,13 +870,13 @@
     }
   },
   "rendered_sql_sha256": {
-    "forward": "694cda41ca51954c5c2afa0bea4ac983d1dcf1a3cf166d758fccab925fecc007",
-    "reverse": "ea657b398c8829551b2640298fe067e8d7581605e715d43a04c4bc6886d83ea4"
+    "forward": "89646793f4b57c11ebc87112ab89d4056548236f2eea77d1e287fad19b7f7e70",
+    "reverse": "13fe4ee5d297c01b6382b758fc7cd2474e8ee856ad3f0d517296bde1be9a98ff"
   },
   "timings_seconds": {
-    "forward_transform": 3.82,
-    "reverse_transform": 12.748,
-    "total": 45.449
+    "forward_transform": 3.774,
+    "reverse_transform": 12.017,
+    "total": 43.344
   },
   "validated_source": {
     "division_area_ids": [

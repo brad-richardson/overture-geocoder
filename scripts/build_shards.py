@@ -201,13 +201,27 @@ _ROUTER_FOLD_TABLE = {
     'ç': 'c',
     'ñ': 'n',
     'ý': 'y', 'ÿ': 'y',
+    # Greek final sigma folds to the medial sigma so a pre-lowercased final
+    # sigma converges with per-character lowercasing of an uppercase sigma
+    # (which yields the medial form). Keep in lockstep with the worker's
+    # fold_diacritic in stac/router_db.rs.
+    'ς': 'σ',
 }
 
 
 def _router_normalize(s: str) -> str:
     """Mirror the worker's RouterDb::normalize_token: trim, lowercase, then
-    fold only the diacritics in _ROUTER_FOLD_TABLE (see stac.rs)."""
-    return ''.join(_ROUTER_FOLD_TABLE.get(c, c) for c in s.strip().lower())
+    fold only the diacritics in _ROUTER_FOLD_TABLE (see stac/router_db.rs).
+
+    Lowercasing is per-character to match Rust's ``char::to_lowercase``
+    (context-free); Python's whole-string ``str.lower()`` would apply the
+    Greek Final_Sigma rule ("ΟΔΟΣ" -> "οδος" with a final sigma) and diverge
+    from the worker, so stored Greek tokens could be unreachable."""
+    out: list[str] = []
+    for ch in s.strip():
+        for lowered in ch.lower():
+            out.append(_ROUTER_FOLD_TABLE.get(lowered, lowered))
+    return ''.join(out)
 
 
 def _router_tokenize(text: str | None) -> set[str]:
@@ -1118,7 +1132,6 @@ def prepare_division_rows(rows: list[tuple]) -> list[tuple]:
 # sits just east of +180 and another just west of -180, so min_lon collapses
 # to ~-180 and max_lon to ~+180. That inflated span makes every such country
 # overlap most queries and leaves the worker's wrapped-bbox reader path dead.
-ANTIMERIDIAN_SPAN_THRESHOLD = 180.0
 
 
 def bbox_contains_lon(lon: float, min_lon: float, max_lon: float) -> bool:
@@ -1132,14 +1145,28 @@ def bbox_contains_lon(lon: float, min_lon: float, max_lon: float) -> bool:
 
 class CountryBboxAccumulator:
     """Accumulate a [min_lon, min_lat, max_lon, max_lat] bbox from component
-    bboxes, wrapping longitude across the antimeridian when the plain span
-    would otherwise be near-global.
+    bboxes as a true *minimal circular cover* in longitude.
 
-    When the plain min/max longitude span exceeds 180 deg, the country wraps
-    the antimeridian, and a minimal circular cover is emitted as a wrapped
-    bbox [min_lon > max_lon] matching the worker reader's convention: the west
-    edge is the westmost fully-eastern component and the east edge is the
-    eastmost fully-western component. Latitude is always plain min/max.
+    Every component longitude interval [xmin, xmax] is retained. At result()
+    time the intervals are merged on the circle and the LARGEST angular gap
+    between covered arcs is found; the emitted cover is that gap's complement.
+    When the cover crosses +/-180 it is returned as a wrapped bbox
+    (min_lon > max_lon, matching the worker reader in stac/reverse.rs); when it
+    does not, a plain bbox (min_lon <= max_lon). Latitude is always plain
+    min/max.
+
+    Keying on the largest gap (rather than a plain span-threshold) is what
+    prevents excluding central territory: a country spanning far-east +
+    far-west + central components (mainland Europe + Reunion + New Caledonia +
+    French Guiana + Wallis) covers the small far-east/far-west gap, not the
+    central meridian, so Paris stays inside the cover.
+
+    Safety invariant: after computing, every component interval is verified to
+    lie inside the cover (wrap-aware); on any violation we fall back to the
+    plain min/max bbox, which is over-broad but never excludes covered land.
+    A component whose own bbox already spans the dateline arrives as a
+    near-global plain interval (xmin ~ -180, xmax ~ +180) and is treated as-is;
+    it dominates the merge into a single near-global arc.
     """
 
     def __init__(self) -> None:
@@ -1147,9 +1174,8 @@ class CountryBboxAccumulator:
         self.min_lat = 90.0
         self.max_lon = -180.0
         self.max_lat = -90.0
-        # Circular-cover edges (None until a component lands in that hemisphere).
-        self._east_min_lon: float | None = None  # min xmin among xmin > 0
-        self._west_max_lon: float | None = None  # max xmax among xmax < 0
+        # Every component's longitude interval [xmin, xmax], in add() order.
+        self._lon_intervals: list[tuple[float, float]] = []
 
     def add(self, xmin, ymin, xmax, ymax) -> None:
         xmin, ymin = float(xmin), float(ymin)
@@ -1158,32 +1184,56 @@ class CountryBboxAccumulator:
         self.min_lat = min(self.min_lat, ymin)
         self.max_lon = max(self.max_lon, xmax)
         self.max_lat = max(self.max_lat, ymax)
-        if xmin > 0.0:
-            self._east_min_lon = (
-                xmin if self._east_min_lon is None
-                else min(self._east_min_lon, xmin)
-            )
-        if xmax < 0.0:
-            self._west_max_lon = (
-                xmax if self._west_max_lon is None
-                else max(self._west_max_lon, xmax)
-            )
+        self._lon_intervals.append((xmin, xmax))
+
+    def _circular_cover(self) -> tuple[float, float]:
+        """Return (min_lon, max_lon) of the minimal circular cover.
+
+        min_lon > max_lon signals a wrapped (antimeridian-crossing) cover.
+        """
+        plain = (self.min_lon, self.max_lon)
+        # Merge the component intervals on the line [-180, 180]. Each component
+        # arrives as a normal interval (xmin <= xmax); a dateline-spanning
+        # component arrives near-global and simply absorbs the rest.
+        merged: list[list[float]] = []
+        for start, end in sorted(self._lon_intervals):
+            if merged and start <= merged[-1][1]:
+                merged[-1][1] = max(merged[-1][1], end)
+            else:
+                merged.append([start, end])
+
+        if len(merged) == 1:
+            # A single covered arc never wraps; its plain span is minimal.
+            cover = (merged[0][0], merged[0][1])
+        else:
+            # Candidate gaps: between consecutive covered arcs, plus the wrap
+            # gap across +/-180 from the eastmost arc's end to the westmost
+            # arc's start. The minimal cover is the largest gap's complement.
+            # Wrap gap's complement is the plain span of all arcs (no wrap).
+            best_gap = 360.0 - merged[-1][1] + merged[0][0]
+            cover = (merged[0][0], merged[-1][1])
+            for j in range(len(merged) - 1):
+                gap = merged[j + 1][0] - merged[j][1]
+                if gap > best_gap:
+                    best_gap = gap
+                    # Cover crosses the dateline: from the arc after the gap,
+                    # east across +/-180, to the arc before it (min > max).
+                    cover = (merged[j + 1][0], merged[j][1])
+
+        # Safety invariant: every component must lie inside the cover.
+        min_lon, max_lon = cover
+        for start, end in self._lon_intervals:
+            if not (bbox_contains_lon(start, min_lon, max_lon)
+                    and bbox_contains_lon(end, min_lon, max_lon)):
+                return plain
+        return cover
 
     def result(self) -> list[float]:
         # No rows accumulated: preserve the historical empty-bbox sentinel.
-        if self.min_lon > self.max_lon:
+        if not self._lon_intervals:
             return [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
-        wraps = (
-            (self.max_lon - self.min_lon) > ANTIMERIDIAN_SPAN_THRESHOLD
-            and self._east_min_lon is not None
-            and self._west_max_lon is not None
-        )
-        if wraps:
-            return [
-                self._east_min_lon, self.min_lat,
-                self._west_max_lon, self.max_lat,
-            ]
-        return [self.min_lon, self.min_lat, self.max_lon, self.max_lat]
+        min_lon, max_lon = self._circular_cover()
+        return [min_lon, self.min_lat, max_lon, self.max_lat]
 
 
 def build_region_shard(
@@ -1558,6 +1608,42 @@ def populate_reverse_rtree(db: sqlite3.Connection):
     """)
 
 
+# The reverse-shard SELECT columns, positionally consumed by
+# prepare_reverse_rows(). `wkb` is appended only when the source parquet
+# declares it (future exact-geometry builds); production parquet omits it so
+# the shard's wkb stays all-NULL.
+REVERSE_SELECT_COLUMNS = (
+    "gers_id", "subtype", "primary_name", "lat", "lon",
+    "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
+    "area", "population", "country", "region",
+)
+
+
+def reverse_select_list(con: "duckdb.DuckDBPyConnection", parquet_str: str) -> str:
+    """Comma-separated reverse SELECT columns, appending `wkb` when present."""
+    available = {
+        row[0]
+        for row in con.execute(
+            f"DESCRIBE SELECT * FROM read_parquet('{parquet_str}')"
+        ).fetchall()
+    }
+    columns = list(REVERSE_SELECT_COLUMNS)
+    if "wkb" in available:
+        columns.append("wkb")
+    return ",\n            ".join(columns)
+
+
+def maybe_flag_has_wkb(db: sqlite3.Connection, has_wkb_data: bool) -> None:
+    """Write the `has_wkb` metadata flag only when non-NULL geometry was stored.
+
+    The reader's has_wkb() (geocoder-core) is an O(1) lookup of this flag rather
+    than a full-table NULL scan on cold load. Production reverse rows are all
+    NULL, so the flag is never written and the reader takes the cheap bbox path.
+    """
+    if has_wkb_data:
+        db.execute("INSERT OR REPLACE INTO metadata VALUES ('has_wkb', '1')")
+
+
 def prepare_reverse_rows(rows: list[tuple]) -> list[tuple]:
     """Coerce DuckDB numeric values to SQLite-compatible Python primitives.
 
@@ -1609,19 +1695,7 @@ def build_reverse_country_shard(
     # Query reverse geocoding data for this country
     cursor = con.execute(f"""
         SELECT
-            gers_id,
-            subtype,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            area,
-            population,
-            country,
-            region
+            {reverse_select_list(con, parquet_str)}
         FROM read_parquet('{parquet_str}')
         WHERE country = '{country_code}'
         ORDER BY gers_id, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax
@@ -1629,6 +1703,7 @@ def build_reverse_country_shard(
 
     count = 0
     bbox_acc = CountryBboxAccumulator()
+    has_wkb_data = False
     FETCH_SIZE = 50000
 
     while True:
@@ -1640,6 +1715,8 @@ def build_reverse_country_shard(
         for row in prepared_rows:
             # Update bbox (row layout: ..., bbox_xmin[5], ymin[6], xmax[7], ymax[8])
             bbox_acc.add(row[5], row[6], row[7], row[8])
+            if row[13] is not None:  # non-NULL wkb geometry (index 13)
+                has_wkb_data = True
 
         db.executemany("""
             INSERT INTO divisions_reverse (
@@ -1659,6 +1736,7 @@ def build_reverse_country_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('type', ?)", ("reverse",))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
                (version_timestamp(version),))
+    maybe_flag_has_wkb(db, has_wkb_data)
 
     db.commit()
     db.execute("VACUUM")
@@ -1696,19 +1774,7 @@ def build_reverse_head_shard(
     # HEAD shard: countries, regions, counties, and high-population localities
     cursor = con.execute(f"""
         SELECT
-            gers_id,
-            subtype,
-            primary_name,
-            lat,
-            lon,
-            bbox_xmin,
-            bbox_ymin,
-            bbox_xmax,
-            bbox_ymax,
-            area,
-            population,
-            country,
-            region
+            {reverse_select_list(con, parquet_str)}
         FROM read_parquet('{parquet_str}')
         WHERE subtype IN ('country', 'region', 'county')
            OR (population IS NOT NULL AND population >= {population_threshold})
@@ -1716,6 +1782,7 @@ def build_reverse_head_shard(
     """)
 
     count = 0
+    has_wkb_data = False
     FETCH_SIZE = 50000
 
     while True:
@@ -1724,6 +1791,9 @@ def build_reverse_head_shard(
             break
 
         prepared_rows = prepare_reverse_rows(rows)
+        for row in prepared_rows:
+            if row[13] is not None:  # non-NULL wkb geometry (index 13)
+                has_wkb_data = True
         db.executemany("""
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
@@ -1743,6 +1813,7 @@ def build_reverse_head_shard(
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('record_count', ?)", (str(count),))
     db.execute("INSERT OR REPLACE INTO metadata VALUES ('created_at', ?)",
                (version_timestamp(version),))
+    maybe_flag_has_wkb(db, has_wkb_data)
 
     db.commit()
     db.execute("VACUUM")

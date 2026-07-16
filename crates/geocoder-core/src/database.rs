@@ -136,13 +136,22 @@ impl Database {
 
     fn has_wkb(&self) -> bool {
         *self.has_wkb.get_or_init(|| {
+            // O(1) metadata lookup instead of `WHERE wkb IS NOT NULL LIMIT 1`,
+            // which full-scans an all-NULL wkb column (today's universal
+            // production shape) on the latency-sensitive first request per
+            // shard. The builder writes `has_wkb` = "1" only when it actually
+            // stored non-NULL geometry (see build_shards.py reverse build);
+            // absent flag or missing metadata table => false. A hand-built
+            // shard carrying real wkb but no flag degrades safely to the bbox
+            // path (over-broad candidates, still correct) rather than scanning.
             self.conn
                 .query_row(
-                    "SELECT 1 FROM divisions_reverse WHERE wkb IS NOT NULL LIMIT 1",
+                    "SELECT value FROM metadata WHERE key = 'has_wkb'",
                     [],
-                    |_| Ok(()),
+                    |row| row.get::<_, String>(0),
                 )
-                .is_ok()
+                .map(|value| value == "1")
+                .unwrap_or(false)
         })
     }
 
@@ -1130,13 +1139,16 @@ mod tests {
         )
     }
 
-    /// `has_wkb` must detect populated geometry, not merely the column: every
-    /// production shard declares `wkb` but leaves it all-NULL, and taking the
-    /// containment path over NULL rows is pure overhead with zero filtering.
+    /// `has_wkb` reads the builder's O(1) metadata flag, not the column: every
+    /// production shard declares `wkb` but leaves it all-NULL and writes no
+    /// flag, so has_wkb() must be false without a full-table NULL scan on cold
+    /// load. The metadata table present without a `has_wkb` row is the real
+    /// production shape.
     #[test]
     fn test_has_wkb_all_null_column_takes_non_wkb_path() {
         let schema = format!(
             r#"{REVERSE_SCHEMA}
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
             ALTER TABLE divisions_reverse ADD COLUMN wkb BLOB;
             INSERT INTO divisions_reverse VALUES
               (1, 'loc-1', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', NULL, NULL);
@@ -1145,14 +1157,19 @@ mod tests {
         let db = db_with(&schema);
         assert!(
             !db.has_wkb(),
-            "an all-NULL wkb column carries no geometry and must take the non-WKB path"
+            "no has_wkb metadata flag must take the non-WKB path"
         );
     }
 
+    /// A shard that stored real geometry carries the builder's `has_wkb` = "1"
+    /// metadata row; has_wkb() reports true and reverse_geocode takes the exact
+    /// containment path.
     #[test]
     fn test_has_wkb_detects_populated_geometry() {
         let schema = format!(
             r#"{REVERSE_SCHEMA}
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO metadata VALUES ('has_wkb', '1');
             ALTER TABLE divisions_reverse ADD COLUMN wkb BLOB;
             INSERT INTO divisions_reverse VALUES
               (1, 'loc-1', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', NULL, NULL);
@@ -1175,8 +1192,22 @@ mod tests {
             .unwrap();
         assert!(
             db.has_wkb(),
-            "a shard with real wkb data must take the WKB containment path"
+            "a shard flagged has_wkb=1 must take the WKB containment path"
         );
+    }
+
+    /// A shard-side `has_wkb` = "0" (or any non-"1") must read as false so a
+    /// mis-set flag never forces a NULL-wkb shard onto the containment path.
+    #[test]
+    fn test_has_wkb_flag_zero_is_false() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            INSERT INTO metadata VALUES ('has_wkb', '0');
+            "#
+        );
+        let db = db_with(&schema);
+        assert!(!db.has_wkb());
     }
 
     /// Under an exact area tie the `rn <= 8` cut and final ordering fall to the

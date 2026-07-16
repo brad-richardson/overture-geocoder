@@ -1067,10 +1067,11 @@ jobs:
 
           # A worker can still hold the pre-prune catalog cached for up to
           # CATALOG_CACHE_TTL (300s, crates/geocoder-worker/src/stac/cache.rs)
-          # and fall back onto one of the versions we are about to delete. Wait
-          # out that TTL (300s + margin) after publishing the pruned catalog and
-          # before removing any objects.
-          sleep 330
+          # plus the in-isolate text memo TTL (TEXT_MEMO_TTL_MS, 60s) and fall
+          # back onto one of the versions we are about to delete. Wait out that
+          # combined worst-case staleness (360s + margin) after publishing the
+          # pruned catalog and before removing any objects.
+          sleep 390
 
           while read -r VERSION; do
             test "$VERSION" != "$CURRENT"

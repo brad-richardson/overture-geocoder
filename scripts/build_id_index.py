@@ -2992,6 +2992,48 @@ def phase_build_r2(prefix_len, r2_config, version, release_version, workers, pre
 # Metadata: Generate id-collection.json
 # ---------------------------------------------------------------------------
 
+def _list_r2_object_etags(r2_config, key_prefix):
+    """Return {key: etag-without-quotes} for every object under key_prefix.
+
+    Uses the S3 API listing (aws CLI auto-paginates), the same access path the
+    producer's checksum-validated uploads use. The metadata phase binds each
+    shard's single-part ETag to the producer marker's content MD5 before
+    publishing, so a stale byte-size-identical object (a crash between two
+    range-marker rewrites during a --prefixes patch) is caught here instead of
+    only at finalize time.
+    """
+    env = os.environ.copy()
+    env["AWS_ACCESS_KEY_ID"] = r2_config["key_id"]
+    env["AWS_SECRET_ACCESS_KEY"] = r2_config["secret"]
+    env["AWS_REQUEST_CHECKSUM_CALCULATION"] = "when_required"
+    env["AWS_RESPONSE_CHECKSUM_VALIDATION"] = "when_required"
+    endpoint = f"https://{r2_config['endpoint']}"
+    try:
+        result = subprocess.run(
+            ["aws", "s3api", "list-objects-v2",
+             "--bucket", r2_config["bucket"],
+             "--prefix", key_prefix,
+             "--query", "Contents[].[Key,ETag]", "--output", "json",
+             "--endpoint-url", endpoint, "--region", "auto"],
+            capture_output=True, text=True, timeout=300, env=env,
+        )
+    except FileNotFoundError:
+        raise RuntimeError(
+            "aws CLI is required to bind ID shard ETags at metadata time"
+        ) from None
+    except subprocess.TimeoutExpired:
+        raise RuntimeError(
+            f"Timed out listing R2 objects under {key_prefix}"
+        ) from None
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"Failed to list R2 objects under {key_prefix}: "
+            f"{(result.stderr or '')[:300]}"
+        )
+    listed = json.loads(result.stdout or "null") or []
+    return {key: etag.strip('"') for key, etag in listed}
+
+
 def _gather_shard_info_from_r2(prefix_len, r2_config, version):
     """Discover existing R2 shards via glob (for metadata-only runs).
 
@@ -3040,6 +3082,18 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
             f"missing={missing}, extra={extra}"
         )
 
+    # Size alone cannot catch a stale value-patch: the uncompressed fixed-width
+    # parquet shards are byte-size-identical across value changes, so a crash
+    # between two range-marker rewrites of a --prefixes patch could leave an R2
+    # object whose bytes predate the marker's sha256/content_md5. Bind the
+    # single-part ETag (== content MD5 for the producer's whole-object uploads)
+    # to the marker here, at metadata time, instead of relying on finalize's
+    # fail-closed check alone. Older markers without content_md5 keep the
+    # size-only behavior.
+    etags = {}
+    if any(info.get("content_md5") for info in intended_shards.values()):
+        etags = _list_r2_object_etags(r2_config, f"{version}/id-index/")
+
     results = []
     for path in shard_files:
         prefix = path.rsplit("/", 1)[-1].replace(".parquet", "")
@@ -3049,9 +3103,25 @@ def _gather_shard_info_from_r2(prefix_len, r2_config, version):
         intended = intended_shards[prefix]
         if size != intended["size_bytes"]:
             raise RuntimeError(f"ID shard {prefix} size differs from producer marker")
+        content_md5 = intended.get("content_md5")
+        if content_md5:
+            etag = etags.get(f"{version}/id-index/{prefix}.parquet")
+            if etag is None:
+                raise RuntimeError(
+                    f"ID shard {prefix} missing from R2 ETag listing; "
+                    f"cannot bind its bytes to the producer marker"
+                )
+            if "-" not in etag and etag != content_md5:
+                raise RuntimeError(
+                    f"ID shard {prefix} ETag {etag} does not match producer "
+                    f"marker content MD5 {content_md5}: the R2 object's bytes "
+                    f"are stale (likely a crashed --prefixes patch between "
+                    f"range-marker rewrites). Re-run the patch for the range "
+                    f"covering prefix {prefix} before publishing metadata."
+                )
         results.append(
             (prefix, intended["record_count"], size, None, intended["sha256"],
-             intended.get("content_md5"))
+             content_md5)
         )
 
     print(f"  Found {len(results)} shards")

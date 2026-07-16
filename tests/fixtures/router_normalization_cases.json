@@ -28,5 +28,8 @@
   {"input": "Brno Ě", "normalized": "brno ě"},
   {"input": "Straße", "normalized": "straße"},
   {"input": "Œuf", "normalized": "œuf"},
-  {"input": "Łódź", "normalized": "łodź"}
+  {"input": "Łódź", "normalized": "łodź"},
+  {"input": "ΟΔΟΣ", "normalized": "οδοσ"},
+  {"input": "οδος", "normalized": "οδοσ"},
+  {"input": "ΟδοΣ", "normalized": "οδοσ"}
 ]

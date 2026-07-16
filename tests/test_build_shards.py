@@ -727,6 +727,61 @@ class TestReverseShardBuild:
         assert city_ids == {"city-1", "county-1"}
 
 
+class TestReverseHasWkbFlag:
+    """The reader's has_wkb() (geocoder-core) is an O(1) lookup of the
+    builder-written `has_wkb` metadata flag; the builder writes it only when it
+    actually stored non-NULL wkb geometry. Production rows are all NULL, so
+    production shards never carry the flag."""
+
+    def _write_parquet(self, path, with_wkb: bool):
+        wkb_select = ", unhex('0102030405') AS wkb" if with_wkb else ""
+        duckdb.sql(f"""
+            COPY (
+                SELECT *{wkb_select} FROM (VALUES
+                    ('city-1', 1, 'locality', 'Test City', 10.0, 10.0, 50000,
+                     'US', 'US-TS', 9.8, 9.8, 10.2, 10.2, 0.16),
+                    ('county-1', 1, 'county', 'Test County', 10.0, 10.0, 100000,
+                     'US', 'US-TS', 9.0, 9.0, 21.0, 21.0, 144.0)
+                ) AS t(
+                    gers_id, version, subtype, primary_name, lat, lon, population,
+                    country, region, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax, area
+                )
+            ) TO '{path}' (FORMAT PARQUET)
+        """)
+
+    def _flag(self, shard_path):
+        db = sqlite3.connect(shard_path)
+        row = db.execute(
+            "SELECT value FROM metadata WHERE key = 'has_wkb'"
+        ).fetchone()
+        db.close()
+        return row
+
+    def test_null_wkb_production_shape_writes_no_flag(self, tmp_path):
+        source = tmp_path / "reverse.parquet"
+        self._write_parquet(source, with_wkb=False)
+        build_reverse_country_shard(source, "US", tmp_path / "US.db", "test")
+        build_reverse_head_shard(source, tmp_path / "HEAD.db", "test",
+                                 population_threshold=50_000)
+        assert self._flag(tmp_path / "US.db") is None
+        assert self._flag(tmp_path / "HEAD.db") is None
+
+    def test_synthetic_wkb_sets_flag_and_stores_geometry(self, tmp_path):
+        source = tmp_path / "reverse.parquet"
+        self._write_parquet(source, with_wkb=True)
+        build_reverse_country_shard(source, "US", tmp_path / "US.db", "test")
+        build_reverse_head_shard(source, tmp_path / "HEAD.db", "test",
+                                 population_threshold=50_000)
+        assert self._flag(tmp_path / "US.db") == ("1",)
+        assert self._flag(tmp_path / "HEAD.db") == ("1",)
+        db = sqlite3.connect(tmp_path / "US.db")
+        non_null = db.execute(
+            "SELECT COUNT(*) FROM divisions_reverse WHERE wkb IS NOT NULL"
+        ).fetchone()[0]
+        db.close()
+        assert non_null == 2
+
+
 class TestReverseBuildMetrics:
     def test_counts_localities_and_area_components(self, tmp_path, capsys):
         source = tmp_path / "reverse.parquet"
@@ -901,6 +956,42 @@ class TestCountryBboxAccumulator:
         box = acc.result()
         assert box == [-160.0, 20.0, -60.0, 60.0]
 
+    def test_all_eastern_wide_span_stays_unwrapped_and_covers_all(self):
+        # Two eastern clusters spanning 10..175: the widest gap is the wrap
+        # gap, so the cover is the plain [10, 175] span, not a wrap.
+        acc = CountryBboxAccumulator()
+        acc.add(10.0, 20.0, 50.0, 40.0)
+        acc.add(100.0, 20.0, 175.0, 40.0)
+        box = acc.result()
+        assert box == [10.0, 20.0, 175.0, 40.0]
+        assert box[0] < box[2]  # plain, not wrapped
+        for lon in (10.0, 30.0, 90.0, 175.0):
+            assert bbox_contains_lon(lon, box[0], box[2])
+
+    def test_scattered_territories_cover_central_meridian(self):
+        # France-shaped: mainland Europe + Reunion + New Caledonia + French
+        # Guiana + Wallis. The largest gap is the small far-east/far-west one
+        # near the dateline, so the minimal cover must WRAP the *other* way and
+        # keep Paris (2.35E), Reunion (55E) and Wallis (-176E) all inside. A
+        # plain span-threshold wrap would have excluded the central meridian.
+        acc = CountryBboxAccumulator()
+        for xmin, ymin, xmax, ymax in [
+            (-5.0, 42.0, 9.0, 51.0),      # mainland Europe
+            (55.0, -21.0, 56.0, -20.0),    # Reunion
+            (166.0, -22.0, 167.0, -20.0),  # New Caledonia
+            (-53.0, 2.0, -52.0, 6.0),      # French Guiana
+            (-176.0, -14.0, -176.0, -13.0),  # Wallis
+        ]:
+            acc.add(xmin, ymin, xmax, ymax)
+        box = acc.result()
+        min_lon, min_lat, max_lon, max_lat = box
+        assert min_lon > max_lon  # wrapped cover
+        assert (min_lat, max_lat) == (-22.0, 51.0)
+        assert bbox_contains_lon(2.35, min_lon, max_lon)   # Paris
+        assert bbox_contains_lon(55.0, min_lon, max_lon)   # Reunion
+        assert bbox_contains_lon(-176.0, min_lon, max_lon)  # Wallis
+        assert bbox_contains_lon(166.0, min_lon, max_lon)  # New Caledonia
+
     def test_empty_keeps_sentinel(self):
         assert CountryBboxAccumulator().result() == [180.0, 90.0, -180.0, -90.0]
 
@@ -1023,6 +1114,16 @@ class TestRouterNormalization:
         assert _router_normalize("Češka") == "češka"
         assert _router_normalize("Řež") == "řež"
         assert _router_normalize("Straße") == "straße"
+
+    def test_greek_final_sigma_converges_with_worker(self):
+        # Per-character lowercasing (matching Rust char::to_lowercase) plus the
+        # ς->σ fold makes uppercase, medial and pre-lowercased final-sigma forms
+        # all land on the same token; whole-string .lower() would emit a final
+        # sigma and diverge from the worker, stranding the stored Greek token.
+        assert _router_normalize("ΟΔΟΣ") == "οδοσ"
+        assert _router_normalize("οδος") == "οδοσ"
+        assert _router_normalize("ΟδοΣ") == "οδοσ"
+        assert _router_normalize("ΟΔΟΣ") == _router_normalize("οδος")
 
 
 class TestRouterTokenContract:

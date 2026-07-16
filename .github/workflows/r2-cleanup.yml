@@ -95,10 +95,12 @@ jobs:
 
       - name: Wait out worker catalog cache TTL
         # A worker can still serve the pre-prune catalog for up to
-        # CATALOG_CACHE_TTL (300s, crates/geocoder-worker/src/stac.rs) and fall
-        # back onto a version we are about to delete. Wait out that TTL (300s +
-        # margin) after publishing the pruned catalog, before any deletion.
-        run: sleep 330
+        # CATALOG_CACHE_TTL (300s, crates/geocoder-worker/src/stac/cache.rs)
+        # plus the in-isolate text memo TTL (TEXT_MEMO_TTL_MS, 60s) and fall
+        # back onto a version we are about to delete. Wait out that combined
+        # worst-case staleness (360s + margin) after publishing the pruned
+        # catalog, before any deletion.
+        run: sleep 390
 
       - name: Delete pruned and orphaned prefixes
         run: |

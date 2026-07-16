@@ -103,9 +103,10 @@ def _ranges_from_for_loop(script):
 
 def _stac_const(name):
     text = "\n".join(p.read_text() for p in STAC_SOURCES if p.exists())
-    m = re.search(rf"{name}[^=]*=\s*(\d+)", text)
+    # Rust numeric literals may carry underscore separators (e.g. 60_000).
+    m = re.search(rf"{name}[^=]*=\s*(\d[\d_]*)", text)
     assert m, f"{name} not found in the worker stac module"
-    return int(m.group(1))
+    return int(m.group(1).replace("_", ""))
 
 
 # --- (a) only the finalize jobs may write the root catalog -------------------
@@ -186,6 +187,11 @@ def test_rebuild_prune_waits_between_catalog_publish_and_delete():
 def test_retention_and_ttl_track_worker_constants():
     fallback = _stac_const("MAX_VERSION_ATTEMPTS")  # 4
     cache_ttl = _stac_const("CATALOG_CACHE_TTL")  # 300
+    # Worst-case catalog staleness stacks the edge-cache TTL with the
+    # in-isolate text memo: a memo entry written at the last instant of the
+    # cache TTL can serve the pre-prune catalog for another TEXT_MEMO_TTL_MS.
+    text_memo_s = _stac_const("TEXT_MEMO_TTL_MS") // 1000  # 60
+    worst_case_staleness = cache_ttl + text_memo_s  # 360
 
     prune = step_by_name(
         jobs(load(REBUILD))["post-finalize"],
@@ -208,7 +214,9 @@ def test_retention_and_ttl_track_worker_constants():
     ):
         run = step_by_name(jobs(load(path))[job_name], step_name)["run"]
         sleeps = [int(s) for s in re.findall(r"sleep\s+(\d+)", run)]
-        assert sleeps and max(sleeps) >= cache_ttl, (path.name, step_name, sleeps)
+        assert sleeps and max(sleeps) >= worst_case_staleness, (
+            path.name, step_name, sleeps,
+        )
 
 
 # --- behavioral: the jq guard patch-id-stage uses to reject a live version ---

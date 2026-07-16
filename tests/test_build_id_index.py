@@ -1360,6 +1360,123 @@ def test_phase_metadata_records_content_md5_when_present(monkeypatch):
     assert "content_md5" not in items["001"]
 
 
+class _ShardMetadataCon:
+    """DuckDB stand-in for the metadata gather's size query."""
+
+    def __init__(self, sizes):
+        self._sizes = sizes
+
+    def execute(self, _query, *_args):
+        return self
+
+    def fetchall(self):
+        return list(self._sizes.items())
+
+    def close(self):
+        pass
+
+
+def _gather_setup(monkeypatch, intended, etags, sizes=None):
+    """Wire _gather_shard_info_from_r2's collaborators for one scenario."""
+    paths = [f"s3://b/v/id-index/{prefix}.parquet" for prefix in intended]
+    if sizes is None:
+        sizes = {
+            path: intended[path.rsplit("/", 1)[-1].removesuffix(".parquet")][
+                "size_bytes"
+            ]
+            for path in paths
+        }
+    monkeypatch.setattr(bii, "_r2_con", lambda *_: _ShardMetadataCon(sizes))
+    monkeypatch.setattr(bii, "_glob_files", lambda *_: paths)
+    monkeypatch.setattr(
+        bii, "_build_marker_shard_inventory", lambda *_: intended
+    )
+    etag_mock = mock.Mock(return_value=etags)
+    monkeypatch.setattr(bii, "_list_r2_object_etags", etag_mock)
+    return etag_mock
+
+
+def test_gather_binds_matching_single_part_etag(monkeypatch):
+    md5 = "b" * 32
+    intended = {
+        "000": {"record_count": 7, "size_bytes": 1234, "sha256": "a" * 64,
+                "content_md5": md5},
+    }
+    etag_mock = _gather_setup(
+        monkeypatch, intended, {"v/id-index/000.parquet": md5}
+    )
+    results = bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
+    assert results == [("000", 7, 1234, None, "a" * 64, md5)]
+    etag_mock.assert_called_once_with({"bucket": "b"}, "v/id-index/")
+
+
+def test_gather_fails_closed_on_stale_etag(monkeypatch):
+    """A byte-size-identical value patch left stale by a crash between two
+    range-marker rewrites must be caught at metadata time, not finalize."""
+    intended = {
+        "000": {"record_count": 7, "size_bytes": 1234, "sha256": "a" * 64,
+                "content_md5": "b" * 32},
+    }
+    _gather_setup(
+        monkeypatch, intended, {"v/id-index/000.parquet": "f" * 32}
+    )
+    with pytest.raises(RuntimeError, match="Re-run the patch"):
+        bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
+
+
+def test_gather_skips_multipart_etag_check(monkeypatch):
+    intended = {
+        "000": {"record_count": 7, "size_bytes": 1234, "sha256": "a" * 64,
+                "content_md5": "b" * 32},
+    }
+    _gather_setup(
+        monkeypatch, intended,
+        {"v/id-index/000.parquet": "deadbeefdeadbeefdeadbeefdeadbeef-4"},
+    )
+    results = bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
+    assert results[0][5] == "b" * 32
+
+
+def test_gather_without_content_md5_keeps_size_only_behavior(monkeypatch):
+    intended = {
+        "000": {"record_count": 7, "size_bytes": 1234, "sha256": "a" * 64},
+    }
+    etag_mock = _gather_setup(monkeypatch, intended, {})
+    results = bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
+    assert results == [("000", 7, 1234, None, "a" * 64, None)]
+    etag_mock.assert_not_called()
+
+
+def test_gather_fails_closed_when_etag_listing_misses_shard(monkeypatch):
+    intended = {
+        "000": {"record_count": 7, "size_bytes": 1234, "sha256": "a" * 64,
+                "content_md5": "b" * 32},
+    }
+    _gather_setup(monkeypatch, intended, {})
+    with pytest.raises(RuntimeError, match="missing from R2 ETag listing"):
+        bii._gather_shard_info_from_r2(3, {"bucket": "b"}, "v")
+
+
+def test_list_r2_object_etags_parses_and_strips_quotes(monkeypatch):
+    listing = json.dumps([
+        ["v/id-index/000.parquet", '"' + "b" * 32 + '"'],
+        ["v/id-index/001.parquet", '"deadbeef-4"'],
+    ])
+    run = mock.Mock(
+        return_value=mock.Mock(returncode=0, stdout=listing, stderr="")
+    )
+    monkeypatch.setattr(bii.subprocess, "run", run)
+    config = {"bucket": "b", "key_id": "k", "secret": "s", "endpoint": "e"}
+    etags = bii._list_r2_object_etags(config, "v/id-index/")
+    assert etags == {
+        "v/id-index/000.parquet": "b" * 32,
+        "v/id-index/001.parquet": "deadbeef-4",
+    }
+    cmd = run.call_args.args[0]
+    assert cmd[:2] == ["aws", "s3api"]
+    assert "--prefix" in cmd and "v/id-index/" in cmd
+
+
 def test_build_marker_shard_inventory_validates_sha(monkeypatch):
     monkeypatch.setattr(
         bii,

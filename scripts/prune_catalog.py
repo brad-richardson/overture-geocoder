@@ -57,6 +57,8 @@ def prune_by_retention(catalog: dict, *, keep: int, current: str):
     Mirrors the rebuild finalizer's retention guards: the current build must be
     the catalog's newest child and the catalog must not fall below ``keep``.
     """
+    if keep < 1:
+        raise PruneError(f"retention keep must be >= 1, got {keep}")
     static: list[dict] = []
     children: list[tuple[tuple, str, dict]] = []
     for link in catalog.get("links", []):
@@ -86,6 +88,8 @@ def prune_by_allowlist(catalog: dict, *, prune: set[str], floor: int):
     Mirrors the cleanup guards: never remove the ``latest`` link, and keep at
     least ``floor`` children with a ``latest`` still present.
     """
+    if floor < 1:
+        raise PruneError(f"retention floor must be >= 1, got {floor}")
     prune = set(prune)
     kept_links: list[dict] = []
     removed: list[str] = []

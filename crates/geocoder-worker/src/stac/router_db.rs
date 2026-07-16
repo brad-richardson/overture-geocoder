@@ -41,6 +41,12 @@ impl RouterDb {
             'ç' => 'c',
             'ñ' => 'n',
             'ý' | 'ÿ' => 'y',
+            // Greek final sigma -> medial sigma. `char::to_lowercase` is
+            // context-free and lowercases an uppercase sigma to the medial
+            // form, but a pre-lowercased final sigma stays final; folding it
+            // here converges both. Kept in lockstep with the Python builder's
+            // _ROUTER_FOLD_TABLE in scripts/build_shards.py.
+            'ς' => 'σ',
             _ => c,
         }
     }
