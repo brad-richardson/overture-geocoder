@@ -137,7 +137,11 @@ impl Database {
     fn has_wkb(&self) -> bool {
         *self.has_wkb.get_or_init(|| {
             self.conn
-                .prepare("SELECT wkb FROM divisions_reverse LIMIT 0")
+                .query_row(
+                    "SELECT 1 FROM divisions_reverse WHERE wkb IS NOT NULL LIMIT 1",
+                    [],
+                    |_| Ok(()),
+                )
                 .is_ok()
         })
     }
@@ -647,9 +651,11 @@ fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
     if wkb[0] != 0 && wkb[0] != 1 {
         return None;
     }
+    // Only plain 2D WKB is parsed at the 16-byte XY stride below; a Z/M type
+    // (e.g. PolygonZ, 24 B/point) would misread coordinates while still
+    // satisfying the 2D bounds checks. Reject anything else (fails open).
     let ty = read_u32_wkb(wkb, 1, little)?;
-    let geom_type = ty % 1000;
-    match geom_type {
+    match ty {
         3 => {
             let mut offset = 5;
             let num_rings = read_u32_wkb(wkb, offset, little)? as usize;
@@ -699,7 +705,7 @@ fn point_in_wkb(wkb: &[u8], lat: f64, lon: f64) -> Option<bool> {
                 offset += 1;
                 let ty2 = read_u32_wkb(wkb, offset, little2)?;
                 offset += 4;
-                if ty2 % 1000 != 3 {
+                if ty2 != 3 {
                     return None;
                 }
                 let num_rings = read_u32_wkb(wkb, offset, little2)? as usize;
@@ -782,6 +788,36 @@ mod tests {
         out
     }
 
+    /// A PolygonZ (type 1003) WKB buffer at 24 bytes/point.
+    fn polygon_z_wkb(rings: &[&[(f64, f64, f64)]], little: bool) -> Vec<u8> {
+        let mut out = Vec::new();
+        out.push(u8::from(little));
+        if little {
+            out.extend_from_slice(&1003_u32.to_le_bytes());
+            out.extend_from_slice(&(rings.len() as u32).to_le_bytes());
+        } else {
+            out.extend_from_slice(&1003_u32.to_be_bytes());
+            out.extend_from_slice(&(rings.len() as u32).to_be_bytes());
+        }
+        for ring in rings {
+            if little {
+                out.extend_from_slice(&(ring.len() as u32).to_le_bytes());
+            } else {
+                out.extend_from_slice(&(ring.len() as u32).to_be_bytes());
+            }
+            for (x, y, z) in *ring {
+                for v in [x, y, z] {
+                    if little {
+                        out.extend_from_slice(&v.to_le_bytes());
+                    } else {
+                        out.extend_from_slice(&v.to_be_bytes());
+                    }
+                }
+            }
+        }
+        out
+    }
+
     #[test]
     fn point_in_wkb_handles_polygon_holes_and_endianness() {
         let outer = [
@@ -834,6 +870,28 @@ mod tests {
         bad_nested_order.extend_from_slice(&1_u32.to_le_bytes());
         bad_nested_order.extend_from_slice(&[2, 3, 0, 0, 0]);
         assert_eq!(point_in_wkb(&bad_nested_order, 0.0, 0.0), None);
+    }
+
+    #[test]
+    fn point_in_wkb_rejects_z_polygon() {
+        // A PolygonZ buffer (24 B/point) clears the 2D 16*n bounds check but
+        // its coordinates parse to garbage at the XY stride. Only plain 2D
+        // types 3/6 are trusted; anything else must return None (fails open).
+        let outer = [
+            (0.0, 0.0, 1.0),
+            (10.0, 0.0, 1.0),
+            (10.0, 10.0, 1.0),
+            (0.0, 10.0, 1.0),
+            (0.0, 0.0, 1.0),
+        ];
+        for little in [true, false] {
+            let wkb = polygon_z_wkb(&[&outer], little);
+            assert_eq!(point_in_wkb(&wkb, 5.0, 5.0), None);
+        }
+
+        // A MultiPolygon whose nested member is a PolygonZ is rejected too.
+        let nested = multipolygon_wkb(&[polygon_z_wkb(&[&outer], true)]);
+        assert_eq!(point_in_wkb(&nested, 5.0, 5.0), None);
     }
 
     fn db_with(schema_and_data: &str) -> Database {
@@ -1070,6 +1128,77 @@ mod tests {
               (5, 'c-1', 'country', 'Countryland', 0.0, 0.0, -20.0, -20.0, 20.0, 20.0, 1600.0, NULL, 'US', NULL);
             {extra}"#
         )
+    }
+
+    /// `has_wkb` must detect populated geometry, not merely the column: every
+    /// production shard declares `wkb` but leaves it all-NULL, and taking the
+    /// containment path over NULL rows is pure overhead with zero filtering.
+    #[test]
+    fn test_has_wkb_all_null_column_takes_non_wkb_path() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN wkb BLOB;
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-1', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', NULL, NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        assert!(
+            !db.has_wkb(),
+            "an all-NULL wkb column carries no geometry and must take the non-WKB path"
+        );
+    }
+
+    #[test]
+    fn test_has_wkb_detects_populated_geometry() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            ALTER TABLE divisions_reverse ADD COLUMN wkb BLOB;
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-1', 'locality', 'Town', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', NULL, NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let outer = [
+            (0.0, 0.0),
+            (10.0, 0.0),
+            (10.0, 10.0),
+            (0.0, 10.0),
+            (0.0, 0.0),
+        ];
+        let wkb = polygon_wkb(&[&outer], true);
+        db.conn
+            .execute(
+                "UPDATE divisions_reverse SET wkb = ?1 WHERE rowid = 1",
+                params![wkb],
+            )
+            .unwrap();
+        assert!(
+            db.has_wkb(),
+            "a shard with real wkb data must take the WKB containment path"
+        );
+    }
+
+    /// Under an exact area tie the `rn <= 8` cut and final ordering fall to the
+    /// SQL `gers_id` tiebreak; without it the surviving row is plan-dependent.
+    /// Rows are inserted in descending gers_id order (so rowid order alone
+    /// would surface 'loc-b') with identical centroid so the distance tiebreak
+    /// is also a tie — leaving only the SQL ordering to decide.
+    #[test]
+    fn test_reverse_geocode_identical_area_deterministic_tiebreak() {
+        let schema = format!(
+            r#"{REVERSE_SCHEMA}
+            INSERT INTO divisions_reverse VALUES
+              (1, 'loc-b', 'locality', 'Town B', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', NULL),
+              (2, 'loc-a', 'locality', 'Town A', 0.05, 0.05, 0.0, 0.0, 0.2, 0.2, 0.01, NULL, 'US', NULL);
+            "#
+        );
+        let db = db_with(&schema);
+        let result = db.reverse_geocode(0.05, 0.05).unwrap().unwrap();
+        assert_eq!(
+            result.gers_id, "loc-a",
+            "identical-area ties must resolve deterministically by gers_id"
+        );
     }
 
     #[test]
