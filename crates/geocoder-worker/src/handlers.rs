@@ -245,12 +245,8 @@ pub async fn handle_reverse(
         .map(|d| d == "1" || d == "true")
         .unwrap_or(false);
 
-    let cf_country = req.headers().get("CF-IPCountry").ok().flatten();
-
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
-    let search = loader
-        .reverse_geocode(lat, lon, cf_country.as_deref())
-        .await?;
+    let search = loader.reverse_geocode(lat, lon).await?;
 
     match search.result {
         Some(r) => match format {
@@ -505,7 +501,7 @@ fn reverse_to_geojson_response(result: &ReverseResult, data_version: &str) -> Re
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::stac::{ReverseCountryDecision, ReverseRoutingOutcome};
+    use crate::stac::reverse::{ReverseCountryDecision, ReverseRoutingOutcome};
     use geocoder_core::types::HierarchyEntry;
 
     fn reverse_routing_fixture() -> ReverseRoutingDebug {
