@@ -25,9 +25,11 @@ from build_id_index import (
     _assert_locator_rows,
     _assert_shard_schema,
     _compact_locator_query,
+    _write_local_dictionary_tables,
+)
+from id_index_protocol import (
     _glob_files,
     _load_locator_manifest_and_dictionary,
-    _write_local_dictionary_tables,
 )
 
 # Load .env
