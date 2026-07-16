@@ -68,7 +68,30 @@ COPY (
                 -- Fallback: just the name and country
                 ELSE
                     CONCAT(names.primary, ', ', country)
-            END as primary_name
+            END as primary_name,
+            -- Materialized primary-hierarchy ancestor chain: the division GERS
+            -- IDs of hierarchies[1] (DuckDB 1-indexed first path) as an
+            -- ORDERED JSON array root -> ... -> self. Verified against release
+            -- 2026-06-17.0: every reverse-eligible division carries exactly
+            -- one hierarchy path, so the first path IS the default/display
+            -- hierarchy; the division itself is always the last element
+            -- (55,517/55,517) and the root is the country (55,515/55,517; the
+            -- two exceptions are territory roots, still root-first).
+            -- list_transform preserves list order. The reverse worker parses
+            -- this to test exact parentage (candidate.gers_id in the anchor's
+            -- chain) without recursion, replacing the country/region-code
+            -- coherence heuristic, and resolves same-subtype collisions by
+            -- chain position so the primary path's parent wins. NULL when the
+            -- source row carries no hierarchies; the worker then falls back to
+            -- the legacy heuristic for that row.
+            CASE
+                WHEN hierarchies IS NULL OR len(hierarchies) = 0 THEN NULL
+                ELSE CAST(
+                    to_json(
+                        list_transform(hierarchies[1], x -> x.division_id)
+                    ) AS VARCHAR
+                )
+            END as lineage_ids
         FROM read_parquet(
             's3://overturemaps-us-west-2/release/__OVERTURE_RELEASE__/theme=divisions/type=division/*',
             hive_partitioning = true
@@ -114,7 +137,8 @@ COPY (
         a.bbox_ymin,
         a.bbox_xmax,
         a.bbox_ymax,
-        a.area
+        a.area,
+        d.lineage_ids
     FROM divisions d
     JOIN areas_all a ON d.gers_id = a.division_id
 )

@@ -706,9 +706,19 @@ class TestReverseShardBuild:
             "SELECT COUNT(*) FROM divisions_reverse WHERE gers_id = 'city-1'"
         ).fetchone()[0]
         rtree_rows = db.execute("SELECT COUNT(*) FROM divisions_reverse_rtree").fetchone()[0]
+        # A legacy source without a lineage_ids column still builds; the shard
+        # declares the column but leaves every row NULL (heuristic fallback).
+        lineage_present = db.execute(
+            "SELECT 1 FROM pragma_table_info('divisions_reverse') WHERE name = 'lineage_ids'"
+        ).fetchone()
+        null_lineage = db.execute(
+            "SELECT COUNT(*) FROM divisions_reverse WHERE lineage_ids IS NULL"
+        ).fetchone()[0]
         db.close()
         assert city_components == 2
         assert rtree_rows == info["record_count"]
+        assert lineage_present is not None
+        assert null_lineage == info["record_count"]
 
         # A city appears in HEAD only after it crosses the configured threshold;
         # broad administrative containers remain present at every threshold.
@@ -725,6 +735,36 @@ class TestReverseShardBuild:
         city_ids = {row[0] for row in city_head.execute("SELECT gers_id FROM divisions_reverse")}
         city_head.close()
         assert city_ids == {"city-1", "county-1"}
+
+    def test_lineage_ids_round_trip_from_source(self, tmp_path):
+        """A source exporting lineage_ids threads the ordered JSON chain
+        (root -> ... -> self) into the shard byte-for-byte."""
+        source = tmp_path / "reverse.parquet"
+        city_lineage = '["US","county-1","city-1"]'
+        duckdb.sql(f"""
+            COPY (
+                SELECT * FROM (VALUES
+                    ('city-1', 1, 'locality', 'Test City', 10.0, 10.0, 50000,
+                     'US', 'US-TS', 9.8, 9.8, 10.2, 10.2, 0.16, '{city_lineage}'),
+                    ('county-1', 1, 'county', 'Test County', 10.0, 10.0, 100000,
+                     'US', 'US-TS', 9.0, 9.0, 21.0, 21.0, 144.0, '["US","county-1"]')
+                ) AS t(
+                    gers_id, version, subtype, primary_name, lat, lon, population,
+                    country, region, bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
+                    area, lineage_ids
+                )
+            ) TO '{source}' (FORMAT PARQUET)
+        """)
+
+        country_path = tmp_path / "US.db"
+        build_reverse_country_shard(source, "US", country_path, "test")
+        db = sqlite3.connect(country_path)
+        stored = dict(
+            db.execute("SELECT gers_id, lineage_ids FROM divisions_reverse").fetchall()
+        )
+        db.close()
+        assert stored["city-1"] == city_lineage
+        assert stored["county-1"] == '["US","county-1"]'
 
 
 class TestReverseHasWkbFlag:

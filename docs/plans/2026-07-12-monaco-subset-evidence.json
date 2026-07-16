@@ -8,12 +8,12 @@
     },
     "predicate": "validated country plus exact discovered supplemental IDs without bbox",
     "reverse": {
-      "rendered_sql_sha256": "08ded61ae3536ab09e62641b92bed10483685f6a502567c4a6cd96d31fc91622",
+      "rendered_sql_sha256": "65d8d4194903c3e41f31253765db916b23fb8baa7a54bf5faff2b6c5fee74b93",
       "rows": 3,
-      "sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
-      "size_bytes": 2206
+      "sha256": "b37630aff113c0512255f703582bf8a7275d9e56f91304f536b047cb22092791",
+      "size_bytes": 2635
     },
-    "timing_seconds": 75.442
+    "timing_seconds": 70.854
   },
   "comparison": "shared-production-sql; full-global MC filter and no-bbox baseline use schema plus EXCEPT ALL across every output column",
   "derived_bbox": [
@@ -24,12 +24,12 @@
   ],
   "evidence_version": 2,
   "input_sha256": {
-    "build_shards": "126206c5a6b5c5500eb0b2419817bd790f5500b00e8f0e50b92e2963fc6107b2",
+    "build_shards": "fef25102e097fdf246d17b849e79336e72e8cf8d11994843d16f4dbbdf159dac",
     "contract": "10d9865a47d72470fd5cc5696449299b31b2bc2cd63a4720d0592d250c60f003",
     "evidence_generator": "f9d246cd4e1b3a358b2cbe49bec6bc3555849a7711f3a7a2c9286ae0f0bf699d",
     "export_comparator": "39c3b05ef3375845786d57cfbca9cdf3a5784e6820a6886ef20e890bb55d60b1",
     "forward": "ecfdf0886bd6dba050e596c783aca7bb56456b16ef91050582aa3b46bdf1e27d",
-    "reverse": "50d6a5bbcd32f4edadc98c6617c35fa43577ba1130f51e9148a4c73ead772f54",
+    "reverse": "477731e2249d0c2f08b8172da23f9b013b08422d4a87f88b2dfa90d29f585dc3",
     "smoke_exporter": "ecf3b61250a7d6751143ce158f6f977cbb07234befc6ac44cf3db0db3679036d"
   },
   "logical_equivalence_to_full_global": {
@@ -120,7 +120,7 @@
         }
       },
       "reverse": {
-        "legacy_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
+        "legacy_snapshot_sha256": "df9561a182931df5969a95ca3c30956151914d06bbf8fd643f1699669fd6c98f",
         "legacy_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -147,7 +147,7 @@
             "table",
             "divisions_reverse",
             "divisions_reverse",
-            "CREATE TABLE divisions_reverse (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL,\n            subtype TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            area REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            wkb BLOB\n        )"
+            "CREATE TABLE divisions_reverse (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL,\n            subtype TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            area REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            wkb BLOB,\n            -- Materialized primary-hierarchy ancestor chain: an ORDERED JSON\n            -- array of division GERS IDs, root -> ... -> self (see\n            -- download_divisions_area.sql). NULLABLE and appended last so\n            -- older workers, which select reverse columns by name, keep\n            -- working; a new worker probes for it and, when present, resolves\n            -- hierarchy parentage by exact membership instead of the code\n            -- heuristic, breaking same-subtype ties by chain position.\n            lineage_ids TEXT\n        )"
           ],
           [
             "table",
@@ -180,7 +180,7 @@
             "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
           ]
         ],
-        "subset_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
+        "subset_snapshot_sha256": "df9561a182931df5969a95ca3c30956151914d06bbf8fd643f1699669fd6c98f",
         "subset_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -222,7 +222,7 @@
     "forward": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "b714a609db5cb249060456cb14cba4ac60e7b4170da805088b5c620e01e02409",
+      "legacy_sha256": "e7805076498bfe99238556aa45b0603b713f37464779ed315e9020948ef2aff3",
       "logical_rows_sha256": "83c79dd025cce65128c407834e5a622577dd5002318b976327dfdd64a45532e5",
       "rows": 3,
       "schema": [
@@ -335,8 +335,8 @@
     "reverse": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "33a9599d7fbf8f4e6270081155942cb130e77d083e750afbe85328262882b1ae",
-      "logical_rows_sha256": "498615eaaf4eb8aedbb4186dd007ba3c5d070f21f7c4e52e38a6c08a0c69be31",
+      "legacy_sha256": "7ab8b69d52feb511f29ffaec5ed26611b3929c03d3a1fdc27db5d189e733d2f5",
+      "logical_rows_sha256": "76a82250890fae3e73f1268a7f6af3b213ab011fc08891550cf0029bab4881b9",
       "rows": 3,
       "schema": [
         [
@@ -408,11 +408,16 @@
           "area",
           "DOUBLE",
           "YES"
+        ],
+        [
+          "lineage_ids",
+          "VARCHAR",
+          "YES"
         ]
       ],
       "subset_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "subset_only_rows": 0,
-      "subset_sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d"
+      "subset_sha256": "b37630aff113c0512255f703582bf8a7275d9e56f91304f536b047cb22092791"
     }
   },
   "logical_equivalence_to_no_bbox_baseline": {
@@ -503,7 +508,7 @@
         }
       },
       "reverse": {
-        "legacy_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
+        "legacy_snapshot_sha256": "df9561a182931df5969a95ca3c30956151914d06bbf8fd643f1699669fd6c98f",
         "legacy_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -530,7 +535,7 @@
             "table",
             "divisions_reverse",
             "divisions_reverse",
-            "CREATE TABLE divisions_reverse (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL,\n            subtype TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            area REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            wkb BLOB\n        )"
+            "CREATE TABLE divisions_reverse (\n            rowid INTEGER PRIMARY KEY,\n            gers_id TEXT NOT NULL,\n            subtype TEXT NOT NULL,\n            primary_name TEXT NOT NULL,\n            lat REAL NOT NULL,\n            lon REAL NOT NULL,\n            bbox_xmin REAL NOT NULL,\n            bbox_ymin REAL NOT NULL,\n            bbox_xmax REAL NOT NULL,\n            bbox_ymax REAL NOT NULL,\n            area REAL NOT NULL,\n            population INTEGER,\n            country TEXT,\n            region TEXT,\n            wkb BLOB,\n            -- Materialized primary-hierarchy ancestor chain: an ORDERED JSON\n            -- array of division GERS IDs, root -> ... -> self (see\n            -- download_divisions_area.sql). NULLABLE and appended last so\n            -- older workers, which select reverse columns by name, keep\n            -- working; a new worker probes for it and, when present, resolves\n            -- hierarchy parentage by exact membership instead of the code\n            -- heuristic, breaking same-subtype ties by chain position.\n            lineage_ids TEXT\n        )"
           ],
           [
             "table",
@@ -563,7 +568,7 @@
             "CREATE TABLE metadata (\n            key TEXT PRIMARY KEY,\n            value TEXT NOT NULL\n        )"
           ]
         ],
-        "subset_snapshot_sha256": "7e55b9e8bb7f4ae114294871703c0f07f74700a10fb6ddf7ad4420859a2d8242",
+        "subset_snapshot_sha256": "df9561a182931df5969a95ca3c30956151914d06bbf8fd643f1699669fd6c98f",
         "subset_table_row_counts": {
           "divisions_reverse": 3,
           "divisions_reverse_rtree": 3,
@@ -718,8 +723,8 @@
     "reverse": {
       "legacy_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "legacy_only_rows": 0,
-      "legacy_sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
-      "logical_rows_sha256": "498615eaaf4eb8aedbb4186dd007ba3c5d070f21f7c4e52e38a6c08a0c69be31",
+      "legacy_sha256": "b37630aff113c0512255f703582bf8a7275d9e56f91304f536b047cb22092791",
+      "logical_rows_sha256": "76a82250890fae3e73f1268a7f6af3b213ab011fc08891550cf0029bab4881b9",
       "rows": 3,
       "schema": [
         [
@@ -791,11 +796,16 @@
           "area",
           "DOUBLE",
           "YES"
+        ],
+        [
+          "lineage_ids",
+          "VARCHAR",
+          "YES"
         ]
       ],
       "subset_created_by": "DuckDB version v1.5.1 (build 7dbb2e646f)",
       "subset_only_rows": 0,
-      "subset_sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d"
+      "subset_sha256": "b37630aff113c0512255f703582bf8a7275d9e56f91304f536b047cb22092791"
     }
   },
   "notes": [
@@ -811,13 +821,13 @@
     },
     "reverse": {
       "rows": 3,
-      "sha256": "db70628eefc510c671192c6b80a0e6f313e1946c4cc81729b653df763c34025d",
-      "size_bytes": 2206
+      "sha256": "b37630aff113c0512255f703582bf8a7275d9e56f91304f536b047cb22092791",
+      "size_bytes": 2635
     }
   },
   "overture_release": "2026-06-17.0",
   "provenance": {
-    "base_git_sha": "c2cb06ed0ab93e2066f72b0a26109099f27adb55",
+    "base_git_sha": "c51cf9956e76c1359107260a0bfc300aff24cd87",
     "command": [
       "python",
       "scripts/download_divisions_smoke.py",
@@ -846,7 +856,7 @@
       "plan_has_bbox_filter": true,
       "plan_has_country_filter": true,
       "plan_sha256": "7d9e68f5772c46d614102851807583dfa17306ecc872414f745e723d30fadff0",
-      "profile_sha256": "1defa41d7e7cf11861920aa181972929acf88967cb59b65bab770f8ac6836d04",
+      "profile_sha256": "0423a5786838c41e57003f023e120aff49859694603f005071166fbef8fa8ace",
       "profiled_predicate": "rendered division country/required-ID closure plus bbox",
       "result_rows": 22,
       "total_row_group_bytes": 1210094533,
@@ -861,7 +871,7 @@
       "plan_has_bbox_filter": true,
       "plan_has_country_filter": false,
       "plan_sha256": "d630555448aebefd680aa44d84f453c34ab9b07472c5e8d04ff8920cd09de8a7",
-      "profile_sha256": "de324a69905418f93041c69723141612ccdf40e3b6c572717c5e4e9ea836ad4d",
+      "profile_sha256": "7deee64e1146bb4eee63509f71371bcb66d544e257a34833c0ae3cdbec63a4d5",
       "profiled_predicate": "actual rendered country-or-division_id ownership predicate plus bbox",
       "result_rows": 22,
       "total_row_group_bytes": 6274762647,
@@ -871,12 +881,12 @@
   },
   "rendered_sql_sha256": {
     "forward": "89646793f4b57c11ebc87112ab89d4056548236f2eea77d1e287fad19b7f7e70",
-    "reverse": "13fe4ee5d297c01b6382b758fc7cd2474e8ee856ad3f0d517296bde1be9a98ff"
+    "reverse": "99cc51ba306073f5d5a12f95b867e01637842a5eadb5d096565f6a6135ed8acc"
   },
   "timings_seconds": {
-    "forward_transform": 3.774,
-    "reverse_transform": 12.017,
-    "total": 43.344
+    "forward_transform": 3.686,
+    "reverse_transform": 13.365,
+    "total": 44.866
   },
   "validated_source": {
     "division_area_ids": [

@@ -1579,7 +1579,15 @@ def build_reverse_shard_schema(db: sqlite3.Connection):
             population INTEGER,
             country TEXT,
             region TEXT,
-            wkb BLOB
+            wkb BLOB,
+            -- Materialized primary-hierarchy ancestor chain: an ORDERED JSON
+            -- array of division GERS IDs, root -> ... -> self (see
+            -- download_divisions_area.sql). NULLABLE and appended last so
+            -- older workers, which select reverse columns by name, keep
+            -- working; a new worker probes for it and, when present, resolves
+            -- hierarchy parentage by exact membership instead of the code
+            -- heuristic, breaking same-subtype ties by chain position.
+            lineage_ids TEXT
         );
 
         -- R*Tree spatial index for reverse geocoding point-in-bbox queries.
@@ -1609,9 +1617,11 @@ def populate_reverse_rtree(db: sqlite3.Connection):
 
 
 # The reverse-shard SELECT columns, positionally consumed by
-# prepare_reverse_rows(). `wkb` is appended only when the source parquet
-# declares it (future exact-geometry builds); production parquet omits it so
-# the shard's wkb stays all-NULL.
+# prepare_reverse_rows(). `lineage_ids` is always emitted at index 13 (as a
+# NULL cast when the source parquet predates the lineage export) so positions
+# stay fixed; `wkb` is appended only when the source parquet declares it
+# (future exact-geometry builds); production parquet omits it so the shard's
+# wkb stays all-NULL.
 REVERSE_SELECT_COLUMNS = (
     "gers_id", "subtype", "primary_name", "lat", "lon",
     "bbox_xmin", "bbox_ymin", "bbox_xmax", "bbox_ymax",
@@ -1620,7 +1630,12 @@ REVERSE_SELECT_COLUMNS = (
 
 
 def reverse_select_list(con: "duckdb.DuckDBPyConnection", parquet_str: str) -> str:
-    """Comma-separated reverse SELECT columns, appending `wkb` when present."""
+    """Comma-separated reverse SELECT columns.
+
+    Always emits `lineage_ids` (the extraction SQL's JSON ancestor chain) after
+    the fixed columns, casting NULL when a legacy parquet lacks it, and appends
+    `wkb` last when the source declares it.
+    """
     available = {
         row[0]
         for row in con.execute(
@@ -1628,6 +1643,10 @@ def reverse_select_list(con: "duckdb.DuckDBPyConnection", parquet_str: str) -> s
         ).fetchall()
     }
     columns = list(REVERSE_SELECT_COLUMNS)
+    if "lineage_ids" in available:
+        columns.append("lineage_ids")
+    else:
+        columns.append("CAST(NULL AS VARCHAR) AS lineage_ids")
     if "wkb" in available:
         columns.append("wkb")
     return ",\n            ".join(columns)
@@ -1645,29 +1664,32 @@ def maybe_flag_has_wkb(db: sqlite3.Connection, has_wkb_data: bool) -> None:
 
 
 def prepare_reverse_rows(rows: list[tuple]) -> list[tuple]:
-    """Coerce DuckDB numeric values to SQLite-compatible Python primitives.
+    """Coerce DuckDB values into the SQLite `divisions_reverse` insert layout.
 
-    Supports optional trailing wkb column (future build with exact geometry).
+    Input rows carry the fixed leading schema
+    ``(gers_id, subtype, primary_name, lat, lon, bbox_xmin, bbox_ymin,
+    bbox_xmax, bbox_ymax, area, population, country, region)`` followed by an
+    optional ``lineage_ids`` (index 13, JSON ancestor chain) and an optional
+    ``wkb`` blob (index 14, reserved for a future exact-geometry build). Both
+    trailing columns default to NULL when absent, so a legacy parquet still
+    loads and the reserved wkb slot stays empty.
     """
     prepared = []
     for row in rows:
-        has_wkb = len(row) > 13
         base = (
             row[0], row[1], row[2],
             *(float(value) for value in row[3:10]),
             int(row[10]) if row[10] is not None else None,
             row[11], row[12],
         )
-        if has_wkb:
-            wkb_val = row[13] if len(row) > 13 else None
-            if wkb_val is not None and not isinstance(wkb_val, (bytes, bytearray, type(None))):
-                try:
-                    wkb_val = bytes(wkb_val)
-                except Exception:
-                    wkb_val = None
-            prepared.append(base + (wkb_val,))
-        else:
-            prepared.append(base + (None,))
+        lineage_val = row[13] if len(row) > 13 else None
+        wkb_val = row[14] if len(row) > 14 else None
+        if wkb_val is not None and not isinstance(wkb_val, (bytes, bytearray, type(None))):
+            try:
+                wkb_val = bytes(wkb_val)
+            except Exception:
+                wkb_val = None
+        prepared.append(base + (lineage_val, wkb_val))
     return prepared
 
 
@@ -1715,15 +1737,15 @@ def build_reverse_country_shard(
         for row in prepared_rows:
             # Update bbox (row layout: ..., bbox_xmin[5], ymin[6], xmax[7], ymax[8])
             bbox_acc.add(row[5], row[6], row[7], row[8])
-            if row[13] is not None:  # non-NULL wkb geometry (index 13)
+            if row[14] is not None:  # non-NULL wkb geometry (index 14)
                 has_wkb_data = True
 
         db.executemany("""
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                area, population, country, region, wkb
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                area, population, country, region, lineage_ids, wkb
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, prepared_rows)
         count += len(rows)
 
@@ -1792,14 +1814,14 @@ def build_reverse_head_shard(
 
         prepared_rows = prepare_reverse_rows(rows)
         for row in prepared_rows:
-            if row[13] is not None:  # non-NULL wkb geometry (index 13)
+            if row[14] is not None:  # non-NULL wkb geometry (index 14)
                 has_wkb_data = True
         db.executemany("""
             INSERT INTO divisions_reverse (
                 gers_id, subtype, primary_name, lat, lon,
                 bbox_xmin, bbox_ymin, bbox_xmax, bbox_ymax,
-                area, population, country, region, wkb
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                area, population, country, region, lineage_ids, wkb
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, prepared_rows)
         count += len(rows)
 
