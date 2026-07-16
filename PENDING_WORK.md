@@ -1,9 +1,10 @@
-# Pending Work — 2026-07-15
+# Pending Work — 2026-07-16
 
 This is the durable roadmap after the July architecture and experiment series.
-The code baseline is `8c9b00d` (`main` after #69). Keep measured evidence
-separate from decisions and proposed work so this file can be updated without
-preserving branch- or PR-specific history.
+The code baseline is `4b7468f` (`main` after #74) plus the 2026-07-16
+review-fix and consolidation branch. Keep measured evidence separate from
+decisions and proposed work so this file can be updated without preserving
+branch- or PR-specific history.
 
 ## Baseline
 
@@ -95,6 +96,41 @@ preserving branch- or PR-specific history.
   deliberately uncompressed 148.1 B/indexed-row shape is rejected as the final
   planet format. R2 shuffle, multi-source dictionaries, and global skew remain
   unmeasured.
+
+- The 2026-07-16 review-driven correctness pass fixed the pipeline defects a
+  six-area adversarial review confirmed: the concurrent staging path could
+  again host-OOM (3×10 GB after the dedicated-runner retune; now parameterized
+  back to 3×4 GB), `--prefixes` patch builds bypassed the build-marker
+  inventory (they now rewrite the containing range marker or fail closed),
+  `patch_failed_shards.py` could mutate a published version (now guarded, with
+  `--force-unsafe`), finalize verified ID shards by size only (single-part R2
+  ETags are now bound to recorded Content-MD5), staging markers without staged
+  data went undetected (now fail closed), and batched schema classification
+  depended on unguaranteed row order (now keyed by column name).
+- The same pass fixed shard-generation and routing defects: the reverse
+  "exact WKB containment" path had been active on every shard while all `wkb`
+  values were NULL (the probe now requires actual geometry data, and the
+  parser accepts only plain 2D types); reverse candidate ordering gained
+  `gers_id` tiebreaks; shard builds are now byte-reproducible (ORDER BY on
+  every build SELECT, `created_at` derived from the data version — verified
+  byte-identical across rebuilds); aggregate country bboxes now wrap the
+  antimeridian instead of spanning the globe (takes effect on the next fleet
+  rebuild and should sharply reduce ambiguous reverse routes); and the router
+  builder now shares the worker's exact normalization/token contract via a
+  cross-language fixture, dropping provably unreachable 2-char/hyphenated
+  tokens and fixing the never-working raw-schema fallback.
+- The consolidation half of that pass: the worker's 3.5k-line `stac.rs` split
+  into six focused modules (cache, catalog, forward, reverse, id_index,
+  router_db) with dead CF-IPCountry reverse plumbing removed and parsed
+  collections memoized; the ~370 lines of promote/rollback/prune bash moved
+  into unit-tested `finalize_rebuild.py promote|recover` and
+  `scripts/prune_catalog.py` (exact-match reference guard replacing substring
+  grep); retention raised to the worker's four-version fallback window with a
+  cache-TTL grace before any deletion; workflow contract tests rewritten to
+  parse YAML structurally; actionlint added to CI; recovery procedure
+  documented in `docs/rebuild-recovery.md`; the Places experiment moved out of
+  `build_shards.py`; and the Monaco equivalence evidence regenerated with a
+  real `2026-06-17.0` run (drift 0, subset smoke 45.4 s).
 
 ### Current production data
 
@@ -488,7 +524,46 @@ Every current candidate fails correctness or stored bytes. Only after a future
 candidate passes the ratified gates should a separate review cover Worker
 caching, artifact publication/rollback, failure behavior, and production smoke
 coverage. Continue using ambiguous-bbox-to-`HEAD` fallback until that
-integration is deployed and verified.
+integration is deployed and verified. Note the wrapped antimeridian country
+bboxes shipped 2026-07-16 apply at the next fleet rebuild and should sharply
+reduce the ambiguous-route share on their own; re-measure the multi-bbox
+ambiguity rate after that rebuild before sizing the exact-country work.
+
+### 7. Engineering follow-ups from the 2026-07-16 review
+
+Deferred deliberately; none block the current experiment tracks.
+
+- Materialize division lineage (`parent_division_id` or per-level parent
+  columns) into reverse shards at build time and replace the query-time
+  hierarchy-coherence heuristic with an exact lookup. The heuristic's own test
+  pins a wrong-county answer as its documented ceiling, and the top-8
+  per-subtype cap can drop the true region near dense borders.
+- Decide the reverse `wkb` column's future: populate locality-scale geometry
+  (the containment cap must then apply after filtering, not before) or drop
+  the column and its query path. It is now correctly dormant either way.
+- Replace the hardcoded seven-type ID matrix with a discovery job emitting the
+  matrix via `fromJSON`; today an Overture type addition fails the monthly run
+  closed until a workflow edit.
+- Extract the marker/inventory protocol from `build_id_index.py` into one
+  module with a single attest/verify pair every consumer calls (build still
+  trusts staging globs), then split staging/build/metadata into separate
+  scripts sharing it.
+- Extract `scripts/common.py` for the sha256/write_json/version-key helpers
+  duplicated across roughly nine scripts.
+- Move the pure routing functions (`select_reverse_route`, `bbox_contains`,
+  `normalize_lon`, `distance_to_bbox`) from the worker into geocoder-core so
+  the CLI and offline evaluation exercise production routing exactly.
+- Put the address-spike decoder and its `flate2` dependency behind a cargo
+  feature so the production wasm bundle stops shipping dead spike code.
+- Converge the two address formats (division-joined spike vs division-free
+  hosted pipeline) before any catalog integration; they currently coexist with
+  no reconciliation decision.
+- Re-enable shellcheck/pyflakes in the CI actionlint job after a dedicated
+  quoting cleanup of the 71 pre-existing findings in the large workflows.
+- Remove or consume the unconsumed research artifacts in the pipeline
+  directory (`build_country_h3_index.py`, `extract_country_router.sql`), whose
+  current output format was judged unfit to wire in (duplicated simplified
+  boundary polys, dateline-inconsistent classification).
 
 ## Deferred geocoder feature-gap review
 
@@ -532,54 +607,25 @@ inventory expected files/bytes/row counts, confirm range and retry coverage,
 and document promotion plus rollback checks. Treat scale or correctness defects
 found during that rehearsal as hardening work, not reasons to relax gates.
 
-### 2026-07-13 read-only readiness audit: no-go pending workflow hardening
+### 2026-07-13 readiness audit: resolved
 
-No rebuild or production write was triggered. Production is healthy on
-`2026-07-02.3`, and the latest upstream release remains `2026-06-17.0`. A new
-build would therefore exercise the current v3 ID producer and workflow fixes
-against the same upstream snapshot rather than ingest newer source data.
+The 2026-07-13 no-go audit's five findings were implemented by #61 (single
+finalizer gated on every enabled family, exact immutable-inventory readback,
+prefix-collision rejection, live four-endpoint smoke, automatic rollback,
+guarded retention) and validated by the hardened rebuild that promoted
+`2026-07-13.0`. The audit's measured input/output inventory remains useful
+sizing context: 10 division Parquet objects (5,788,444 rows), about 353.6 GB
+of compressed ID-input Parquet, and a 2h06m-to-3h34m full-workflow envelope
+with ID staging/build on the critical path.
 
-Measured candidate inputs and current output headroom are healthy:
-
-- Divisions: 10 Parquet objects, 5,788,444 rows, and 5,508,502,487 bytes.
-- ID inputs: 3,586,392,274 registry rows plus 944,242,075 current-release
-  address/base rows, scanning about 353.6 GB of compressed Parquet.
-- Current output: 261 forward shards (56,864,768 bytes), 252 reverse shards
-  (32,690,176 bytes), and 4,096 ID shards (138,576,344,116 bytes). The largest
-  forward, reverse, and ID objects are about 12.6 MB, 11.2 MB, and 32.4 MB,
-  respectively, below the present 50 MB division-family warning threshold.
-- The last successful full workflow took about 2h06m; forward/reverse published
-  after about nine minutes, while ID staging/build determined the critical path.
-
-The current workflow is not ready for another production dispatch:
-
-1. `rebuild-shards` publishes the root discovery catalog independently of the
-   parallel ID pipeline. The Worker health check requires forward, reverse, and
-   ID metadata on the latest version, so normal publication can make `/health`
-   fail until ID completes, and indefinitely if ID fails.
-2. Scheduled/default retention runs in `rebuild-shards` immediately after that
-   early catalog publish, while ID is still building. Keeping only the current
-   incomplete version plus one fallback removes the deeper recovery margin.
-3. An explicit version is format-checked but not rejected when its prefix
-   already exists, so a manual dispatch can mutate supposedly immutable live
-   objects. Partial country, forward-only, or ID-disabled runs can also publish
-   an incomplete version as global latest; reverse-only creates an unreferenced
-   prefix instead.
-4. Forward/reverse collections contain per-object size and SHA-256, but the
-   workflow readback verifies only collections, `HEAD`, and the router. ID
-   metadata inspects Parquet formats but publishes neither per-shard sizes nor
-   hashes; the live ID collection reports zero total bytes. `build-meta.json`
-   is generated locally but is not uploaded.
-5. The rebuild has no final live production smoke and no automatic catalog
-   rollback if post-publication health, search, reverse, or ID checks fail.
-
-Before dispatching, add one finalization job that waits for every enabled
-production family, verifies exact immutable inventories, publishes the root
-catalog once, runs live four-endpoint smoke checks, and only then performs
-retention. Reject existing version prefixes, keep partial builds non-promoting,
-disable or guard the July 25 scheduled run until this lands, use cleanup=false
-for the first hardened rehearsal, and retain at least three complete versions
-until the new version has passed soak checks.
+The 2026-07-16 pass then moved the promotion, rollback, and prune logic into
+unit-tested Python (`finalize_rebuild.py promote|recover`,
+`scripts/prune_catalog.py`), raised retention to the worker's four-version
+fallback window, added a worker cache-TTL grace before any object deletion,
+and documented the interrupted-rebuild recovery ritual in
+`docs/rebuild-recovery.md`. The scheduled July 25 run will rebuild and
+auto-promote; with the rollback and smoke gates in place and a recent
+successful hardened rebuild, it is accepted to proceed.
 
 ## Open decisions
 
