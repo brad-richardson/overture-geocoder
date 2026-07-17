@@ -46,13 +46,18 @@ def test_builds_three_shards_head_and_exact_oracles(tmp_path):
 
     assert len(report["shards"]) == 3
     assert (tmp_path / "output" / "head.phrp").is_file()
+    assert (tmp_path / "output" / "catalog.pcat").is_file()
+    assert report["catalog"]["schema_version"] == 1
     assert any(case["head_hit"] for case in report["cases"])
     assert any(not case["head_hit"] for case in report["cases"])
     assert any(case["name"] == "shard_prefix" for case in report["cases"])
     assert all(case["result_ids"] for case in report["cases"])
+    assert all(
+        len(case["required_objects"]) <= 2 for case in report["cases"]
+    )
 
 
-def test_equal_rank_global_merge_uses_same_shard_doc_tiebreak_as_local_limit(tmp_path):
+def test_equal_rank_routed_limit_uses_same_doc_tiebreak_as_packed_head(tmp_path):
     inputs = [tmp_path / f"input-{index}.json" for index in range(3)]
     first = [
         {
@@ -112,7 +117,9 @@ def test_equal_rank_global_merge_uses_same_shard_doc_tiebreak_as_local_limit(tmp
         artifacts.append(artifact)
         ordered_groups.append(ordered)
 
-    result = smoke.query_shards(artifacts, "tie", False)
+    result = smoke.query_shard(
+        artifacts[0], (smoke.Clause("tie"),), [0.0, 0.0]
+    )
     head_order, heads, _ = smoke.build_heads_and_baseline(
         [place for group in ordered_groups for place in group],
         head_minimum_candidates=2,
@@ -130,7 +137,6 @@ def test_equal_rank_global_merge_uses_same_shard_doc_tiebreak_as_local_limit(tmp
         )
     ]
 
-    assert result["candidate_count"] == 12
+    assert result["candidate_count"] == 11
     assert result["result_ids"] == [f"z{index:02}" for index in range(10)]
-    assert "a-next-shard" not in result["result_ids"]
     assert head_ids == result["result_ids"]

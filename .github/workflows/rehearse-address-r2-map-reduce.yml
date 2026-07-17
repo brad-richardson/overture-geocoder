@@ -1,0 +1,253 @@
+name: Rehearse Real Address R2 Map Reduce Resume
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rehearse-address-r2-map-reduce
+  cancel-in-progress: false
+
+env:
+  SHUFFLE_PREFIX: smoke/address-real-shuffle/${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  real-address-resume:
+    name: Real address resume ${{ matrix.name }} (${{ matrix.task_index }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: us-full
+            task_index: 48
+          - name: mexico-full
+            task_index: 3
+    env:
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned binary dependency
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      - name: Record runner resources
+        run: |
+          {
+            echo "## Real address verified-resume task ${{ matrix.name }}"
+            echo
+            echo '```text'
+            lscpu
+            free -h
+            df -h . /tmp
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Project one inventoried current-release task
+        run: |
+          set -euo pipefail
+          mkdir -p "/tmp/address-resume-${{ matrix.name }}/fragments" \
+            "/tmp/address-resume-${{ matrix.name }}/restore"
+          /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
+            --release 2026-06-17.0 \
+            --family addresses \
+            --inventory-report benchmarks/address-rowgroup-inventory-report.json \
+            --task-index "${{ matrix.task_index }}" \
+            --output "/tmp/address-resume-${{ matrix.name }}/projected.parquet" \
+            --json-out "projection-${{ matrix.name }}.json" \
+            --target-rowgroup-uncompressed-bytes 350000000 \
+            --max-rows 4000000 \
+            --max-groups 72 \
+            --max-output-bytes 500000000
+
+      - name: Build real map fragments and the local reduce oracle
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          /usr/bin/time -v python scripts/prepare_address_verified_resume.py map \
+            --input "$ROOT/projected.parquet" \
+            --fragment-dir "$ROOT/fragments" \
+            --json-out "map-${{ matrix.name }}.json" \
+            --work-dir /tmp \
+            --max-rows 4000000 \
+            --fragment-rows 128000 \
+            --max-workspace-bytes 12000000000
+          /usr/bin/time -v python scripts/prepare_address_verified_resume.py reduce \
+            --map-report "map-${{ matrix.name }}.json" \
+            --output "$ROOT/local.aidx" \
+            --json-out "local-reduce-${{ matrix.name }}.json" \
+            --work-dir /tmp \
+            --sparse-stride 256 \
+            --max-artifact-bytes 1000000000 \
+            --max-workspace-bytes 12000000000
+
+      - name: Build deterministic partial and full content manifests
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
+          FRAGMENTS=("$ROOT"/fragments/fragment-*.bin)
+          test -f "${FRAGMENTS[0]}"
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$TASK_PREFIX" \
+            --output "$ROOT/partial.json" \
+            "${FRAGMENTS[0]}"
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$TASK_PREFIX" \
+            --output "$ROOT/full.json" \
+            "${FRAGMENTS[@]}"
+
+      - name: Upload partial completion and verify two full resumes
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$TASK_PREFIX" --manifest "$ROOT/partial.json" \
+            --report "$ROOT/partial-upload.json"
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$TASK_PREFIX" --manifest "$ROOT/full.json" \
+            --report "$ROOT/full-upload.json"
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$TASK_PREFIX" --manifest "$ROOT/full.json" \
+            --report "$ROOT/resumed-upload.json"
+          jq -e '
+            .artifacts[0].status == "existing_verified"
+            and any(.artifacts[1:][]; .status == "uploaded")
+          ' "$ROOT/full-upload.json"
+          jq -e 'all(.artifacts[]; .status == "existing_verified" and .readback_verified == true)' \
+            "$ROOT/resumed-upload.json"
+
+      - name: Restore from empty and stale state then reproduce the oracle
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          rm -rf "$ROOT/fragments" "$ROOT/restore" "$ROOT/local.aidx" "$ROOT/projected.parquet"
+          python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
+            --manifest "$ROOT/full.json" --output-dir "$ROOT/restore" \
+            --report "$ROOT/empty-restore.json"
+          RESTORED=("$ROOT"/restore/fragment-*.bin)
+          FIRST_RESTORED="${RESTORED[0]}"
+          test -f "$FIRST_RESTORED"
+          printf 'stale-fragment\n' > "$FIRST_RESTORED"
+          python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
+            --manifest "$ROOT/full.json" --output-dir "$ROOT/restore" \
+            --report "$ROOT/stale-restore.json"
+          jq -e 'all(.artifacts[]; .verified == true)' "$ROOT/stale-restore.json"
+          /usr/bin/time -v python scripts/prepare_address_verified_resume.py reduce \
+            --map-report "map-${{ matrix.name }}.json" \
+            --restore-report "$ROOT/stale-restore.json" \
+            --expected-report "local-reduce-${{ matrix.name }}.json" \
+            --output "$ROOT/restored.aidx" \
+            --json-out "restored-reduce-${{ matrix.name }}.json" \
+            --work-dir /tmp \
+            --sparse-stride 256 \
+            --max-artifact-bytes 1000000000 \
+            --max-workspace-bytes 12000000000
+          jq -e '
+            .restored == true
+            and .local_oracle_match == true
+            and .reduce.verification.full_sorted_scan == true
+            and .reduce.verification.record_count_match == true
+          ' "restored-reduce-${{ matrix.name }}.json"
+          jq -n \
+            --slurpfile map "map-${{ matrix.name }}.json" \
+            --slurpfile partial "$ROOT/partial-upload.json" \
+            --slurpfile full "$ROOT/full-upload.json" \
+            --slurpfile resumed "$ROOT/resumed-upload.json" \
+            --slurpfile empty "$ROOT/empty-restore.json" \
+            --slurpfile stale "$ROOT/stale-restore.json" \
+            --slurpfile local "local-reduce-${{ matrix.name }}.json" \
+            --slurpfile restored "restored-reduce-${{ matrix.name }}.json" '
+            def bytes($report): [$report[0].artifacts[].bytes] | add;
+            ($map[0].map_fragments.bytes) as $source_bytes |
+            (bytes($partial) + bytes($full) + bytes($resumed)) as $upload_readback |
+            ([($empty[0].artifacts + $stale[0].artifacts)[] |
+              select(.status == "remote_verified") | .bytes] | add // 0) as $restore_download |
+            {
+              schema: "overture-address-real-r2-resume-measurement-v1",
+              fragment_bytes: $source_bytes,
+              verified_upload_readback_bytes: $upload_readback,
+              retry_readback_amplification: ($upload_readback / $source_bytes),
+              restore_download_bytes: $restore_download,
+              map_resources: $map[0].resources,
+              local_reduce_resources: $local[0].resources,
+              restored_reduce_resources: $restored[0].resources,
+              local_oracle_match: $restored[0].local_oracle_match
+            }
+          ' | tee "resume-measurement-${{ matrix.name }}.json"
+
+      - name: Summarize measured coverage, bytes, and resources
+        if: always()
+        run: |
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          {
+            echo
+            echo "### Projection and structured retention"
+            echo '```json'
+            test -f "projection-${{ matrix.name }}.json" && cat "projection-${{ matrix.name }}.json"
+            echo '```'
+            echo
+            echo "### Real map fragments"
+            echo '```json'
+            test -f "map-${{ matrix.name }}.json" && cat "map-${{ matrix.name }}.json"
+            echo '```'
+            echo
+            echo "### Restored reduce equivalence"
+            echo '```json'
+            test -f "restored-reduce-${{ matrix.name }}.json" && cat "restored-reduce-${{ matrix.name }}.json"
+            test -f "resume-measurement-${{ matrix.name }}.json" && cat "resume-measurement-${{ matrix.name }}.json"
+            test -f "$ROOT/resumed-upload.json" && cat "$ROOT/resumed-upload.json"
+            test -f "$ROOT/stale-restore.json" && cat "$ROOT/stale-restore.json"
+            echo '```'
+            echo
+            echo "Task ${{ matrix.task_index }} is one member of the fixed 127-task inventory. This rehearsal is run-unique, non-promoting, and cannot update a catalog."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Delete the task's isolated R2 fragments
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${TASK_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${TASK_PREFIX}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"

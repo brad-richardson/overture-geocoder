@@ -1,6 +1,6 @@
 //! Strict range reader for the experimental compact Places spatial shard.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use geocoder_core::pages::{format_uuid, ByteRange, ByteReader, PageError};
 use serde::{Deserialize, Serialize};
@@ -11,6 +11,7 @@ use crate::stac::{not_found, ShardLoader};
 
 const MAGIC: &[u8; 8] = b"PCSH0001";
 const HEAD_MAGIC: &[u8; 8] = b"PHRP0001";
+const CATALOG_MAGIC: &[u8; 8] = b"PCAT0001";
 const PREAMBLE_BYTES: usize = 12;
 const RECORD_INDEX_BYTES: u64 = 8;
 const MAX_DIRECTORY_BYTES: usize = 512 * 1024;
@@ -25,10 +26,21 @@ const MAX_POSTING_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_POSTING_CANDIDATES: usize = 200_000;
 const MAX_RESULT_RECORD_BYTES: usize = 64 * 1024;
 const MAX_RESULT_RANGE_BYTES: u64 = 2 * 1024 * 1024;
-const RESULT_LIMIT: usize = 10;
+const RESULT_LIMIT: usize = 25;
+const HEAD_RESULT_LIMIT: usize = 10;
+const MAX_QUERY_CLAUSES: usize = 4;
+const MAX_QUERY_POSTING_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_HEAD_INDEX_BYTES: u64 = 1024 * 1024;
 const MAX_HEAD_KEYS: usize = 100_000;
 const MAX_HEAD_ENTRY_BYTES: u64 = 128 * 1024;
+const MAX_CATALOG_BYTES: usize = 256 * 1024;
+const MAX_CATALOG_SHARDS: usize = 4096;
+
+const FIELD_NAME: u8 = 1;
+const FIELD_BRAND: u8 = 2;
+const FIELD_CATEGORY: u8 = 4;
+const FIELD_CONTEXT: u8 = 8;
+const FIELD_ALL: u8 = FIELD_NAME | FIELD_BRAND | FIELD_CATEGORY | FIELD_CONTEXT;
 
 type PageResult<T> = std::result::Result<T, PageError>;
 
@@ -54,6 +66,7 @@ struct Directory {
     record_count: usize,
     token_count: usize,
     lexicon_blocks: Vec<LexiconBlock>,
+    field_bits: HashMap<String, u8>,
     components: HashMap<String, Component>,
 }
 
@@ -83,6 +96,97 @@ pub(crate) struct PlaceProjection {
     pub locality: String,
     pub region: String,
     pub country: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub distance_km: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PlacesClause {
+    pub token: String,
+    pub prefix: bool,
+    pub field: Option<String>,
+    #[serde(skip)]
+    field_mask: u8,
+}
+
+impl PlacesClause {
+    pub(crate) fn new(token: String, prefix: bool, field: Option<String>) -> Result<Self> {
+        if token.is_empty()
+            || token.len() > MAX_TOKEN_BYTES
+            || (prefix && token.chars().count() < MIN_PREFIX_CHARS)
+        {
+            return Err(Error::RustError(
+                "Places lookup token is outside hard bounds".into(),
+            ));
+        }
+        let field_mask = match field.as_deref() {
+            None => FIELD_ALL,
+            Some("name") => FIELD_NAME,
+            Some("brand") => FIELD_BRAND,
+            Some("category") => FIELD_CATEGORY,
+            Some("context") => FIELD_CONTEXT,
+            Some(_) => {
+                return Err(Error::RustError(
+                    "Places lookup field is unsupported".into(),
+                ))
+            }
+        };
+        Ok(Self {
+            token,
+            prefix,
+            field,
+            field_mask,
+        })
+    }
+
+    pub(crate) fn head_eligible(&self) -> bool {
+        self.field.is_none() && !self.prefix
+    }
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub(crate) struct PlacesCatalogShard {
+    pub id: String,
+    pub object: String,
+    pub bbox: [f64; 4],
+    pub center: [f64; 2],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub(crate) struct PlacesCatalog {
+    schema_version: u32,
+    tokenizer_version: String,
+    pub shards: Vec<PlacesCatalogShard>,
+}
+
+impl PlacesCatalog {
+    pub(crate) fn route_context(&self, context: &str) -> Option<&PlacesCatalogShard> {
+        self.shards.iter().find(|shard| shard.id == context)
+    }
+
+    pub(crate) fn route_point(&self, longitude: f64, latitude: f64) -> Option<&PlacesCatalogShard> {
+        self.shards
+            .iter()
+            .filter(|shard| {
+                shard.bbox[0] <= longitude
+                    && longitude <= shard.bbox[2]
+                    && shard.bbox[1] <= latitude
+                    && latitude <= shard.bbox[3]
+            })
+            .min_by(|left, right| {
+                let left_area = (left.bbox[2] - left.bbox[0]) * (left.bbox[3] - left.bbox[1]);
+                let right_area = (right.bbox[2] - right.bbox[0]) * (right.bbox[3] - right.bbox[1]);
+                left_area
+                    .total_cmp(&right_area)
+                    .then(left.id.cmp(&right.id))
+            })
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub(crate) struct PlacesCatalogLookup {
+    pub catalog: PlacesCatalog,
+    pub read_metrics: RangeReadMetrics,
 }
 
 #[derive(Debug, Serialize)]
@@ -97,6 +201,7 @@ pub(crate) struct PlacesReadStages {
 #[derive(Debug, Serialize)]
 pub(crate) struct PlacesShardLookup {
     pub candidate_count: usize,
+    pub clause_candidate_counts: Vec<usize>,
     pub results: Vec<PlaceProjection>,
     pub read_metrics: RangeReadMetrics,
     pub stages: PlacesReadStages,
@@ -236,7 +341,7 @@ fn select_lexicon_blocks<'a>(
     Ok(selected)
 }
 
-fn decode_postings(bytes: &[u8], count: usize) -> PageResult<Vec<(u64, u8)>> {
+fn decode_postings(bytes: &[u8], count: usize) -> PageResult<Vec<(u64, u8, u8)>> {
     if count > MAX_POSTING_CANDIDATES {
         return Err(PageError::new("Places posting count exceeds hard cap"));
     }
@@ -256,7 +361,10 @@ fn decode_postings(bytes: &[u8], count: usize) -> PageResult<Vec<(u64, u8)>> {
             return Err(PageError::new("Places posting IDs are not increasing"));
         }
         let pair = reader.take(2)?;
-        result.push((doc_id, pair[1]));
+        if pair[0] == 0 || pair[0] & !FIELD_ALL != 0 {
+            return Err(PageError::new("Places posting field mask is invalid"));
+        }
+        result.push((doc_id, pair[0], pair[1]));
         previous = doc_id;
     }
     if !reader.is_empty() {
@@ -306,6 +414,7 @@ fn decode_projection(bytes: &[u8]) -> PageResult<PlaceProjection> {
         locality,
         region,
         country,
+        distance_km: None,
     })
 }
 
@@ -358,6 +467,7 @@ fn decode_head_projection(bytes: &[u8]) -> PageResult<PlaceProjection> {
         locality,
         region,
         country,
+        distance_km: None,
     })
 }
 
@@ -394,7 +504,7 @@ fn decode_head_entry(bytes: &[u8]) -> PageResult<Vec<PlaceProjection>> {
     let mut reader = ByteReader::new(bytes, 0);
     let mut results = Vec::new();
     while !reader.is_empty() {
-        if results.len() >= RESULT_LIMIT {
+        if results.len() >= HEAD_RESULT_LIMIT {
             return Err(PageError::new("Places head result count exceeds hard cap"));
         }
         let length = usize::try_from(reader.uvarint()?)
@@ -405,12 +515,89 @@ fn decode_head_entry(bytes: &[u8]) -> PageResult<Vec<PlaceProjection>> {
 }
 
 impl ShardLoader {
+    pub(crate) async fn lookup_places_catalog_spike(
+        &self,
+        object_key: &str,
+    ) -> Result<PlacesCatalogLookup> {
+        let mut reader = RangeReader::new(self, object_key);
+        let preamble = reader
+            .range(0, PREAMBLE_BYTES as u64)
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        if preamble.len() != PREAMBLE_BYTES || &preamble[..8] != CATALOG_MAGIC {
+            return Err(Error::RustError("Invalid Places catalog preamble".into()));
+        }
+        let payload_length =
+            u32::from_le_bytes(preamble[8..12].try_into().expect("four-byte slice")) as usize;
+        if payload_length == 0 || payload_length > MAX_CATALOG_BYTES {
+            return Err(Error::RustError(
+                "Places catalog payload is outside hard bounds".into(),
+            ));
+        }
+        let payload = reader
+            .range(PREAMBLE_BYTES as u64, payload_length as u64)
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        let catalog: PlacesCatalog = serde_json::from_slice(&payload)
+            .map_err(|_| Error::RustError("Invalid Places catalog JSON".into()))?;
+        if catalog.schema_version != 1
+            || catalog.tokenizer_version != "nfkd-latin-fold-cjk-bigram-v2"
+            || catalog.shards.is_empty()
+            || catalog.shards.len() > MAX_CATALOG_SHARDS
+        {
+            return Err(Error::RustError(
+                "Unsupported Places catalog contract".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        for shard in &catalog.shards {
+            let valid_id = !shard.id.is_empty()
+                && shard.id.len() <= 64
+                && shard
+                    .id
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-');
+            let valid_object = shard.object.ends_with(".pcsh")
+                && shard.object.len() <= 128
+                && shard.object.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+                });
+            let [xmin, ymin, xmax, ymax] = shard.bbox;
+            let valid_geometry = shard.bbox.iter().all(|value| value.is_finite())
+                && shard.center.iter().all(|value| value.is_finite())
+                && (-180.0..=180.0).contains(&xmin)
+                && (-180.0..=180.0).contains(&xmax)
+                && (-90.0..=90.0).contains(&ymin)
+                && (-90.0..=90.0).contains(&ymax)
+                && xmin <= xmax
+                && ymin <= ymax
+                && (xmin..=xmax).contains(&shard.center[0])
+                && (ymin..=ymax).contains(&shard.center[1]);
+            if !valid_id || !valid_object || !valid_geometry || !ids.insert(shard.id.as_str()) {
+                return Err(Error::RustError(
+                    "Places catalog shard is outside hard bounds".into(),
+                ));
+            }
+        }
+        Ok(PlacesCatalogLookup {
+            catalog,
+            read_metrics: reader.metrics(),
+        })
+    }
+
     pub(crate) async fn lookup_places_head_spike(
         &self,
         object_key: &str,
-        token: &str,
-        prefix: bool,
+        clauses: &[PlacesClause],
     ) -> Result<PlacesHeadLookup> {
+        if clauses.is_empty()
+            || clauses.len() > MAX_QUERY_CLAUSES
+            || clauses.iter().any(|clause| !clause.head_eligible())
+        {
+            return Err(Error::RustError(
+                "Places head query is outside its eligibility contract".into(),
+            ));
+        }
         let mut reader = RangeReader::new(self, object_key);
         let preamble = reader
             .range(0, PREAMBLE_BYTES as u64)
@@ -451,31 +638,51 @@ impl ShardLoader {
             .range(key_index.offset, key_index.length)
             .await?
             .ok_or_else(|| not_found(object_key))?;
-        let head_key = format!("{}:{token}", if prefix { "p" } else { "e" });
-        let located = find_head_entry(&index_bytes, &head_key)
-            .map_err(|error| Error::RustError(format!("Invalid Places head index: {error}")))?;
+        let mut located = Vec::with_capacity(clauses.len());
+        for clause in clauses {
+            let head_key = format!("e:{}", clause.token);
+            let Some(extent) = find_head_entry(&index_bytes, &head_key)
+                .map_err(|error| Error::RustError(format!("Invalid Places head index: {error}")))?
+            else {
+                let after_index = reader.metrics();
+                return Ok(PlacesHeadLookup {
+                    hit: false,
+                    results: Vec::new(),
+                    read_metrics: after_index,
+                    directory_metrics: after_directory,
+                    index_metrics: after_index.since(after_directory),
+                    entry_metrics: RangeReadMetrics::default(),
+                });
+            };
+            located.push(extent);
+        }
         let after_index = reader.metrics();
-        let Some((offset, length)) = located else {
-            return Ok(PlacesHeadLookup {
-                hit: false,
-                results: Vec::new(),
-                read_metrics: after_index,
-                directory_metrics: after_directory,
-                index_metrics: after_index.since(after_directory),
-                entry_metrics: RangeReadMetrics::default(),
-            });
-        };
         let entries = head_component(&directory, "entries")?;
-        let extent = checked_extent(entries.offset, offset, length, entries.length)?;
-        let entry_bytes = reader
-            .range(extent.offset, extent.length)
-            .await?
-            .ok_or_else(|| not_found(object_key))?;
-        let results = decode_head_entry(&entry_bytes)
-            .map_err(|error| Error::RustError(format!("Invalid Places head entry: {error}")))?;
+        let wants = located
+            .into_iter()
+            .map(|(offset, length)| checked_extent(entries.offset, offset, length, entries.length))
+            .collect::<Result<Vec<_>>>()?;
+        let chunks = reader.coalesced(&wants, 64 * 1024, 512 * 1024).await?;
+        let mut per_clause = chunks
+            .iter()
+            .map(|bytes| {
+                decode_head_entry(bytes).map_err(|error| {
+                    Error::RustError(format!("Invalid Places head entry: {error}"))
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+        let mut results = per_clause.remove(0);
+        for clause_results in per_clause {
+            let ids: HashSet<_> = clause_results
+                .iter()
+                .map(|place| place.id.as_str())
+                .collect();
+            results.retain(|place| ids.contains(place.id.as_str()));
+        }
+        results.truncate(HEAD_RESULT_LIMIT);
         let after_entry = reader.metrics();
         Ok(PlacesHeadLookup {
-            hit: true,
+            hit: !results.is_empty(),
             results,
             read_metrics: after_entry,
             directory_metrics: after_directory,
@@ -487,9 +694,13 @@ impl ShardLoader {
     pub(crate) async fn lookup_places_shard_spike(
         &self,
         key: &str,
-        token: &str,
-        prefix: bool,
+        clauses: &[PlacesClause],
     ) -> Result<PlacesShardLookup> {
+        if clauses.is_empty() || clauses.len() > MAX_QUERY_CLAUSES {
+            return Err(Error::RustError(
+                "Places clause count is outside hard bounds".into(),
+            ));
+        }
         let mut reader = RangeReader::new(self, key);
         let preamble = reader
             .range(0, PREAMBLE_BYTES as u64)
@@ -516,6 +727,10 @@ impl ShardLoader {
             || directory.record_count == 0
             || directory.token_count == 0
             || directory.lexicon_blocks.is_empty()
+            || directory.field_bits.get("name") != Some(&FIELD_NAME)
+            || directory.field_bits.get("brand") != Some(&FIELD_BRAND)
+            || directory.field_bits.get("category") != Some(&FIELD_CATEGORY)
+            || directory.field_bits.get("context") != Some(&FIELD_CONTEXT)
         {
             return Err(Error::RustError(
                 "Unsupported Places directory contract".into(),
@@ -524,36 +739,51 @@ impl ShardLoader {
         let after_directory = reader.metrics();
 
         let lexicon = component(&directory, "lexicon")?;
-        let blocks = select_lexicon_blocks(&directory, token, prefix)?;
-        let wants: Vec<_> = blocks
-            .iter()
-            .map(|block| checked_extent(lexicon.offset, block.offset, block.length, lexicon.length))
-            .collect::<Result<_>>()?;
-        let chunks = reader.coalesced(&wants, 0, MAX_LEXICON_BLOCK_BYTES).await?;
-        let mut matches = Vec::new();
-        for (block, bytes) in blocks.iter().zip(chunks) {
-            for entry in decode_lexicon_block(&bytes, block.entries)
-                .map_err(|error| Error::RustError(format!("Invalid Places lexicon: {error}")))?
-            {
-                if entry.token == token || (prefix && entry.token.starts_with(token)) {
-                    if matches.len() >= MAX_LEXICON_MATCHES {
-                        return Err(Error::RustError(
-                            "Places lexicon matches exceed hard cap".into(),
-                        ));
+        let mut clause_matches = Vec::with_capacity(clauses.len());
+        for clause in clauses {
+            let blocks = select_lexicon_blocks(&directory, &clause.token, clause.prefix)?;
+            let wants: Vec<_> = blocks
+                .iter()
+                .map(|block| {
+                    checked_extent(lexicon.offset, block.offset, block.length, lexicon.length)
+                })
+                .collect::<Result<_>>()?;
+            let chunks = reader.coalesced(&wants, 0, MAX_LEXICON_BLOCK_BYTES).await?;
+            let mut matches = Vec::new();
+            for (block, bytes) in blocks.iter().zip(chunks) {
+                for entry in decode_lexicon_block(&bytes, block.entries)
+                    .map_err(|error| Error::RustError(format!("Invalid Places lexicon: {error}")))?
+                {
+                    if entry.token == clause.token
+                        || (clause.prefix && entry.token.starts_with(&clause.token))
+                    {
+                        if matches.len() >= MAX_LEXICON_MATCHES {
+                            return Err(Error::RustError(
+                                "Places lexicon matches exceed hard cap".into(),
+                            ));
+                        }
+                        matches.push(entry);
                     }
-                    matches.push(entry);
                 }
             }
+            matches.sort_by(|left, right| left.token.cmp(&right.token));
+            clause_matches.push(matches);
         }
         let after_lexicon = reader.metrics();
-        if after_lexicon.since(after_directory).planned_physical_ranges > MAX_LEXICON_BLOCKS {
+        if after_lexicon.since(after_directory).planned_physical_ranges
+            > MAX_LEXICON_BLOCKS.saturating_mul(clauses.len())
+        {
             return Err(Error::RustError(
                 "Places lexicon physical reads exceed hard cap".into(),
             ));
         }
-        if matches.is_empty() {
+        if clause_matches.iter().any(Vec::is_empty) {
             return Ok(PlacesShardLookup {
                 candidate_count: 0,
+                clause_candidate_counts: clause_matches
+                    .iter()
+                    .map(|matches| usize::from(!matches.is_empty()))
+                    .collect(),
                 results: Vec::new(),
                 read_metrics: reader.metrics(),
                 stages: PlacesReadStages {
@@ -567,59 +797,90 @@ impl ShardLoader {
             });
         }
 
-        matches.sort_by(|left, right| left.token.cmp(&right.token));
         let postings = component(&directory, "postings")?;
-        let first = matches.first().expect("nonempty matches");
-        let last = matches.last().expect("nonempty matches");
-        let posting_start = first.posting_offset;
-        let posting_end = last
-            .posting_offset
-            .checked_add(last.posting_length)
-            .ok_or_else(|| Error::RustError("Places posting span overflows".into()))?;
-        let posting_length = posting_end
-            .checked_sub(posting_start)
-            .ok_or_else(|| Error::RustError("Places posting span is reversed".into()))?;
-        if posting_length > MAX_POSTING_BYTES {
-            return Err(Error::RustError(
-                "Places posting span exceeds hard cap".into(),
-            ));
-        }
-        let posting_extent = checked_extent(
-            postings.offset,
-            posting_start,
-            posting_length,
-            postings.length,
-        )?;
-        let posting_bytes = reader
-            .range(posting_extent.offset, posting_extent.length)
-            .await?
-            .ok_or_else(|| not_found(key))?;
-        let mut candidates: BTreeMap<u64, u8> = BTreeMap::new();
-        for entry in &matches {
-            let relative = usize::try_from(entry.posting_offset - posting_start)
-                .map_err(|_| Error::RustError("Places posting offset is too large".into()))?;
-            let length = usize::try_from(entry.posting_length)
-                .map_err(|_| Error::RustError("Places posting length is too large".into()))?;
-            let end = relative
-                .checked_add(length)
-                .ok_or_else(|| Error::RustError("Places posting slice overflows".into()))?;
-            let encoded = posting_bytes
-                .get(relative..end)
-                .ok_or_else(|| Error::RustError("Places posting slice is truncated".into()))?;
-            for (doc_id, rank) in decode_postings(encoded, entry.posting_count)
-                .map_err(|error| Error::RustError(format!("Invalid Places posting: {error}")))?
-            {
-                candidates
-                    .entry(doc_id)
-                    .and_modify(|old| *old = (*old).max(rank))
-                    .or_insert(rank);
-                if candidates.len() > MAX_POSTING_CANDIDATES {
-                    return Err(Error::RustError(
-                        "Places union candidate count exceeds hard cap".into(),
-                    ));
+        let mut total_posting_bytes = 0_u64;
+        let mut clause_candidate_counts = Vec::with_capacity(clauses.len());
+        let mut candidates: Option<BTreeMap<u64, u8>> = None;
+        for (clause, matches) in clauses.iter().zip(&clause_matches) {
+            let first = matches.first().expect("nonempty matches");
+            let last = matches.last().expect("nonempty matches");
+            let posting_start = first.posting_offset;
+            let posting_end = last
+                .posting_offset
+                .checked_add(last.posting_length)
+                .ok_or_else(|| Error::RustError("Places posting span overflows".into()))?;
+            let posting_length = posting_end
+                .checked_sub(posting_start)
+                .ok_or_else(|| Error::RustError("Places posting span is reversed".into()))?;
+            if posting_length > MAX_POSTING_BYTES {
+                return Err(Error::RustError(
+                    "Places posting span exceeds hard cap".into(),
+                ));
+            }
+            total_posting_bytes = total_posting_bytes
+                .checked_add(posting_length)
+                .ok_or_else(|| Error::RustError("Places posting byte total overflows".into()))?;
+            if total_posting_bytes > MAX_QUERY_POSTING_BYTES {
+                return Err(Error::RustError(
+                    "Places query posting bytes exceed hard cap".into(),
+                ));
+            }
+            let posting_extent = checked_extent(
+                postings.offset,
+                posting_start,
+                posting_length,
+                postings.length,
+            )?;
+            let posting_bytes = reader
+                .range(posting_extent.offset, posting_extent.length)
+                .await?
+                .ok_or_else(|| not_found(key))?;
+            let mut clause_docs: BTreeMap<u64, u8> = BTreeMap::new();
+            for entry in matches {
+                let relative = usize::try_from(entry.posting_offset - posting_start)
+                    .map_err(|_| Error::RustError("Places posting offset is too large".into()))?;
+                let length = usize::try_from(entry.posting_length)
+                    .map_err(|_| Error::RustError("Places posting length is too large".into()))?;
+                let end = relative
+                    .checked_add(length)
+                    .ok_or_else(|| Error::RustError("Places posting slice overflows".into()))?;
+                let encoded = posting_bytes
+                    .get(relative..end)
+                    .ok_or_else(|| Error::RustError("Places posting slice is truncated".into()))?;
+                for (doc_id, field_mask, rank) in decode_postings(encoded, entry.posting_count)
+                    .map_err(|error| Error::RustError(format!("Invalid Places posting: {error}")))?
+                {
+                    if field_mask & clause.field_mask == 0 {
+                        continue;
+                    }
+                    clause_docs
+                        .entry(doc_id)
+                        .and_modify(|old| *old = (*old).max(rank))
+                        .or_insert(rank);
+                    if clause_docs.len() > MAX_POSTING_CANDIDATES {
+                        return Err(Error::RustError(
+                            "Places union candidate count exceeds hard cap".into(),
+                        ));
+                    }
                 }
             }
+            clause_candidate_counts.push(clause_docs.len());
+            candidates = Some(match candidates {
+                None => clause_docs,
+                Some(mut prior) => {
+                    prior.retain(|doc_id, rank| {
+                        if let Some(clause_rank) = clause_docs.get(doc_id) {
+                            *rank = (*rank).max(*clause_rank);
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    prior
+                }
+            });
         }
+        let candidates = candidates.unwrap_or_default();
         let after_postings = reader.metrics();
         let mut best: Vec<_> = candidates
             .iter()
@@ -682,6 +943,7 @@ impl ShardLoader {
         let after_records = reader.metrics();
         Ok(PlacesShardLookup {
             candidate_count: candidates.len(),
+            clause_candidate_counts,
             results,
             read_metrics: after_records,
             stages: PlacesReadStages {
@@ -739,6 +1001,55 @@ mod tests {
     }
 
     #[test]
+    fn posting_decoder_preserves_and_validates_field_masks() {
+        let mut bytes = varint(7);
+        bytes.extend([FIELD_BRAND | FIELD_CATEGORY, 200]);
+        assert_eq!(
+            decode_postings(&bytes, 1).unwrap(),
+            vec![(7, FIELD_BRAND | FIELD_CATEGORY, 200)]
+        );
+
+        let mut invalid = varint(7);
+        invalid.extend([0, 200]);
+        assert!(decode_postings(&invalid, 1).is_err());
+    }
+
+    #[test]
+    fn clause_field_masks_and_head_eligibility_are_explicit() {
+        let exact = PlacesClause::new("starbucks".into(), false, None).unwrap();
+        let brand = PlacesClause::new("starbucks".into(), false, Some("brand".into())).unwrap();
+        assert_eq!(exact.field_mask, FIELD_ALL);
+        assert_eq!(brand.field_mask, FIELD_BRAND);
+        assert!(exact.head_eligible());
+        assert!(!brand.head_eligible());
+        assert!(PlacesClause::new("s".into(), true, None).is_err());
+    }
+
+    #[test]
+    fn catalog_point_route_prefers_the_smallest_covering_shard() {
+        let catalog = PlacesCatalog {
+            schema_version: 1,
+            tokenizer_version: "nfkd-latin-fold-cjk-bigram-v2".into(),
+            shards: vec![
+                PlacesCatalogShard {
+                    id: "large".into(),
+                    object: "large.pcsh".into(),
+                    bbox: [-72.0, 41.0, -70.0, 43.0],
+                    center: [-71.0, 42.0],
+                },
+                PlacesCatalogShard {
+                    id: "small".into(),
+                    object: "small.pcsh".into(),
+                    bbox: [-71.5, 41.5, -70.5, 42.5],
+                    center: [-71.0, 42.0],
+                },
+            ],
+        };
+        assert_eq!(catalog.route_point(-71.0, 42.0).unwrap().id, "small");
+        assert!(catalog.route_point(0.0, 0.0).is_none());
+    }
+
+    #[test]
     fn projection_decodes_python_wire_shape() {
         let mut bytes = 42.0_f32.to_le_bytes().to_vec();
         bytes.extend((-71.0_f32).to_le_bytes());
@@ -761,6 +1072,12 @@ mod tests {
             record_count: 1,
             token_count: blocks.iter().map(|block| block.entries).sum(),
             lexicon_blocks: blocks,
+            field_bits: HashMap::from([
+                ("name".into(), FIELD_NAME),
+                ("brand".into(), FIELD_BRAND),
+                ("category".into(), FIELD_CATEGORY),
+                ("context".into(), FIELD_CONTEXT),
+            ]),
             components: HashMap::new(),
         }
     }
@@ -833,7 +1150,7 @@ mod tests {
             entry.posting_count,
         )
         .unwrap();
-        docs.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
+        docs.sort_by(|left, right| right.2.cmp(&left.2).then(left.0.cmp(&right.0)));
         let doc_id = usize::try_from(docs[0].0).unwrap();
         let record_index =
             fixture_component(object, component(&directory, "record_index").unwrap());
@@ -873,7 +1190,7 @@ mod tests {
         let start = usize::try_from(entries.offset + offset).unwrap();
         let length = usize::try_from(length).unwrap();
         let results = decode_head_entry(&object[start..start + length]).unwrap();
-        assert_eq!(results.len(), RESULT_LIMIT);
+        assert_eq!(results.len(), HEAD_RESULT_LIMIT);
         assert_eq!(results[0].id, "fixture-00");
         assert_eq!(results[9].id, "fixture-09");
     }

@@ -18,11 +18,20 @@ def test_places_smoke_is_manual_real_three_shard_and_isolated():
     assert "2026-06-17.0" in workflow
     assert workflow.count("experiment_places_partition_extract.py") == 3
     assert "prepare_places_worker_smoke.py" in workflow
-    assert "shard-0.pcsh shard-1.pcsh shard-2.pcsh head.phrp" in workflow
+    assert "--context boston --context tokyo --context mexico-city" in workflow
+    assert "benchmarks/places-relevance-seed.json" in workflow
+    assert "catalog.pcat" in workflow
+    assert "required_objects" in workflow
+    assert "case-${SCOPE}" in workflow
     assert "cjk_exact" in workflow
     assert 'name == "shard_prefix"' in workflow
     assert "head_hit" in workflow
     assert ".candidate_count == $count" in workflow
+    assert '(.shards | length) == 1' in workflow
+    assert ".read_metrics.r2_reads > 0" in workflow
+    assert 'route == "catalog_miss"' in workflow
+    assert "overture-places-worker-failure-spike-v1" in workflow
+    assert "overture-places-worker-latency-spike-v2" in workflow
     assert "for propagation_attempt in $(seq 1 12)" in workflow
     assert 'if [ "$STATUS" != "404" ]' in workflow
     assert "Places page spike remained unavailable after propagation retries" in workflow
