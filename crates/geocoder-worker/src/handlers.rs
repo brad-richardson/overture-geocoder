@@ -266,7 +266,7 @@ pub async fn handle_places_page_spike(
                 "entry": head.entry_metrics,
             },
             "fame_evidence": {
-                "contract": "context-free, one-or-two exact unfielded tokens; every token must have a packed top-10 entry and their intersection must be non-empty",
+                "contract": "context-free, one-or-two exact unfielded tokens; two-token queries probe the famous e2: pair entry first, then fall back to the per-token top-10 ID intersection; a miss on any per-token entry is a head miss",
                 "eligible": true,
                 "intersection_hit": head.hit,
             },
