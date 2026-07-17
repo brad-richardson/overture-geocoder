@@ -39,6 +39,10 @@ from common import sha256_file as _sha256  # noqa: E402,F401
 VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
 ID_PREFIX_RE = re.compile(r"^[0-9a-f]{3}$")
 
+# v3 fleets publish permanent id-inventories objects alongside the ID shards.
+ID_INVENTORY_DIR = "id-inventories"
+SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+
 # Root discovery catalog + durable operator-recovery backups.
 BUCKET = "geocoder-shards"
 CATALOG_KEY = "catalog.json"
@@ -52,6 +56,28 @@ def _load_json(path: Path) -> dict:
     if not isinstance(value, dict):
         raise ValueError(f"{path} must contain a JSON object")
     return value
+
+
+def _verify_referenced_json_object(
+    key: str, reference: dict, inventory: dict, local_dir: Path
+) -> None:
+    """Byte-verify one id-inventories object against its trusted reference.
+
+    The object must be present in the R2 inventory listing, present in the
+    local readback (synced into ``local_dir`` by the finalize job), match the
+    reference's ``size_bytes``, and hash to the reference's ``sha256``. This
+    binds each referenced key to content, so a stray object squatting a
+    referenced key fails closed on the SHA and any unreferenced key fails at
+    the exact-set gate.
+    """
+    entry = inventory.get(key)
+    local = local_dir / key
+    if entry is None or not local.is_file():
+        raise ValueError(f"{key} is missing from inventory or readback")
+    if entry["size_bytes"] != reference.get("size_bytes"):
+        raise ValueError(f"{key} size mismatch")
+    if _sha256(local) != reference.get("sha256"):
+        raise ValueError(f"{key} SHA-256 mismatch")
 
 
 def _version_key(value: str) -> tuple[int, int, int, int]:
@@ -314,6 +340,59 @@ def verify_release(
     if _sha256(dictionary_path) != dictionary.get("sha256"):
         raise ValueError("locator dictionary SHA-256 mismatch")
 
+    # v3 fleets bind the locator dictionary to a permanent id-inventories set.
+    # Parse the already-SHA-verified dictionary file and walk the committed
+    # chain (dictionary -> inventory-set -> stage inventories) to derive the
+    # EXACT id-inventories key set, byte-verifying each referenced object. The
+    # exact-set gate then accepts exactly these keys and rejects any stray or
+    # tampered id-inventories object. The referenced JSON is synced into
+    # metadata_dir by the finalize job, alongside the dictionary file.
+    dictionary_payload = _load_json(dictionary_path)
+    inv_set_ref = dictionary_payload.get("input_inventory_set")
+    inv_set_sha = dictionary_payload.get("input_inventory_set_sha256")
+    if not isinstance(inv_set_ref, dict) or not isinstance(inv_set_sha, str):
+        raise ValueError(
+            "locator dictionary has no bound id-inventories set (not a v3 fleet)"
+        )
+    set_href = inv_set_ref.get("href")
+    set_sha = inv_set_ref.get("sha256")
+    if (
+        not isinstance(set_sha, str)
+        or not SHA256_RE.fullmatch(set_sha)
+        or set_href != f"./{ID_INVENTORY_DIR}/inventory-set-{set_sha}.json"
+    ):
+        raise ValueError("invalid id-inventories set reference")
+    if inv_set_ref.get("inventory_references_sha256") != inv_set_sha:
+        raise ValueError("locator dictionary inventory-set binding mismatch")
+
+    inv_set_key = set_href[2:]
+    _verify_referenced_json_object(inv_set_key, inv_set_ref, inventory, metadata_dir)
+
+    inv_set_payload = _load_json(metadata_dir / inv_set_key)
+    stage_refs = inv_set_payload.get("inventories")
+    if not isinstance(stage_refs, list) or not stage_refs:
+        raise ValueError("id-inventories set has no stage inventories")
+
+    expected_inventory_keys = {inv_set_key}
+    for ref in stage_refs:
+        if not isinstance(ref, dict):
+            raise ValueError("invalid stage inventory reference")
+        href = ref.get("href")
+        sha = ref.get("sha256")
+        if (
+            not isinstance(sha, str)
+            or not SHA256_RE.fullmatch(sha)
+            or not isinstance(href, str)
+            or not href.startswith(f"./{ID_INVENTORY_DIR}/")
+            or not href.endswith(f"-{sha}.json")
+        ):
+            raise ValueError("invalid stage inventory reference")
+        key = href[2:]
+        if key in expected_inventory_keys:
+            raise ValueError(f"duplicate id-inventories reference {key}")
+        _verify_referenced_json_object(key, ref, inventory, metadata_dir)
+        expected_inventory_keys.add(key)
+
     required_root = {
         "collection.json",
         "reverse-collection.json",
@@ -335,6 +414,7 @@ def verify_release(
     expected_keys |= {f"shards/{shard_id}.db" for shard_id in _collection_items(forward, "forward")}
     expected_keys |= {f"reverse/{shard_id}.db" for shard_id in _collection_items(reverse, "reverse")}
     expected_keys |= expected_id_keys
+    expected_keys |= expected_inventory_keys
     actual_keys = set(inventory)
     if actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)[:20]
