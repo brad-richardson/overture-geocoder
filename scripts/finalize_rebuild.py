@@ -406,16 +406,19 @@ def verify_release(
     }
     # The version prefix must contain exactly the objects this release
     # verified: the required root files above, every forward and reverse SQLite
-    # shard, and all 4096 ID shards. Anything extra (half-cleaned staging/,
-    # stray uploads) or missing fails closed so an operator removes the residue
-    # and re-runs finalize; release-manifest.json is uploaded only afterward,
-    # so it is legitimately absent from this listing.
+    # shard, all 4096 ID shards, and the referenced id-inventories objects.
+    # `staging/` is transient build scaffolding (multi-GB, never a released
+    # artifact) that now survives until post-finalize cleanup so a failed
+    # finalize can be recovered; it is excluded here rather than blessed. Any
+    # OTHER extra key (stray uploads) or a missing expected key fails closed.
+    # release-manifest.json is uploaded only afterward, so it is legitimately
+    # absent from this listing.
     expected_keys = set(required_root)
     expected_keys |= {f"shards/{shard_id}.db" for shard_id in _collection_items(forward, "forward")}
     expected_keys |= {f"reverse/{shard_id}.db" for shard_id in _collection_items(reverse, "reverse")}
     expected_keys |= expected_id_keys
     expected_keys |= expected_inventory_keys
-    actual_keys = set(inventory)
+    actual_keys = {key for key in inventory if not key.startswith("staging/")}
     if actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)[:20]
         unexpected = sorted(actual_keys - expected_keys)[:20]
@@ -455,12 +458,16 @@ def verify_release(
                 "locator_dictionary": dictionary,
             },
         },
-        # Exact-set equality above proved every key under the version prefix
-        # is one this release content-verified, so the whole inventory is the
-        # verified object set. release-manifest.json is uploaded from this
-        # payload afterward, so it is intentionally absent rather than being a
-        # self-referential inventory.
-        "verified_version_objects": [inventory[key] for key in sorted(inventory)],
+        # Exact-set equality above proved every non-staging key under the
+        # version prefix is one this release content-verified, so the verified
+        # object set is the inventory minus the transient staging/ scaffolding.
+        # release-manifest.json is uploaded from this payload afterward, so it
+        # is intentionally absent rather than being a self-referential inventory.
+        "verified_version_objects": [
+            inventory[key]
+            for key in sorted(inventory)
+            if not key.startswith("staging/")
+        ],
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(manifest, indent=2) + "\n")
