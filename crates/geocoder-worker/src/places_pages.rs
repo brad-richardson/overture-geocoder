@@ -79,7 +79,30 @@ struct Directory {
 struct HeadDirectory {
     schema_version: u32,
     key_count: usize,
+    /// Additive famous-unique provenance (schema_version stays 1): the number
+    /// of `e2:` pair keys and the admission-rule marker. Objects built before
+    /// famous admission omit both; an unknown marker fails closed.
+    #[serde(default)]
+    e2_key_count: usize,
+    #[serde(default)]
+    admission: Option<String>,
     components: HashMap<String, Component>,
+}
+
+const HEAD_ADMISSION_MARKER: &str = "famous-unique-v1";
+
+fn head_directory_supported(directory: &HeadDirectory) -> bool {
+    directory.schema_version == 1
+        && directory.key_count > 0
+        && directory.key_count <= MAX_HEAD_KEYS
+        && directory.e2_key_count <= directory.key_count
+        && matches!(
+            directory.admission.as_deref(),
+            None | Some(HEAD_ADMISSION_MARKER)
+        )
+        // Pair keys without a declared admission rule are undeclared
+        // provenance: fail closed rather than serve them silently.
+        && (directory.e2_key_count == 0 || directory.admission.is_some())
 }
 
 #[derive(Debug)]
@@ -476,6 +499,28 @@ fn decode_head_projection(bytes: &[u8]) -> PageResult<PlaceProjection> {
     })
 }
 
+/// The `e2:` famous-pair key for a two-clause head-eligible query.
+///
+/// The two tokens are joined in ascending byte order, matching the builder's
+/// `a < b` pair emission. Any other clause shape — or two identical tokens,
+/// which the builder never emits — has no pair key. The Python smoke oracle
+/// (`prepare_places_worker_smoke.py::query_head` via `famous_pair_key`)
+/// constructs the identical key; producer-oracle equality enforces lockstep.
+fn famous_pair_key(clauses: &[PlacesClause]) -> Option<String> {
+    let [first, second] = clauses else {
+        return None;
+    };
+    let (low, high) = if first.token <= second.token {
+        (&first.token, &second.token)
+    } else {
+        (&second.token, &first.token)
+    };
+    if low == high {
+        return None;
+    }
+    Some(format!("e2:{low} {high}"))
+}
+
 fn find_head_entry(bytes: &[u8], key: &str) -> PageResult<Option<(u64, u64)>> {
     let mut reader = ByteReader::new(bytes, 0);
     let mut previous = String::new();
@@ -624,10 +669,7 @@ impl ShardLoader {
             .ok_or_else(|| not_found(object_key))?;
         let directory: HeadDirectory = serde_json::from_slice(&directory_bytes)
             .map_err(|_| Error::RustError("Invalid Places head directory JSON".into()))?;
-        if directory.schema_version != 1
-            || directory.key_count == 0
-            || directory.key_count > MAX_HEAD_KEYS
-        {
+        if !head_directory_supported(&directory) {
             return Err(Error::RustError(
                 "Unsupported Places head directory contract".into(),
             ));
@@ -643,23 +685,38 @@ impl ShardLoader {
             .range(key_index.offset, key_index.length)
             .await?
             .ok_or_else(|| not_found(object_key))?;
+        // Probe order matches the Python smoke oracle: a two-clause query
+        // first probes the famous `e2:` pair entry, which is by construction
+        // the bounded top-k of the exact posting AND; a pair hit is served as
+        // the single decoded entry. A pair miss falls back to the per-token
+        // entries and their stable ID intersection, unchanged.
         let mut located = Vec::with_capacity(clauses.len());
-        for clause in clauses {
-            let head_key = format!("e:{}", clause.token);
-            let Some(extent) = find_head_entry(&index_bytes, &head_key)
+        if let Some(pair_key) = famous_pair_key(clauses) {
+            if let Some(extent) = find_head_entry(&index_bytes, &pair_key)
                 .map_err(|error| Error::RustError(format!("Invalid Places head index: {error}")))?
-            else {
-                let after_index = reader.metrics();
-                return Ok(PlacesHeadLookup {
-                    hit: false,
-                    results: Vec::new(),
-                    read_metrics: after_index,
-                    directory_metrics: after_directory,
-                    index_metrics: after_index.since(after_directory),
-                    entry_metrics: RangeReadMetrics::default(),
-                });
-            };
-            located.push(extent);
+            {
+                located.push(extent);
+            }
+        }
+        if located.is_empty() {
+            for clause in clauses {
+                let head_key = format!("e:{}", clause.token);
+                let Some(extent) = find_head_entry(&index_bytes, &head_key).map_err(|error| {
+                    Error::RustError(format!("Invalid Places head index: {error}"))
+                })?
+                else {
+                    let after_index = reader.metrics();
+                    return Ok(PlacesHeadLookup {
+                        hit: false,
+                        results: Vec::new(),
+                        read_metrics: after_index,
+                        directory_metrics: after_directory,
+                        index_metrics: after_index.since(after_directory),
+                        entry_metrics: RangeReadMetrics::default(),
+                    });
+                };
+                located.push(extent);
+            }
         }
         let after_index = reader.metrics();
         let entries = head_component(&directory, "entries")?;
@@ -1182,6 +1239,109 @@ mod tests {
             decode_projection(&records[record_offset..record_offset + record_length]).unwrap();
         assert_eq!(result.id, "fixture-00");
         assert_eq!(result.name, "Shared Cafe");
+    }
+
+    #[test]
+    fn famous_pair_key_is_sorted_distinct_and_two_clause_only() {
+        let tokyo = PlacesClause::new("tokyo".into(), false, None).unwrap();
+        let tower = PlacesClause::new("tower".into(), false, None).unwrap();
+        assert_eq!(
+            famous_pair_key(&[tower.clone(), tokyo.clone()]).as_deref(),
+            Some("e2:tokyo tower")
+        );
+        assert_eq!(
+            famous_pair_key(&[tokyo.clone(), tower.clone()]).as_deref(),
+            Some("e2:tokyo tower")
+        );
+        assert!(famous_pair_key(std::slice::from_ref(&tokyo)).is_none());
+        assert!(famous_pair_key(&[tokyo.clone(), tokyo.clone()]).is_none());
+        assert!(famous_pair_key(&[tokyo, tower.clone(), tower]).is_none());
+    }
+
+    #[test]
+    fn head_index_sorts_pair_keys_before_exact_keys() {
+        let mut bytes = Vec::new();
+        for (key, offset, length) in [
+            ("e2:alpha beta", 0_u64, 5_u64),
+            ("e:alpha", 5, 7),
+            ("e:beta", 12, 9),
+        ] {
+            bytes.extend(varint(key.len() as u64));
+            bytes.extend(key.as_bytes());
+            bytes.extend(varint(offset));
+            bytes.extend(varint(length));
+        }
+        assert_eq!(
+            find_head_entry(&bytes, "e2:alpha beta").unwrap(),
+            Some((0, 5))
+        );
+        assert_eq!(find_head_entry(&bytes, "e:beta").unwrap(), Some((12, 9)));
+        assert_eq!(find_head_entry(&bytes, "e2:alpha zeta").unwrap(), None);
+        assert_eq!(find_head_entry(&bytes, "e:zeta").unwrap(), None);
+    }
+
+    #[test]
+    fn head_directory_fails_closed_on_unknown_admission_or_pair_overrun() {
+        let supported: HeadDirectory = serde_json::from_str(
+            r#"{"schema_version":1,"key_count":4,"e2_key_count":1,"admission":"famous-unique-v1","components":{}}"#,
+        )
+        .unwrap();
+        assert!(head_directory_supported(&supported));
+        let legacy: HeadDirectory =
+            serde_json::from_str(r#"{"schema_version":1,"key_count":4,"components":{}}"#).unwrap();
+        assert!(head_directory_supported(&legacy));
+        let unknown_admission: HeadDirectory = serde_json::from_str(
+            r#"{"schema_version":1,"key_count":4,"e2_key_count":1,"admission":"famous-unique-v2","components":{}}"#,
+        )
+        .unwrap();
+        assert!(!head_directory_supported(&unknown_admission));
+        let pair_overrun: HeadDirectory = serde_json::from_str(
+            r#"{"schema_version":1,"key_count":4,"e2_key_count":5,"admission":"famous-unique-v1","components":{}}"#,
+        )
+        .unwrap();
+        assert!(!head_directory_supported(&pair_overrun));
+        let undeclared_pairs: HeadDirectory = serde_json::from_str(
+            r#"{"schema_version":1,"key_count":4,"e2_key_count":1,"components":{}}"#,
+        )
+        .unwrap();
+        assert!(!head_directory_supported(&undeclared_pairs));
+        let wrong_schema: HeadDirectory =
+            serde_json::from_str(r#"{"schema_version":2,"key_count":4,"components":{}}"#).unwrap();
+        assert!(!head_directory_supported(&wrong_schema));
+    }
+
+    #[test]
+    fn python_generated_head_serves_famous_pair_and_rare_admitted_entries() {
+        let object = include_bytes!("../../../tests/fixtures/places-pages/head.phrp");
+        let directory_length = u32::from_le_bytes(object[8..12].try_into().unwrap()) as usize;
+        let directory: HeadDirectory =
+            serde_json::from_slice(&object[12..12 + directory_length]).unwrap();
+        assert!(head_directory_supported(&directory));
+        assert!(directory.e2_key_count >= 1);
+        assert_eq!(directory.admission.as_deref(), Some(HEAD_ADMISSION_MARKER));
+        let key_index = head_component(&directory, "key_index").unwrap();
+        let index_start = usize::try_from(key_index.offset).unwrap();
+        let index_bytes =
+            &object[index_start..index_start + usize::try_from(key_index.length).unwrap()];
+        let entries = head_component(&directory, "entries").unwrap();
+        let fetch = |key: &str| {
+            let (offset, length) = find_head_entry(index_bytes, key).unwrap().unwrap();
+            let start = usize::try_from(entries.offset + offset).unwrap();
+            decode_head_entry(&object[start..start + usize::try_from(length).unwrap()]).unwrap()
+        };
+        // The reader's pair probe constructs this key for either clause order.
+        let fixture = PlacesClause::new("fixture".into(), false, None).unwrap();
+        let tower = PlacesClause::new("tower".into(), false, None).unwrap();
+        let pair_key = famous_pair_key(&[tower, fixture]).unwrap();
+        assert_eq!(pair_key, "e2:fixture tower");
+        let pair = fetch(&pair_key);
+        assert_eq!(pair.len(), 1);
+        assert_eq!(pair[0].id, "fixture-famous");
+        // A single posting is below the density floor; the token is admitted
+        // only through the famous set, with dense-entry semantics.
+        let rare = fetch("e:tower");
+        assert_eq!(rare.len(), 1);
+        assert_eq!(rare[0].id, "fixture-famous");
     }
 
     #[test]

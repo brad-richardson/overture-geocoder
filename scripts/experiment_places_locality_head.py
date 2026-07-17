@@ -44,6 +44,9 @@ from experiment_places_kv_r2_pages import (  # noqa: E402
 
 
 HEAD_PREFIX_LENGTHS = tuple(range(2, 9))
+# Famous pair keys use the first this-many distinct name/brand tokens per
+# famous place (tokenizer emission order), bounding pair fanout to 28/place.
+FAMOUS_PAIR_TOKEN_LIMIT = 8
 
 
 def spatial_cell(place: Place, degrees: float) -> str:
@@ -142,15 +145,85 @@ def push_top(heap: list[tuple[int, int]], doc_id: int, rank: int, limit: int) ->
         heapq.heapreplace(heap, value)
 
 
+def famous_pair_token_key(low: str, high: str) -> str:
+    """Format the ``e2:`` pair key for two tokens already in ascending order.
+
+    Single source of the pair wire format: the builder emits through it and the
+    Python reader (``experiment_places_head_repack.famous_pair_key``) constructs
+    probe keys through it, so emission and probing cannot drift apart. The Rust
+    Worker mirrors the format in lockstep, enforced by the fixture tests.
+    """
+    return f"e2:{low} {high}"
+
+
+def famous_docs(places: list[Place], famous_cap: int) -> list[int]:
+    """Deterministically select the famous set F.
+
+    Top ``famous_cap`` places by (-quantized confidence, stable serving order).
+    A hard cap rather than a confidence floor keeps the added bytes bounded
+    regardless of the confidence distribution.
+    """
+    if famous_cap <= 0:
+        return []
+    return sorted(
+        range(len(places)),
+        key=lambda doc: (-round(places[doc].confidence * 255), doc),
+    )[:famous_cap]
+
+
+def famous_name_brand_tokens(place: Place) -> tuple[str, ...]:
+    """Distinct name/brand tokens of one place, in tokenizer emission order.
+
+    Category/context tokens are deliberately excluded: they would reintroduce
+    the density this admission path exists to bypass.
+    """
+    field_text = place.field_text()
+    return tuple(
+        dict.fromkeys(
+            token
+            for value in (field_text["name"], field_text["brand"])
+            for token in tokens(value)
+        )
+    )
+
+
 def build_heads(
     places: list[Place],
     exact: dict[str, dict[int, tuple[int, int]]],
     minimum_candidates: int,
     limit: int,
+    famous_cap: int = 0,
 ) -> dict[str, list[int]]:
     heads: dict[str, list[int]] = {}
+    admitted_tokens: set[str] = set()
+    pair_keys: dict[str, tuple[str, str]] = {}
+    for doc in famous_docs(places, famous_cap):
+        name_brand = famous_name_brand_tokens(places[doc])
+        admitted_tokens.update(name_brand)
+        pair_tokens = name_brand[:FAMOUS_PAIR_TOKEN_LIMIT]
+        for first_index in range(len(pair_tokens)):
+            for second_index in range(first_index + 1, len(pair_tokens)):
+                low, high = sorted(
+                    (pair_tokens[first_index], pair_tokens[second_index])
+                )
+                pair_keys[famous_pair_token_key(low, high)] = (low, high)
+    for key in sorted(pair_keys):
+        low, high = pair_keys[key]
+        low_docs = exact.get(low)
+        high_docs = exact.get(high)
+        if not low_docs or not high_docs:
+            continue
+        shared = low_docs.keys() & high_docs.keys()
+        if not shared:
+            continue
+        # The stored rank is per document (round(confidence * 255), identical
+        # in both posting maps), so ranking through either map matches the
+        # per-token ``e:`` entries' (-rank, doc) order exactly.
+        heads[key] = sorted(
+            shared, key=lambda doc: (-low_docs[doc][1], doc)
+        )[:limit]
     for token, docs in exact.items():
-        if len(docs) < minimum_candidates:
+        if len(docs) < minimum_candidates and token not in admitted_tokens:
             continue
         best = sorted(docs, key=lambda doc: (-docs[doc][1], doc))[:limit]
         heads[f"e:{token}"] = best
@@ -197,6 +270,7 @@ class LocalityHeadIndex:
         head_bucket_count: int = 4096,
         head_minimum_candidates: int = 64,
         head_limit: int = 10,
+        head_famous_cap: int = 0,
     ):
         self.cell_degrees = cell_degrees
         self.places = ordered_places(places, cell_degrees)
@@ -222,7 +296,11 @@ class LocalityHeadIndex:
                 self.doc_to_result_page[doc_id] = pages[local_mapping[local_id]]
         self.record_sizes = [len(encode_record(place)) for place in self.places]
         self.heads = build_heads(
-            self.places, self.base.exact, head_minimum_candidates, head_limit
+            self.places,
+            self.base.exact,
+            head_minimum_candidates,
+            head_limit,
+            head_famous_cap,
         )
         self.head_store = PackedHeadStore(
             release, self.places, self.heads, head_target, head_bucket_count
@@ -340,9 +418,15 @@ class LocalityHeadIndex:
 
 
 def build_report(
-    places: list[Place], head_minimum_candidates: int = 64
+    places: list[Place],
+    head_minimum_candidates: int = 64,
+    head_famous_cap: int = 0,
 ) -> dict[str, Any]:
-    index = LocalityHeadIndex(places, head_minimum_candidates=head_minimum_candidates)
+    index = LocalityHeadIndex(
+        places,
+        head_minimum_candidates=head_minimum_candidates,
+        head_famous_cap=head_famous_cap,
+    )
     cases = []
     for case in CASES:
         fallback = index.query(case)
@@ -368,6 +452,7 @@ def build_report(
             "result_order": "spatial cell, descending quantized confidence, stable ID",
             "global_head_semantics": "top-k exact under static rank for eligible single exact/prefix clauses; never presented as complete candidate recall",
             "head_minimum_candidates": head_minimum_candidates,
+            "head_famous_cap": head_famous_cap,
             "head_limit": index.head_limit,
             "located_routing_model": "optimistic: route to the cell containing the globally highest-ranked matching result",
         },
@@ -472,10 +557,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json-out", type=Path, required=True)
     parser.add_argument("--markdown-out", type=Path, required=True)
     parser.add_argument("--head-minimum-candidates", type=int, default=64)
+    parser.add_argument("--head-famous-cap", type=int, default=0)
     args = parser.parse_args(argv)
     if args.head_minimum_candidates <= 0:
         parser.error("--head-minimum-candidates must be positive")
-    report = build_report(load_places(args.input), args.head_minimum_candidates)
+    if args.head_famous_cap < 0:
+        parser.error("--head-famous-cap cannot be negative")
+    report = build_report(
+        load_places(args.input), args.head_minimum_candidates, args.head_famous_cap
+    )
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
     args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
     args.json_out.write_text(json.dumps(report, indent=2) + "\n")

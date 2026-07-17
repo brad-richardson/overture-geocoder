@@ -8,6 +8,7 @@ import json
 import math
 import struct
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -28,6 +29,7 @@ from experiment_places_head_repack import (  # noqa: E402
     build_heads_and_baseline,
     build_repack_object,
     decode_head_entry,
+    famous_pair_key,
     RepackHead,
 )
 
@@ -37,6 +39,10 @@ CATALOG_PREAMBLE = struct.Struct("<8sI")
 TOKENIZER_VERSION = "nfkd-latin-fold-cjk-bigram-v2"
 RESULT_LIMIT = 10
 SHARD_FETCH_LIMIT = 25
+# Fixture famous cap: bounds the packed head's famous set (rare-prominent
+# single-token admission plus e2: pair keys). The planet value is a later,
+# separately measured decision.
+HEAD_FAMOUS_CAP = 1024
 
 
 def response_projection(row: dict[str, Any]) -> dict[str, Any]:
@@ -134,31 +140,41 @@ def query_shard(
     }
 
 
+def head_miss() -> dict[str, Any]:
+    """The single miss shape shared by every head-miss return path."""
+    return {"head_hit": False, "candidate_count": 0, "result_ids": [], "results": []}
+
+
 def query_head(reader: RepackHead, clauses: tuple[Clause, ...]) -> dict[str, Any]:
     if not clauses or len(clauses) > 2 or any(
         clause.field is not None or clause.prefix for clause in clauses
     ):
-        return {"head_hit": False, "candidate_count": 0, "result_ids": [], "results": []}
+        return head_miss()
     index = reader.load_resident_index()
     entries_base, _ = reader.component("entries")
-    per_clause = []
-    for clause in clauses:
-        located = index.get(f"e:{normalize(clause.value)}")
-        if located is None:
-            return {
-                "head_hit": False,
-                "candidate_count": 0,
-                "result_ids": [],
-                "results": [],
-            }
+    # Two-clause queries probe the famous pair entry first: it is by
+    # construction the bounded top-k of the exact posting AND, so a hit is
+    # served directly. A miss falls back to the per-token top-10 intersection.
+    # The Rust Worker reader probes in the same order.
+    pair_key = famous_pair_key(clauses)
+    rows = None
+    if pair_key is not None and (located := index.get(pair_key)) is not None:
         offset, length = located
-        per_clause.append(
-            decode_head_entry(reader._read(entries_base + offset, length))
-        )
-    rows = per_clause[0]
-    for other in per_clause[1:]:
-        ids = {row["id"] for row in other}
-        rows = [row for row in rows if row["id"] in ids]
+        rows = decode_head_entry(reader._read(entries_base + offset, length))
+    if rows is None:
+        per_clause = []
+        for clause in clauses:
+            located = index.get(f"e:{normalize(clause.value)}")
+            if located is None:
+                return head_miss()
+            offset, length = located
+            per_clause.append(
+                decode_head_entry(reader._read(entries_base + offset, length))
+            )
+        rows = per_clause[0]
+        for other in per_clause[1:]:
+            ids = {row["id"] for row in other}
+            rows = [row for row in rows if row["id"] in ids]
     rows = [response_projection(row) for row in rows[:RESULT_LIMIT]]
     return {
         "head_hit": bool(rows),
@@ -295,6 +311,7 @@ def prepare(
     *,
     contexts: list[str] | None = None,
     head_minimum_candidates: int = 64,
+    head_famous_cap: int = HEAD_FAMOUS_CAP,
     relevance_seed: Path | None = None,
 ) -> dict[str, Any]:
     if len(inputs) != 3:
@@ -332,10 +349,31 @@ def prepare(
     ordered, heads, _ = build_heads_and_baseline(
         combined,
         head_minimum_candidates=head_minimum_candidates,
+        head_famous_cap=head_famous_cap,
         preserve_input_order=True,
     )
     head_path = output_dir / "head.phrp"
-    head_report = build_repack_object(ordered, heads, head_path)
+    head_report = build_repack_object(
+        ordered, heads, head_path, head_famous_cap=head_famous_cap
+    )
+    # Measure the famous-admission byte cost against a famous-cap-0 build of
+    # the same input: the whole key index is read cold, so its growth is the
+    # part that charges the cold packed-head budget.
+    baseline_ordered, baseline_heads, _ = build_heads_and_baseline(
+        combined,
+        head_minimum_candidates=head_minimum_candidates,
+        head_famous_cap=0,
+        preserve_input_order=True,
+    )
+    # Build the throwaway baseline object outside output_dir so a crash can
+    # never leave a non-serving object among the uploaded smoke artifacts.
+    with tempfile.TemporaryDirectory() as baseline_dir:
+        baseline_report = build_repack_object(
+            baseline_ordered,
+            baseline_heads,
+            Path(baseline_dir) / "head-baseline-nofamous.phrp",
+            head_famous_cap=0,
+        )
     head_reader = RepackHead(head_path)
     head_index = head_reader.load_resident_index()
 
@@ -454,7 +492,23 @@ def prepare(
         "catalog": catalog_report,
         "head": {
             **head_report,
-            "eligibility": "context-free, one-or-two exact unfielded tokens; all packed top-10 entries must exist and have a non-empty ID intersection",
+            "baseline_without_famous": {
+                "object_bytes": baseline_report["object_bytes"],
+                "key_index_bytes": baseline_report["key_index_bytes"],
+                "entries_bytes": baseline_report["entries_bytes"],
+                "key_count": baseline_report["key_count"],
+            },
+            "famous_delta": {
+                "object_bytes": head_report["object_bytes"]
+                - baseline_report["object_bytes"],
+                "key_index_bytes": head_report["key_index_bytes"]
+                - baseline_report["key_index_bytes"],
+                "entries_bytes": head_report["entries_bytes"]
+                - baseline_report["entries_bytes"],
+                "key_count": head_report["key_count"]
+                - baseline_report["key_count"],
+            },
+            "eligibility": "context-free, one-or-two exact unfielded tokens; two-token queries probe the famous e2: pair entry first, then fall back to the per-token top-10 ID intersection; a miss on any per-token entry is a head miss",
         },
         "cases": cases,
         "failure_cases": [
@@ -477,6 +531,7 @@ def main() -> None:
     parser.add_argument("--context", action="append")
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--head-minimum-candidates", type=int, default=64)
+    parser.add_argument("--head-famous-cap", type=int, default=HEAD_FAMOUS_CAP)
     parser.add_argument("--relevance-seed", type=Path)
     args = parser.parse_args()
     report = prepare(
@@ -484,6 +539,7 @@ def main() -> None:
         args.output_dir,
         contexts=args.context,
         head_minimum_candidates=args.head_minimum_candidates,
+        head_famous_cap=args.head_famous_cap,
         relevance_seed=args.relevance_seed,
     )
     (args.output_dir / "report.json").write_text(

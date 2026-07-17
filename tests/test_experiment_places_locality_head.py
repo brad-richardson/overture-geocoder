@@ -91,6 +91,132 @@ def test_fielded_and_multi_clause_queries_fall_back_to_complete_postings():
     assert result["complete_candidate_recall"] is True
 
 
+def famous_places():
+    compact = sys.modules["experiment_places_compact_index"]
+    rows = [
+        {
+            "id": f"dense-{index:02}",
+            "name": "Tokyo Grand Cafe",
+            "category": "cafe",
+            "lat": 35.68,
+            "lon": 139.75,
+            "confidence": 0.95 - index / 1000,
+        }
+        for index in range(11)
+    ]
+    rows.append(
+        {
+            "id": "famous-tower",
+            "name": "Tokyo Tower",
+            "category": "landmark",
+            "lat": 35.6586,
+            "lon": 139.7454,
+            "confidence": 0.93,
+        }
+    )
+    rows.append(
+        {
+            "id": "obscure-shack",
+            "name": "Obscure Shack",
+            "category": "shed",
+            "lat": 35.60,
+            "lon": 139.70,
+            "confidence": 0.05,
+        }
+    )
+    return [compact.place_from_row(row, number) for number, row in enumerate(rows, 1)]
+
+
+def index_for(famous_cap):
+    return experiment.LocalityHeadIndex(
+        famous_places(),
+        head_minimum_candidates=2,
+        head_bucket_count=16,
+        head_famous_cap=famous_cap,
+    )
+
+
+def test_famous_cap_zero_preserves_density_gated_admission():
+    heads = index_for(0).heads
+    assert "e:tower" not in heads
+    assert not any(key.startswith("e2:") for key in heads)
+
+
+def test_rare_prominent_token_is_admitted_and_rare_obscure_is_not():
+    index = index_for(12)
+    heads = index.heads
+    assert [index.places[doc].place_id for doc in heads["e:tower"]] == [
+        "famous-tower"
+    ]
+    # The obscure place is outside the famous cap, so its unique tokens stay
+    # below the density floor and are not admitted.
+    assert "e:obscure" not in heads
+    assert "e:shack" not in heads
+
+
+def test_famous_pair_entry_is_exact_intersection_and_dense_entries_unchanged():
+    index = index_for(12)
+    heads = index.heads
+    baseline = index_for(0).heads
+    # The famous pair serves the AND directly even though the famous place is
+    # squeezed out of the dense token's per-token top-10.
+    assert [index.places[doc].place_id for doc in heads["e2:tokyo tower"]] == [
+        "famous-tower"
+    ]
+    assert "famous-tower" not in {
+        index.places[doc].place_id for doc in heads["e:tokyo"]
+    }
+    # Entries admitted without the famous cap are identical with it enabled.
+    for key, docs in baseline.items():
+        assert heads[key] == docs
+
+
+def test_pair_generation_uses_first_eight_tokens_and_sorted_keys():
+    compact = sys.modules["experiment_places_compact_index"]
+    rows = [
+        {
+            "id": "many-tokens",
+            "name": "Alpha Beta Gamma Delta Epsilon Zeta Eta Theta Iota Kappa",
+            "category": "cafe",
+            "lat": 0.0,
+            "lon": 0.0,
+            "confidence": 0.99,
+        },
+        {
+            "id": "other",
+            "name": "Unrelated",
+            "category": "cafe",
+            "lat": 0.1,
+            "lon": 0.1,
+            "confidence": 0.5,
+        },
+    ]
+    places_list = [
+        compact.place_from_row(row, number) for number, row in enumerate(rows, 1)
+    ]
+    index = experiment.LocalityHeadIndex(
+        places_list,
+        head_minimum_candidates=2,
+        head_bucket_count=16,
+        head_famous_cap=1,
+    )
+    pair_keys = sorted(key for key in index.heads if key.startswith("e2:"))
+    # First 8 distinct tokens -> exactly C(8, 2) = 28 unordered pairs.
+    assert len(pair_keys) == 28
+    excluded = {"iota", "kappa"}
+    for key in pair_keys:
+        low, high = key[len("e2:") :].split(" ")
+        assert low < high
+        assert excluded.isdisjoint({low, high})
+
+
+def test_famous_head_build_is_deterministic():
+    first = index_for(12).heads
+    second = index_for(12).heads
+    assert first == second
+    assert list(first) == list(second)
+
+
 def test_cli_writes_reports(tmp_path):
     source = tmp_path / "places.jsonl"
     source.write_text(

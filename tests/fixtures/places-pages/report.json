@@ -1,14 +1,19 @@
 {
+  "famous_pair_key": "e2:fixture tower",
+  "famous_pair_result_ids": [
+    "fixture-famous"
+  ],
   "files": {
     "head.phrp": {
-      "bytes": 22614,
-      "sha256": "febbf658051b6ceea4a7cce5ac5b486c2af897901c860c29597e1192cf28fb7d"
+      "bytes": 22793,
+      "sha256": "a977171ebdf4e1be5ab8da3192b25187090f4fd954441605dd6a8748777bff41"
     },
     "shard.pcsh": {
-      "bytes": 1483,
-      "sha256": "d6fde90386d43a51d5926eda517ecd220bedd537162c6a3f9643874fa4866599"
+      "bytes": 1596,
+      "sha256": "67219f13141eaa3328bb488b496eda641e9b95e276dbae54ff78953f7255c591"
     }
   },
+  "head_famous_cap": 1,
   "head_result_ids": [
     "fixture-00",
     "fixture-01",
@@ -21,7 +26,11 @@
     "fixture-08",
     "fixture-09"
   ],
+  "rare_admitted_result_ids": [
+    "fixture-famous"
+  ],
+  "rare_admitted_token": "tower",
   "schema": "overture-places-page-fixture-v1",
-  "shard_first_id": "fixture-00",
+  "shard_first_id": "fixture-famous",
   "token": "shared"
 }

@@ -42,11 +42,14 @@ def test_builds_three_shards_head_and_exact_oracles(tmp_path):
     for index, path in enumerate(inputs):
         write_places(path, f"R{index}", cjk=index == 2)
 
-    report = smoke.prepare(inputs, tmp_path / "output", head_minimum_candidates=2)
+    report = smoke.prepare(
+        inputs, tmp_path / "output", head_minimum_candidates=2, head_famous_cap=2
+    )
 
     assert len(report["shards"]) == 3
     assert (tmp_path / "output" / "head.phrp").is_file()
     assert (tmp_path / "output" / "catalog.pcat").is_file()
+    assert not (tmp_path / "output" / "head-baseline-nofamous.phrp").exists()
     assert report["catalog"]["schema_version"] == 1
     assert any(case["head_hit"] for case in report["cases"])
     assert any(not case["head_hit"] for case in report["cases"])
@@ -56,6 +59,14 @@ def test_builds_three_shards_head_and_exact_oracles(tmp_path):
     assert all(
         len(case["required_objects"]) <= 2 for case in report["cases"]
     )
+    head = report["head"]
+    assert head["head_famous_cap"] == 2
+    assert head["famous_delta"]["object_bytes"] == (
+        head["object_bytes"] - head["baseline_without_famous"]["object_bytes"]
+    )
+    assert head["famous_delta"]["key_index_bytes"] >= 0
+    assert head["famous_delta"]["key_count"] >= 0
+    assert "e2:" in head["eligibility"]
 
 
 def test_equal_rank_routed_limit_uses_same_doc_tiebreak_as_packed_head(tmp_path):
@@ -141,3 +152,91 @@ def test_equal_rank_routed_limit_uses_same_doc_tiebreak_as_packed_head(tmp_path)
     assert result["candidate_count"] == 11
     assert result["result_ids"] == [f"z{index:02}" for index in range(10)]
     assert head_ids == result["result_ids"]
+
+
+def famous_head_reader(tmp_path):
+    """A packed head where the famous target misses the dense per-token top-10."""
+    rows = [
+        {
+            # "cafe" stays a category-only token so the pair-miss fallback
+            # test below has two admitted tokens without an e2: pair key.
+            "id": f"dense-{index:02}",
+            "name": "Tokyo Grand",
+            "category": "cafe",
+            "lat": 35.68,
+            "lon": 139.75,
+            "confidence": 0.95 - index / 1000,
+        }
+        for index in range(11)
+    ]
+    rows.append(
+        {
+            "id": "famous-tower",
+            "name": "Tokyo Tower",
+            "category": "landmark",
+            "lat": 35.6586,
+            "lon": 139.7454,
+            "confidence": 0.93,
+        }
+    )
+    compact = sys.modules["experiment_places_compact_index"]
+    places = [
+        compact.place_from_row(row, number) for number, row in enumerate(rows, 1)
+    ]
+    ordered, heads, _ = smoke.build_heads_and_baseline(
+        places,
+        head_minimum_candidates=2,
+        head_famous_cap=len(places),
+        preserve_input_order=True,
+    )
+    head_path = tmp_path / "head.phrp"
+    smoke.build_repack_object(ordered, heads, head_path, head_famous_cap=len(places))
+    return smoke.RepackHead(head_path), heads
+
+
+def test_query_head_serves_famous_pair_before_per_token_intersection(tmp_path):
+    reader, heads = famous_head_reader(tmp_path)
+    # Without the pair probe this is a zero-result intersection: the famous
+    # place is not in the dense token's per-token top-10.
+    dense_top = {row for row in heads["e:tokyo"]}
+    assert heads["e2:tokyo tower"][0] not in dense_top
+    result = smoke.query_head(
+        reader, (smoke.Clause("tokyo"), smoke.Clause("tower"))
+    )
+    assert result["head_hit"] is True
+    assert result["result_ids"] == ["famous-tower"]
+    # Repeatable, order-stable.
+    assert (
+        smoke.query_head(reader, (smoke.Clause("tokyo"), smoke.Clause("tower")))[
+            "result_ids"
+        ]
+        == result["result_ids"]
+    )
+    # Clause order does not change the probed pair key.
+    assert (
+        smoke.query_head(reader, (smoke.Clause("tower"), smoke.Clause("tokyo")))[
+            "result_ids"
+        ]
+        == result["result_ids"]
+    )
+
+
+def test_query_head_pair_miss_falls_back_to_per_token_intersection(tmp_path):
+    reader, heads = famous_head_reader(tmp_path)
+    # "cafe" is a category token: never a famous name/brand token, so no
+    # e2: pair exists and the query uses the per-token intersection.
+    assert "e2:cafe tokyo" not in reader.load_resident_index()
+    result = smoke.query_head(
+        reader, (smoke.Clause("tokyo"), smoke.Clause("cafe"))
+    )
+    assert result["head_hit"] is True
+    assert result["result_ids"] == [f"dense-{index:02}" for index in range(10)]
+    missing = smoke.query_head(
+        reader, (smoke.Clause("tokyo"), smoke.Clause("zzabsenttoken"))
+    )
+    assert missing == {
+        "head_hit": False,
+        "candidate_count": 0,
+        "result_ids": [],
+        "results": [],
+    }
