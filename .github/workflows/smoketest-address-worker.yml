@@ -211,8 +211,15 @@ jobs:
           PY
             SERVER_TIMING=$(awk 'BEGIN{IGNORECASE=1} /^server-timing:/ {sub(/\r$/, ""); print substr($0, index($0,$2)); exit}' "$HEADERS")
             jq -cn --argjson attempt "$attempt" --argjson time_total "$TIME_TOTAL" \
-              --arg server_timing "$SERVER_TIMING" \
-              '{attempt:$attempt,time_total_seconds:$time_total,server_timing:$server_timing}' \
+              --arg server_timing "$SERVER_TIMING" --slurpfile response "$BODY" \
+              '{attempt:$attempt,time_total_seconds:$time_total,
+                server_timing:$server_timing,
+                candidate_count:$response[0].candidate_count,
+                index_bytes:$response[0].index_bytes,
+                stored_page_bytes:$response[0].stored_page_bytes,
+                decoded_page_bytes:$response[0].decoded_page_bytes,
+                materialized_page_bytes:$response[0].materialized_page_bytes,
+                read_metrics:$response[0].read_metrics}' \
               >> /tmp/address-worker-timings.jsonl
           done
           jq -e '.candidate_count == 0 and .ids == []' <(

@@ -1,258 +1,208 @@
-# Pending Work — 2026-07-16
+# Pending Work — 2026-07-17
 
-This is the active roadmap. Completed PR-by-PR history is intentionally omitted;
-the merged changes, benchmark reports, and dated design documents remain the
-record of how the current decisions were reached. The code baseline is `f9d2eb8`
-(`main` after #83).
+This is the active roadmap. Completed PR history is intentionally omitted unless
+its result constrains the next decision. The implementation baseline is
+`7480d57` (`main` after #85); the current remote evidence is recorded in
+`benchmarks/2026-07-17-remote-address-places-r2-evidence.md`.
 
 ## Current state
 
-- Production serves data version `2026-07-13.0`, built from Overture release
-  `2026-06-17.0`. Health, forward, reverse, and ID checks passed after promotion.
-- Forward search remains division-focused. No Places, address, or street family
-  has been promoted.
-- The production ID index is v3 with compact locator metadata and remains
-  backward compatible with v1 artifacts.
-- Reverse routing uses request coordinates and conservative country-bbox
-  guardrails. Ambiguous routes fall through to `HEAD`; caller IP does not choose
-  the country.
-- The scheduled July 25 rebuild is accepted to proceed through the hardened
-  build, verification, smoke, promotion, rollback, and retention gates. This is
-  not approval for an additional ad-hoc rebuild or for promoting experimental
-  artifact families.
-
-The reconciled working tree adds the foundation needed by the next work. It is
-not yet published, so the remote workflows below cannot be dispatched until
-this branch is committed and pushed:
-
-- one payload-agnostic range-reader core in `geocoder-core`, with the address
-  decoder and compact Places reader as its first two consumers;
-- one lookup-safe compressed address page family, with raw address levels as the
-  source of truth and optional division IDs in a self-describing extension;
-- a selected Places storage shape: compact spatial shards plus one
-  range-readable global-head object;
-- deterministic global-build manifests and non-promoting map/reduce controls;
-- a complete 127-task address footer inventory, global source-object locators,
-  checked range slicing, and capped payload-generic extensions;
-- local hash-verifying shuffle/resume logic plus isolated address, Places, and
-  R2 manual smoke workflows;
-- exact reverse lineage materialized for the next fleet rebuild; and
-- unit-tested Python promotion, recovery, and pruning commands.
+- Production is healthy on data version `2026-07-13.0` and remains
+  division-only. No address, Places, street, or exact-country experiment is
+  discoverable from the production catalog.
+- The shared range-reader, compressed address pages, compact Places shards,
+  packed Places head, global address task inventory, and hash-verifying R2
+  store are merged.
+- Three current-release address tasks passed source accounting, exact reducer
+  checks, lossless page decode checks, and the hosted runner envelope. Structured
+  retention varied from 40.29% to effectively 100%; regional completeness is a
+  product constraint, not a single global coefficient.
+- The isolated address Worker returned the exact 92-candidate producer digest.
+  Its cold request used three R2 reads and 954,362 bytes in 392 ms; warm requests
+  used three cache hits, zero R2 reads, and a 174 ms median. The 941,745-byte side
+  index dominated cold transfer while page materialization stayed below 91 KB.
+- The isolated Places Worker passed exact producer/reader equivalence through
+  real R2. Packed-head cold access used four reads and 132 KB; a three-shard
+  fallback used 15 logical ranges and took 1.347 seconds on its first observed
+  request. Places remains disabled by default.
+- The remote R2 rehearsal passed partial upload, repeated verified resume, empty
+  restore, stale-local repair, and cleanup. The small rehearsal now belongs in
+  path-filtered `main` smoke CI; the large external-data jobs remain manual.
+- The July 25 rebuild remains the next production rebuild. The July 13 rebuild
+  is recent enough that no ad-hoc production rebuild is justified by this work.
 
 ## Decisions and constraints in force
 
-1. Do not promote Places, address, street, or exact-country artifacts until their
-   explicit correctness, bytes, heap, latency, and failure-behavior gates pass.
-2. Keep one range-readable binary family and one Worker range-reader core.
-   Format-specific payloads may differ, but framing, integrity checks, range
-   planning, and cache behavior must not fork.
-3. Keep one publication path. Address and Places manifests should feed the
-   existing control-plane/finalizer flow; do not create another catalog writer.
-   Before broader automated publication, add an object-level conditional write
-   or otherwise enforce a single serialized publisher.
-4. Preserve offline/online logic parity by putting serving decisions needed by
-   evaluation—routing, future reranking, and hierarchy assembly—in
-   `geocoder-core`.
-5. Exact structured address lookup must preserve duplicate and ambiguous
-   candidates. Do not destructively deduplicate keys, infer missing ranges, or
-   claim one universal free-form address grammar.
-6. Places storage and tokenizer version are settled. The remaining product gates
-   are real Worker read-chain latency, labeled relevance, and explicit handling
-   of unsupported broad or tail queries.
-7. No exact-country candidate currently passes both correctness and byte gates.
-   Keep ambiguous-bbox-to-`HEAD` behavior until a future candidate passes and a
-   separate production integration review approves it.
-8. Keep external-source/R2 smokes merge-only or manually dispatched. They should
-   not become required pull-request checks.
+1. Do not promote experimental families until their correctness, byte, heap,
+   latency, failure, and product-coverage gates pass.
+2. Keep one range-readable framing family and one Worker range-reader core.
+   Payload formats may differ; integrity, exact-range behavior, caching, and
+   physical-read planning must not fork.
+3. Keep one publication path. Before address or Places publication is automated,
+   add object-level conditional publication or otherwise prove there is one
+   serialized publisher.
+4. Exact structured address lookup returns all duplicate/ambiguous candidates.
+   It must not destructively deduplicate keys or infer a universal free-form
+   grammar.
+5. Places launch scope remains literal: name/brand tokens, last-token prefix,
+   structured category, and explicit location/context. Broad semantic search,
+   one-character CJK prefixes, and unbounded tail enumeration are unsupported.
+6. External Overture and Cloudflare workflows are merge-only, manual, or
+   low-frequency integration evidence. They are not required pull-request CI.
+7. Keep ambiguous reverse routes on `HEAD` until an exact-country candidate
+   passes correctness and byte gates after the next production rebuild.
 
-## Execution priority
+## Next work
 
-### 1. Run and review the address evidence workflows
+### 1. Route and score the Places prototype
 
-The complete footer inventory now covers 32 objects, 473,576,753 rows, and 8,704
-row groups. A 4,000,000-row/350 MB selected-column/72-row-group plan produces
-127 tasks, so the 128-job control-plane gate passes. Global source-object indexes
-are part of every locator; a task may safely span adjacent source objects.
+The byte reader works; query planning and product relevance are now the blocking
+work.
 
-Run `hosted-rowgroup-data-spike.yml` for the full US task, full Mexico task, and
-smallest tail. Combine those reports with the current-release format-convergence
-samples: 40,000 rows in Boston and every 35,042 address in the Tokyo box. Reject
-the plan on any accounting mismatch or runner memory, disk, runtime, page,
-fanout, or transfer-amplification gate.
+- Add a versioned shard catalog and route explicit query location/context to the
+  relevant compact shard instead of fanning every head miss across all shards.
+- Preserve the packed head as the context-free fast path, but define eligibility
+  and fame evidence rather than treating frequency alone as relevance.
+- Run each latency case from an independent cold namespace or explicit
+  smoke-only cache bypass. Report cold and warm client time, Worker time,
+  physical reads, R2/cache bytes, and failure behavior separately.
+- Execute and human-score `benchmarks/places-relevance-seed.json`, including
+  returned names, categories, context, distance ordering, duplicate IDs, and
+  repeated-order stability. Expand labels only after inspecting those results.
+- Set explicit launch and stop gates from the routed measurements. Do not enable
+  `place` by default while a normal located miss still follows the observed
+  three-shard/15-range path or any seed class has zero relevant top-five result.
 
-Then run `smoketest-address-worker.yml`. It now builds a real ~4M-row task and
-large side index, verifies the maximum-fanout UUID digest against the producer,
-tests a miss, and reports Cache API/R2 reads plus stored, decoded, and
-materialized bytes. Add exact/prefix/ambiguous structured cases only where the
-endpoint contract defines them; the current binary lookup itself is exact.
+Exit artifact: one routed Worker/relevance report with a proceed, optimize, or
+stop decision.
 
-Exit artifact: one reviewed address scale/Worker report with a proceed or
-rescope decision. Keep live Overture hydration out of the request path.
+### 2. Connect real address fragments to verified resume
 
-### 2. Run the hash-verifying R2 shuffle rehearsal
+The bounded producer shape is viable; the next risk is global coordination and
+coverage policy.
 
-The local resume layer and `smoketest-r2-shuffle.yml` are ready. Run the manual,
-non-promoting workflow and retain its reports for partial completion, repeated
-upload, empty-local restore, stale-local restore, and mandatory cleanup.
-Existence is never sufficient: immutable SHA-addressed objects must match stored
-size/metadata and a downloaded SHA-256, and a conflicting object is never
-overwritten.
+- Feed real content-addressed map fragments and their deterministic manifests
+  through the verified R2 store. Rehearse partial completion, retry, empty-local
+  reduce restore, and cleanup with more than one inventoried address task.
+- Collect structured-retention and output-byte summaries across the planned 127
+  tasks before selecting regional partitions or claiming planet storage.
+- Define the public structured endpoint: required fields, exact versus prefix
+  semantics, ambiguity behavior, response limits, and the disposition of rows
+  missing street or number.
+- Choose the partition/catalog rule from measured fanout and bytes, then add the
+  object-level publication guard required by the shared finalizer path.
+- Evaluate a bounded two-level/sparse side index or smaller serving partition so
+  a cold exact lookup does not automatically fetch the observed 941,745-byte
+  full index. Preserve exact predecessor selection and the three-range cap.
+- Measure Actions minutes, retry amplification, peak disk/RAM, and wall time.
+  Keep partial runs undiscoverable and do not hydrate Overture on the request
+  path.
 
-After that small rehearsal passes, connect the same manifest contract to real
-map fragments and measure Actions minutes, retry amplification, peak disk/RAM,
-and wall time. Keep partial runs undiscoverable. Replace the current secret-based
-smoke credentials with a short-lived OIDC/broker path if Cloudflare support makes
-that practical.
+Exit artifact: a multi-task, non-promoting R2 map/reduce rehearsal plus a
+reviewed address coverage/partition contract.
 
-Exit artifact: a non-promoting remote rehearsal resumable from empty local state.
+### 3. Rehearse the scheduled production path
 
-### 3. Run and score the Places Worker prototype
+This remains deadline-driven operational work, not a reason to rebuild early.
 
-The CJK decision, packed-head reader, compact-shard reader, three-region fixture
-builder, stage metrics, and isolated workflow are implemented. Run
-`smoketest-places-worker.yml` to extract Boston, Tokyo, and Mexico City samples,
-then measure packed-head hits and head-miss fallback through directory → lexicon
-→ postings → record index → records against real R2.
+- Before or with the July 25 run, dispatch the existing rebuild with
+  `promote=false` to exercise build, verification, immutable release-manifest
+  publication, and catalog-candidate generation without changing the catalog.
+  This dry run does not exercise catalog swap, production smoke, recovery, or
+  pruning because those paths are correctly gated on `promote=true`.
+- After the rebuild, verify lineage-backed reverse hierarchies and re-measure the
+  multi-bbox ambiguous-route share. Wrapped antimeridian bboxes and materialized
+  lineage only affect a newly built fleet.
+- On the scheduled promoted run, record per-family inventories, promotion and
+  production-smoke checks, any rollback/recovery outcome, and retention cleanup.
+  Do not add address or Places artifacts to this run.
 
-Score the seed cases in `benchmarks/places-relevance-seed.json` independently of
-the producer oracle. The oracle proves byte/reader equivalence, not relevance.
-Expand the labels only after inspecting actual results for brand-with-context,
-local-name, category-near-me, ambiguous-context, famous-unique, and chain-name
-queries. Record cold/warm p50/p95, physical reads, cache hits, bytes, failure
-behavior, and relevance-at-five.
+Exit artifact: one production-operations report for the July 25 release.
 
-The launch contract remains literal: name/brand tokens, last-token prefix,
-structured category, and explicit location/context. Single-character CJK
-prefixes, broad semantic queries, and candidate-tail enumeration are unsupported.
-Do not enable `place` by default until the latency and relevance stop gates pass.
+### 4. Re-size exact-country work after the rebuild
 
-### 4. Rehearse and validate the existing production path
+No current exact-country candidate passes both correctness and the proposed
+5 MiB byte gate. After the new reverse baseline exists:
 
-This is deadline-driven operational work alongside the address track.
-
-- Before or with the July 25 run, manually dispatch the rebuild with
-  `promote=false` to exercise build, verify, manifest, and the new Python
-  finalizer path without changing the catalog.
-- After the July 25 rebuild, verify that lineage-backed reverse hierarchies serve
-  correctly and re-measure the multi-bbox ambiguous-route share. Wrapped
-  antimeridian country bboxes and materialized lineage only take effect after a
-  new fleet build.
-- Re-size exact-country work from that measured baseline before investing in a
-  new comparator.
-- Record complete per-family inventories, promotion checks, rollback result, and
-  retention behavior for the run.
-
-No Places or address artifact should be added to this rebuild.
-
-### 5. Keep exact-country research queued
-
-The direct all-claims oracle is correct but about 183 MB. Measured simplified
-candidates either exceed the proposed 5 MiB budget or change routing decisions.
-Do not wire any current research artifact into the Worker.
-
-After the post-rebuild ambiguity measurement:
-
-- decide whether the proposed 5 MiB hot-object gate still stands;
-- independently review border, coast, island, enclave, antimeridian, synthetic
-  `X*`, and political-perspective labels;
-- if justified, build a research-only conservative interior-cover comparator
-  with exact unsimplified fallback and zero route-target drift; and
-- ratify heap, cold-open, and warm-p95 gates only after a candidate passes
-  correctness and stored-byte gates.
+- decide whether the 5 MiB hot-object gate still stands;
+- independently review borders, coasts, islands, enclaves, antimeridian cases,
+  synthetic `X*` codes, and political-perspective labels;
+- only if justified, test a conservative interior cover with exact unsimplified
+  fallback and zero route-target drift; and
+- ratify heap, cold-open, and warm-p95 gates only after stored-byte and
+  correctness gates pass.
 
 ## Supporting engineering backlog
 
-These items remain useful but do not block the first address measurement slice:
+These do not block the first routed Places or real-fragment address slice:
 
-- replace the hardcoded seven-type ID workflow matrix with a discovery job that
-  emits the matrix via `fromJSON`;
-- split `build_id_index.py` staging, build, and metadata phases into separate
-  scripts sharing `id_index_protocol.py`;
-- convert `build_shards.py` to `scripts/common.py` helpers during its next
-  evidence-regenerating change;
-- decide whether to populate locality-scale reverse `wkb` correctly or remove
-  the dormant column and query path;
-- add object-level `If-Match` publication or enforce a single publisher before
-  broader automated catalog writes;
-- clean the existing workflow quoting findings, then re-enable
-  shellcheck/pyflakes in the actionlint job; and
-- remove or consume unfit research outputs from
-  `build_country_h3_index.py` and `extract_country_router.sql`.
+- replace long-lived R2 smoke secrets with a short-lived OIDC/broker path when
+  Cloudflare support makes that practical;
+- replace the hardcoded seven-type ID workflow matrix with discovery plus
+  `fromJSON`;
+- split ID staging, build, and metadata phases while retaining
+  `id_index_protocol.py` as the shared contract;
+- decide whether to populate locality reverse `wkb` correctly or remove the
+  dormant column/query path;
+- clean existing workflow quoting findings, then re-enable shellcheck/pyflakes
+  in actionlint; and
+- remove or consume unfit exact-country research outputs.
 
-## Measured gates that still matter
+## Measured constraints to carry forward
 
-### Addresses
+### Address
 
-- The lookup-safe gzip-page experiment retained the full reducer response at
-  35.50 B/indexed row with 8.98 KiB p50 pages. A conservative all-473M-row
-  diagnostic is 16.79 GB for addresses and about 25.54 GB combined with Places.
-  These are bounded diagnostics, not a planet forecast.
-- The isolated Worker decoded the observed 137-candidate maximum-fanout fixture
-  in 434 ms on the first run-unique lookup and 156 ms subsequent median. Cache
-  API hits and representative large-index behavior were not measured; the new
-  real-shard workflow is ready but has not yet produced a remote report.
-- The complete release inventory is 473,576,753 rows, 8,704 row groups, and
-  33.17 GB of selected uncompressed source columns. Its 127-task plan has
-  3,998,407 p95 rows and 292.9 MB p95 selected uncompressed bytes.
-- The current-release format extension added 0.311 B/indexed row in the bounded
-  Boston sample and 0.387 B/indexed row in the all-35,042-row Tokyo box. Tokyo
-  address-level and containment labels agreed for 99.87% of rows; these are
-  purposive single-box measurements, not global forecasts.
-- In the measured hosted range, only 1,382,264 of 3,743,307 projected rows
-  (36.93%) had both non-empty street and number. Global completeness and the
-  product effect of rejecting incomplete rows remain open.
-- Conservative normalized address keys can map to materially different
-  coordinates. Exact lookup must return candidate lists.
+- Full task useful-gzip pages measured 35.325 B/retained row in Mexico and
+  36.495 B/retained row in the US; the smallest tail measured 29.510 B/row.
+- Projection peak RSS stayed below 1.73 GB and map/reduce peak RSS below 870 MB.
+  The longest measured compression pass was 692 seconds.
+- Maximum exact-key fanout was 252, and every tested page variant preserved
+  full candidate order and IDs.
+- The large-shard Worker cold lookup measured 392 ms, three R2 reads, and
+  954,362 bytes; five warm lookups had a 174 ms median and zero R2 reads. The
+  stored/decoded/materialized page sizes were 8,521/15,838/90,978 bytes.
+- The complete source inventory remains 473,576,753 rows, 8,704 row groups, and
+  127 planned tasks. Do not multiply it by one regional retention ratio.
 
 ### Places
 
-- Compact spatial shards measured 116.7 B/place on a deterministic California
-  sample and 122.9 B/place on a Tokyo sample. Storage shape generalized across
-  those partitions. Tokenizer v2 now preserves dakuten and adds CJK bigrams;
-  its relevance effect is not yet scored.
-- The packed global head fits one range-readable 25.75 MB object. The unresolved
-  risk is its hit rate and real request latency, not whether it can be packed.
-- A normal query still has at least four dependent logical reads before the first
-  result. The shared Worker reader and stage instrumentation compile for wasm,
-  but real R2 measurements are still pending.
+- Current three-region shards measured 116.38 B/place in Boston, 169.34 in
+  Tokyo, and 124.38 in Mexico City. CJK token density materially changes bytes.
+- Packed-head cold access measured 863 ms client time, four R2 reads, and
+  132,219 bytes. Five warm observations had a 195 ms median.
+- The first three-shard fallback measured 1.347 seconds, 15 logical ranges,
+  12 R2 reads plus three cache hits, and 75,042 R2 bytes. Fully warm fallbacks
+  had zero R2 reads but roughly 196-224 ms median client time.
+- The workflow proves reader equivalence, not relevance or an independently
+  cold latency distribution.
 
-### Producer
+### Producer and operations
 
-- One hosted projection processed 1,415,000 addresses from 24 row groups in
-  6.11 seconds at 764.8 MB peak RSS. It was one eligible range, not a skew
-  sample.
-- The hosted reducer retained 1,382,264 rows and completed in 2m38s; reducer peak
-  RSS was 715.4 MB. Its earlier uncompressed 148.1 B/row output is rejected as a
-  final format.
 - Initial global stop gates remain 12 hours, 12 CPU on the factory equivalent,
   48 GiB RAM, 700 GiB temporary disk, and 40 GB combined compact
   Places/address output per release.
+- Immutable R2 objects require verified size, metadata, and downloaded SHA-256.
+  Existence alone is never a resume signal, and a conflicting object is never
+  overwritten.
 
 ## Open decisions
 
-1. Address regional byte budget, partition rule, incomplete-row coverage policy,
-   structured endpoint contract, and Worker latency/heap gates.
-2. Places latency gates, relevance labels, head eligibility, fame evidence, and
-   low/high-fanout thresholds.
-3. Publication CAS/serialization and additive degraded/partial-result signaling.
+1. Places catalog/routing, head eligibility, relevance labels, and numeric
+   read/latency gates.
+2. Address endpoint, incomplete-row policy, partition sizes, catalog shape, and
+   publication serialization.
+3. Additive degraded/partial-result signaling shared by experimental families.
 4. Reverse `wkb` disposition and post-rebuild exact-country priority.
-5. Exact-country byte/heap/latency gates plus synthetic-code,
-   political-perspective, boundary, and antimeridian policy.
 
-## Historical references
+## References
 
-- `docs/plans/2026-07-14-global-places-address-processing-design.md`
-- `docs/plans/2026-07-12-exact-country-decision-artifact.md`
-- `docs/plans/2026-07-12-id-locator-scale-gates.md`
-- `docs/plans/2026-07-11-address-street-experiments.md`
-- `docs/places-search-spike.md`
+- `benchmarks/2026-07-17-remote-address-places-r2-evidence.md`
+- `benchmarks/2026-07-16-live-service-baseline.md`
+- `benchmarks/address-rowgroup-inventory-report.md`
 - `benchmarks/address-format-convergence-report.md`
 - `benchmarks/address-format-convergence-tokyo-report.md`
-- `benchmarks/hosted-address-compression-report.md`
-- `benchmarks/hosted-address-worker-decoder-report.md`
 - `benchmarks/places-compact-shard-factory-report.md`
 - `benchmarks/places-head-repack-report.md`
-- `benchmarks/places-nonca-partition-report.md`
-- `benchmarks/address-rowgroup-inventory-report.md`
 - `docs/places-tokenization-decision.md`
-- `benchmarks/2026-07-16-live-service-baseline.md`
+- `docs/plans/2026-07-14-global-places-address-processing-design.md`
+- `docs/plans/2026-07-12-exact-country-decision-artifact.md`

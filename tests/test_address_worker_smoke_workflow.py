@@ -27,6 +27,9 @@ def test_address_worker_smoke_is_manual_isolated_and_cleans_up():
     assert "EXPECTED_DIGEST" in workflow
     assert "Worker candidate IDs differ from producer oracle" in workflow
     assert ".read_metrics.logical_ranges == 3" in workflow
+    assert "read_metrics:$response[0].read_metrics" in workflow
+    assert "stored_page_bytes:$response[0].stored_page_bytes" in workflow
+    assert "materialized_page_bytes:$response[0].materialized_page_bytes" in workflow
     assert "workers/scripts/geocoder-address-smoke" in workflow
     assert "--request DELETE" in workflow
     assert 'if [ "$HTTP_STATUS" != "404" ]' in workflow
