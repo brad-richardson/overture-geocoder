@@ -14,21 +14,19 @@ def test_places_smoke_is_manual_real_three_shard_and_isolated():
     assert "workflow_dispatch:" in trigger
     assert "push:" not in trigger
     assert "contents: read" in workflow
+    assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "persist-credentials: false" in workflow
-    assert "2026-06-17.0" in workflow
     assert workflow.count("experiment_places_partition_extract.py") == 3
-    assert "prepare_places_worker_smoke.py" in workflow
-    assert "shard-0.pcsh shard-1.pcsh shard-2.pcsh head.phrp" in workflow
-    assert "cjk_exact" in workflow
-    assert 'name == "shard_prefix"' in workflow
-    assert "head_hit" in workflow
-    assert ".candidate_count == $count" in workflow
-    assert "for propagation_attempt in $(seq 1 12)" in workflow
-    assert 'if [ "$STATUS" != "404" ]' in workflow
-    assert "Places page spike remained unavailable after propagation retries" in workflow
-    assert "| tee /tmp/places-worker-latency.json" in workflow
-    assert "workers/scripts/geocoder-places-smoke" in workflow
-    assert "s3://geocoder-shards/${SMOKE_VERSION}/" in workflow
+    for required_behavior in (
+        "prepare_places_worker_smoke.py",
+        "benchmarks/places-relevance-seed.json",
+        '(.shards | length) == 1',
+        "EXPECTED_RESULTS",
+        "overture-places-worker-technical-decision-v1",
+        "awaiting_relevance_benchmark",
+        "s3://geocoder-shards/${SMOKE_VERSION}/",
+    ):
+        assert required_behavior in workflow
     assert 'name = "geocoder-places-smoke"' in config
     assert 'ENVIRONMENT = "places-smoke"' in config
     assert 'command = "worker-build --release --features places-spike"' in config
