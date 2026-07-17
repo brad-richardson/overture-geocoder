@@ -245,13 +245,12 @@ def test_verify_release_rejects_missing_id_shard(tmp_path):
 
 
 def test_verify_release_rejects_unexpected_version_object(tmp_path):
-    # An object under the version prefix that no family or root file accounts
-    # for (e.g. half-cleaned staging residue) got no content verification, so
-    # the exact-inventory gate must fail closed and name it rather than bless
-    # it in the manifest.
+    # A non-staging object under the version prefix that no family or root file
+    # accounts for got no content verification, so the exact-inventory gate must
+    # fail closed and name it rather than bless it in the manifest.
     metadata, readback, inventory = _release_fixture(tmp_path)
     value = json.loads(inventory.read_text())
-    value["Contents"].append(_entry("staging/build-000-3ff/_SUCCESS", 12))
+    value["Contents"].append(_entry("stray-root.json", 12))
     _write_json(inventory, value)
 
     with pytest.raises(ValueError, match="not an exact match") as excinfo:
@@ -263,7 +262,29 @@ def test_verify_release_rejects_unexpected_version_object(tmp_path):
             readback_dir=readback,
             output_path=tmp_path / "manifest.json",
         )
-    assert "staging/build-000-3ff/_SUCCESS" in str(excinfo.value)
+    assert "stray-root.json" in str(excinfo.value)
+
+
+def test_verify_release_tolerates_staging_objects_during_finalize(tmp_path):
+    # Staging now survives until post-finalize cleanup so a failed finalize can
+    # be recovered, so finalize must run with staging/ present. It is excluded
+    # from the exact-set gate and never blessed into the verified object set.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry("staging/build-000-3ff/_SUCCESS", 12))
+    value["Contents"].append(_entry("staging/registry/_SUCCESS", 9))
+    _write_json(inventory, value)
+
+    manifest = fr.verify_release(
+        version=VERSION,
+        release=RELEASE,
+        inventory_path=inventory,
+        metadata_dir=metadata,
+        readback_dir=readback,
+        output_path=tmp_path / "manifest.json",
+    )
+    hrefs = {obj["href"] for obj in manifest["verified_version_objects"]}
+    assert not any(href.startswith("./staging/") for href in hrefs)
 
 
 def test_verify_release_rejects_stray_id_inventory_object(tmp_path):
