@@ -69,6 +69,23 @@ RECORDS_COALESCE_GAP = 64 * 1024
 # physical reads the Worker issues. Pinned by the same parity test.
 RECORD_INDEX_MAX_RANGE_BYTES = 256 * 1024
 RECORDS_MAX_RANGE_BYTES = 2 * 1024 * 1024
+# Postings-stage plan mirroring the Worker's per-matched-entry reads through
+# coalesced(..., gap 0, MAX_POSTING_BYTES): adjacent entries merge into one
+# physical read, non-adjacent entries split, and the dead bytes between them
+# are never fetched. Pinned by the same parity test.
+POSTINGS_COALESCE_GAP = 0
+POSTINGS_MAX_RANGE_BYTES = 8 * 1024 * 1024
+# Whole-query posting byte cap mirroring the Worker's MAX_QUERY_POSTING_BYTES:
+# the Worker fails the lookup when the clauses' summed posting extents pass it,
+# so the model must fail identically instead of serving oracle truth the
+# Worker would refuse.
+QUERY_POSTINGS_MAX_BYTES = 16 * 1024 * 1024
+# Lexicon-stage per-read cap mirroring the Worker's
+# coalesced(&wants, 0, MAX_LEXICON_BLOCK_BYTES), and the per-clause union
+# candidate cap mirroring MAX_POSTING_CANDIDATES: both fail or split exactly
+# where the Worker does, so modeled physical reads and failures transfer.
+LEXICON_MAX_RANGE_BYTES = 512 * 1024
+POSTING_CANDIDATES_CAP = 200_000
 
 
 def encode_identity(place: Place) -> bytes:
@@ -194,6 +211,7 @@ def build_artifact(
     output: Path,
     block_entries: int = 256,
     cell_degrees: float = 0.25,
+    posting_layout: list[str] | None = None,
 ) -> tuple[list[Place], dict[str, Any]]:
     started = time.perf_counter()
     ordered = ordered_places(places, cell_degrees)
@@ -214,7 +232,19 @@ def build_artifact(
         },
         "name_only": {"mask": FIELD_BITS["name"], "bytes": 0, "tokens": 0},
     }
-    for token in sorted(exact, key=lambda value: value.encode("utf-8")):
+    # The postings blob's physical order is free: every reader resolves each
+    # entry's extent through the lexicon's explicit (offset, length), so a
+    # producer may lay posting lists in any order. The default (token order)
+    # keeps prefix ranges contiguous; tests pass an explicit permutation to
+    # exercise the readers' non-adjacent multi-entry coalescing branch.
+    token_order = sorted(exact, key=lambda value: value.encode("utf-8"))
+    if posting_layout is not None:
+        if sorted(posting_layout, key=lambda value: value.encode("utf-8")) != token_order:
+            raise ValueError("posting layout must permute exactly the token set")
+        physical_order = posting_layout
+    else:
+        physical_order = token_order
+    for token in physical_order:
         items = sorted(exact[token].items())
         encoded = encode_posting_items(items)
         entries.append((token, len(postings), len(encoded), len(exact[token])))
@@ -223,6 +253,8 @@ def build_artifact(
             size, count = posting_variant_size(items, variant["mask"])
             variant["bytes"] += size
             variant["tokens"] += int(count > 0)
+    # The lexicon requires token-sorted entries regardless of physical layout.
+    entries.sort(key=lambda entry: entry[0].encode("utf-8"))
 
     lexicon = bytearray()
     blocks = []
@@ -489,7 +521,8 @@ class CompactShard:
         chunks = self.reader.read_ranges(
             ((base + block["offset"], block["length"]) for block in blocks),
             "lexicon",
-            0,
+            max_gap=0,
+            max_range=LEXICON_MAX_RANGE_BYTES,
         )
         matches = []
         for block in blocks:
@@ -499,26 +532,58 @@ class CompactShard:
                     matches.append(entry)
         return matches
 
-    def clause_docs(self, clause: Clause) -> dict[int, tuple[int, int]]:
-        value = normalize(clause.value)
-        entries = self.lexicon_matches(value, clause.prefix)
+    def entry_docs(
+        self, clause: Clause, entries: list[LexiconEntry]
+    ) -> dict[int, tuple[int, int]]:
+        """Union the matched entries' postings via per-entry gap-0 reads.
+
+        Mirrors the Worker's posting stage (places_pages.rs) exactly: one want
+        per matched lexicon entry through the shared coalescer (adjacent
+        extents merge into one physical read, non-adjacent extents split, dead
+        bytes between them are never fetched), the same clause-level posting
+        byte cap, and the same decode rule — an occurrence whose field mask
+        misses the clause's mask is skipped BEFORE the per-doc rank merge, not
+        filtered afterwards. Extents are resolved through each entry's explicit
+        offset/length, so any physical posting layout — including a permuted
+        one — decodes correctly.
+        """
         if not entries:
             return {}
+        clause_posting_bytes = sum(entry.posting_length for entry in entries)
+        if clause_posting_bytes > POSTINGS_MAX_RANGE_BYTES:
+            # Mirrors the Worker's MAX_POSTING_BYTES clause cap: it fails the
+            # lookup instead of issuing the reads, so the model must not
+            # quietly split the clause into several capped reads.
+            raise ValueError("clause posting span exceeds hard cap")
+        clause_mask = FIELD_BITS[clause.field] if clause.field else sum(FIELD_BITS.values())
         postings_base, _ = self.component("postings")
-        start = postings_base + entries[0].posting_offset
-        end = postings_base + entries[-1].posting_offset + entries[-1].posting_length
-        data = self.reader.read(start, end - start, "postings")
+        chunks = self.reader.read_ranges(
+            (
+                (postings_base + entry.posting_offset, entry.posting_length)
+                for entry in entries
+            ),
+            "postings",
+            max_gap=POSTINGS_COALESCE_GAP,
+            max_range=POSTINGS_MAX_RANGE_BYTES,
+        )
         docs: dict[int, tuple[int, int]] = {}
         for entry in entries:
-            relative = postings_base + entry.posting_offset - start
-            encoded = data[relative : relative + entry.posting_length]
+            encoded = chunk_slice(
+                chunks, postings_base + entry.posting_offset, entry.posting_length
+            )
             for doc_id, mask, rank in decode_postings(encoded, entry.posting_count):
+                if mask & clause_mask == 0:
+                    continue
                 old_mask, old_rank = docs.get(doc_id, (0, rank))
                 docs[doc_id] = (old_mask | mask, max(old_rank, rank))
-        if clause.field:
-            bit = FIELD_BITS[clause.field]
-            docs = {doc: value for doc, value in docs.items() if value[0] & bit}
+                if len(docs) > POSTING_CANDIDATES_CAP:
+                    # Mirrors the Worker's MAX_POSTING_CANDIDATES union cap.
+                    raise ValueError("clause union candidates exceed hard cap")
         return docs
+
+    def clause_docs(self, clause: Clause) -> dict[int, tuple[int, int]]:
+        value = normalize(clause.value)
+        return self.entry_docs(clause, self.lexicon_matches(value, clause.prefix))
 
     def records(
         self,
@@ -570,14 +635,40 @@ class CompactShard:
         before = len(self.reader.reads)
         candidates: set[int] | None = None
         ranks: dict[int, int] = {}
-        matched_tokens = []
-        for clause in case.clauses:
-            docs = self.clause_docs(clause)
-            matched_tokens.append(len(docs))
-            ids = set(docs)
-            candidates = ids if candidates is None else candidates & ids
-            for doc_id, (_, rank) in docs.items():
-                ranks[doc_id] = max(ranks.get(doc_id, 0), rank)
+        # clause_candidate_counts[i] is a DIAGNOSTIC, not candidate recall: the
+        # number of candidate docs actually decoded for clause i, or None for a
+        # clause whose postings were never read because the reader exited early.
+        # The early-exit rules mirror the Worker (places_pages.rs,
+        # lookup_places_shard_spike) exactly: a clause with no lexicon match
+        # makes the AND-intersection provably empty, so ALL posting reads are
+        # skipped (every count stays None); and once the running intersection
+        # empties, later clauses' postings are not read (their counts stay
+        # None). The two implementations must produce identical values for
+        # every case.
+        matched_entries = [
+            self.lexicon_matches(normalize(clause.value), clause.prefix)
+            for clause in case.clauses
+        ]
+        clause_candidate_counts: list[int | None] = [None] * len(case.clauses)
+        total_posting_bytes = 0
+        if all(matched_entries):
+            for position, (clause, entries) in enumerate(
+                zip(case.clauses, matched_entries)
+            ):
+                total_posting_bytes += sum(
+                    entry.posting_length for entry in entries
+                )
+                if total_posting_bytes > QUERY_POSTINGS_MAX_BYTES:
+                    # Mirrors the Worker's MAX_QUERY_POSTING_BYTES hard cap.
+                    raise ValueError("query posting bytes exceed hard cap")
+                docs = self.entry_docs(clause, entries)
+                clause_candidate_counts[position] = len(docs)
+                ids = set(docs)
+                candidates = ids if candidates is None else candidates & ids
+                for doc_id, (_, rank) in docs.items():
+                    ranks[doc_id] = max(ranks.get(doc_id, 0), rank)
+                if not candidates:
+                    break
         candidates = candidates or set()
         best = sorted(candidates, key=lambda doc: (-ranks[doc], doc))[:limit]
         results = self.records(best, index_gap, record_gap)
@@ -600,7 +691,7 @@ class CompactShard:
             "cold_bytes_transferred": sum(row["length"] for row in reads)
             + self._directory_bytes,
             "stages": stages,
-            "clause_candidate_counts": matched_tokens,
+            "clause_candidate_counts": clause_candidate_counts,
         }
 
 

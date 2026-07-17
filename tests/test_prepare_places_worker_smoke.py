@@ -55,7 +55,16 @@ def test_builds_three_shards_head_and_exact_oracles(tmp_path):
     assert any(not case["head_hit"] for case in report["cases"])
     assert any(case["name"] == "shard_prefix" for case in report["cases"])
     assert any(case["route"] == "catalog_point" for case in report["cases"])
-    assert all(case["result_ids"] for case in report["cases"])
+    early_exit_names = {
+        "shard_no_lexicon_match",
+        "shard_empty_intersection",
+        "shard_early_exit_sentinel",
+    }
+    assert all(
+        case["result_ids"]
+        for case in report["cases"]
+        if case["name"] not in early_exit_names
+    )
     assert all(
         len(case["required_objects"]) <= 2 for case in report["cases"]
     )
@@ -67,6 +76,57 @@ def test_builds_three_shards_head_and_exact_oracles(tmp_path):
     assert head["famous_delta"]["key_index_bytes"] >= 0
     assert head["famous_delta"]["key_count"] >= 0
     assert "e2:" in head["eligibility"]
+
+
+def test_early_exit_cases_pin_the_clause_candidate_counts_contract(tmp_path):
+    """The three diagnostics cases carry the agreed counts semantics: numbers
+    for clauses whose postings were decoded, null (None) for clauses never read
+    because of the no-lexicon-match or emptied-intersection early exits."""
+    inputs = [tmp_path / f"input-{index}.json" for index in range(3)]
+    for index, path in enumerate(inputs):
+        write_places(path, f"R{index}", cjk=index == 2)
+
+    report = smoke.prepare(
+        inputs, tmp_path / "output", head_minimum_candidates=2, head_famous_cap=2
+    )
+    by_name = {case["name"]: case for case in report["cases"]}
+
+    no_match = by_name["shard_no_lexicon_match"]
+    assert no_match["clause_candidate_counts"] == [None, None]
+    assert no_match["candidate_count"] == 0
+    assert no_match["result_ids"] == []
+
+    empty = by_name["shard_empty_intersection"]
+    assert len(empty["clause_candidate_counts"]) == 2
+    assert all(
+        isinstance(count, int) and count >= 1
+        for count in empty["clause_candidate_counts"]
+    )
+    assert empty["candidate_count"] == 0
+    assert empty["result_ids"] == []
+
+    sentinel = by_name["shard_early_exit_sentinel"]
+    assert len(sentinel["clause_candidate_counts"]) == 3
+    assert sentinel["clause_candidate_counts"][:2] == empty["clause_candidate_counts"]
+    assert sentinel["clause_candidate_counts"][2] is None
+    assert sentinel["candidate_count"] == 0
+    assert sentinel["result_ids"] == []
+
+    # Every non-early-exit case decodes all its clauses: no sentinel leaks into
+    # ordinary cases, and counts keep one entry per clause.
+    for case in report["cases"]:
+        assert len(case.get("clause_candidate_counts", case["clauses"])) == len(
+            case["clauses"]
+        )
+        if case["name"] not in (
+            "shard_no_lexicon_match",
+            "shard_empty_intersection",
+            "shard_early_exit_sentinel",
+        ) and "clause_candidate_counts" in case:
+            assert all(
+                isinstance(count, int)
+                for count in case["clause_candidate_counts"]
+            )
 
 
 def test_equal_rank_routed_limit_uses_same_doc_tiebreak_as_packed_head(tmp_path):

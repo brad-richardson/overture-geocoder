@@ -144,6 +144,11 @@ jobs:
             EXPECTED_HEAD=$(jq -r '.head_hit' <<< "$CASE")
             EXPECTED_COUNT=$(jq -r '.candidate_count' <<< "$CASE")
             EXPECTED_ROUTE=$(jq -r '.route' <<< "$CASE")
+            # Diagnostic counts contract (see places_pages.rs and the oracle's
+            # CompactShard.query): numbers for clauses actually decoded, null
+            # for clauses never read due to the reader's early exits. Head
+            # cases carry no counts (null skips the check).
+            EXPECTED_CLAUSE_COUNTS=$(jq -c '.clause_candidate_counts // null' <<< "$CASE")
             QUERY="scope=${SCOPE}"
             if [ -n "$CONTEXT" ]; then QUERY="${QUERY}&context=${CONTEXT}"; fi
             if jq -e '.point != null' <<< "$CASE" >/dev/null; then
@@ -206,6 +211,8 @@ jobs:
                        then (($resp.results[$i].distance_km - $results[$i].distance_km) | abs) < 0.001
                        else ($resp.results[$i] | has("distance_km") | not) end)))
                 and .candidate_count == $count
+                and (if $clause_counts == null then true
+                     else .clause_candidate_counts == $clause_counts end)
                 and .head_hit == $head
                 and .route == $route
                 and .read_metrics.logical_ranges >= 3
@@ -215,6 +222,7 @@ jobs:
                 and (if $attempt == 1 then .read_metrics.r2_reads > 0 else true end)'
               JQ_ARGS=(--argjson ids "$EXPECTED_IDS" --argjson results "$EXPECTED_RESULTS"
                 --argjson head "$EXPECTED_HEAD" --argjson count "$EXPECTED_COUNT"
+                --argjson clause_counts "$EXPECTED_CLAUSE_COUNTS"
                 --arg route "$EXPECTED_ROUTE" --argjson attempt "$attempt")
               if ! jq -e "${JQ_ARGS[@]}" "$STRICT_FILTER" "$BODY" >/dev/null; then
                 echo "::error::Places case ${NAME} attempt ${attempt} failed strict equivalence"
@@ -225,6 +233,8 @@ jobs:
                   ids_unique: (([.results[].id] | unique | length) == (.results | length)),
                   result_count: ((.results | length) == ($results | length)),
                   candidate_count: (.candidate_count == $count),
+                  clause_counts: (if $clause_counts == null then true
+                    else .clause_candidate_counts == $clause_counts end),
                   head_hit: (.head_hit == $head),
                   route: (.route == $route),
                   logical_ranges: (.read_metrics.logical_ranges >= 3),

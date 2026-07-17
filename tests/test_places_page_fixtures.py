@@ -19,7 +19,9 @@ sys.modules[SPEC.name] = generator
 SPEC.loader.exec_module(generator)
 
 
-@pytest.mark.parametrize("name", ("shard.pcsh", "head.phrp", "report.json"))
+@pytest.mark.parametrize(
+    "name", ("shard.pcsh", "head.phrp", "split.pcsh", "report.json")
+)
 def test_committed_places_fixture_matches_generator(tmp_path, name):
     generator.write(tmp_path)
     assert (FIXTURE_DIR / name).read_bytes() == (tmp_path / name).read_bytes()

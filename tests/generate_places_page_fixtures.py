@@ -16,7 +16,7 @@ if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
 
 from experiment_places_compact_index import Place  # noqa: E402
-from experiment_places_compact_shard import build_artifact  # noqa: E402
+from experiment_places_compact_shard import build_artifact, posting_map  # noqa: E402
 from experiment_places_head_repack import (  # noqa: E402
     build_heads_and_baseline,
     build_repack_object,
@@ -66,6 +66,51 @@ def places() -> list[Place]:
     return fixture
 
 
+# Physical posting layout for the split fixture: shareda and sharedz — both
+# matched by the prefix clause "shared" — are separated in the postings blob by
+# the non-matching gapx entry, so the Worker's per-entry gap-0 coalescing must
+# split into two physical reads and never fetch gapx's dead bytes. adja/adjb
+# stay physically adjacent, so the same plan must merge them into one read.
+SPLIT_LAYOUT_FRONT = ("adja", "adjb", "shareda", "gapx", "sharedz")
+SPLIT_PREFIX = "shared"
+SPLIT_ADJACENT_PREFIX = "adj"
+
+
+def split_places() -> list[Place]:
+    rows = [
+        ("split-00", "Adja Corner"),
+        ("split-01", "Adja Adjb Diner"),
+        ("split-02", "Adjb Shareda Sharedz Bar"),
+        ("split-03", "Gapx Hall"),
+        ("split-04", "Gapx Annex"),
+        ("split-05", "Sharedz Point"),
+    ]
+    return [
+        Place(
+            place_id=place_id,
+            name=name,
+            brand="",
+            category="venue",
+            locality="Boston",
+            region="MA",
+            country="US",
+            lat=42.35 + index / 10_000,
+            lon=-71.10,
+            confidence=0.95 - index / 100,
+        )
+        for index, (place_id, name) in enumerate(rows)
+    ]
+
+
+def split_posting_layout(places: list[Place]) -> list[str]:
+    tokens = sorted(posting_map(places), key=lambda token: token.encode("utf-8"))
+    front = list(SPLIT_LAYOUT_FRONT)
+    missing = set(front) - set(tokens)
+    if missing:
+        raise ValueError(f"split fixture tokens missing from corpus: {missing}")
+    return front + [token for token in tokens if token not in set(front)]
+
+
 def write(output_dir: Path) -> dict:
     output_dir.mkdir(parents=True, exist_ok=True)
     source = places()
@@ -76,11 +121,20 @@ def write(output_dir: Path) -> dict:
     )
     head = output_dir / "head.phrp"
     build_repack_object(ordered_head, heads, head, head_famous_cap=HEAD_FAMOUS_CAP)
-    files = {path.name: path.read_bytes() for path in (shard, head)}
+    split_source = split_places()
+    split = output_dir / "split.pcsh"
+    ordered_split, _ = build_artifact(
+        split_source, split, posting_layout=split_posting_layout(split_source)
+    )
+    files = {path.name: path.read_bytes() for path in (shard, head, split)}
     report = {
         "schema": "overture-places-page-fixture-v1",
         "token": "shared",
         "shard_first_id": ordered_shard[0].place_id,
+        "split_prefix": SPLIT_PREFIX,
+        "split_adjacent_prefix": SPLIT_ADJACENT_PREFIX,
+        "split_posting_layout": SPLIT_LAYOUT_FRONT,
+        "split_doc_ids": [place.place_id for place in ordered_split],
         "head_result_ids": [
             ordered_head[doc_id].place_id for doc_id in heads["e:shared"]
         ],
