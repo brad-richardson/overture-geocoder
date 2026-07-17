@@ -87,7 +87,48 @@ def _release_fixture(tmp_path):
         },
     )
 
-    dictionary_bytes = b'{"dictionary":"v3"}'
+    # Build the v3 id-inventories chain bottom-up: stage inventory -> inventory
+    # set -> locator dictionary. The finalizer binds each object by byte-SHA, so
+    # the aggregate/scope shas need only be internally consistent (the finalizer
+    # never recomputes them), and each referenced object's href embeds its own
+    # content sha.
+    inv_dir = metadata / "id-inventories"
+    inv_dir.mkdir()
+    agg_sha = hashlib.sha256(b"inventory-references").hexdigest()
+    scope_sha = "0" * 16
+    stage_bytes = json.dumps(
+        {"kind": "registry_range", "scope": {"kind": "registry_range"}}
+    ).encode()
+    stage_sha = hashlib.sha256(stage_bytes).hexdigest()
+    stage_name = f"registry_range-{scope_sha}-{stage_sha}.json"
+    (inv_dir / stage_name).write_bytes(stage_bytes)
+    stage_ref = {
+        "href": f"./id-inventories/{stage_name}",
+        "sha256": stage_sha,
+        "size_bytes": len(stage_bytes),
+        "kind": "registry_range",
+        "scope": {"kind": "registry_range"},
+    }
+    inv_set_bytes = json.dumps(
+        {"inventories": [stage_ref], "inventory_references_sha256": agg_sha}
+    ).encode()
+    set_sha = hashlib.sha256(inv_set_bytes).hexdigest()
+    set_name = f"inventory-set-{set_sha}.json"
+    (inv_dir / set_name).write_bytes(inv_set_bytes)
+    inv_set_ref = {
+        "href": f"./id-inventories/{set_name}",
+        "sha256": set_sha,
+        "size_bytes": len(inv_set_bytes),
+        "inventory_references_sha256": agg_sha,
+        "inventories_count": 1,
+    }
+    dictionary_bytes = json.dumps(
+        {
+            "dictionary": "v3",
+            "input_inventory_set_sha256": agg_sha,
+            "input_inventory_set": inv_set_ref,
+        }
+    ).encode()
     dictionary_sha = hashlib.sha256(dictionary_bytes).hexdigest()
     dictionary_name = f"id-locator-dictionary-{dictionary_sha}.json"
     (metadata / dictionary_name).write_bytes(dictionary_bytes)
@@ -147,6 +188,8 @@ def _release_fixture(tmp_path):
         _entry("id-meta.json", (metadata / "id-meta.json").stat().st_size),
         _entry("id-locator-manifest.json", (metadata / "id-locator-manifest.json").stat().st_size),
         _entry(dictionary_name, len(dictionary_bytes)),
+        _entry(f"id-inventories/{set_name}", len(inv_set_bytes)),
+        _entry(f"id-inventories/{stage_name}", len(stage_bytes)),
         _entry("shards/AA.db", len(forward_bytes)),
         _entry("reverse/AA.db", len(reverse_bytes)),
         _entry("router.db", len(router_bytes)),
@@ -177,7 +220,7 @@ def test_verify_release_writes_complete_exact_manifest(tmp_path):
     assert manifest["families"]["reverse"]["shard_count"] == 1
     assert manifest["families"]["id"]["shard_count"] == 4096
     assert manifest["families"]["id"]["total_size_bytes"] > 0
-    assert len(manifest["verified_version_objects"]) == 4107
+    assert len(manifest["verified_version_objects"]) == 4109
     assert json.loads(output.read_text())["version"] == VERSION
 
 
@@ -221,6 +264,46 @@ def test_verify_release_rejects_unexpected_version_object(tmp_path):
             output_path=tmp_path / "manifest.json",
         )
     assert "staging/build-000-3ff/_SUCCESS" in str(excinfo.value)
+
+
+def test_verify_release_rejects_stray_id_inventory_object(tmp_path):
+    # id-inventories objects are accepted only when the trusted locator chain
+    # references them; an unreferenced object under the prefix must still fail
+    # the exact-set gate (the prefix is not blessed wholesale).
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    stray = f"id-inventories/registry_range-ffffffffffffffff-{'a' * 64}.json"
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry(stray, 5))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="not an exact match") as excinfo:
+        fr.verify_release(
+            version=VERSION,
+            release=RELEASE,
+            inventory_path=inventory,
+            metadata_dir=metadata,
+            readback_dir=readback,
+            output_path=tmp_path / "manifest.json",
+        )
+    assert stray in str(excinfo.value)
+
+
+def test_verify_release_rejects_tampered_stage_inventory(tmp_path):
+    # Each referenced id-inventories object is byte-SHA-bound to its reference,
+    # so replacing its content (keeping the key) fails closed.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    stage_file = next((metadata / "id-inventories").glob("registry_range-*.json"))
+    stage_file.write_bytes(b'{"tampered": true}')
+
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        fr.verify_release(
+            version=VERSION,
+            release=RELEASE,
+            inventory_path=inventory,
+            metadata_dir=metadata,
+            readback_dir=readback,
+            output_path=tmp_path / "manifest.json",
+        )
 
 
 @pytest.mark.parametrize(
