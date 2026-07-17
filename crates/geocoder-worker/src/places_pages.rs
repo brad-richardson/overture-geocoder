@@ -779,91 +779,97 @@ impl ShardLoader {
         }
         let postings = component(&directory, "postings")?;
         let mut total_posting_bytes = 0_u64;
-        let mut clause_candidate_counts = Vec::with_capacity(clauses.len());
+        // Length is fixed to clauses.len(); positions for clauses skipped by the
+        // early-exit below stay 0, so the diagnostic keeps a stable shape.
+        let mut clause_candidate_counts = vec![0_usize; clauses.len()];
         let mut candidates: Option<BTreeMap<u64, u8>> = None;
-        for (clause, matches) in clauses.iter().zip(&clause_matches) {
-            if matches.is_empty() {
-                clause_candidate_counts.push(0);
-                candidates = Some(BTreeMap::new());
-                continue;
-            }
-            let first = matches.first().expect("nonempty matches");
-            let last = matches.last().expect("nonempty matches");
-            let posting_start = first.posting_offset;
-            let posting_end = last
-                .posting_offset
-                .checked_add(last.posting_length)
-                .ok_or_else(|| Error::RustError("Places posting span overflows".into()))?;
-            let posting_length = posting_end
-                .checked_sub(posting_start)
-                .ok_or_else(|| Error::RustError("Places posting span is reversed".into()))?;
-            if posting_length > MAX_POSTING_BYTES {
-                return Err(Error::RustError(
-                    "Places posting span exceeds hard cap".into(),
-                ));
-            }
-            total_posting_bytes = total_posting_bytes
-                .checked_add(posting_length)
-                .ok_or_else(|| Error::RustError("Places posting byte total overflows".into()))?;
-            if total_posting_bytes > MAX_QUERY_POSTING_BYTES {
-                return Err(Error::RustError(
-                    "Places query posting bytes exceed hard cap".into(),
-                ));
-            }
-            let posting_extent = checked_extent(
-                postings.offset,
-                posting_start,
-                posting_length,
-                postings.length,
-            )?;
-            let posting_bytes = reader
-                .range(posting_extent.offset, posting_extent.length)
-                .await?
-                .ok_or_else(|| not_found(key))?;
-            let mut clause_docs: BTreeMap<u64, u8> = BTreeMap::new();
-            for entry in matches {
-                let relative = usize::try_from(entry.posting_offset - posting_start)
-                    .map_err(|_| Error::RustError("Places posting offset is too large".into()))?;
-                let length = usize::try_from(entry.posting_length)
-                    .map_err(|_| Error::RustError("Places posting length is too large".into()))?;
-                let end = relative
-                    .checked_add(length)
-                    .ok_or_else(|| Error::RustError("Places posting slice overflows".into()))?;
-                let encoded = posting_bytes
-                    .get(relative..end)
-                    .ok_or_else(|| Error::RustError("Places posting slice is truncated".into()))?;
-                for (doc_id, field_mask, rank) in decode_postings(encoded, entry.posting_count)
-                    .map_err(|error| Error::RustError(format!("Invalid Places posting: {error}")))?
-                {
-                    if field_mask & clause.field_mask == 0 {
-                        continue;
-                    }
-                    clause_docs
-                        .entry(doc_id)
-                        .and_modify(|old| *old = (*old).max(rank))
-                        .or_insert(rank);
-                    if clause_docs.len() > MAX_POSTING_CANDIDATES {
-                        return Err(Error::RustError(
-                            "Places union candidate count exceeds hard cap".into(),
-                        ));
-                    }
+        // A clause with no lexicon match makes the AND-intersection provably
+        // empty, so no posting read can change the (empty) result: skip them all.
+        let any_clause_unmatched = clause_matches.iter().any(|matches| matches.is_empty());
+        if !any_clause_unmatched {
+            for (position, (clause, matches)) in clauses.iter().zip(&clause_matches).enumerate() {
+                // Read each matched entry's own posting range rather than the
+                // single [first, last] span. Postings are stored contiguously in
+                // token order, so adjacent matches coalesce into one physical
+                // read at gap 0 while distant matches split — the dead bytes
+                // between them are never fetched (the old span read fetched and
+                // then discarded them). Slicing is per-want, so the old unchecked
+                // `entry.posting_offset - posting_start` subtraction is gone too.
+                let posting_wants: Vec<_> = matches
+                    .iter()
+                    .map(|entry| {
+                        checked_extent(
+                            postings.offset,
+                            entry.posting_offset,
+                            entry.posting_length,
+                            postings.length,
+                        )
+                    })
+                    .collect::<Result<_>>()?;
+                let clause_posting_bytes = matches
+                    .iter()
+                    .try_fold(0_u64, |sum, entry| sum.checked_add(entry.posting_length))
+                    .ok_or_else(|| Error::RustError("Places posting span overflows".into()))?;
+                if clause_posting_bytes > MAX_POSTING_BYTES {
+                    return Err(Error::RustError(
+                        "Places posting span exceeds hard cap".into(),
+                    ));
                 }
-            }
-            clause_candidate_counts.push(clause_docs.len());
-            candidates = Some(match candidates {
-                None => clause_docs,
-                Some(mut prior) => {
-                    prior.retain(|doc_id, rank| {
-                        if let Some(clause_rank) = clause_docs.get(doc_id) {
-                            *rank = (*rank).max(*clause_rank);
-                            true
-                        } else {
-                            false
+                total_posting_bytes = total_posting_bytes
+                    .checked_add(clause_posting_bytes)
+                    .ok_or_else(|| {
+                        Error::RustError("Places posting byte total overflows".into())
+                    })?;
+                if total_posting_bytes > MAX_QUERY_POSTING_BYTES {
+                    return Err(Error::RustError(
+                        "Places query posting bytes exceed hard cap".into(),
+                    ));
+                }
+                let posting_chunks = reader
+                    .coalesced(&posting_wants, 0, MAX_POSTING_BYTES)
+                    .await?;
+                let mut clause_docs: BTreeMap<u64, u8> = BTreeMap::new();
+                for (entry, encoded) in matches.iter().zip(&posting_chunks) {
+                    for (doc_id, field_mask, rank) in decode_postings(encoded, entry.posting_count)
+                        .map_err(|error| {
+                            Error::RustError(format!("Invalid Places posting: {error}"))
+                        })?
+                    {
+                        if field_mask & clause.field_mask == 0 {
+                            continue;
                         }
-                    });
-                    prior
+                        clause_docs
+                            .entry(doc_id)
+                            .and_modify(|old| *old = (*old).max(rank))
+                            .or_insert(rank);
+                        if clause_docs.len() > MAX_POSTING_CANDIDATES {
+                            return Err(Error::RustError(
+                                "Places union candidate count exceeds hard cap".into(),
+                            ));
+                        }
+                    }
                 }
-            });
+                clause_candidate_counts[position] = clause_docs.len();
+                candidates = Some(match candidates {
+                    None => clause_docs,
+                    Some(mut prior) => {
+                        prior.retain(|doc_id, rank| {
+                            if let Some(clause_rank) = clause_docs.get(doc_id) {
+                                *rank = (*rank).max(*clause_rank);
+                                true
+                            } else {
+                                false
+                            }
+                        });
+                        prior
+                    }
+                });
+                // The intersection only shrinks; once empty no later clause can
+                // revive it, so stop before issuing their posting reads.
+                if matches!(&candidates, Some(docs) if docs.is_empty()) {
+                    break;
+                }
+            }
         }
         let candidates = candidates.unwrap_or_default();
         let after_postings = reader.metrics();
