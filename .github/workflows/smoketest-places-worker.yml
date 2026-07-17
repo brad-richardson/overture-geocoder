@@ -318,6 +318,20 @@ jobs:
             echo "Three real regional samples, versioned catalog routing, one shard maximum per located query, packed-head-only context-free queries, and one independent cache namespace per latency case. All objects are non-promoting."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload evidence artifacts for post-mortem diagnosis
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: places-smoke-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            /tmp/places-worker-smoke/artifacts/report.json
+            /tmp/places-worker-latency.json
+            /tmp/places-worker-technical-decision.json
+            /tmp/places-worker-failure.json
+            /tmp/places-worker-timings.jsonl
+
       - name: Delete preview Worker and isolated R2 objects
         if: always()
         env:
