@@ -63,6 +63,12 @@ RECORD_INDEX = struct.Struct("<II")
 # value against the modeled cold gate.
 RECORD_INDEX_COALESCE_GAP = 64 * 1024
 RECORDS_COALESCE_GAP = 64 * 1024
+# Per-physical-read size caps mirroring the Worker's coalesced(..., max_range)
+# arguments for the same stages: a merged read never grows past the cap even
+# when the gap rule alone would coalesce further, so this model plans the same
+# physical reads the Worker issues. Pinned by the same parity test.
+RECORD_INDEX_MAX_RANGE_BYTES = 256 * 1024
+RECORDS_MAX_RANGE_BYTES = 2 * 1024 * 1024
 
 
 def encode_identity(place: Place) -> bytes:
@@ -396,18 +402,28 @@ class RangeReader:
         ranges: Iterable[tuple[int, int]],
         stage: str,
         max_gap: int,
+        max_range: int | None = None,
     ) -> list[ReadChunk]:
         selected = sorted((start, start + length) for start, length in ranges if length)
         if not selected:
             return []
+        if max_range is not None:
+            for start, end in selected:
+                if end - start > max_range:
+                    raise ValueError("range want exceeds max range budget")
         plans = []
         start, end = selected[0]
         for next_start, next_end in selected[1:]:
-            if next_start > end + max_gap:
+            merged_end = max(end, next_end)
+            # Mirror the Rust planner (geocoder_core::pages::coalesce_ranges):
+            # merge only when the gap fits AND the merged span stays within the
+            # per-read cap; otherwise start a new physical read.
+            within_cap = max_range is None or merged_end - start <= max_range
+            if next_start > end + max_gap or not within_cap:
                 plans.append((start, end))
                 start, end = next_start, next_end
             else:
-                end = max(end, next_end)
+                end = merged_end
         plans.append((start, end))
         return [
             ReadChunk(start, self.read(start, end - start, stage))
@@ -516,7 +532,10 @@ class CompactShard:
             for doc_id in doc_ids
         ]
         index_chunks = self.reader.read_ranges(
-            index_ranges, "record_index", max_gap=index_gap
+            index_ranges,
+            "record_index",
+            max_gap=index_gap,
+            max_range=RECORD_INDEX_MAX_RANGE_BYTES,
         )
         positions = []
         for doc_id in doc_ids:
@@ -531,7 +550,10 @@ class CompactShard:
             (records_base + offset, length) for offset, length in positions
         ]
         record_chunks = self.reader.read_ranges(
-            record_ranges, "records", max_gap=record_gap
+            record_ranges,
+            "records",
+            max_gap=record_gap,
+            max_range=RECORDS_MAX_RANGE_BYTES,
         )
         return [
             decode_projection(chunk_slice(record_chunks, records_base + offset, length))

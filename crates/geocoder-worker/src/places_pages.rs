@@ -37,6 +37,12 @@ const MAX_RESULT_RANGE_BYTES: u64 = 2 * 1024 * 1024;
 // fails if the two sides drift.
 const RECORD_INDEX_COALESCE_GAP: u64 = 64 * 1024;
 const RECORDS_COALESCE_GAP: u64 = 64 * 1024;
+// Per-physical-read size cap for the record_index stage (the records stage uses
+// MAX_RESULT_RANGE_BYTES). Mirrored by RECORD_INDEX_MAX_RANGE_BYTES /
+// RECORDS_MAX_RANGE_BYTES in scripts/experiment_places_compact_shard.py and
+// pinned by the same parity test, so the offline model plans the same physical
+// reads this Worker issues.
+const RECORD_INDEX_MAX_RANGE_BYTES: u64 = 256 * 1024;
 // The served window: the routed handler returns at most this many results
 // (handlers.rs `results.truncate(10)`) and does not re-rank the shard's
 // confidence/doc-id ordering, so fetching more record_index/records than this
@@ -987,7 +993,11 @@ impl ShardLoader {
             })
             .collect::<Result<_>>()?;
         let index_bytes = reader
-            .coalesced(&index_wants, RECORD_INDEX_COALESCE_GAP, 256 * 1024)
+            .coalesced(
+                &index_wants,
+                RECORD_INDEX_COALESCE_GAP,
+                RECORD_INDEX_MAX_RANGE_BYTES,
+            )
             .await?;
         let mut positions = Vec::with_capacity(index_bytes.len());
         for bytes in index_bytes {

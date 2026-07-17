@@ -76,50 +76,54 @@ def _place(
     )
 
 
-def modeled_places() -> list[Place]:
-    """A representative shard: a scattered same-brand chain plus dense filler.
+# Same-rank filler docs interleaved between adjacent chain branches. Each filler
+# projection is ~59 bytes, so adjacent served chain records sit about
+# FILLER_PER_GAP * 59 B (~17.7 KiB) apart in the rank-laid-out records blob:
+# within the 64Ki/256Ki coalesce buckets but beyond 0/4Ki/16Ki, so the sweep
+# genuinely discriminates between the swept thresholds.
+CHAIN_BRANCHES = 12
+FILLER_PER_GAP = 300
 
-    The chain branches share a brand and a confidence, so in global rank order
-    their served window lands inside a wide band of equal-rank filler records —
-    the exact scatter that made the real 7-Eleven records stage span most of the
-    component. Filler tokens are unique, so no filler clause matches the chain
-    and the postings stage stays small.
+
+def modeled_places() -> list[Place]:
+    """A rank-band-scattered same-brand chain inside dense equal-rank filler.
+
+    The chain branches share one confidence with a large equal-rank filler
+    population. The rank layout's in-band tiebreak is doc id, every place shares
+    one spatial cell, and doc order within the cell follows place_id, so the
+    interleaved ids ({block}-a-chain < {block}-b-filler < {block+1}-a-chain)
+    separate adjacent served chain records by FILLER_PER_GAP filler records
+    (~17.7 KiB) in the records blob. This is a scaled-down analogue of the real
+    7-Eleven scatter, sized so the swept gap thresholds straddle the actual
+    inter-record gaps instead of trivially coalescing at every setting. Filler
+    tokens are unique, so no filler matches the chain clauses and the postings
+    stage stays small.
     """
     places: list[Place] = []
-    # 30 chain branches spread across a wide bbox (distinct spatial cells) at one
-    # shared confidence, so the served top-10 are the 10 lowest-doc branches and
-    # they scatter through the equal-rank filler band.
-    for index in range(30):
-        lat = 35.0 + (index % 6) * 0.4
-        lon = 139.0 + (index // 6) * 0.4
+    for block in range(CHAIN_BRANCHES):
         places.append(
             _place(
-                place_id=f"chain-{index:03}",
-                name=f"Seven Eleven Store {index}",
+                place_id=f"{block:04}-a-chain",
+                name=f"Seven Eleven Store {block}",
                 brand="Seven Eleven",
                 category="convenience store",
-                lat=lat,
-                lon=lon,
+                lat=35.01,
+                lon=139.01,
                 confidence=0.90,
             )
         )
-    # Dense equal-rank filler sharing the chain's confidence so it interleaves
-    # with the chain in rank order, plus a spread of other ranks for realism.
-    for index in range(1200):
-        lat = 35.0 + (index % 30) * 0.12
-        lon = 139.0 + (index // 30) * 0.12
-        confidence = 0.90 if index % 2 == 0 else 0.50 + (index % 40) / 100.0
-        places.append(
-            _place(
-                place_id=f"filler-{index:04}",
-                name=f"Unique Landmark {index:04}",
-                brand="",
-                category="shop",
-                lat=lat,
-                lon=lon,
-                confidence=confidence,
+        for index in range(FILLER_PER_GAP):
+            places.append(
+                _place(
+                    place_id=f"{block:04}-b-{index:04}",
+                    name=f"Unique Landmark {block:04}x{index:04}",
+                    brand="",
+                    category="shop",
+                    lat=35.01,
+                    lon=139.01,
+                    confidence=0.90,
+                )
             )
-        )
     return places
 
 
@@ -181,9 +185,9 @@ def _min_passing_bytes(table: list[dict]) -> int:
 
 
 def test_chain_name_scatter_is_bounded_only_by_coalescing(tmp_path):
-    """The modeled chain_name case genuinely needs coalescing: gap 0 blows the
-    read gate (both record_index and records split ~10 ways) and a nonzero gap
-    is required to fit it."""
+    """The modeled chain_name case genuinely needs coalescing, and the sweep
+    discriminates between the swept thresholds: the ~17.7 KiB inter-record gaps
+    split at 0/4Ki/16Ki (busting the read gate) and coalesce at 64Ki/256Ki."""
     result = _sweep(tmp_path)
     by_gap = {entry["gap"]: entry for entry in result["table"]}
     chain_at_zero = next(
@@ -191,20 +195,25 @@ def test_chain_name_scatter_is_bounded_only_by_coalescing(tmp_path):
     )
     assert chain_at_zero["candidate_count"] > 10
     assert chain_at_zero["records_reads"] > 1
-    # Without coalescing the scattered served window busts the read gate.
-    assert by_gap[0]["max_cold_reads"] > MAX_COLD_READS
+    # Sub-threshold gaps bust the read gate; the sweep is not vacuous.
+    for gap in (0, 4 * 1024, 16 * 1024):
+        assert by_gap[gap]["max_cold_reads"] > MAX_COLD_READS
+    for gap in (64 * 1024, 256 * 1024):
+        assert by_gap[gap]["max_cold_reads"] <= MAX_COLD_READS
 
 
-def test_configured_gap_is_in_the_min_byte_passing_tier(tmp_path):
+def test_configured_gap_is_smallest_in_the_min_byte_passing_tier(tmp_path):
     """The producer/reader constant (mirrored in the Worker) keeps every modeled
-    case within the cold gate and sits at the minimum-byte tier of the sweep.
+    case within the cold gate and is the smallest swept gap in the sweep's
+    minimum-byte passing tier.
 
     For the binding chain case the other stages already consume the 7 non-record
     reads of a two-clause query, so the records/record_index stages must each
-    coalesce to a single physical read. Every gap that achieves that fetches the
-    same rank-local span, so modeled bytes are flat across the passing tier and
-    the gap acts as a read-gate guardrail; the constant is chosen conservatively
-    within that tier and the post-merge credentialed smoke confirms real data."""
+    coalesce to a single physical read. Every gap large enough to do that
+    fetches the same rank-local span (identical bytes), so within the passing
+    tier the smallest gap wins: it bounds worst-case dead-gap overfetch on
+    shapes the model does not cover while still coalescing the modeled scatter.
+    The post-merge credentialed smoke confirms the choice on real data."""
     result = _sweep(tmp_path)
     table = result["table"]
     assert shard.RECORD_INDEX_COALESCE_GAP == shard.RECORDS_COALESCE_GAP
@@ -213,7 +222,14 @@ def test_configured_gap_is_in_the_min_byte_passing_tier(tmp_path):
     entry = next(item for item in table if item["gap"] == configured)
     assert entry["max_cold_reads"] <= MAX_COLD_READS
     assert entry["max_cold_bytes"] <= MAX_COLD_BYTES
-    assert entry["max_cold_bytes"] == _min_passing_bytes(table)
+    min_bytes = _min_passing_bytes(table)
+    assert entry["max_cold_bytes"] == min_bytes
+    tier_gaps = [
+        item["gap"]
+        for item in _passing(table)
+        if item["max_cold_bytes"] == min_bytes
+    ]
+    assert configured == min(tier_gaps)
     chain_row = next(row for row in entry["rows"] if row["case"] == "chain_name")
     assert chain_row["cold_reads"] <= MAX_COLD_READS
     assert chain_row["cold_bytes"] <= MAX_COLD_BYTES

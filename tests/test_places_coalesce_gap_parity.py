@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Pin the records/record_index coalesce-gap constants across Python and Rust.
+"""Pin the records/record_index coalesce constants across Python and Rust.
 
 The reader model (`experiment_places_compact_shard`) and the Worker
 (`crates/geocoder-worker/src/places_pages.rs`) each define the record_index and
-records coalesce-gap thresholds. They must stay identical so the producer oracle
-and the Worker plan the same physical reads; this test fails if either side
-changes without the other.
+records coalesce-gap thresholds and the per-physical-read size caps. All four
+must stay identical so the producer oracle and the Worker plan the same
+physical reads; this test fails if either side changes without the other.
 """
 
 from __future__ import annotations
@@ -21,7 +21,7 @@ SCRIPTS = ROOT / "scripts"
 RUST_SOURCE = ROOT / "crates" / "geocoder-worker" / "src" / "places_pages.rs"
 
 
-def _load_python_constants() -> tuple[int, int]:
+def _load_python_module():
     script = SCRIPTS / "experiment_places_compact_shard.py"
     spec = importlib.util.spec_from_file_location(
         "experiment_places_compact_shard", script
@@ -32,11 +32,10 @@ def _load_python_constants() -> tuple[int, int]:
     if str(SCRIPTS) not in sys.path:
         sys.path.insert(0, str(SCRIPTS))
     spec.loader.exec_module(module)
-    return module.RECORD_INDEX_COALESCE_GAP, module.RECORDS_COALESCE_GAP
+    return module
 
 
-def _rust_constant(name: str) -> int:
-    text = RUST_SOURCE.read_text()
+def _rust_constant(text: str, name: str) -> int:
     match = re.search(rf"const\s+{name}\s*:\s*u64\s*=\s*([0-9*+\s]+);", text)
     assert match, f"Rust constant {name} not found in {RUST_SOURCE}"
     expression = match.group(1).strip()
@@ -44,12 +43,67 @@ def _rust_constant(name: str) -> int:
     return int(eval(expression, {"__builtins__": {}}))  # noqa: S307 - digits/*/+ only
 
 
-def test_record_index_and_records_gaps_match_across_languages():
-    python_index_gap, python_record_gap = _load_python_constants()
-    assert python_index_gap == _rust_constant("RECORD_INDEX_COALESCE_GAP")
-    assert python_record_gap == _rust_constant("RECORDS_COALESCE_GAP")
-    # The two coalesce call sites in places_pages.rs must reference the named
-    # constants, not re-inlined literals, so the parity check cannot be bypassed.
+def _call_site_arguments(text: str, wants: str) -> tuple[str, str]:
+    """The (gap, max_range) argument names passed to coalesced() for `wants`.
+
+    Whitespace-insensitive so rustfmt line wrapping cannot hide a drift.
+    """
+    condensed = re.sub(r"\s+", "", text)
+    match = re.search(rf"\.coalesced\(&{wants},(\w+),(\w+),?\)", condensed)
+    assert match, f"coalesced call for {wants} not found in {RUST_SOURCE}"
+    return match.group(1), match.group(2)
+
+
+def test_record_index_and_records_plans_match_across_languages():
+    module = _load_python_module()
     text = RUST_SOURCE.read_text()
-    assert "coalesced(&index_wants, RECORD_INDEX_COALESCE_GAP" in text
-    assert "coalesced(&record_wants, RECORDS_COALESCE_GAP" in text
+    assert module.RECORD_INDEX_COALESCE_GAP == _rust_constant(
+        text, "RECORD_INDEX_COALESCE_GAP"
+    )
+    assert module.RECORDS_COALESCE_GAP == _rust_constant(text, "RECORDS_COALESCE_GAP")
+    assert module.RECORD_INDEX_MAX_RANGE_BYTES == _rust_constant(
+        text, "RECORD_INDEX_MAX_RANGE_BYTES"
+    )
+    assert module.RECORDS_MAX_RANGE_BYTES == _rust_constant(
+        text, "MAX_RESULT_RANGE_BYTES"
+    )
+    # The two coalesce call sites in places_pages.rs must pass exactly the named
+    # constants above, not re-inlined literals or other constants, so the parity
+    # check cannot be bypassed.
+    assert _call_site_arguments(text, "index_wants") == (
+        "RECORD_INDEX_COALESCE_GAP",
+        "RECORD_INDEX_MAX_RANGE_BYTES",
+    )
+    assert _call_site_arguments(text, "record_wants") == (
+        "RECORDS_COALESCE_GAP",
+        "MAX_RESULT_RANGE_BYTES",
+    )
+
+
+def test_python_model_enforces_the_max_range_cap(tmp_path):
+    """The model's planner splits at the cap exactly like the Rust planner, so
+    modeled read counts transfer to the Worker even for wide served windows."""
+    module = _load_python_module()
+    path = tmp_path / "blob.bin"
+    path.write_bytes(bytes(4096))
+    reader = module.RangeReader(path)
+    # Two wants whose merged span exceeds the cap must split even at a huge gap.
+    chunks = reader.read_ranges(
+        [(0, 100), (2000, 100)], "records", max_gap=1 << 30, max_range=1024
+    )
+    assert [(chunk.offset, len(chunk.data)) for chunk in chunks] == [
+        (0, 100),
+        (2000, 100),
+    ]
+    # Within the cap the same wants merge into one physical read.
+    merged = reader.read_ranges(
+        [(0, 100), (2000, 100)], "records", max_gap=1 << 30, max_range=4096
+    )
+    assert [(chunk.offset, len(chunk.data)) for chunk in merged] == [(0, 2100)]
+    # A single want larger than the cap fails closed, mirroring coalesce_ranges.
+    try:
+        reader.read_ranges([(0, 2048)], "records", max_gap=0, max_range=1024)
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("oversized want must fail closed")
