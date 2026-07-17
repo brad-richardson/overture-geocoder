@@ -2,6 +2,14 @@ name: Rehearse Real Address R2 Map Reduce Resume
 
 on:
   workflow_dispatch:
+    inputs:
+      tasks:
+        description: >-
+          Optional JSON matrix override for debugging, e.g.
+          {"include":[{"name":"us-full","task_index":48}]}. Leave blank to use
+          the committed stratified selection (.github/address-sweep-selection.json).
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -14,19 +22,54 @@ env:
   SHUFFLE_PREFIX: smoke/address-real-shuffle/${{ github.run_id }}-${{ github.run_attempt }}
 
 jobs:
+  select:
+    name: Select stratified sweep tasks
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.pick.outputs.matrix }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Verify the committed selection reproduces from the inventory
+        # Skip when a dispatch override is supplied: an override does not consume
+        # the committed selection, so a stale default must not block debugging.
+        if: ${{ inputs.tasks == '' }}
+        run: |
+          set -euo pipefail
+          python scripts/select_address_sweep_tasks.py check \
+            --inventory-report benchmarks/address-rowgroup-inventory-report.json \
+            --selection .github/address-sweep-selection.json
+
+      - name: Resolve the sweep matrix (committed default or dispatch override)
+        id: pick
+        env:
+          SWEEP_TASKS_OVERRIDE: ${{ inputs.tasks }}
+        run: |
+          set -euo pipefail
+          matrix="$(python scripts/select_address_sweep_tasks.py matrix \
+            --selection .github/address-sweep-selection.json \
+            --override-json "${SWEEP_TASKS_OVERRIDE}")"
+          echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+
   real-address-resume:
     name: Real address resume ${{ matrix.name }} (${{ matrix.task_index }})
+    needs: select
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
       fail-fast: false
-      matrix:
-        include:
-          - name: us-full
-            task_index: 48
-          - name: mexico-full
-            task_index: 3
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.select.outputs.matrix) }}
     env:
       PYTHONHASHSEED: "0"
       LC_ALL: C.UTF-8
@@ -281,3 +324,52 @@ jobs:
             --prefix "${TASK_PREFIX}/" --max-keys 1 --query KeyCount --output text \
             --endpoint-url "$ENDPOINT" --region auto)
           test "$REMAINING" = "0"
+
+  aggregate:
+    name: Aggregate stratified sweep evidence
+    needs: [select, real-address-resume]
+    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Download every completed task's evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          path: sweep-evidence
+          pattern: address-resume-evidence-*
+
+      - name: Aggregate per-task retention, bytes, wall, RSS, and amplification
+        run: |
+          set -euo pipefail
+          mkdir -p sweep-evidence
+          python scripts/aggregate_address_sweep.py \
+            --selection .github/address-sweep-selection.json \
+            --evidence-dir sweep-evidence \
+            --json-out sweep-aggregate.json \
+            --markdown-out sweep-aggregate.md
+          {
+            echo "## Stratified address sweep aggregate"
+            echo
+            cat sweep-aggregate.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the aggregated sweep summary
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: address-sweep-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            sweep-aggregate.json
+            sweep-aggregate.md

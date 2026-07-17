@@ -1,0 +1,105 @@
+{
+  "generated_from": "benchmarks/address-rowgroup-inventory-report.json",
+  "inventory_tasks_sha256": "d21a8354b76c47952bcbe3b8c79a06d140c083367fe672ab012a65677aa1a0e2",
+  "release": "2026-06-17.0",
+  "schema": "overture-address-sweep-selection-v1",
+  "task_count": 12,
+  "tasks": [
+    {
+      "expected_rows": 3998978,
+      "expected_selected_compressed_bytes": 145461327,
+      "name": "mexico-full",
+      "rationale": "largest-by-rows Mexico-dominant task; already-measured MX regression reference",
+      "stratum": "continuity-anchor",
+      "task_index": 3
+    },
+    {
+      "expected_rows": 3972943,
+      "expected_selected_compressed_bytes": 147137882,
+      "name": "mixed-country",
+      "rationale": "global maximum mixed/unknown-country row share; stresses the country partition rule",
+      "stratum": "mixed-unknown",
+      "task_index": 8
+    },
+    {
+      "expected_rows": 3957670,
+      "expected_selected_compressed_bytes": 149936072,
+      "name": "us-mid",
+      "rationale": "first pure-US task other than the anchor; separates US-anchor effects from US-general behaviour",
+      "stratum": "us-mid-range",
+      "task_index": 10
+    },
+    {
+      "expected_rows": 3933601,
+      "expected_selected_compressed_bytes": 141880900,
+      "name": "brazil-full",
+      "rationale": "first BR-dominant task by index",
+      "stratum": "latin-high-density",
+      "task_index": 16
+    },
+    {
+      "expected_rows": 3999111,
+      "expected_selected_compressed_bytes": 153316171,
+      "name": "us-full",
+      "rationale": "global maximum selected_compressed_bytes; already-measured US regression reference",
+      "stratum": "continuity-anchor",
+      "task_index": 48
+    },
+    {
+      "expected_rows": 3984658,
+      "expected_selected_compressed_bytes": 149161136,
+      "name": "france-full",
+      "rationale": "first FR-dominant task by index",
+      "stratum": "latin-europe",
+      "task_index": 75
+    },
+    {
+      "expected_rows": 3973302,
+      "expected_selected_compressed_bytes": 134207138,
+      "name": "italy-full",
+      "rationale": "first IT-dominant task by index",
+      "stratum": "latin-europe",
+      "task_index": 84
+    },
+    {
+      "expected_rows": 3979330,
+      "expected_selected_compressed_bytes": 146403609,
+      "name": "germany-full",
+      "rationale": "first DE-dominant task by index",
+      "stratum": "latin-europe",
+      "task_index": 85
+    },
+    {
+      "expected_rows": 2056708,
+      "expected_selected_compressed_bytes": 70594250,
+      "name": "taiwan-full",
+      "rationale": "first TW-dominant task by index",
+      "stratum": "cjk-traditional",
+      "task_index": 105
+    },
+    {
+      "expected_rows": 3972966,
+      "expected_selected_compressed_bytes": 109560589,
+      "name": "japan-full",
+      "rationale": "first JP-dominant task by index",
+      "stratum": "cjk-japan",
+      "task_index": 117
+    },
+    {
+      "expected_rows": 2074682,
+      "expected_selected_compressed_bytes": 53867895,
+      "name": "japan-pure",
+      "rationale": "pure-Japan task with the second-lowest bytes-per-row; low-B/row CJK exemplar contrasting Latin compression",
+      "stratum": "cjk-japan",
+      "task_index": 121
+    },
+    {
+      "expected_rows": 154296,
+      "expected_selected_compressed_bytes": 4635815,
+      "name": "sparse-tail",
+      "rationale": "global minimum-rows task; exercises small-task fixed overhead",
+      "stratum": "sparse-tail",
+      "task_index": 126
+    }
+  ]
+}
