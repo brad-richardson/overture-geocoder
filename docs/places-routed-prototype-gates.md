@@ -12,13 +12,19 @@ Context and point are mutually exclusive so a request cannot route by one and
 rank or report distance from contradictory location evidence.
 
 The packed head is the only context-free path in this prototype. It accepts one
-or two exact, unfielded normalized tokens. Every token must have a packed top-10
-entry, and multi-token queries return the stable ID intersection of those
-entries. Prefix, fielded, and three-or-more-token queries require explicit
-location. A packed entry is acceleration evidence, not relevance evidence:
-“famous” additionally requires the labelled context-free case to put the named
-feature in the top five with stable order. Frequency alone cannot pass that
-gate.
+or two exact, unfielded normalized tokens. A two-token query first consults the
+famous pair entry (`e2:{a} {b}`, tokens in ascending order), which is the
+builder's bounded top-10 of the exact posting intersection for pairs drawn from
+the capped famous set; on a pair miss it falls back to the stable ID
+intersection of the per-token packed top-10 entries, and every token must then
+have a packed entry. Single-token queries are unchanged; famous-set name/brand
+tokens may be admitted below the density floor, with entry semantics identical
+to dense entries. Prefix, fielded, and three-or-more-token queries require
+explicit location. A packed entry is acceleration evidence, not relevance
+evidence: “famous” additionally requires the labelled context-free case to put
+the named feature in the top five with stable order. Frequency alone cannot
+pass that gate, and neither can presence in the famous set: the fame proxy is
+quantized confidence, and the labelled relevance panel remains the arbiter.
 
 ## Measurement method
 
