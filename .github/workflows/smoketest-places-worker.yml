@@ -196,14 +196,14 @@ jobs:
                 and [.results[].id] == $ids
                 and ([.results[].id] | unique | length) == (.results | length)
                 and (.results | length) == ($results | length)
-                and all(range(0; $results | length) as $i;
-                  (.results[$i] | text_projection) == ($results[$i] | text_projection)
-                  and ((.results[$i].latitude - $results[$i].latitude) | abs) < 0.000001
-                  and ((.results[$i].longitude - $results[$i].longitude) | abs) < 0.000001
-                  and ((.results[$i].confidence - $results[$i].confidence) | abs) < 0.000001
+                and (. as $resp | all(range(0; $results | length); . as $i |
+                  ($resp.results[$i] | text_projection) == ($results[$i] | text_projection)
+                  and (($resp.results[$i].latitude - $results[$i].latitude) | abs) < 0.000001
+                  and (($resp.results[$i].longitude - $results[$i].longitude) | abs) < 0.000001
+                  and (($resp.results[$i].confidence - $results[$i].confidence) | abs) < 0.000001
                   and (if ($results[$i] | has("distance_km"))
-                       then ((.results[$i].distance_km - $results[$i].distance_km) | abs) < 0.001
-                       else (.results[$i] | has("distance_km") | not) end))
+                       then (($resp.results[$i].distance_km - $results[$i].distance_km) | abs) < 0.001
+                       else ($resp.results[$i] | has("distance_km") | not) end)))
                 and .candidate_count == $count
                 and .head_hit == $head
                 and .route == $route
