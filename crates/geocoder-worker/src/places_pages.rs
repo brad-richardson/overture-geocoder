@@ -26,7 +26,12 @@ const MAX_POSTING_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_POSTING_CANDIDATES: usize = 200_000;
 const MAX_RESULT_RECORD_BYTES: usize = 64 * 1024;
 const MAX_RESULT_RANGE_BYTES: u64 = 2 * 1024 * 1024;
-const RESULT_LIMIT: usize = 25;
+// The served window: the routed handler returns at most this many results
+// (handlers.rs `results.truncate(10)`) and does not re-rank the shard's
+// confidence/doc-id ordering, so fetching more record_index/records than this
+// only pulls bytes the handler discards. Kept equal to the served count so the
+// dominant cold-read stage (records) fetches exactly what is returned.
+const RESULT_LIMIT: usize = 10;
 const HEAD_RESULT_LIMIT: usize = 10;
 const MAX_QUERY_CLAUSES: usize = 4;
 const MAX_QUERY_POSTING_BYTES: u64 = 16 * 1024 * 1024;
