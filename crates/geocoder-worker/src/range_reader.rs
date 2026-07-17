@@ -11,11 +11,19 @@
 //! shard prototype lands it becomes the second consumer and the gate drops.
 
 use bytes::Bytes;
+use futures::stream::{self, StreamExt, TryStreamExt};
 use geocoder_core::pages::{coalesce_ranges, ByteRange};
 use serde::Serialize;
 use worker::*;
 
 use crate::stac::{not_found, ShardLoader};
+
+/// Maximum physical range reads issued concurrently within one `coalesced`
+/// call. The plan is unchanged and deterministic; only the await order (and so
+/// wall time) differs. Metrics are accumulated in plan order after all reads
+/// resolve, so logical/physical read and byte counts are identical to a
+/// sequential fetch.
+const MAX_INFLIGHT_READS: usize = 4;
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub(crate) struct RangeReadMetrics {
@@ -176,19 +184,35 @@ impl<'a> RangeReader<'a> {
             .metrics
             .planned_physical_ranges
             .saturating_add(plan.reads.len());
-        let mut slices: Vec<Option<Bytes>> = vec![None; wants.len()];
-        for read in &plan.reads {
-            let fetched = self
-                .loader
-                .cached_range_read_measured(&self.key, read.offset, read.length)
-                .await?
-                .ok_or_else(|| not_found(&self.key))?;
-            self.metrics.observe(fetched.bytes.len(), fetched.cache_hit);
-            if fetched.bytes.len() as u64 != read.length {
-                return Err(Error::RustError(
-                    "Coalesced range returned fewer bytes than requested".into(),
-                ));
+        // Issue the plan's physical reads with bounded concurrency. `buffered`
+        // preserves input (plan) order in its output, so the fetched bytes zip
+        // back to `plan.reads` deterministically regardless of completion order.
+        // The key/loader are borrowed immutably by every read; metrics (a
+        // mutable borrow of self) are folded in afterwards, in plan order.
+        let loader = self.loader;
+        let key = self.key.as_str();
+        let fetched: Vec<_> = stream::iter(plan.reads.iter().map(|read| {
+            let (offset, length) = (read.offset, read.length);
+            async move {
+                let read_bytes = loader
+                    .cached_range_read_measured(key, offset, length)
+                    .await?
+                    .ok_or_else(|| not_found(key))?;
+                if read_bytes.bytes.len() as u64 != length {
+                    return Err(Error::RustError(
+                        "Coalesced range returned fewer bytes than requested".into(),
+                    ));
+                }
+                Ok::<_, Error>(read_bytes)
             }
+        }))
+        .buffered(MAX_INFLIGHT_READS)
+        .try_collect()
+        .await?;
+
+        let mut slices: Vec<Option<Bytes>> = vec![None; wants.len()];
+        for (read, fetched) in plan.reads.iter().zip(fetched.iter()) {
+            self.metrics.observe(fetched.bytes.len(), fetched.cache_hit);
             for want in &read.wants {
                 let start = usize::try_from(want.relative_offset).map_err(|_| {
                     Error::RustError("Coalesced range offset exceeds platform bounds".into())

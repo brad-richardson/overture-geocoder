@@ -52,6 +52,24 @@ MAGIC = b"PCSH0001"
 PREAMBLE = struct.Struct("<8sI")
 RECORD_INDEX = struct.Struct("<II")
 
+# Coalesce-gap defaults for the records / record_index stages of the reader
+# model. With records laid out in serving-rank order the served window is
+# rank-local, so a two-clause query's structural 7 non-record reads leave room
+# for exactly one records read and one record_index read; the gap must stay
+# large enough to coalesce the rank-local window into that single read. These
+# MUST equal the Worker's RECORD_INDEX_COALESCE_GAP / RECORDS_COALESCE_GAP
+# (crates/geocoder-worker/src/places_pages.rs). tests/test_places_coalesce_gap_parity.py
+# fails if the two sides drift; tests/test_places_records_gap_sweep.py pins the
+# value against the modeled cold gate.
+RECORD_INDEX_COALESCE_GAP = 64 * 1024
+RECORDS_COALESCE_GAP = 64 * 1024
+# Per-physical-read size caps mirroring the Worker's coalesced(..., max_range)
+# arguments for the same stages: a merged read never grows past the cap even
+# when the gap rule alone would coalesce further, so this model plans the same
+# physical reads the Worker issues. Pinned by the same parity test.
+RECORD_INDEX_MAX_RANGE_BYTES = 256 * 1024
+RECORDS_MAX_RANGE_BYTES = 2 * 1024 * 1024
+
 
 def encode_identity(place: Place) -> bytes:
     try:
@@ -233,7 +251,28 @@ def build_artifact(
         )
 
     records = bytearray()
-    record_index = bytearray()
+    # The records blob is laid out in global serving-rank order (-qconf, doc) —
+    # the exact key the readers use to select the served window (see the Worker's
+    # `best.sort_by` and this module's `query`) — instead of doc order. record_index
+    # (8 B/doc offset+length) is the only coupling and stays keyed by doc_id, so
+    # doc IDs, postings, and the lexicon are untouched; only the physical position
+    # of each record moves. This concentrates any query's top-N record extents into
+    # a short, coalescible span rather than scattering them across spatial cells.
+    # sorted() with the unique doc_id tiebreak is a total order, so two builds are
+    # byte-identical.
+    record_slots: list[bytes] = [b""] * len(ordered)
+    rank_layout = sorted(
+        range(len(ordered)),
+        key=lambda doc_id: (-round(ordered[doc_id].confidence * 255), doc_id),
+    )
+    for doc_id in rank_layout:
+        encoded = encode_projection(ordered[doc_id])
+        if len(records) + len(encoded) >= 2**32:
+            raise ValueError("record section exceeds 32-bit offset format")
+        record_slots[doc_id] = RECORD_INDEX.pack(len(records), len(encoded))
+        records += encoded
+    record_index = bytearray(b"".join(record_slots))
+
     projection_variants = {
         "locator_only": {
             "fields": (),
@@ -248,14 +287,10 @@ def build_artifact(
             "semantics": "self-contained basic geocoder result; non-search Overture properties require hydration",
         },
     }
+    # Projection-variant byte floors are order-independent sums over every place.
     for variant in projection_variants.values():
         variant["records_bytes"] = 0
     for place in ordered:
-        encoded = encode_projection(place)
-        if len(records) + len(encoded) >= 2**32:
-            raise ValueError("record section exceeds 32-bit offset format")
-        record_index += RECORD_INDEX.pack(len(records), len(encoded))
-        records += encoded
         for variant in projection_variants.values():
             variant["records_bytes"] += len(
                 encode_projection_fields(place, variant["fields"])
@@ -367,18 +402,28 @@ class RangeReader:
         ranges: Iterable[tuple[int, int]],
         stage: str,
         max_gap: int,
+        max_range: int | None = None,
     ) -> list[ReadChunk]:
         selected = sorted((start, start + length) for start, length in ranges if length)
         if not selected:
             return []
+        if max_range is not None:
+            for start, end in selected:
+                if end - start > max_range:
+                    raise ValueError("range want exceeds max range budget")
         plans = []
         start, end = selected[0]
         for next_start, next_end in selected[1:]:
-            if next_start > end + max_gap:
+            merged_end = max(end, next_end)
+            # Mirror the Rust planner (geocoder_core::pages::coalesce_ranges):
+            # merge only when the gap fits AND the merged span stays within the
+            # per-read cap; otherwise start a new physical read.
+            within_cap = max_range is None or merged_end - start <= max_range
+            if next_start > end + max_gap or not within_cap:
                 plans.append((start, end))
                 start, end = next_start, next_end
             else:
-                end = max(end, next_end)
+                end = merged_end
         plans.append((start, end))
         return [
             ReadChunk(start, self.read(start, end - start, stage))
@@ -487,7 +532,10 @@ class CompactShard:
             for doc_id in doc_ids
         ]
         index_chunks = self.reader.read_ranges(
-            index_ranges, "record_index", max_gap=index_gap
+            index_ranges,
+            "record_index",
+            max_gap=index_gap,
+            max_range=RECORD_INDEX_MAX_RANGE_BYTES,
         )
         positions = []
         for doc_id in doc_ids:
@@ -502,7 +550,10 @@ class CompactShard:
             (records_base + offset, length) for offset, length in positions
         ]
         record_chunks = self.reader.read_ranges(
-            record_ranges, "records", max_gap=record_gap
+            record_ranges,
+            "records",
+            max_gap=record_gap,
+            max_range=RECORDS_MAX_RANGE_BYTES,
         )
         return [
             decode_projection(chunk_slice(record_chunks, records_base + offset, length))
@@ -513,8 +564,8 @@ class CompactShard:
         self,
         case: QueryCase,
         limit: int = 10,
-        index_gap: int = 64 * 1024,
-        record_gap: int = 256 * 1024,
+        index_gap: int = RECORD_INDEX_COALESCE_GAP,
+        record_gap: int = RECORDS_COALESCE_GAP,
     ) -> dict[str, Any]:
         before = len(self.reader.reads)
         candidates: set[int] | None = None
@@ -587,8 +638,8 @@ def oracle(
 def benchmark(
     places: list[Place],
     artifact: Path,
-    index_gap: int = 64 * 1024,
-    record_gap: int = 256 * 1024,
+    index_gap: int = RECORD_INDEX_COALESCE_GAP,
+    record_gap: int = RECORDS_COALESCE_GAP,
 ) -> dict[str, Any]:
     rows = []
     for case in CASES:
@@ -715,8 +766,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--markdown-out", type=Path, required=True)
     parser.add_argument("--limit", type=int)
     parser.add_argument("--block-entries", type=int, default=256)
-    parser.add_argument("--record-index-gap", type=int, default=64 * 1024)
-    parser.add_argument("--record-gap", type=int, default=256 * 1024)
+    parser.add_argument(
+        "--record-index-gap", type=int, default=RECORD_INDEX_COALESCE_GAP
+    )
+    parser.add_argument("--record-gap", type=int, default=RECORDS_COALESCE_GAP)
     args = parser.parse_args(argv)
     if args.limit is not None and args.limit <= 0:
         parser.error("--limit must be positive")

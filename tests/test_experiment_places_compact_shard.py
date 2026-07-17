@@ -55,6 +55,87 @@ def places():
     return [compact.place_from_row(row, number) for number, row in enumerate(rows, 1)]
 
 
+def _rank(place) -> int:
+    return round(place.confidence * 255)
+
+
+def scattered_places():
+    """Places whose spatial (doc) order deliberately differs from rank order, so
+    the records-by-rank layout is a non-identity permutation."""
+    compact = sys.modules["experiment_places_compact_index"]
+    Place = compact.Place
+    # Distinct spatial cells (wide lon spread), confidences NOT monotonic with
+    # cell/doc order, so ordered_places (spatial, -rank, id) != rank order.
+    rows = [
+        ("west", 0.72, 37.0, -122.0),
+        ("mid_a", 0.95, 37.0, -100.0),
+        ("mid_b", 0.61, 37.0, -100.0),
+        ("east", 0.88, 37.0, -70.0),
+        ("far", 0.80, 37.0, -40.0),
+    ]
+    return [
+        Place(
+            place_id=pid,
+            name=f"Cafe {pid}",
+            brand="Shared Brand",
+            category="cafe",
+            locality="Town",
+            region="RG",
+            country="US",
+            lat=lat,
+            lon=lon,
+            confidence=conf,
+        )
+        for pid, conf, lat, lon in rows
+    ]
+
+
+def test_records_blob_is_laid_out_in_serving_rank_order(tmp_path):
+    artifact = tmp_path / "rank.pcsh"
+    ordered, _ = experiment.build_artifact(scattered_places(), artifact)
+    # Precondition: this input actually reorders (doc order != rank order).
+    rank_order = sorted(range(len(ordered)), key=lambda doc: (-_rank(ordered[doc]), doc))
+    assert rank_order != list(range(len(ordered)))
+
+    shard = experiment.CompactShard(artifact)
+    base, length = shard.component("record_index")
+    index_bytes = shard.reader.read(base, length, "record_index")
+    positions = [
+        experiment.RECORD_INDEX.unpack_from(index_bytes, doc * experiment.RECORD_INDEX.size)
+        for doc in range(len(ordered))
+    ]
+    # Physical record order (ascending offset) must equal serving-rank order.
+    physical_order = sorted(range(len(ordered)), key=lambda doc: positions[doc][0])
+    assert physical_order == rank_order
+    # Extents tile the records component contiguously with no gaps/overlaps.
+    records_len = shard.component("records")[1]
+    cursor = 0
+    for doc in physical_order:
+        offset, size = positions[doc]
+        assert offset == cursor
+        cursor += size
+    assert cursor == records_len
+
+
+def test_rank_layout_round_trips_and_is_byte_deterministic(tmp_path):
+    first = tmp_path / "a.pcsh"
+    second = tmp_path / "b.pcsh"
+    ordered, _ = experiment.build_artifact(scattered_places(), first)
+    experiment.build_artifact(scattered_places(), second)
+    assert first.read_bytes() == second.read_bytes()
+    # record_index still resolves each doc to its own projection after reorder.
+    case = experiment.QueryCase("brand", (experiment.Clause("shared"),), "typical")
+    shard = experiment.CompactShard(first)
+    result = shard.query(case)
+    expected, ids = experiment.oracle(ordered, case)
+    assert set(result["candidate_doc_ids"]) == expected
+    assert result["result_ids"] == ids
+    for row in result["results"]:
+        # Confidence in the decoded projection matches the doc the ID belongs to.
+        source = next(place for place in ordered if place.place_id == row["id"])
+        assert round(row["confidence"] * 255) == _rank(source)
+
+
 def test_projection_round_trip_omits_non_result_brand():
     place = places()[0]
     decoded = experiment.decode_projection(experiment.encode_projection(place))
