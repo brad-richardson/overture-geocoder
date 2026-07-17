@@ -50,7 +50,17 @@ def test_workflow_pins_actions_and_dependency():
     assert "actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1" in value
     assert "pyarrow==25.0.0" in requirements
     assert "numpy==2.3.5" in requirements
-    assert requirements.count("--hash=sha256:") == 2
+    assert requirements.count("--hash=sha256:") == 4
+    # CPython 3.11 manylinux x86_64 + aarch64 wheels used by the hosted
+    # rowgroup and ARM Worker workflows.
+    assert (
+        "3095bdb8dd297e5920b010e96134ed91d852d81d490e787beca7e35ae1d89cf7"
+        in requirements
+    )
+    assert (
+        "244f98a595f70fa4fd35faa7508c4ae67e14a173397a4b3b49d2b3c360fb0062"
+        in requirements
+    )
     assert "--require-hashes" in value
     assert "persist-credentials: false" in value
 
