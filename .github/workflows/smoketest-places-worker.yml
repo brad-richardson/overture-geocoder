@@ -254,6 +254,7 @@ jobs:
                   server_timing:$server_timing,
                   worker_time_ms:(try ($worker_ms | tonumber) catch null),
                   read_metrics:$response[0].read_metrics,
+                  stages:($response[0].shards[0].stages // $response[0].head_stages),
                   route:$response[0].route,head_hit:$response[0].head_hit,
                   results:$response[0].results}' >> /tmp/places-worker-timings.jsonl
             done
