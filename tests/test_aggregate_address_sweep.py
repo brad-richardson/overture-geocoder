@@ -208,6 +208,36 @@ def test_empty_evidence_still_produces_a_summary(tmp_path):
     assert "0/1" in md
 
 
+def test_zero_retention_task_is_complete_not_missing(tmp_path):
+    # A task that structures zero rows is a real 0% data point, not missing
+    # evidence: it must stay "complete" and contribute to the retention
+    # distribution, while bytes-per-retained-row is left undefined.
+    evidence = tmp_path / "sweep-evidence"
+    _complete_task_evidence(
+        evidence,
+        "alpha",
+        input_rows=1000,
+        selected_rows=0,
+        fragment_bytes=0,
+        map_seconds=100.0,
+        reduce_seconds=90.0,
+        map_rss=800,
+        reduce_rss=700,
+        amplification=3.0,
+        projected_rows=1000,
+    )
+    selection = _selection(
+        [{"name": "alpha", "task_index": 1, "stratum": "s1", "expected_rows": 1000}]
+    )
+    summary = agg.aggregate(selection, evidence)
+    task = summary["tasks"][0]
+    assert task["status"] == "complete"
+    assert task["structured_retention_pct"] == 0.0
+    assert task.get("output_bytes_per_retained_row") is None
+    assert summary["completed_count"] == 1
+    assert summary["distributions"]["structured_retention_pct"]["min"] == 0.0
+
+
 def test_percentile_interpolates():
     assert agg._percentile([10, 20, 30, 40], 50) == 25.0
     assert agg._percentile([10], 95) == 10

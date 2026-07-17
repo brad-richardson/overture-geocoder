@@ -71,7 +71,7 @@ def test_expected_rows_and_bytes_match_inventory(report):
 
 
 def test_committed_selection_matches_generated(report):
-    document = sel.build_selection_document(report, INVENTORY)
+    document = sel.build_selection_document(report)
     committed = json.loads(SELECTION.read_text())
     assert committed == document
 
@@ -83,6 +83,12 @@ def test_matrix_from_selection_is_name_and_index_only():
     assert len(matrix["include"]) == 12
     for item in matrix["include"]:
         assert set(item) == {"name", "task_index"}
+
+
+def test_matrix_from_selection_rejects_bool_index():
+    bad = {"tasks": [{"name": "x", "task_index": True}]}
+    with pytest.raises(sel.SelectionError):
+        sel.matrix_from_selection(bad)
 
 
 def test_validate_override_accepts_include_object():

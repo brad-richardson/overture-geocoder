@@ -40,6 +40,9 @@ jobs:
           python-version: "3.11"
 
       - name: Verify the committed selection reproduces from the inventory
+        # Skip when a dispatch override is supplied: an override does not consume
+        # the committed selection, so a stale default must not block debugging.
+        if: ${{ inputs.tasks == '' }}
         run: |
           set -euo pipefail
           python scripts/select_address_sweep_tasks.py check \

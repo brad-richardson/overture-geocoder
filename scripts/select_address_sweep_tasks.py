@@ -263,14 +263,23 @@ def _validate(entries: list[dict[str, Any]], *, count: int | None = None) -> Non
             raise SelectionError(f"unsafe matrix name: {name!r}")
 
 
-def build_selection_document(report: dict[str, Any], inventory_path: Path) -> dict[str, Any]:
+def build_selection_document(report: dict[str, Any]) -> dict[str, Any]:
     entries = select_tasks(report)
-    inventory_sha256 = hashlib.sha256(inventory_path.read_bytes()).hexdigest()
+    # Provenance hash over the canonical selection input (plan.tasks) rather
+    # than the raw inventory-file bytes: this stays stable under re-serialization
+    # (whitespace, key order, line endings) so `check` only fails when the data
+    # that actually drives selection changes.
+    canonical_tasks = json.dumps(
+        report["plan"]["tasks"], sort_keys=True, separators=(",", ":")
+    )
+    inventory_tasks_sha256 = hashlib.sha256(
+        canonical_tasks.encode("utf-8")
+    ).hexdigest()
     return {
         "schema": SCHEMA,
         "release": report.get("release"),
         "generated_from": "benchmarks/address-rowgroup-inventory-report.json",
-        "inventory_report_sha256": inventory_sha256,
+        "inventory_tasks_sha256": inventory_tasks_sha256,
         "task_count": len(entries),
         "tasks": entries,
     }
@@ -285,7 +294,12 @@ def matrix_from_selection(selection: dict[str, Any]) -> dict[str, Any]:
     for task in tasks:
         name = task["name"]
         index = task["task_index"]
-        if not isinstance(name, str) or not isinstance(index, int) or index < 0:
+        if (
+            not isinstance(name, str)
+            or isinstance(index, bool)
+            or not isinstance(index, int)
+            or index < 0
+        ):
             raise SelectionError(f"invalid selection entry: {task!r}")
         include.append({"name": name, "task_index": index})
     _validate(include, count=12)
@@ -331,7 +345,7 @@ def validate_override(raw: str) -> dict[str, Any]:
 
 def _cmd_generate(args: argparse.Namespace) -> int:
     report = load_inventory(args.inventory_report)
-    document = build_selection_document(report, args.inventory_report)
+    document = build_selection_document(report)
     text = json.dumps(document, indent=2, sort_keys=True) + "\n"
     if args.output is None or str(args.output) == "-":
         sys.stdout.write(text)
@@ -343,7 +357,7 @@ def _cmd_generate(args: argparse.Namespace) -> int:
 
 def _cmd_check(args: argparse.Namespace) -> int:
     report = load_inventory(args.inventory_report)
-    expected = build_selection_document(report, args.inventory_report)
+    expected = build_selection_document(report)
     actual = json.loads(args.selection.read_text())
     if actual != expected:
         sys.stderr.write(

@@ -129,9 +129,19 @@ def aggregate_task(
         result["input_rows"] = input_rows
         result["selected_rows"] = selected_rows
         result["fragment_bytes"] = fragment_bytes
-        if input_rows:
+        # Guard on ``> 0`` (not truthiness): a task that legitimately retains
+        # zero rows is a real 0% data point, not missing evidence. Retention is
+        # defined whenever input rows exist; bytes-per-retained-row is only
+        # defined when at least one row was retained.
+        if isinstance(input_rows, int) and input_rows > 0 and isinstance(
+            selected_rows, int
+        ):
             result["structured_retention_pct"] = 100.0 * selected_rows / input_rows
-        if selected_rows:
+        if (
+            isinstance(selected_rows, int)
+            and selected_rows > 0
+            and isinstance(fragment_bytes, int)
+        ):
             result["output_bytes_per_retained_row"] = fragment_bytes / selected_rows
         map_res = map_report.get("resources", {})
         result["map_wall_seconds"] = map_res.get("elapsed_seconds")
@@ -140,7 +150,7 @@ def aggregate_task(
         map_rss = None
 
     # --- reduce resources (prefer the resumed/restored reduce) --------------
-    reduce_report = restored or local_reduce
+    reduce_report = restored if restored is not None else local_reduce
     reduce_rss = None
     if reduce_report is not None:
         reduce_res = reduce_report.get("resources", {})
@@ -172,6 +182,11 @@ def aggregate_task(
         projected_rows = projection.get("selection", {}).get("rows")
     result["projected_rows"] = projected_rows
     expected_rows = expected.get("expected_rows")
+    # Reconciliation assumes the projection is not row-capped: every selected
+    # task's rows fit under the workflow's --max-rows / --max-groups limits, so
+    # projected rows equal the inventory's full task rows. If a future inventory
+    # selects a task above those caps, projected_rows would legitimately be
+    # smaller and this would report an expected (not spurious) delta.
     if projected_rows is not None and expected_rows is not None:
         result["rows_reconciled"] = projected_rows == expected_rows
         result["rows_delta"] = projected_rows - expected_rows
@@ -180,6 +195,8 @@ def aggregate_task(
         result["rows_delta"] = None
 
     # --- completeness verdict -----------------------------------------------
+    # output_bytes_per_retained_row is intentionally excluded: it is undefined
+    # when a task retains zero rows, which is a valid (not incomplete) outcome.
     required = (
         "structured_retention_pct",
         "fragment_bytes",
@@ -187,7 +204,6 @@ def aggregate_task(
         "reduce_wall_seconds",
         "peak_rss_bytes",
         "retry_read_amplification",
-        "output_bytes_per_retained_row",
     )
     if result["missing"] or any(result.get(k) is None for k in required):
         result["status"] = "incomplete"

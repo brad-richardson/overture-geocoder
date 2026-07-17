@@ -1,6 +1,6 @@
 {
   "generated_from": "benchmarks/address-rowgroup-inventory-report.json",
-  "inventory_report_sha256": "7c198331b96cc168235dfccac1b0f6919eadaad996db5fc176fac5cca93e7771",
+  "inventory_tasks_sha256": "d21a8354b76c47952bcbe3b8c79a06d140c083367fe672ab012a65677aa1a0e2",
   "release": "2026-06-17.0",
   "schema": "overture-address-sweep-selection-v1",
   "task_count": 12,
