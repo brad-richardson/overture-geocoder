@@ -338,6 +338,50 @@ def test_clause_candidate_counts_mirror_worker_early_exit(tmp_path):
     assert result["stages"]["postings"]["reads"] == 2
 
 
+def test_query_mirrors_worker_hard_caps(tmp_path, monkeypatch):
+    """The model fails exactly where the Worker fails closed (clause posting
+    span, whole-query posting bytes, union candidate cap) instead of quietly
+    serving oracle truth the Worker would refuse with a 500."""
+    artifact = tmp_path / "places.pcsh"
+    experiment.build_artifact(places(), artifact, block_entries=2)
+    case = experiment.QueryCase(
+        "wide", (experiment.Clause("golden"), experiment.Clause("gate")), "typical"
+    )
+
+    monkeypatch.setattr(experiment, "POSTINGS_MAX_RANGE_BYTES", 1)
+    with pytest.raises(ValueError, match="clause posting span"):
+        experiment.CompactShard(artifact).query(case)
+    monkeypatch.undo()
+
+    monkeypatch.setattr(experiment, "QUERY_POSTINGS_MAX_BYTES", 1)
+    with pytest.raises(ValueError, match="query posting bytes"):
+        experiment.CompactShard(artifact).query(case)
+    monkeypatch.undo()
+
+    monkeypatch.setattr(experiment, "POSTING_CANDIDATES_CAP", 1)
+    with pytest.raises(ValueError, match="union candidates"):
+        experiment.CompactShard(artifact).query(case)
+
+
+def test_fielded_clause_skips_mismatched_masks_before_rank_merge(tmp_path):
+    """Occurrences whose field mask misses the clause are skipped during
+    decode (mirroring the Worker), not filtered after the rank merge, so
+    fielded candidates and their ranks match the Worker exactly."""
+    artifact = tmp_path / "places.pcsh"
+    ordered, _ = experiment.build_artifact(places(), artifact, block_entries=2)
+    case = experiment.QueryCase(
+        "fielded", (experiment.Clause("hotel", field="category"),), "typical"
+    )
+    shard = experiment.CompactShard(artifact)
+    result = shard.query(case)
+    expected, ids = experiment.oracle(ordered, case)
+    assert set(result["candidate_doc_ids"]) == expected
+    assert result["result_ids"] == ids
+    # The category-fielded "hotel" clause must keep only the doc whose
+    # category is hotel, even though the token also appears in a name field.
+    assert result["clause_candidate_counts"] == [1]
+
+
 def test_cli_writes_reports(tmp_path):
     source = tmp_path / "places.json"
     source.write_text(

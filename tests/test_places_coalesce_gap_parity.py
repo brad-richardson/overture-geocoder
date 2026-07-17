@@ -36,9 +36,11 @@ def _load_python_module():
 
 
 def _rust_constant(text: str, name: str) -> int:
-    match = re.search(rf"const\s+{name}\s*:\s*u64\s*=\s*([0-9*+\s]+);", text)
+    match = re.search(
+        rf"const\s+{name}\s*:\s*(?:u64|usize)\s*=\s*([0-9_*+\s]+);", text
+    )
     assert match, f"Rust constant {name} not found in {RUST_SOURCE}"
-    expression = match.group(1).strip()
+    expression = match.group(1).strip().replace("_", "")
     assert re.fullmatch(r"[0-9*+\s]+", expression), expression
     return int(eval(expression, {"__builtins__": {}}))  # noqa: S307 - digits/*/+ only
 
@@ -84,9 +86,25 @@ def test_record_index_and_records_plans_match_across_languages():
     assert module.POSTINGS_MAX_RANGE_BYTES == _rust_constant(
         text, "MAX_POSTING_BYTES"
     )
+    assert module.QUERY_POSTINGS_MAX_BYTES == _rust_constant(
+        text, "MAX_QUERY_POSTING_BYTES"
+    )
     assert _call_site_arguments(text, "posting_wants") == (
         "0",
         "MAX_POSTING_BYTES",
+    )
+    # The lexicon stage and the per-clause union candidate cap are mirrored
+    # too, so every stage of the modeled read plan (and every hard-cap failure)
+    # transfers to the Worker.
+    assert module.LEXICON_MAX_RANGE_BYTES == _rust_constant(
+        text, "MAX_LEXICON_BLOCK_BYTES"
+    )
+    assert module.POSTING_CANDIDATES_CAP == _rust_constant(
+        text, "MAX_POSTING_CANDIDATES"
+    )
+    assert _call_site_arguments(text, "wants") == (
+        "0",
+        "MAX_LEXICON_BLOCK_BYTES",
     )
 
 

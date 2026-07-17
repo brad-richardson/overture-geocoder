@@ -75,6 +75,17 @@ RECORDS_MAX_RANGE_BYTES = 2 * 1024 * 1024
 # are never fetched. Pinned by the same parity test.
 POSTINGS_COALESCE_GAP = 0
 POSTINGS_MAX_RANGE_BYTES = 8 * 1024 * 1024
+# Whole-query posting byte cap mirroring the Worker's MAX_QUERY_POSTING_BYTES:
+# the Worker fails the lookup when the clauses' summed posting extents pass it,
+# so the model must fail identically instead of serving oracle truth the
+# Worker would refuse.
+QUERY_POSTINGS_MAX_BYTES = 16 * 1024 * 1024
+# Lexicon-stage per-read cap mirroring the Worker's
+# coalesced(&wants, 0, MAX_LEXICON_BLOCK_BYTES), and the per-clause union
+# candidate cap mirroring MAX_POSTING_CANDIDATES: both fail or split exactly
+# where the Worker does, so modeled physical reads and failures transfer.
+LEXICON_MAX_RANGE_BYTES = 512 * 1024
+POSTING_CANDIDATES_CAP = 200_000
 
 
 def encode_identity(place: Place) -> bytes:
@@ -510,7 +521,8 @@ class CompactShard:
         chunks = self.reader.read_ranges(
             ((base + block["offset"], block["length"]) for block in blocks),
             "lexicon",
-            0,
+            max_gap=0,
+            max_range=LEXICON_MAX_RANGE_BYTES,
         )
         matches = []
         for block in blocks:
@@ -525,15 +537,25 @@ class CompactShard:
     ) -> dict[int, tuple[int, int]]:
         """Union the matched entries' postings via per-entry gap-0 reads.
 
-        Mirrors the Worker's posting plan (places_pages.rs): one want per
-        matched lexicon entry through the shared coalescer, so adjacent extents
-        merge into a single physical read while non-adjacent extents split and
-        the dead bytes between them are never fetched. Extents are resolved
-        through each entry's explicit offset/length, so any physical posting
-        layout — including a permuted one — decodes correctly.
+        Mirrors the Worker's posting stage (places_pages.rs) exactly: one want
+        per matched lexicon entry through the shared coalescer (adjacent
+        extents merge into one physical read, non-adjacent extents split, dead
+        bytes between them are never fetched), the same clause-level posting
+        byte cap, and the same decode rule — an occurrence whose field mask
+        misses the clause's mask is skipped BEFORE the per-doc rank merge, not
+        filtered afterwards. Extents are resolved through each entry's explicit
+        offset/length, so any physical posting layout — including a permuted
+        one — decodes correctly.
         """
         if not entries:
             return {}
+        clause_posting_bytes = sum(entry.posting_length for entry in entries)
+        if clause_posting_bytes > POSTINGS_MAX_RANGE_BYTES:
+            # Mirrors the Worker's MAX_POSTING_BYTES clause cap: it fails the
+            # lookup instead of issuing the reads, so the model must not
+            # quietly split the clause into several capped reads.
+            raise ValueError("clause posting span exceeds hard cap")
+        clause_mask = FIELD_BITS[clause.field] if clause.field else sum(FIELD_BITS.values())
         postings_base, _ = self.component("postings")
         chunks = self.reader.read_ranges(
             (
@@ -550,11 +572,13 @@ class CompactShard:
                 chunks, postings_base + entry.posting_offset, entry.posting_length
             )
             for doc_id, mask, rank in decode_postings(encoded, entry.posting_count):
+                if mask & clause_mask == 0:
+                    continue
                 old_mask, old_rank = docs.get(doc_id, (0, rank))
                 docs[doc_id] = (old_mask | mask, max(old_rank, rank))
-        if clause.field:
-            bit = FIELD_BITS[clause.field]
-            docs = {doc: value for doc, value in docs.items() if value[0] & bit}
+                if len(docs) > POSTING_CANDIDATES_CAP:
+                    # Mirrors the Worker's MAX_POSTING_CANDIDATES union cap.
+                    raise ValueError("clause union candidates exceed hard cap")
         return docs
 
     def clause_docs(self, clause: Clause) -> dict[int, tuple[int, int]]:
@@ -626,10 +650,17 @@ class CompactShard:
             for clause in case.clauses
         ]
         clause_candidate_counts: list[int | None] = [None] * len(case.clauses)
+        total_posting_bytes = 0
         if all(matched_entries):
             for position, (clause, entries) in enumerate(
                 zip(case.clauses, matched_entries)
             ):
+                total_posting_bytes += sum(
+                    entry.posting_length for entry in entries
+                )
+                if total_posting_bytes > QUERY_POSTINGS_MAX_BYTES:
+                    # Mirrors the Worker's MAX_QUERY_POSTING_BYTES hard cap.
+                    raise ValueError("query posting bytes exceed hard cap")
                 docs = self.entry_docs(clause, entries)
                 clause_candidate_counts[position] = len(docs)
                 ids = set(docs)
