@@ -51,6 +51,7 @@ def test_builds_three_shards_head_and_exact_oracles(tmp_path):
     assert any(case["head_hit"] for case in report["cases"])
     assert any(not case["head_hit"] for case in report["cases"])
     assert any(case["name"] == "shard_prefix" for case in report["cases"])
+    assert any(case["route"] == "catalog_point" for case in report["cases"])
     assert all(case["result_ids"] for case in report["cases"])
     assert all(
         len(case["required_objects"]) <= 2 for case in report["cases"]

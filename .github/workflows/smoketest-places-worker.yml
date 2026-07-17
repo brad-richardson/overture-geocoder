@@ -15,6 +15,7 @@ env:
 
 jobs:
   smoke:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 90
     steps:
@@ -139,11 +140,17 @@ jobs:
             SCOPE=$(jq -r '.scope | @uri' <<< "$CASE")
             CONTEXT=$(jq -r 'if .context == null then "" else (.context | @uri) end' <<< "$CASE")
             EXPECTED_IDS=$(jq -c '.result_ids' <<< "$CASE")
+            EXPECTED_RESULTS=$(jq -c '.results' <<< "$CASE")
             EXPECTED_HEAD=$(jq -r '.head_hit' <<< "$CASE")
             EXPECTED_COUNT=$(jq -r '.candidate_count' <<< "$CASE")
             EXPECTED_ROUTE=$(jq -r '.route' <<< "$CASE")
             QUERY="scope=${SCOPE}"
             if [ -n "$CONTEXT" ]; then QUERY="${QUERY}&context=${CONTEXT}"; fi
+            if jq -e '.point != null' <<< "$CASE" >/dev/null; then
+              LON=$(jq -r '.point[0] | @uri' <<< "$CASE")
+              LAT=$(jq -r '.point[1] | @uri' <<< "$CASE")
+              QUERY="${QUERY}&lon=${LON}&lat=${LAT}"
+            fi
             while read -r CLAUSE; do
               TOKEN=$(jq -r '.token | @uri' <<< "$CLAUSE")
               PREFIX=$(jq -r 'if .prefix then "1" else "0" end' <<< "$CLAUSE")
@@ -179,11 +186,24 @@ jobs:
                 cat "$BODY"
                 exit 1
               fi
-              jq -e --argjson ids "$EXPECTED_IDS" --argjson head "$EXPECTED_HEAD" \
+              jq -e --argjson ids "$EXPECTED_IDS" --argjson results "$EXPECTED_RESULTS" \
+                --argjson head "$EXPECTED_HEAD" \
                 --argjson count "$EXPECTED_COUNT" --arg route "$EXPECTED_ROUTE" \
                 --argjson attempt "$attempt" '
+                def text_projection:
+                  {id,name,category,locality,region,country};
                 .schema == "overture-places-worker-spike-v2"
                 and [.results[].id] == $ids
+                and ([.results[].id] | unique | length) == (.results | length)
+                and (.results | length) == ($results | length)
+                and all(range(0; $results | length) as $i;
+                  (.results[$i] | text_projection) == ($results[$i] | text_projection)
+                  and ((.results[$i].latitude - $results[$i].latitude) | abs) < 0.000001
+                  and ((.results[$i].longitude - $results[$i].longitude) | abs) < 0.000001
+                  and ((.results[$i].confidence - $results[$i].confidence) | abs) < 0.000001
+                  and (if ($results[$i] | has("distance_km"))
+                       then ((.results[$i].distance_km - $results[$i].distance_km) | abs) < 0.001
+                       else (.results[$i] | has("distance_km") | not) end))
                 and .candidate_count == $count
                 and .head_hit == $head
                 and .route == $route
@@ -194,17 +214,67 @@ jobs:
                 and (if $attempt == 1 then .read_metrics.r2_reads > 0 else true end)
               ' "$BODY"
               SERVER_TIMING=$(awk 'BEGIN{IGNORECASE=1} /^server-timing:/ {sub(/\r$/, ""); print substr($0, index($0,$2)); exit}' "$HEADERS")
+              WORKER_MS=$(sed -nE 's/.*total;dur=([0-9.]+).*/\1/p' <<< "$SERVER_TIMING")
               jq -cn --arg name "$NAME" --argjson attempt "$attempt" \
                 --argjson time_total "$TOTAL" --arg server_timing "$SERVER_TIMING" \
+                --arg worker_ms "$WORKER_MS" \
                 --slurpfile response "$BODY" \
                 '{case:$name,attempt:$attempt,time_total_seconds:$time_total,
-                  server_timing:$server_timing,read_metrics:$response[0].read_metrics,
+                  server_timing:$server_timing,
+                  worker_time_ms:(try ($worker_ms | tonumber) catch null),
+                  read_metrics:$response[0].read_metrics,
                   route:$response[0].route,head_hit:$response[0].head_hit,
                   results:$response[0].results}' >> /tmp/places-worker-timings.jsonl
             done
           done
           jq -s '{schema:"overture-places-worker-latency-spike-v2",samples:.}' \
             /tmp/places-worker-timings.jsonl | tee /tmp/places-worker-latency.json
+
+      - name: Classify technical gates without implying launch approval
+        run: |
+          set -euo pipefail
+          jq -s '
+            def median:
+              sort as $values | ($values | length) as $length |
+              if $length == 0 then null
+              elif ($length % 2) == 1 then $values[($length / 2 | floor)]
+              else (($values[$length / 2 - 1] + $values[$length / 2]) / 2) end;
+            group_by(.case) |
+            map(sort_by(.attempt) as $samples |
+              $samples[0] as $cold |
+              [$samples[1:][] | .time_total_seconds] as $warm_times |
+              {
+                case: $cold.case,
+                route: $cold.route,
+                cold: {
+                  client_seconds: $cold.time_total_seconds,
+                  worker_time_ms: $cold.worker_time_ms,
+                  r2_reads: $cold.read_metrics.r2_reads,
+                  r2_bytes: $cold.read_metrics.r2_bytes
+                },
+                warm_median_client_seconds: ($warm_times | median),
+                warm_all_zero_r2: all($samples[1:][]; .read_metrics.r2_reads == 0),
+                technical_pass: (
+                  $cold.time_total_seconds <= 1.0
+                  and (($warm_times | median) <= 0.250)
+                  and all($samples[1:][]; .read_metrics.r2_reads == 0)
+                  and (if ($cold.route == "packed_head" or $cold.route == "head_only_miss")
+                       then ($cold.read_metrics.r2_reads <= 4 and $cold.read_metrics.r2_bytes <= 262144)
+                       else ($cold.read_metrics.r2_reads <= 8 and $cold.read_metrics.r2_bytes <= 524288)
+                       end)
+                )
+              }) as $cases |
+            {
+              schema: "overture-places-worker-technical-decision-v1",
+              classification: (if all($cases[]; .technical_pass)
+                               then "awaiting_relevance_benchmark" else "optimize" end),
+              launch_approved: false,
+              note: "A green workflow means evidence capture succeeded. Side-by-side reference-geocoder comparison and adjudication are still required and can produce proceed, optimize, or stop.",
+              cases: $cases
+            }
+          ' /tmp/places-worker-timings.jsonl | tee /tmp/places-worker-technical-decision.json
+          jq -e '.launch_approved == false and (.classification == "awaiting_relevance_benchmark" or .classification == "optimize")' \
+            /tmp/places-worker-technical-decision.json
 
       - name: Exercise independently cold catalog failure
         run: |
@@ -241,6 +311,7 @@ jobs:
             test -f /tmp/places-worker-smoke/artifacts/report.json && \
               cat /tmp/places-worker-smoke/artifacts/report.json
             test -f /tmp/places-worker-latency.json && cat /tmp/places-worker-latency.json
+            test -f /tmp/places-worker-technical-decision.json && cat /tmp/places-worker-technical-decision.json
             test -f /tmp/places-worker-failure.json && cat /tmp/places-worker-failure.json
             echo '```'
             echo

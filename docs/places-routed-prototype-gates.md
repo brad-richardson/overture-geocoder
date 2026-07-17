@@ -8,6 +8,8 @@ An explicit catalog context or a point covered by the catalog routes to exactly
 one immutable compact shard. A routed miss returns empty and never enumerates
 neighboring or global shards. A catalog miss returns a bounded error after the
 catalog read and performs no shard read.
+Context and point are mutually exclusive so a request cannot route by one and
+rank or report distance from contradictory location evidence.
 
 The packed head is the only context-free path in this prototype. It accepts one
 or two exact, unfielded normalized tokens. Every token must have a packed top-10
@@ -50,3 +52,21 @@ relevance class has zero relevant top-five results, context ordering is wrong,
 or repeat order is unstable. None of the three classifications enables the
 public `place` type by itself; `proceed` only authorizes the next producer and
 failure-semantics slice.
+
+The workflow emits an automated technical classification of `optimize` or
+`awaiting_relevance_benchmark` and always sets `launch_approved` to false. Workflow
+success means the bounded measurement and cleanup completed; it is never a
+`proceed` decision. After inspecting the returned projections, a human records
+the final `proceed`, `optimize`, or `stop` classification in the retained
+evidence report. The review should use a side-by-side top-five panel from the
+previously evaluated reference geocoders, including Nominatim, rather than
+unaided inspection. Reference engines are comparators rather than ground truth:
+provider disagreements still need adjudication for coverage, local names,
+categories, and requested context.
+
+Distance is reported for routed results but is diagnostic only. The compact
+reader selects a bounded confidence/doc-ID result window before decoding result
+coordinates, so reordering that window would not be a complete nearest-result
+ranking. The `category_near_me` label therefore cannot justify launch until a
+bounded ranking component can compare every eligible candidate; absent that,
+the final classification is at best `optimize`.

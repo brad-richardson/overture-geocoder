@@ -123,8 +123,8 @@ def query_shard(
         row["distance_km"] = haversine_km(
             center[1], center[0], row["latitude"], row["longitude"]
         )
-    # Match the Worker's stable confidence-primary, distance-secondary order.
-    rows.sort(key=lambda row: (-row["confidence"], row["distance_km"]))
+    # Distance is retained for human scoring but is not used to reorder the
+    # reader's bounded confidence/doc-ID result window.
     projected = [response_projection(row) for row in rows[:RESULT_LIMIT]]
     return {
         "candidate_count": result["candidate_count"],
@@ -187,6 +187,7 @@ def routed_case(
     case_class: str = "reader_equivalence",
     query: str | None = None,
     relevant_if: str | None = None,
+    point_route: bool = False,
 ) -> dict[str, Any]:
     expected = query_shard(artifacts[shard_index], clauses, routes[shard_index]["center"])
     return {
@@ -194,9 +195,10 @@ def routed_case(
         "scope": name.replace("_", "-"),
         "class": case_class,
         "query": query,
-        "context": context,
+        "context": None if point_route else context,
+        "point": routes[shard_index]["center"] if point_route else None,
         "clauses": [clause_json(clause) for clause in clauses],
-        "route": "catalog_context",
+        "route": "catalog_point" if point_route else "catalog_context",
         "route_shard": routes[shard_index]["id"],
         "head_hit": False,
         "required_objects": ["catalog.pcat", routes[shard_index]["object"]],
@@ -381,6 +383,7 @@ def prepare(
             clauses=(Clause(exact),),
             artifacts=artifacts,
             routes=routes,
+            point_route=True,
         )
     )
 

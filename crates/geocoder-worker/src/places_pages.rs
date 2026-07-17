@@ -777,31 +777,16 @@ impl ShardLoader {
                 "Places lexicon physical reads exceed hard cap".into(),
             ));
         }
-        if clause_matches.iter().any(Vec::is_empty) {
-            return Ok(PlacesShardLookup {
-                candidate_count: 0,
-                clause_candidate_counts: clause_matches
-                    .iter()
-                    .map(|matches| usize::from(!matches.is_empty()))
-                    .collect(),
-                results: Vec::new(),
-                read_metrics: reader.metrics(),
-                stages: PlacesReadStages {
-                    directory: after_directory,
-                    lexicon: after_lexicon.since(after_directory),
-                    postings: RangeReadMetrics::default(),
-                    record_index: RangeReadMetrics::default(),
-                    records: RangeReadMetrics::default(),
-                },
-                tokenizer_version: directory.tokenizer_version,
-            });
-        }
-
         let postings = component(&directory, "postings")?;
         let mut total_posting_bytes = 0_u64;
         let mut clause_candidate_counts = Vec::with_capacity(clauses.len());
         let mut candidates: Option<BTreeMap<u64, u8>> = None;
         for (clause, matches) in clauses.iter().zip(&clause_matches) {
+            if matches.is_empty() {
+                clause_candidate_counts.push(0);
+                candidates = Some(BTreeMap::new());
+                continue;
+            }
             let first = matches.first().expect("nonempty matches");
             let last = matches.last().expect("nonempty matches");
             let posting_start = first.posting_offset;
@@ -882,6 +867,22 @@ impl ShardLoader {
         }
         let candidates = candidates.unwrap_or_default();
         let after_postings = reader.metrics();
+        if candidates.is_empty() {
+            return Ok(PlacesShardLookup {
+                candidate_count: 0,
+                clause_candidate_counts,
+                results: Vec::new(),
+                read_metrics: after_postings,
+                stages: PlacesReadStages {
+                    directory: after_directory,
+                    lexicon: after_lexicon.since(after_directory),
+                    postings: after_postings.since(after_lexicon),
+                    record_index: RangeReadMetrics::default(),
+                    records: RangeReadMetrics::default(),
+                },
+                tokenizer_version: directory.tokenizer_version,
+            });
+        }
         let mut best: Vec<_> = candidates
             .iter()
             .map(|(doc_id, rank)| (*doc_id, *rank))

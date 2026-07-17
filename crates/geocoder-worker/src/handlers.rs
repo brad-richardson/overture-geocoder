@@ -237,6 +237,9 @@ pub async fn handle_places_page_spike(
     if longitude.is_some() != latitude.is_some() {
         return Response::error("Places point routing requires both lat and lon", 400);
     }
+    if context.is_some() && longitude.is_some() {
+        return Response::error("Choose Places context or point routing, not both", 400);
+    }
 
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let head_eligible = context.is_none()
@@ -315,13 +318,9 @@ pub async fn handle_places_page_spike(
             f64::from(place.longitude),
         ));
     }
-    results.sort_by(|left, right| {
-        right.confidence.total_cmp(&left.confidence).then_with(|| {
-            left.distance_km
-                .unwrap_or(f64::INFINITY)
-                .total_cmp(&right.distance_km.unwrap_or(f64::INFINITY))
-        })
-    });
+    // Distance is diagnostic only in this slice. The shard reader has already
+    // selected a bounded confidence/doc-ID top window; reordering that window
+    // by distance would falsely imply globally complete nearest ranking.
     results.truncate(10);
     let metrics = catalog_lookup.read_metrics.add(lookup.read_metrics);
     let body = serde_json::json!({

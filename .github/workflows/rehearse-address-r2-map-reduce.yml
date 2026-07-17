@@ -16,6 +16,7 @@ env:
 jobs:
   real-address-resume:
     name: Real address resume ${{ matrix.name }} (${{ matrix.task_index }})
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -120,6 +121,7 @@ jobs:
         run: |
           set -euo pipefail
           ROOT="/tmp/address-resume-${{ matrix.name }}"
+          START_SECONDS=$SECONDS
           TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
@@ -138,6 +140,8 @@ jobs:
           ' "$ROOT/full-upload.json"
           jq -e 'all(.artifacts[]; .status == "existing_verified" and .readback_verified == true)' \
             "$ROOT/resumed-upload.json"
+          jq -n --argjson seconds "$((SECONDS - START_SECONDS))" \
+            '{upload_and_resume_wall_seconds:$seconds}' > "$ROOT/upload-timing.json"
 
       - name: Restore from empty and stale state then reproduce the oracle
         env:
@@ -152,16 +156,20 @@ jobs:
           ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
           COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
           rm -rf "$ROOT/fragments" "$ROOT/restore" "$ROOT/local.aidx" "$ROOT/projected.parquet"
+          EMPTY_RESTORE_START=$SECONDS
           python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
             --manifest "$ROOT/full.json" --output-dir "$ROOT/restore" \
             --report "$ROOT/empty-restore.json"
+          EMPTY_RESTORE_SECONDS=$((SECONDS - EMPTY_RESTORE_START))
           RESTORED=("$ROOT"/restore/fragment-*.bin)
           FIRST_RESTORED="${RESTORED[0]}"
           test -f "$FIRST_RESTORED"
           printf 'stale-fragment\n' > "$FIRST_RESTORED"
+          STALE_RESTORE_START=$SECONDS
           python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
             --manifest "$ROOT/full.json" --output-dir "$ROOT/restore" \
             --report "$ROOT/stale-restore.json"
+          STALE_RESTORE_SECONDS=$((SECONDS - STALE_RESTORE_START))
           jq -e 'all(.artifacts[]; .verified == true)' "$ROOT/stale-restore.json"
           /usr/bin/time -v python scripts/prepare_address_verified_resume.py reduce \
             --map-report "map-${{ matrix.name }}.json" \
@@ -179,6 +187,10 @@ jobs:
             and .reduce.verification.full_sorted_scan == true
             and .reduce.verification.record_count_match == true
           ' "restored-reduce-${{ matrix.name }}.json"
+          jq -n --argjson empty "$EMPTY_RESTORE_SECONDS" \
+            --argjson stale "$STALE_RESTORE_SECONDS" \
+            '{empty_restore_wall_seconds:$empty,stale_repair_wall_seconds:$stale}' \
+            > "$ROOT/restore-timing.json"
           jq -n \
             --slurpfile map "map-${{ matrix.name }}.json" \
             --slurpfile partial "$ROOT/partial-upload.json" \
@@ -186,6 +198,8 @@ jobs:
             --slurpfile resumed "$ROOT/resumed-upload.json" \
             --slurpfile empty "$ROOT/empty-restore.json" \
             --slurpfile stale "$ROOT/stale-restore.json" \
+            --slurpfile upload_timing "$ROOT/upload-timing.json" \
+            --slurpfile restore_timing "$ROOT/restore-timing.json" \
             --slurpfile local "local-reduce-${{ matrix.name }}.json" \
             --slurpfile restored "restored-reduce-${{ matrix.name }}.json" '
             def bytes($report): [$report[0].artifacts[].bytes] | add;
@@ -199,6 +213,7 @@ jobs:
               verified_upload_readback_bytes: $upload_readback,
               retry_readback_amplification: ($upload_readback / $source_bytes),
               restore_download_bytes: $restore_download,
+              r2_wall_seconds: ($upload_timing[0] + $restore_timing[0]),
               map_resources: $map[0].resources,
               local_reduce_resources: $local[0].resources,
               restored_reduce_resources: $restored[0].resources,
