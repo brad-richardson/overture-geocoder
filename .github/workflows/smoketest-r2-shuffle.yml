@@ -1,6 +1,13 @@
 name: Smoke Test Verified R2 Shuffle Resume
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/r2_verified_store.py'
+      - 'tests/test_r2_verified_store.py'
+      - 'tests/test_r2_shuffle_workflow.py'
+      - '.github/workflows/smoketest-r2-shuffle.yml'
   workflow_dispatch:
 
 permissions:

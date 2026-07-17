@@ -5,13 +5,20 @@ ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "smoketest-r2-shuffle.yml"
 
 
-def test_verified_shuffle_smoke_is_manual_non_promoting_and_cleans_up():
+def test_verified_shuffle_smoke_is_merge_only_non_promoting_and_cleans_up():
     workflow = WORKFLOW.read_text()
     trigger = workflow[workflow.index("on:") : workflow.index("permissions:")]
 
     assert "workflow_dispatch:" in trigger
-    assert "push:" not in trigger
+    assert "push:" in trigger
+    assert "branches: [main]" in trigger
+    assert "pull_request:" not in trigger
+    assert "scripts/r2_verified_store.py" in trigger
     assert "contents: read" in workflow
+    assert (
+        "SHUFFLE_PREFIX: smoke/r2-shuffle/${{ github.run_id }}-${{ github.run_attempt }}"
+        in workflow
+    )
     assert "upload-manifest" in workflow
     assert "restore-manifest" in workflow
     assert "partial.json" in workflow
