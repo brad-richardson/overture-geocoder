@@ -15,8 +15,12 @@ const PREAMBLE_BYTES: usize = 12;
 const RECORD_INDEX_BYTES: u64 = 8;
 const MAX_DIRECTORY_BYTES: usize = 512 * 1024;
 const MAX_LEXICON_BLOCK_BYTES: u64 = 512 * 1024;
+const MAX_LEXICON_BLOCKS: usize = 32;
+const MAX_LEXICON_TOTAL_BYTES: u64 = 2 * 1024 * 1024;
+const MAX_LEXICON_MATCHES: usize = 4096;
 const MAX_LEXICON_ENTRIES_PER_BLOCK: usize = 4096;
 const MAX_TOKEN_BYTES: usize = 4096;
+const MIN_PREFIX_CHARS: usize = 2;
 const MAX_POSTING_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_POSTING_CANDIDATES: usize = 200_000;
 const MAX_RESULT_RECORD_BYTES: usize = 64 * 1024;
@@ -178,6 +182,58 @@ fn decode_lexicon_block(bytes: &[u8], expected_entries: usize) -> PageResult<Vec
         return Err(PageError::new("Places lexicon block has trailing bytes"));
     }
     Ok(entries)
+}
+
+fn select_lexicon_blocks<'a>(
+    directory: &'a Directory,
+    token: &str,
+    prefix: bool,
+) -> Result<Vec<&'a LexiconBlock>> {
+    if token.is_empty()
+        || token.len() > MAX_TOKEN_BYTES
+        || (prefix && token.chars().count() < MIN_PREFIX_CHARS)
+    {
+        return Err(Error::RustError(
+            "Places lookup token is outside hard bounds".into(),
+        ));
+    }
+    let upper = format!("{token}\u{10ffff}");
+    let mut selected = Vec::new();
+    let mut total_bytes = 0_u64;
+    for block in &directory.lexicon_blocks {
+        let overlaps = if prefix {
+            block.last.as_str() >= token && block.first <= upper
+        } else {
+            block.first.as_str() <= token && token <= block.last.as_str()
+        };
+        if !overlaps {
+            continue;
+        }
+        if block.length == 0
+            || block.length > MAX_LEXICON_BLOCK_BYTES
+            || block.entries == 0
+            || block.entries > MAX_LEXICON_ENTRIES_PER_BLOCK
+        {
+            return Err(Error::RustError(
+                "Places lexicon block exceeds hard cap".into(),
+            ));
+        }
+        if selected.len() >= MAX_LEXICON_BLOCKS {
+            return Err(Error::RustError(
+                "Places lexicon block selection exceeds hard cap".into(),
+            ));
+        }
+        total_bytes = total_bytes
+            .checked_add(block.length)
+            .ok_or_else(|| Error::RustError("Places lexicon byte total overflows".into()))?;
+        if total_bytes > MAX_LEXICON_TOTAL_BYTES {
+            return Err(Error::RustError(
+                "Places lexicon byte total exceeds hard cap".into(),
+            ));
+        }
+        selected.push(block);
+    }
+    Ok(selected)
 }
 
 fn decode_postings(bytes: &[u8], count: usize) -> PageResult<Vec<(u64, u8)>> {
@@ -434,11 +490,6 @@ impl ShardLoader {
         token: &str,
         prefix: bool,
     ) -> Result<PlacesShardLookup> {
-        if token.is_empty() || token.len() > MAX_TOKEN_BYTES {
-            return Err(Error::RustError(
-                "Places lookup token is outside hard bounds".into(),
-            ));
-        }
         let mut reader = RangeReader::new(self, key);
         let preamble = reader
             .range(0, PREAMBLE_BYTES as u64)
@@ -473,28 +524,10 @@ impl ShardLoader {
         let after_directory = reader.metrics();
 
         let lexicon = component(&directory, "lexicon")?;
-        let upper = format!("{token}\u{10ffff}");
-        let blocks: Vec<_> = directory
-            .lexicon_blocks
-            .iter()
-            .filter(|block| {
-                if prefix {
-                    block.last.as_str() >= token && block.first <= upper
-                } else {
-                    block.first.as_str() <= token && token <= block.last.as_str()
-                }
-            })
-            .collect();
+        let blocks = select_lexicon_blocks(&directory, token, prefix)?;
         let wants: Vec<_> = blocks
             .iter()
-            .map(|block| {
-                if block.length > MAX_LEXICON_BLOCK_BYTES {
-                    return Err(Error::RustError(
-                        "Places lexicon block exceeds hard cap".into(),
-                    ));
-                }
-                checked_extent(lexicon.offset, block.offset, block.length, lexicon.length)
-            })
+            .map(|block| checked_extent(lexicon.offset, block.offset, block.length, lexicon.length))
             .collect::<Result<_>>()?;
         let chunks = reader.coalesced(&wants, 0, MAX_LEXICON_BLOCK_BYTES).await?;
         let mut matches = Vec::new();
@@ -503,11 +536,21 @@ impl ShardLoader {
                 .map_err(|error| Error::RustError(format!("Invalid Places lexicon: {error}")))?
             {
                 if entry.token == token || (prefix && entry.token.starts_with(token)) {
+                    if matches.len() >= MAX_LEXICON_MATCHES {
+                        return Err(Error::RustError(
+                            "Places lexicon matches exceed hard cap".into(),
+                        ));
+                    }
                     matches.push(entry);
                 }
             }
         }
         let after_lexicon = reader.metrics();
+        if after_lexicon.since(after_directory).planned_physical_ranges > MAX_LEXICON_BLOCKS {
+            return Err(Error::RustError(
+                "Places lexicon physical reads exceed hard cap".into(),
+            ));
+        }
         if matches.is_empty() {
             return Ok(PlacesShardLookup {
                 candidate_count: 0,
@@ -709,5 +752,129 @@ mod tests {
         assert_eq!(place.id, "id");
         assert_eq!(place.name, "Name");
         assert_eq!(place.country, "US");
+    }
+
+    fn directory_with_blocks(blocks: Vec<LexiconBlock>) -> Directory {
+        Directory {
+            schema_version: 1,
+            tokenizer_version: "nfkd-latin-fold-cjk-bigram-v2".into(),
+            record_count: 1,
+            token_count: blocks.iter().map(|block| block.entries).sum(),
+            lexicon_blocks: blocks,
+            components: HashMap::new(),
+        }
+    }
+
+    fn matching_block(index: usize, length: u64) -> LexiconBlock {
+        LexiconBlock {
+            first: format!("ab{index:04}"),
+            last: format!("ab{index:04}z"),
+            offset: index as u64 * length,
+            length,
+            entries: 1,
+        }
+    }
+
+    #[test]
+    fn broad_prefix_rejects_too_many_lexicon_blocks_before_reading() {
+        let blocks = (0..=MAX_LEXICON_BLOCKS)
+            .map(|index| matching_block(index, 1))
+            .collect();
+        let directory = directory_with_blocks(blocks);
+        let error = select_lexicon_blocks(&directory, "ab", true).unwrap_err();
+        assert!(format!("{error:?}").contains("block selection exceeds hard cap"));
+    }
+
+    #[test]
+    fn broad_prefix_rejects_aggregate_lexicon_bytes_before_reading() {
+        let blocks = (0..5)
+            .map(|index| matching_block(index, MAX_LEXICON_BLOCK_BYTES))
+            .collect();
+        let directory = directory_with_blocks(blocks);
+        let error = select_lexicon_blocks(&directory, "ab", true).unwrap_err();
+        assert!(format!("{error:?}").contains("byte total exceeds hard cap"));
+    }
+
+    #[test]
+    fn single_character_prefix_is_unsupported() {
+        let directory = directory_with_blocks(vec![matching_block(0, 1)]);
+        assert!(select_lexicon_blocks(&directory, "a", true).is_err());
+    }
+
+    fn fixture_component<'a>(object: &'a [u8], component: &Component) -> &'a [u8] {
+        let start = usize::try_from(component.offset).unwrap();
+        let length = usize::try_from(component.length).unwrap();
+        &object[start..start + length]
+    }
+
+    #[test]
+    fn python_generated_full_shard_decodes_through_rust_components() {
+        let object = include_bytes!("../../../tests/fixtures/places-pages/shard.pcsh");
+        assert_eq!(&object[..8], MAGIC);
+        let directory_length = u32::from_le_bytes(object[8..12].try_into().unwrap()) as usize;
+        let directory: Directory =
+            serde_json::from_slice(&object[12..12 + directory_length]).unwrap();
+        let lexicon = fixture_component(object, component(&directory, "lexicon").unwrap());
+        let blocks = select_lexicon_blocks(&directory, "shared", false).unwrap();
+        let entry = blocks
+            .iter()
+            .flat_map(|block| {
+                let start = usize::try_from(block.offset).unwrap();
+                let length = usize::try_from(block.length).unwrap();
+                decode_lexicon_block(&lexicon[start..start + length], block.entries).unwrap()
+            })
+            .find(|entry| entry.token == "shared")
+            .unwrap();
+        let postings = fixture_component(object, component(&directory, "postings").unwrap());
+        let posting_start = usize::try_from(entry.posting_offset).unwrap();
+        let posting_length = usize::try_from(entry.posting_length).unwrap();
+        let mut docs = decode_postings(
+            &postings[posting_start..posting_start + posting_length],
+            entry.posting_count,
+        )
+        .unwrap();
+        docs.sort_by(|left, right| right.1.cmp(&left.1).then(left.0.cmp(&right.0)));
+        let doc_id = usize::try_from(docs[0].0).unwrap();
+        let record_index =
+            fixture_component(object, component(&directory, "record_index").unwrap());
+        let index_start = doc_id * RECORD_INDEX_BYTES as usize;
+        let record_offset = u32::from_le_bytes(
+            record_index[index_start..index_start + 4]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let record_length = u32::from_le_bytes(
+            record_index[index_start + 4..index_start + 8]
+                .try_into()
+                .unwrap(),
+        ) as usize;
+        let records = fixture_component(object, component(&directory, "records").unwrap());
+        let result =
+            decode_projection(&records[record_offset..record_offset + record_length]).unwrap();
+        assert_eq!(result.id, "fixture-00");
+        assert_eq!(result.name, "Shared Cafe");
+    }
+
+    #[test]
+    fn python_generated_full_head_decodes_through_rust_components() {
+        let object = include_bytes!("../../../tests/fixtures/places-pages/head.phrp");
+        assert_eq!(&object[..8], HEAD_MAGIC);
+        let directory_length = u32::from_le_bytes(object[8..12].try_into().unwrap()) as usize;
+        let directory: HeadDirectory =
+            serde_json::from_slice(&object[12..12 + directory_length]).unwrap();
+        let key_index = head_component(&directory, "key_index").unwrap();
+        let index_start = usize::try_from(key_index.offset).unwrap();
+        let index_length = usize::try_from(key_index.length).unwrap();
+        let (offset, length) =
+            find_head_entry(&object[index_start..index_start + index_length], "e:shared")
+                .unwrap()
+                .unwrap();
+        let entries = head_component(&directory, "entries").unwrap();
+        let start = usize::try_from(entries.offset + offset).unwrap();
+        let length = usize::try_from(length).unwrap();
+        let results = decode_head_entry(&object[start..start + length]).unwrap();
+        assert_eq!(results.len(), RESULT_LIMIT);
+        assert_eq!(results[0].id, "fixture-00");
+        assert_eq!(results[9].id, "fixture-09");
     }
 }

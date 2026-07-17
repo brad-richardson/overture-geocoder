@@ -73,6 +73,7 @@ jobs:
           jq -e '
             (.cases | any(.head_hit == true))
             and (.cases | any(.head_hit == false))
+            and (.cases | any(.name == "shard_prefix"))
             and (.cases | any(.name == "cjk_exact"))
           ' /tmp/places-worker-smoke/artifacts/report.json
 
@@ -127,6 +128,7 @@ jobs:
             PREFIX=$(jq -r 'if .prefix then "1" else "0" end' <<< "$CASE")
             EXPECTED_IDS=$(jq -c '.result_ids' <<< "$CASE")
             EXPECTED_HEAD=$(jq -r '.head_hit' <<< "$CASE")
+            EXPECTED_COUNT=$(jq -r '.candidate_count' <<< "$CASE")
             for attempt in 1 2 3 4 5 6; do
               BODY=$(mktemp)
               HEADERS=$(mktemp)
@@ -135,9 +137,11 @@ jobs:
                 --write-out '%{http_code} %{time_total}\n' \
                 "${PREVIEW_URL}/__places-page-spike?token=${TOKEN}&prefix=${PREFIX}")
               test "$STATUS" = "200"
-              jq -e --argjson ids "$EXPECTED_IDS" --argjson head "$EXPECTED_HEAD" '
+              jq -e --argjson ids "$EXPECTED_IDS" --argjson head "$EXPECTED_HEAD" \
+                --argjson count "$EXPECTED_COUNT" '
                 .schema == "overture-places-worker-spike-v1"
                 and [.results[].id] == $ids
+                and .candidate_count == $count
                 and .head_hit == $head
                 and .head_consulted == true
                 and .read_metrics.logical_ranges >= 3

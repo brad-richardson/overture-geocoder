@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -43,6 +44,72 @@ def test_existing_corrupt_remote_object_is_never_overwritten(tmp_path):
     with pytest.raises(ValueError, match="SHA-256 differs"):
         shuffle.ensure_uploaded(store, source, key)
     assert store._path(key).read_bytes() == b"corrupt!"
+
+
+def test_raced_remote_object_is_never_overwritten(tmp_path):
+    source = tmp_path / "fragment.bin"
+    source.write_bytes(b"expected")
+
+    class RaceStore(shuffle.FilesystemStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.first_head = True
+
+        def head(self, key):
+            if self.first_head:
+                self.first_head = False
+                return None
+            return super().head(key)
+
+        def upload(self, source, key, sha256):
+            raced = tmp_path / "raced.bin"
+            raced.write_bytes(b"raced object")
+            identity = shuffle.artifact_identity(raced)
+            super().upload(raced, key, identity["sha256"])
+            raise FileExistsError(key)
+
+    store = RaceStore(tmp_path / "remote")
+    identity = shuffle.artifact_identity(source)
+    key = shuffle.immutable_key("runs/1", identity)
+
+    with pytest.raises(ValueError, match="refusing overwrite"):
+        shuffle.ensure_uploaded(store, source, key)
+    assert store._path(key).read_bytes() == b"raced object"
+
+
+def test_s3_upload_uses_create_only_precondition(tmp_path, monkeypatch):
+    source = tmp_path / "fragment.bin"
+    source.write_bytes(b"expected")
+    calls = []
+
+    def run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(shuffle.subprocess, "run", run)
+    shuffle.S3Store("bucket", "https://example.invalid").upload(
+        source, "prefix/key", shuffle.sha256_file(source)
+    )
+
+    assert ["--if-none-match", "*"] == calls[0][0][
+        calls[0][0].index("--if-none-match") : calls[0][0].index("--if-none-match") + 2
+    ]
+
+
+def test_s3_upload_maps_precondition_failure_to_race(tmp_path, monkeypatch):
+    source = tmp_path / "fragment.bin"
+    source.write_bytes(b"expected")
+
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command, 1, stdout="", stderr="PreconditionFailed (412)"
+        )
+
+    monkeypatch.setattr(shuffle.subprocess, "run", run)
+    with pytest.raises(FileExistsError, match="appeared"):
+        shuffle.S3Store("bucket", "https://example.invalid").upload(
+            source, "prefix/key", shuffle.sha256_file(source)
+        )
 
 
 def test_stale_local_download_is_replaced_only_after_remote_verification(tmp_path):

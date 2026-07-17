@@ -24,6 +24,16 @@ pub(crate) struct CacheRangeRead {
 }
 
 #[cfg(feature = "address-spike")]
+fn validate_at_most_prefix_length(actual: usize, max_bytes: usize) -> Result<()> {
+    if max_bytes == 0 || actual > max_bytes {
+        return Err(Error::RustError(
+            "Prefix response exceeds requested hard cap".into(),
+        ));
+    }
+    Ok(())
+}
+
+#[cfg(feature = "address-spike")]
 pub(crate) struct AddressPageLookup {
     pub records: Vec<AddressPageRecord>,
     pub read_metrics: RangeReadMetrics,
@@ -170,6 +180,11 @@ impl ShardLoader {
             if bytes.is_empty() {
                 return Ok(None);
             }
+            if bytes.len() as u64 != length {
+                return Err(Error::RustError(
+                    "Cached range length differs from requested extent".into(),
+                ));
+            }
             console_log!("Cache HIT range: {} ({}..{})", key, offset, offset + length);
             return Ok(Some(CacheRangeRead {
                 bytes: Bytes::from(bytes),
@@ -192,6 +207,11 @@ impl ShardLoader {
             .body()
             .ok_or_else(|| Error::RustError("Empty range body".into()))?;
         let bytes = Bytes::from(body.bytes().await?);
+        if bytes.len() as u64 != length {
+            return Err(Error::RustError(
+                "R2 range length differs from requested extent".into(),
+            ));
+        }
         self.cache_put_bytes_background(cache_key, bytes.clone(), ID_INDEX_CACHE_TTL)
             .await;
 
@@ -262,6 +282,61 @@ impl ShardLoader {
         }))
     }
 
+    /// Read up to `max_bytes` from the start of an object. Unlike the bounded
+    /// whole-object helper above, a short response at EOF is valid: callers use
+    /// this only for a fixed-size envelope/header prefix of a possibly larger
+    /// object. Both cache hits and R2 responses are checked before acceptance.
+    #[cfg(feature = "address-spike")]
+    pub(crate) async fn cached_at_most_prefix_read_measured(
+        &self,
+        key: &str,
+        max_bytes: usize,
+        ttl: u64,
+    ) -> Result<Option<CacheRangeRead>> {
+        validate_at_most_prefix_length(0, max_bytes)?;
+        let cache_key = format!("{}{}__at-most-prefix-{}", CACHE_PREFIX, key, max_bytes);
+        let request = Request::new(&cache_key, Method::Get)?;
+        if let Some(mut response) = self.cache.get(&request, false).await? {
+            let bytes = response.bytes().await?;
+            if bytes.is_empty() {
+                return Ok(None);
+            }
+            validate_at_most_prefix_length(bytes.len(), max_bytes)?;
+            return Ok(Some(CacheRangeRead {
+                bytes: Bytes::from(bytes),
+                cache_hit: true,
+            }));
+        }
+        let obj = self
+            .bucket
+            .get(key)
+            .range(worker::Range::OffsetWithLength {
+                offset: 0,
+                length: max_bytes as u64,
+            })
+            .execute()
+            .await?;
+        let Some(obj) = obj else {
+            self.cache_put_bytes_background(cache_key, Bytes::new(), NEGATIVE_CACHE_TTL)
+                .await;
+            return Ok(None);
+        };
+        let body = obj
+            .body()
+            .ok_or_else(|| Error::RustError("Empty prefix body".into()))?;
+        let bytes = Bytes::from(body.bytes().await?);
+        if bytes.is_empty() {
+            return Err(Error::RustError("R2 prefix body is empty".into()));
+        }
+        validate_at_most_prefix_length(bytes.len(), max_bytes)?;
+        self.cache_put_bytes_background(cache_key, bytes.clone(), ttl)
+            .await;
+        Ok(Some(CacheRangeRead {
+            bytes,
+            cache_hit: false,
+        }))
+    }
+
     /// Experimental exact-address storage path.
     ///
     /// The caller supplies immutable versioned object keys and an already
@@ -301,7 +376,7 @@ impl ShardLoader {
         // is edge-cached separately from candidate pages.
         let mut data_reader = RangeReader::new(self, data_key);
         let header = data_reader
-            .range(0, 4096)
+            .at_most_prefix(4096, IMMUTABLE_CACHE_TTL)
             .await?
             .ok_or_else(|| not_found(data_key))?;
         parse_useful_gzip_header(&header)
@@ -496,5 +571,22 @@ impl ShardLoader {
         });
 
         Ok((db, size))
+    }
+}
+
+#[cfg(all(test, feature = "address-spike"))]
+mod address_prefix_tests {
+    use super::validate_at_most_prefix_length;
+
+    #[test]
+    fn at_most_prefix_accepts_short_eof_and_exact_cap() {
+        assert!(validate_at_most_prefix_length(985, 4096).is_ok());
+        assert!(validate_at_most_prefix_length(4096, 4096).is_ok());
+    }
+
+    #[test]
+    fn at_most_prefix_rejects_overflow_and_zero_cap() {
+        assert!(validate_at_most_prefix_length(4097, 4096).is_err());
+        assert!(validate_at_most_prefix_length(0, 0).is_err());
     }
 }

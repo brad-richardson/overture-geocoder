@@ -123,3 +123,15 @@ def test_plan_rejects_one_row_group_over_byte_cap():
             max_groups=2,
             max_tasks=2,
         )
+
+
+def test_plan_rejects_one_row_group_over_row_cap():
+    objects = [source("s3://bucket/a", [101], [10])]
+    with pytest.raises(ValueError, match="exceeds the task row cap"):
+        inventory.plan_contiguous_ranges(
+            objects,
+            target_rows=100,
+            max_selected_uncompressed_bytes=100,
+            max_groups=2,
+            max_tasks=2,
+        )

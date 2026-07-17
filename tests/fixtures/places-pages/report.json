@@ -1,0 +1,27 @@
+{
+  "files": {
+    "head.phrp": {
+      "bytes": 22614,
+      "sha256": "febbf658051b6ceea4a7cce5ac5b486c2af897901c860c29597e1192cf28fb7d"
+    },
+    "shard.pcsh": {
+      "bytes": 1483,
+      "sha256": "d6fde90386d43a51d5926eda517ecd220bedd537162c6a3f9643874fa4866599"
+    }
+  },
+  "head_result_ids": [
+    "fixture-00",
+    "fixture-01",
+    "fixture-02",
+    "fixture-03",
+    "fixture-04",
+    "fixture-05",
+    "fixture-06",
+    "fixture-07",
+    "fixture-08",
+    "fixture-09"
+  ],
+  "schema": "overture-places-page-fixture-v1",
+  "shard_first_id": "fixture-00",
+  "token": "shared"
+}

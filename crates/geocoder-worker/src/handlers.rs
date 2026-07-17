@@ -161,7 +161,7 @@ pub async fn handle_places_page_spike(
         .query_pairs()
         .find(|(name, _)| name == "prefix")
         .is_some_and(|(_, value)| value == "1");
-    if token.is_empty() || token.len() > 4096 {
+    if token.is_empty() || token.len() > 4096 || (prefix_query && token.chars().count() < 2) {
         return Response::error("Expected one bounded normalized token", 400);
     }
 
@@ -208,12 +208,11 @@ pub async fn handle_places_page_spike(
             "tokenizer_version": lookup.tokenizer_version,
         }));
     }
-    results.sort_by(|left, right| {
-        right
-            .confidence
-            .total_cmp(&left.confidence)
-            .then(left.id.cmp(&right.id))
-    });
+    // Each shard returns (quantized confidence DESC, local doc_id ASC). Stable
+    // confidence-only sorting preserves shard order and local doc order for
+    // ties, so per-shard truncation and global truncation use one comparator.
+    // The packed head is built from the same shard-major/local-doc ordering.
+    results.sort_by(|left, right| right.confidence.total_cmp(&left.confidence));
     results.truncate(10);
     let body = serde_json::json!({
         "schema": "overture-places-worker-spike-v1",

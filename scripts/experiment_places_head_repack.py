@@ -160,6 +160,7 @@ def build_heads_and_baseline(
     head_bucket_count: int = HEAD_BUCKET_COUNT,
     head_minimum_candidates: int = HEAD_MINIMUM_CANDIDATES,
     head_limit: int = HEAD_LIMIT,
+    preserve_input_order: bool = False,
 ) -> tuple[list[Place], dict[str, list[int]], PackedHeadStore]:
     """Reproduce the locality-head object exactly, without its cell/posting tiers.
 
@@ -168,12 +169,15 @@ def build_heads_and_baseline(
     ``LocalityHeadIndex.head_store`` bit-for-bit (see the equality test), while
     skipping the expensive base page index the repack does not need.
     """
-    ordered = ordered_places(places, cell_degrees)
+    # A multi-shard caller may already have established the serving order
+    # (shard index, then local document ID). Preserve it so packed-head and
+    # fallback top-k use the same deterministic tie-breaker.
+    ordered = (
+        list(places) if preserve_input_order else ordered_places(places, cell_degrees)
+    )
     exact = posting_map(ordered)
     heads = build_heads(ordered, exact, head_minimum_candidates, head_limit)
-    baseline = PackedHeadStore(
-        release, ordered, heads, head_target, head_bucket_count
-    )
+    baseline = PackedHeadStore(release, ordered, heads, head_target, head_bucket_count)
     return ordered, heads, baseline
 
 
@@ -201,7 +205,9 @@ def build_repack_object(
         "magic": MAGIC.decode(),
         "key_count": len(key_entries),
         "head_limit": HEAD_LIMIT,
-        "components": {name: {"length": len(data)} for name, data in components.items()},
+        "components": {
+            name: {"length": len(data)} for name, data in components.items()
+        },
     }
     # Stabilize the JSON directory length and the component offsets it stores.
     for _ in range(8):
@@ -436,10 +442,18 @@ def measure(
         "queries": rows,
         "summary": {
             "hit_query_count": len(hits),
-            "baseline_max_reads": max((r["baseline_4090obj"]["reads"] for r in hits), default=0),
-            "baseline_max_bytes": max((r["baseline_4090obj"]["bytes"] for r in hits), default=0),
-            "resident_max_reads": max((r["single_resident"]["reads"] for r in hits), default=0),
-            "resident_max_bytes": max((r["single_resident"]["bytes"] for r in hits), default=0),
+            "baseline_max_reads": max(
+                (r["baseline_4090obj"]["reads"] for r in hits), default=0
+            ),
+            "baseline_max_bytes": max(
+                (r["baseline_4090obj"]["bytes"] for r in hits), default=0
+            ),
+            "resident_max_reads": max(
+                (r["single_resident"]["reads"] for r in hits), default=0
+            ),
+            "resident_max_bytes": max(
+                (r["single_resident"]["bytes"] for r in hits), default=0
+            ),
             "cold_max_reads": max((r["single_cold"]["reads"] for r in hits), default=0),
             "cold_max_bytes": max((r["single_cold"]["bytes"] for r in hits), default=0),
             "mean_overfetch_ratio_baseline_vs_resident": (
@@ -640,7 +654,15 @@ def main(argv: list[str] | None = None) -> int:
     args.markdown_out.parent.mkdir(parents=True, exist_ok=True)
     args.json_out.write_text(json.dumps(report, indent=2) + "\n")
     args.markdown_out.write_text(markdown(report) + "\n")
-    print(json.dumps({"summary": report["benchmark"]["summary"], "single_object_head": report["single_object_head"]}, indent=2))
+    print(
+        json.dumps(
+            {
+                "summary": report["benchmark"]["summary"],
+                "single_object_head": report["single_object_head"],
+            },
+            indent=2,
+        )
+    )
     return 0
 
 

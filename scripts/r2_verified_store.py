@@ -66,7 +66,9 @@ class ObjectInfo:
 class ObjectStore(Protocol):
     def head(self, key: str) -> ObjectInfo | None: ...
 
-    def upload(self, source: Path, key: str, sha256: str) -> None: ...
+    def upload(self, source: Path, key: str, sha256: str) -> None:
+        """Create ``key`` atomically, raising FileExistsError if it exists."""
+        ...
 
     def download(self, key: str, destination: Path) -> None: ...
 
@@ -104,7 +106,9 @@ class FilesystemStore:
                 shutil.copyfileobj(input_file, temporary)
         metadata_path = destination.with_name(f"{destination.name}.metadata.json")
         try:
-            os.replace(temporary_path, destination)
+            # link(2) is an atomic create-only publication: unlike replace(), it
+            # cannot overwrite an object that races the preflight exists check.
+            os.link(temporary_path, destination)
             metadata_path.write_text(
                 json.dumps({SHA_METADATA_KEY: sha256}, sort_keys=True) + "\n"
             )
@@ -170,19 +174,32 @@ class S3Store:
         return ObjectInfo(int(payload["ContentLength"]), metadata.get(SHA_METADATA_KEY))
 
     def upload(self, source: Path, key: str, sha256: str) -> None:
-        self._run(
-            [
-                "put-object",
-                "--bucket",
-                self.bucket,
-                "--key",
-                key,
-                "--body",
-                str(source),
-                "--metadata",
-                f"{SHA_METADATA_KEY}={sha256}",
-            ]
-        )
+        command = [
+            "aws",
+            "s3api",
+            "put-object",
+            "--bucket",
+            self.bucket,
+            "--key",
+            key,
+            "--body",
+            str(source),
+            "--metadata",
+            f"{SHA_METADATA_KEY}={sha256}",
+            "--if-none-match",
+            "*",
+            "--endpoint-url",
+            self.endpoint_url,
+            "--region",
+            "auto",
+        ]
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.returncode == 0:
+            return
+        combined = f"{result.stdout}\n{result.stderr}"
+        if "PreconditionFailed" in combined or "412" in combined:
+            raise FileExistsError(f"object appeared during create-only upload: {key}")
+        raise RuntimeError(f"put-object failed for {key}: {result.stderr.strip()}")
 
     def download(self, key: str, destination: Path) -> None:
         self._run(
@@ -249,8 +266,15 @@ def ensure_uploaded(store: ObjectStore, source: Path, key: str) -> dict[str, Any
     remote = store.head(key)
     status = "uploaded"
     if remote is None:
-        store.upload(source, key, artifact["sha256"])
-    else:
+        try:
+            store.upload(source, key, artifact["sha256"])
+        except FileExistsError:
+            # A concurrent create won after our HEAD. Never retry with an
+            # overwrite: inspect and read back the winner under the same rules
+            # as an object that existed before the operation.
+            remote = store.head(key)
+            status = "existing_verified"
+    if remote is not None:
         if remote != expected:
             raise ValueError(
                 f"existing object identity differs; refusing overwrite: {key}"

@@ -113,6 +113,29 @@ impl<'a> RangeReader<'a> {
         }
     }
 
+    /// Read at most `max_bytes` from the object start. Short-at-EOF is valid;
+    /// this is for envelope prefixes, not exact component extents.
+    #[cfg(feature = "address-spike")]
+    pub(crate) async fn at_most_prefix(
+        &mut self,
+        max_bytes: usize,
+        ttl: u64,
+    ) -> Result<Option<Bytes>> {
+        self.metrics.logical_ranges = self.metrics.logical_ranges.saturating_add(1);
+        self.metrics.planned_physical_ranges =
+            self.metrics.planned_physical_ranges.saturating_add(1);
+        let read = self
+            .loader
+            .cached_at_most_prefix_read_measured(&self.key, max_bytes, ttl)
+            .await?;
+        if let Some(read) = read {
+            self.metrics.observe(read.bytes.len(), read.cache_hit);
+            Ok(Some(read.bytes))
+        } else {
+            Ok(None)
+        }
+    }
+
     /// Read one exact byte range, edge-cached.
     pub(crate) async fn range(&mut self, offset: u64, length: u64) -> Result<Option<Bytes>> {
         self.metrics.logical_ranges = self.metrics.logical_ranges.saturating_add(1);
@@ -124,6 +147,11 @@ impl<'a> RangeReader<'a> {
             .await?;
         if let Some(read) = read {
             self.metrics.observe(read.bytes.len(), read.cache_hit);
+            if read.bytes.len() as u64 != length {
+                return Err(Error::RustError(
+                    "Exact range length differs from requested extent".into(),
+                ));
+            }
             Ok(Some(read.bytes))
         } else {
             Ok(None)

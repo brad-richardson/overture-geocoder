@@ -50,7 +50,9 @@ def query_shards(artifacts: list[Path], token: str, prefix: bool) -> dict[str, A
         )
         candidates += result["candidate_count"]
         results.extend(result["results"])
-    results.sort(key=lambda row: (-row["confidence"], row["id"]))
+    # Python's stable sort preserves shard-major/local-doc order for equal
+    # quantized confidence, matching both per-shard truncation and the Worker.
+    results.sort(key=lambda row: -row["confidence"])
     return {
         "candidate_count": candidates,
         "result_ids": [row["id"] for row in results[:10]],
@@ -76,7 +78,9 @@ def prepare(
 
     combined = [place for group in ordered_groups for place in group]
     ordered, heads, _ = build_heads_and_baseline(
-        combined, head_minimum_candidates=head_minimum_candidates
+        combined,
+        head_minimum_candidates=head_minimum_candidates,
+        preserve_input_order=True,
     )
     head_path = output_dir / "head.phrp"
     head_report = build_repack_object(ordered, heads, head_path)
@@ -131,21 +135,29 @@ def prepare(
     for token in fallback_tokens:
         if len(token) < 4 or has_cjk(token):
             continue
-        prefix = token[: max(3, len(token) - 2)]
-        if f"p:{prefix}" in head_index:
-            continue
-        result = query_shards(artifacts, prefix, True)
-        if 0 < result["candidate_count"] <= 10_000:
-            prefix_case = {
-                "name": "shard_prefix",
-                "token": prefix,
-                "prefix": True,
-                "head_hit": False,
-                **result,
-            }
+        # Prefer a proper last-token prefix, but the full token through the
+        # prefix path is still a valid bounded fallback when every shorter
+        # prefix was promoted into the packed head.
+        lengths = [*range(len(token) - 1, 1, -1), len(token)]
+        for length in lengths:
+            prefix = token[:length]
+            if f"p:{prefix}" in head_index:
+                continue
+            result = query_shards(artifacts, prefix, True)
+            if 0 < result["candidate_count"] <= 10_000:
+                prefix_case = {
+                    "name": "shard_prefix",
+                    "token": prefix,
+                    "prefix": True,
+                    "head_hit": False,
+                    **result,
+                }
+                break
+        if prefix_case is not None:
             break
-    if prefix_case:
-        cases.append(prefix_case)
+    if prefix_case is None:
+        raise ValueError("no bounded non-head prefix case exists in the three shards")
+    cases.append(prefix_case)
 
     cjk_case = None
     for token in fallback_tokens:

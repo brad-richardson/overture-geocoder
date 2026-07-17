@@ -242,6 +242,10 @@ def plan_contiguous_ranges(
                 raise ValueError(
                     f"row group {group['index']} in {source['uri']} exceeds the task byte cap"
                 )
+            if group["rows"] > target_rows:
+                raise ValueError(
+                    f"row group {group['index']} in {source['uri']} exceeds the task row cap"
+                )
             if (
                 pending_ranges
                 and pending_ranges[-1]["uri"] == source["uri"]
