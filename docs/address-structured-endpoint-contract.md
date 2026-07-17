@@ -29,10 +29,11 @@ matches producer rows whose corresponding normalized value is empty and is not
 a wildcard. A client that has less context needs a separately designed search
 surface rather than surprising exact-lookup fanout.
 
-Normalization is the current producer's `strip`, whitespace collapse, and
-ASCII lowercase contract. Non-ASCII characters remain exact; this slice does
-not promise Unicode case folding. The response echoes the data version and
-normalization version so a client can diagnose a miss.
+Normalization is the current producer's NFC normalization,
+Unicode-whitespace collapse, and ASCII-only lowercasing contract. Canonically
+equivalent non-ASCII sequences are merged, but this slice does not promise
+Unicode case folding. The response echoes the data version and normalization
+version so a client can diagnose a miss.
 
 ## Results and ambiguity
 

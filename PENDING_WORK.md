@@ -2,7 +2,7 @@
 
 This is the active roadmap. Completed PR history is intentionally omitted unless
 its result constrains the next decision. The implementation baseline is
-`7480d57` (`main` after #85); the current remote evidence is recorded in
+`6ff382c` (`main` after #86); the current remote evidence is recorded in
 `benchmarks/2026-07-17-remote-address-places-r2-evidence.md`.
 
 ## Current state
@@ -28,6 +28,18 @@ its result constrains the next decision. The implementation baseline is
 - The remote R2 rehearsal passed partial upload, repeated verified resume, empty
   restore, stale-local repair, and cleanup. The small rehearsal now belongs in
   path-filtered `main` smoke CI; the large external-data jobs remain manual.
+- A versioned Places routing catalog, one-shard context/point routing,
+  multi-clause field masks, packed-head-only context-free path, independent
+  cold namespaces, full-projection oracles, and technical gate classification
+  are implemented in #87. Distance is diagnostic only: the bounded result
+  window is not yet a complete nearest-candidate ranking.
+- A main-only, non-promoting two-task address workflow now connects real reducer
+  fragments to the verified R2 store, including partial/repeated resume,
+  empty/stale restore, byte-identical local-oracle reduction, cleanup, and
+  structured byte/resource/timing evidence. It has not yet been dispatched.
+- Prototype contracts now define structured exact-address ambiguity and a
+  candidate country/hash-range partition rule, plus Places launch/stop gates.
+  These are measurement contracts, not publication approval.
 - The July 25 rebuild remains the next production rebuild. The July 13 rebuild
   is recent enough that no ad-hoc production rebuild is justified by this work.
 
@@ -51,46 +63,51 @@ its result constrains the next decision. The implementation baseline is
    low-frequency integration evidence. They are not required pull-request CI.
 7. Keep ambiguous reverse routes on `HEAD` until an exact-country candidate
    passes correctness and byte gates after the next production rebuild.
+8. Credentialed external-data workflows run only from `main`. A green evidence
+   workflow means measurement and cleanup succeeded; it does not approve a
+   family for launch or publication.
 
 ## Next work
 
-### 1. Route and score the Places prototype
+### 1. Run and benchmark the routed Places prototype
 
 The byte reader works; query planning and product relevance are now the blocking
 work.
 
-- Add a versioned shard catalog and route explicit query location/context to the
-  relevant compact shard instead of fanning every head miss across all shards.
-- Preserve the packed head as the context-free fast path, but define eligibility
-  and fame evidence rather than treating frequency alone as relevance.
-- Run each latency case from an independent cold namespace or explicit
-  smoke-only cache bypass. Report cold and warm client time, Worker time,
-  physical reads, R2/cache bytes, and failure behavior separately.
-- Execute and human-score `benchmarks/places-relevance-seed.json`, including
-  returned names, categories, context, distance ordering, duplicate IDs, and
-  repeated-order stability. Expand labels only after inspecting those results.
-- Set explicit launch and stop gates from the routed measurements. Do not enable
-  `place` by default while a normal located miss still follows the observed
-  three-shard/15-range path or any seed class has zero relevant top-five result.
+- Dispatch the main-only Places workflow. Retain independently cold/warm client
+  and Worker time, physical reads, R2/cache bytes, full projections, point and
+  context routing, catalog failure, duplicate IDs, and repeated order.
+- Build a side-by-side top-five panel for the six relevance seeds using the
+  previously evaluated reference geocoders, including Nominatim. Treat those
+  engines as comparators rather than ground truth and adjudicate disagreements
+  in coverage, local names, category semantics, and requested context.
+- Record `proceed`, `optimize`, or `stop`. The automated state
+  `awaiting_relevance_benchmark` is intentionally not launch approval.
+- Design a bounded ranking component that can compare every eligible located
+  candidate before applying distance. Do not present the current decoded
+  top-window distances as complete near-me ranking.
+- Keep `place` disabled by default until every seed class has a relevant
+  top-five result, context ordering is correct, repeated order is stable, and
+  the routed read/byte/latency gates pass.
 
 Exit artifact: one routed Worker/relevance report with a proceed, optimize, or
 stop decision.
 
-### 2. Connect real address fragments to verified resume
+### 2. Run real address fragments through verified resume
 
 The bounded producer shape is viable; the next risk is global coordination and
 coverage policy.
 
-- Feed real content-addressed map fragments and their deterministic manifests
-  through the verified R2 store. Rehearse partial completion, retry, empty-local
-  reduce restore, and cleanup with more than one inventoried address task.
+- Dispatch the main-only US/Mexico workflow and retain its real fragment,
+  partial/repeated resume, empty/stale restore, byte-identical reduce, cleanup,
+  retry-amplification, wall-time, RAM, disk, retention, and output-byte evidence.
 - Collect structured-retention and output-byte summaries across the planned 127
   tasks before selecting regional partitions or claiming planet storage.
-- Define the public structured endpoint: required fields, exact versus prefix
-  semantics, ambiguity behavior, response limits, and the disposition of rows
-  missing street or number.
-- Choose the partition/catalog rule from measured fanout and bytes, then add the
-  object-level publication guard required by the shared finalizer path.
+- Validate the proposed exact endpoint and country/hash-range partition against
+  the multi-task evidence. The current normalization contract is NFC,
+  Unicode-whitespace collapse, and ASCII-only lowercasing; decide and version
+  any broader Unicode folding before building publishable shards.
+- Add the object-level publication guard required by the shared finalizer path.
 - Evaluate a bounded two-level/sparse side index or smaller serving partition so
   a cold exact lookup does not automatically fetch the observed 941,745-byte
   full index. Preserve exact predecessor selection and the three-range cap.
@@ -100,6 +117,37 @@ coverage policy.
 
 Exit artifact: a multi-task, non-promoting R2 map/reduce rehearsal plus a
 reviewed address coverage/partition contract.
+
+### Production rebuild readiness for address and Places
+
+Neither family is part of the next scheduled full shard rebuild. A limited
+regional rebuild is acceptable before planet readiness, but only after its
+scope is explicit and the following gaps close:
+
+- **Producer scope and coverage:** choose named address and Places regions from
+  source inventory; record included/excluded rows and reasons; produce exact
+  family totals rather than extrapolating one regional retention ratio.
+- **Final artifacts and catalogs:** turn the prototype address partition rule
+  and Places routing catalog into release-versioned family manifests with
+  immutable object identities, lineage, format/tokenizer/normalization versions,
+  and deterministic local plus downloaded verification.
+- **Serving correctness:** complete bounded located-Places ranking, comparator
+  relevance adjudication, multilingual/local-name coverage, address ambiguity
+  and overflow behavior, and the smaller address side-index decision.
+- **Publication serialization:** integrate both optional families into the one
+  shared finalizer with create-only object publication, expected-current
+  promotion, undiscoverable partial runs, and no independent publisher.
+- **Operational envelope:** run a non-promoting regional build through resume,
+  family verification, candidate-catalog generation, remote Worker smoke,
+  failure injection, cleanup, and retained time/RAM/disk/byte evidence.
+- **Promotion and recovery:** add family-aware production smoke, degraded or
+  partial-result signaling, rollback/recovery behavior, and retention rules that
+  never prune the live or rollback release.
+
+Only after those gates pass should a promoted rebuild opt into address or
+Places. Planet scale additionally requires complete 127-task address coverage,
+global Places partition/fame evidence, and a combined stored-byte/build-time
+result inside the existing 40 GB and 12-hour stop gates.
 
 ### 3. Rehearse the scheduled production path
 
@@ -187,10 +235,10 @@ These do not block the first routed Places or real-fragment address slice:
 
 ## Open decisions
 
-1. Places catalog/routing, head eligibility, relevance labels, and numeric
-   read/latency gates.
-2. Address endpoint, incomplete-row policy, partition sizes, catalog shape, and
-   publication serialization.
+1. Places comparator relevance, complete bounded located ranking, regional
+   coverage, and measured numeric gate results.
+2. Address Unicode normalization version, 127-task coverage, serving partition
+   size/side index, and publication serialization.
 3. Additive degraded/partial-result signaling shared by experimental families.
 4. Reverse `wkb` disposition and post-rebuild exact-country priority.
 
