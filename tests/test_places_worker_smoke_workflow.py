@@ -23,6 +23,10 @@ def test_places_smoke_is_manual_real_three_shard_and_isolated():
     assert 'name == "shard_prefix"' in workflow
     assert "head_hit" in workflow
     assert ".candidate_count == $count" in workflow
+    assert "for propagation_attempt in $(seq 1 12)" in workflow
+    assert 'if [ "$STATUS" != "404" ]' in workflow
+    assert "Places page spike remained unavailable after propagation retries" in workflow
+    assert "| tee /tmp/places-worker-latency.json" in workflow
     assert "workers/scripts/geocoder-places-smoke" in workflow
     assert "s3://geocoder-shards/${SMOKE_VERSION}/" in workflow
     assert 'name = "geocoder-places-smoke"' in config
