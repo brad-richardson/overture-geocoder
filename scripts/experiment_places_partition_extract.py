@@ -1,19 +1,24 @@
 #!/usr/bin/env python3
 """Deterministic bbox-parameterized Overture Places extractor for partition spikes.
 
-This mirrors ``scripts/factory_extract_places.py`` exactly -- same projection,
-same filters, same determinism (``ORDER BY id`` before ``LIMIT`` with
-``preserve_insertion_order=true``) -- and only parameterizes the bounding box.
-Running this with the California bbox (-124.5..-114.0 x, 32.5..42.1 y) produces
-byte-identical parquet to ``factory_extract_places.py`` (verified once locally
-by SHA-256 on a 5k-row sample; CI asserts only projection parity via
-``test_partition_extractor_projection_matches_factory``). The result is a
-source-order-free deterministic sample of a rectangular bbox, not exact
-administrative containment or a representative random sample.
+It shares ``scripts/factory_extract_places.py``'s projection columns (CI asserts
+this via ``test_partition_extractor_projection_matches_factory``) and filters,
+and only parameterizes the bounding box, but it deliberately diverges in two
+ways that serve the routed relevance smoke rather than production parity:
 
-It exists so the compact-shard stability experiment can extract a second,
-non-California partition without forking or editing the pinned California
-extractor. No production pipeline script is modified.
+* It orders by ``COALESCE(confidence, 0.5) DESC, id`` before ``LIMIT`` (still
+  deterministic via the ``id`` tiebreak and ``preserve_insertion_order=true``),
+  so when the bbox holds far more than ``--limit`` rows the sample keeps the
+  most prominent places instead of the lexicographically-smallest UUIDs. A
+  UUID-ordered subsample silently dropped landmarks such as Tokyo Tower from
+  the fixture, which the relevance seeds specifically query.
+* It additionally projects ``alt_names`` (the space-joined ``names.common``
+  values), which the compact index folds into the name field so a query in one
+  language can match a feature whose primary name is in another.
+
+Because of the ordering change it no longer produces byte-identical parquet to
+the California factory extractor; only the shared projection columns are pinned.
+No production pipeline script is modified.
 """
 
 from __future__ import annotations
@@ -38,7 +43,8 @@ PROJECTION = """
             COALESCE(addresses[1].country, '') AS country,
             ST_Y(geometry) AS lat,
             ST_X(geometry) AS lon,
-            COALESCE(confidence, 0.5) AS confidence
+            COALESCE(confidence, 0.5) AS confidence,
+            COALESCE(array_to_string(map_values(names.common), ' '), '') AS alt_names
 """
 
 
@@ -118,7 +124,7 @@ def main() -> None:
           WHERE {predicate}
             AND names.primary IS NOT NULL
             AND COALESCE(operating_status, 'open') != 'permanently_closed'
-          ORDER BY id
+          ORDER BY COALESCE(confidence, 0.5) DESC, id
           LIMIT {args.limit}
         ) TO '{output_sql}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """

@@ -24,14 +24,19 @@ def _load(name):
 
 def test_partition_extractor_is_deterministic_and_bbox_parameterized():
     source = (SCRIPTS / "experiment_places_partition_extract.py").read_text()
-    assert "ORDER BY id" in source
+    # Prominence-ordered (confidence DESC) with an id tiebreak so the sample
+    # keeps landmarks the relevance seeds query instead of the smallest UUIDs,
+    # while staying deterministic via the tiebreak + preserved insertion order.
+    order_by = "ORDER BY COALESCE(confidence, 0.5) DESC, id"
+    assert order_by in source
     assert "LIMIT {args.limit}" in source
     assert "preserve_insertion_order=true" in source
     assert "preserve_insertion_order=false" not in source
-    assert source.index("ORDER BY id") < source.index("LIMIT {args.limit}")
+    assert source.index(order_by) < source.index("LIMIT {args.limit}")
     # bbox is parameterized, not hard-coded to California.
     assert "bbox.xmin BETWEEN {xmin} AND {xmax}" in source
-    assert "representative random sample" in source
+    # Alternate/common names are projected for cross-lingual name matching.
+    assert "AS alt_names" in source
 
 
 def test_partition_extractor_projection_matches_factory():
