@@ -149,10 +149,17 @@ class Place:
     lat: float
     lon: float
     confidence: float
+    # Alternate/common names (e.g. an English "Tokyo Tower" for a primary
+    # "東京タワー"), indexed into the name field but never displayed. Defaulted
+    # so existing positional/keyword constructions stay valid.
+    alt_names: str = ""
 
     def field_text(self) -> dict[str, str]:
+        # Index the primary name plus any alternate/common names so a query in
+        # another language matches, while the displayed projection (see
+        # encode_projection) keeps only the primary name.
         return {
-            "name": self.name,
+            "name": " ".join(part for part in (self.name, self.alt_names) if part),
             "brand": self.brand,
             "category": self.category,
             "context": " ".join((self.locality, self.region, self.country)),
@@ -184,6 +191,7 @@ def place_from_row(row: dict[str, Any], row_number: int) -> Place:
         lat=_float(row.get("lat")),
         lon=_float(row.get("lon")),
         confidence=min(1.0, max(0.0, _float(row.get("confidence"), 0.5))),
+        alt_names=str(row.get("alt_names") or "").strip(),
     )
 
 

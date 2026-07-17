@@ -105,6 +105,32 @@ def test_context_is_searchable_without_becoming_result_payload_noise(tmp_path):
     assert [row["id"] for row in results] == ["c"]
 
 
+def test_alternate_names_index_into_name_field_but_are_not_displayed(tmp_path):
+    place = experiment.place_from_row(
+        {
+            "id": "tt",
+            "primary_name": "東京タワー",
+            "alt_names": "Tokyo Tower",
+            "category": "attraction",
+            "region": "Tokyo",
+            "country": "JP",
+            "confidence": 0.95,
+        },
+        1,
+    )
+    # The displayed record keeps only the primary name...
+    assert experiment.decode_record(experiment.encode_record(place))["name"] == "東京タワー"
+
+    artifact = tmp_path / "places.pcix"
+    experiment.build_artifact([place], artifact)
+    # ...but a name-scoped English query matches via the folded alternate name,
+    # even though the primary name has no "tower" token.
+    index = experiment.CompactIndex(artifact)
+    assert [row["id"] for row in index.search("name:tower", limit=10)[0]] == ["tt"]
+    index = experiment.CompactIndex(artifact)
+    assert [row["id"] for row in index.search("東京タワー", limit=10)[0]] == ["tt"]
+
+
 def test_benchmark_reports_sqlite_overlap_and_range_bytes(tmp_path):
     artifact = tmp_path / "places.pcix"
     source = places()
