@@ -248,6 +248,21 @@ jobs:
             echo "Task ${{ matrix.task_index }} is one member of the fixed 127-task inventory. This rehearsal is run-unique, non-promoting, and cannot update a catalog."
           } >> "$GITHUB_STEP_SUMMARY"
 
+      - name: Upload evidence artifacts for post-mortem diagnosis
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: address-resume-evidence-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            projection-${{ matrix.name }}.json
+            map-${{ matrix.name }}.json
+            local-reduce-${{ matrix.name }}.json
+            restored-reduce-${{ matrix.name }}.json
+            resume-measurement-${{ matrix.name }}.json
+            /tmp/address-resume-${{ matrix.name }}/*.json
+
       - name: Delete the task's isolated R2 fragments
         if: always()
         env:
