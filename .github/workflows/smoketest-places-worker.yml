@@ -164,8 +164,11 @@ jobs:
               TOTAL=""
               # A newly deployed workers.dev script can briefly alternate with
               # a previous/missing version while propagating between edge hosts.
-              # Ignore only that transient 404; the first successful response is
-              # still the cold R2 sample and every successful body remains strict.
+              # That race surfaces as a transient 404 (missing) or an HTTP 500
+              # with Cloudflare "error code: 1104" (script not found at edge);
+              # both are retried. Any other status — including a genuine Worker
+              # exception (1101) — is fatal. The first 200 is still the cold R2
+              # sample and every successful body remains strict.
               for propagation_attempt in $(seq 1 12); do
                 read -r STATUS TOTAL < <(curl --silent --show-error \
                   --dump-header "$HEADERS" --output "$BODY" \
@@ -174,7 +177,8 @@ jobs:
                 if [ "$STATUS" = "200" ]; then
                   break
                 fi
-                if [ "$STATUS" != "404" ]; then
+                if [ "$STATUS" != "404" ] \
+                  && ! { [ "$STATUS" = "500" ] && grep -q "error code: 1104" "$BODY"; }; then
                   echo "::error::Places page spike returned HTTP ${STATUS}"
                   cat "$BODY"
                   exit 1
