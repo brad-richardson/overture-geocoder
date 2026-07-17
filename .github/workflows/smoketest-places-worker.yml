@@ -132,11 +132,32 @@ jobs:
             for attempt in 1 2 3 4 5 6; do
               BODY=$(mktemp)
               HEADERS=$(mktemp)
-              read -r STATUS TOTAL < <(curl --silent --show-error \
-                --dump-header "$HEADERS" --output "$BODY" \
-                --write-out '%{http_code} %{time_total}\n' \
-                "${PREVIEW_URL}/__places-page-spike?token=${TOKEN}&prefix=${PREFIX}")
-              test "$STATUS" = "200"
+              STATUS=""
+              TOTAL=""
+              # A newly deployed workers.dev script can briefly alternate with
+              # a previous/missing version while propagating between edge hosts.
+              # Ignore only that transient 404; the first successful response is
+              # still the cold R2 sample and every successful body remains strict.
+              for propagation_attempt in $(seq 1 12); do
+                read -r STATUS TOTAL < <(curl --silent --show-error \
+                  --dump-header "$HEADERS" --output "$BODY" \
+                  --write-out '%{http_code} %{time_total}\n' \
+                  "${PREVIEW_URL}/__places-page-spike?token=${TOKEN}&prefix=${PREFIX}")
+                if [ "$STATUS" = "200" ]; then
+                  break
+                fi
+                if [ "$STATUS" != "404" ]; then
+                  echo "::error::Places page spike returned HTTP ${STATUS}"
+                  cat "$BODY"
+                  exit 1
+                fi
+                sleep 2
+              done
+              if [ "$STATUS" != "200" ]; then
+                echo "::error::Places page spike remained unavailable after propagation retries"
+                cat "$BODY"
+                exit 1
+              fi
               jq -e --argjson ids "$EXPECTED_IDS" --argjson head "$EXPECTED_HEAD" \
                 --argjson count "$EXPECTED_COUNT" '
                 .schema == "overture-places-worker-spike-v1"
@@ -158,7 +179,7 @@ jobs:
             done
           done
           jq -s '{schema:"overture-places-worker-latency-spike-v1",samples:.}' \
-            /tmp/places-worker-timings.jsonl > /tmp/places-worker-latency.json
+            /tmp/places-worker-timings.jsonl | tee /tmp/places-worker-latency.json
 
       - name: Summarize measurement
         if: always()
