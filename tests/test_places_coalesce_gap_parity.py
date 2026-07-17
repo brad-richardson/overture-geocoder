@@ -78,6 +78,16 @@ def test_record_index_and_records_plans_match_across_languages():
         "RECORDS_COALESCE_GAP",
         "MAX_RESULT_RANGE_BYTES",
     )
+    # The postings stage plans per-matched-entry wants at gap 0 with the same
+    # cap on both sides (Worker: coalesced(&posting_wants, 0, MAX_POSTING_BYTES)).
+    assert module.POSTINGS_COALESCE_GAP == 0
+    assert module.POSTINGS_MAX_RANGE_BYTES == _rust_constant(
+        text, "MAX_POSTING_BYTES"
+    )
+    assert _call_site_arguments(text, "posting_wants") == (
+        "0",
+        "MAX_POSTING_BYTES",
+    )
 
 
 def test_python_model_enforces_the_max_range_cap(tmp_path):

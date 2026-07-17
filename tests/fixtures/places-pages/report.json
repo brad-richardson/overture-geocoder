@@ -11,6 +11,10 @@
     "shard.pcsh": {
       "bytes": 1596,
       "sha256": "67219f13141eaa3328bb488b496eda641e9b95e276dbae54ff78953f7255c591"
+    },
+    "split.pcsh": {
+      "bytes": 1072,
+      "sha256": "067531fdd9099b8a190d82f5b9a401ed3c549a0a72f50ba6236e98fbd93397e7"
     }
   },
   "head_famous_cap": 1,
@@ -32,5 +36,22 @@
   "rare_admitted_token": "tower",
   "schema": "overture-places-page-fixture-v1",
   "shard_first_id": "fixture-famous",
+  "split_adjacent_prefix": "adj",
+  "split_doc_ids": [
+    "split-00",
+    "split-01",
+    "split-02",
+    "split-03",
+    "split-04",
+    "split-05"
+  ],
+  "split_posting_layout": [
+    "adja",
+    "adjb",
+    "shareda",
+    "gapx",
+    "sharedz"
+  ],
+  "split_prefix": "shared",
   "token": "shared"
 }

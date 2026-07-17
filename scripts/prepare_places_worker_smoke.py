@@ -248,6 +248,30 @@ def head_case(
     }
 
 
+def absent_token(maps: dict[str, dict[int, tuple[int, int]]]) -> str:
+    """A token deterministically absent from the shard's lexicon."""
+    token = "zzzzznomatch"
+    while token in maps:
+        token += "z"
+    return token
+
+
+def disjoint_token_pair(
+    maps: dict[str, dict[int, tuple[int, int]]],
+) -> tuple[str, str] | None:
+    """A deterministic bounded token pair whose posting doc-sets are disjoint."""
+    bounded = sorted(
+        (token for token, docs in maps.items() if 1 <= len(docs) <= 10_000),
+        key=lambda token: (len(maps[token]), token),
+    )
+    for anchor in bounded[:64]:
+        anchor_docs = set(maps[anchor])
+        for other in bounded:
+            if other != anchor and anchor_docs.isdisjoint(maps[other]):
+                return anchor, other
+    return None
+
+
 def relevance_cases(
     seed_path: Path,
     *,
@@ -473,6 +497,39 @@ def prepare(
             break
     if cjk_case:
         cases.append(cjk_case)
+
+    # Early-exit diagnostics cases pinning the clause_candidate_counts contract
+    # end to end: entry i is the number of candidates actually decoded for
+    # clause i, null for a clause whose postings were never read because the
+    # reader exited early (no-lexicon-match skips all posting reads; an emptied
+    # running intersection stops the clause loop). Both the oracle
+    # (CompactShard.query) and the Worker implement the same rules, so the
+    # expected counts here are also a cross-language parity assertion.
+    early_exit = None
+    for shard_index, group in enumerate(ordered_groups):
+        maps = posting_map(group)
+        pair = disjoint_token_pair(maps)
+        if pair is not None:
+            early_exit = (shard_index, maps, pair)
+            break
+    if early_exit is None:
+        raise ValueError("no disjoint bounded token pair exists in the three shards")
+    shard_index, maps, (first_token, second_token) = early_exit
+    for name, clause_tokens in (
+        ("shard_no_lexicon_match", (first_token, absent_token(maps))),
+        ("shard_empty_intersection", (first_token, second_token)),
+        ("shard_early_exit_sentinel", (first_token, second_token, first_token)),
+    ):
+        cases.append(
+            routed_case(
+                name=name,
+                context=contexts[shard_index],
+                shard_index=shard_index,
+                clauses=tuple(Clause(token) for token in clause_tokens),
+                artifacts=artifacts,
+                routes=routes,
+            )
+        )
 
     seed_path = relevance_seed or SCRIPT_DIR.parent / "benchmarks" / "places-relevance-seed.json"
     cases.extend(

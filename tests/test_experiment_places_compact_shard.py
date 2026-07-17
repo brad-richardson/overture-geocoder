@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 SCRIPTS = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -13,6 +15,15 @@ spec = importlib.util.spec_from_file_location("experiment_places_compact_shard",
 experiment = importlib.util.module_from_spec(spec)
 sys.modules[spec.name] = experiment
 spec.loader.exec_module(experiment)
+
+GENERATOR_SCRIPT = Path(__file__).with_name("generate_places_page_fixtures.py")
+GENERATOR_SPEC = importlib.util.spec_from_file_location(
+    "generate_places_page_fixtures", GENERATOR_SCRIPT
+)
+assert GENERATOR_SPEC and GENERATOR_SPEC.loader
+fixture_generator = importlib.util.module_from_spec(GENERATOR_SPEC)
+sys.modules[GENERATOR_SPEC.name] = fixture_generator
+GENERATOR_SPEC.loader.exec_module(fixture_generator)
 
 
 def places():
@@ -220,6 +231,111 @@ def test_artifact_components_are_contiguous_and_range_readable(tmp_path):
     )
     postings = build["posting_field_variants"]
     assert postings["name_only"]["bytes"] < postings["all_fields"]["bytes"]
+
+
+def test_split_posting_layout_splits_gap_zero_and_skips_dead_bytes(tmp_path):
+    """Multi-entry posting coalescing: non-adjacent matched entries must split
+    the gap-0 plan and never fetch the dead bytes between them; adjacent
+    entries must merge into one physical read."""
+    source = fixture_generator.split_places()
+    artifact = tmp_path / "split.pcsh"
+    ordered, _ = experiment.build_artifact(
+        source, artifact, posting_layout=fixture_generator.split_posting_layout(source)
+    )
+    probe = experiment.CompactShard(artifact)
+    matches = probe.lexicon_matches("shared", True)
+    assert [entry.token for entry in matches] == ["shareda", "sharedz"]
+    matched_bytes = sum(entry.posting_length for entry in matches)
+    span = max(
+        entry.posting_offset + entry.posting_length for entry in matches
+    ) - min(entry.posting_offset for entry in matches)
+    assert matched_bytes < span, "fixture must place a dead gap between matches"
+
+    shard = experiment.CompactShard(artifact)
+    case = experiment.QueryCase(
+        "split", (experiment.Clause("shared", prefix=True),), "typical"
+    )
+    result = shard.query(case)
+    expected, ids = experiment.oracle(ordered, case)
+    assert set(result["candidate_doc_ids"]) == expected
+    assert result["result_ids"] == ids
+    # The physical plan splits instead of spanning the dead gap...
+    assert result["stages"]["postings"]["reads"] == 2
+    # ...and byte accounting proves the gap bytes were never fetched.
+    assert result["stages"]["postings"]["bytes"] == matched_bytes
+
+    adjacent = experiment.QueryCase(
+        "adjacent", (experiment.Clause("adj", prefix=True),), "typical"
+    )
+    shard = experiment.CompactShard(artifact)
+    result = shard.query(adjacent)
+    expected, ids = experiment.oracle(ordered, adjacent)
+    assert set(result["candidate_doc_ids"]) == expected
+    assert result["result_ids"] == ids
+    adjacent_matches = probe.lexicon_matches("adj", True)
+    assert result["stages"]["postings"]["reads"] == 1
+    assert result["stages"]["postings"]["bytes"] == sum(
+        entry.posting_length for entry in adjacent_matches
+    )
+
+
+def test_posting_layout_must_permute_the_exact_token_set(tmp_path):
+    with pytest.raises(ValueError):
+        experiment.build_artifact(
+            places(), tmp_path / "bad.pcsh", posting_layout=["only-token"]
+        )
+
+
+def test_clause_candidate_counts_mirror_worker_early_exit(tmp_path):
+    """clause_candidate_counts is a diagnostic mirroring the Worker exactly:
+    Some(decoded count) for clauses whose postings were read, None for clauses
+    skipped by the no-lexicon-match or emptied-intersection early exits."""
+    artifact = tmp_path / "places.pcsh"
+    experiment.build_artifact(places(), artifact, block_entries=2)
+
+    # Any clause without a lexicon match skips ALL posting reads.
+    shard = experiment.CompactShard(artifact)
+    result = shard.query(
+        experiment.QueryCase(
+            "nomatch",
+            (experiment.Clause("golden"), experiment.Clause("zzznope")),
+            "typical",
+        )
+    )
+    assert result["clause_candidate_counts"] == [None, None]
+    assert result["candidate_count"] == 0
+    assert result["stages"]["postings"]["reads"] == 0
+
+    # Both clauses decode, the intersection is empty: numeric counts, no
+    # sentinel, and the result set is empty.
+    shard = experiment.CompactShard(artifact)
+    result = shard.query(
+        experiment.QueryCase(
+            "empty",
+            (experiment.Clause("hotel"), experiment.Clause("gateway")),
+            "typical",
+        )
+    )
+    assert result["clause_candidate_counts"] == [1, 1]
+    assert result["candidate_count"] == 0
+    assert result["stages"]["postings"]["reads"] == 2
+
+    # Once the running intersection empties, later clauses are never read.
+    shard = experiment.CompactShard(artifact)
+    result = shard.query(
+        experiment.QueryCase(
+            "sentinel",
+            (
+                experiment.Clause("hotel"),
+                experiment.Clause("gateway"),
+                experiment.Clause("golden"),
+            ),
+            "typical",
+        )
+    )
+    assert result["clause_candidate_counts"] == [1, 1, None]
+    assert result["candidate_count"] == 0
+    assert result["stages"]["postings"]["reads"] == 2
 
 
 def test_cli_writes_reports(tmp_path):

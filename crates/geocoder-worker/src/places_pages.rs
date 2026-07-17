@@ -246,7 +246,14 @@ pub(crate) struct PlacesReadStages {
 #[derive(Debug, Serialize)]
 pub(crate) struct PlacesShardLookup {
     pub candidate_count: usize,
-    pub clause_candidate_counts: Vec<usize>,
+    /// DIAGNOSTIC, not candidate recall: entry `i` is the number of candidate
+    /// docs actually decoded for clause `i`, or `None` (JSON `null`) for a
+    /// clause whose postings were never read because the lookup exited early
+    /// (any clause without a lexicon match skips all posting reads; an emptied
+    /// running intersection stops the clause loop). The Python oracle
+    /// (`experiment_places_compact_shard.CompactShard.query`) mirrors these
+    /// rules exactly and must produce identical values for every case.
+    pub clause_candidate_counts: Vec<Option<usize>>,
     pub results: Vec<PlaceProjection>,
     pub read_metrics: RangeReadMetrics,
     pub stages: PlacesReadStages,
@@ -567,6 +574,47 @@ fn find_head_entry(bytes: &[u8], key: &str) -> PageResult<Option<(u64, u64)>> {
     Ok(None)
 }
 
+/// Union the per-entry posting chunks of one clause into its candidate map.
+///
+/// `chunks[i]` must hold exactly the posting bytes of `matches[i]` — the
+/// per-want slices returned by `RangeReader::coalesced` for one want per
+/// matched lexicon entry — regardless of how the physical reads were merged or
+/// split. Occurrences whose field mask misses `field_mask` are skipped; ranks
+/// keep the per-doc maximum. Fails closed on a `matches`/`chunks` length
+/// mismatch (a mis-zip would silently drop entries) and on the candidate cap.
+fn union_clause_postings<B: AsRef<[u8]>>(
+    matches: &[LexiconEntry],
+    chunks: &[B],
+    field_mask: u8,
+) -> Result<BTreeMap<u64, u8>> {
+    if matches.len() != chunks.len() {
+        return Err(Error::RustError(
+            "Places posting chunks do not align with lexicon matches".into(),
+        ));
+    }
+    let mut clause_docs: BTreeMap<u64, u8> = BTreeMap::new();
+    for (entry, encoded) in matches.iter().zip(chunks) {
+        for (doc_id, occurrence_mask, rank) in
+            decode_postings(encoded.as_ref(), entry.posting_count)
+                .map_err(|error| Error::RustError(format!("Invalid Places posting: {error}")))?
+        {
+            if occurrence_mask & field_mask == 0 {
+                continue;
+            }
+            clause_docs
+                .entry(doc_id)
+                .and_modify(|old| *old = (*old).max(rank))
+                .or_insert(rank);
+            if clause_docs.len() > MAX_POSTING_CANDIDATES {
+                return Err(Error::RustError(
+                    "Places union candidate count exceeds hard cap".into(),
+                ));
+            }
+        }
+    }
+    Ok(clause_docs)
+}
+
 fn decode_head_entry(bytes: &[u8]) -> PageResult<Vec<PlaceProjection>> {
     let mut reader = ByteReader::new(bytes, 0);
     let mut results = Vec::new();
@@ -858,9 +906,12 @@ impl ShardLoader {
         }
         let postings = component(&directory, "postings")?;
         let mut total_posting_bytes = 0_u64;
-        // Length is fixed to clauses.len(); positions for clauses skipped by the
-        // early-exit below stay 0, so the diagnostic keeps a stable shape.
-        let mut clause_candidate_counts = vec![0_usize; clauses.len()];
+        // DIAGNOSTIC, not candidate recall (see PlacesShardLookup): the length
+        // is fixed to clauses.len(); a position holds Some(decoded candidate
+        // count) once that clause's postings are read, and stays None for
+        // clauses skipped by the early exits below. The Python oracle mirrors
+        // the same skip/break rules and must report identical values.
+        let mut clause_candidate_counts: Vec<Option<usize>> = vec![None; clauses.len()];
         let mut candidates: Option<BTreeMap<u64, u8>> = None;
         // A clause with no lexicon match makes the AND-intersection provably
         // empty, so no posting read can change the (empty) result: skip them all.
@@ -907,28 +958,9 @@ impl ShardLoader {
                 let posting_chunks = reader
                     .coalesced(&posting_wants, 0, MAX_POSTING_BYTES)
                     .await?;
-                let mut clause_docs: BTreeMap<u64, u8> = BTreeMap::new();
-                for (entry, encoded) in matches.iter().zip(&posting_chunks) {
-                    for (doc_id, field_mask, rank) in decode_postings(encoded, entry.posting_count)
-                        .map_err(|error| {
-                            Error::RustError(format!("Invalid Places posting: {error}"))
-                        })?
-                    {
-                        if field_mask & clause.field_mask == 0 {
-                            continue;
-                        }
-                        clause_docs
-                            .entry(doc_id)
-                            .and_modify(|old| *old = (*old).max(rank))
-                            .or_insert(rank);
-                        if clause_docs.len() > MAX_POSTING_CANDIDATES {
-                            return Err(Error::RustError(
-                                "Places union candidate count exceeds hard cap".into(),
-                            ));
-                        }
-                    }
-                }
-                clause_candidate_counts[position] = clause_docs.len();
+                let clause_docs =
+                    union_clause_postings(matches, &posting_chunks, clause.field_mask)?;
+                clause_candidate_counts[position] = Some(clause_docs.len());
                 candidates = Some(match candidates {
                     None => clause_docs,
                     Some(mut prior) => {
@@ -1206,6 +1238,183 @@ mod tests {
     fn single_character_prefix_is_unsupported() {
         let directory = directory_with_blocks(vec![matching_block(0, 1)]);
         assert!(select_lexicon_blocks(&directory, "a", true).is_err());
+    }
+
+    fn union_masked(
+        matches: &[LexiconEntry],
+        chunks: &[&[u8]],
+    ) -> std::result::Result<BTreeMap<u64, u8>, Error> {
+        union_clause_postings(matches, chunks, FIELD_ALL)
+    }
+
+    #[test]
+    fn clause_posting_union_fails_closed_on_chunk_entry_misalignment() {
+        let matches = vec![
+            LexiconEntry {
+                token: "alpha".into(),
+                posting_offset: 0,
+                posting_length: 3,
+                posting_count: 1,
+            },
+            LexiconEntry {
+                token: "beta".into(),
+                posting_offset: 3,
+                posting_length: 3,
+                posting_count: 1,
+            },
+        ];
+        let mut posting = varint(7);
+        posting.extend([FIELD_NAME, 200]);
+        let chunks: Vec<&[u8]> = vec![&posting];
+        let error = union_masked(&matches, &chunks).unwrap_err();
+        assert!(format!("{error:?}").contains("do not align"));
+    }
+
+    /// Slice every want of a gap-0 coalesce plan back out of the raw object,
+    /// mirroring what `RangeReader::coalesced` returns per want.
+    fn plan_slices<'a>(
+        object: &'a [u8],
+        wants: &[ByteRange],
+        plan: &geocoder_core::pages::CoalescePlan,
+    ) -> Vec<&'a [u8]> {
+        let mut slices: Vec<Option<&[u8]>> = vec![None; wants.len()];
+        for read in &plan.reads {
+            for want in &read.wants {
+                let start = usize::try_from(read.offset + want.relative_offset).unwrap();
+                let length = usize::try_from(want.length).unwrap();
+                slices[want.want_index] = Some(&object[start..start + length]);
+            }
+        }
+        slices.into_iter().map(Option::unwrap).collect()
+    }
+
+    fn split_fixture_matches(object: &[u8], prefix: &str) -> (Directory, Vec<LexiconEntry>) {
+        assert_eq!(&object[..8], MAGIC);
+        let directory_length = u32::from_le_bytes(object[8..12].try_into().unwrap()) as usize;
+        let directory: Directory =
+            serde_json::from_slice(&object[12..12 + directory_length]).unwrap();
+        let lexicon = fixture_component(object, component(&directory, "lexicon").unwrap());
+        let blocks = select_lexicon_blocks(&directory, prefix, true).unwrap();
+        let mut matches: Vec<LexiconEntry> = blocks
+            .iter()
+            .flat_map(|block| {
+                let start = usize::try_from(block.offset).unwrap();
+                let length = usize::try_from(block.length).unwrap();
+                decode_lexicon_block(&lexicon[start..start + length], block.entries).unwrap()
+            })
+            .filter(|entry| entry.token.starts_with(prefix))
+            .collect();
+        matches.sort_by(|left, right| left.token.cmp(&right.token));
+        (directory, matches)
+    }
+
+    fn split_fixture_ids(
+        object: &[u8],
+        directory: &Directory,
+        docs: &BTreeMap<u64, u8>,
+    ) -> Vec<String> {
+        let record_index = fixture_component(object, component(directory, "record_index").unwrap());
+        let records = fixture_component(object, component(directory, "records").unwrap());
+        docs.keys()
+            .map(|doc_id| {
+                let index_start = usize::try_from(*doc_id).unwrap() * RECORD_INDEX_BYTES as usize;
+                let offset = u32::from_le_bytes(
+                    record_index[index_start..index_start + 4]
+                        .try_into()
+                        .unwrap(),
+                ) as usize;
+                let length = u32::from_le_bytes(
+                    record_index[index_start + 4..index_start + 8]
+                        .try_into()
+                        .unwrap(),
+                ) as usize;
+                decode_projection(&records[offset..offset + length])
+                    .unwrap()
+                    .id
+            })
+            .collect()
+    }
+
+    #[test]
+    fn split_posting_prefix_plan_splits_and_excludes_dead_gap_bytes() {
+        use geocoder_core::pages::coalesce_ranges;
+
+        let object = include_bytes!("../../../tests/fixtures/places-pages/split.pcsh");
+        let (directory, matches) = split_fixture_matches(object, "shared");
+        let tokens: Vec<_> = matches.iter().map(|entry| entry.token.as_str()).collect();
+        assert_eq!(tokens, ["shareda", "sharedz"]);
+        let postings = component(&directory, "postings").unwrap();
+        let wants: Vec<_> = matches
+            .iter()
+            .map(|entry| {
+                checked_extent(
+                    postings.offset,
+                    entry.posting_offset,
+                    entry.posting_length,
+                    postings.length,
+                )
+                .unwrap()
+            })
+            .collect();
+        let plan = coalesce_ranges(&wants, 0, MAX_POSTING_BYTES).unwrap();
+        // Non-adjacent matched entries (gapx's postings sit between them) must
+        // split the gap-0 plan instead of merging across the dead gap.
+        assert!(plan.reads.len() > 1);
+        assert_eq!(plan.reads.len(), 2);
+        // Byte accounting excludes the dead gap: the plan fetches exactly the
+        // matched entries' extents, nothing between them.
+        let planned: u64 = plan.reads.iter().map(|read| read.length).sum();
+        let matched: u64 = matches.iter().map(|entry| entry.posting_length).sum();
+        assert_eq!(planned, matched);
+        let span = wants
+            .iter()
+            .map(|want| want.offset + want.length)
+            .max()
+            .unwrap()
+            - wants.iter().map(|want| want.offset).min().unwrap();
+        assert!(
+            planned < span,
+            "a span read would have fetched the dead gap"
+        );
+        // Candidate set equality against the fixture's brute-force truth: the
+        // union of the split chunks stitched through the product code equals
+        // exactly the docs whose names carry a shared* token.
+        let chunks = plan_slices(object, &wants, &plan);
+        let docs = union_masked(&matches, &chunks).unwrap();
+        let ids = split_fixture_ids(object, &directory, &docs);
+        assert_eq!(ids, ["split-02", "split-05"]);
+    }
+
+    #[test]
+    fn adjacent_posting_prefix_plan_merges_into_one_read() {
+        use geocoder_core::pages::coalesce_ranges;
+
+        let object = include_bytes!("../../../tests/fixtures/places-pages/split.pcsh");
+        let (directory, matches) = split_fixture_matches(object, "adj");
+        let tokens: Vec<_> = matches.iter().map(|entry| entry.token.as_str()).collect();
+        assert_eq!(tokens, ["adja", "adjb"]);
+        let postings = component(&directory, "postings").unwrap();
+        let wants: Vec<_> = matches
+            .iter()
+            .map(|entry| {
+                checked_extent(
+                    postings.offset,
+                    entry.posting_offset,
+                    entry.posting_length,
+                    postings.length,
+                )
+                .unwrap()
+            })
+            .collect();
+        let plan = coalesce_ranges(&wants, 0, MAX_POSTING_BYTES).unwrap();
+        assert_eq!(plan.reads.len(), 1);
+        let planned: u64 = plan.reads.iter().map(|read| read.length).sum();
+        let matched: u64 = matches.iter().map(|entry| entry.posting_length).sum();
+        assert_eq!(planned, matched);
+        let chunks = plan_slices(object, &wants, &plan);
+        let docs = union_masked(&matches, &chunks).unwrap();
+        let ids = split_fixture_ids(object, &directory, &docs);
+        assert_eq!(ids, ["split-00", "split-01", "split-02"]);
     }
 
     fn fixture_component<'a>(object: &'a [u8], component: &Component) -> &'a [u8] {
