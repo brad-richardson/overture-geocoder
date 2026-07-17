@@ -1,0 +1,57 @@
+{
+  "schema": "overture-places-relevance-seed-v1",
+  "status": "human-label seed; not yet scored against the Worker prototype",
+  "regions": [
+    "Boston, US-MA",
+    "Tokyo, JP-13",
+    "Ciudad de Mexico, MX-CMX"
+  ],
+  "cases": [
+    {
+      "class": "brand_with_context",
+      "query": "Starbucks",
+      "context": "Boston, US-MA",
+      "relevant_if": "a Starbucks-branded place in or near the requested Boston context"
+    },
+    {
+      "class": "local_name",
+      "query": "東京タワー",
+      "context": "Tokyo, JP-13",
+      "relevant_if": "the Tokyo Tower feature, with the Japanese local name accepted"
+    },
+    {
+      "class": "category_near_me",
+      "query": "cafe",
+      "context": "Ciudad de Mexico, MX-CMX",
+      "relevant_if": "an open cafe in the requested local context; distance breaks comparable ranks"
+    },
+    {
+      "class": "ambiguous_context",
+      "query": "Cambridge",
+      "context": "Boston, US-MA",
+      "relevant_if": "a Cambridge-area feature outranks same-name features outside Massachusetts"
+    },
+    {
+      "class": "famous_unique",
+      "query": "Tokyo Tower",
+      "context": null,
+      "relevant_if": "Tokyo Tower is returned from the packed global head or an explicitly justified shard"
+    },
+    {
+      "class": "chain_name",
+      "query": "7-Eleven",
+      "context": "Tokyo, JP-13",
+      "relevant_if": "nearby chain branches are retained and deterministically ranked; they are not deduplicated to one result"
+    }
+  ],
+  "scoring": {
+    "primary": "relevance_at_5",
+    "secondary": [
+      "first_relevant_rank",
+      "context_violations",
+      "duplicate_feature_ids",
+      "stable_order_on_repeat"
+    ],
+    "stop": "do not enable place by default if any class has zero relevant results in the top five or leaks an out-of-context result above an in-context equivalent"
+  }
+}

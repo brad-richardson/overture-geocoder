@@ -60,7 +60,9 @@ def object_url(key: str) -> str:
 
 def head_identity(key: str) -> dict[str, Any]:
     request = urllib.request.Request(
-        object_url(key), method="HEAD", headers={"User-Agent": "overture-geocoder-spike/1"}
+        object_url(key),
+        method="HEAD",
+        headers={"User-Agent": "overture-geocoder-spike/1"},
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         return {
@@ -125,7 +127,11 @@ def discover_object(
     with urllib.request.urlopen(request, timeout=30) as response:
         objects = parse_listing(response.read())
     eligible = [item for item in objects if item["bytes"] <= max_object_bytes]
-    eligible = [item for item in eligible if item["bytes"] > 0 and item["key"].endswith(".parquet")]
+    eligible = [
+        item
+        for item in eligible
+        if item["bytes"] > 0 and item["key"].endswith(".parquet")
+    ]
     if not eligible:
         raise ValueError(
             f"no object under {max_object_bytes} bytes in first {len(objects)} listing entries"
@@ -158,7 +164,9 @@ def select_row_groups(
             group["rowgroup_uncompressed_bytes"] > target_rowgroup_uncompressed_bytes
             or group["rows"] > max_rows
         ):
-            raise ValueError("first row group exceeds the configured byte or row budget")
+            raise ValueError(
+                "first row group exceeds the configured byte or row budget"
+            )
         selected.append(group["index"])
         byte_count = next_bytes
         row_count = next_rows
@@ -193,77 +201,211 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
     args.output.parent.mkdir(parents=True, exist_ok=True)
     disk_before = shutil.disk_usage(args.output.parent)
     network_before = network_received_bytes()
-    source = discover_object(
-        args.release,
-        args.family,
-        max_keys=args.list_max_keys,
-        max_object_bytes=args.max_object_bytes,
-    )
-    identity_before = head_identity(source["key"])
-    if (identity_before["etag"], identity_before["bytes"]) != (
-        source["etag"],
-        source["bytes"],
-    ):
-        raise ValueError("source identity changed between listing and pre-read HEAD")
-    source["version_id"] = identity_before["version_id"]
-    source_inventory = {
-        "release": args.release,
-        "family": args.family,
-        "uri": source["uri"],
-        "etag": source["etag"],
-        "bytes": source["bytes"],
-        "version_id": source["version_id"],
-    }
-    source_inventory_digest = hashlib.sha256(
-        json.dumps(source_inventory, sort_keys=True, separators=(",", ":")).encode()
-    ).hexdigest()
     filesystem = pafs.S3FileSystem(anonymous=True, region=REGION)
-    s3_path = f"{BUCKET}/{source['key']}"
     metadata_started = time.monotonic()
-    parquet = pq.ParquetFile(s3_path, filesystem=filesystem)
-    metadata_seconds = time.monotonic() - metadata_started
-    available_columns = set(parquet.schema_arrow.names)
     requested_columns = ADDRESS_COLUMNS if args.family == "addresses" else ()
-    missing_columns = sorted(set(requested_columns) - available_columns)
-    if missing_columns:
-        raise ValueError(f"source schema is missing benchmark columns: {missing_columns}")
     columns = list(requested_columns)
-
-    groups = []
-    for index in range(parquet.metadata.num_row_groups):
-        row_group = parquet.metadata.row_group(index)
-        selected_compressed_bytes = 0
-        selected_uncompressed_bytes = 0
-        for column_index in range(row_group.num_columns):
-            column = row_group.column(column_index)
-            if column.path_in_schema.split(".", 1)[0] in columns:
-                selected_compressed_bytes += column.total_compressed_size
-                selected_uncompressed_bytes += column.total_uncompressed_size
-        groups.append(
-            {
-                "index": index,
-                "rows": row_group.num_rows,
-                "rowgroup_uncompressed_bytes": row_group.total_byte_size,
-                "selected_compressed_bytes": selected_compressed_bytes,
-                "selected_uncompressed_bytes": selected_uncompressed_bytes,
-            }
+    selections: list[dict[str, Any]] = []
+    parquets: dict[int, Any] = {}
+    sources: dict[int, dict[str, Any]] = {}
+    identities_before: dict[int, dict[str, Any]] = {}
+    inventory_task: dict[str, Any] | None = None
+    if args.inventory_report is not None:
+        inventory = json.loads(args.inventory_report.read_text())
+        if inventory.get("schema") != "overture-address-rowgroup-inventory-v1":
+            raise ValueError("unsupported address row-group inventory schema")
+        if inventory.get("release") != args.release:
+            raise ValueError("inventory release differs from requested release")
+        tasks = inventory.get("plan", {}).get("tasks", [])
+        if args.task_index is None or not 0 <= args.task_index < len(tasks):
+            raise ValueError("inventory task index is outside the plan")
+        inventory_task = tasks[args.task_index]
+        source_inventory = inventory["source_inventory"]
+        inventory_objects = source_inventory["objects"]
+        object_indexes = {
+            source["uri"]: index for index, source in enumerate(inventory_objects)
+        }
+        for selected_range in inventory_task["ranges"]:
+            source_index = object_indexes.get(selected_range["uri"])
+            if source_index is None:
+                raise ValueError("planned range is absent from the source inventory")
+            if source_index not in parquets:
+                inventory_source = inventory_objects[source_index]
+                key = inventory_source["uri"].removeprefix(f"s3://{BUCKET}/")
+                if key == inventory_source["uri"]:
+                    raise ValueError(
+                        "source inventory URI is outside the Overture bucket"
+                    )
+                source = {**inventory_source, "key": key}
+                identity = head_identity(key)
+                if (identity["etag"], identity["bytes"]) != (
+                    source["etag"],
+                    source["bytes"],
+                ):
+                    raise ValueError("source identity differs from the inventory")
+                source["version_id"] = identity["version_id"]
+                parquet = pq.ParquetFile(f"{BUCKET}/{key}", filesystem=filesystem)
+                missing_columns = sorted(
+                    set(requested_columns) - set(parquet.schema_arrow.names)
+                )
+                if missing_columns:
+                    raise ValueError(
+                        f"source schema is missing benchmark columns: {missing_columns}"
+                    )
+                sources[source_index] = source
+                identities_before[source_index] = identity
+                parquets[source_index] = parquet
+            indexes = list(
+                range(
+                    selected_range["first_row_group"],
+                    selected_range["last_row_group"] + 1,
+                )
+            )
+            if len(indexes) != selected_range["row_groups"]:
+                raise ValueError("planned row-group range count differs")
+            selections.append(
+                {
+                    "source_object_index": source_index,
+                    "row_group_indexes": indexes,
+                }
+            )
+    else:
+        source = discover_object(
+            args.release,
+            args.family,
+            max_keys=args.list_max_keys,
+            max_object_bytes=args.max_object_bytes,
         )
-    row_group_indexes = select_row_groups(
-        groups,
-        target_rowgroup_uncompressed_bytes=args.target_rowgroup_uncompressed_bytes,
-        max_rows=args.max_rows,
-        max_groups=args.max_groups,
-    )
+        identity = head_identity(source["key"])
+        if (identity["etag"], identity["bytes"]) != (
+            source["etag"],
+            source["bytes"],
+        ):
+            raise ValueError(
+                "source identity changed between listing and pre-read HEAD"
+            )
+        source["version_id"] = identity["version_id"]
+        source_inventory = {
+            "schema": "overture-global-source-inventory-v1",
+            "release": args.release,
+            "family": args.family,
+            "objects": [
+                {
+                    "uri": source["uri"],
+                    "etag": source["etag"],
+                    "bytes": source["bytes"],
+                    "version_id": source["version_id"],
+                }
+            ],
+        }
+        parquet = pq.ParquetFile(f"{BUCKET}/{source['key']}", filesystem=filesystem)
+        missing_columns = sorted(
+            set(requested_columns) - set(parquet.schema_arrow.names)
+        )
+        if missing_columns:
+            raise ValueError(
+                f"source schema is missing benchmark columns: {missing_columns}"
+            )
+        groups = []
+        for index in range(parquet.metadata.num_row_groups):
+            row_group = parquet.metadata.row_group(index)
+            selected_compressed_bytes = 0
+            selected_uncompressed_bytes = 0
+            for column_index in range(row_group.num_columns):
+                column = row_group.column(column_index)
+                if column.path_in_schema.split(".", 1)[0] in columns:
+                    selected_compressed_bytes += column.total_compressed_size
+                    selected_uncompressed_bytes += column.total_uncompressed_size
+            groups.append(
+                {
+                    "index": index,
+                    "rows": row_group.num_rows,
+                    "rowgroup_uncompressed_bytes": row_group.total_byte_size,
+                    "selected_compressed_bytes": selected_compressed_bytes,
+                    "selected_uncompressed_bytes": selected_uncompressed_bytes,
+                }
+            )
+        row_group_indexes = select_row_groups(
+            groups,
+            target_rowgroup_uncompressed_bytes=args.target_rowgroup_uncompressed_bytes,
+            max_rows=args.max_rows,
+            max_groups=args.max_groups,
+        )
+        sources[0] = source
+        identities_before[0] = identity
+        parquets[0] = parquet
+        selections.append(
+            {"source_object_index": 0, "row_group_indexes": row_group_indexes}
+        )
+    metadata_seconds = time.monotonic() - metadata_started
+    source_inventory_json = json.dumps(
+        source_inventory, sort_keys=True, separators=(",", ":")
+    ).encode()
+    source_inventory_digest = hashlib.sha256(source_inventory_json).hexdigest()
+
+    selected_groups = []
+    for selection in selections:
+        source_index = selection["source_object_index"]
+        parquet = parquets[source_index]
+        for index in selection["row_group_indexes"]:
+            row_group = parquet.metadata.row_group(index)
+            selected_compressed_bytes = selected_uncompressed_bytes = 0
+            for column_index in range(row_group.num_columns):
+                column = row_group.column(column_index)
+                if column.path_in_schema.split(".", 1)[0] in columns:
+                    selected_compressed_bytes += column.total_compressed_size
+                    selected_uncompressed_bytes += column.total_uncompressed_size
+            selected_groups.append(
+                {
+                    "source_object_index": source_index,
+                    "index": index,
+                    "rows": row_group.num_rows,
+                    "rowgroup_uncompressed_bytes": row_group.total_byte_size,
+                    "selected_compressed_bytes": selected_compressed_bytes,
+                    "selected_uncompressed_bytes": selected_uncompressed_bytes,
+                }
+            )
+    if (
+        sum(group["rows"] for group in selected_groups) > args.max_rows
+        or len(selected_groups) > args.max_groups
+    ):
+        raise ValueError("planned task exceeds the configured row or group cap")
+    if inventory_task is not None:
+        measured = (
+            sum(group["rows"] for group in selected_groups),
+            sum(group["selected_compressed_bytes"] for group in selected_groups),
+            sum(group["selected_uncompressed_bytes"] for group in selected_groups),
+        )
+        planned = (
+            inventory_task["rows"],
+            inventory_task["selected_compressed_bytes"],
+            inventory_task["selected_uncompressed_bytes"],
+        )
+        if measured != planned:
+            raise ValueError(
+                "planned task statistics differ from current Parquet footers"
+            )
+        if measured[2] > args.target_rowgroup_uncompressed_bytes:
+            raise ValueError(
+                "planned task exceeds the configured selected-column byte cap"
+            )
 
     read_and_decode_seconds = 0.0
     projection_seconds = 0.0
     tables = []
-    for index in row_group_indexes:
+    for group in selected_groups:
+        source_index = group["source_object_index"]
+        index = group["index"]
+        parquet = parquets[source_index]
         read_started = time.monotonic()
         table = parquet.read_row_group(index, columns=columns, use_threads=True)
         read_and_decode_seconds += time.monotonic() - read_started
         projection_started = time.monotonic()
         row_count = table.num_rows
+        table = table.append_column(
+            "source_object_index",
+            pa.array([source_index] * row_count, type=pa.int32()),
+        )
         table = table.append_column(
             "source_row_group", pa.array([index] * row_count, type=pa.int32())
         )
@@ -278,13 +420,9 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
     artifact_metadata = {
         **(projected.schema.metadata or {}),
         b"overture.source_inventory_sha256": source_inventory_digest.encode(),
-        b"overture.source_uri": source["uri"].encode(),
-        b"overture.source_etag": source["etag"].encode(),
         b"overture.release": args.release.encode(),
         b"overture.family": args.family.encode(),
-        b"overture.source_inventory_json": json.dumps(
-            source_inventory, sort_keys=True, separators=(",", ":")
-        ).encode(),
+        b"overture.source_inventory_json": source_inventory_json,
     }
     projected = projected.replace_schema_metadata(artifact_metadata)
     network_after_projection = network_received_bytes()
@@ -307,37 +445,58 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
     verification = pq.ParquetFile(args.output)
     if verification.metadata.num_rows != projected.num_rows:
         raise ValueError("output record count does not match projected input")
-    expected_output_columns = columns + ["source_row_group", "source_row_index"]
+    expected_output_columns = columns + [
+        "source_object_index",
+        "source_row_group",
+        "source_row_index",
+    ]
     if verification.schema_arrow.names != expected_output_columns:
         raise ValueError("output schema does not match projected schema")
     output_metadata = verification.schema_arrow.metadata or {}
-    if output_metadata.get(b"overture.source_inventory_sha256") != source_inventory_digest.encode():
+    if (
+        output_metadata.get(b"overture.source_inventory_sha256")
+        != source_inventory_digest.encode()
+    ):
         raise ValueError("output metadata does not bind the source inventory")
-    if output_metadata.get(b"overture.source_inventory_json") != json.dumps(
-        source_inventory, sort_keys=True, separators=(",", ":")
-    ).encode():
+    if output_metadata.get(b"overture.source_inventory_json") != source_inventory_json:
         raise ValueError("output metadata does not preserve the source inventory")
 
     hydration_started = time.monotonic()
     sample_indexes = sorted({0, projected.num_rows // 2, projected.num_rows - 1})
     sample = pq.read_table(
-        args.output, columns=["id", "source_row_group", "source_row_index"]
+        args.output,
+        columns=[
+            "id",
+            "source_object_index",
+            "source_row_group",
+            "source_row_index",
+        ],
     ).take(pa.array(sample_indexes))
     hydrated_samples = []
     for offset in range(sample.num_rows):
         source_group = sample["source_row_group"][offset].as_py()
         source_index = sample["source_row_index"][offset].as_py()
+        source_object_index = sample["source_object_index"][offset].as_py()
+        parquet = parquets[source_object_index]
         output_id = sample["id"][offset].as_py()
-        hydrated = parquet.read_row_group(source_group, columns=["id"])["id"][source_index].as_py()
+        hydrated = parquet.read_row_group(source_group, columns=["id"])["id"][
+            source_index
+        ].as_py()
         if hydrated != output_id:
             raise ValueError("sample locator did not hydrate the expected source ID")
         hydrated_samples.append(
-            {"output_row": sample_indexes[offset], "source_row_group": source_group, "source_row_index": source_index}
+            {
+                "output_row": sample_indexes[offset],
+                "source_object_index": source_object_index,
+                "source_row_group": source_group,
+                "source_row_index": source_index,
+            }
         )
     hydration_seconds = time.monotonic() - hydration_started
-    identity_after = head_identity(source["key"])
-    if identity_after != identity_before:
-        raise ValueError("source identity changed during the experiment")
+    for source_object_index, source in sources.items():
+        identity_after = head_identity(source["key"])
+        if identity_after != identities_before[source_object_index]:
+            raise ValueError("source identity changed during the experiment")
     network_after_hydration = network_received_bytes()
     initial_network_received_delta = (
         network_after_projection - network_before
@@ -355,22 +514,31 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         else None
     )
 
-    selected_groups = [groups[index] for index in row_group_indexes]
     disk_after = shutil.disk_usage(args.output.parent)
     report = {
-        "schema": "overture-hosted-rowgroup-spike-v1",
+        "schema": "overture-hosted-rowgroup-spike-v2",
         "release": args.release,
         "family": args.family,
         "pyarrow_version": pa.__version__,
-        "source": {
-            **source,
-            "parquet_rows": parquet.metadata.num_rows,
-            "parquet_row_groups": parquet.metadata.num_row_groups,
-            "schema_columns": parquet.schema_arrow.names,
-        },
+        "sources": [
+            {
+                "source_object_index": source_index,
+                **source,
+                "parquet_rows": parquets[source_index].metadata.num_rows,
+                "parquet_row_groups": parquets[source_index].metadata.num_row_groups,
+                "schema_columns": parquets[source_index].schema_arrow.names,
+            }
+            for source_index, source in sorted(sources.items())
+        ],
         "selection": {
-            "row_groups": row_group_indexes,
-            "row_group_count": len(row_group_indexes),
+            "row_groups": [
+                {
+                    "source_object_index": group["source_object_index"],
+                    "row_group": group["index"],
+                }
+                for group in selected_groups
+            ],
+            "row_group_count": len(selected_groups),
             "rows": projected.num_rows,
             "rowgroup_uncompressed_bytes": sum(
                 item["rowgroup_uncompressed_bytes"] for item in selected_groups
@@ -426,10 +594,18 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
             "max_output_bytes": args.max_output_bytes,
         },
         "sampling": {
-            "object_policy": "lexicographically first eligible object in the first listing page",
-            "row_group_policy": "contiguous row groups from index zero within fixed limits",
-            "representative": False,
-            "artifact_source_scope": "one source object; global fragments require a source dictionary",
+            "object_policy": (
+                "complete-inventory byte-balanced task"
+                if inventory_task is not None
+                else "lexicographically first eligible object in the first listing page"
+            ),
+            "row_group_policy": (
+                f"inventory task {args.task_index} with contiguous per-object ranges"
+                if inventory_task is not None
+                else "contiguous row groups from index zero within fixed limits"
+            ),
+            "representative": inventory_task is not None,
+            "artifact_source_scope": "global inventory with explicit source-object locators",
         },
     }
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
@@ -443,13 +619,19 @@ def main() -> None:
     parser.add_argument("--family", choices=sorted(FAMILY_PATHS), default="addresses")
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--json-out", type=Path, required=True)
+    parser.add_argument("--inventory-report", type=Path)
+    parser.add_argument("--task-index", type=int)
     parser.add_argument("--list-max-keys", type=int, default=100)
     parser.add_argument("--max-object-bytes", type=int, default=900_000_000)
-    parser.add_argument("--target-rowgroup-uncompressed-bytes", type=int, default=134_217_728)
+    parser.add_argument(
+        "--target-rowgroup-uncompressed-bytes", type=int, default=134_217_728
+    )
     parser.add_argument("--max-rows", type=int, default=1_500_000)
     parser.add_argument("--max-groups", type=int, default=32)
     parser.add_argument("--max-output-bytes", type=int, default=134_217_728)
     args = parser.parse_args()
+    if (args.inventory_report is None) != (args.task_index is None):
+        parser.error("--inventory-report and --task-index must be supplied together")
     print(json.dumps(run_experiment(args), sort_keys=True))
 
 

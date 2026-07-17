@@ -28,6 +28,7 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from experiment_places_compact_index import (  # noqa: E402
     Place,
+    TOKENIZER_VERSION,
     common_prefix,
     decode_varint,
     encode_varint,
@@ -268,6 +269,7 @@ def build_artifact(
     }
     directory = {
         "schema_version": 1,
+        "tokenizer_version": TOKENIZER_VERSION,
         "record_count": len(ordered),
         "token_count": len(entries),
         "cell_degrees": cell_degrees,

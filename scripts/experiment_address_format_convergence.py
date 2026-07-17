@@ -69,8 +69,7 @@ DIVISION_AREA_SOURCE_URI = (
     "theme=divisions/type=division_area/*"
 )
 DIVISION_POINT_SOURCE_URI = (
-    "s3://overturemaps-us-west-2/release/2026-06-17.0/"
-    "theme=divisions/type=division/*"
+    "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=divisions/type=division/*"
 )
 # The division-free hosted lookup-safe compressed baseline (useful_gzip variant,
 # benchmarks/hosted-address-compression-report.json). The gate this experiment
@@ -711,6 +710,7 @@ def prepare_records(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
             "address_levels": levels,
             # Locators are absent from raw addresses; the storage delta is
             # unaffected because both variants encode them identically.
+            "source_object_index": 0,
             "source_row_group": 0,
             "source_row_index": int(row["address_row"]),
             # Containment context for classification and encoding.
@@ -797,8 +797,8 @@ def build_cost_diagnostics(extract: dict[str, Any], rows: int) -> dict[str, Any]
             "A purely linear wall-clock diagnostic on a "
             f"{extract['threads']}-thread DuckDB session, NOT a build forecast. "
             "It excludes global polygon density, extraction, sort, shuffle, "
-            "retries, and country-specific work; the measured box has an "
-            "atypically small polygon set and single region, and the timed join "
+            "retries, and country-specific work; the measured box covers one "
+            "small geographic area with a bounded polygon set, and the timed join "
             "includes the taxonomy-only neighborhood polygons."
         ),
     }
@@ -818,7 +818,45 @@ def build_report(
     classified = total - counts["missing_address_levels"]
     with_containment = classified - counts["point_outside_any_division"]
     rows_with_postal_city = sum(1 for record in records if record["postal_city"])
-    genuine_conflicts = counts["country_disagreement"] + counts["unresolved_disagreement"]
+    genuine_conflicts = (
+        counts["country_disagreement"] + counts["unresolved_disagreement"]
+    )
+    countries = sorted({record["country"] for record in records if record["country"]})
+    country_scope = ", ".join(countries) if countries else "unknown country"
+    structural_notes = []
+    if rows_with_postal_city == 0:
+        structural_notes.append(
+            "postal_city is empty for "
+            f"all {total:,} sampled rows, so the "
+            "postal_city_vs_containment bucket cannot trigger in this sample."
+        )
+    else:
+        structural_notes.append(
+            f"postal_city is populated for {rows_with_postal_city:,} of "
+            f"{total:,} sampled rows and participates in the agreement taxonomy."
+        )
+    if counts["exact_agreement"] == 0 and counts["normalization_only"]:
+        structural_notes.append(
+            "No raw exact label equality was observed; "
+            f"{counts['normalization_only']:,} compatible rows agreed only after "
+            "the declared Unicode/case/whitespace normalization."
+        )
+    elif counts["exact_agreement"]:
+        structural_notes.append(
+            f"Raw label equality was observed for {counts['exact_agreement']:,} "
+            "rows; normalization-only agreement is reported separately."
+        )
+    structural_notes.append(
+        f"Box {box.name!r} is purposive rather than random; its conflict rate must "
+        "not be generalized beyond this bounded sample."
+    )
+    cap_limitation = (
+        "The sample is cap-saturated: sampled rows equal the row cap and are a "
+        "deterministic md5(id) subset of the box population."
+        if extract["cap_saturated"]
+        else "The box population is below the row cap, so every address in the "
+        "configured box is included."
+    )
     return {
         "schema": "overture-address-format-convergence-v1",
         "date": datetime.now(timezone.utc).date().isoformat(),
@@ -877,44 +915,20 @@ def build_report(
             "rows_with_address_levels": classified,
             "rows_with_containment": with_containment,
             "rows_with_postal_city": rows_with_postal_city,
-            "structural_notes": [
-                (
-                    "postal_city is empty for "
-                    f"{total - rows_with_postal_city:,} of {total:,} sampled rows, "
-                    "so the postal_city_vs_containment bucket cannot trigger in "
-                    "this sample."
-                ),
-                (
-                    "exact_agreement is structurally unreachable here: the "
-                    "sampled address_levels labels are uppercase while Overture "
-                    "division names are title case, so raw string equality never "
-                    "holds and agreement appears as normalization_only."
-                ),
-                (
-                    "The sample box was chosen to span municipal boundaries and "
-                    "a neighborhood-labeled core, which maximizes "
-                    "granularity-artifact and boundary cases relative to a "
-                    "random box; the genuine-conflict rate is the meaningful "
-                    "headline, not the raw disagreement share."
-                ),
-            ],
+            "structural_notes": structural_notes,
             "examples": sample_mismatches(records, 20),
         },
         "storage": storage,
         "build_cost": build_cost_diagnostics(extract, total),
         "limitations": [
-            "One tiny purposive box in a single US region; not globally "
-            "representative, and deliberately biased toward municipal-boundary and "
-            "neighborhood-label cases.",
+            f"One small purposive box in {country_scope}; not globally representative.",
             "Stored context covers region/county/locality only; finer subtypes "
             "are taxonomy-only channels. Neighborhood polygons are joined where "
             "they exist, and macrohood/neighborhood/microhood division points "
             "are associated with their containing municipality by name -- a "
             "name-level heuristic, not verified neighborhood-polygon "
-            "containment, because Overture has no polygons for these "
-            "neighborhoods in this box.",
-            "The sample is cap-saturated: sampled rows equal the row cap and are "
-            "a deterministic md5(id) subset of the box population.",
+            "containment for those point-only features.",
+            cap_limitation,
             "The measured storage delta is a favorable-case lower bound; see the "
             "storage delta caveat.",
             "address_levels semantics are country-dependent; first/last are proxies.",

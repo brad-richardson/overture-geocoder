@@ -31,11 +31,14 @@ def test_workflow_is_manual_read_only_and_non_publishing():
 def test_workflow_has_hard_resource_and_data_limits():
     value = text()
     assert "timeout-minutes: 90" in value
-    assert "--max-object-bytes 900000000" in value
+    assert (
+        "--inventory-report benchmarks/address-rowgroup-inventory-report.json" in value
+    )
+    assert '--task-index "${{ matrix.task_index }}"' in value
     assert "--target-rowgroup-uncompressed-bytes 350000000" in value
-    assert "--max-rows 3750000" in value
-    assert "--max-groups 64" in value
-    assert "--max-output-bytes 400000000" in value
+    assert "--max-rows 4000000" in value
+    assert "--max-groups 72" in value
+    assert "--max-output-bytes 500000000" in value
     assert "--max-workspace-bytes 12000000000" in value
     assert "--max-artifact-bytes 1000000000" in value
 
@@ -57,7 +60,7 @@ def test_workflow_uses_current_release_and_ephemeral_output():
     assert "--release 2026-06-17.0" in value
     assert "--output /tmp/address-rowgroups.parquet" in value
     assert "--output /tmp/address-reduced.aidx" in value
-    assert "No artifact was uploaded and no catalog or production state was written." in value
+    assert "no R2 object, catalog, or production state is written" in value
 
 
 def test_workflow_runs_bounded_reduce_without_a_remote_data_plane():
@@ -65,4 +68,4 @@ def test_workflow_runs_bounded_reduce_without_a_remote_data_plane():
     assert "scripts/experiment_address_reduce.py" in value
     assert "--fragment-rows 128000" in value
     assert "--sparse-stride 256" in value
-    assert "R2 shuffle latency is not measured" in value
+    assert "Inputs and compact outputs remain ephemeral" in value

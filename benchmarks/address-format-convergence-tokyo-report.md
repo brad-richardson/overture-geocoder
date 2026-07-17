@@ -28,10 +28,10 @@ distinct rather than collapsing one into the other.
 
 ## Sample
 
-- Box `boston-core-ma`: lon [-71.15, -71.05], lat [42.35, 42.4]
-- Addresses in box (pre-cap): 189,248; sampled (cap-saturated: true, row cap 40,000): 40,000; classified rows: 40,000
-- Division polygons in box: 18 (13 region/county/locality context polygons + taxonomy-only neighborhoods)
-- Finer division points in municipality scope: 323 (271 locality/finer-name associations; taxonomy-only)
+- Box `tokyo-core-jp`: lon [139.7, 139.85], lat [35.62, 35.75]
+- Addresses in box (pre-cap): 35,042; sampled (cap-saturated: false, row cap 40,000): 35,042; classified rows: 35,042
+- Division polygons in box: 1,308 (42 region/county/locality context polygons + taxonomy-only neighborhoods)
+- Finer division points in municipality scope: 8,242 (3,574 locality/finer-name associations; taxonomy-only)
 - DuckDB `1.4.4`; producer commit `f9d2eb8`
 
 ## Agreement taxonomy
@@ -40,24 +40,24 @@ address_levels[0]/[-1] (NFC/ASCII-lowercase/whitespace normalized) compared agai
 
 | Bucket | Rows | Share |
 |---|---:|---:|
-| exact_agreement | 0 | 0.00% |
-| normalization_only | 34,262 | 85.66% |
-| finer_granularity_neighborhood | 5,642 | 14.11% |
+| exact_agreement | 34,997 | 99.87% |
+| normalization_only | 0 | 0.00% |
+| finer_granularity_neighborhood | 0 | 0.00% |
 | postal_city_vs_containment | 0 | 0.00% |
 | missing_address_levels | 0 | 0.00% |
 | point_outside_any_division | 0 | 0.00% |
 | country_disagreement | 0 | 0.00% |
-| unresolved_disagreement | 96 | 0.24% |
-| **total** | **40,000** | **100.00%** |
+| unresolved_disagreement | 45 | 0.13% |
+| **total** | **35,042** | **100.00%** |
 
-- Rows with `address_levels`: 40,000
-- Rows with a containing division: 40,000
+- Rows with `address_levels`: 35,042
+- Rows with a containing division: 35,042
 - Rows with a populated `postal_city`: 0
-- **Genuine cross-context conflicts: 96 (0.24%)** -- country disagreements plus unresolved disagreements after granularity decomposition.
+- **Genuine cross-context conflicts: 45 (0.13%)** -- country disagreements plus unresolved disagreements after granularity decomposition.
 
-> postal_city is empty for all 40,000 sampled rows, so the postal_city_vs_containment bucket cannot trigger in this sample.
-> No raw exact label equality was observed; 34,262 compatible rows agreed only after the declared Unicode/case/whitespace normalization.
-> Box 'boston-core-ma' is purposive rather than random; its conflict rate must not be generalized beyond this bounded sample.
+> postal_city is empty for all 35,042 sampled rows, so the postal_city_vs_containment bucket cannot trigger in this sample.
+> Raw label equality was observed for 34,997 rows; normalization-only agreement is reported separately.
+> Box 'tokyo-core-jp' is purposive rather than random; its conflict rate must not be generalized beyond this bounded sample.
 
 The agreement-plus-granularity rate (exact + normalization-only +
 finer-granularity) shows how often `address_levels` and geometric
@@ -69,35 +69,46 @@ explicit match method is safer than overwriting the source label.
 
 | Category | Rows | Country | AL region | AL locality | Postal city | Cont. region | Cont. locality | Cont. neighborhood | Method |
 |---|---:|---|---|---|---|---|---|---|---|
-| finer_granularity_neighborhood | 3,009 | US | MA | BRIGHTON |  | Massachusetts | Boston |  | point_in_polygon_interior |
-| finer_granularity_neighborhood | 2,577 | US | MA | CHARLESTOWN |  | Massachusetts | Boston |  | point_in_polygon_interior |
-| finer_granularity_neighborhood | 44 | US | MA | CHARLESTOWN |  |  | Boston |  | point_in_polygon_interior |
-| unresolved_disagreement | 27 | US | MA | SOMERVILLE |  | Massachusetts | Medford |  | point_in_polygon_interior |
-| unresolved_disagreement | 21 | US | MA | ARLINGTON |  | Massachusetts | Cambridge |  | point_in_polygon_interior |
-| unresolved_disagreement | 18 | US | MA | CHELSEA |  | Massachusetts | Everett |  | point_in_polygon_interior |
-| unresolved_disagreement | 17 | US | MA | CAMBRIDGE |  | Massachusetts | Somerville |  | point_in_polygon_interior |
-| unresolved_disagreement | 13 | US | MA | SOMERVILLE |  | Massachusetts | Cambridge |  | point_in_polygon_interior |
-| finer_granularity_neighborhood | 12 | US | MA | SOUTH BOSTON |  | Massachusetts | Boston |  | point_in_polygon_interior |
+| unresolved_disagreement | 8 | JP | 東京都 | 豊島区 |  | 東京都 | 文京区 | 千石四丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 3 | JP | 東京都 | 新宿区 |  | 東京都 | 港区 | 元赤坂二丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 2 | JP | 東京都 | 新宿区 |  | 東京都 | 文京区 | 関口一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 2 | JP | 東京都 | 中央区 |  | 東京都 | 千代田区 | 丸の内一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 2 | JP | 東京都 | 港区 |  | 東京都 | 渋谷区 | 恵比寿三丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 2 | JP | 東京都 | 千代田区 |  | 東京都 | 文京区 | 湯島一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 新宿区 |  | 東京都 | 豊島区 | 目白三丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 港区 |  | 東京都 | 渋谷区 | 神宮前三丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 品川区 |  | 東京都 | 港区 | 港南二丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 北区 |  | 東京都 | 豊島区 | 西巣鴨四丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 千代田区 |  | 東京都 | 文京区 | 湯島一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 文京区 |  | 東京都 | 台東区 | 池之端一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 中央区 |  | 東京都 | 千代田区 | 丸の内三丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 板橋区 |  | 東京都 | 豊島区 | 池袋三丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 文京区 |  | 東京都 | 豊島区 | 南大塚二丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 新宿区 |  | 東京都 | 文京区 | 関口一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 渋谷区 |  | 東京都 | 目黒区 | 中目黒一丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 中央区 |  | 東京都 | 千代田区 | 大手町二丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 品川区 |  | 東京都 | 港区 | 高輪四丁目 | point_in_polygon_interior |
+| unresolved_disagreement | 1 | JP | 東京都 | 豊島区 |  | 東京都 | 新宿区 | 下落合三丁目 | point_in_polygon_interior |
 
 ## Storage delta vs the 35.50 B/row baseline
 
-Measured on the same 40,000 rows, page_rows=256, independent gzip pages.
+Measured on the same 35,042 rows, page_rows=256, independent gzip pages.
 
 | Format | B/indexed row | p50 page bytes | Linear all-473M GB |
 |---|---:|---:|---:|
-| Lookup-safe baseline (measured here) | 34.235 | 8,736 | 16.19 |
-| + division GERS IDs + match byte | 34.546 | 8,824 | 16.34 |
-| **delta** | **+0.311** | | |
+| Lookup-safe baseline (measured here) | 31.935 | 8,151 | 15.11 |
+| + division GERS IDs + match byte | 32.323 | 8,242 | 15.29 |
+| **delta** | **+0.387** | | |
 
-All GB projections in the table linearize the box-measured 34.235/34.546 B/row values. Applying the same +0.311 B/row delta to the hosted `useful_gzip` reference baseline (35.502976 B/row, measured on the separate hosted reduce range) gives 16.79 GB -> 16.94 GB. Both sit far inside the 40 GB stop gate (addresses share that budget with Places; these are labeled diagnostics, not forecasts). Every stored extended page is verified to decode from its bytes alone (self-describing core-length framing).
+All GB projections in the table linearize the box-measured 31.935/32.323 B/row values. Applying the same +0.387 B/row delta to the hosted `useful_gzip` reference baseline (35.502976 B/row, measured on the separate hosted reduce range) gives 16.79 GB -> 16.98 GB. Both sit far inside the 40 GB stop gate (addresses share that budget with Places; these are labeled diagnostics, not forecasts). Every stored extended page is verified to decode from its bytes alone (self-describing core-length framing).
 
 > The measured delta is a favorable-case lower bound: the sample box has an atypically small division-polygon set, so few distinct GERS IDs repeat within each page and the page dictionary amortizes to almost nothing. The delta scales with the number of distinct containing divisions per page under global polygon density (boundaries, dense locality/neighborhood fabric, multi-membership).
 
 ## Build cost (labeled diagnostic, not a forecast)
 
-- Spatial join: 2.737 s wall on a 4-thread DuckDB session, 2.737 s CPU, over 40,000 points x 18 polygons
-- Peak process RSS: 998.0 MB
-- Linear all-473M-row wall diagnostic: 8.99 factory-hours (single 4-thread-session wall-clock basis)
+- Spatial join: 4.596 s wall on a 4-thread DuckDB session, 4.595 s CPU, over 35,042 points x 1,308 polygons
+- Peak process RSS: 1320.5 MB
+- Linear all-473M-row wall diagnostic: 17.23 factory-hours (single 4-thread-session wall-clock basis)
 
 > A purely linear wall-clock diagnostic on a 4-thread DuckDB session, NOT a build forecast. It excludes global polygon density, extraction, sort, shuffle, retries, and country-specific work; the measured box covers one small geographic area with a bounded polygon set, and the timed join includes the taxonomy-only neighborhood polygons.
 
@@ -126,9 +137,9 @@ python3 scripts/experiment_address_format_convergence.py \
 
 ## Limitations
 
-- One small purposive box in US; not globally representative.
+- One small purposive box in JP; not globally representative.
 - Stored context covers region/county/locality only; finer subtypes are taxonomy-only channels. Neighborhood polygons are joined where they exist, and macrohood/neighborhood/microhood division points are associated with their containing municipality by name -- a name-level heuristic, not verified neighborhood-polygon containment for those point-only features.
-- The sample is cap-saturated: sampled rows equal the row cap and are a deterministic md5(id) subset of the box population.
+- The box population is below the row cap, so every address in the configured box is included.
 - The measured storage delta is a favorable-case lower bound; see the storage delta caveat.
 - address_levels semantics are country-dependent; first/last are proxies.
 - Division-area geometry is current-release; a single release join only.

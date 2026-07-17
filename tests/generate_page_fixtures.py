@@ -54,6 +54,7 @@ def _record(index: int, number: str, gers_ints, method: int, confidence: int) ->
         "number": number,
         "unit": "",
         "address_levels": ["MA", "Cambridge"],
+        "source_object_index": 0,
         "source_row_group": 0,
         "source_row_index": index,
         "division_gers_ids": [str(uuid.UUID(int=n)) for n in gers_ints],
@@ -80,7 +81,9 @@ def build_fixtures() -> tuple[list[dict], dict[str, bytes]]:
     files = {
         "plain_page.bin": compression.encode_page(records, useful=True),
         "extended_page.bin": convergence.encode_extended_page(records),
-        "truncated_extended_page.bin": convergence.encode_uvarint(TRUNCATED_CORE_LENGTH),
+        "truncated_extended_page.bin": convergence.encode_uvarint(
+            TRUNCATED_CORE_LENGTH
+        ),
     }
     return records, files
 
@@ -103,7 +106,9 @@ def write(output_dir: Path) -> dict:
     for name, data in files.items():
         (output_dir / name).write_bytes(data)
     report = build_report(records, files)
-    (output_dir / "report.json").write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    (output_dir / "report.json").write_text(
+        json.dumps(report, indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 

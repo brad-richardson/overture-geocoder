@@ -347,6 +347,36 @@ pub struct DivisionExtensionRow {
     pub match_confidence: u8,
 }
 
+/// Hard limits for a page-local reference extension. The shared decoder uses
+/// these before allocating or cloning identifiers; payload families choose a
+/// preset that reflects their measured row and heap envelope.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReferenceExtensionCaps {
+    pub max_rows: usize,
+    pub max_dictionary_entries: usize,
+    pub max_references_per_row: usize,
+    pub max_total_references: usize,
+}
+
+/// Generic decoded row for a dictionary-backed extension. The trailing tag is
+/// deliberately uninterpreted here (division uses it for two nibbles; another
+/// payload can assign different semantics without forking the framing logic).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReferenceExtensionRow<I> {
+    pub references: Vec<I>,
+    pub tag: u8,
+}
+
+/// Measured address-division extension limits. A normal row has only a small
+/// region/county/locality chain; the looser caps tolerate unusual hierarchies
+/// while keeping hostile dictionaries and reference amplification bounded.
+pub const DIVISION_EXTENSION_CAPS: ReferenceExtensionCaps = ReferenceExtensionCaps {
+    max_rows: PageCaps::ADDRESS.max_page_rows,
+    max_dictionary_entries: 30_000,
+    max_references_per_row: 64,
+    max_total_references: 100_000,
+};
+
 /// Split a decompressed extended page into its `(core, extension)` byte halves
 /// using only the bytes: `uvarint(core_length)` locates the boundary between
 /// the reused lookup-safe core page and the appended extension. Rejects a core
@@ -366,45 +396,108 @@ pub fn split_extended_page(payload: &[u8]) -> PageResult<(&[u8], &[u8])> {
     Ok((&payload[start..end], &payload[end..]))
 }
 
-/// Decode `count` rows of the division extension from `payload`: a page-local
-/// dictionary of 16-byte GERS UUIDs, then per row a `uvarint(count)`, that many
-/// `uvarint` dictionary indices, and one match/confidence byte. Returns the
-/// rows and the number of bytes consumed (so callers can reject trailing
-/// bytes). A faithful port of `decode_division_extension`; it never
-/// pre-allocates from an attacker-controlled count.
+/// Decode a page-local dictionary followed by per-row references and one raw
+/// tag byte. `decode_identifier` owns only the identifier representation; all
+/// counts, references, and amplification limits stay in this shared reader.
+pub fn decode_reference_extension<I, F>(
+    payload: &[u8],
+    count: usize,
+    caps: &ReferenceExtensionCaps,
+    mut decode_identifier: F,
+) -> PageResult<(Vec<ReferenceExtensionRow<I>>, usize)>
+where
+    I: Clone,
+    F: FnMut(&mut ByteReader<'_>) -> PageResult<I>,
+{
+    if count > caps.max_rows {
+        return Err(PageError::new("extension row count exceeds hard cap"));
+    }
+    let mut reader = ByteReader::new(payload, 0);
+    let dictionary_count = usize::try_from(reader.uvarint()?)
+        .map_err(|_| PageError::new("extension dictionary count is too large"))?;
+    if dictionary_count > caps.max_dictionary_entries {
+        return Err(PageError::new(
+            "extension dictionary entry count exceeds hard cap",
+        ));
+    }
+    let mut identifiers: Vec<I> = Vec::with_capacity(dictionary_count);
+    for _ in 0..dictionary_count {
+        identifiers.push(decode_identifier(&mut reader)?);
+    }
+    let mut rows: Vec<ReferenceExtensionRow<I>> = Vec::with_capacity(count);
+    let mut total_references = 0_usize;
+    for _ in 0..count {
+        let reference_count = usize::try_from(reader.uvarint()?)
+            .map_err(|_| PageError::new("extension reference count is too large"))?;
+        if reference_count > caps.max_references_per_row {
+            return Err(PageError::new(
+                "extension row reference count exceeds hard cap",
+            ));
+        }
+        total_references = total_references
+            .checked_add(reference_count)
+            .ok_or_else(|| PageError::new("extension reference count overflows"))?;
+        if total_references > caps.max_total_references {
+            return Err(PageError::new(
+                "extension total reference count exceeds hard cap",
+            ));
+        }
+        let mut references: Vec<I> = Vec::with_capacity(reference_count);
+        for _ in 0..reference_count {
+            let reference = usize::try_from(reader.uvarint()?)
+                .map_err(|_| PageError::new("extension dictionary index is too large"))?;
+            if reference >= identifiers.len() {
+                return Err(PageError::new("extension dictionary index is out of range"));
+            }
+            references.push(identifiers[reference].clone());
+        }
+        let tag = *reader.take(1)?.first().expect("one-byte slice");
+        rows.push(ReferenceExtensionRow { references, tag });
+    }
+    Ok((rows, reader.position()))
+}
+
+/// Address-specific wrapper around [`decode_reference_extension`].
 pub fn decode_division_extension(
     payload: &[u8],
     count: usize,
 ) -> PageResult<(Vec<DivisionExtensionRow>, usize)> {
-    let mut reader = ByteReader::new(payload, 0);
-    let dictionary_count = usize::try_from(reader.uvarint()?)
-        .map_err(|_| PageError::new("division dictionary count is too large"))?;
-    let mut identifiers: Vec<String> = Vec::new();
-    for _ in 0..dictionary_count {
-        let raw: [u8; 16] = reader.take(16)?.try_into().expect("sixteen-byte slice");
-        identifiers.push(format_uuid(raw));
+    let (rows, consumed) =
+        decode_reference_extension(payload, count, &DIVISION_EXTENSION_CAPS, |reader| {
+            let raw: [u8; 16] = reader.take(16)?.try_into().expect("sixteen-byte slice");
+            Ok(format_uuid(raw))
+        })?;
+    Ok((
+        rows.into_iter()
+            .map(|row| DivisionExtensionRow {
+                division_gers_ids: row.references,
+                match_method: row.tag >> 4,
+                match_confidence: row.tag & 0x0f,
+            })
+            .collect(),
+        consumed,
+    ))
+}
+
+/// Decode an extended page with payload-specific core and extension closures.
+/// This is the reusable composition point for address, Places, and future
+/// payload families.
+pub fn decode_extended_page_with<T, E, F, G>(
+    payload: &[u8],
+    decode_core: F,
+    decode_extension: G,
+) -> PageResult<(T, E)>
+where
+    F: FnOnce(&[u8]) -> PageResult<(T, usize)>,
+    G: FnOnce(&[u8], usize) -> PageResult<(E, usize)>,
+{
+    let (core, extension) = split_extended_page(payload)?;
+    let (value, rows) = decode_core(core)?;
+    let (extension_value, consumed) = decode_extension(extension, rows)?;
+    if consumed != extension.len() {
+        return Err(PageError::new("trailing extended-page bytes"));
     }
-    let mut rows: Vec<DivisionExtensionRow> = Vec::new();
-    for _ in 0..count {
-        let reference_count = usize::try_from(reader.uvarint()?)
-            .map_err(|_| PageError::new("division reference count is too large"))?;
-        let mut division_gers_ids: Vec<String> = Vec::new();
-        for _ in 0..reference_count {
-            let reference = usize::try_from(reader.uvarint()?)
-                .map_err(|_| PageError::new("division dictionary index is too large"))?;
-            if reference >= identifiers.len() {
-                return Err(PageError::new("division dictionary index is out of range"));
-            }
-            division_gers_ids.push(identifiers[reference].clone());
-        }
-        let provenance = *reader.take(1)?.first().expect("one-byte slice");
-        rows.push(DivisionExtensionRow {
-            division_gers_ids,
-            match_method: provenance >> 4,
-            match_confidence: provenance & 0x0f,
-        });
-    }
-    Ok((rows, reader.position()))
+    Ok((value, extension_value))
 }
 
 /// Decode a self-describing extended page end to end: split the framing, let
@@ -420,13 +513,7 @@ pub fn decode_extended_page<T, F>(
 where
     F: FnOnce(&[u8]) -> PageResult<(T, usize)>,
 {
-    let (core, extension) = split_extended_page(payload)?;
-    let (value, rows) = decode_core(core)?;
-    let (extension_rows, consumed) = decode_division_extension(extension, rows)?;
-    if consumed != extension.len() {
-        return Err(PageError::new("trailing extended-page bytes"));
-    }
-    Ok((value, extension_rows))
+    decode_extended_page_with(payload, decode_core, decode_division_extension)
 }
 
 // ---------------------------------------------------------------------------
@@ -793,6 +880,34 @@ mod tests {
         bytes.extend(uvarint_bytes(5)); // dictionary only has index 0
         bytes.push(0);
         assert!(decode_division_extension(&bytes, 1).is_err());
+    }
+
+    #[test]
+    fn reference_extension_enforces_dictionary_and_reference_caps() {
+        let caps = ReferenceExtensionCaps {
+            max_rows: 2,
+            max_dictionary_entries: 1,
+            max_references_per_row: 1,
+            max_total_references: 1,
+        };
+        let too_many_dictionary_entries = uvarint_bytes(2);
+        assert!(
+            decode_reference_extension(&too_many_dictionary_entries, 0, &caps, |reader| Ok(
+                *reader.take(1)?.first().expect("one-byte slice")
+            ),)
+            .is_err()
+        );
+
+        let mut too_many_references = uvarint_bytes(1);
+        too_many_references.push(7);
+        too_many_references.extend(uvarint_bytes(2));
+        assert!(
+            decode_reference_extension(&too_many_references, 1, &caps, |reader| Ok(*reader
+                .take(1)?
+                .first()
+                .expect("one-byte slice")),)
+            .is_err()
+        );
     }
 
     #[test]

@@ -9,8 +9,8 @@ Raw data: `benchmarks/2026-07-09-multilingual-typeahead.json`
 (13 third-language cases, progressive prefixes, top-5 window, 50 km tolerance).
 
 Purpose: measure the demand/capability gap for multilingual forward search
-called out in `docs/plans/2026-07-02-future-work.md` (section 2) and
-`REVIEW_FOLLOWUPS.md` (P2, multilingual). Today `search_name` carries only
+called out in `docs/plans/2026-07-02-future-work.md` (section 2). Today
+`search_name` carries only
 primary + short + English common/official/alternate names, so third-language
 exonyms ("moscou", "kolonia", "nueva york") are predicted to miss.
 
