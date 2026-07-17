@@ -186,10 +186,7 @@ jobs:
                 cat "$BODY"
                 exit 1
               fi
-              jq -e --argjson ids "$EXPECTED_IDS" --argjson results "$EXPECTED_RESULTS" \
-                --argjson head "$EXPECTED_HEAD" \
-                --argjson count "$EXPECTED_COUNT" --arg route "$EXPECTED_ROUTE" \
-                --argjson attempt "$attempt" '
+              STRICT_FILTER='
                 def text_projection:
                   {id,name,category,locality,region,country};
                 .schema == "overture-places-worker-spike-v2"
@@ -211,8 +208,38 @@ jobs:
                 and (if (.route | startswith("head")) or .route == "packed_head"
                      then (.shards | length) == 0 and .head_consulted == true
                      else (.shards | length) == 1 and .head_consulted == false end)
-                and (if $attempt == 1 then .read_metrics.r2_reads > 0 else true end)
-              ' "$BODY"
+                and (if $attempt == 1 then .read_metrics.r2_reads > 0 else true end)'
+              JQ_ARGS=(--argjson ids "$EXPECTED_IDS" --argjson results "$EXPECTED_RESULTS"
+                --argjson head "$EXPECTED_HEAD" --argjson count "$EXPECTED_COUNT"
+                --arg route "$EXPECTED_ROUTE" --argjson attempt "$attempt")
+              if ! jq -e "${JQ_ARGS[@]}" "$STRICT_FILTER" "$BODY" >/dev/null; then
+                echo "::error::Places case ${NAME} attempt ${attempt} failed strict equivalence"
+                echo "--- per-clause truth (expected all true) ---"
+                jq -c "${JQ_ARGS[@]}" '{
+                  schema: (.schema == "overture-places-worker-spike-v2"),
+                  ids_order: ([.results[].id] == $ids),
+                  ids_unique: (([.results[].id] | unique | length) == (.results | length)),
+                  result_count: ((.results | length) == ($results | length)),
+                  candidate_count: (.candidate_count == $count),
+                  head_hit: (.head_hit == $head),
+                  route: (.route == $route),
+                  logical_ranges: (.read_metrics.logical_ranges >= 3),
+                  shard_shape: (if (.route | startswith("head")) or .route == "packed_head"
+                    then (.shards | length) == 0 and .head_consulted == true
+                    else (.shards | length) == 1 and .head_consulted == false end),
+                  cold_read: (if $attempt == 1 then .read_metrics.r2_reads > 0 else true end)
+                }' "$BODY"
+                echo "--- expected (producer oracle) ---"
+                jq -c '{ids:$ids,count:$count,head:$head,route:$route,
+                  results:[$results[]|{id,name,category,distance_km}]}' \
+                  --argjson ids "$EXPECTED_IDS" --argjson results "$EXPECTED_RESULTS" \
+                  --argjson head "$EXPECTED_HEAD" --argjson count "$EXPECTED_COUNT" \
+                  --arg route "$EXPECTED_ROUTE" <<< '{}'
+                echo "--- actual (worker) ---"
+                jq -c '{route,head_hit,candidate_count,read_metrics,
+                  results:[.results[]|{id,name,category,latitude,longitude,confidence,distance_km}]}' "$BODY"
+                exit 1
+              fi
               SERVER_TIMING=$(awk 'BEGIN{IGNORECASE=1} /^server-timing:/ {sub(/\r$/, ""); print substr($0, index($0,$2)); exit}' "$HEADERS")
               WORKER_MS=$(sed -nE 's/.*total;dur=([0-9.]+).*/\1/p' <<< "$SERVER_TIMING")
               jq -cn --arg name "$NAME" --argjson attempt "$attempt" \
