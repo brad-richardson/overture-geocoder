@@ -30,6 +30,7 @@ Production baseline: `https://geocoder.bradr.dev`, data version `2026-07-13.0`
 
 - [Address three-task matrix](https://github.com/brad-richardson/overture-geocoder/actions/runs/29543948867)
 - [Address Worker read chain, first pass](https://github.com/brad-richardson/overture-geocoder/actions/runs/29544510887)
+- [Address Worker read chain with retained metrics](https://github.com/brad-richardson/overture-geocoder/actions/runs/29545506984)
 - [Verified R2 shuffle/resume](https://github.com/brad-richardson/overture-geocoder/actions/runs/29543949392)
 - [Places Worker read chain](https://github.com/brad-richardson/overture-geocoder/actions/runs/29544511279)
 
@@ -65,13 +66,21 @@ digest, reported three logical range stages, and returned an empty candidate lis
 for the miss case. Cleanup deleted both the preview Worker and run-specific R2
 objects.
 
-The first observed request took 416 ms client time and 294 ms Worker time. The
-five subsequent requests had a 127 ms client median (102-232 ms observed range)
-and a 30 ms Worker median (21-38 ms observed range). The first workflow version
-asserted positive index, stored-page, decoded-page, and materialized-page bytes,
-but accidentally omitted those values and the R2/cache split from its saved
-latency record. The recorder fix in this evidence change requires one repeat run
-before this report is final.
+The first pass's first observed request took 416 ms client time and 294 ms Worker
+time. Its five subsequent requests had a 127 ms client median. A branch-ref
+repeat with the corrected recorder took 392 ms client / 236 ms Worker time cold,
+then a 174 ms client / 30 ms Worker median over five warm requests.
+
+| state | R2 reads | R2 bytes | cache hits / bytes | index | stored page | decoded page | materialized page |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| cold | 3 | 954,362 | 0 / 0 | 941,745 B | 8,521 B | 15,838 B | 90,978 B |
+| warm | 0 | 0 | 3 / 954,362 | 941,745 B | 8,521 B | 15,838 B | 90,978 B |
+
+Both runs returned the same 92-candidate digest and the repeat cleaned up its
+Worker and R2 prefix. The page itself is small and materialization stayed below
+91 KB, but the full side index contributed 98.7% of cold fetched bytes. The next
+address slice should evaluate the partition/index tradeoff before treating a
+roughly 942 KB cold index read per shard as the final serving shape.
 
 ## Verified R2 shuffle/resume
 

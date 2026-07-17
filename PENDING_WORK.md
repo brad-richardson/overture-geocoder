@@ -17,6 +17,10 @@ its result constrains the next decision. The implementation baseline is
   checks, lossless page decode checks, and the hosted runner envelope. Structured
   retention varied from 40.29% to effectively 100%; regional completeness is a
   product constraint, not a single global coefficient.
+- The isolated address Worker returned the exact 92-candidate producer digest.
+  Its cold request used three R2 reads and 954,362 bytes in 392 ms; warm requests
+  used three cache hits, zero R2 reads, and a 174 ms median. The 941,745-byte side
+  index dominated cold transfer while page materialization stayed below 91 KB.
 - The isolated Places Worker passed exact producer/reader equivalence through
   real R2. Packed-head cold access used four reads and 132 KB; a three-shard
   fallback used 15 logical ranges and took 1.347 seconds on its first observed
@@ -87,6 +91,9 @@ coverage policy.
   missing street or number.
 - Choose the partition/catalog rule from measured fanout and bytes, then add the
   object-level publication guard required by the shared finalizer path.
+- Evaluate a bounded two-level/sparse side index or smaller serving partition so
+  a cold exact lookup does not automatically fetch the observed 941,745-byte
+  full index. Preserve exact predecessor selection and the three-range cap.
 - Measure Actions minutes, retry amplification, peak disk/RAM, and wall time.
   Keep partial runs undiscoverable and do not hydrate Overture on the request
   path.
@@ -151,6 +158,9 @@ These do not block the first routed Places or real-fragment address slice:
   The longest measured compression pass was 692 seconds.
 - Maximum exact-key fanout was 252, and every tested page variant preserved
   full candidate order and IDs.
+- The large-shard Worker cold lookup measured 392 ms, three R2 reads, and
+  954,362 bytes; five warm lookups had a 174 ms median and zero R2 reads. The
+  stored/decoded/materialized page sizes were 8,521/15,838/90,978 bytes.
 - The complete source inventory remains 473,576,753 rows, 8,704 row groups, and
   127 planned tasks. Do not multiply it by one regional retention ratio.
 
