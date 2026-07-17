@@ -26,6 +26,17 @@ const MAX_POSTING_BYTES: u64 = 8 * 1024 * 1024;
 const MAX_POSTING_CANDIDATES: usize = 200_000;
 const MAX_RESULT_RECORD_BYTES: usize = 64 * 1024;
 const MAX_RESULT_RANGE_BYTES: u64 = 2 * 1024 * 1024;
+// Coalesce-gap thresholds for the record_index and records stages. The records
+// component is laid out in serving-rank order by the producer, so a query's
+// served window is rank-local and coalesces into a single physical read at
+// these gaps; the gap is the guardrail that keeps the scattered window one read
+// (a two-clause query's other stages already consume 7 of the 8-read cold
+// budget). These MUST equal the producer/reader-model defaults
+// RECORD_INDEX_COALESCE_GAP / RECORDS_COALESCE_GAP in
+// scripts/experiment_places_compact_shard.py; tests/test_places_coalesce_gap_parity.py
+// fails if the two sides drift.
+const RECORD_INDEX_COALESCE_GAP: u64 = 64 * 1024;
+const RECORDS_COALESCE_GAP: u64 = 64 * 1024;
 // The served window: the routed handler returns at most this many results
 // (handlers.rs `results.truncate(10)`) and does not re-rank the shard's
 // confidence/doc-id ordering, so fetching more record_index/records than this
@@ -976,7 +987,7 @@ impl ShardLoader {
             })
             .collect::<Result<_>>()?;
         let index_bytes = reader
-            .coalesced(&index_wants, 64 * 1024, 256 * 1024)
+            .coalesced(&index_wants, RECORD_INDEX_COALESCE_GAP, 256 * 1024)
             .await?;
         let mut positions = Vec::with_capacity(index_bytes.len());
         for bytes in index_bytes {
@@ -999,7 +1010,7 @@ impl ShardLoader {
             })
             .collect::<Result<_>>()?;
         let records_bytes = reader
-            .coalesced(&record_wants, 256 * 1024, MAX_RESULT_RANGE_BYTES)
+            .coalesced(&record_wants, RECORDS_COALESCE_GAP, MAX_RESULT_RANGE_BYTES)
             .await?;
         let results = records_bytes
             .iter()
