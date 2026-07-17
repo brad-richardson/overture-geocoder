@@ -145,6 +145,17 @@ def push_top(heap: list[tuple[int, int]], doc_id: int, rank: int, limit: int) ->
         heapq.heapreplace(heap, value)
 
 
+def famous_pair_token_key(low: str, high: str) -> str:
+    """Format the ``e2:`` pair key for two tokens already in ascending order.
+
+    Single source of the pair wire format: the builder emits through it and the
+    Python reader (``experiment_places_head_repack.famous_pair_key``) constructs
+    probe keys through it, so emission and probing cannot drift apart. The Rust
+    Worker mirrors the format in lockstep, enforced by the fixture tests.
+    """
+    return f"e2:{low} {high}"
+
+
 def famous_docs(places: list[Place], famous_cap: int) -> list[int]:
     """Deterministically select the famous set F.
 
@@ -195,20 +206,21 @@ def build_heads(
                 low, high = sorted(
                     (pair_tokens[first_index], pair_tokens[second_index])
                 )
-                pair_keys[f"e2:{low} {high}"] = (low, high)
+                pair_keys[famous_pair_token_key(low, high)] = (low, high)
     for key in sorted(pair_keys):
         low, high = pair_keys[key]
         low_docs = exact.get(low)
         high_docs = exact.get(high)
         if not low_docs or not high_docs:
             continue
-        if len(high_docs) < len(low_docs):
-            low_docs, high_docs = high_docs, low_docs
-        shared = [doc for doc in low_docs if doc in high_docs]
+        shared = low_docs.keys() & high_docs.keys()
         if not shared:
             continue
+        # The stored rank is per document (round(confidence * 255), identical
+        # in both posting maps), so ranking through either map matches the
+        # per-token ``e:`` entries' (-rank, doc) order exactly.
         heads[key] = sorted(
-            shared, key=lambda doc: (-max(low_docs[doc][1], high_docs[doc][1]), doc)
+            shared, key=lambda doc: (-low_docs[doc][1], doc)
         )[:limit]
     for token, docs in exact.items():
         if len(docs) < minimum_candidates and token not in admitted_tokens:

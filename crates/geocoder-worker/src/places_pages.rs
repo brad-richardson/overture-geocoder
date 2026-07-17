@@ -100,6 +100,9 @@ fn head_directory_supported(directory: &HeadDirectory) -> bool {
             directory.admission.as_deref(),
             None | Some(HEAD_ADMISSION_MARKER)
         )
+        // Pair keys without a declared admission rule are undeclared
+        // provenance: fail closed rather than serve them silently.
+        && (directory.e2_key_count == 0 || directory.admission.is_some())
 }
 
 #[derive(Debug)]
@@ -1297,6 +1300,11 @@ mod tests {
         )
         .unwrap();
         assert!(!head_directory_supported(&pair_overrun));
+        let undeclared_pairs: HeadDirectory = serde_json::from_str(
+            r#"{"schema_version":1,"key_count":4,"e2_key_count":1,"components":{}}"#,
+        )
+        .unwrap();
+        assert!(!head_directory_supported(&undeclared_pairs));
         let wrong_schema: HeadDirectory =
             serde_json::from_str(r#"{"schema_version":2,"key_count":4,"components":{}}"#).unwrap();
         assert!(!head_directory_supported(&wrong_schema));

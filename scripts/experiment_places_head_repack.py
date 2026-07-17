@@ -55,6 +55,7 @@ from experiment_places_kv_r2_pages import CASES, Clause  # noqa: E402
 from experiment_places_locality_head import (  # noqa: E402
     PackedHeadStore,
     build_heads,
+    famous_pair_token_key,
     ordered_places,
 )
 
@@ -70,10 +71,20 @@ HEAD_BUCKET_COUNT = 4096
 HEAD_MINIMUM_CANDIDATES = 64
 HEAD_LIMIT = 10
 # Famous-unique admission is off by default so the historical spike objects
-# stay reproducible; callers opt in with an explicit cap.
+# stay byte-for-byte reproducible (a cap of 0 also omits the famous provenance
+# fields from the directory); callers opt in with an explicit cap.
 HEAD_FAMOUS_CAP = 0
 HEAD_ADMISSION_MARKER = "famous-unique-v1"
 HEAD_KEY_FAMILIES = ("e", "e2", "p")
+# Mirrors of the Rust reader's hard caps (crates/geocoder-worker/src/
+# places_pages.rs: MAX_HEAD_KEYS, MAX_HEAD_INDEX_BYTES, MAX_HEAD_ENTRY_BYTES,
+# MAX_TOKEN_BYTES). The builder fails a build that the reader would reject so
+# an over-cap famous configuration surfaces at build time, not as a serve-time
+# outage of every head-eligible query.
+READER_MAX_HEAD_KEYS = 100_000
+READER_MAX_HEAD_INDEX_BYTES = 1024 * 1024
+READER_MAX_HEAD_ENTRY_BYTES = 128 * 1024
+READER_MAX_KEY_BYTES = 4096
 
 
 def head_key(clause: Clause) -> str | None:
@@ -102,7 +113,7 @@ def famous_pair_key(clauses: tuple[Clause, ...]) -> str | None:
     low, high = sorted(normalize(clause.value) for clause in clauses)
     if not low or low == high:
         return None
-    return f"e2:{low} {high}"
+    return famous_pair_token_key(low, high)
 
 
 # --------------------------------------------------------------------------
@@ -238,19 +249,41 @@ def build_repack_object(
         family_entry_bytes[family] += len(entry)
 
     key_index = encode_key_index(key_entries)
+    oversized_keys = [
+        key
+        for key, _, _ in key_entries
+        if len(key.encode("utf-8")) > READER_MAX_KEY_BYTES
+    ]
+    if (
+        len(key_entries) > READER_MAX_HEAD_KEYS
+        or len(key_index) > READER_MAX_HEAD_INDEX_BYTES
+        or (entry_sizes and max(entry_sizes) > READER_MAX_HEAD_ENTRY_BYTES)
+        or oversized_keys
+    ):
+        raise ValueError(
+            "packed head exceeds the reader's hard caps "
+            f"(keys={len(key_entries)}, key_index_bytes={len(key_index)}, "
+            f"max_entry_bytes={max(entry_sizes, default=0)}, "
+            f"oversized_keys={len(oversized_keys)}); "
+            "shrink head_famous_cap or raise the reader caps in lockstep"
+        )
     components = {"key_index": bytes(key_index), "entries": bytes(entries_blob)}
     directory = {
         "schema_version": 1,
         "magic": MAGIC.decode(),
         "key_count": len(key_entries),
         "head_limit": HEAD_LIMIT,
-        "head_famous_cap": head_famous_cap,
-        "e2_key_count": family_key_counts["e2"],
-        "admission": HEAD_ADMISSION_MARKER,
         "components": {
             name: {"length": len(data)} for name, data in components.items()
         },
     }
+    if head_famous_cap > 0:
+        # Additive famous provenance, only on famous-enabled builds so a cap-0
+        # build stays byte-identical to the historical spike objects and the
+        # marker actually distinguishes famous-admitted objects.
+        directory["head_famous_cap"] = head_famous_cap
+        directory["e2_key_count"] = family_key_counts["e2"]
+        directory["admission"] = HEAD_ADMISSION_MARKER
     # Stabilize the JSON directory length and the component offsets it stores.
     for _ in range(8):
         directory_bytes = json.dumps(

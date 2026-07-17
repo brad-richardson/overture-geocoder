@@ -265,6 +265,9 @@ def test_two_famous_builds_are_byte_identical_and_baseline_entries_unchanged(
     experiment.build_repack_object(baseline_ordered, baseline_heads, baseline_obj)
     famous_reader = experiment.RepackHead(first)
     baseline_reader = experiment.RepackHead(baseline_obj)
+    # A cap-0 build keeps the historical directory shape: no famous fields.
+    for field in ("head_famous_cap", "e2_key_count", "admission"):
+        assert field not in baseline_reader.directory
     famous_index = famous_reader.load_resident_index()
     famous_entries_base, _ = famous_reader.component("entries")
     baseline_entries_base, _ = baseline_reader.component("entries")
@@ -273,6 +276,22 @@ def test_two_famous_builds_are_byte_identical_and_baseline_entries_unchanged(
         assert famous_reader._read(
             famous_entries_base + famous_offset, famous_length
         ) == baseline_reader._read(baseline_entries_base + offset, length)
+
+
+def test_build_fails_when_exceeding_reader_hard_caps(tmp_path, monkeypatch):
+    places = famous_mix()
+    ordered, heads, _ = experiment.build_heads_and_baseline(
+        places, head_minimum_candidates=2, head_famous_cap=4
+    )
+    monkeypatch.setattr(experiment, "READER_MAX_HEAD_KEYS", 2)
+    try:
+        experiment.build_repack_object(
+            ordered, heads, tmp_path / "head.repack", head_famous_cap=4
+        )
+    except ValueError as error:
+        assert "hard caps" in str(error)
+    else:
+        raise AssertionError("expected an over-cap build to fail")
 
 
 def test_cli_writes_reports(tmp_path):

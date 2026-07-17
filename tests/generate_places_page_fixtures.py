@@ -21,6 +21,7 @@ from experiment_places_head_repack import (  # noqa: E402
     build_heads_and_baseline,
     build_repack_object,
 )
+from experiment_places_locality_head import famous_pair_token_key  # noqa: E402
 
 
 FIXTURE_DIR = ROOT / "tests" / "fixtures" / "places-pages"
@@ -84,9 +85,10 @@ def write(output_dir: Path) -> dict:
             ordered_head[doc_id].place_id for doc_id in heads["e:shared"]
         ],
         "head_famous_cap": HEAD_FAMOUS_CAP,
-        "famous_pair_key": "e2:fixture tower",
+        "famous_pair_key": famous_pair_token_key("fixture", "tower"),
         "famous_pair_result_ids": [
-            ordered_head[doc_id].place_id for doc_id in heads["e2:fixture tower"]
+            ordered_head[doc_id].place_id
+            for doc_id in heads[famous_pair_token_key("fixture", "tower")]
         ],
         "rare_admitted_token": "tower",
         "rare_admitted_result_ids": [

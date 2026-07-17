@@ -8,6 +8,7 @@ import json
 import math
 import struct
 import sys
+import tempfile
 from pathlib import Path
 from typing import Any
 
@@ -139,11 +140,16 @@ def query_shard(
     }
 
 
+def head_miss() -> dict[str, Any]:
+    """The single miss shape shared by every head-miss return path."""
+    return {"head_hit": False, "candidate_count": 0, "result_ids": [], "results": []}
+
+
 def query_head(reader: RepackHead, clauses: tuple[Clause, ...]) -> dict[str, Any]:
     if not clauses or len(clauses) > 2 or any(
         clause.field is not None or clause.prefix for clause in clauses
     ):
-        return {"head_hit": False, "candidate_count": 0, "result_ids": [], "results": []}
+        return head_miss()
     index = reader.load_resident_index()
     entries_base, _ = reader.component("entries")
     # Two-clause queries probe the famous pair entry first: it is by
@@ -160,12 +166,7 @@ def query_head(reader: RepackHead, clauses: tuple[Clause, ...]) -> dict[str, Any
         for clause in clauses:
             located = index.get(f"e:{normalize(clause.value)}")
             if located is None:
-                return {
-                    "head_hit": False,
-                    "candidate_count": 0,
-                    "result_ids": [],
-                    "results": [],
-                }
+                return head_miss()
             offset, length = located
             per_clause.append(
                 decode_head_entry(reader._read(entries_base + offset, length))
@@ -364,11 +365,15 @@ def prepare(
         head_famous_cap=0,
         preserve_input_order=True,
     )
-    baseline_path = output_dir / "head-baseline-nofamous.phrp"
-    baseline_report = build_repack_object(
-        baseline_ordered, baseline_heads, baseline_path, head_famous_cap=0
-    )
-    baseline_path.unlink()
+    # Build the throwaway baseline object outside output_dir so a crash can
+    # never leave a non-serving object among the uploaded smoke artifacts.
+    with tempfile.TemporaryDirectory() as baseline_dir:
+        baseline_report = build_repack_object(
+            baseline_ordered,
+            baseline_heads,
+            Path(baseline_dir) / "head-baseline-nofamous.phrp",
+            head_famous_cap=0,
+        )
     head_reader = RepackHead(head_path)
     head_index = head_reader.load_resident_index()
 
