@@ -153,6 +153,39 @@ def test_reconcile_fails_on_duplicate_task_index():
         region.reconcile_rows(report, entries)
 
 
+def test_reconcile_fails_on_an_extra_task_not_in_the_plan():
+    # An extra task index that the plan never emitted must fail even when the
+    # measured rows happen to sum to bbox_scoped_rows, so a stray/misrouted
+    # evidence artifact cannot slip a spurious task past reconciliation.
+    report = scoped_report([10, 20])
+    entries = [
+        region.task_rows_entry(map_report(10), task_index=0, name="region-000"),
+        region.task_rows_entry(map_report(20), task_index=1, name="region-001"),
+        region.task_rows_entry(map_report(0), task_index=2, name="region-002"),
+    ]
+    with pytest.raises(region.RegionRehearsalError, match=r"extra=\[2\]"):
+        region.reconcile_rows(report, entries)
+
+
+def test_task_rows_rejects_non_integer_measured_rows():
+    # A bool is an int subclass; a JSON float would silently coerce sums. Both
+    # must be rejected so reconciliation stays exact-integer.
+    with pytest.raises(region.RegionRehearsalError, match="non-negative int"):
+        region.task_rows_entry(
+            {"schema": "overture-address-verified-resume-map-v1",
+             "map_fragments": {"input_rows": True}},
+            task_index=0,
+            name="region-000",
+        )
+    with pytest.raises(region.RegionRehearsalError, match="non-negative int"):
+        region.task_rows_entry(
+            {"schema": "overture-address-verified-resume-map-v1",
+             "map_fragments": {"input_rows": 10.0}},
+            task_index=0,
+            name="region-000",
+        )
+
+
 # --- family manifest ------------------------------------------------------
 
 
@@ -223,6 +256,23 @@ def test_manifest_verify_rejects_unexpected_object_in_listing():
             producer_commit="deadbeef",
             upload_reports=reports,
             listing=listing,
+            generated_at=None,
+        )
+
+
+def test_manifest_rejects_duplicate_reduce_output_key():
+    # Two upload reports naming the same immutable object key must fail rather
+    # than double-count one artifact into the family manifest.
+    reports = [upload_report([(KEY_A, 100, SHA_A)]), upload_report([(KEY_A, 100, SHA_A)])]
+    with pytest.raises(region.RegionRehearsalError, match="duplicate reduce-output key"):
+        region.build_and_verify_manifest(
+            release="2026-06-17.0",
+            region_name="us-northeast",
+            bbox=[-80.5, 38.0, -66.9, 47.5],
+            build_id="c" * 64,
+            producer_commit="deadbeef",
+            upload_reports=reports,
+            listing={KEY_A: 100},
             generated_at=None,
         )
 

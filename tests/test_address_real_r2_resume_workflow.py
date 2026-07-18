@@ -122,9 +122,12 @@ def test_region_plan_generates_scoped_inventory_and_enforces_hard_cap():
     assert "scripts/inventory_address_rowgroups.py" in plan
     for flag in ("--xmin", "--ymin", "--xmax", "--ymax"):
         assert flag in plan
-    # The whole scoped plan runs, but a plan above the cap FAILS the run.
+    # The whole scoped plan runs, but a plan above the cap FAILS the run. The
+    # cap input reaches the CLI through an env var (not a direct ${{ }} splice
+    # into the run block) so a crafted input cannot inject shell.
     assert "region_address_rehearsal.py matrix" in plan
-    assert '--max-tasks "${{ inputs.max_region_tasks }}"' in plan
+    assert "MAX_REGION_TASKS: ${{ inputs.max_region_tasks }}" in plan
+    assert '--max-tasks "${MAX_REGION_TASKS}"' in plan
 
 
 def test_region_resume_reuses_map_reduce_machinery_over_scoped_plan():
@@ -170,6 +173,19 @@ def test_region_finalize_reconciles_rows_and_verifies_family_manifest():
     # The isolated family prefix is cleaned up afterward; no catalog write.
     assert 'aws s3 rm "s3://geocoder-shards/${FAMILY_PREFIX}/"' in finalize
     assert "catalog.json" not in finalize
+
+
+def test_region_cleanup_sweeps_the_run_unique_prefix_on_every_path():
+    workflow = WORKFLOW.read_text()
+    cleanup = workflow[workflow.index("  region-cleanup:") :]
+    header = cleanup[: cleanup.index("steps:")]
+    # Runs even when a scoped task (and therefore region-finalize) fails, so the
+    # family objects finalize would have deleted are not orphaned on failure.
+    assert "needs: [plan-region, region-address-resume, region-finalize]" in header
+    assert "always()" in header and "inputs.mode == 'region'" in header
+    # Sweeps the WHOLE run-unique prefix, not just the family sub-prefix.
+    assert 'aws s3 rm "s3://geocoder-shards/${SHUFFLE_PREFIX}/"' in cleanup
+    assert 'test "$REMAINING" = "0"' in cleanup
 
 
 def test_large_real_data_rehearsal_does_not_replace_small_merge_smoke():

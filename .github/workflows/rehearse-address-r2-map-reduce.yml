@@ -451,26 +451,34 @@ jobs:
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
 
       - name: Generate the bbox-scoped inventory and task plan at run time
+        env:
+          BBOX_XMIN: ${{ inputs.bbox_xmin }}
+          BBOX_YMIN: ${{ inputs.bbox_ymin }}
+          BBOX_XMAX: ${{ inputs.bbox_xmax }}
+          BBOX_YMAX: ${{ inputs.bbox_ymax }}
         run: |
           set -euo pipefail
           /usr/bin/time -v python scripts/inventory_address_rowgroups.py \
             --release 2026-06-17.0 \
             --json-out scoped-inventory.json \
             --markdown-out scoped-inventory.md \
-            --xmin "${{ inputs.bbox_xmin }}" \
-            --ymin "${{ inputs.bbox_ymin }}" \
-            --xmax "${{ inputs.bbox_xmax }}" \
-            --ymax "${{ inputs.bbox_ymax }}" \
+            --xmin "${BBOX_XMIN}" \
+            --ymin "${BBOX_YMIN}" \
+            --xmax "${BBOX_XMAX}" \
+            --ymax "${BBOX_YMAX}" \
             --max-tasks 128
 
       - name: Build the region matrix and enforce the hard task cap
         id: plan
+        env:
+          REGION_NAME: ${{ inputs.region_name }}
+          MAX_REGION_TASKS: ${{ inputs.max_region_tasks }}
         run: |
           set -euo pipefail
           python scripts/region_address_rehearsal.py matrix \
             --scoped-report scoped-inventory.json \
-            --region-name "${{ inputs.region_name }}" \
-            --max-tasks "${{ inputs.max_region_tasks }}" \
+            --region-name "${REGION_NAME}" \
+            --max-tasks "${MAX_REGION_TASKS}" \
             --matrix-out region-matrix.json \
             --summary-out scoped-plan-summary.json
           echo "matrix=$(cat region-matrix.json)" >> "$GITHUB_OUTPUT"
@@ -878,17 +886,25 @@ jobs:
           cat family-listing.json
 
       - name: Build and verify the family manifest over the reduce outputs
+        env:
+          REGION_NAME: ${{ inputs.region_name }}
+          BBOX_XMIN: ${{ inputs.bbox_xmin }}
+          BBOX_YMIN: ${{ inputs.bbox_ymin }}
+          BBOX_XMAX: ${{ inputs.bbox_xmax }}
+          BBOX_YMAX: ${{ inputs.bbox_ymax }}
+          PRODUCER_COMMIT: ${{ github.sha }}
+          RUN_ID: ${{ github.run_id }}-${{ github.run_attempt }}
         run: |
           set -euo pipefail
           mkdir -p uploads
           find region-evidence -name 'family-upload-*.json' -exec cp {} uploads/ \;
           python scripts/region_address_rehearsal.py manifest \
             --release 2026-06-17.0 \
-            --region-name "${{ inputs.region_name }}" \
-            --bbox "${{ inputs.bbox_xmin }}" "${{ inputs.bbox_ymin }}" \
-              "${{ inputs.bbox_xmax }}" "${{ inputs.bbox_ymax }}" \
-            --producer-commit "${{ github.sha }}" \
-            --run-id "${{ github.run_id }}-${{ github.run_attempt }}" \
+            --region-name "${REGION_NAME}" \
+            --bbox "${BBOX_XMIN}" "${BBOX_YMIN}" \
+              "${BBOX_XMAX}" "${BBOX_YMAX}" \
+            --producer-commit "${PRODUCER_COMMIT}" \
+            --run-id "${RUN_ID}" \
             --upload-report-dir uploads \
             --listing family-listing.json \
             --out family-manifest.json
@@ -937,5 +953,33 @@ jobs:
             --only-show-errors --endpoint-url "$ENDPOINT" --region auto
           REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
             --prefix "${FAMILY_PREFIX}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"
+
+  region-cleanup:
+    name: Sweep the isolated region prefix on every path
+    needs: [plan-region, region-address-resume, region-finalize]
+    # always(): region-finalize is success-gated and is skipped when any scoped
+    # task fails, so its family-prefix delete never runs on the failure path.
+    # This job unconditionally sweeps the whole run-unique prefix (task fragments
+    # AND the family sub-prefix) so a failed run leaves no orphaned R2 objects.
+    if: ${{ always() && github.ref == 'refs/heads/main' && inputs.mode == 'region' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Delete every object under the run-unique isolated prefix
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${SHUFFLE_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${SHUFFLE_PREFIX}/" --max-keys 1 --query KeyCount --output text \
             --endpoint-url "$ENDPOINT" --region auto)
           test "$REMAINING" = "0"
