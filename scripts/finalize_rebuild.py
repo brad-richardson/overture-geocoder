@@ -48,6 +48,11 @@ from global_build_manifest import (  # noqa: E402
 
 
 VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
+# Non-production slice versions for the family-release rehearsal. A slice version
+# MUST NOT match VERSION_RE, so a slice prefix can never collide with, or
+# masquerade as, a real release. The families-only slice path accepts exactly
+# this pattern and fails closed on a production-pattern version.
+SLICE_VERSION_RE = re.compile(r"^slice-\d{4}-\d{2}-\d{2}\.\d+$")
 ID_PREFIX_RE = re.compile(r"^[0-9a-f]{3}$")
 
 # v3 fleets publish permanent id-inventories objects alongside the ID shards.
@@ -99,6 +104,44 @@ def _version_key(value: str) -> tuple[int, int, int, int]:
     # Reject syntactically plausible but impossible calendar dates.
     date_value = date(year, month, day)
     return date_value.year, date_value.month, date_value.day, int(suffix)
+
+
+def _slice_version_key(value: str) -> tuple[int, int, int, int]:
+    """Validate a NON-production slice version and return its sort key.
+
+    Fail closed on anything but the ``slice-YYYY-MM-DD.N`` pattern, and REJECT a
+    production-pattern version (VERSION_RE) even though it also carries a date: a
+    slice must never be able to name, or be named by, a real release prefix.
+    """
+    if VERSION_RE.fullmatch(value):
+        raise ValueError(
+            f"{value!r} matches the production release pattern; slice versions "
+            "must not collide with a real release"
+        )
+    if not SLICE_VERSION_RE.fullmatch(value):
+        raise ValueError(
+            f"invalid slice version {value!r} (expected slice-YYYY-MM-DD.N)"
+        )
+    date_part, suffix = value[len("slice-"):].rsplit(".", 1)
+    year, month, day = (int(part) for part in date_part.split("-"))
+    # Reject syntactically plausible but impossible calendar dates.
+    date_value = date(year, month, day)
+    return date_value.year, date_value.month, date_value.day, int(suffix)
+
+
+def _publishable_version_key(value: str) -> tuple[int, int, int, int]:
+    """Version validation for family publication: a real release OR a slice.
+
+    ``publish-family`` is the one shared publication path for optional families
+    in both a real release (under the production version prefix) and a
+    non-promoting slice (under a ``slice-*`` prefix). Accept either validated
+    pattern and reject anything else; both are calendar-checked so an impossible
+    date still fails closed.
+    """
+    try:
+        return _version_key(value)
+    except ValueError:
+        return _slice_version_key(value)
 
 
 def _inventory_by_relative_key(inventory: dict, version: str) -> dict[str, dict]:
@@ -635,6 +678,85 @@ def verify_release(
     # core-only release (no allowlist) produces a byte-identical manifest.
     if optional_summaries:
         manifest["optional_families"] = optional_summaries
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    return manifest
+
+
+def verify_families_only(
+    *,
+    version: str,
+    release: str,
+    inventory_path: Path,
+    metadata_dir: Path,
+    readback_dir: Path,
+    output_path: Path,
+    families: list[str],
+) -> dict:
+    """Verify a NON-PROMOTING, families-only slice under a ``slice-*`` prefix.
+
+    ``verify_release`` proves a complete core forward/reverse/id release and can
+    *add* optional families; a family-release slice has NO core fleet — its
+    prefix holds exactly the allowlisted families' manifests and artifacts. This
+    mode reuses the identical per-family verification (``_verify_optional_family``:
+    manifest self-digest, artifact byte-hashing from the readback, and a
+    per-family exact-set gate) and layers a slice-wide exact-set gate whose
+    expected set is EXACTLY the union of the families' keys. So any core object,
+    stray upload, or unlisted family object under the slice prefix fails closed,
+    just as the release-wide gate does for a real release.
+
+    It is structurally non-promoting: it never reads or writes a catalog, and the
+    record is stamped ``is_slice``/``promotion_eligible: False``. The slice
+    version is validated with ``_slice_version_key`` so a production-pattern
+    version is rejected before any object is inspected.
+    """
+    _slice_version_key(version)
+    if not families:
+        raise ValueError("verify-families-only requires at least one family")
+    inventory = _inventory_by_relative_key(_load_json(inventory_path), version)
+
+    expected_keys: set[str] = set()
+    summaries: dict[str, dict] = {}
+    for family in families:
+        if family in summaries:
+            raise ValueError(f"duplicate family {family!r}")
+        family_expected, summary = _verify_optional_family(
+            family=family,
+            release=release,
+            inventory=inventory,
+            metadata_dir=metadata_dir,
+            readback_dir=readback_dir,
+        )
+        expected_keys |= family_expected
+        summaries[family] = summary
+
+    # A slice prefix must contain EXACTLY the verified family objects: no core
+    # release files, no stray uploads. `staging/` scaffolding is excluded like
+    # the release path (a slice build should not produce it, but excluding it
+    # keeps the gate identical rather than special-casing).
+    actual_keys = {key for key in inventory if not key.startswith("staging/")}
+    if actual_keys != expected_keys:
+        missing = sorted(expected_keys - actual_keys)[:20]
+        unexpected = sorted(actual_keys - expected_keys)[:20]
+        raise ValueError(
+            f"slice {version} object inventory is not an exact match: "
+            f"missing={missing}, unexpected={unexpected}"
+        )
+
+    manifest = {
+        "schema_version": 1,
+        "slice_version": version,
+        "overture_release": release,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        # This record documents a verified, NON-promoting family fleet. There is
+        # no core release and no catalog link: a slice can never be promoted.
+        "is_slice": True,
+        "promotion_eligible": False,
+        "families": summaries,
+        "verified_version_objects": [
+            inventory[key] for key in sorted(inventory) if not key.startswith("staging/")
+        ],
+    }
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
@@ -1292,7 +1414,9 @@ def publish_family(
     """
     if family not in FAMILIES:
         raise ValueError(f"unknown optional family {family!r}")
-    _version_key(version)
+    # A real release version OR a non-promoting slice version; both are
+    # validated and calendar-checked, and the two patterns never collide.
+    _publishable_version_key(version)
     manifest = validate_family_manifest(_load_json(manifest_path))
     if manifest["family"] != family:
         raise ValueError(
@@ -1408,6 +1532,21 @@ def main() -> None:
         help="comma-separated optional families to verify (addresses,places)",
     )
 
+    verify_families = subparsers.add_parser("verify-families-only")
+    verify_families.add_argument("--version", required=True)
+    verify_families.add_argument("--release", required=True)
+    verify_families.add_argument("--inventory", type=Path, required=True)
+    verify_families.add_argument("--metadata-dir", type=Path, required=True)
+    verify_families.add_argument("--readback-dir", type=Path, required=True)
+    verify_families.add_argument("--output", type=Path, required=True)
+    # Required: a families-only slice has nothing else to verify. An empty or
+    # omitted allowlist fails closed rather than verifying an empty prefix.
+    verify_families.add_argument(
+        "--families",
+        required=True,
+        help="comma-separated families in the slice (addresses,places)",
+    )
+
     publish_family_p = subparsers.add_parser("publish-family")
     publish_family_p.add_argument("--version", required=True)
     publish_family_p.add_argument("--family", choices=sorted(FAMILIES), required=True)
@@ -1471,6 +1610,27 @@ def main() -> None:
         except (PromotionError, ValueError) as exc:
             print(f"::error::{exc}", file=sys.stderr)
             sys.exit(1)
+        return
+    if args.command == "verify-families-only":
+        families = [name.strip() for name in args.families.split(",") if name.strip()]
+        try:
+            manifest = verify_families_only(
+                version=args.version,
+                release=args.release,
+                inventory_path=args.inventory,
+                metadata_dir=args.metadata_dir,
+                readback_dir=args.readback_dir,
+                output_path=args.output,
+                families=families,
+            )
+        except ValueError as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            sys.exit(1)
+        summary = ", ".join(
+            f"{name}={info['artifact_count']}"
+            for name, info in sorted(manifest["families"].items())
+        )
+        print(f"Verified non-promoting slice {args.version}: {summary}")
         return
     if args.command == "verify":
         optional_families = [
