@@ -177,10 +177,10 @@ jobs:
           ( cd /tmp/region/a && python "$GITHUB_WORKSPACE/scripts/r2_verified_store.py" \
             build-manifest --prefix "$REGION_PREFIX" \
             --output /tmp/region/store-manifest.json "${OBJECTS[@]}" )
-          python "$GITHUB_WORKSPACE/scripts/r2_verified_store.py" \
+          ( cd /tmp/region/a && python "$GITHUB_WORKSPACE/scripts/r2_verified_store.py" \
             --bucket geocoder-shards --endpoint-url "$ENDPOINT" upload-manifest \
             --prefix "$REGION_PREFIX" --manifest /tmp/region/store-manifest.json \
-            --report /tmp/region/upload.json
+            --report /tmp/region/upload.json )
           jq -e 'all(.artifacts[]; .readback_verified == true)' /tmp/region/upload.json
           jq -n --argjson seconds "$((SECONDS - UPLOAD_START))" \
             '{upload_wall_seconds:$seconds}' > /tmp/region/upload-timing.json
