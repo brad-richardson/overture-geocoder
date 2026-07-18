@@ -101,7 +101,7 @@ pub async fn handle_address_page_spike(
         .map_err(|_| Error::RustError("Address smoke key field count differs".into()))?;
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let lookup = loader
-        .lookup_address_page_spike(&index_key, &data_key, &key)
+        .lookup_address_page(&index_key, &data_key, &key)
         .await?;
     let body = serde_json::json!({
         "schema": "overture-address-worker-spike-v2",

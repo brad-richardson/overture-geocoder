@@ -4,12 +4,11 @@
 
 use worker::*;
 
-#[cfg(feature = "address-spike")]
+mod address;
 mod address_pages;
 mod handlers;
 #[cfg(feature = "places-spike")]
 mod places_pages;
-#[cfg(any(feature = "address-spike", feature = "places-spike"))]
 mod range_reader;
 mod stac;
 
@@ -66,6 +65,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let router = Router::with_data(std::rc::Rc::new(ctx))
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
+        .get_async("/address", address::handle_address)
         .get_async("/id/:gers_id", handlers::handle_id_lookup);
 
     // The address-page spike route ships only in the smoke build; production
@@ -81,7 +81,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
             Response::ok(concat!(
                 r#"{"name":"overture-geocoder","version":""#,
                 env!("CARGO_PKG_VERSION"),
-                r#"","endpoints":["/search","/reverse","/id/:id"]}"#,
+                r#"","endpoints":["/search","/reverse","/address","/id/:id"]}"#,
             ))
         })
         .run(req, env)
@@ -126,6 +126,7 @@ fn request_endpoint(path: &str) -> &'static str {
     match path {
         "/search" => "search",
         "/reverse" => "reverse",
+        "/address" => "address",
         "/health" => "health",
         "/" => "root",
         path if path.starts_with("/id/") => "id",
@@ -183,6 +184,7 @@ mod tests {
     fn classifies_known_endpoints_without_retaining_path_parameters() {
         assert_eq!(request_endpoint("/search"), "search");
         assert_eq!(request_endpoint("/reverse"), "reverse");
+        assert_eq!(request_endpoint("/address"), "address");
         assert_eq!(request_endpoint("/id/abc-123"), "id");
         assert_eq!(
             request_endpoint("/__address-page-spike"),

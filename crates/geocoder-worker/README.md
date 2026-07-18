@@ -8,8 +8,8 @@ public API reference and `SPEC.md` for architecture details.
 
 ## Features
 
-- Worker routing (`/search`, `/reverse`, `/id/:gers_id`, `/health`, `/`),
-  with HEAD request support on all endpoints
+- Worker routing (`/search`, `/reverse`, `/address`, `/id/:gers_id`,
+  `/health`, `/`), with HEAD request support on all endpoints
 - STAC catalog loading from R2 with version fallback
 - Forward shard selection: HEAD + location shards (coordinates or
   CF-IPCountry/CF-Region-Code headers)
@@ -58,6 +58,14 @@ Summary:
 - `GET /reverse?lat=<f>&lon=<f>&format=json|geojson` — reverse geocode
   (bbox-based containment over countries, regions, counties, and populated
   localities)
+- `GET /address?country=&admin_level_general=&admin_level_specific=&postal_city=&postcode=&street=&number=&unit=`
+  — structured exact-address lookup (all eight fields required; `country`,
+  `street`, `number` must be non-empty). Returns every duplicate/ambiguous
+  candidate (no dedup) with `ambiguous`/`overflow` signaling, `coverage`
+  (`in_coverage`/`out_of_coverage`), `data_version`, and
+  `normalization_version`. Returns a `404 {"error":"address_family_unavailable"}`
+  until an address family is published in the release catalog. See
+  `docs/address-structured-endpoint-contract.md`.
 - `GET /id/:gers_id` — resolve a GERS ID to its bounding box
 - `GET /health` — verifies the catalog loads and a version exists
 

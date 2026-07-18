@@ -247,6 +247,19 @@ impl ShardLoader {
         Ok(latest)
     }
 
+    /// Latest discoverable data version, or `None` when the catalog lists none.
+    ///
+    /// Optional families (e.g. address) key their objects to this single
+    /// version rather than walking the fallback window: an absent family object
+    /// is then a clean family-unavailable signal instead of silently serving an
+    /// older release's family data.
+    pub(crate) async fn latest_version(&self) -> Result<Option<String>> {
+        let catalog = self.load_catalog().await?;
+        Ok(get_ordered_versions(&catalog, &self.catalog_key)
+            .into_iter()
+            .next())
+    }
+
     pub(crate) async fn load_catalog(&self) -> Result<StacCatalog> {
         let text = self
             .memoized_get_text(&self.catalog_key, CATALOG_CACHE_TTL)

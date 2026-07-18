@@ -169,7 +169,7 @@ pub(crate) fn decode_useful_gzip_range_measured(
 }
 
 #[cfg(test)]
-fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
+pub(crate) fn decode_useful_page(bytes: &[u8]) -> Result<Vec<AddressPageRecord>> {
     Ok(decode_useful_page_measured(bytes)?.0)
 }
 
