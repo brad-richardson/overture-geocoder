@@ -34,6 +34,15 @@ classified out-of-coverage, never not-found.
   region, the cost is trivial, and rural coverage differentiates the deploy
   from a metros-only demo); the four metro boxes remain natural
   routing-catalog context entries if the shard split follows metro lines.
+  Continental reference counts (same scan, 2026-07-18): CONUS box
+  (-125..-66.9, 24.4..49.4) **18,014,140 places** (~2.1 GB at 116.4 B/place,
+  ~13-20 shards), Alaska 50,174, Hawaii 69,512, global 75,631,061. A
+  full-US Places build is ~24% of planet scale and still trivial against
+  the 40 GB gate. Scale plan: NE stays the fast-iteration deploy target;
+  once the NE slice is green, one CONUS Places + all-US address rehearsal
+  (33 existing US-dominant tasks — no bbox machinery needed) is the
+  scale-signal pass, and that pair naturally satisfies the design doc's
+  two-region-per-family slice with regions of different magnitude.
 - **Address**: the pushdown pattern is proven in-repo
   (`download_addresses.sql` filters `bbox.*` and even `address_levels`
   state values) but the family producer that feeds R2
