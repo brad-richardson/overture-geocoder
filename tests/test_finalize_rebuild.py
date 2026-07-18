@@ -1,5 +1,6 @@
 import hashlib
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -554,7 +555,14 @@ class FakeClient:
     def fetch_catalog(self):
         return self.catalog
 
-    def publish_catalog(self, data):
+    def publish_catalog(self, data, *, expected_etag=None):
+        # Model R2's server-side compare-and-swap: when the caller supplies an
+        # expected-current ETag, reject the write (as R2 does with 412) unless
+        # the live catalog still hashes to it, so a lost CAS never clobbers.
+        if expected_etag is not None:
+            current = fr._content_etag(self.catalog) if self.catalog is not None else None
+            if current != expected_etag:
+                raise fr.PreconditionFailed("catalog changed under compare-and-swap")
         self.catalog = data
         self.published.append(data)
 
@@ -711,6 +719,139 @@ def test_recover_refuses_unknown_live_catalog():
         _recover(client)
 
     assert client.published == []
+
+
+# ---------------------------------------------------------------------------
+# R2Client conditional-write helpers: exercised through a fake `aws` that models
+# R2's server-side If-None-Match / If-Match preconditions (no live R2 calls).
+# ---------------------------------------------------------------------------
+
+
+class FakeAws:
+    """Stand-in for ``R2Client._aws`` backing a tiny in-memory object store.
+
+    Models R2 semantics needed for the guards: single-part objects carry a
+    quoted-md5 ETag, ``put-object`` honours ``--if-none-match``/``--if-match``
+    server-side (a miss raises a ``PreconditionFailed`` CalledProcessError like
+    the real CLI), and ``s3 cp`` reads an object back. ``corrupt_readback`` and
+    ``transient_puts`` let a test inject a wrong-bytes readback or N transient
+    put failures before success.
+    """
+
+    def __init__(self, store=None):
+        self.store = dict(store or {})
+        self.puts = []
+        self.corrupt_readback = None
+        self.transient_puts = 0
+
+    def _fail(self, message):
+        return subprocess.CalledProcessError(254, ["aws"], output="", stderr=message)
+
+    def __call__(self, *args, capture=False):
+        args = list(args)
+        if args[:2] == ["s3api", "put-object"]:
+            opts = {args[i]: args[i + 1] for i in range(len(args) - 1)}
+            key = opts["--key"]
+            data = Path(opts["--body"]).read_bytes()
+            if self.transient_puts > 0:
+                self.transient_puts -= 1
+                raise self._fail("An error occurred (RequestTimeout) ...")
+            if opts.get("--if-none-match") == "*" and key in self.store:
+                raise self._fail(
+                    "An error occurred (PreconditionFailed) when calling the PutObject operation"
+                )
+            if "--if-match" in opts:
+                current = fr._content_etag(self.store[key]) if key in self.store else None
+                if current != opts["--if-match"]:
+                    raise self._fail(
+                        "An error occurred (PreconditionFailed) when calling the PutObject operation"
+                    )
+            self.store[key] = data
+            self.puts.append(key)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ["s3", "cp"]:
+            src, dest = args[2], args[3]
+            key = src.split(f"{fr.BUCKET}/", 1)[1] if src.startswith("s3://") else None
+            payload = self.corrupt_readback if self.corrupt_readback is not None else self.store[key]
+            Path(dest).write_bytes(payload)
+            return subprocess.CompletedProcess(args, 0, "", "")
+        raise AssertionError(f"unexpected aws call: {args}")
+
+
+def _client_with(store=None):
+    client = fr.R2Client(
+        bucket=fr.BUCKET,
+        endpoint="https://example.invalid",
+        base_url="https://example.invalid",
+        repo_root=Path("."),
+        sleep=lambda _s: None,
+    )
+    fake = FakeAws(store)
+    client._aws = fake
+    return client, fake
+
+
+def test_publish_create_only_writes_and_verifies():
+    client, fake = _client_with()
+    client.publish_create_only("backups/x.json", b"payload")
+    assert fake.store["backups/x.json"] == b"payload"
+
+
+def test_publish_create_only_conflict_is_hard_error_and_no_overwrite():
+    client, fake = _client_with({"backups/x.json": b"original"})
+    with pytest.raises(fr.PreconditionFailed):
+        client.publish_create_only("backups/x.json", b"replacement")
+    assert fake.store["backups/x.json"] == b"original"  # never overwritten
+    assert fake.puts == []  # the put was rejected server-side
+
+
+def test_swap_expected_current_replaces_when_etag_matches():
+    old = b"catalog-old"
+    client, fake = _client_with({fr.CATALOG_KEY: old})
+    client.swap_expected_current(fr.CATALOG_KEY, b"catalog-new", fr._content_etag(old))
+    assert fake.store[fr.CATALOG_KEY] == b"catalog-new"
+
+
+def test_swap_expected_current_precondition_failure_aborts_without_overwrite():
+    live = b"catalog-live-someone-else"
+    client, fake = _client_with({fr.CATALOG_KEY: live})
+    stale = fr._content_etag(b"catalog-we-thought-was-current")
+    with pytest.raises(fr.PreconditionFailed):
+        client.swap_expected_current(fr.CATALOG_KEY, b"catalog-ours", stale)
+    assert fake.store[fr.CATALOG_KEY] == live  # untouched: a lost CAS never clobbers
+    assert fake.puts == []
+
+
+def test_swap_expected_current_readback_digest_mismatch_is_hard_error():
+    old = b"catalog-old"
+    client, fake = _client_with({fr.CATALOG_KEY: old})
+    fake.corrupt_readback = b"corrupted-on-store"  # R2 accepted the PUT but readback differs
+    with pytest.raises(fr.PromotionError, match="read-back digest mismatch"):
+        client.swap_expected_current(fr.CATALOG_KEY, b"catalog-new", fr._content_etag(old))
+
+
+def test_publish_catalog_cas_precondition_failure_is_not_retried():
+    live = b"catalog-live"
+    client, fake = _client_with({fr.CATALOG_KEY: live})
+    with pytest.raises(fr.PreconditionFailed):
+        client.publish_catalog(b"catalog-ours", expected_etag=fr._content_etag(b"catalog-stale"))
+    assert fake.store[fr.CATALOG_KEY] == live
+    assert fake.puts == []  # aborted on first attempt, no retry loop
+
+
+def test_publish_catalog_retries_transient_put_failures():
+    old = b"catalog-old"
+    client, fake = _client_with({fr.CATALOG_KEY: old})
+    fake.transient_puts = 2  # two transient failures, then success within 3 attempts
+    client.publish_catalog(b"catalog-new", expected_etag=fr._content_etag(old))
+    assert fake.store[fr.CATALOG_KEY] == b"catalog-new"
+
+
+def test_put_backup_is_create_only():
+    client, fake = _client_with({f"{fr.BACKUP_PREFIX}/dup.json": b"first"})
+    with pytest.raises(fr.PreconditionFailed):
+        client.put_backup("dup.json", b"second")
+    assert fake.store[f"{fr.BACKUP_PREFIX}/dup.json"] == b"first"
 
 
 # ---------------------------------------------------------------------------
