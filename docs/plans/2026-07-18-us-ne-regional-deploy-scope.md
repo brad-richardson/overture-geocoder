@@ -130,7 +130,20 @@ the section 2 contract.
    `releases/{version}/` layout with downloaded-hash remote verification.
 
 **Serving gaps — none block the rehearsal; all gate promotion**
-- 941 KB address cold side-index: promotion cost/latency decision.
+- 941 KB address cold side-index: DECIDED 2026-07-18 (analysis brief) —
+  **Option C now, Option A at the trigger.** The index is a flat 0.2355
+  B/retained-row array read in one range; cold cost is latency-only
+  (~218 ms) and ~$0 (R2 egress free, 7-day immutable cache TTL). The
+  measured 941 KB shard sits at 22.5% of the reader's hard 4 MiB /
+  65,536-entry cap (~16M rows/shard ceiling). Guardrail recorded: **no
+  served address shard above ~4M rows**; the existing task packing already
+  respects it, so NE/US shards need no format change. Trigger for Option A
+  (two-level index — reuse the Places `lexicon_blocks` root/leaf pattern,
+  fold the root into the existing 4 KB header-prefix read to keep the exact
+  3-read cap; ~31 KB cold, 30x reduction, format bump OACIX01→OACIX02):
+  any planned shard projected past ~4M rows, or planet scale, whichever
+  first. Option B (many small partitions) rejected: it multiplies objects
+  and lowers per-colo warm-hit rate — the wrong lever at this traffic.
 - Places bounded located ranking: promotion blocker for any near-me claim.
 - chain_name read-chain: structural (2 uncounted catalog reads; 8 sequential
   stage reads precede records; global-rank layout cannot cluster a chain).
