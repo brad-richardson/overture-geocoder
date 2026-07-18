@@ -615,6 +615,16 @@ def test_family_manifest_rejects_nonuniform_artifact_format():
         manifest.build_family_manifest_from_candidate(build_plan, artifacts, family_scope())
 
 
+def test_family_manifest_rejects_missing_artifact_format():
+    build_plan = plan()
+    completions = map_completions(build_plan)
+    artifacts = artifact_manifests(build_plan, completions)
+    without_format = {key: value for key, value in artifacts[0].items() if key != "format_version"}
+    artifacts[0] = without_format
+    with pytest.raises(ValueError, match="missing format_version"):
+        manifest.build_family_manifest_from_candidate(build_plan, artifacts, family_scope())
+
+
 def test_cli_fan_in_emits_family_manifest(tmp_path):
     build_plan = plan()
     completions = map_completions(build_plan)

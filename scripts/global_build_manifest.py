@@ -566,9 +566,13 @@ def build_catalog_candidate(
 # Overture release, producer script + version, build run id), the
 # format/tokenizer/normalization contract versions, and the region scope (bbox
 # floats + scope mode + human-readable name). A canonical-JSON self-digest,
-# computed the same way as id_index_protocol's content addressing, lets a later
+# computed with this module's own ``digest`` (sorted-key, compact-separator JSON
+# + SHA-256, matching the catalog candidate it is referenced from), lets a later
 # finalizer bind the manifest to the catalog candidate and verify it against a
-# local directory of artifacts or a remote object listing.
+# local directory of artifacts or a remote object listing. Note this shares the
+# algorithm — but not the byte encoding — of id_index_protocol's addressing:
+# that module dumps with ensure_ascii=False, so digests of non-ASCII region
+# names diverge. Cross-check family manifests only through this module.
 # ---------------------------------------------------------------------------
 
 
@@ -733,7 +737,11 @@ def family_manifest_key(build_id: str, family: str) -> str:
 
 
 def _require_uniform_format_version(artifacts: list[dict[str, Any]]) -> str:
-    observed = {artifact["format_version"] for artifact in artifacts}
+    observed: set[Any] = set()
+    for artifact in artifacts:
+        if not isinstance(artifact, dict) or "format_version" not in artifact:
+            raise ValueError("reduce artifact is missing format_version")
+        observed.add(artifact["format_version"])
     if len(observed) != 1:
         raise ValueError("reduce artifacts do not share a single format_version")
     return observed.pop()
