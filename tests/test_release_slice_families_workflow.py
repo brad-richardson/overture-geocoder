@@ -60,6 +60,76 @@ def test_slice_version_input_is_required_with_no_default():
     assert "default" not in slice_input
 
 
+def test_dispatch_input_count_is_within_the_github_limit():
+    # workflow_dispatch allows AT MOST 10 inputs (a GitHub hard limit). The four
+    # bbox floats per region were collapsed into ONE comma-separated string each
+    # (region_a_bbox, region_b_bbox), shared by both families, to stay under it.
+    inputs = load()[True]["workflow_dispatch"]["inputs"]
+    assert len(inputs) <= 10, sorted(inputs)
+
+
+def test_regions_are_supplied_as_one_bbox_string_each():
+    # Each region is a single "xmin,ymin,xmax,ymax" string, not four scalar
+    # inputs; the discrete corner inputs must be gone entirely.
+    inputs = load()[True]["workflow_dispatch"]["inputs"]
+    assert "region_a_bbox" in inputs
+    assert "region_b_bbox" in inputs
+    for region in ("a", "b"):
+        for corner in ("xmin", "ymin", "xmax", "ymax"):
+            assert f"region_{region}_{corner}" not in inputs
+        # A default bbox is exactly four comma-separated finite floats.
+        parts = str(inputs[f"region_{region}_bbox"]["default"]).split(",")
+        assert len(parts) == 4
+        for part in parts:
+            float(part)
+
+
+def test_preflight_parses_and_validates_the_bbox_strings():
+    # A malformed bbox must fail preflight loudly, before any credentialed job.
+    # The parse step routes inputs.*_bbox through env (never inline into the run
+    # body) and enforces 4 finite floats with xmin<xmax and ymin<ymax.
+    preflight = jobs()["preflight"]
+    parse = next(
+        step
+        for step in preflight["steps"]
+        if "parse_bbox" in step.get("run", "")
+    )
+    env = parse.get("env", {})
+    assert env.get("REGION_A_BBOX") == "${{ inputs.region_a_bbox }}"
+    assert env.get("REGION_B_BBOX") == "${{ inputs.region_b_bbox }}"
+    run = parse["run"]
+    # Exactly four comma-separated fields (awk FS=",", NF != 4 fails closed).
+    assert 'awk -F' in run and "NF != 4" in run
+    # Ordering guards for both axes and a fail-closed exit.
+    assert "c[1] + 0 < c[3] + 0" in run
+    assert "c[2] + 0 < c[4] + 0" in run
+    assert "exit 1" in run
+    # inputs.* bbox strings must NOT be interpolated directly into any run body.
+    for script in all_run_scripts():
+        assert "inputs.region_a_bbox" not in script
+        assert "inputs.region_b_bbox" not in script
+
+
+def test_parsed_corners_route_to_family_jobs_via_preflight_outputs():
+    # The validated corners flow to the family builds through preflight job
+    # outputs and per-job env -- never re-read from inputs.* by the build jobs.
+    workflow = load()
+    outs = workflow["jobs"]["preflight"]["outputs"]
+    for region in ("a", "b"):
+        for corner in ("xmin", "ymin", "xmax", "ymax"):
+            key = f"region_{region}_{corner}"
+            assert key in outs
+            assert "steps.bbox.outputs." + key in outs[key]
+    for job_name in ("places", "addresses"):
+        env = workflow["jobs"][job_name]["env"]
+        for region in ("A", "B"):
+            for corner in ("XMIN", "YMIN", "XMAX", "YMAX"):
+                val = env[f"REGION_{region}_{corner}"]
+                assert "needs.preflight.outputs." in val
+                # The build jobs never re-derive corners from raw inputs.
+                assert "inputs.region_" not in val
+
+
 def test_every_job_is_main_only():
     for name, job in jobs().items():
         assert "github.ref == 'refs/heads/main'" in job.get("if", ""), name

@@ -37,50 +37,28 @@ on:
         required: false
         default: us-northeast
         type: string
-      region_a_xmin:
-        description: Region A minimum longitude.
+      region_a_bbox:
+        description: >-
+          Region A (primary/outer) bbox as four comma-separated finite floats
+          "xmin,ymin,xmax,ymax". Parsed and validated in preflight (exactly 4
+          floats, xmin<xmax, ymin<ymax) before any credentialed job. Shared by
+          BOTH families.
         required: false
-        default: "-80.5"
-        type: string
-      region_a_ymin:
-        description: Region A minimum latitude.
-        required: false
-        default: "38.0"
-        type: string
-      region_a_xmax:
-        description: Region A maximum longitude.
-        required: false
-        default: "-66.9"
-        type: string
-      region_a_ymax:
-        description: Region A maximum latitude.
-        required: false
-        default: "47.5"
+        default: "-80.5,38.0,-66.9,47.5"
         type: string
       region_b_name:
         description: Region B routing/catalog name (ASCII alphanumeric/hyphen).
         required: false
         default: dc-metro
         type: string
-      region_b_xmin:
-        description: Region B minimum longitude.
+      region_b_bbox:
+        description: >-
+          Region B (secondary/inner) bbox as four comma-separated finite floats
+          "xmin,ymin,xmax,ymax". Parsed and validated in preflight; the pair
+          must be nested (one region contains the other). Shared by BOTH
+          families.
         required: false
-        default: "-77.3"
-        type: string
-      region_b_ymin:
-        description: Region B minimum latitude.
-        required: false
-        default: "38.7"
-        type: string
-      region_b_xmax:
-        description: Region B maximum longitude.
-        required: false
-        default: "-76.7"
-        type: string
-      region_b_ymax:
-        description: Region B maximum latitude.
-        required: false
-        default: "39.1"
+        default: "-77.3,38.7,-76.7,39.1"
         type: string
       places_extract_limit:
         description: >-
@@ -134,6 +112,18 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      # The parsed region corners, validated here ONCE, routed to every
+      # downstream family job via needs.preflight.outputs (never re-parsed and
+      # never interpolated from inputs.* inside a run block).
+      region_a_xmin: ${{ steps.bbox.outputs.region_a_xmin }}
+      region_a_ymin: ${{ steps.bbox.outputs.region_a_ymin }}
+      region_a_xmax: ${{ steps.bbox.outputs.region_a_xmax }}
+      region_a_ymax: ${{ steps.bbox.outputs.region_a_ymax }}
+      region_b_xmin: ${{ steps.bbox.outputs.region_b_xmin }}
+      region_b_ymin: ${{ steps.bbox.outputs.region_b_ymin }}
+      region_b_xmax: ${{ steps.bbox.outputs.region_b_xmax }}
+      region_b_ymax: ${{ steps.bbox.outputs.region_b_ymax }}
     steps:
       - name: Check out main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -154,16 +144,59 @@ jobs:
             exit 1
           fi
 
+      - name: Parse and validate the region bbox strings
+        id: bbox
+        env:
+          # The ONLY place inputs.* touch a run block: routed through env, then
+          # parsed. A malformed string fails here, before any credentialed job.
+          REGION_A_BBOX: ${{ inputs.region_a_bbox }}
+          REGION_B_BBOX: ${{ inputs.region_b_bbox }}
+        run: |
+          set -euo pipefail
+          # Each bbox must be EXACTLY four comma-separated finite floats with
+          # xmin<xmax and ymin<ymax. The number regex admits no infinity/NaN
+          # token, so a match is finite by construction. Parsed corners are
+          # emitted as step outputs and routed onward via preflight outputs.
+          parse_bbox () {
+            local label="$1" raw="$2" out
+            if ! out=$(printf '%s\n' "$raw" | awk -F',' '
+              function num(v) { return (v ~ /^[+-]?([0-9]+([.][0-9]*)?|[.][0-9]+)([eE][+-]?[0-9]+)?$/) }
+              {
+                if (NF != 4) { exit 2 }
+                for (i = 1; i <= 4; i++) {
+                  v = $i; gsub(/^[ \t\r]+|[ \t\r]+$/, "", v)
+                  if (!num(v)) { exit 3 }
+                  c[i] = v
+                }
+                if (!(c[1] + 0 < c[3] + 0)) { exit 4 }
+                if (!(c[2] + 0 < c[4] + 0)) { exit 5 }
+                printf "%s %s %s %s", c[1], c[2], c[3], c[4]
+              }
+              END { if (NR == 0) { exit 2 } }'); then
+              echo "::error::${label} bbox '$raw' must be exactly 4 comma-separated finite floats with xmin<xmax and ymin<ymax"
+              exit 1
+            fi
+            read -r xmin ymin xmax ymax <<<"$out"
+            {
+              echo "${label}_xmin=$xmin"
+              echo "${label}_ymin=$ymin"
+              echo "${label}_xmax=$xmax"
+              echo "${label}_ymax=$ymax"
+            } >> "$GITHUB_OUTPUT"
+          }
+          parse_bbox region_a "$REGION_A_BBOX"
+          parse_bbox region_b "$REGION_B_BBOX"
+
       - name: Assert one region contains the other (union bbox is honest)
         env:
-          REGION_A_XMIN: ${{ inputs.region_a_xmin }}
-          REGION_A_YMIN: ${{ inputs.region_a_ymin }}
-          REGION_A_XMAX: ${{ inputs.region_a_xmax }}
-          REGION_A_YMAX: ${{ inputs.region_a_ymax }}
-          REGION_B_XMIN: ${{ inputs.region_b_xmin }}
-          REGION_B_YMIN: ${{ inputs.region_b_ymin }}
-          REGION_B_XMAX: ${{ inputs.region_b_xmax }}
-          REGION_B_YMAX: ${{ inputs.region_b_ymax }}
+          REGION_A_XMIN: ${{ steps.bbox.outputs.region_a_xmin }}
+          REGION_A_YMIN: ${{ steps.bbox.outputs.region_a_ymin }}
+          REGION_A_XMAX: ${{ steps.bbox.outputs.region_a_xmax }}
+          REGION_A_YMAX: ${{ steps.bbox.outputs.region_a_ymax }}
+          REGION_B_XMIN: ${{ steps.bbox.outputs.region_b_xmin }}
+          REGION_B_YMIN: ${{ steps.bbox.outputs.region_b_ymin }}
+          REGION_B_XMAX: ${{ steps.bbox.outputs.region_b_xmax }}
+          REGION_B_YMAX: ${{ steps.bbox.outputs.region_b_ymax }}
         run: |
           set -euo pipefail
           # Each family publishes ONE manifest carrying ONE region bbox: the UNION
@@ -208,15 +241,15 @@ jobs:
       LC_ALL: C.UTF-8
       LANG: C.UTF-8
       REGION_A_NAME: ${{ inputs.region_a_name }}
-      REGION_A_XMIN: ${{ inputs.region_a_xmin }}
-      REGION_A_YMIN: ${{ inputs.region_a_ymin }}
-      REGION_A_XMAX: ${{ inputs.region_a_xmax }}
-      REGION_A_YMAX: ${{ inputs.region_a_ymax }}
+      REGION_A_XMIN: ${{ needs.preflight.outputs.region_a_xmin }}
+      REGION_A_YMIN: ${{ needs.preflight.outputs.region_a_ymin }}
+      REGION_A_XMAX: ${{ needs.preflight.outputs.region_a_xmax }}
+      REGION_A_YMAX: ${{ needs.preflight.outputs.region_a_ymax }}
       REGION_B_NAME: ${{ inputs.region_b_name }}
-      REGION_B_XMIN: ${{ inputs.region_b_xmin }}
-      REGION_B_YMIN: ${{ inputs.region_b_ymin }}
-      REGION_B_XMAX: ${{ inputs.region_b_xmax }}
-      REGION_B_YMAX: ${{ inputs.region_b_ymax }}
+      REGION_B_XMIN: ${{ needs.preflight.outputs.region_b_xmin }}
+      REGION_B_YMIN: ${{ needs.preflight.outputs.region_b_ymin }}
+      REGION_B_XMAX: ${{ needs.preflight.outputs.region_b_xmax }}
+      REGION_B_YMAX: ${{ needs.preflight.outputs.region_b_ymax }}
       EXTRACT_LIMIT: ${{ inputs.places_extract_limit }}
       SHARD_ROW_CAP: ${{ inputs.places_shard_row_cap }}
     steps:
@@ -361,15 +394,15 @@ jobs:
       manifest_digest: ${{ steps.publish.outputs.manifest_digest }}
     env:
       REGION_A_NAME: ${{ inputs.region_a_name }}
-      REGION_A_XMIN: ${{ inputs.region_a_xmin }}
-      REGION_A_YMIN: ${{ inputs.region_a_ymin }}
-      REGION_A_XMAX: ${{ inputs.region_a_xmax }}
-      REGION_A_YMAX: ${{ inputs.region_a_ymax }}
+      REGION_A_XMIN: ${{ needs.preflight.outputs.region_a_xmin }}
+      REGION_A_YMIN: ${{ needs.preflight.outputs.region_a_ymin }}
+      REGION_A_XMAX: ${{ needs.preflight.outputs.region_a_xmax }}
+      REGION_A_YMAX: ${{ needs.preflight.outputs.region_a_ymax }}
       REGION_B_NAME: ${{ inputs.region_b_name }}
-      REGION_B_XMIN: ${{ inputs.region_b_xmin }}
-      REGION_B_YMIN: ${{ inputs.region_b_ymin }}
-      REGION_B_XMAX: ${{ inputs.region_b_xmax }}
-      REGION_B_YMAX: ${{ inputs.region_b_ymax }}
+      REGION_B_XMIN: ${{ needs.preflight.outputs.region_b_xmin }}
+      REGION_B_YMIN: ${{ needs.preflight.outputs.region_b_ymin }}
+      REGION_B_XMAX: ${{ needs.preflight.outputs.region_b_xmax }}
+      REGION_B_YMAX: ${{ needs.preflight.outputs.region_b_ymax }}
       MAX_REGION_TASKS: ${{ inputs.addresses_max_tasks }}
     steps:
       - name: Check out main without persisted credentials
