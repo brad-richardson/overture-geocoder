@@ -6,6 +6,23 @@ read feature columns, write cloud objects, or touch a catalog. The resulting
 inventory is suitable for the global-build control plane, while the embedded
 row-group plan answers whether the pinned release fits the hosted-runner task
 count and per-task row/byte gates.
+
+Alongside the per-row-group ``country`` statistics the inventory now records the
+row group's ``bbox`` extent (``xmin_min``/``xmax_max``/``ymin_min``/``ymax_max``)
+so a regional build can prune the plan to the row groups whose bbox statistics
+intersect a query box. Missing bbox statistics are recorded as ``null`` and are
+treated as "cannot prune" (conservatively intersecting), never silently dropped.
+
+bbox scope is *row-group approximate*, not exact. The map producer
+(``experiment_hosted_rowgroups.py``) reads whole row groups and its
+source-accounting invariant reconciles the measured ``(rows, compressed,
+uncompressed)`` of each task against the planned footer statistics, deriving a
+per-row ``source_row_index`` over the *entire* row group. A row-level bbox
+predicate would make the emitted row count fall below the row group's
+``num_rows`` and shift those locators, breaking that reconciliation. A
+bbox-scoped plan therefore prunes at row-group granularity only and records
+``bbox_scope: row_group_approximate``: every intersecting group is read in full,
+so the scope is a superset of the box, never a subset.
 """
 
 from __future__ import annotations
@@ -120,6 +137,7 @@ def inventory_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
         group = metadata.row_group(group_index)
         selected_compressed = selected_uncompressed = all_compressed = 0
         country_min = country_max = None
+        bbox_xmin_min = bbox_xmax_max = bbox_ymin_min = bbox_ymax_max = None
         for column_index in range(group.num_columns):
             column = group.column(column_index)
             all_compressed += column.total_compressed_size
@@ -130,6 +148,14 @@ def inventory_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
             if column.path_in_schema == "country":
                 country_min = statistic_value(column.statistics, "min")
                 country_max = statistic_value(column.statistics, "max")
+            elif column.path_in_schema == "bbox.xmin":
+                bbox_xmin_min = statistic_value(column.statistics, "min")
+            elif column.path_in_schema == "bbox.xmax":
+                bbox_xmax_max = statistic_value(column.statistics, "max")
+            elif column.path_in_schema == "bbox.ymin":
+                bbox_ymin_min = statistic_value(column.statistics, "min")
+            elif column.path_in_schema == "bbox.ymax":
+                bbox_ymax_max = statistic_value(column.statistics, "max")
         groups.append(
             {
                 "index": group_index,
@@ -145,6 +171,15 @@ def inventory_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
                     if country_min is not None and country_min == country_max
                     else None
                 ),
+                # bbox extent from footer statistics: the leftmost xmin, rightmost
+                # xmax, lowest ymin, highest ymax across the row group's features.
+                # Any missing statistic stays null so the group cannot be pruned.
+                "bbox_xmin_min": bbox_xmin_min,
+                "bbox_xmax_max": bbox_xmax_max,
+                "bbox_ymin_min": bbox_ymin_min,
+                "bbox_ymax_max": bbox_ymax_max,
+                "bbox_stats_complete": None
+                not in (bbox_xmin_min, bbox_xmax_max, bbox_ymin_min, bbox_ymax_max),
             }
         )
     if sum(group["rows"] for group in groups) != metadata.num_rows:
@@ -180,6 +215,30 @@ def distribution(values: list[int]) -> dict[str, int | float]:
     }
 
 
+def group_bbox_intersects(
+    group: dict[str, Any], bbox: tuple[float, float, float, float]
+) -> bool:
+    """Return whether a row group's bbox extent can intersect the query box.
+
+    ``bbox`` is ``(xmin, ymin, xmax, ymax)``. A row group whose bbox statistics
+    are incomplete cannot be pruned and is treated as intersecting so no source
+    row is ever silently dropped by the plan.
+    """
+    xmin_min = group.get("bbox_xmin_min")
+    xmax_max = group.get("bbox_xmax_max")
+    ymin_min = group.get("bbox_ymin_min")
+    ymax_max = group.get("bbox_ymax_max")
+    if None in (xmin_min, xmax_max, ymin_min, ymax_max):
+        return True
+    qxmin, qymin, qxmax, qymax = bbox
+    return (
+        xmin_min <= qxmax
+        and xmax_max >= qxmin
+        and ymin_min <= qymax
+        and ymax_max >= qymin
+    )
+
+
 def plan_contiguous_ranges(
     objects: list[dict[str, Any]],
     *,
@@ -187,6 +246,7 @@ def plan_contiguous_ranges(
     max_selected_uncompressed_bytes: int,
     max_groups: int,
     max_tasks: int,
+    bbox: tuple[float, float, float, float] | None = None,
 ) -> dict[str, Any]:
     if (
         min(
@@ -230,6 +290,12 @@ def plan_contiguous_ranges(
 
     for source in objects:
         for group in source["groups"]:
+            # bbox-scoped plans skip non-intersecting groups. A skipped group
+            # naturally breaks contiguity, so the surviving groups still pack
+            # into contiguous per-object ranges. When bbox is None the guard is
+            # inert and the default plan is byte-identical.
+            if bbox is not None and not group_bbox_intersects(group, bbox):
+                continue
             next_rows = pending_rows + group["rows"]
             next_bytes = pending_uncompressed + group["selected_uncompressed_bytes"]
             if pending_ranges and (
@@ -285,11 +351,23 @@ def plan_contiguous_ranges(
                 pending_mixed_rows += group["rows"]
     finish()
     planned_rows = sum(task["rows"] for task in tasks)
-    source_rows = sum(source["records"] for source in objects)
-    if planned_rows != source_rows:
-        raise ValueError("planned rows do not reconcile with the source inventory")
+    if bbox is None:
+        source_rows = sum(source["records"] for source in objects)
+        if planned_rows != source_rows:
+            raise ValueError("planned rows do not reconcile with the source inventory")
+    else:
+        scoped_rows = sum(
+            group["rows"]
+            for source in objects
+            for group in source["groups"]
+            if group_bbox_intersects(group, bbox)
+        )
+        if planned_rows != scoped_rows:
+            raise ValueError(
+                "planned rows do not reconcile with the bbox-scoped inventory"
+            )
     safe = len(tasks) <= max_tasks
-    return {
+    plan: dict[str, Any] = {
         "schema": PLAN_SCHEMA,
         "gates": {
             "target_rows": target_rows,
@@ -308,6 +386,33 @@ def plan_contiguous_ranges(
         ),
         "tasks": tasks,
     }
+    if bbox is not None:
+        qxmin, qymin, qxmax, qymax = bbox
+        all_groups = [group for source in objects for group in source["groups"]]
+        selected_groups = [
+            group for group in all_groups if group_bbox_intersects(group, bbox)
+        ]
+        no_stats_groups = [
+            group for group in selected_groups if not group.get("bbox_stats_complete")
+        ]
+        # Every intersecting row group is read in full, so the served rows are a
+        # superset of the box; see the module docstring for why v1 prunes at
+        # row-group granularity only.
+        plan["bbox_scope"] = "row_group_approximate"
+        plan["bbox"] = {
+            "xmin": qxmin,
+            "ymin": qymin,
+            "xmax": qxmax,
+            "ymax": qymax,
+        }
+        plan["bbox_row_groups"] = {
+            "total": len(all_groups),
+            "selected": len(selected_groups),
+            "pruned": len(all_groups) - len(selected_groups),
+            "no_stats_conservative": len(no_stats_groups),
+        }
+        plan["bbox_scoped_rows"] = planned_rows
+    return plan
 
 
 def build_report(
@@ -414,6 +519,26 @@ def markdown(report: dict[str, Any]) -> str:
         "This is a footer-only planning result. Hosted execution and compact-output "
         "skew remain separate gates.",
         "",
+    ]
+    if "bbox" in plan:
+        box = plan["bbox"]
+        scoped = plan["bbox_row_groups"]
+        lines.extend(
+            [
+                (
+                    f"Scope: **bbox {box['xmin']},{box['ymin']},{box['xmax']},"
+                    f"{box['ymax']}** (`{plan['bbox_scope']}`). "
+                    f"{scoped['selected']:,} of {scoped['total']:,} row groups "
+                    f"intersect the box "
+                    f"({scoped['no_stats_conservative']:,} kept conservatively for "
+                    f"missing statistics); {scoped['pruned']:,} pruned. Every "
+                    f"intersecting group is read in full, so the served rows are a "
+                    f"superset of the box."
+                ),
+                "",
+            ]
+        )
+    lines += [
         "## Complete source inventory",
         "",
         f"- Objects: {totals['objects']:,}",
@@ -474,9 +599,27 @@ def main() -> None:
     )
     parser.add_argument("--max-groups", type=int, default=72)
     parser.add_argument("--max-tasks", type=int, default=128)
+    parser.add_argument(
+        "--xmin",
+        type=float,
+        help="bbox-scoped plan: western longitude bound (with --ymin/--xmax/--ymax)",
+    )
+    parser.add_argument("--ymin", type=float, help="bbox-scoped plan: southern bound")
+    parser.add_argument("--xmax", type=float, help="bbox-scoped plan: eastern bound")
+    parser.add_argument("--ymax", type=float, help="bbox-scoped plan: northern bound")
     args = parser.parse_args()
     if args.workers <= 0 or args.workers > 32:
         raise SystemExit("--workers must be between 1 and 32")
+    bbox_flags = (args.xmin, args.ymin, args.xmax, args.ymax)
+    if any(value is not None for value in bbox_flags) and not all(
+        value is not None for value in bbox_flags
+    ):
+        raise SystemExit("--xmin, --ymin, --xmax, and --ymax must be supplied together")
+    bbox: tuple[float, float, float, float] | None = None
+    if all(value is not None for value in bbox_flags):
+        if args.xmin >= args.xmax or args.ymin >= args.ymax:
+            raise SystemExit("bbox must have xmin<xmax and ymin<ymax")
+        bbox = (args.xmin, args.ymin, args.xmax, args.ymax)
 
     try:
         import pyarrow.fs as pafs
@@ -496,6 +639,7 @@ def main() -> None:
         max_selected_uncompressed_bytes=args.max_selected_uncompressed_bytes,
         max_groups=args.max_groups,
         max_tasks=args.max_tasks,
+        bbox=bbox,
     )
     report = build_report(args.release, objects, plan)
     args.json_out.parent.mkdir(parents=True, exist_ok=True)
