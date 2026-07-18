@@ -3,13 +3,60 @@ name: Rehearse Real Address R2 Map Reduce Resume
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: >-
+          "stratified" (default) runs the committed 12-task stratified sample
+          over the fixed global inventory, exactly as before. "region" generates
+          a bbox-scoped inventory + task plan at run time and runs the whole
+          scoped plan, then reconciles rows and builds the family manifest.
+        required: false
+        type: choice
+        default: stratified
+        options:
+          - stratified
+          - region
       tasks:
         description: >-
           Optional JSON matrix override for debugging, e.g.
           {"include":[{"name":"us-full","task_index":48}]}. Leave blank to use
           the committed stratified selection (.github/address-sweep-selection.json).
+          Ignored in region mode.
         required: false
         type: string
+      region_name:
+        description: >-
+          Region mode only: human-readable region name recorded in the family
+          manifest scope (e.g. "us-northeast").
+        required: false
+        type: string
+        default: us-northeast
+      bbox_xmin:
+        description: "Region mode only: western longitude bound."
+        required: false
+        type: string
+        default: "-80.5"
+      bbox_ymin:
+        description: "Region mode only: southern latitude bound."
+        required: false
+        type: string
+        default: "38.0"
+      bbox_xmax:
+        description: "Region mode only: eastern longitude bound."
+        required: false
+        type: string
+        default: "-66.9"
+      bbox_ymax:
+        description: "Region mode only: northern latitude bound."
+        required: false
+        type: string
+        default: "47.5"
+      max_region_tasks:
+        description: >-
+          Region mode only: hard cap on scoped tasks. A scoped plan larger than
+          this FAILS the run rather than silently sampling a subset.
+        required: false
+        type: string
+        default: "40"
 
 permissions:
   contents: read
@@ -24,7 +71,7 @@ env:
 jobs:
   select:
     name: Select stratified sweep tasks
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.mode != 'region'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
@@ -63,7 +110,7 @@ jobs:
   real-address-resume:
     name: Real address resume ${{ matrix.name }} (${{ matrix.task_index }})
     needs: select
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && inputs.mode != 'region'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     strategy:
@@ -328,7 +375,7 @@ jobs:
   aggregate:
     name: Aggregate stratified sweep evidence
     needs: [select, real-address-resume]
-    if: ${{ always() && github.ref == 'refs/heads/main' }}
+    if: ${{ always() && github.ref == 'refs/heads/main' && inputs.mode != 'region' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out main without persisted credentials
@@ -373,3 +420,522 @@ jobs:
           path: |
             sweep-aggregate.json
             sweep-aggregate.md
+
+  # ---------------------------------------------------------------------------
+  # Region mode (inputs.mode == 'region'): generate a bbox-scoped inventory and
+  # task plan at run time, run the SAME map/reduce/verify machinery over every
+  # scoped task, reconcile bbox_scoped_rows exactly, and build + verify the
+  # release-versioned family manifest over the reduce outputs. Same isolated
+  # prefix, non-promoting, no catalog writes.
+  # ---------------------------------------------------------------------------
+  plan-region:
+    name: Plan bbox-scoped region tasks
+    if: github.ref == 'refs/heads/main' && inputs.mode == 'region'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      matrix: ${{ steps.plan.outputs.matrix }}
+      task_count: ${{ steps.plan.outputs.task_count }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned binary dependency
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      - name: Generate the bbox-scoped inventory and task plan at run time
+        run: |
+          set -euo pipefail
+          /usr/bin/time -v python scripts/inventory_address_rowgroups.py \
+            --release 2026-06-17.0 \
+            --json-out scoped-inventory.json \
+            --markdown-out scoped-inventory.md \
+            --xmin "${{ inputs.bbox_xmin }}" \
+            --ymin "${{ inputs.bbox_ymin }}" \
+            --xmax "${{ inputs.bbox_xmax }}" \
+            --ymax "${{ inputs.bbox_ymax }}" \
+            --max-tasks 128
+
+      - name: Build the region matrix and enforce the hard task cap
+        id: plan
+        run: |
+          set -euo pipefail
+          python scripts/region_address_rehearsal.py matrix \
+            --scoped-report scoped-inventory.json \
+            --region-name "${{ inputs.region_name }}" \
+            --max-tasks "${{ inputs.max_region_tasks }}" \
+            --matrix-out region-matrix.json \
+            --summary-out scoped-plan-summary.json
+          echo "matrix=$(cat region-matrix.json)" >> "$GITHUB_OUTPUT"
+          echo "task_count=$(jq '.task_count' scoped-plan-summary.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Summarize the scoped plan
+        if: always()
+        run: |
+          {
+            echo "## Bbox-scoped region plan"
+            echo
+            echo '```json'
+            test -f scoped-plan-summary.json && cat scoped-plan-summary.json
+            echo '```'
+            echo
+            test -f scoped-inventory.md && cat scoped-inventory.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the scoped plan for the matrix and finalize jobs
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: region-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            scoped-inventory.json
+            scoped-inventory.md
+            scoped-plan-summary.json
+            region-matrix.json
+
+  region-address-resume:
+    name: Region address resume ${{ matrix.name }} (${{ matrix.task_index }})
+    needs: plan-region
+    if: github.ref == 'refs/heads/main' && inputs.mode == 'region'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      max-parallel: 4
+      matrix: ${{ fromJSON(needs.plan-region.outputs.matrix) }}
+    env:
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned binary dependency
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      - name: Download the run-time scoped inventory and plan
+        uses: actions/download-artifact@v7
+        with:
+          name: region-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: region-plan
+
+      - name: Record runner resources
+        run: |
+          {
+            echo "## Region address verified-resume task ${{ matrix.name }}"
+            echo
+            echo '```text'
+            lscpu
+            free -h
+            df -h . /tmp
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Project one scoped-inventory task
+        run: |
+          set -euo pipefail
+          mkdir -p "/tmp/address-resume-${{ matrix.name }}/fragments" \
+            "/tmp/address-resume-${{ matrix.name }}/restore"
+          /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
+            --release 2026-06-17.0 \
+            --family addresses \
+            --inventory-report region-plan/scoped-inventory.json \
+            --task-index "${{ matrix.task_index }}" \
+            --output "/tmp/address-resume-${{ matrix.name }}/projected.parquet" \
+            --json-out "projection-${{ matrix.name }}.json" \
+            --target-rowgroup-uncompressed-bytes 350000000 \
+            --max-rows 4000000 \
+            --max-groups 72 \
+            --max-output-bytes 500000000
+
+      - name: Build real map fragments and the local reduce oracle
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          /usr/bin/time -v python scripts/prepare_address_verified_resume.py map \
+            --input "$ROOT/projected.parquet" \
+            --fragment-dir "$ROOT/fragments" \
+            --json-out "map-${{ matrix.name }}.json" \
+            --work-dir /tmp \
+            --max-rows 4000000 \
+            --fragment-rows 128000 \
+            --max-workspace-bytes 12000000000
+          /usr/bin/time -v python scripts/prepare_address_verified_resume.py reduce \
+            --map-report "map-${{ matrix.name }}.json" \
+            --output "$ROOT/local.aidx" \
+            --json-out "local-reduce-${{ matrix.name }}.json" \
+            --work-dir /tmp \
+            --sparse-stride 256 \
+            --max-artifact-bytes 1000000000 \
+            --max-workspace-bytes 12000000000
+
+      - name: Build deterministic partial and full content manifests
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
+          FRAGMENTS=("$ROOT"/fragments/fragment-*.bin)
+          test -f "${FRAGMENTS[0]}"
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$TASK_PREFIX" \
+            --output "$ROOT/partial.json" \
+            "${FRAGMENTS[0]}"
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$TASK_PREFIX" \
+            --output "$ROOT/full.json" \
+            "${FRAGMENTS[@]}"
+
+      - name: Upload partial completion and verify two full resumes
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          START_SECONDS=$SECONDS
+          TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$TASK_PREFIX" --manifest "$ROOT/partial.json" \
+            --report "$ROOT/partial-upload.json"
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$TASK_PREFIX" --manifest "$ROOT/full.json" \
+            --report "$ROOT/full-upload.json"
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$TASK_PREFIX" --manifest "$ROOT/full.json" \
+            --report "$ROOT/resumed-upload.json"
+          jq -e '
+            .artifacts[0].status == "existing_verified"
+            and any(.artifacts[1:][]; .status == "uploaded")
+          ' "$ROOT/full-upload.json"
+          jq -e 'all(.artifacts[]; .status == "existing_verified" and .readback_verified == true)' \
+            "$ROOT/resumed-upload.json"
+          jq -n --argjson seconds "$((SECONDS - START_SECONDS))" \
+            '{upload_and_resume_wall_seconds:$seconds}' > "$ROOT/upload-timing.json"
+
+      - name: Restore from empty and stale state then reproduce the oracle
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          rm -rf "$ROOT/fragments" "$ROOT/restore" "$ROOT/local.aidx" "$ROOT/projected.parquet"
+          EMPTY_RESTORE_START=$SECONDS
+          python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
+            --manifest "$ROOT/full.json" --output-dir "$ROOT/restore" \
+            --report "$ROOT/empty-restore.json"
+          EMPTY_RESTORE_SECONDS=$((SECONDS - EMPTY_RESTORE_START))
+          RESTORED=("$ROOT"/restore/fragment-*.bin)
+          FIRST_RESTORED="${RESTORED[0]}"
+          test -f "$FIRST_RESTORED"
+          printf 'stale-fragment\n' > "$FIRST_RESTORED"
+          STALE_RESTORE_START=$SECONDS
+          python scripts/r2_verified_store.py "${COMMON[@]}" restore-manifest \
+            --manifest "$ROOT/full.json" --output-dir "$ROOT/restore" \
+            --report "$ROOT/stale-restore.json"
+          STALE_RESTORE_SECONDS=$((SECONDS - STALE_RESTORE_START))
+          jq -e 'all(.artifacts[]; .verified == true)' "$ROOT/stale-restore.json"
+          /usr/bin/time -v python scripts/prepare_address_verified_resume.py reduce \
+            --map-report "map-${{ matrix.name }}.json" \
+            --restore-report "$ROOT/stale-restore.json" \
+            --expected-report "local-reduce-${{ matrix.name }}.json" \
+            --output "$ROOT/restored.aidx" \
+            --json-out "restored-reduce-${{ matrix.name }}.json" \
+            --work-dir /tmp \
+            --sparse-stride 256 \
+            --max-artifact-bytes 1000000000 \
+            --max-workspace-bytes 12000000000
+          jq -e '
+            .restored == true
+            and .local_oracle_match == true
+            and .reduce.verification.full_sorted_scan == true
+            and .reduce.verification.record_count_match == true
+          ' "restored-reduce-${{ matrix.name }}.json"
+          jq -n --argjson empty "$EMPTY_RESTORE_SECONDS" \
+            --argjson stale "$STALE_RESTORE_SECONDS" \
+            '{empty_restore_wall_seconds:$empty,stale_repair_wall_seconds:$stale}' \
+            > "$ROOT/restore-timing.json"
+
+      - name: Record measured rows for exact reconciliation
+        run: |
+          set -euo pipefail
+          python scripts/region_address_rehearsal.py task-rows \
+            --map-report "map-${{ matrix.name }}.json" \
+            --task-index "${{ matrix.task_index }}" \
+            --name "${{ matrix.name }}" \
+            --out "task-rows-${{ matrix.name }}.json"
+
+      - name: Publish the verified reduce output to the isolated family prefix
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          FAMILY_PREFIX="${SHUFFLE_PREFIX}/family"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          COMMON=(--bucket geocoder-shards --endpoint-url "$ENDPOINT")
+          # Give the reduce artifact a task-unique basename so the family object
+          # set is human-readable; the immutable key still binds its SHA-256.
+          cp "$ROOT/restored.aidx" "$ROOT/${{ matrix.name }}.aidx"
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$FAMILY_PREFIX" \
+            --output "$ROOT/family-artifact-${{ matrix.name }}.json" \
+            "$ROOT/${{ matrix.name }}.aidx"
+          python scripts/r2_verified_store.py "${COMMON[@]}" upload-manifest \
+            --prefix "$FAMILY_PREFIX" \
+            --manifest "$ROOT/family-artifact-${{ matrix.name }}.json" \
+            --report "family-upload-${{ matrix.name }}.json"
+          jq -e 'all(.artifacts[]; .readback_verified == true and .status != null)' \
+            "family-upload-${{ matrix.name }}.json"
+
+      - name: Emit the per-task resume measurement
+        run: |
+          set -euo pipefail
+          ROOT="/tmp/address-resume-${{ matrix.name }}"
+          jq -n \
+            --slurpfile map "map-${{ matrix.name }}.json" \
+            --slurpfile partial "$ROOT/partial-upload.json" \
+            --slurpfile full "$ROOT/full-upload.json" \
+            --slurpfile resumed "$ROOT/resumed-upload.json" \
+            --slurpfile empty "$ROOT/empty-restore.json" \
+            --slurpfile stale "$ROOT/stale-restore.json" \
+            --slurpfile upload_timing "$ROOT/upload-timing.json" \
+            --slurpfile restore_timing "$ROOT/restore-timing.json" \
+            --slurpfile local "local-reduce-${{ matrix.name }}.json" \
+            --slurpfile restored "restored-reduce-${{ matrix.name }}.json" '
+            def bytes($report): [$report[0].artifacts[].bytes] | add;
+            ($map[0].map_fragments.bytes) as $source_bytes |
+            (bytes($partial) + bytes($full) + bytes($resumed)) as $upload_readback |
+            ([($empty[0].artifacts + $stale[0].artifacts)[] |
+              select(.status == "remote_verified") | .bytes] | add // 0) as $restore_download |
+            {
+              schema: "overture-address-real-r2-resume-measurement-v1",
+              fragment_bytes: $source_bytes,
+              verified_upload_readback_bytes: $upload_readback,
+              retry_readback_amplification: ($upload_readback / $source_bytes),
+              restore_download_bytes: $restore_download,
+              r2_wall_seconds: ($upload_timing[0] + $restore_timing[0]),
+              map_resources: $map[0].resources,
+              local_reduce_resources: $local[0].resources,
+              restored_reduce_resources: $restored[0].resources,
+              local_oracle_match: $restored[0].local_oracle_match
+            }
+          ' | tee "resume-measurement-${{ matrix.name }}.json"
+
+      - name: Summarize measured coverage, bytes, and resources
+        if: always()
+        run: |
+          {
+            echo
+            echo "### Projection and structured retention"
+            echo '```json'
+            test -f "projection-${{ matrix.name }}.json" && cat "projection-${{ matrix.name }}.json"
+            echo '```'
+            echo
+            echo "### Real map fragments"
+            echo '```json'
+            test -f "map-${{ matrix.name }}.json" && cat "map-${{ matrix.name }}.json"
+            echo '```'
+            echo
+            echo "### Restored reduce equivalence and published family object"
+            echo '```json'
+            test -f "restored-reduce-${{ matrix.name }}.json" && cat "restored-reduce-${{ matrix.name }}.json"
+            test -f "resume-measurement-${{ matrix.name }}.json" && cat "resume-measurement-${{ matrix.name }}.json"
+            test -f "family-upload-${{ matrix.name }}.json" && cat "family-upload-${{ matrix.name }}.json"
+            test -f "task-rows-${{ matrix.name }}.json" && cat "task-rows-${{ matrix.name }}.json"
+            echo '```'
+            echo
+            echo "Task ${{ matrix.task_index }} is one member of the run-time bbox-scoped plan. This rehearsal is run-unique, non-promoting, and cannot update a catalog."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence artifacts for post-mortem diagnosis
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: region-resume-evidence-${{ matrix.name }}-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            projection-${{ matrix.name }}.json
+            map-${{ matrix.name }}.json
+            local-reduce-${{ matrix.name }}.json
+            restored-reduce-${{ matrix.name }}.json
+            resume-measurement-${{ matrix.name }}.json
+            task-rows-${{ matrix.name }}.json
+            family-upload-${{ matrix.name }}.json
+            /tmp/address-resume-${{ matrix.name }}/*.json
+
+      - name: Delete the task's isolated R2 map fragments
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          TASK_PREFIX="${SHUFFLE_PREFIX}/${{ matrix.name }}"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${TASK_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${TASK_PREFIX}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"
+
+  region-finalize:
+    name: Reconcile region rows and build the family manifest
+    needs: [plan-region, region-address-resume]
+    # Success-gated (not always()): the exact reconciliation and the manifest
+    # are only meaningful over the complete set of scoped tasks, so a failed or
+    # missing task must block finalize rather than reconcile a partial set.
+    if: github.ref == 'refs/heads/main' && inputs.mode == 'region'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Download the scoped plan
+        uses: actions/download-artifact@v7
+        with:
+          name: region-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: region-plan
+
+      - name: Download every scoped task's evidence
+        uses: actions/download-artifact@v7
+        with:
+          path: region-evidence
+          pattern: region-resume-evidence-*
+
+      - name: Reconcile bbox_scoped_rows against the measured map rows
+        run: |
+          set -euo pipefail
+          mkdir -p rows
+          find region-evidence -name 'task-rows-*.json' -exec cp {} rows/ \;
+          python scripts/region_address_rehearsal.py reconcile \
+            --scoped-report region-plan/scoped-inventory.json \
+            --task-rows-dir rows \
+            --out reconcile.json
+          cat reconcile.json
+
+      - name: List the isolated family prefix from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          FAMILY_PREFIX="${SHUFFLE_PREFIX}/family"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${FAMILY_PREFIX}/" \
+            --endpoint-url "$ENDPOINT" --region auto --output json \
+            --query 'Contents[].[Key,Size]' > family-listing-raw.json
+          jq 'reduce (. // [])[] as $o ({}; .[$o[0]] = $o[1])' \
+            family-listing-raw.json > family-listing.json
+          cat family-listing.json
+
+      - name: Build and verify the family manifest over the reduce outputs
+        run: |
+          set -euo pipefail
+          mkdir -p uploads
+          find region-evidence -name 'family-upload-*.json' -exec cp {} uploads/ \;
+          python scripts/region_address_rehearsal.py manifest \
+            --release 2026-06-17.0 \
+            --region-name "${{ inputs.region_name }}" \
+            --bbox "${{ inputs.bbox_xmin }}" "${{ inputs.bbox_ymin }}" \
+              "${{ inputs.bbox_xmax }}" "${{ inputs.bbox_ymax }}" \
+            --producer-commit "${{ github.sha }}" \
+            --run-id "${{ github.run_id }}-${{ github.run_attempt }}" \
+            --upload-report-dir uploads \
+            --listing family-listing.json \
+            --out family-manifest.json
+          DIGEST="$(jq -r .manifest_digest family-manifest.json)"
+          {
+            echo "## Region reconciliation and family manifest"
+            echo
+            echo '```json'
+            cat reconcile.json
+            echo '```'
+            echo
+            echo "Family manifest digest: \`${DIGEST}\`"
+            echo
+            echo '```json'
+            jq '{schema, family, region, versions, lineage, totals, manifest_digest}' family-manifest.json
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the reconciliation, plan, and family manifest evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: region-finalize-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            region-plan/scoped-plan-summary.json
+            region-plan/scoped-inventory.md
+            reconcile.json
+            family-listing.json
+            family-manifest.json
+
+      - name: Delete the isolated family prefix
+        if: always()
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          FAMILY_PREFIX="${SHUFFLE_PREFIX}/family"
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${FAMILY_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${FAMILY_PREFIX}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"
