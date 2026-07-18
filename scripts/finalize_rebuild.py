@@ -656,6 +656,21 @@ def _is_precondition_failed(exc: subprocess.CalledProcessError) -> bool:
     return "PreconditionFailed" in blob or "412" in blob
 
 
+def _is_unsupported_conditional_option(exc: subprocess.CalledProcessError) -> bool:
+    """True when aws rejected ``--if-match``/``--if-none-match`` as unknown.
+
+    An aws CLI too old to expose the PutObject conditional-write options rejects
+    them at argument-parse time (``Unknown options: --if-match, ...``) rather
+    than reaching R2. Detecting that lets the guard fail fast with an actionable
+    "upgrade the CLI" message instead of retrying a request that can never
+    succeed and reporting a misleading transient-publish failure.
+    """
+    blob = f"{exc.stdout or ''}{exc.stderr or ''}"
+    lowered = blob.lower()
+    names = ("--if-match" in blob) or ("--if-none-match" in blob)
+    return names and ("unknown option" in lowered or "unrecognized argument" in lowered)
+
+
 class R2Client:
     """Production client: shells out to the aws CLI and to
     ``scripts/r2_catalog_fetch.sh`` (whose two-consecutive-404 rule keeps an
@@ -736,6 +751,15 @@ class R2Client:
                     raise PreconditionFailed(
                         f"conditional PUT of {key} rejected by R2 (412 precondition failed)"
                     ) from exc
+                if _is_unsupported_conditional_option(exc):
+                    # A pre-2.15-ish aws CLI has no --if-match/--if-none-match, so
+                    # the guarded write silently degrades to unguarded. Refuse
+                    # rather than retry a request that can never parse.
+                    raise PromotionError(
+                        "aws CLI does not support PutObject conditional writes "
+                        "(--if-match/--if-none-match); upgrade the CLI on the runner "
+                        "before publishing the production catalog"
+                    ) from exc
                 raise
 
     def _get_object(self, key: str) -> bytes:
@@ -813,10 +837,21 @@ class R2Client:
         """Write a durable operator-recovery copy, create-only.
 
         A per-version backup is immutable, so a duplicate publisher that already
-        wrote it fails closed (:class:`PreconditionFailed`) rather than
-        overwriting it; the write is read back and SHA-256-verified.
+        wrote it fails closed rather than overwriting it. But a *re-run* of the
+        same finalize (e.g. an operator re-running a job that already wrote the
+        backups before failing at smoke) legitimately re-writes the identical
+        bytes; that must stay idempotent, not brick the retry. So a create-only
+        412 is only fatal when the existing object differs -- a genuine
+        conflicting publisher; identical content is treated as already durable.
         """
-        self.publish_create_only(f"{BACKUP_PREFIX}/{name}", data)
+        key = f"{BACKUP_PREFIX}/{name}"
+        try:
+            self.publish_create_only(key, data)
+        except PreconditionFailed:
+            existing = self._get_object(key)
+            if existing != data:
+                raise
+            # Same version, same bytes: the durable copy already exists.
 
     def get_backup(self, name: str) -> bytes:
         key = f"s3://{self.bucket}/{BACKUP_PREFIX}/{name}"
@@ -1014,7 +1049,17 @@ def recover(
     elif live == candidate_bytes:
         # CAS the previous catalog back, guarding on the interrupted candidate
         # still being live (If-Match on its content ETag).
-        client.publish_catalog(before_bytes, expected_etag=_content_etag(candidate_bytes))
+        try:
+            client.publish_catalog(
+                before_bytes, expected_etag=_content_etag(candidate_bytes)
+            )
+        except PreconditionFailed as exc:
+            # Another recoverer/publisher swapped the catalog between our read and
+            # this CAS. The compare-and-swap aborted without clobbering anything;
+            # the readback below decides whether the prior catalog nonetheless
+            # ended up live (someone else restored it -> success) or a foreign
+            # catalog is now live (-> refuse, as RecoveryError not a raw crash).
+            log(f"Recovery compare-and-swap lost a race: {exc}")
         restored = client.fetch_catalog()
         if restored != before_bytes:
             raise RecoveryError("restore readback did not equal the previous catalog")

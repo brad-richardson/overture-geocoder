@@ -721,6 +721,54 @@ def test_recover_refuses_unknown_live_catalog():
     assert client.published == []
 
 
+class _RaceThenLiveClient(FakeClient):
+    """Models a recover whose CAS loses to a concurrent writer: the first fetch
+    still sees the interrupted candidate, ``publish_catalog`` 412s, and the next
+    fetch reflects whatever that concurrent writer left live.
+    """
+
+    def __init__(self, *, candidate, post_race):
+        super().__init__(catalog=candidate)
+        self._post_race = post_race
+        self._first_fetch = True
+
+    def publish_catalog(self, data, *, expected_etag=None):
+        raise fr.PreconditionFailed("lost CAS to concurrent writer")
+
+    def fetch_catalog(self):
+        if self._first_fetch:
+            self._first_fetch = False
+            return self.catalog
+        self.catalog = self._post_race
+        return self._post_race
+
+
+def test_recover_lost_cas_but_previous_now_live_succeeds():
+    # Another recoverer won the race and restored the previous catalog first: a
+    # 412 here is success, not a raw crash.
+    before = _catalog_bytes(latest=PREVIOUS)
+    candidate = _catalog_bytes(latest=NEW, others=[PREVIOUS])
+    client = _RaceThenLiveClient(candidate=candidate, post_race=before)
+    client.backups[f"catalog-before-{NEW}.json"] = before
+    client.backups[f"catalog-candidate-{NEW}.json"] = candidate
+
+    _recover(client)  # must not raise
+
+
+def test_recover_lost_cas_to_foreign_catalog_refuses_cleanly():
+    # The race left a catalog we do not recognise live: refuse as a RecoveryError
+    # (which main handles) rather than an unhandled PreconditionFailed traceback.
+    before = _catalog_bytes(latest=PREVIOUS)
+    candidate = _catalog_bytes(latest=NEW, others=[PREVIOUS])
+    intruder = _catalog_bytes(latest="2026-07-16.0")
+    client = _RaceThenLiveClient(candidate=candidate, post_race=intruder)
+    client.backups[f"catalog-before-{NEW}.json"] = before
+    client.backups[f"catalog-candidate-{NEW}.json"] = candidate
+
+    with pytest.raises(fr.RecoveryError, match="restore readback did not equal"):
+        _recover(client)
+
+
 # ---------------------------------------------------------------------------
 # R2Client conditional-write helpers: exercised through a fake `aws` that models
 # R2's server-side If-None-Match / If-Match preconditions (no live R2 calls).
@@ -743,6 +791,8 @@ class FakeAws:
         self.puts = []
         self.corrupt_readback = None
         self.transient_puts = 0
+        # Model an aws CLI too old to expose the conditional-write options.
+        self.reject_conditional_options = False
 
     def _fail(self, message):
         return subprocess.CalledProcessError(254, ["aws"], output="", stderr=message)
@@ -753,6 +803,11 @@ class FakeAws:
             opts = {args[i]: args[i + 1] for i in range(len(args) - 1)}
             key = opts["--key"]
             data = Path(opts["--body"]).read_bytes()
+            if self.reject_conditional_options and (
+                "--if-match" in opts or "--if-none-match" in opts
+            ):
+                bad = "--if-match" if "--if-match" in opts else "--if-none-match"
+                raise self._fail(f"aws: [ERROR]: Unknown options: {bad}, <value>")
             if self.transient_puts > 0:
                 self.transient_puts -= 1
                 raise self._fail("An error occurred (RequestTimeout) ...")
@@ -852,6 +907,49 @@ def test_put_backup_is_create_only():
     with pytest.raises(fr.PreconditionFailed):
         client.put_backup("dup.json", b"second")
     assert fake.store[f"{fr.BACKUP_PREFIX}/dup.json"] == b"first"
+
+
+def test_put_backup_identical_content_is_idempotent():
+    # An operator re-running the same finalize re-writes the identical backup;
+    # the create-only 412 must not brick that legitimate retry.
+    key = f"{fr.BACKUP_PREFIX}/dup.json"
+    client, fake = _client_with({key: b"same-bytes"})
+    client.put_backup("dup.json", b"same-bytes")  # must not raise
+    assert fake.store[key] == b"same-bytes"
+
+
+def test_content_etag_is_quoted_md5_and_forwarded_verbatim():
+    # R2's single-part ETag is the *quoted* hex MD5; the CAS must send exactly
+    # that quoted form as If-Match. A fake that (like R2) only accepts the quoted
+    # value proves the code does not strip or re-quote it.
+    old = b"catalog-old"
+    etag = fr._content_etag(old)
+    assert etag == '"' + hashlib.md5(old).hexdigest() + '"'
+    assert etag.startswith('"') and etag.endswith('"')
+
+    client, fake = _client_with({fr.CATALOG_KEY: old})
+    client.swap_expected_current(fr.CATALOG_KEY, b"catalog-new", etag)
+    assert fake.store[fr.CATALOG_KEY] == b"catalog-new"
+
+    # The unquoted digest is not R2's ETag, so the CAS must be rejected.
+    client, fake = _client_with({fr.CATALOG_KEY: old})
+    with pytest.raises(fr.PreconditionFailed):
+        client.swap_expected_current(
+            fr.CATALOG_KEY, b"catalog-new", hashlib.md5(old).hexdigest()
+        )
+    assert fake.store[fr.CATALOG_KEY] == old
+
+
+def test_put_object_unsupported_conditional_option_is_clear_error():
+    # An aws CLI too old for --if-match/--if-none-match must fail fast with an
+    # actionable upgrade message, not silently retry an unparseable request.
+    client, fake = _client_with({fr.CATALOG_KEY: b"catalog-old"})
+    fake.reject_conditional_options = True
+    with pytest.raises(fr.PromotionError, match="does not support PutObject conditional"):
+        client.swap_expected_current(
+            fr.CATALOG_KEY, b"catalog-new", fr._content_etag(b"catalog-old")
+        )
+    assert fake.puts == []  # never written
 
 
 # ---------------------------------------------------------------------------
