@@ -1,0 +1,673 @@
+name: Rehearse Family Release Slice (non-promoting)
+
+# The Track C integration capstone. Publishes TWO regions PER FAMILY (addresses,
+# places) through the REAL `{version}/families/{family}/` release layout using
+# the ONE shared finalizer publication path (finalize_rebuild.py publish-family),
+# verifies remotely, emits a retained scale report, and cleans up.
+#
+# It is structurally non-promoting and cannot touch production:
+#   * the version is a `slice-YYYY-MM-DD.N` string that MUST NOT match the
+#     production VERSION_RE `^\d{4}-\d{2}-\d{2}\.\d+$`, asserted here AND rejected
+#     by every finalize helper it calls, so a slice prefix can never collide with
+#     or masquerade as a real release;
+#   * nothing reads or writes catalog.json (a negative probe proves the
+#     production catalog never references the slice, before and after publish);
+#   * the only writer of `{slice}/families/...` is finalize_rebuild.py
+#     publish-family (create-only via #108 guards, manifest last) — no raw
+#     `aws s3 cp/put` targets a families path.
+# A green run is measurement + cleanup succeeding; it is NOT launch or
+# publication approval (PENDING_WORK.md decisions 6 and 8).
+
+on:
+  workflow_dispatch:
+    inputs:
+      slice_version:
+        description: >-
+          Non-production slice version (slice-YYYY-MM-DD.N). MUST NOT match the
+          production release pattern; validated here and by every finalize helper.
+        required: true
+        type: string
+      release:
+        description: Overture release both families are built from.
+        required: false
+        default: "2026-06-17.0"
+        type: string
+      region_a_name:
+        description: Region A routing/catalog name (ASCII alphanumeric/hyphen).
+        required: false
+        default: us-northeast
+        type: string
+      region_a_xmin:
+        description: Region A minimum longitude.
+        required: false
+        default: "-80.5"
+        type: string
+      region_a_ymin:
+        description: Region A minimum latitude.
+        required: false
+        default: "38.0"
+        type: string
+      region_a_xmax:
+        description: Region A maximum longitude.
+        required: false
+        default: "-66.9"
+        type: string
+      region_a_ymax:
+        description: Region A maximum latitude.
+        required: false
+        default: "47.5"
+        type: string
+      region_b_name:
+        description: Region B routing/catalog name (ASCII alphanumeric/hyphen).
+        required: false
+        default: dc-metro
+        type: string
+      region_b_xmin:
+        description: Region B minimum longitude.
+        required: false
+        default: "-77.3"
+        type: string
+      region_b_ymin:
+        description: Region B minimum latitude.
+        required: false
+        default: "38.7"
+        type: string
+      region_b_xmax:
+        description: Region B maximum longitude.
+        required: false
+        default: "-76.7"
+        type: string
+      region_b_ymax:
+        description: Region B maximum latitude.
+        required: false
+        default: "39.1"
+        type: string
+      places_extract_limit:
+        description: >-
+          Hard Places extraction row cap. Must sit comfortably above the region
+          count; an extracted count at this limit means silent truncation and
+          FAILS (no partial shard set) per #112's guard idiom.
+        required: false
+        default: "6000000"
+        type: string
+      places_shard_row_cap:
+        description: Maximum rows per compact Places shard before it is split.
+        required: false
+        default: "1500000"
+        type: string
+      addresses_max_tasks:
+        description: >-
+          Hard cap on bbox-scoped address tasks per region. A scoped plan larger
+          than this FAILS the run rather than silently sampling a subset.
+        required: false
+        default: "16"
+        type: string
+      cleanup:
+        description: >-
+          Delete the slice prefix at the end (evidence artifact retained either
+          way). cleanup=false retains the prefix for a follow-up Worker smoke.
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # A dedicated group (NOT the r2-production-catalog group): the slice writes no
+  # catalog, so it must not serialize against real rebuilds, but it must never be
+  # cancelled in-flight — a cancelled credentialed publish can strand
+  # half-written slice objects the cleanup step would then miss.
+  group: release-slice-families
+  cancel-in-progress: false
+
+env:
+  SLICE_VERSION: ${{ inputs.slice_version }}
+  RELEASE: ${{ inputs.release }}
+  # The single non-promoting slice prefix everything lives under.
+  BASE_URL: https://geocoder.bradr.dev
+
+jobs:
+  # --- Preflight: prove the version is a slice, and the catalog is clean -------
+  preflight:
+    name: Validate slice version and probe the production catalog
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Assert the slice version cannot masquerade as a real release
+        run: |
+          set -euo pipefail
+          # MUST match the slice pattern and MUST NOT match the production
+          # VERSION_RE. Both checks fail closed here, before any credentialed job.
+          if ! printf '%s' "$SLICE_VERSION" | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+            echo "::error::slice_version '$SLICE_VERSION' must match slice-YYYY-MM-DD.N"
+            exit 1
+          fi
+          if printf '%s' "$SLICE_VERSION" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+            echo "::error::slice_version '$SLICE_VERSION' matches the production release pattern"
+            exit 1
+          fi
+
+      - name: Probe production catalog does NOT reference the slice (before)
+        run: |
+          set -euo pipefail
+          bash scripts/probe_catalog_excludes_slice.sh "$BASE_URL" "$SLICE_VERSION"
+
+  # --- Places family: both regions, one manifest, published via the finalizer --
+  places:
+    name: Build and publish the Places family (two regions)
+    needs: preflight
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    outputs:
+      manifest_digest: ${{ steps.publish.outputs.manifest_digest }}
+    env:
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+      REGION_A_NAME: ${{ inputs.region_a_name }}
+      REGION_A_XMIN: ${{ inputs.region_a_xmin }}
+      REGION_A_YMIN: ${{ inputs.region_a_ymin }}
+      REGION_A_XMAX: ${{ inputs.region_a_xmax }}
+      REGION_A_YMAX: ${{ inputs.region_a_ymax }}
+      REGION_B_NAME: ${{ inputs.region_b_name }}
+      REGION_B_XMIN: ${{ inputs.region_b_xmin }}
+      REGION_B_YMIN: ${{ inputs.region_b_ymin }}
+      REGION_B_XMAX: ${{ inputs.region_b_xmax }}
+      REGION_B_YMAX: ${{ inputs.region_b_ymax }}
+      EXTRACT_LIMIT: ${{ inputs.places_extract_limit }}
+      SHARD_ROW_CAP: ${{ inputs.places_shard_row_cap }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install the extraction dependency
+        run: pip install duckdb==1.5.1
+
+      - name: Build both region shard sets under the families/places tree
+        # Region A (US-NE) full-scale, Region B (DC metro) small-scale; both use
+        # the SAME no-truncation guard (a count at --limit fails). Every produced
+        # object is staged at families/places/<region>-<name> so the ONE family
+        # manifest and publish-family address it by its immutable published key.
+        run: |
+          set -euo pipefail
+          BUILD_START=$SECONDS
+          mkdir -p /tmp/slice/staged/families/places
+          build_region () {
+            local name="$1" xmin="$2" ymin="$3" xmax="$4" ymax="$5"
+            python scripts/experiment_places_partition_extract.py \
+              --release "$RELEASE" --limit "$EXTRACT_LIMIT" \
+              --xmin "$xmin" --xmax "$xmax" --ymin "$ymin" --ymax "$ymax" \
+              --output "/tmp/slice/${name}.parquet" | tee "/tmp/slice/${name}-extract.log"
+            local rows
+            rows=$(sed -n 's/^rows=\([0-9][0-9]*\).*/\1/p' "/tmp/slice/${name}-extract.log")
+            test -n "$rows"
+            if [ "$rows" -ge "$EXTRACT_LIMIT" ]; then
+              echo "::error::region $name extracted $rows rows at the $EXTRACT_LIMIT limit: raise places_extract_limit"
+              exit 1
+            fi
+            python scripts/build_places_region_shards.py \
+              --input "/tmp/slice/${name}.parquet" \
+              --output-dir "/tmp/slice/build-${name}" \
+              --region-name "$name" --shard-row-cap "$SHARD_ROW_CAP" \
+              --report "/tmp/slice/build-${name}.json"
+            # Stage every produced object under a per-region subdirectory so the
+            # original object names (and the routing catalog's internal shard
+            # references) stay intact and provenance lives in the key path; record
+            # the region's measured rows/bytes for the scale report.
+            mkdir -p "/tmp/slice/staged/families/places/${name}"
+            while read -r obj; do
+              cp "/tmp/slice/build-${name}/${obj}" \
+                "/tmp/slice/staged/families/places/${name}/${obj}"
+            done < <(jq -r '.produced_objects[]' "/tmp/slice/build-${name}.json")
+            jq -n --arg name "$name" \
+              --argjson bbox "[$xmin,$ymin,$xmax,$ymax]" \
+              --slurpfile r "/tmp/slice/build-${name}.json" '{
+                name:$name, bbox:$bbox,
+                rows:$r[0].totals.shard_rows,
+                artifacts:($r[0].produced_objects|length),
+                bytes:$r[0].totals.shard_bytes
+              }' > "/tmp/slice/region-places-${name}.json"
+          }
+          build_region "$REGION_A_NAME" "$REGION_A_XMIN" "$REGION_A_YMIN" "$REGION_A_XMAX" "$REGION_A_YMAX"
+          build_region "$REGION_B_NAME" "$REGION_B_XMIN" "$REGION_B_YMIN" "$REGION_B_XMAX" "$REGION_B_YMAX"
+          echo "PLACES_BUILD_SECONDS=$((SECONDS - BUILD_START))" >> "$GITHUB_ENV"
+
+      - name: Assemble ONE family manifest over both regions (union bbox)
+        # ONE manifest per family: #110's verify treats one manifest per family
+        # under {version}/families/{family}/. The single #107 region field carries
+        # the UNION bbox of both regions (Region B ⊂ Region A here, so the union is
+        # Region A's box); per-region provenance survives in the region-tagged
+        # artifact keys. bbox_scope is uniform `exact` for Places.
+        run: |
+          set -euo pipefail
+          UNION=$(jq -n \
+            --argjson a "[$REGION_A_XMIN,$REGION_A_YMIN,$REGION_A_XMAX,$REGION_A_YMAX]" \
+            --argjson b "[$REGION_B_XMIN,$REGION_B_YMIN,$REGION_B_XMAX,$REGION_B_YMAX]" \
+            '[[$a[0],$b[0]]|min,[$a[1],$b[1]]|min,[$a[2],$b[2]]|max,[$a[3],$b[3]]|max]')
+          # Enumerate every staged artifact (recursively) by its published key,
+          # excluding the manifest itself (written below, into this same tree).
+          ARTIFACT_ARGS=()
+          while read -r key; do
+            ARTIFACT_ARGS+=(--artifact "${key}=/tmp/slice/staged/${key}")
+          done < <(cd /tmp/slice/staged && find families/places -type f ! -name family-manifest.json | sort)
+          python scripts/global_build_manifest.py family-manifest \
+            --family places --overture-release "$RELEASE" \
+            --producer-commit "$GITHUB_SHA" \
+            --producer-script scripts/build_places_region_shards.py \
+            --producer-version 1 \
+            --region-name "slice-${REGION_A_NAME}-with-${REGION_B_NAME}" \
+            --bbox "$(echo "$UNION" | jq -r '.[0]')" "$(echo "$UNION" | jq -r '.[1]')" \
+                   "$(echo "$UNION" | jq -r '.[2]')" "$(echo "$UNION" | jq -r '.[3]')" \
+            --bbox-scope exact \
+            "${ARTIFACT_ARGS[@]}" \
+            --output /tmp/slice/staged/families/places/family-manifest.json
+
+      - name: Publish the Places family via the shared finalizer
+        id: publish
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          PUBLISH_START=$SECONDS
+          # The ONE shared publication path: create-only artifacts (data before
+          # marker), manifest LAST, then a downloaded-hash remote re-verify.
+          python scripts/finalize_rebuild.py publish-family \
+            --version "$SLICE_VERSION" --family places \
+            --manifest /tmp/slice/staged/families/places/family-manifest.json \
+            --artifacts-root /tmp/slice/staged
+          DIGEST=$(jq -r '.manifest_digest' /tmp/slice/staged/families/places/family-manifest.json)
+          echo "manifest_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          jq -n --arg family places --arg digest "$DIGEST" \
+            --argjson build "${PLACES_BUILD_SECONDS}" \
+            --argjson publish "$((SECONDS - PUBLISH_START))" \
+            --slurpfile ra "/tmp/slice/region-places-${REGION_A_NAME}.json" \
+            --slurpfile rb "/tmp/slice/region-places-${REGION_B_NAME}.json" '{
+              family:$family, manifest_digest:$digest,
+              build_seconds:$build, publish_seconds:$publish,
+              regions:[$ra[0],$rb[0]]
+            }' > /tmp/slice/family-places.json
+
+      - name: Upload the Places measurement for the scale report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slice-family-places-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: /tmp/slice/family-places.json
+
+  # --- Address family: both regions, one manifest, published via the finalizer -
+  addresses:
+    name: Build and publish the Address family (two regions)
+    needs: preflight
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    outputs:
+      manifest_digest: ${{ steps.publish.outputs.manifest_digest }}
+    env:
+      REGION_A_NAME: ${{ inputs.region_a_name }}
+      REGION_A_XMIN: ${{ inputs.region_a_xmin }}
+      REGION_A_YMIN: ${{ inputs.region_a_ymin }}
+      REGION_A_XMAX: ${{ inputs.region_a_xmax }}
+      REGION_A_YMAX: ${{ inputs.region_a_ymax }}
+      REGION_B_NAME: ${{ inputs.region_b_name }}
+      REGION_B_XMIN: ${{ inputs.region_b_xmin }}
+      REGION_B_YMIN: ${{ inputs.region_b_ymin }}
+      REGION_B_XMAX: ${{ inputs.region_b_xmax }}
+      REGION_B_YMAX: ${{ inputs.region_b_ymax }}
+      MAX_REGION_TASKS: ${{ inputs.addresses_max_tasks }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install pinned binary dependency
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      # DESIGN NOTE (documented in the PR): #111's region rehearsal is a parallel
+      # matrix workflow; reusing its jobs inside this single workflow is
+      # impractical. This is the "smallest honest path" the scope doc allows: the
+      # #106 bbox-scoped inventory + a BOUNDED SINGLE-RUNNER sequential map/reduce
+      # over every scoped task (capped by addresses_max_tasks, fail-closed on
+      # overflow — no silent sampling, mirroring #111's build_region_matrix guard),
+      # reconciled exactly against bbox_scoped_rows. Reduce outputs are staged
+      # LOCALLY under families/addresses/ so the SAME publish-family path uploads
+      # them — the slice never uploads addresses to a staging R2 prefix.
+      # DRIFT: the per-task producer wiring (experiment_hosted_rowgroups.py /
+      # prepare_address_verified_resume.py args) tracks #111's unmerged
+      # rehearse-address-r2-map-reduce.yml region mode and must be reconciled when
+      # #111 lands.
+      - name: Build both region address reduce outputs under families/addresses
+        run: |
+          set -euo pipefail
+          BUILD_START=$SECONDS
+          mkdir -p /tmp/slice/staged/families/addresses
+          build_region () {
+            local name="$1" xmin="$2" ymin="$3" xmax="$4" ymax="$5"
+            local root="/tmp/slice/addr-${name}"
+            mkdir -p "$root"
+            python scripts/inventory_address_rowgroups.py \
+              --release "$RELEASE" \
+              --json-out "${root}/scoped-inventory.json" \
+              --xmin "$xmin" --ymin "$ymin" --xmax "$xmax" --ymax "$ymax" \
+              --max-tasks 128
+            python scripts/region_address_rehearsal.py matrix \
+              --scoped-report "${root}/scoped-inventory.json" \
+              --region-name "$name" --max-tasks "$MAX_REGION_TASKS" \
+              --matrix-out "${root}/matrix.json" \
+              --summary-out "${root}/summary.json"
+            # Bounded single-runner: iterate every scoped task index in order.
+            for idx in $(jq -r '.include[].task_index' "${root}/matrix.json"); do
+              local task
+              task="task-$(printf '%03d' "$idx")"
+              python scripts/experiment_hosted_rowgroups.py \
+                --release "$RELEASE" --family addresses \
+                --inventory-report "${root}/scoped-inventory.json" \
+                --task-index "$idx" \
+                --output "${root}/${task}.parquet" \
+                --json-out "${root}/proj-${task}.json" \
+                --target-rowgroup-uncompressed-bytes 350000000 \
+                --max-rows 4000000 --max-groups 72 --max-output-bytes 500000000
+              python scripts/prepare_address_verified_resume.py map \
+                --input "${root}/${task}.parquet" \
+                --fragment-dir "${root}/${task}-fragments" \
+                --json-out "${root}/map-${task}.json" \
+                --work-dir /tmp --max-rows 4000000 --fragment-rows 128000 \
+                --max-workspace-bytes 12000000000
+              mkdir -p "/tmp/slice/staged/families/addresses/${name}"
+              python scripts/prepare_address_verified_resume.py reduce \
+                --map-report "${root}/map-${task}.json" \
+                --output "/tmp/slice/staged/families/addresses/${name}/${task}.aidx" \
+                --json-out "${root}/reduce-${task}.json" \
+                --work-dir /tmp --sparse-stride 256 \
+                --max-artifact-bytes 1000000000 --max-workspace-bytes 12000000000
+              python scripts/region_address_rehearsal.py task-rows \
+                --map-report "${root}/map-${task}.json" \
+                --task-index "$idx" --name "$name" \
+                --out "${root}/rows-${task}.json"
+            done
+            # Exact reconciliation: measured rows == plan bbox_scoped_rows over the
+            # complete task set (fails on any missing/extra/duplicate task).
+            python scripts/region_address_rehearsal.py reconcile \
+              --scoped-report "${root}/scoped-inventory.json" \
+              --task-rows-dir "$root" --out "${root}/reconcile.json"
+            jq -n --arg name "$name" \
+              --argjson bbox "[$xmin,$ymin,$xmax,$ymax]" \
+              --slurpfile s "${root}/summary.json" \
+              --slurpfile rc "${root}/reconcile.json" '{
+                name:$name, bbox:$bbox,
+                rows:$rc[0].measured_rows,
+                artifacts:($s[0].task_count),
+                bytes:0
+              }' > "/tmp/slice/region-addresses-${name}.json"
+          }
+          build_region "$REGION_A_NAME" "$REGION_A_XMIN" "$REGION_A_YMIN" "$REGION_A_XMAX" "$REGION_A_YMAX"
+          build_region "$REGION_B_NAME" "$REGION_B_XMIN" "$REGION_B_YMIN" "$REGION_B_XMAX" "$REGION_B_YMAX"
+          # Fill in the measured on-disk bytes per region from the staged outputs.
+          for name in "$REGION_A_NAME" "$REGION_B_NAME"; do
+            b=$(find "/tmp/slice/staged/families/addresses/${name}" -name '*.aidx' -printf '%s\n' \
+              | awk '{s+=$1} END {print s+0}')
+            jq --argjson bytes "${b:-0}" '.bytes=$bytes' \
+              "/tmp/slice/region-addresses-${name}.json" > "/tmp/slice/region-addresses-${name}.tmp"
+            mv "/tmp/slice/region-addresses-${name}.tmp" "/tmp/slice/region-addresses-${name}.json"
+          done
+          echo "ADDR_BUILD_SECONDS=$((SECONDS - BUILD_START))" >> "$GITHUB_ENV"
+
+      - name: Assemble ONE address family manifest over both regions (union bbox)
+        run: |
+          set -euo pipefail
+          UNION=$(jq -n \
+            --argjson a "[$REGION_A_XMIN,$REGION_A_YMIN,$REGION_A_XMAX,$REGION_A_YMAX]" \
+            --argjson b "[$REGION_B_XMIN,$REGION_B_YMIN,$REGION_B_XMAX,$REGION_B_YMAX]" \
+            '[[$a[0],$b[0]]|min,[$a[1],$b[1]]|min,[$a[2],$b[2]]|max,[$a[3],$b[3]]|max]')
+          ARTIFACT_ARGS=()
+          while read -r key; do
+            ARTIFACT_ARGS+=(--artifact "${key}=/tmp/slice/staged/${key}")
+          done < <(cd /tmp/slice/staged && find families/addresses -type f ! -name family-manifest.json | sort)
+          python scripts/global_build_manifest.py family-manifest \
+            --family addresses --overture-release "$RELEASE" \
+            --producer-commit "$GITHUB_SHA" \
+            --producer-script scripts/prepare_address_verified_resume.py \
+            --producer-version 1 \
+            --region-name "slice-${REGION_A_NAME}-with-${REGION_B_NAME}" \
+            --bbox "$(echo "$UNION" | jq -r '.[0]')" "$(echo "$UNION" | jq -r '.[1]')" \
+                   "$(echo "$UNION" | jq -r '.[2]')" "$(echo "$UNION" | jq -r '.[3]')" \
+            --bbox-scope row_group_approximate \
+            "${ARTIFACT_ARGS[@]}" \
+            --output /tmp/slice/staged/families/addresses/family-manifest.json
+
+      - name: Publish the Address family via the shared finalizer
+        id: publish
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          PUBLISH_START=$SECONDS
+          python scripts/finalize_rebuild.py publish-family \
+            --version "$SLICE_VERSION" --family addresses \
+            --manifest /tmp/slice/staged/families/addresses/family-manifest.json \
+            --artifacts-root /tmp/slice/staged
+          DIGEST=$(jq -r '.manifest_digest' /tmp/slice/staged/families/addresses/family-manifest.json)
+          echo "manifest_digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          jq -n --arg family addresses --arg digest "$DIGEST" \
+            --argjson build "${ADDR_BUILD_SECONDS}" \
+            --argjson publish "$((SECONDS - PUBLISH_START))" \
+            --slurpfile ra "/tmp/slice/region-addresses-${REGION_A_NAME}.json" \
+            --slurpfile rb "/tmp/slice/region-addresses-${REGION_B_NAME}.json" '{
+              family:$family, manifest_digest:$digest,
+              build_seconds:$build, publish_seconds:$publish,
+              regions:[$ra[0],$rb[0]]
+            }' > /tmp/slice/family-addresses.json
+
+      - name: Upload the Address measurement for the scale report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slice-family-addresses-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: /tmp/slice/family-addresses.json
+
+  # --- Verify: independent downloaded-hash remote verification + negative probe -
+  verify:
+    name: Remotely verify the slice via the shared finalizer
+    needs: [places, addresses]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    outputs:
+      verify_seconds: ${{ steps.verify.outputs.verify_seconds }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Download every slice object and build the R2 inventory
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          mkdir -p /tmp/verify/readback
+          # Independent readback: download the ENTIRE slice prefix from R2 so
+          # verify-families-only recomputes the SHA-256 of every published object.
+          aws s3 cp "s3://geocoder-shards/${SLICE_VERSION}/" /tmp/verify/readback/ \
+            --recursive --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${SLICE_VERSION}/" --endpoint-url "$ENDPOINT" --region auto \
+            --query '{Contents: Contents[].{Key: Key, Size: Size, ETag: ETag}}' \
+            --output json > /tmp/verify/inventory.json
+
+      - name: verify-families-only against the slice prefix
+        id: verify
+        run: |
+          set -euo pipefail
+          VERIFY_START=$SECONDS
+          # The same downloaded tree is both metadata (manifests) and readback
+          # (artifacts). Fails closed on any missing/extra/resized/tampered object,
+          # any core release object, or a production-pattern version.
+          python scripts/finalize_rebuild.py verify-families-only \
+            --version "$SLICE_VERSION" --release "$RELEASE" \
+            --inventory /tmp/verify/inventory.json \
+            --metadata-dir /tmp/verify/readback \
+            --readback-dir /tmp/verify/readback \
+            --families addresses,places \
+            --output /tmp/verify/slice-manifest.json
+          echo "verify_seconds=$((SECONDS - VERIFY_START))" >> "$GITHUB_OUTPUT"
+
+      - name: Probe production catalog does NOT reference the slice (after)
+        run: |
+          set -euo pipefail
+          bash scripts/probe_catalog_excludes_slice.sh "$BASE_URL" "$SLICE_VERSION"
+
+      - name: Upload the verified slice manifest
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slice-verify-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            /tmp/verify/slice-manifest.json
+            /tmp/verify/inventory.json
+
+  # --- Scale report: retained evidence artifact --------------------------------
+  scale-report:
+    name: Emit the retained scale report
+    needs: [places, addresses, verify]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      VERIFY_SECONDS: ${{ needs.verify.outputs.verify_seconds }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Download the per-family measurements
+        uses: actions/download-artifact@v5
+        with:
+          pattern: slice-family-*-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/measurements
+          merge-multiple: true
+
+      - name: Build the scale report and step summary
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg version "$SLICE_VERSION" --arg release "$RELEASE" \
+            --argjson verify "${VERIFY_SECONDS}" \
+            --slurpfile places /tmp/measurements/family-places.json \
+            --slurpfile addresses /tmp/measurements/family-addresses.json '{
+              schema:"overture-slice-scale-input-v1",
+              slice_version:$version, release:$release,
+              verify_seconds:$verify,
+              families:[$places[0],$addresses[0]]
+            }' > /tmp/scale-input.json
+          python scripts/slice_scale_report.py \
+            --input /tmp/scale-input.json \
+            --output /tmp/scale-report.json \
+            --markdown /tmp/scale-report.md
+          cat /tmp/scale-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the retained scale report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: slice-scale-report-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            /tmp/scale-input.json
+            /tmp/scale-report.json
+            /tmp/scale-report.md
+
+  # --- Cleanup: delete the slice prefix (evidence retained) --------------------
+  cleanup:
+    name: Delete the slice prefix
+    needs: [places, addresses, verify, scale-report]
+    # Runs on success or failure so a partial run cannot strand objects, but only
+    # when cleanup is requested. cleanup=false documents retention for a
+    # follow-up Worker smoke; the evidence artifacts are retained either way.
+    if: ${{ always() && github.ref == 'refs/heads/main' && inputs.cleanup }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Delete the slice prefix and confirm it is empty
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          # Guard: only a validated slice prefix is ever deletable from here.
+          if ! printf '%s' "$SLICE_VERSION" | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+            echo "::error::refusing to delete non-slice prefix '$SLICE_VERSION'"
+            exit 1
+          fi
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${SLICE_VERSION}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${SLICE_VERSION}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"
+
+      - name: Confirm production catalog still excludes the slice (post-cleanup)
+        run: |
+          set -euo pipefail
+          bash scripts/probe_catalog_excludes_slice.sh "$BASE_URL" "$SLICE_VERSION"

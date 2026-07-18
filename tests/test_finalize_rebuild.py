@@ -1486,3 +1486,152 @@ def test_publish_family_rejects_artifact_traversal_key(tmp_path):
             manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
         )
     assert fake.puts == []
+
+
+# ---------------------------------------------------------------------------
+# Non-promoting family-release slice: slice-version validation, publish-family
+# under a slice version, and verify-families-only.
+# ---------------------------------------------------------------------------
+
+SLICE = "slice-2026-07-18.0"
+
+
+def test_slice_version_key_accepts_slice_and_rejects_production():
+    assert fr._slice_version_key(SLICE) == (2026, 7, 18, 0)
+    # A production-pattern version must be REJECTED as a slice, never accepted:
+    # a slice can never name (or be named by) a real release.
+    with pytest.raises(ValueError, match="production release pattern"):
+        fr._slice_version_key(VERSION)
+
+
+@pytest.mark.parametrize(
+    "bad",
+    ["slice-2026-13-01.0", "slice-2026-07-18", "2026-07-18.0-slice", "slice-", ""],
+)
+def test_slice_version_key_rejects_malformed(bad):
+    with pytest.raises(ValueError):
+        fr._slice_version_key(bad)
+
+
+def test_publishable_version_key_accepts_both_patterns():
+    assert fr._publishable_version_key(VERSION) == fr._version_key(VERSION)
+    assert fr._publishable_version_key(SLICE) == fr._slice_version_key(SLICE)
+    with pytest.raises(ValueError):
+        fr._publishable_version_key("not-a-version")
+
+
+def test_publish_family_accepts_a_slice_version(tmp_path):
+    # The ONE shared publication path must also accept a slice version so a
+    # non-promoting slice publishes through it, not its own code.
+    client, fake = _client_with()
+    root, manifest_path, _manifest, artifacts = _local_family(tmp_path, "places")
+    fr.publish_family(
+        client, version=SLICE, family="places",
+        manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+    )
+    manifest_key = f"{SLICE}/families/places/family-manifest.json"
+    art_keys = sorted(f"{SLICE}/{art['object_key']}" for art in artifacts)
+    assert fake.puts == art_keys + [manifest_key]
+
+
+def _slice_entry(key, size):
+    return {"Key": f"{SLICE}/{key}", "Size": size, "ETag": f'"etag-{key}"'}
+
+
+def _slice_fixture(tmp_path, families=("addresses", "places")):
+    """A families-only slice: manifests in metadata, artifacts in readback."""
+    metadata = tmp_path / "meta"
+    readback = tmp_path / "read"
+    metadata.mkdir()
+    readback.mkdir()
+    contents = []
+    for family in families:
+        data = f"{family}-slice-shard-0000".encode()
+        art_key = f"families/{family}/shards/0000.bin"
+        (readback / art_key).parent.mkdir(parents=True, exist_ok=True)
+        (readback / art_key).write_bytes(data)
+        manifest = _make_family_manifest(
+            family,
+            [{"object_key": art_key, "bytes": len(data),
+              "sha256": hashlib.sha256(data).hexdigest()}],
+        )
+        manifest_key = f"families/{family}/family-manifest.json"
+        manifest_bytes = gbm.canonical_json(manifest)
+        (metadata / manifest_key).parent.mkdir(parents=True, exist_ok=True)
+        (metadata / manifest_key).write_bytes(manifest_bytes)
+        contents.append(_slice_entry(art_key, len(data)))
+        contents.append(_slice_entry(manifest_key, len(manifest_bytes)))
+    inventory = tmp_path / "inv.json"
+    _write_json(inventory, {"Contents": contents})
+    return metadata, readback, inventory
+
+
+def _verify_families_only(metadata, readback, inventory, tmp_path, **kwargs):
+    return fr.verify_families_only(
+        version=kwargs.pop("version", SLICE),
+        release=RELEASE,
+        inventory_path=inventory,
+        metadata_dir=metadata,
+        readback_dir=readback,
+        output_path=tmp_path / "slice-manifest.json",
+        families=kwargs.pop("families", ["addresses", "places"]),
+    )
+
+
+def test_verify_families_only_accepts_a_valid_slice(tmp_path):
+    metadata, readback, inventory = _slice_fixture(tmp_path)
+    produced = _verify_families_only(metadata, readback, inventory, tmp_path)
+    assert produced["is_slice"] is True
+    assert produced["promotion_eligible"] is False
+    assert produced["slice_version"] == SLICE
+    assert set(produced["families"]) == {"addresses", "places"}
+    assert all(
+        info["promotion_eligible"] is False for info in produced["families"].values()
+    )
+    # Every published object is in the verified set (independent downloaded-hash).
+    assert len(produced["verified_version_objects"]) == 4
+
+
+def test_verify_families_only_rejects_a_production_version(tmp_path):
+    metadata, readback, inventory = _slice_fixture(tmp_path)
+    with pytest.raises(ValueError, match="production release pattern"):
+        _verify_families_only(
+            metadata, readback, inventory, tmp_path, version="2026-07-18.0"
+        )
+
+
+def test_verify_families_only_requires_a_family(tmp_path):
+    metadata, readback, inventory = _slice_fixture(tmp_path)
+    with pytest.raises(ValueError, match="at least one family"):
+        _verify_families_only(metadata, readback, inventory, tmp_path, families=[])
+
+
+def test_verify_families_only_rejects_a_core_release_object(tmp_path):
+    # A slice prefix must hold ONLY family objects: a stray core file (e.g. a
+    # router.db) fails the slice-wide exact-set gate.
+    metadata, readback, inventory = _slice_fixture(tmp_path)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_slice_entry("router.db", 6))
+    _write_json(inventory, value)
+    with pytest.raises(ValueError, match="not an exact match") as excinfo:
+        _verify_families_only(metadata, readback, inventory, tmp_path)
+    assert "router.db" in str(excinfo.value)
+
+
+def test_verify_families_only_rejects_unlisted_family_object(tmp_path):
+    metadata, readback, inventory = _slice_fixture(tmp_path)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_slice_entry("families/places/shards/9999.bin", 5))
+    _write_json(inventory, value)
+    with pytest.raises(ValueError, match="inventory mismatch"):
+        _verify_families_only(metadata, readback, inventory, tmp_path)
+
+
+def test_verify_families_only_single_family_leaves_the_other_unexpected(tmp_path):
+    # Allowlisting only one family means the OTHER family's objects are now
+    # unexpected and fail the slice-wide exact-set gate: presence is opt-in.
+    metadata, readback, inventory = _slice_fixture(tmp_path)
+    with pytest.raises(ValueError, match="not an exact match"):
+        _verify_families_only(
+            metadata, readback, inventory, tmp_path, families=["addresses"]
+        )
