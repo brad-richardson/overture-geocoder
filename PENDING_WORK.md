@@ -18,14 +18,21 @@ Places relevance verdict (step 2).
    dispatch without the typed `confirm` input silently skips every job and
    reports success). Validates the #96/#97 finalize fixes over a real v3
    build before the July 25 scheduled rebuild.
-   OUTCOME: **failed at finalize-release** — every build/id job succeeded,
-   then `finalize_rebuild.py` died at import (`scripts/common.py` top-level
-   `import duckdb`, introduced in e0591c2; the finalize-release job
-   intentionally installs no duckdb). The #96/#97 finalize logic is therefore
-   still unvalidated. Fix: PR #104 (lazy duckdb import in `common.py` plus
-   no-duckdb import regression tests; finalize stays dependency-thin) —
-   awaiting review/merge, then re-dispatch the dry-run. Staging survives per
-   #97, so the re-run can resume.
+   OUTCOME: first attempt **failed at finalize-release** — every build/id
+   job succeeded, then `finalize_rebuild.py` died at import
+   (`scripts/common.py` top-level `import duckdb`, introduced in e0591c2;
+   the finalize-release job intentionally installs no duckdb). Fixed by
+   PR #104 (lazy duckdb import + no-duckdb regression tests; finalize stays
+   dependency-thin).
+   RESOLVED 2026-07-18: re-dispatch as `2026-07-18.0` (run 29624600543)
+   **green end-to-end** — build, all id stages, finalize-release,
+   post-finalize, smoke. The #96/#97/#104 finalize path is validated over a
+   real v3 build; the July 25 scheduled rebuild is cleared. Two notes:
+   (a) the workflow fails closed on a version-prefix collision rather than
+   resuming, so the first attempt's `2026-07-17.0/` prefix is orphaned,
+   non-promoted, undiscoverable data in R2 — schedule an R2 cleanup pass;
+   (b) same-version resume via dispatch input is not supported by design.
+   **DONE.**
 2. **Places relevance iteration.** Famous-unique head admission (the last
    relevance STOP seed; design:
    `docs/plans/2026-07-17-famous-unique-head-admission.md`), then the
@@ -90,6 +97,41 @@ Places relevance verdict (step 2).
    non-promoting families in the shared finalizer, then the design doc's
    two-region-per-family slice through the real `releases/{version}/` layout
    with remote verification and a scale report.
+   2026-07-18 status (US-NE regional track; scope + decisions in
+   `docs/plans/2026-07-18-us-ne-regional-deploy-scope.md`, merged #105):
+   - Family manifests DONE (#107): `overture-global-family-manifest-v1`
+     with lineage, format/tokenizer/normalization versions, region bbox +
+     scope mode, artifact hashes, canonical-JSON self-digest; wired to the
+     fan-in candidate, `promotion_eligible: false`.
+   - Object-level publication guard DONE (#108): server-side create-only
+     (If-None-Match) and expected-current CAS (If-Match) PUTs in the
+     finalize path — R2 enforces both; 412 aborts, never retried;
+     idempotent same-content backups; CLI capability check fails fast.
+   - Address bbox-scoped producer DONE (#106): per-row-group bbox stats +
+     bbox-pruned task planning, `bbox_scope: row_group_approximate`
+     (superset semantics), default path byte-identical. Note: address row
+     groups are not spatially clustered, so pruning selectivity is modest.
+   - Production `/address` route DONE and DEPLOYED (#109): structured
+     8-field exact lookup, all-candidates ambiguity (512 bound → 413),
+     out-of-coverage vs not-found split, stable 404
+     `address_family_unavailable` until the family enters the catalog;
+     existing routes proven byte-identical; wasm ~1.34 MB gzip. The
+     explorer-safety contract (undocumented `types=` default excluding
+     `place`; catalog additive discovery) is verified and documented in the
+     scope doc.
+   - Side-index decision CLOSED: Option C (no format change) with a
+     recorded guardrail — no served address shard above ~4M rows (index
+     22.5% of the 4 MiB reader cap at 4M rows); two-level index (Places
+     `lexicon_blocks` pattern) triggers past that or at planet scale.
+   - Region sizing measured (release 2026-06-17.0): US-NE box 4,133,950
+     places (~481 MB, 3-4 shards); CONUS 18,014,140 (~2.1 GB); global
+     75,631,061. All-US address remains 33 tasks / ~131.0M rows.
+   - REMAINING for the slice: optional non-promoting families in the
+     shared finalizer (verify_release exact-set gate or a parallel
+     non-promoting finalize path), the NE Places shard build + NE address
+     rehearsal, and the two-region slice through the real
+     `releases/{version}/` layout with remote verification. Scale-signal
+     pass after NE is green: CONUS Places + all-US address.
 5. **After July 25:** verify the promoted rebuild's lineage/reverse baseline,
    then re-size exact-country work. It does not queue-jump the family work.
 
@@ -345,8 +387,9 @@ These do not block the first routed Places or real-fragment address slice:
 
 1. Places comparator relevance, complete bounded located ranking, regional
    coverage, and measured numeric gate results.
-2. Address Unicode normalization version, 127-task coverage, serving partition
-   size/side index, and publication serialization.
+2. Address Unicode normalization version and 127-task coverage. (Resolved
+   2026-07-18: side index — Option C with the 4M-row shard guardrail;
+   publication serialization — object-level CAS guard merged in #108.)
 3. Additive degraded/partial-result signaling shared by experimental families.
 4. Reverse `wkb` disposition and post-rebuild exact-country priority.
 
@@ -364,5 +407,6 @@ These do not block the first routed Places or real-fragment address slice:
 - `docs/plans/2026-07-17-famous-unique-head-admission.md`
 - `docs/plans/2026-07-17-places-chain-name-records-stage.md`
 - `docs/plans/2026-07-17-places-92-residues.md`
+- `docs/plans/2026-07-18-us-ne-regional-deploy-scope.md`
 - `docs/plans/2026-07-17-address-stratified-sweep.md`
 - `docs/plans/2026-07-12-exact-country-decision-artifact.md`
