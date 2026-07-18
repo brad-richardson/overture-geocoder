@@ -7,6 +7,10 @@ ordering, and a spill-hardened in-memory DuckDB connection. A single copy
 means a fix or hardening (e.g. making the JSON write atomic) lands everywhere
 at once instead of drifting between nine near-identical inline definitions.
 
+``duckdb`` is imported lazily inside ``spill_safe_connect`` so the
+dependency-thin jobs (the finalizer, which only needs ``sha256_file``) can
+import this module without a DuckDB install on the runner.
+
 TODO: scripts/build_shards.py still carries its own hash_file / write_json /
 version_sort_key / spill_safe_connect. Its SHA-256 is pinned by the Monaco
 subset evidence (docs/plans/2026-07-12-monaco-subset-evidence.json), whose
@@ -21,8 +25,10 @@ import json
 import os
 import tempfile
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-import duckdb
+if TYPE_CHECKING:
+    import duckdb
 
 
 def sha256_file(path: Path | str) -> str:
@@ -71,7 +77,13 @@ def spill_safe_connect(memory_limit: str = "10GB") -> "duckdb.DuckDBPyConnection
     aggregation OOMs instead of going out-of-core (the DuckDB 1.5 failure
     mode the download SQL scripts guard against). Cap memory, provide a
     spill directory, and bound parallel pipeline buffers.
+
+    ``duckdb`` is imported here rather than at module load so callers that only
+    need the file/JSON/version helpers (e.g. the finalizer job, which does not
+    install DuckDB) can import this module without the dependency present.
     """
+    import duckdb
+
     con = duckdb.connect()
     con.execute(f"SET memory_limit = '{memory_limit}';")
     spill_dir = Path(tempfile.gettempdir()) / "duckdb_spill.tmp"
