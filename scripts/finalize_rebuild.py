@@ -36,6 +36,16 @@ sys.path.insert(0, str(Path(__file__).parent))
 # alias keeps this script's call sites and monkeypatch surface stable.
 from common import sha256_file as _sha256  # noqa: E402,F401
 
+# Optional experimental-family support (#107 manifests). global_build_manifest is
+# stdlib-only, so importing it keeps the finalize job dependency-thin (no duckdb;
+# see PR #104).
+from global_build_manifest import (  # noqa: E402
+    FAMILIES,
+    canonical_json as _family_canonical_json,
+    validate_family_manifest,
+    verify_family_manifest_against_listing,
+)
+
 
 VERSION_RE = re.compile(r"^\d{4}-\d{2}-\d{2}\.\d+$")
 ID_PREFIX_RE = re.compile(r"^[0-9a-f]{3}$")
@@ -193,6 +203,135 @@ def _require_metadata_file(metadata_dir: Path, name: str) -> dict:
     return _load_json(path)
 
 
+# ---------------------------------------------------------------------------
+# Optional experimental families (addresses, places).
+#
+# Core forward/reverse/id verification stays exact-set and fail-closed. An
+# optional family is *added* to the expected object set only when the operator
+# allowlists it (finalize `verify --families ...`) AND its #107 family manifest
+# is present under the release and valid. The manifest is the create-only,
+# digest-addressed marker published after (never before) its artifacts, so a
+# present-and-valid manifest attests that every artifact it lists exists; verify
+# re-proves that by byte-hashing each artifact from the readback. Family objects
+# live under `{version}/families/{family}/`; the manifest is
+# `family-manifest.json` under that prefix.
+#
+# Deviation from the design doc: the doc sketches `releases/{version}/places/...`
+# and a `releases/` root, but the shipped finalizer uses the flat `{version}/`
+# layout (forward `shards/`, `reverse/`, `id-index/`, `router.db`). Rather than
+# fork the release root, families nest under `{version}/families/{family}/`.
+# ---------------------------------------------------------------------------
+
+FAMILY_PREFIX = "families"
+
+
+def _family_manifest_key(family: str) -> str:
+    return f"{FAMILY_PREFIX}/{family}/family-manifest.json"
+
+
+def _is_safe_family_artifact_key(key: str, *, prefix: str, manifest_key: str) -> bool:
+    """True iff ``key`` is a clean object key strictly under ``prefix``.
+
+    Rejects the manifest key itself, any key outside the family prefix, and any
+    key carrying a traversal or non-canonical path segment (``..``, ``.``, an
+    empty segment, or a leading slash). Without the segment check a key like
+    ``families/{family}/../../catalog.json`` passes a bare ``startswith(prefix)``
+    test yet escapes the family prefix -- both admitting it into the expected set
+    and, worse, making ``readback_dir / key`` resolve OUTSIDE the readback dir so
+    the artifact hash proves nothing about the object stored under that key. This
+    keeps every admitted artifact literally inside ``{version}/families/{family}/``.
+    """
+    if key == manifest_key or not key.startswith(prefix):
+        return False
+    return not any(segment in ("", ".", "..") for segment in key.split("/"))
+
+
+def _verify_optional_family(
+    *,
+    family: str,
+    release: str,
+    inventory: dict[str, dict],
+    metadata_dir: Path,
+    readback_dir: Path,
+) -> tuple[set[str], dict]:
+    """Verify one allowlisted optional family, returning (expected_keys, summary).
+
+    Loads and validates the family manifest (self-digest via #107), then
+    byte-verifies every artifact it lists (present in the R2 inventory, present
+    in the readback, size + SHA-256 match). Enforces a per-family exact-set gate:
+    every non-manifest object under `families/{family}/` must be a manifest
+    artifact, so an extra object squatting the family prefix fails closed here
+    before the release-wide exact-set gate ever sees it. The returned key set is
+    exactly the manifest object plus its artifacts, which the caller unions into
+    the release expected set.
+    """
+    if family not in FAMILIES:
+        raise ValueError(f"unknown optional family {family!r}")
+    prefix = f"{FAMILY_PREFIX}/{family}/"
+    manifest_key = _family_manifest_key(family)
+
+    manifest_entry = inventory.get(manifest_key)
+    manifest_local = metadata_dir / manifest_key
+    if manifest_entry is None or not manifest_local.is_file():
+        raise ValueError(
+            f"optional family {family} manifest is missing from inventory or readback"
+        )
+    if manifest_entry["size_bytes"] != manifest_local.stat().st_size:
+        raise ValueError(f"optional family {family} manifest size mismatch")
+    manifest = validate_family_manifest(_load_json(manifest_local))
+    if manifest["family"] != family:
+        raise ValueError(
+            f"optional family {family} manifest declares family {manifest['family']!r}"
+        )
+    if manifest["lineage"]["overture_release"] != release:
+        raise ValueError(f"optional family {family} manifest release mismatch")
+
+    artifact_keys: set[str] = set()
+    objects: list[dict] = []
+    for artifact in manifest["artifacts"]:
+        key = artifact["object_key"]
+        if not _is_safe_family_artifact_key(key, prefix=prefix, manifest_key=manifest_key):
+            raise ValueError(
+                f"optional family {family} artifact key is outside its prefix: {key}"
+            )
+        entry = inventory.get(key)
+        local = readback_dir / key
+        if entry is None or not local.is_file():
+            raise ValueError(f"optional family {family} artifact missing: {key}")
+        if entry["size_bytes"] != artifact["bytes"]:
+            raise ValueError(f"optional family {family} artifact size mismatch: {key}")
+        if _sha256(local) != artifact["sha256"]:
+            raise ValueError(f"optional family {family} artifact SHA-256 mismatch: {key}")
+        artifact_keys.add(key)
+        objects.append({**entry, "sha256": artifact["sha256"]})
+
+    # Per-family exact-set: nothing may live under the family prefix that the
+    # manifest does not list (the manifest object itself excepted).
+    actual_family_keys = {
+        key for key in inventory if key.startswith(prefix) and key != manifest_key
+    }
+    if actual_family_keys != artifact_keys:
+        extra = sorted(actual_family_keys - artifact_keys)[:20]
+        missing = sorted(artifact_keys - actual_family_keys)[:20]
+        raise ValueError(
+            f"optional family {family} inventory mismatch: missing={missing}, extra={extra}"
+        )
+
+    expected_keys = {manifest_key} | artifact_keys
+    summary = {
+        "manifest": f"./{manifest_key}",
+        "manifest_digest": manifest["manifest_digest"],
+        "region": manifest["region"],
+        "artifact_count": len(objects),
+        "total_bytes": sum(obj["size_bytes"] for obj in objects),
+        "objects": objects,
+        # Optional families are never promotion targets: they add no catalog
+        # link and this record exists only to document the verified fleet.
+        "promotion_eligible": False,
+    }
+    return expected_keys, summary
+
+
 def verify_release(
     *,
     version: str,
@@ -201,6 +340,7 @@ def verify_release(
     metadata_dir: Path,
     readback_dir: Path,
     output_path: Path,
+    optional_families: list[str] | None = None,
 ) -> dict:
     _version_key(version)
     inventory = _inventory_by_relative_key(_load_json(inventory_path), version)
@@ -419,6 +559,27 @@ def verify_release(
     expected_keys |= {f"reverse/{shard_id}.db" for shard_id in _collection_items(reverse, "reverse")}
     expected_keys |= expected_id_keys
     expected_keys |= expected_inventory_keys
+
+    # Optional experimental families become expected exactly when allowlisted and
+    # their manifest is present + valid; each verified family contributes exactly
+    # its manifest object and artifacts. A family object present but NOT allowlisted
+    # stays unexpected and fails the release-wide exact-set gate below. With no
+    # allowlist this loop is skipped and the expected set is byte-identical to a
+    # core-only release.
+    optional_summaries: dict[str, dict] = {}
+    for family in optional_families or []:
+        if family in optional_summaries:
+            raise ValueError(f"duplicate optional family {family!r}")
+        family_expected, summary = _verify_optional_family(
+            family=family,
+            release=release,
+            inventory=inventory,
+            metadata_dir=metadata_dir,
+            readback_dir=readback_dir,
+        )
+        expected_keys |= family_expected
+        optional_summaries[family] = summary
+
     actual_keys = {key for key in inventory if not key.startswith("staging/")}
     if actual_keys != expected_keys:
         missing = sorted(expected_keys - actual_keys)[:20]
@@ -470,6 +631,10 @@ def verify_release(
             if not key.startswith("staging/")
         ],
     }
+    # Record the optional families only when at least one was verified, so a
+    # core-only release (no allowlist) produces a byte-identical manifest.
+    if optional_summaries:
+        manifest["optional_families"] = optional_summaries
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
@@ -833,25 +998,44 @@ class R2Client:
                     )
                 self._sleep(attempt * 10)
 
-    def put_backup(self, name: str, data: bytes) -> None:
-        """Write a durable operator-recovery copy, create-only.
+    def put_immutable(self, key: str, data: bytes) -> None:
+        """Create-only publish that tolerates an identical re-publish.
 
-        A per-version backup is immutable, so a duplicate publisher that already
-        wrote it fails closed rather than overwriting it. But a *re-run* of the
-        same finalize (e.g. an operator re-running a job that already wrote the
-        backups before failing at smoke) legitimately re-writes the identical
-        bytes; that must stay idempotent, not brick the retry. So a create-only
-        412 is only fatal when the existing object differs -- a genuine
-        conflicting publisher; identical content is treated as already durable.
+        The single guarded write for immutable objects (backups, family
+        artifacts, family manifests). A create-only 412 is fatal only when the
+        object that already exists differs -- a genuine conflicting publisher;
+        re-writing the identical bytes (an operator re-running a job that got
+        partway through) stays idempotent rather than bricking the retry.
         """
-        key = f"{BACKUP_PREFIX}/{name}"
         try:
             self.publish_create_only(key, data)
         except PreconditionFailed:
             existing = self._get_object(key)
             if existing != data:
                 raise
-            # Same version, same bytes: the durable copy already exists.
+            # Same key, same bytes: the immutable object already exists.
+
+    def put_backup(self, name: str, data: bytes) -> None:
+        """Write a durable operator-recovery copy, create-only (idempotent)."""
+        self.put_immutable(f"{BACKUP_PREFIX}/{name}", data)
+
+    def get_object(self, key: str) -> bytes:
+        """Download an object's bytes (public wrapper for family re-verification)."""
+        return self._get_object(key)
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        """Return every object key under ``prefix`` (empty list when none)."""
+        result = self._aws(
+            "s3api", "list-objects-v2", "--bucket", self.bucket,
+            "--prefix", prefix, "--query", "Contents[].Key", "--output", "json",
+            capture=True,
+        )
+        keys = json.loads(result.stdout or "null")
+        if keys is None:
+            return []
+        if not isinstance(keys, list) or any(not isinstance(key, str) for key in keys):
+            raise PromotionError(f"unexpected list-objects-v2 response for {prefix}")
+        return keys
 
     def get_backup(self, name: str) -> bytes:
         key = f"s3://{self.bucket}/{BACKUP_PREFIX}/{name}"
@@ -1079,6 +1263,99 @@ def recover(
     raise RecoveryError("Catalog restored in R2 but cached production did not recover")
 
 
+def publish_family(
+    client,
+    *,
+    version: str,
+    family: str,
+    manifest_path: Path,
+    artifacts_root: Path,
+    log=print,
+) -> dict:
+    """Publish one non-promoting optional family under ``{version}/families/{family}/``.
+
+    Ordering mirrors id_index_protocol's "data before marker": every artifact is
+    published create-only first, then the family manifest is published LAST so a
+    present manifest always attests already-present artifacts (a crash mid-publish
+    never leaves a manifest without its data). Publication is non-promoting: no
+    catalog object is read or written. Steps:
+
+    1. Validate the #107 manifest and verify it locally against ``artifacts_root``
+       (every artifact present, size + SHA-256 match, keys inside the family
+       prefix, no extra local file under the prefix).
+    2. Publish each artifact create-only (idempotent on an identical re-run).
+    3. Publish the manifest last, create-only.
+    4. Re-verify remotely: list the family prefix, download every non-manifest
+       object, and check the fleet against the manifest via #107's
+       ``verify_family_manifest_against_listing`` (catches a missing, extra,
+       resized, or tampered remote object).
+    """
+    if family not in FAMILIES:
+        raise ValueError(f"unknown optional family {family!r}")
+    _version_key(version)
+    manifest = validate_family_manifest(_load_json(manifest_path))
+    if manifest["family"] != family:
+        raise ValueError(
+            f"manifest declares family {manifest['family']!r}, not {family!r}"
+        )
+
+    prefix = f"{FAMILY_PREFIX}/{family}/"
+    manifest_key = _family_manifest_key(family)
+    artifacts = manifest["artifacts"]
+
+    # 1. Local verification (before any publish).
+    local_by_key: dict[str, bytes] = {}
+    for artifact in artifacts:
+        key = artifact["object_key"]
+        if not _is_safe_family_artifact_key(key, prefix=prefix, manifest_key=manifest_key):
+            raise ValueError(f"artifact key is outside the family prefix: {key}")
+        local = artifacts_root / key
+        if not local.is_file():
+            raise ValueError(f"artifact missing from local build: {key}")
+        data = local.read_bytes()
+        if len(data) != artifact["bytes"]:
+            raise ValueError(f"artifact size mismatch for {key}")
+        if hashlib.sha256(data).hexdigest() != artifact["sha256"]:
+            raise ValueError(f"artifact SHA-256 mismatch for {key}")
+        local_by_key[key] = data
+
+    # No stray local artifact under the family prefix (the manifest excepted).
+    prefix_root = artifacts_root / prefix
+    if prefix_root.is_dir():
+        for path in prefix_root.rglob("*"):
+            if not path.is_file():
+                continue
+            key = path.relative_to(artifacts_root).as_posix()
+            if key != manifest_key and key not in local_by_key:
+                raise ValueError(f"unexpected local artifact under family prefix: {key}")
+
+    manifest_bytes = _family_canonical_json(manifest)
+
+    # 2. Publish artifacts create-only (data before marker), deterministic order.
+    for key in sorted(local_by_key):
+        log(f"Publishing family artifact {version}/{key}")
+        client.put_immutable(f"{version}/{key}", local_by_key[key])
+
+    # 3. Publish the manifest LAST.
+    log(f"Publishing family manifest {version}/{manifest_key}")
+    client.put_immutable(f"{version}/{manifest_key}", manifest_bytes)
+
+    # 4. Remote re-verification via a downloaded-hash listing.
+    listing: dict[str, tuple[int, str]] = {}
+    for full_key in client.list_prefix(f"{version}/{prefix}"):
+        relative = full_key[len(f"{version}/"):]
+        if relative == manifest_key:
+            continue
+        data = client.get_object(full_key)
+        listing[relative] = (len(data), hashlib.sha256(data).hexdigest())
+    verify_family_manifest_against_listing(manifest, listing)
+    log(
+        f"Published and remotely verified family {family}: "
+        f"{len(artifacts)} artifacts under {version}/{prefix}"
+    )
+    return manifest
+
+
 def _build_client_from_env(args) -> R2Client:
     account = os.environ.get("CLOUDFLARE_ACCOUNT_ID", "")
     endpoint = (
@@ -1121,6 +1398,24 @@ def main() -> None:
     verify.add_argument("--metadata-dir", type=Path, required=True)
     verify.add_argument("--readback-dir", type=Path, required=True)
     verify.add_argument("--output", type=Path, required=True)
+    # Allowlist of optional experimental families to admit into the exact-set
+    # gate (e.g. --families addresses,places). Omitted -> core-only, byte-
+    # identical to today. A listed family whose manifest is absent fails closed;
+    # a family object present but NOT listed stays unexpected and fails.
+    verify.add_argument(
+        "--families",
+        default="",
+        help="comma-separated optional families to verify (addresses,places)",
+    )
+
+    publish_family_p = subparsers.add_parser("publish-family")
+    publish_family_p.add_argument("--version", required=True)
+    publish_family_p.add_argument("--family", choices=sorted(FAMILIES), required=True)
+    publish_family_p.add_argument("--manifest", type=Path, required=True)
+    publish_family_p.add_argument("--artifacts-root", type=Path, required=True)
+    publish_family_p.add_argument("--base-url", default=None)
+    publish_family_p.add_argument("--endpoint", default=None)
+    publish_family_p.add_argument("--bucket", default=None)
 
     catalog = subparsers.add_parser("catalog")
     catalog.add_argument("--before", type=Path, required=True)
@@ -1163,7 +1458,24 @@ def main() -> None:
             print(f"::error::{exc}", file=sys.stderr)
             sys.exit(1)
         return
+    if args.command == "publish-family":
+        client = _build_client_from_env(args)
+        try:
+            publish_family(
+                client,
+                version=args.version,
+                family=args.family,
+                manifest_path=args.manifest,
+                artifacts_root=args.artifacts_root,
+            )
+        except (PromotionError, ValueError) as exc:
+            print(f"::error::{exc}", file=sys.stderr)
+            sys.exit(1)
+        return
     if args.command == "verify":
+        optional_families = [
+            name.strip() for name in args.families.split(",") if name.strip()
+        ]
         manifest = verify_release(
             version=args.version,
             release=args.release,
@@ -1171,12 +1483,18 @@ def main() -> None:
             metadata_dir=args.metadata_dir,
             readback_dir=args.readback_dir,
             output_path=args.output,
+            optional_families=optional_families,
+        )
+        optional = manifest.get("optional_families", {})
+        summary = ", ".join(
+            f"{name}={info['artifact_count']}" for name, info in sorted(optional.items())
         )
         print(
             "Verified complete release: "
             f"forward={manifest['families']['forward']['shard_count']}, "
             f"reverse={manifest['families']['reverse']['shard_count']}, "
             f"id={manifest['families']['id']['shard_count']}"
+            + (f", optional families: {summary}" if summary else "")
         )
     else:
         build_catalog(before_path=args.before, version=args.version, output_path=args.output)

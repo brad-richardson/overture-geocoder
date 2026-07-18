@@ -9,6 +9,7 @@ import pytest
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
 import finalize_rebuild as fr
+import global_build_manifest as gbm
 import prune_catalog as pc
 
 
@@ -830,6 +831,17 @@ class FakeAws:
             payload = self.corrupt_readback if self.corrupt_readback is not None else self.store[key]
             Path(dest).write_bytes(payload)
             return subprocess.CompletedProcess(args, 0, "", "")
+        if args[:2] == ["s3api", "list-objects-v2"]:
+            opts = {args[i]: args[i + 1] for i in range(len(args) - 1)}
+            prefix = opts.get("--prefix", "")
+            keys = sorted(key for key in self.store if key.startswith(prefix))
+            query = opts.get("--query")
+            if query == "KeyCount":
+                return subprocess.CompletedProcess(args, 0, str(len(keys)), "")
+            if query == "Contents[].Key":
+                # Real aws prints `null` (not `[]`) when there are no matches.
+                return subprocess.CompletedProcess(args, 0, json.dumps(keys or None), "")
+            raise AssertionError(f"unexpected list-objects-v2 query: {query}")
         raise AssertionError(f"unexpected aws call: {args}")
 
 
@@ -1086,3 +1098,391 @@ def test_is_referenced_uses_exact_match_and_detects_orphans():
     # exact link-target comparison fixes versus the old `grep -q`).
     assert pc.is_referenced(catalog, "2026-07-14") is False
     assert pc.is_referenced(catalog, "07-14.0") is False
+
+
+# ---------------------------------------------------------------------------
+# Optional experimental families in verify_release (addresses / places).
+# ---------------------------------------------------------------------------
+
+NE_BBOX = [-80.5, 38.0, -66.9, 47.5]
+
+
+def _family_versions(family):
+    if family == "addresses":
+        return {
+            "format": gbm.ADDRESS_FORMAT_VERSION,
+            "tokenizer": None,
+            "normalization": gbm.ADDRESS_NORMALIZATION_VERSION,
+        }, "scripts/experiment_address_reduce.py", "row_group_approximate"
+    return {
+        "format": gbm.PLACES_FORMAT_VERSION,
+        "tokenizer": gbm.PLACES_TOKENIZER_VERSION,
+        "normalization": None,
+    }, "scripts/experiment_places_compact_shard.py", "exact"
+
+
+def _make_family_manifest(family, artifacts, *, release=RELEASE):
+    versions, producer_script, scope = _family_versions(family)
+    return gbm.build_family_manifest(
+        family,
+        lineage={
+            "overture_release": release,
+            "build_id": "a" * 64,
+            "producer_commit": "abc123",
+            "producer_script": producer_script,
+            "producer_version": "1",
+        },
+        versions=versions,
+        region={"name": "US-Northeast", "bbox": list(NE_BBOX), "bbox_scope": scope},
+        artifacts=artifacts,
+    )
+
+
+def _add_family(tmp_path, metadata, readback, inventory, family="addresses",
+                artifact_bytes=b"family-artifact-shard-0000"):
+    """Attach a valid optional family (one artifact + manifest) to the fixture."""
+    art_key = f"families/{family}/shards/0000.pidx"
+    art_local = readback / art_key
+    art_local.parent.mkdir(parents=True, exist_ok=True)
+    art_local.write_bytes(artifact_bytes)
+    art_sha = hashlib.sha256(artifact_bytes).hexdigest()
+
+    manifest = _make_family_manifest(
+        family,
+        [{"object_key": art_key, "bytes": len(artifact_bytes), "sha256": art_sha}],
+    )
+    manifest_bytes = gbm.canonical_json(manifest)
+    manifest_key = f"families/{family}/family-manifest.json"
+    manifest_local = metadata / manifest_key
+    manifest_local.parent.mkdir(parents=True, exist_ok=True)
+    manifest_local.write_bytes(manifest_bytes)
+
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry(art_key, len(artifact_bytes)))
+    value["Contents"].append(_entry(manifest_key, len(manifest_bytes)))
+    _write_json(inventory, value)
+    return manifest, art_key, manifest_key
+
+
+def _verify(metadata, readback, inventory, tmp_path, name="manifest.json", **kwargs):
+    return fr.verify_release(
+        version=VERSION,
+        release=RELEASE,
+        inventory_path=inventory,
+        metadata_dir=metadata,
+        readback_dir=readback,
+        output_path=tmp_path / name,
+        **kwargs,
+    )
+
+
+def test_verify_release_zero_families_is_byte_identical(tmp_path):
+    # A release with no family manifests must behave exactly as today: no
+    # `optional_families` key and, modulo the generated_at timestamp, an
+    # identical manifest whether the allowlist is omitted or explicitly empty.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    baseline = _verify(metadata, readback, inventory, tmp_path, "a.json")
+    empty = _verify(
+        metadata, readback, inventory, tmp_path, "b.json", optional_families=[]
+    )
+    for produced in (baseline, empty):
+        assert "optional_families" not in produced
+    baseline.pop("generated_at")
+    empty.pop("generated_at")
+    assert baseline == empty
+    assert len(empty["verified_version_objects"]) == 4109
+
+
+def test_verify_release_accepts_valid_optional_family(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    manifest, art_key, manifest_key = _add_family(tmp_path, metadata, readback, inventory)
+
+    produced = _verify(
+        metadata, readback, inventory, tmp_path, optional_families=["addresses"]
+    )
+
+    info = produced["optional_families"]["addresses"]
+    assert info["promotion_eligible"] is False
+    assert info["artifact_count"] == 1
+    assert info["manifest_digest"] == manifest["manifest_digest"]
+    assert info["region"]["name"] == "US-Northeast"
+    # The verified object set now spans the two family objects too.
+    hrefs = {obj["href"] for obj in produced["verified_version_objects"]}
+    assert f"./{art_key}" in hrefs
+    assert f"./{manifest_key}" in hrefs
+
+
+def test_verify_release_family_object_without_allowlist_still_fails(tmp_path):
+    # An unexpected object outside any allowlisted manifest fails the exact-set
+    # gate: family presence is opt-in, never blessed wholesale.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _add_family(tmp_path, metadata, readback, inventory)
+
+    with pytest.raises(ValueError, match="not an exact match") as excinfo:
+        _verify(metadata, readback, inventory, tmp_path)
+    assert "families/addresses" in str(excinfo.value)
+
+
+def test_verify_release_allowlisted_family_missing_manifest_fails(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    with pytest.raises(ValueError, match="manifest is missing"):
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+
+
+def test_verify_release_family_missing_artifact_fails(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _add_family(tmp_path, metadata, readback, inventory)
+    value = json.loads(inventory.read_text())
+    value["Contents"] = [
+        item for item in value["Contents"]
+        if not item["Key"].endswith("/families/addresses/shards/0000.pidx")
+    ]
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="artifact missing"):
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+
+
+def test_verify_release_family_artifact_hash_mismatch_fails(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _add_family(tmp_path, metadata, readback, inventory)
+    # Overwrite the readback artifact with different bytes of the SAME length so
+    # the size gate passes and the SHA-256 gate is what fails closed.
+    art = readback / "families/addresses/shards/0000.pidx"
+    art.write_bytes(b"X" * len(art.read_bytes()))
+
+    with pytest.raises(ValueError, match="SHA-256 mismatch"):
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+
+
+def test_verify_release_family_extra_object_fails(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _add_family(tmp_path, metadata, readback, inventory)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry("families/addresses/shards/0001.pidx", 5))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="inventory mismatch") as excinfo:
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+    assert "0001.pidx" in str(excinfo.value)
+
+
+def test_verify_release_rejects_tampered_family_manifest(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    manifest, _art_key, manifest_key = _add_family(tmp_path, metadata, readback, inventory)
+    # Mutate a manifest field while keeping its recorded manifest_digest: the
+    # self-digest recomputation fails closed. Update the inventory size so the
+    # size gate passes and validation is what rejects it.
+    tampered = {**manifest, "totals": {"artifacts": 1, "bytes": 999}}
+    tampered_bytes = gbm.canonical_json(tampered)
+    (metadata / manifest_key).write_bytes(tampered_bytes)
+    value = json.loads(inventory.read_text())
+    for item in value["Contents"]:
+        if item["Key"].endswith("/family-manifest.json"):
+            item["Size"] = len(tampered_bytes)
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="deterministic contents"):
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+
+
+@pytest.mark.parametrize(
+    "evil_key",
+    [
+        "families/addresses/../../catalog.json",
+        "families/addresses/../reverse/steal.db",
+        "families/addresses/sub/../../shards/0000.db",
+    ],
+)
+def test_verify_release_rejects_family_artifact_traversal_key(tmp_path, evil_key):
+    # A manifest artifact key that startswith the family prefix but escapes it via
+    # a `..` segment must be REJECTED, never admitted to the expected set: it would
+    # otherwise both whitelist an out-of-prefix key and make `readback_dir / key`
+    # resolve outside the readback dir, so the hash proves nothing about the object
+    # stored under that key. Even with a matching readback file placed at the
+    # traversal target, the key-shape gate fails closed.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    data = b"traversal-artifact-payload"
+    sha = hashlib.sha256(data).hexdigest()
+    manifest = _make_family_manifest(
+        "addresses", [{"object_key": evil_key, "bytes": len(data), "sha256": sha}]
+    )
+    manifest_bytes = gbm.canonical_json(manifest)
+    manifest_key = "families/addresses/family-manifest.json"
+    (metadata / manifest_key).parent.mkdir(parents=True, exist_ok=True)
+    (metadata / manifest_key).write_bytes(manifest_bytes)
+    # Place a readback file AT the traversal target so only the key-shape gate can
+    # stop the artifact from verifying against unrelated bytes.
+    target = readback / evil_key
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry(evil_key, len(data)))
+    value["Contents"].append(_entry(manifest_key, len(manifest_bytes)))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="outside its prefix"):
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+
+
+def test_verify_release_two_families_do_not_touch_core_promotion_shape(tmp_path):
+    # Both experimental families verified: the core forward/reverse/id families
+    # and the promotable object shape are unchanged; the optional records are a
+    # separate, non-promoting section.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _add_family(tmp_path, metadata, readback, inventory, family="addresses")
+    _add_family(tmp_path, metadata, readback, inventory, family="places")
+
+    produced = _verify(
+        metadata, readback, inventory, tmp_path,
+        optional_families=["addresses", "places"],
+    )
+    assert set(produced["families"]) == {"forward", "reverse", "id"}
+    assert set(produced["optional_families"]) == {"addresses", "places"}
+    assert all(
+        info["promotion_eligible"] is False
+        for info in produced["optional_families"].values()
+    )
+
+
+# ---------------------------------------------------------------------------
+# publish-family: publish artifacts create-only, manifest last, remote re-verify.
+# ---------------------------------------------------------------------------
+
+
+def _local_family(tmp_path, family="addresses", count=2):
+    root = tmp_path / "build"
+    artifacts = []
+    for index in range(count):
+        data = f"artifact-{family}-{index}".encode()
+        key = f"families/{family}/shards/{index:04d}.pidx"
+        path = root / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data)
+        artifacts.append(
+            {"object_key": key, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+        )
+    manifest = _make_family_manifest(family, artifacts)
+    manifest_path = root / f"families/{family}/family-manifest.json"
+    manifest_path.write_bytes(gbm.canonical_json(manifest))
+    return root, manifest_path, manifest, artifacts
+
+
+def _publish_family(client, tmp_path, family="addresses", count=2, root_override=None,
+                    manifest_override=None):
+    root, manifest_path, manifest, artifacts = _local_family(tmp_path, family, count)
+    fr.publish_family(
+        client,
+        version=VERSION,
+        family=family,
+        manifest_path=manifest_override or manifest_path,
+        artifacts_root=root_override or root,
+        log=lambda *_a, **_k: None,
+    )
+    return root, manifest, artifacts
+
+
+def test_publish_family_publishes_artifacts_before_manifest(tmp_path):
+    client, fake = _client_with()
+    _root, _manifest, artifacts = _publish_family(client, tmp_path)
+
+    manifest_key = f"{VERSION}/families/addresses/family-manifest.json"
+    art_keys = sorted(f"{VERSION}/{art['object_key']}" for art in artifacts)
+    # Data before marker: every artifact key, then the manifest key last.
+    assert fake.puts == art_keys + [manifest_key]
+    assert manifest_key in fake.store
+
+
+def test_publish_family_identical_rerun_is_idempotent(tmp_path):
+    root, manifest_path, manifest, artifacts = _local_family(tmp_path)
+    store = {
+        f"{VERSION}/{art['object_key']}": (root / art["object_key"]).read_bytes()
+        for art in artifacts
+    }
+    store[f"{VERSION}/families/addresses/family-manifest.json"] = gbm.canonical_json(manifest)
+    client, fake = _client_with(store)
+
+    fr.publish_family(
+        client, version=VERSION, family="addresses",
+        manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+    )
+    assert fake.puts == []  # every create-only was a no-op on identical bytes
+
+
+def test_publish_family_conflicting_artifact_is_hard_error(tmp_path):
+    root, manifest_path, _manifest, artifacts = _local_family(tmp_path)
+    clashing_key = f"{VERSION}/{artifacts[0]['object_key']}"
+    client, fake = _client_with({clashing_key: b"someone-elses-bytes"})
+
+    with pytest.raises(fr.PreconditionFailed):
+        fr.publish_family(
+            client, version=VERSION, family="addresses",
+            manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+        )
+    assert fake.store[clashing_key] == b"someone-elses-bytes"  # never overwritten
+
+
+def test_publish_family_local_mismatch_aborts_before_any_publish(tmp_path):
+    root, manifest_path, _manifest, artifacts = _local_family(tmp_path)
+    # Corrupt a local artifact so its hash no longer matches the manifest.
+    (root / artifacts[0]["object_key"]).write_bytes(b"tampered-local-bytes")
+    client, fake = _client_with()
+
+    with pytest.raises(ValueError, match="mismatch"):
+        fr.publish_family(
+            client, version=VERSION, family="addresses",
+            manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+        )
+    assert fake.puts == []  # local verification precedes every publish
+
+
+def test_publish_family_remote_reverify_detects_extra_object(tmp_path):
+    root, manifest_path, _manifest, _artifacts = _local_family(tmp_path)
+    # A stray object already squats the family prefix remotely; it is not local,
+    # so local verify passes but the downloaded-hash remote re-verify catches it.
+    stray_key = f"{VERSION}/families/addresses/shards/9999.pidx"
+    client, fake = _client_with({stray_key: b"stray"})
+
+    with pytest.raises(ValueError, match="unexpected objects"):
+        fr.publish_family(
+            client, version=VERSION, family="addresses",
+            manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+        )
+
+
+def test_publish_family_rejects_manifest_family_mismatch(tmp_path):
+    root, _manifest_path, _manifest, _artifacts = _local_family(tmp_path, family="addresses")
+    manifest_path = root / "families/addresses/family-manifest.json"
+    client, fake = _client_with()
+
+    with pytest.raises(ValueError, match="manifest declares family"):
+        fr.publish_family(
+            client, version=VERSION, family="places",
+            manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+        )
+    assert fake.puts == []
+
+
+def test_publish_family_rejects_artifact_traversal_key(tmp_path):
+    # A manifest listing a `..`-escaping artifact key must abort before any
+    # publish, never writing bytes to a traversed local path or an out-of-prefix
+    # key.
+    root = tmp_path / "build"
+    evil_key = "families/addresses/../../catalog.json"
+    data = b"payload"
+    (root / "families/addresses").mkdir(parents=True, exist_ok=True)
+    manifest = _make_family_manifest(
+        "addresses",
+        [{"object_key": evil_key, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}],
+    )
+    manifest_path = root / "families/addresses/family-manifest.json"
+    manifest_path.write_bytes(gbm.canonical_json(manifest))
+    client, fake = _client_with()
+
+    with pytest.raises(ValueError, match="outside the family prefix"):
+        fr.publish_family(
+            client, version=VERSION, family="addresses",
+            manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+        )
+    assert fake.puts == []
