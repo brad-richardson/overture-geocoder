@@ -17,6 +17,7 @@ restore the retained catalog if production smoke checks fail.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -535,6 +536,16 @@ class PromotionError(RuntimeError):
     """A promotion guard failed; the workflow step must exit non-zero."""
 
 
+class PreconditionFailed(PromotionError):
+    """A conditional PUT was rejected by R2 with HTTP 412.
+
+    Raised for both a create-only conflict (the immutable key already exists)
+    and a compare-and-swap miss (the object changed under us). It is a hard
+    error that is *never* retried: a lost create-only race or a lost CAS means
+    another publisher won, and overwriting its object would be last-write-wins.
+    """
+
+
 class RecoveryError(RuntimeError):
     """Crash-window recovery could not safely reconcile the catalog."""
 
@@ -622,6 +633,44 @@ def _health_production(base_url: str, version: str, cache_buster: str) -> bool:
         return False
 
 
+def _content_etag(data: bytes) -> str:
+    """The ETag R2 assigns a single-part PutObject: the quoted hex MD5.
+
+    The root catalog and the operator-recovery backups are tiny JSON objects
+    always written whole (single-part), so their stored ETag equals this digest.
+    That lets a caller derive the expected-current precondition for a
+    compare-and-swap from the *exact bytes it already validated*, instead of
+    issuing a second, racy read to learn the live ETag.
+    """
+    return '"' + hashlib.md5(data, usedforsecurity=False).hexdigest() + '"'
+
+
+def _is_precondition_failed(exc: subprocess.CalledProcessError) -> bool:
+    """True when an aws failure is R2's 412 precondition rejection.
+
+    The aws CLI surfaces R2's ``412 PreconditionFailed`` as a client error whose
+    message names ``PreconditionFailed``; match that (or a bare 412) so a lost
+    conditional write is distinguished from a transient/network failure.
+    """
+    blob = f"{exc.stdout or ''}{exc.stderr or ''}"
+    return "PreconditionFailed" in blob or "412" in blob
+
+
+def _is_unsupported_conditional_option(exc: subprocess.CalledProcessError) -> bool:
+    """True when aws rejected ``--if-match``/``--if-none-match`` as unknown.
+
+    An aws CLI too old to expose the PutObject conditional-write options rejects
+    them at argument-parse time (``Unknown options: --if-match, ...``) rather
+    than reaching R2. Detecting that lets the guard fail fast with an actionable
+    "upgrade the CLI" message instead of retrying a request that can never
+    succeed and reporting a misleading transient-publish failure.
+    """
+    blob = f"{exc.stdout or ''}{exc.stderr or ''}"
+    lowered = blob.lower()
+    names = ("--if-match" in blob) or ("--if-none-match" in blob)
+    return names and ("unknown option" in lowered or "unrecognized argument" in lowered)
+
+
 class R2Client:
     """Production client: shells out to the aws CLI and to
     ``scripts/r2_catalog_fetch.sh`` (whose two-consecutive-404 rule keeps an
@@ -664,38 +713,145 @@ class R2Client:
                 return None  # genuinely absent (first deploy)
             return dest.read_bytes()
 
-    def publish_catalog(self, data: bytes) -> None:
+    def _put_object(
+        self,
+        key: str,
+        data: bytes,
+        *,
+        if_match: str | None = None,
+        if_none_match: str | None = None,
+    ) -> None:
+        """PutObject via ``aws s3api`` so a conditional header can be attached.
+
+        ``aws s3 cp`` cannot express preconditions, so the guarded writes use
+        ``put-object`` directly. R2 evaluates ``If-None-Match``/``If-Match``
+        server-side and rejects a miss with 412, which surfaces here as
+        ``PreconditionFailed``; any other failure propagates as the raw
+        ``CalledProcessError`` so callers can tell a lost race from a transient
+        fault.
+        """
         with tempfile.TemporaryDirectory() as work:
-            src = Path(work) / "catalog.json"
-            src.write_bytes(data)
-            dest = f"s3://{self.bucket}/{CATALOG_KEY}"
-            for attempt in range(1, self.publish_attempts + 1):
-                try:
-                    self._aws(
-                        "s3", "cp", str(src), dest,
-                        "--content-type", "application/json", "--only-show-errors",
+            body = Path(work) / "body"
+            body.write_bytes(data)
+            args = [
+                "s3api", "put-object",
+                "--bucket", self.bucket, "--key", key,
+                "--body", str(body),
+                "--content-type", "application/json",
+                "--no-cli-pager",
+            ]
+            if if_none_match is not None:
+                args += ["--if-none-match", if_none_match]
+            if if_match is not None:
+                args += ["--if-match", if_match]
+            try:
+                self._aws(*args, capture=True)
+            except subprocess.CalledProcessError as exc:
+                if _is_precondition_failed(exc):
+                    raise PreconditionFailed(
+                        f"conditional PUT of {key} rejected by R2 (412 precondition failed)"
+                    ) from exc
+                if _is_unsupported_conditional_option(exc):
+                    # A pre-2.15-ish aws CLI has no --if-match/--if-none-match, so
+                    # the guarded write silently degrades to unguarded. Refuse
+                    # rather than retry a request that can never parse.
+                    raise PromotionError(
+                        "aws CLI does not support PutObject conditional writes "
+                        "(--if-match/--if-none-match); upgrade the CLI on the runner "
+                        "before publishing the production catalog"
+                    ) from exc
+                raise
+
+    def _get_object(self, key: str) -> bytes:
+        with tempfile.TemporaryDirectory() as work:
+            dest = Path(work) / "obj"
+            self._aws(
+                "s3", "cp", f"s3://{self.bucket}/{key}", str(dest), "--only-show-errors"
+            )
+            return dest.read_bytes()
+
+    def _verify_readback(self, key: str, data: bytes) -> None:
+        """Read the object back and hard-fail if its digest is not ``data``.
+
+        R2 enforces the precondition, but only an end-to-end readback proves the
+        bytes it committed are the bytes we intended; a mismatch is never
+        retried, it is a fatal integrity failure.
+        """
+        stored = self._get_object(key)
+        if hashlib.sha256(stored).digest() != hashlib.sha256(data).digest():
+            raise PromotionError(
+                f"read-back digest mismatch for {key}: R2 stored unexpected bytes"
+            )
+
+    def publish_create_only(self, key: str, data: bytes) -> None:
+        """Server-side create-only PUT (``If-None-Match: "*"``).
+
+        R2 writes ``key`` only if it does not already exist. A concurrent
+        duplicate publisher that already wrote it is rejected with 412, surfaced
+        as a hard :class:`PreconditionFailed`; the existing immutable object is
+        never overwritten. The write is then read back and SHA-256-verified.
+        """
+        self._put_object(key, data, if_none_match="*")
+        self._verify_readback(key, data)
+
+    def swap_expected_current(self, key: str, data: bytes, expected_etag: str) -> None:
+        """Compare-and-swap PUT (``If-Match: expected_etag``).
+
+        R2 replaces ``key`` only if its current ETag still equals
+        ``expected_etag`` (derived by the caller from the exact bytes it
+        validated). A 412 means another publisher changed the object first; it
+        aborts immediately with :class:`PreconditionFailed` and never retries --
+        a lost CAS must never degrade to last-write-wins. The write is then read
+        back and SHA-256-verified.
+        """
+        self._put_object(key, data, if_match=expected_etag)
+        self._verify_readback(key, data)
+
+    def publish_catalog(self, data: bytes, *, expected_etag: str | None = None) -> None:
+        """Publish the root catalog under an object-level precondition.
+
+        With ``expected_etag`` this is a compare-and-swap (``If-Match``) so a
+        catalog another publisher swapped in between our read and write is not
+        clobbered; without it -- only a hypothetical first-ever publish, no live
+        catalog exists -- it is create-only. A 412 (:class:`PreconditionFailed`)
+        and a readback digest mismatch are both fatal and never retried; only a
+        transient aws/network failure is retried.
+        """
+        for attempt in range(1, self.publish_attempts + 1):
+            try:
+                if expected_etag is None:
+                    self.publish_create_only(CATALOG_KEY, data)
+                else:
+                    self.swap_expected_current(CATALOG_KEY, data, expected_etag)
+                return
+            except subprocess.CalledProcessError:
+                # A 412 is raised as PreconditionFailed (not CalledProcessError)
+                # and propagates without retry; this branch is only transient.
+                if attempt >= self.publish_attempts:
+                    raise PromotionError(
+                        f"Failed to publish catalog after {self.publish_attempts} attempts"
                     )
-                    return
-                except subprocess.CalledProcessError:
-                    if attempt >= self.publish_attempts:
-                        raise PromotionError(
-                            f"Failed to publish catalog after {self.publish_attempts} attempts"
-                        )
-                    self._sleep(attempt * 10)
+                self._sleep(attempt * 10)
 
     def put_backup(self, name: str, data: bytes) -> None:
-        key = f"s3://{self.bucket}/{BACKUP_PREFIX}/{name}"
-        with tempfile.TemporaryDirectory() as work:
-            src = Path(work) / "src.json"
-            src.write_bytes(data)
-            self._aws(
-                "s3", "cp", str(src), key,
-                "--content-type", "application/json", "--only-show-errors",
-            )
-            readback = Path(work) / "readback.json"
-            self._aws("s3", "cp", key, str(readback), "--only-show-errors")
-            if readback.read_bytes() != data:
-                raise PromotionError(f"durable backup readback mismatch for {name}")
+        """Write a durable operator-recovery copy, create-only.
+
+        A per-version backup is immutable, so a duplicate publisher that already
+        wrote it fails closed rather than overwriting it. But a *re-run* of the
+        same finalize (e.g. an operator re-running a job that already wrote the
+        backups before failing at smoke) legitimately re-writes the identical
+        bytes; that must stay idempotent, not brick the retry. So a create-only
+        412 is only fatal when the existing object differs -- a genuine
+        conflicting publisher; identical content is treated as already durable.
+        """
+        key = f"{BACKUP_PREFIX}/{name}"
+        try:
+            self.publish_create_only(key, data)
+        except PreconditionFailed:
+            existing = self._get_object(key)
+            if existing != data:
+                raise
+            # Same version, same bytes: the durable copy already exists.
 
     def get_backup(self, name: str) -> bytes:
         key = f"s3://{self.bucket}/{BACKUP_PREFIX}/{name}"
@@ -803,7 +959,11 @@ def promote(
             raise PromotionError(
                 "Live catalog no longer equals this candidate; refusing rollback clobber"
             )
-        client.publish_catalog(before_bytes)
+        # Compare-and-swap the previous catalog back only if the candidate we
+        # just confirmed live is still current (If-Match on its content ETag).
+        client.publish_catalog(
+            before_bytes, expected_etag=_content_etag(candidate_bytes)
+        )
         readback = client.fetch_catalog()
         if readback != before_bytes:
             raise PromotionError("rollback readback did not equal the previous catalog")
@@ -826,7 +986,14 @@ def promote(
         # Treat publication as possibly successful before invoking the client:
         # a connection can fail after R2 accepted the write.
         published = True
-        client.publish_catalog(candidate_bytes)
+        # Expected-current swap: R2 accepts the candidate only if the live
+        # catalog still equals `before` (If-Match on its content ETag), so a
+        # catalog another publisher swapped in during finalization is rejected
+        # server-side (412) rather than clobbered. The prepublish byte compare
+        # above and this precondition together fail closed on a lost race.
+        client.publish_catalog(
+            candidate_bytes, expected_etag=_content_etag(before_bytes)
+        )
         if not _confirm_serving(
             client.smoke, version,
             attempts=smoke_attempts, interval=smoke_interval,
@@ -880,7 +1047,19 @@ def recover(
     if live == before_bytes:
         log("Previous catalog is already restored.")
     elif live == candidate_bytes:
-        client.publish_catalog(before_bytes)
+        # CAS the previous catalog back, guarding on the interrupted candidate
+        # still being live (If-Match on its content ETag).
+        try:
+            client.publish_catalog(
+                before_bytes, expected_etag=_content_etag(candidate_bytes)
+            )
+        except PreconditionFailed as exc:
+            # Another recoverer/publisher swapped the catalog between our read and
+            # this CAS. The compare-and-swap aborted without clobbering anything;
+            # the readback below decides whether the prior catalog nonetheless
+            # ended up live (someone else restored it -> success) or a foreign
+            # catalog is now live (-> refuse, as RecoveryError not a raw crash).
+            log(f"Recovery compare-and-swap lost a race: {exc}")
         restored = client.fetch_catalog()
         if restored != before_bytes:
             raise RecoveryError("restore readback did not equal the previous catalog")
