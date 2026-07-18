@@ -128,12 +128,45 @@ Places relevance verdict (step 2).
    - Region sizing measured (release 2026-06-17.0): US-NE box 4,133,950
      places (~481 MB, 3-4 shards); CONUS 18,014,140 (~2.1 GB); global
      75,631,061. All-US address remains 33 tasks / ~131.0M rows.
-   - REMAINING for the slice: optional non-promoting families in the
-     shared finalizer (verify_release exact-set gate or a parallel
-     non-promoting finalize path), the NE Places shard build + NE address
-     rehearsal, and the two-region slice through the real
-     `releases/{version}/` layout with remote verification. Scale-signal
-     pass after NE is green: CONUS Places + all-US address.
+   - Slice COMPLETE 2026-07-18 — step 4's exit artifact exists:
+     - Optional non-promoting families in the shared finalizer DONE
+       (#110: `verify --families` allowlist, manifest-derived expected
+       sets fail-closed incl. path-traversal guard, `publish-family`
+       with data-before-marker ordering; #113 added `verify-families-only`
+       for core-less slice versions and `SLICE_VERSION_RE` so a slice
+       version can never collide with a production release).
+     - NE address region rehearsal GREEN (run 29629389486): 34,112,192
+       rows / 9 tasks, exact reconciliation, 8,118 of 8,704 row groups
+       pruned (93%), family manifest verified. Largest task 3,983,695
+       rows — just under the 4M side-index guardrail, which is therefore
+       load-bearing for NE-scale shards.
+     - NE Places region build GREEN (runs 29629499331+29630398903, cwd
+       fix #114): 4,133,950 places (matches the count-only scan
+       exactly), 3 shards + catalog, 479.6 MB verified, deterministic
+       double-build; packed head omitted `over_reader_caps` at region
+       scale — context-free head queries need per-shard heads or raised
+       caps before any regional Places serving.
+     - Two-region-per-family slice GREEN (`slice-2026-07-18.1`, run
+       29631677440, after first-dispatch fixes #115): both families
+       published through the one guarded finalizer path into
+       `slice-2026-07-18.1/families/{family}/`, verify-families-only +
+       independent downloaded hashes + negative catalog probe passed.
+       Scale report (retained artifact `slice-scale-report-29631677440`):
+       places NE 4,133,950 rows / 479,599,903 B + dc-metro 151,187 /
+       18,035,207 B, build 778 s, publish 43 s; addresses NE 34,112,192
+       rows / 9 artifacts / 4,650,368,299 B + dc-metro 1,788,974 /
+       254,896,248 B, build 2,137 s, publish 240 s; verify 3 s.
+       NOTE: NE address serving bytes (~4.65 GB fragments-as-published)
+       dominate the region and put naive all-US address publication
+       (~18 GB) inside but near the 40 GB combined gate — the compact
+       serving-page format (35 B/row measured) rather than raw reduce
+       fragments is the planet-scale path.
+     - NEXT: scale-signal pass (CONUS Places + all-US address), a Worker
+       smoke against retained slice data (re-run with cleanup=false),
+       and the Places serving gates (chain_name read-chain redesign,
+       comparator relevance panel, bounded located ranking + the
+       measured multi-shard route_point seam recall hole from #112's
+       review, per-shard head strategy).
 5. **After July 25:** verify the promoted rebuild's lineage/reverse baseline,
    then re-size exact-country work. It does not queue-jump the family work.
 
