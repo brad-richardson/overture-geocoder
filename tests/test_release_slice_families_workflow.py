@@ -149,6 +149,46 @@ def test_verify_depends_on_both_family_builds():
     assert set(jobs()["verify"]["needs"]) == {"places", "addresses"}
 
 
+def test_preflight_rejects_non_nested_region_boxes():
+    # The single per-family manifest carries the UNION bbox of both regions, which
+    # is an honest coverage claim ONLY when one region box contains the other.
+    # Preflight must fail closed on a non-nested pair before any credentialed build
+    # rather than publish a manifest that claims coverage over an unbuilt gap.
+    preflight = jobs()["preflight"]
+    guard = next(
+        step
+        for step in preflight["steps"]
+        if "nested" in step.get("run", "") and "a_in_b" in step.get("run", "")
+    )
+    run = guard["run"]
+    # Both containment directions are tested and the step exits non-zero otherwise.
+    assert "a_in_b" in run and "b_in_a" in run
+    assert "exit 1" in run
+    # The region bounds reach the guard through env (never inline interpolation).
+    env = guard.get("env", {})
+    for corner in ("XMIN", "YMIN", "XMAX", "YMAX"):
+        assert f"REGION_A_{corner}" in env and f"REGION_B_{corner}" in env
+
+
+def test_address_reconcile_reads_an_isolated_task_rows_dir():
+    # region_address_rehearsal.py reconcile globs every *.json in its
+    # --task-rows-dir and fails closed on any non-task-rows schema, so the address
+    # job must point it at a directory holding ONLY task-rows files, not the build
+    # root that also carries the inventory/matrix/summary/map/reduce reports.
+    addresses = "\n".join(
+        _join_continuations(step.get("run", ""))
+        for step in jobs()["addresses"]["steps"]
+    )
+    reconcile = next(
+        line for line in addresses.splitlines() if "reconcile" in line and "--task-rows-dir" in line
+    )
+    match = re.search(r"--task-rows-dir\s+(\S+)", reconcile)
+    assert match, reconcile
+    target = match.group(1).strip('"')
+    # An isolated subdirectory, not the bare build root.
+    assert target.rstrip("/").endswith("/rows"), target
+
+
 def test_scale_report_is_retained_evidence():
     scale = jobs()["scale-report"]
     assert set(scale["needs"]) == {"places", "addresses", "verify"}

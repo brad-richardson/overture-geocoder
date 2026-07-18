@@ -154,6 +154,41 @@ jobs:
             exit 1
           fi
 
+      - name: Assert one region contains the other (union bbox is honest)
+        env:
+          REGION_A_XMIN: ${{ inputs.region_a_xmin }}
+          REGION_A_YMIN: ${{ inputs.region_a_ymin }}
+          REGION_A_XMAX: ${{ inputs.region_a_xmax }}
+          REGION_A_YMAX: ${{ inputs.region_a_ymax }}
+          REGION_B_XMIN: ${{ inputs.region_b_xmin }}
+          REGION_B_YMIN: ${{ inputs.region_b_ymin }}
+          REGION_B_XMAX: ${{ inputs.region_b_xmax }}
+          REGION_B_YMAX: ${{ inputs.region_b_ymax }}
+        run: |
+          set -euo pipefail
+          # Each family publishes ONE manifest carrying ONE region bbox: the UNION
+          # of both region boxes. That union honestly describes coverage ONLY when
+          # one box contains the other (then union == the outer box, which is
+          # exactly the covered area). For two overlapping-but-not-nested or fully
+          # disjoint boxes the union RECTANGLE would claim coverage over corners or
+          # a gap band that neither region actually built -- a silent coverage lie
+          # in a manifest whose Places bbox_scope is `exact`. Fail closed here,
+          # before any credentialed build, unless region A contains region B or
+          # region B contains region A.
+          nested=$(awk \
+            -v axmin="$REGION_A_XMIN" -v aymin="$REGION_A_YMIN" \
+            -v axmax="$REGION_A_XMAX" -v aymax="$REGION_A_YMAX" \
+            -v bxmin="$REGION_B_XMIN" -v bymin="$REGION_B_YMIN" \
+            -v bxmax="$REGION_B_XMAX" -v bymax="$REGION_B_YMAX" 'BEGIN{
+              a_in_b = (bxmin+0<=axmin+0 && bymin+0<=aymin+0 && bxmax+0>=axmax+0 && bymax+0>=aymax+0);
+              b_in_a = (axmin+0<=bxmin+0 && aymin+0<=bymin+0 && axmax+0>=bxmax+0 && aymax+0>=bymax+0);
+              print (a_in_b || b_in_a) ? "1" : "0";
+            }')
+          if [ "$nested" != "1" ]; then
+            echo "::error::regions are not nested; the union-bbox family manifest would claim coverage over an unbuilt gap. Supply boxes where one contains the other."
+            exit 1
+          fi
+
       - name: Probe production catalog does NOT reference the slice (before)
         run: |
           set -euo pipefail
@@ -356,13 +391,14 @@ jobs:
       # #106 bbox-scoped inventory + a BOUNDED SINGLE-RUNNER sequential map/reduce
       # over every scoped task (capped by addresses_max_tasks, fail-closed on
       # overflow — no silent sampling, mirroring #111's build_region_matrix guard),
-      # reconciled exactly against bbox_scoped_rows. Reduce outputs are staged
-      # LOCALLY under families/addresses/ so the SAME publish-family path uploads
-      # them — the slice never uploads addresses to a staging R2 prefix.
-      # DRIFT: the per-task producer wiring (experiment_hosted_rowgroups.py /
-      # prepare_address_verified_resume.py args) tracks #111's unmerged
-      # rehearse-address-r2-map-reduce.yml region mode and must be reconciled when
-      # #111 lands.
+      # reconciled exactly against bbox_scoped_rows via #111's merged
+      # region_address_rehearsal.py (matrix/task-rows/reconcile). Reduce outputs
+      # are staged LOCALLY under families/addresses/ so the SAME publish-family
+      # path uploads them — the slice never uploads addresses to a staging R2
+      # prefix. The per-task producer wiring (experiment_hosted_rowgroups.py /
+      # prepare_address_verified_resume.py) and the reconcile helper are reconciled
+      # against #111/#112 as merged; reconcile reads an isolated rows/ dir because
+      # its --task-rows-dir fails closed on any non-task-rows JSON.
       - name: Build both region address reduce outputs under families/addresses
         run: |
           set -euo pipefail
@@ -371,7 +407,11 @@ jobs:
           build_region () {
             local name="$1" xmin="$2" ymin="$3" xmax="$4" ymax="$5"
             local root="/tmp/slice/addr-${name}"
-            mkdir -p "$root"
+            # `rows/` holds ONLY task-rows files: reconcile globs every *.json in
+            # its --task-rows-dir and fails closed on any non-task-rows schema, so
+            # the reconciliation inputs must live apart from the scoped-inventory,
+            # matrix, summary, projection, map, and reduce reports under $root.
+            mkdir -p "$root" "${root}/rows"
             python scripts/inventory_address_rowgroups.py \
               --release "$RELEASE" \
               --json-out "${root}/scoped-inventory.json" \
@@ -410,13 +450,14 @@ jobs:
               python scripts/region_address_rehearsal.py task-rows \
                 --map-report "${root}/map-${task}.json" \
                 --task-index "$idx" --name "$name" \
-                --out "${root}/rows-${task}.json"
+                --out "${root}/rows/rows-${task}.json"
             done
             # Exact reconciliation: measured rows == plan bbox_scoped_rows over the
-            # complete task set (fails on any missing/extra/duplicate task).
+            # complete task set (fails on any missing/extra/duplicate task). Point
+            # at the isolated rows/ dir so only task-rows files are reconciled.
             python scripts/region_address_rehearsal.py reconcile \
               --scoped-report "${root}/scoped-inventory.json" \
-              --task-rows-dir "$root" --out "${root}/reconcile.json"
+              --task-rows-dir "${root}/rows" --out "${root}/reconcile.json"
             jq -n --arg name "$name" \
               --argjson bbox "[$xmin,$ymin,$xmax,$ymax]" \
               --slurpfile s "${root}/summary.json" \
