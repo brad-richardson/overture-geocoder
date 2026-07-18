@@ -527,6 +527,40 @@ mod tests {
         assert_eq!(normalize_field("Cafe\u{301}"), "café");
     }
 
+    /// Cross-language normalization parity. Each expectation is the byte-exact
+    /// output of the producer's Python
+    /// `" ".join(unicodedata.normalize("NFC", v).split()).translate(ASCII_LOWER)`
+    /// on the same input (generated with explicit code points so both sides are
+    /// unambiguous). A future producer or a Unicode-data bump in either language
+    /// that diverges on these adversarial vectors trips this test rather than
+    /// silently routing address lookups to the wrong key.
+    #[test]
+    fn matches_producer_normalize_on_adversarial_vectors() {
+        // Unicode-whitespace collapse (each is White_Space or a C0 separator).
+        assert_eq!(normalize_field("A\u{3000}B"), "a b"); // ideographic space
+        assert_eq!(normalize_field("A\u{85}B"), "a b"); // NEL
+        assert_eq!(normalize_field("  A\u{9}\u{a0}\u{3000} B  "), "a b"); // mixed run
+                                                                          // Turkish dotted/dotless I: ASCII-only lowercasing must NOT touch them,
+                                                                          // and NFC must not decompose U+0130 into "I + combining dot".
+        assert_eq!(normalize_field("\u{130}STANBUL"), "\u{130}stanbul");
+        assert_eq!(normalize_field("\u{131}RMAK"), "\u{131}rmak");
+        // NFC (not NFKC): full-width forms are preserved, not folded to ASCII.
+        assert_eq!(
+            normalize_field("\u{ff11}\u{ff12}\u{ff13}"),
+            "\u{ff11}\u{ff12}\u{ff13}"
+        );
+        assert_eq!(
+            normalize_field("\u{ff21}\u{ff22}\u{ff23}"),
+            "\u{ff21}\u{ff22}\u{ff23}"
+        );
+        // Canonical singletons recompose identically to Python's NFC.
+        assert_eq!(normalize_field("\u{212b}NGSTROM"), "\u{c5}ngstrom"); // Å sign -> U+00C5
+        assert_eq!(normalize_field("\u{2126}"), "\u{3a9}"); // Ohm sign -> U+03A9
+                                                            // Combining sequence composes; zero-width space is not whitespace.
+        assert_eq!(normalize_field("Cafe\u{301}"), "caf\u{e9}");
+        assert_eq!(normalize_field("A\u{200b}B"), "a\u{200b}b");
+    }
+
     // --- Validation ---
 
     #[test]
@@ -671,6 +705,22 @@ mod tests {
             select_shard(&collection, &key),
             ShardSelection::Unroutable
         ));
+    }
+
+    /// Pin the routing hash + key serialization as a shared cross-language
+    /// vector. A producer that splits a country across shards MUST partition by
+    /// this exact FNV-1a-over-`0x1f`-joined-fields hash; a mismatch would route
+    /// duplicate candidates to the wrong shard and surface as a silent
+    /// not-found. These constants are reproduced by the reference Python
+    /// (`FNV-1a`, offset 0xcbf29ce484222325, prime 0x100000001b3, fields joined
+    /// by a 0x1f separator byte) so both implementations can check against them.
+    #[test]
+    fn address_key_hash_is_a_pinned_cross_language_vector() {
+        let key = build_lookup_key(&params(&full_params())).unwrap();
+        assert_eq!(key[0], "us"); // guards the serialized byte stream below
+        assert_eq!(address_key_hash(&key), 0x0ce4_f784_42ca_30b4);
+        let key2 = ["fr", "", "", "", "", "rue de la paix", "1", ""].map(str::to_string);
+        assert_eq!(address_key_hash(&key2), 0x20fd_8a67_97be_2b2b);
     }
 
     // --- Manifest deserialization ---
