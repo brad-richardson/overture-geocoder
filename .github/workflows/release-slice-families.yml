@@ -326,7 +326,7 @@ jobs:
           UNION=$(jq -n \
             --argjson a "[$REGION_A_XMIN,$REGION_A_YMIN,$REGION_A_XMAX,$REGION_A_YMAX]" \
             --argjson b "[$REGION_B_XMIN,$REGION_B_YMIN,$REGION_B_XMAX,$REGION_B_YMAX]" \
-            '[[$a[0],$b[0]]|min,[$a[1],$b[1]]|min,[$a[2],$b[2]]|max,[$a[3],$b[3]]|max]')
+            '[([$a[0],$b[0]]|min),([$a[1],$b[1]]|min),([$a[2],$b[2]]|max),([$a[3],$b[3]]|max)]')
           # Enumerate every staged artifact (recursively) by its published key,
           # excluding the manifest itself (written below, into this same tree).
           ARTIFACT_ARGS=()
@@ -448,6 +448,7 @@ jobs:
             python scripts/inventory_address_rowgroups.py \
               --release "$RELEASE" \
               --json-out "${root}/scoped-inventory.json" \
+              --markdown-out "${root}/scoped-inventory.md" \
               --xmin "$xmin" --ymin "$ymin" --xmax "$xmax" --ymax "$ymax" \
               --max-tasks 128
             python scripts/region_address_rehearsal.py matrix \
@@ -519,7 +520,7 @@ jobs:
           UNION=$(jq -n \
             --argjson a "[$REGION_A_XMIN,$REGION_A_YMIN,$REGION_A_XMAX,$REGION_A_YMAX]" \
             --argjson b "[$REGION_B_XMIN,$REGION_B_YMIN,$REGION_B_XMAX,$REGION_B_YMAX]" \
-            '[[$a[0],$b[0]]|min,[$a[1],$b[1]]|min,[$a[2],$b[2]]|max,[$a[3],$b[3]]|max]')
+            '[([$a[0],$b[0]]|min),([$a[1],$b[1]]|min),([$a[2],$b[2]]|max),([$a[3],$b[3]]|max)]')
           ARTIFACT_ARGS=()
           while read -r key; do
             ARTIFACT_ARGS+=(--artifact "${key}=/tmp/slice/staged/${key}")
