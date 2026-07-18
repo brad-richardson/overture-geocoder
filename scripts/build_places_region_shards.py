@@ -19,13 +19,26 @@ Serving-order split
 ``ordered_places`` sorts every place by spatial cell (0.25 deg), then by
 descending quantized confidence, then by id -- the same order a single shard
 stores internally. Splitting that global order into contiguous, near-equal
-chunks therefore yields shards that are spatially clustered (each shard's bbox
-is the compact extent of a run of adjacent cells) and internally already in
-serving order, so re-running ``build_artifact`` on a chunk is idempotent. The
-Worker's point router tolerates the axis-aligned bbox overlap at chunk seams
-(it picks the smallest covering shard), and each shard's unique id doubles as a
-routing-catalog context entry. Two runs are byte-identical because every step
-is a total-order sort.
+chunks yields shards that are internally already in serving order, so re-running
+``build_artifact`` on a chunk is idempotent, and each shard's unique id doubles
+as a routing-catalog ``context`` entry. Two runs are byte-identical because
+every step is a total-order sort.
+
+Point-routing recall is NOT single-shard-equivalent -- measure before promotion.
+The cell key is row-major (``y`` then ``x``), so a contiguous run of cells is
+not a spatially compact rectangle: it steps across ``x`` within a latitude band
+and wraps to the next band, giving each shard a wide "staircase" bounding box
+whose extent overlaps its neighbours' -- across the whole band, not merely at
+the chunk seam. The Worker's ``route_point`` (crates/geocoder-worker/src/
+places_pages.rs) picks the single smallest-area covering bbox, so a query point
+can route to a shard that overlaps the point but does not contain the point's
+cell, and a place can be unreachable via a point query at its own coordinates
+(demonstrated: multi-shard point routing returns a strict subset of the
+single-shard result for a fraction of points). This is the pre-existing
+``route_point`` bounded-result-window contract, now at region scale; it is a
+recall regression versus a single shard that MUST be quantified before any slice
+built from these shards is promoted. Context routing (by shard id) is exact and
+unaffected.
 
 Packed head at region scale
 ---------------------------
@@ -38,6 +51,16 @@ not a build error: the head is then reported ``over_reader_caps`` and omitted
 from the produced object set rather than failing the whole region build. The
 shards and routing catalog -- the load-bearing deliverables -- are always
 produced.
+
+The head is not optional at serving time for the query class it owns. The
+Worker's ``lookup_places_head_spike`` hard-requires ``head.phrp`` for a
+head-eligible query (context-free, one-or-two exact unfielded tokens) and
+returns early with no routing fallback, so an omitted head means that query
+class cannot be served -- its absence is a hard read error for those queries,
+not a graceful miss that falls through to shard routing. Context- and
+point-routed queries are unaffected. A region reported ``over_reader_caps`` is
+therefore only servable for routed queries; the head-key overflow must be
+resolved (or the head query class accepted as unserved) before promotion.
 
 This is an offline producer. It does not access Cloudflare, R2, or Overture S3
 and cannot promote a catalog.
