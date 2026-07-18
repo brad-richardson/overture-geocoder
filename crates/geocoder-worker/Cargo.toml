@@ -10,9 +10,12 @@ crate-type = ["cdylib"]
 
 [features]
 default = []
-# Experimental smoke-only address page decoder. Gated out of production wasm
-# bundles; enabled only by the address smoke deploy (wrangler.address-smoke.toml).
-address-spike = ["dep:flate2"]
+# Isolated smoke-only address page route (`/__address-page-spike`) that reads a
+# raw R2 prefix supplied by the address smoke deploy. The reader machinery it
+# exercised (address page decode, range reader, gzip) is now compiled into every
+# build so the production `/address` route can reuse it; this feature only gates
+# the raw-prefix smoke ROUTE, not the shared read path.
+address-spike = []
 # Experimental smoke-only compact Places payload reader.
 places-spike = []
 
@@ -35,9 +38,15 @@ futures = "0.3"
 # Parquet reading (snappy only, minimal features for wasm32)
 parquet = { version = "54", default-features = false, features = ["snap"] }
 bytes = "1"
-# Only pulled in by the `address-spike` feature (the smoke-only address page
-# decoder); off by default so production wasm bundles stay lean.
-flate2 = { version = "1", default-features = false, features = ["rust_backend"], optional = true }
+# gzip decode for the address page reader. The production `/address` route
+# reads the same range-readable address pages as the smoke spike, so this is a
+# non-optional dependency; the `rust_backend` (miniz_oxide) build compiles to
+# wasm32-unknown-unknown.
+flate2 = { version = "1", default-features = false, features = ["rust_backend"] }
+# NFC normalization for the structured `/address` lookup key. Pure-Rust,
+# wasm32-compatible; used to reproduce the producer's
+# NFC + Unicode-whitespace-collapse + ASCII-lowercase key contract.
+unicode-normalization = "0.1"
 
 # WASM compatibility
 getrandom = { version = "0.2", features = ["js"] }

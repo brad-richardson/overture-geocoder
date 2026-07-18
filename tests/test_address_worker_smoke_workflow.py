@@ -64,4 +64,4 @@ def test_spike_endpoint_is_not_advertised_as_a_public_api():
     worker = (ROOT / "crates" / "geocoder-worker" / "src" / "lib.rs").read_text()
 
     assert '.get_async("/__address-page-spike"' in worker
-    assert '"endpoints":["/search","/reverse","/id/:id"]' in worker
+    assert '"endpoints":["/search","/reverse","/address","/id/:id"]' in worker

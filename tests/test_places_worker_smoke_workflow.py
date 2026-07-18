@@ -37,4 +37,4 @@ def test_places_spike_endpoint_is_not_advertised_as_public():
     worker = (ROOT / "crates" / "geocoder-worker" / "src" / "lib.rs").read_text()
 
     assert '.get_async("/__places-page-spike"' in worker
-    assert '"endpoints":["/search","/reverse","/id/:id"]' in worker
+    assert '"endpoints":["/search","/reverse","/address","/id/:id"]' in worker

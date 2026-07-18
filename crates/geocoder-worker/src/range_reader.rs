@@ -6,9 +6,8 @@
 //! this component decides *how many physical range reads to issue* and slices
 //! each want back out.
 //!
-//! Only the experimental address spike consumes it today, so it is gated behind
-//! `address-spike`. It has no address-specific logic: when the Places compact
-//! shard prototype lands it becomes the second consumer and the gate drops.
+//! It has no payload-specific logic: the production `/address` route and the
+//! experimental Places compact-shard reader are both consumers.
 
 use bytes::Bytes;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -62,6 +61,10 @@ impl RangeReadMetrics {
         }
     }
 
+    /// Difference between two metric snapshots. Only the Places multi-stage
+    /// reader attributes per-stage byte/read deltas, so this is compiled with
+    /// that feature.
+    #[cfg(feature = "places-spike")]
     pub(crate) fn since(self, earlier: Self) -> Self {
         Self {
             logical_ranges: self.logical_ranges.saturating_sub(earlier.logical_ranges),
@@ -100,7 +103,6 @@ impl<'a> RangeReader<'a> {
 
     /// Read at most `max_bytes` from the start of the object, failing closed if
     /// the object overflows the cap (see `cached_bounded_prefix_read`).
-    #[cfg(feature = "address-spike")]
     pub(crate) async fn bounded_prefix(
         &mut self,
         max_bytes: usize,
@@ -123,7 +125,6 @@ impl<'a> RangeReader<'a> {
 
     /// Read at most `max_bytes` from the object start. Short-at-EOF is valid;
     /// this is for envelope prefixes, not exact component extents.
-    #[cfg(feature = "address-spike")]
     pub(crate) async fn at_most_prefix(
         &mut self,
         max_bytes: usize,
@@ -144,7 +145,10 @@ impl<'a> RangeReader<'a> {
         }
     }
 
-    /// Read one exact byte range, edge-cached.
+    /// Read one exact byte range, edge-cached. Only the Places multi-stage
+    /// reader issues single exact ranges directly; the address path plans its
+    /// page reads through [`RangeReader::coalesced`].
+    #[cfg(feature = "places-spike")]
     pub(crate) async fn range(&mut self, offset: u64, length: u64) -> Result<Option<Bytes>> {
         self.metrics.logical_ranges = self.metrics.logical_ranges.saturating_add(1);
         self.metrics.planned_physical_ranges =

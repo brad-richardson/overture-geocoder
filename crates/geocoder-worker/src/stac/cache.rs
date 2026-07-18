@@ -8,12 +8,10 @@ use bytes::Bytes;
 use geocoder_core::Database;
 use worker::*;
 
-#[cfg(feature = "address-spike")]
 use crate::address_pages::{
     decode_useful_gzip_range_measured, parse_address_index, parse_useful_gzip_header,
     AddressPageDecode, AddressPageRecord, MAX_INDEX_BYTES, MAX_STORED_PAGE_RANGE,
 };
-#[cfg(feature = "address-spike")]
 use crate::range_reader::{RangeReadMetrics, RangeReader};
 
 use super::{not_found, ShardLoader};
@@ -23,7 +21,6 @@ pub(crate) struct CacheRangeRead {
     pub cache_hit: bool,
 }
 
-#[cfg(feature = "address-spike")]
 fn validate_at_most_prefix_length(actual: usize, max_bytes: usize) -> Result<()> {
     if max_bytes == 0 || actual > max_bytes {
         return Err(Error::RustError(
@@ -33,13 +30,18 @@ fn validate_at_most_prefix_length(actual: usize, max_bytes: usize) -> Result<()>
     Ok(())
 }
 
-#[cfg(feature = "address-spike")]
 pub(crate) struct AddressPageLookup {
     pub records: Vec<AddressPageRecord>,
     pub read_metrics: RangeReadMetrics,
+    // Byte-accounting fields consumed only by the isolated `address-spike` smoke
+    // response; the production `/address` route reads `records`/`read_metrics`.
+    #[allow(dead_code)]
     pub index_bytes: usize,
+    #[allow(dead_code)]
     pub stored_page_bytes: usize,
+    #[allow(dead_code)]
     pub decoded_page_bytes: usize,
+    #[allow(dead_code)]
     pub materialized_page_bytes: usize,
 }
 
@@ -225,7 +227,6 @@ impl ShardLoader {
     /// result after proving the object did not fill a `max + 1` sentinel range.
     /// This prevents a corrupt index from being fully materialized by
     /// `cached_get` before its size cap can be checked.
-    #[cfg(feature = "address-spike")]
     pub(crate) async fn cached_bounded_prefix_read_measured(
         &self,
         key: &str,
@@ -286,7 +287,6 @@ impl ShardLoader {
     /// whole-object helper above, a short response at EOF is valid: callers use
     /// this only for a fixed-size envelope/header prefix of a possibly larger
     /// object. Both cache hits and R2 responses are checked before acceptance.
-    #[cfg(feature = "address-spike")]
     pub(crate) async fn cached_at_most_prefix_read_measured(
         &self,
         key: &str,
@@ -337,15 +337,16 @@ impl ShardLoader {
         }))
     }
 
-    /// Experimental exact-address storage path.
+    /// Exact-address storage read path, shared by the production `/address`
+    /// route and the isolated `/__address-page-spike` smoke route.
     ///
     /// The caller supplies immutable versioned object keys and an already
     /// normalized eight-field address key. The small side index is edge-cached,
     /// then exactly one group-aligned gzip page is range-read and decoded under
-    /// the hard limits in `address_pages`. This is deliberately not routed yet:
-    /// the spike must measure real Worker/R2 latency before becoming an API.
-    #[cfg(feature = "address-spike")]
-    pub(crate) async fn lookup_address_page_spike(
+    /// the hard limits in `address_pages`. Every candidate that carries the
+    /// exact key is returned in producer order; the caller applies the response
+    /// candidate cap.
+    pub(crate) async fn lookup_address_page(
         &self,
         index_key: &str,
         data_key: &str,
@@ -574,7 +575,7 @@ impl ShardLoader {
     }
 }
 
-#[cfg(all(test, feature = "address-spike"))]
+#[cfg(test)]
 mod address_prefix_tests {
     use super::validate_at_most_prefix_length;
 
