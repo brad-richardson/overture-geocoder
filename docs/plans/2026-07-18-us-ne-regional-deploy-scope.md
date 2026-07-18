@@ -48,20 +48,21 @@ classified out-of-coverage, never not-found.
   state values) but the family producer that feeds R2
   (`experiment_hosted_rowgroups.py`) reads whole row groups by contiguous
   index with no spatial predicate, and `inventory_address_rowgroups.py`
-  records only `country` row-group stats. A bbox-scoped address build needs
+  recorded only `country` row-group stats until #106 added per-row-group
+  bbox extent and a bbox-scoped plan mode. A bbox-scoped address build needs
   one of:
   1. a DuckDB bbox extract producer (cheap, real S3 pruning, but bypasses
      the map/reduce resume machinery the finalizer work hardens), or
   2. a bbox-aware inventory (record per-row-group bbox min/max, prune the
-     task plan to NE-intersecting groups — keeps map/reduce, net-new
-     inventory code).
+     task plan to NE-intersecting groups — keeps map/reduce; this inventory
+     change landed as #106).
   Decision: start with (2) — the point of the exercise is to rehearse the
   pipeline that will run at planet scale, and the inventory change is
   reusable. (1) remains the fallback if (2) overruns.
   All-US upper bound if pruning slips: 33 tasks, ~131M rows, ~2.5-3 h wall,
   ~17 GB fragments — feasible but wasteful; the NE box should cut this
-  substantially (sizing requires a fresh bbox scan; the current inventory
-  cannot answer it).
+  substantially (sizing requires running the bbox-scoped inventory (#106)
+  against the release; the country-only inventory report cannot answer it).
 
 ## 2. Compatibility contract (what keeps the explorer safe)
 
@@ -108,20 +109,22 @@ the section 2 contract.
    Places smoke matrix. Proven pattern.
 
 **Track B — address bbox producer (medium risk)**
-3. (M) bbox-aware row-group inventory (per-group bbox stats + NE-pruned task
-   plan); fallback: DuckDB bbox extract producer.
+3. (M, inventory landed #106) bbox-aware row-group inventory (per-group bbox
+   stats + NE-pruned task plan); fallback: DuckDB bbox extract producer.
+   Remaining: run the bbox-scoped plan for the NE box.
 4. (M, dep 3) US-NE address build through the rehearse-address map/reduce
    machinery (upload / verified resume / restore / stale-repair / cleanup)
    with the scale report.
 
 **Track C — shared finalizer integration (long pole, at-risk)**
-5. (M) Family manifest schema in `global_build_manifest.py`: immutable object
-   identities, lineage, format/tokenizer/normalization versions, **bbox
-   scope**. `promotion_eligible: false` is already the fan-in default.
-6. (M-L, at-risk) Object-level publication guard: create-only
+5. (M, landed #107) Family manifest schema in `global_build_manifest.py`:
+   immutable object identities, lineage, format/tokenizer/normalization
+   versions, **bbox scope**. `promotion_eligible: false` is already the
+   fan-in default.
+6. (landed #108) Object-level publication guard: create-only
    (`If-None-Match`) and expected-current (`If-Match`) conditional writes in
-   the finalize R2 path; today the only serialization is the workflow
-   concurrency group and a read-back byte compare.
+   the finalize R2 path landed in #108, replacing the prior serialization
+   (the workflow concurrency group and a read-back byte compare).
 7. (L, dep 5, at-risk) Optional non-promoting families in the shared
    finalizer: either teach `verify_release`'s exact-set gate about optional
    families or stand up a parallel non-promoting finalize path driven by
@@ -158,7 +161,7 @@ the section 2 contract.
    `releases/{version}/` layout, non-promoting, with remote verification.
 2. **Baseline (planned floor)**: A+B land; families rehearse through the
    existing isolated-prefix machinery with NE inputs and the scale report;
-   C items 6-8 carry into the next cycle with documented limitations.
+   C items 7-8 carry into the next cycle with documented limitations.
 3. **Address-first promotion**: if promotion is pulled forward, address goes
    first (no relevance/ranking/latency debt); Places data publishes unrouted
    behind its two gates until its promotion gates pass.
