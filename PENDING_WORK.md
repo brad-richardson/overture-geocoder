@@ -2,8 +2,140 @@
 
 This is the active roadmap. Completed PR history is intentionally omitted unless
 its result constrains the next decision. The implementation baseline is
-`6ff382c` (`main` after #86); the current remote evidence is recorded in
-`benchmarks/2026-07-17-remote-address-places-r2-evidence.md`.
+`699696c` (`main` after #98); the current remote evidence is recorded in
+`benchmarks/2026-07-17-remote-address-places-r2-evidence.md`, updated by the
+2026-07-16 first end-to-end dispatch of both measurement workflows.
+
+## Sequencing (2026-07-17)
+
+Ordered plan to reach a meaningful non-promoting Places/address shard build
+test. Steps 2 and 3 are independent and can run in parallel; step 4 must not
+start before both, because its inputs are the partition rule (step 3) and a
+Places relevance verdict (step 2).
+
+1. **Dispatch the rebuild dry-run (`promote=false`).** DISPATCHED 2026-07-17
+   (Actions run 29586616677, `confirm=REBUILD promote=false`; note a manual
+   dispatch without the typed `confirm` input silently skips every job and
+   reports success). Validates the #96/#97 finalize fixes over a real v3
+   build before the July 25 scheduled rebuild.
+   OUTCOME: first attempt **failed at finalize-release** — every build/id
+   job succeeded, then `finalize_rebuild.py` died at import
+   (`scripts/common.py` top-level `import duckdb`, introduced in e0591c2;
+   the finalize-release job intentionally installs no duckdb). Fixed by
+   PR #104 (lazy duckdb import + no-duckdb regression tests; finalize stays
+   dependency-thin).
+   RESOLVED 2026-07-18: re-dispatch as `2026-07-18.0` (run 29624600543)
+   **green end-to-end** — build, all id stages, finalize-release,
+   post-finalize (the promote+smoke step is gated on `promote=true` and was
+   correctly skipped for this `promote=false` dry-run). The #96/#97/#104
+   finalize path is validated over a
+   real v3 build; the July 25 scheduled rebuild is cleared. Two notes:
+   (a) the workflow fails closed on a version-prefix collision rather than
+   resuming, so the first attempt's `2026-07-17.0/` prefix is orphaned,
+   non-promoted, undiscoverable data in R2 — schedule an R2 cleanup pass;
+   (b) same-version resume via dispatch input is not supported by design.
+   **DONE.**
+2. **Places relevance iteration.** Famous-unique head admission (the last
+   relevance STOP seed; design:
+   `docs/plans/2026-07-17-famous-unique-head-admission.md`), then the
+   remaining cold-gate failure `relevance_chain_name` (records-stage layout
+   or coalesce-gap change plus concurrent reads). Re-dispatch the smoke and
+   re-score all six seeds.
+   2026-07-17 chain_name status: records-stage layout merged as PR #102 and
+   coverage/contract pinning as PR #103. The post-merge smoke (run
+   29591168866, fresh fixture shards) shows bytes fixed (1.10 MB → 307,681 B,
+   inside the 512 KiB gate) but cold reads WORSE (15 → 19 vs the 8-read cap)
+   and cold latency unchanged (1.42 s vs the 1.0 s gate).
+   Diagnosis (2026-07-17 per-stage attribution of run 29591168866): NOT a
+   Worker bug — reader/model parity holds. (1) The model's 8-read budget
+   omits the 2 catalog-routing reads the live gate counts; even the model's
+   best case is 10 live reads, over the gate before any scatter. (2) The #102
+   design premise is false: global-rank records layout interleaves a chain's
+   branches with every similar-confidence place, so the 10 served records
+   coalesce to 9 physical reads, and doc-id-keyed record_index drags 215 KB
+   of gap into 2 reads; the gap-sweep fixture was engineered with uniform
+   17.7 KiB spacing that cannot reproduce real scatter. (3) Arithmetic wall:
+   a two-clause catalog_context query spends 8 structural reads
+   (catalog 2 + directory 2 + lexicon 2 + postings 2) before record stages —
+   no records layout can pass the current gate. Required next change: fold
+   record stages into already-fetched reads (rank-ordered doc-ids so
+   record_index is rank-monotone; chain-local record clustering, e.g.
+   (brand-key, rank)) AND re-derive the gate read budget to name the 2
+   unavoidable catalog reads; also fix the sweep fixture to real scatter and
+   add the +2 to the model budget. Directory stage (2 reads / 45 KB every
+   query) is the next byte target.
+   Separately, three cases (`relevance_local_name` 1.046 s, `shard_prefix`
+   1.045 s, `shard_early_exit_sentinel` 1.119 s) fail only the 1.0 s
+   cold-latency line by 4–12%: all 8-read cases sit on the same ~6-8
+   sequential data-dependent round-trip floor (passing peers span
+   723–1059 ms worker time) — R2 jitter straddling the gate, not
+   regressions. The floor itself is the concern: stage-count reduction is
+   the only lever that moves it.
+   2026-07-17 status: head admission implemented and MERGED as PR #100 (CI
+   green, adversarially reviewed, budget gates hold, zero regressions). The
+   famous_unique seed itself is data-blocked on release 2026-06-17.0: the
+   東京タワー feature has `names.common = None` (verified against raw S3),
+   so zero fixture places hold both `tokyo` and `tower` and the exact AND is
+   provably empty; independently, the quantized-confidence fame proxy
+   saturates (37,012 places at qconf ≥ 254 vs the tower's 253). Decision
+   (2026-07-17): merged the machinery; the seed is to be re-adjudicated —
+   pick a rule-based replacement famous entity supportable by the data
+   and/or verify a newer Overture release carries the alias. A
+   saturation-resistant fame signal (e.g. alt-name language count) is a
+   flagged design gap for planet scale regardless.
+3. **Address stratified multi-task sweep.** DONE 2026-07-17 (PR #99, run
+   29585075948): 12 stratified tasks, 12/12 complete, byte-identical
+   local-oracle reduce on every task, rows reconciled vs inventory.
+   Retention min/median/p95/max: 40.29 / 99.74 / 100.00 / 100.00 % — the
+   Mexico anchor's 40.29% is a regional outlier; CJK and Latin-Europe strata
+   retain ≥99.2%. Fragment output 117.1–161.5 B/retained row; peak RSS
+   ≤869.6 MB; retry amplification 2.02–2.83 (max at the sparse tail).
+   Evidence: `benchmarks/2026-07-17-address-stratified-sweep-report.md`
+   (PR #101). The partition/normalization-contract review (open decision 2)
+   is now unblocked. Still open from this step: the 941 KB cold side-index
+   decision.
+4. **The shard build test.** Release-versioned family manifests, the
+   object-level publication guard, both families integrated as optional
+   non-promoting families in the shared finalizer, then the design doc's
+   two-region-per-family slice through the real `releases/{version}/` layout
+   with remote verification and a scale report.
+   2026-07-18 status (US-NE regional track; scope + decisions in
+   `docs/plans/2026-07-18-us-ne-regional-deploy-scope.md`, merged #105):
+   - Family manifests DONE (#107): `overture-global-family-manifest-v1`
+     with lineage, format/tokenizer/normalization versions, region bbox +
+     scope mode, artifact hashes, canonical-JSON self-digest; wired to the
+     fan-in candidate, `promotion_eligible: false`.
+   - Object-level publication guard DONE (#108): server-side create-only
+     (If-None-Match) and expected-current CAS (If-Match) PUTs in the
+     finalize path — R2 enforces both; 412 aborts, never retried;
+     idempotent same-content backups; CLI capability check fails fast.
+   - Address bbox-scoped producer DONE (#106): per-row-group bbox stats +
+     bbox-pruned task planning, `bbox_scope: row_group_approximate`
+     (superset semantics), default path byte-identical. Note: address row
+     groups are not spatially clustered, so pruning selectivity is modest.
+   - Production `/address` route DONE and DEPLOYED (#109): structured
+     8-field exact lookup, all-candidates ambiguity (512 bound → 413),
+     out-of-coverage vs not-found split, stable 404
+     `address_family_unavailable` until the family enters the catalog;
+     existing routes proven byte-identical; wasm ~1.34 MB gzip. The
+     explorer-safety contract (undocumented `types=` default excluding
+     `place`; catalog additive discovery) is verified and documented in the
+     scope doc.
+   - Side-index decision CLOSED: Option C (no format change) with a
+     recorded guardrail — no served address shard above ~4M rows (index
+     22.5% of the 4 MiB reader cap at 4M rows); two-level index (Places
+     `lexicon_blocks` pattern) triggers past that or at planet scale.
+   - Region sizing measured (release 2026-06-17.0): US-NE box 4,133,950
+     places (~481 MB, 3-4 shards); CONUS 18,014,140 (~2.1 GB); global
+     75,631,061. All-US address remains 33 tasks / ~131.0M rows.
+   - REMAINING for the slice: optional non-promoting families in the
+     shared finalizer (verify_release exact-set gate or a parallel
+     non-promoting finalize path), the NE Places shard build + NE address
+     rehearsal, and the two-region slice through the real
+     `releases/{version}/` layout with remote verification. Scale-signal
+     pass after NE is green: CONUS Places + all-US address.
+5. **After July 25:** verify the promoted rebuild's lineage/reverse baseline,
+   then re-size exact-country work. It does not queue-jump the family work.
 
 ## Current state
 
@@ -33,10 +165,27 @@ its result constrains the next decision. The implementation baseline is
   cold namespaces, full-projection oracles, and technical gate classification
   are implemented in #87. Distance is diagnostic only: the bounded result
   window is not yet a complete nearest-candidate ranking.
-- A main-only, non-promoting two-task address workflow now connects real reducer
-  fragments to the verified R2 store, including partial/repeated resume,
-  empty/stale restore, byte-identical local-oracle reduction, cleanup, and
-  structured byte/resource/timing evidence. It has not yet been dispatched.
+- Both main-only measurement workflows were dispatched for the first time on
+  2026-07-16 against real R2/Cloudflare/Overture (release `2026-06-17.0`).
+  Address (US task 48 + Mexico task 3): PASS — byte-identical local-oracle
+  reduce, verified upload/resume/restore/stale-repair, ~4M rows/task, map RSS
+  866 MB, retry read amplification 2.03×. Places: technical `optimize`,
+  relevance `stop` under the seed's own rule. Follow-ups #88–#94 and #98
+  (RESULT_LIMIT 25→10) took the cold gate from 5/10 failing to 1/10; alt-name
+  indexing (#93) fixed the 東京タワー seed. Remaining: `famous_unique`
+  (context-free "Tokyo Tower", head-admission design —
+  `docs/plans/2026-07-17-famous-unique-head-admission.md`) and the
+  `relevance_chain_name` cold gate (post-#102/#103 status in Sequencing
+  step 2: bytes fixed, reads/latency still failing).
+- The `Smoke Test R2 ID Index` run on the #103 merge (29591153753) failed on
+  Cloudflare workers.dev propagation flake (404/1042 ×4 then 500/1104 within a
+  ~25 s retry window right after preview-Worker deploy), not code — #103
+  touched only Python experiment/test files and the identical smoke passed on
+  #102's merge 35 minutes earlier. Re-dispatched 2026-07-18 (run 29623176674).
+  If this recurs, widen the retry window.
+- The finalize release blockers are fixed: #96 derives the exact
+  id-inventories key set in `verify_release`; #97 deletes staging only after
+  finalize succeeds. A `promote=false` rebuild dry-run is now runnable.
 - Prototype contracts now define structured exact-address ambiguity and a
   candidate country/hash-range partition rule, plus Places launch/stop gates.
   These are measurement contracts, not publication approval.
@@ -74,9 +223,9 @@ its result constrains the next decision. The implementation baseline is
 The byte reader works; query planning and product relevance are now the blocking
 work.
 
-- Dispatch the main-only Places workflow. Retain independently cold/warm client
-  and Worker time, physical reads, R2/cache bytes, full projections, point and
-  context routing, catalog failure, duplicate IDs, and repeated order.
+- ~~Dispatch the main-only Places workflow.~~ Done 2026-07-16; evidence
+  retained. Re-dispatch after each relevance/read-path change; next changes are
+  famous-unique head admission and the chain_name records-stage fix.
 - Build a side-by-side top-five panel for the six relevance seeds using the
   previously evaluated reference geocoders, including Nominatim. Treat those
   engines as comparators rather than ground truth and adjudicate disagreements
@@ -98,11 +247,14 @@ stop decision.
 The bounded producer shape is viable; the next risk is global coordination and
 coverage policy.
 
-- Dispatch the main-only US/Mexico workflow and retain its real fragment,
-  partial/repeated resume, empty/stale restore, byte-identical reduce, cleanup,
-  retry-amplification, wall-time, RAM, disk, retention, and output-byte evidence.
-- Collect structured-retention and output-byte summaries across the planned 127
-  tasks before selecting regional partitions or claiming planet storage.
+- ~~Dispatch the main-only US/Mexico workflow.~~ Done 2026-07-16: PASS with
+  full evidence retained.
+- ~~Collect structured-retention and output-byte summaries via a stratified
+  sweep.~~ Done 2026-07-17: 12-task stratified sweep green (see Sequencing
+  step 3 and `benchmarks/2026-07-17-address-stratified-sweep-report.md`).
+  Full 127-task coverage remains a planet-readiness gate; the stratified
+  evidence is the input for the partition-rule review, not a substitute for
+  complete coverage.
 - Validate the proposed exact endpoint and country/hash-range partition against
   the multi-task evidence. The current normalization contract is NFC,
   Unicode-whitespace collapse, and ASCII-only lowercasing; decide and version
@@ -237,8 +389,9 @@ These do not block the first routed Places or real-fragment address slice:
 
 1. Places comparator relevance, complete bounded located ranking, regional
    coverage, and measured numeric gate results.
-2. Address Unicode normalization version, 127-task coverage, serving partition
-   size/side index, and publication serialization.
+2. Address Unicode normalization version and 127-task coverage. (Resolved
+   2026-07-18: side index — Option C with the 4M-row shard guardrail;
+   publication serialization — object-level CAS guard merged in #108.)
 3. Additive degraded/partial-result signaling shared by experimental families.
 4. Reverse `wkb` disposition and post-rebuild exact-country priority.
 
@@ -253,4 +406,9 @@ These do not block the first routed Places or real-fragment address slice:
 - `benchmarks/places-head-repack-report.md`
 - `docs/places-tokenization-decision.md`
 - `docs/plans/2026-07-14-global-places-address-processing-design.md`
+- `docs/plans/2026-07-17-famous-unique-head-admission.md`
+- `docs/plans/2026-07-17-places-chain-name-records-stage.md`
+- `docs/plans/2026-07-17-places-92-residues.md`
+- `docs/plans/2026-07-18-us-ne-regional-deploy-scope.md`
+- `docs/plans/2026-07-17-address-stratified-sweep.md`
 - `docs/plans/2026-07-12-exact-country-decision-artifact.md`
