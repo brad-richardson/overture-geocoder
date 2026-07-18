@@ -1,0 +1,336 @@
+name: Build Places Region Shards (non-promoting)
+
+# Builds a real bbox-region Places shard set at full scale (no --limit
+# subsampling) and uploads it, size + SHA-256 verified, to an isolated,
+# non-promoting R2 prefix with retained evidence. It never writes near a
+# production prefix and cannot touch the production catalog. A green run is
+# measurement and cleanup succeeding; it is not launch or publication approval
+# (PENDING_WORK.md decisions 6 and 8).
+
+on:
+  workflow_dispatch:
+    inputs:
+      region_name:
+        description: Routing/catalog region name (ASCII alphanumeric/hyphen).
+        required: false
+        default: us-northeast
+        type: string
+      bbox_xmin:
+        description: Extraction bbox minimum longitude.
+        required: false
+        default: "-80.5"
+        type: string
+      bbox_ymin:
+        description: Extraction bbox minimum latitude.
+        required: false
+        default: "38.0"
+        type: string
+      bbox_xmax:
+        description: Extraction bbox maximum longitude.
+        required: false
+        default: "-66.9"
+        type: string
+      bbox_ymax:
+        description: Extraction bbox maximum latitude.
+        required: false
+        default: "47.5"
+        type: string
+      shard_row_cap:
+        description: Maximum rows per compact shard before it is split.
+        required: false
+        default: "1500000"
+        type: string
+      extract_limit:
+        description: >-
+          Hard extraction row cap. Must sit comfortably above the region count;
+          an extracted count at this limit means silent truncation and fails.
+        required: false
+        default: "6000000"
+        type: string
+      release:
+        description: Overture release the region is extracted from.
+        required: false
+        default: "2026-06-17.0"
+        type: string
+      cleanup:
+        description: Delete the isolated R2 prefix at the end (keeps the evidence artifact).
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  # Never cancel in-flight: a cancelled credentialed upload can strand
+  # half-written isolated objects that the cleanup step would then miss.
+  group: build-places-region
+  cancel-in-progress: false
+
+env:
+  REGION_PREFIX: smoke/places-region/${{ github.run_id }}-${{ github.run_attempt }}
+
+jobs:
+  build:
+    name: Build and verify the region shard set
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 240
+    env:
+      PYTHONHASHSEED: "0"
+      LC_ALL: C.UTF-8
+      LANG: C.UTF-8
+      REGION_NAME: ${{ inputs.region_name }}
+      BBOX_XMIN: ${{ inputs.bbox_xmin }}
+      BBOX_YMIN: ${{ inputs.bbox_ymin }}
+      BBOX_XMAX: ${{ inputs.bbox_xmax }}
+      BBOX_YMAX: ${{ inputs.bbox_ymax }}
+      SHARD_ROW_CAP: ${{ inputs.shard_row_cap }}
+      EXTRACT_LIMIT: ${{ inputs.extract_limit }}
+      RELEASE: ${{ inputs.release }}
+    steps:
+      - name: Check out without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Install the extraction dependency
+        run: pip install duckdb==1.5.1
+
+      - name: Record runner resources
+        run: |
+          {
+            echo "## Places region build ${REGION_NAME}"
+            echo
+            echo '```text'
+            lscpu || true
+            free -h || true
+            df -h . /tmp || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Extract the full region and assert no truncation
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/region
+          EXTRACT_START=$SECONDS
+          python scripts/experiment_places_partition_extract.py \
+            --release "$RELEASE" --limit "$EXTRACT_LIMIT" \
+            --xmin "$BBOX_XMIN" --xmax "$BBOX_XMAX" \
+            --ymin "$BBOX_YMIN" --ymax "$BBOX_YMAX" \
+            --output /tmp/region/region.parquet | tee /tmp/region/extract.log
+          ROWS=$(sed -n 's/^rows=\([0-9][0-9]*\).*/\1/p' /tmp/region/extract.log)
+          test -n "$ROWS"
+          # A count at the limit means the LIMIT truncated the region: fail
+          # rather than silently build a partial shard set.
+          if [ "$ROWS" -ge "$EXTRACT_LIMIT" ]; then
+            echo "::error::extracted $ROWS rows at the $EXTRACT_LIMIT limit: raise extract_limit"
+            exit 1
+          fi
+          jq -n --argjson rows "$ROWS" --argjson limit "$EXTRACT_LIMIT" \
+            --argjson seconds "$((SECONDS - EXTRACT_START))" \
+            '{extracted_rows:$rows,extract_limit:$limit,truncated:false,extract_wall_seconds:$seconds}' \
+            > /tmp/region/extract.json
+
+      - name: Build the shard set twice and byte-compare for determinism
+        run: |
+          set -euo pipefail
+          BUILD_START=$SECONDS
+          python scripts/build_places_region_shards.py \
+            --input /tmp/region/region.parquet --output-dir /tmp/region/a \
+            --region-name "$REGION_NAME" --shard-row-cap "$SHARD_ROW_CAP" \
+            --report /tmp/region/build-report.json
+          python scripts/build_places_region_shards.py \
+            --input /tmp/region/region.parquet --output-dir /tmp/region/b \
+            --region-name "$REGION_NAME" --shard-row-cap "$SHARD_ROW_CAP" \
+            --report /tmp/region/build-report-b.json
+          # Every produced object must be byte-identical across the two builds.
+          while read -r OBJ; do
+            cmp "/tmp/region/a/${OBJ}" "/tmp/region/b/${OBJ}"
+          done < <(jq -r '.produced_objects[]' /tmp/region/build-report.json)
+          # The two reports must agree on the object set (build timings differ).
+          diff \
+            <(jq -S '.produced_objects' /tmp/region/build-report.json) \
+            <(jq -S '.produced_objects' /tmp/region/build-report-b.json)
+          jq -n --argjson seconds "$((SECONDS - BUILD_START))" \
+            '{determinism_ok:true,build_wall_seconds:$seconds}' \
+            > /tmp/region/determinism.json
+          rm -rf /tmp/region/b
+
+      - name: Upload the shard set to the isolated prefix with verified readback
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          UPLOAD_START=$SECONDS
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          mapfile -t OBJECTS < <(jq -r '.produced_objects[]' /tmp/region/build-report.json)
+          ( cd /tmp/region/a && python "$GITHUB_WORKSPACE/scripts/r2_verified_store.py" \
+            build-manifest --prefix "$REGION_PREFIX" \
+            --output /tmp/region/store-manifest.json "${OBJECTS[@]}" )
+          python "$GITHUB_WORKSPACE/scripts/r2_verified_store.py" \
+            --bucket geocoder-shards --endpoint-url "$ENDPOINT" upload-manifest \
+            --prefix "$REGION_PREFIX" --manifest /tmp/region/store-manifest.json \
+            --report /tmp/region/upload.json
+          jq -e 'all(.artifacts[]; .readback_verified == true)' /tmp/region/upload.json
+          jq -n --argjson seconds "$((SECONDS - UPLOAD_START))" \
+            '{upload_wall_seconds:$seconds}' > /tmp/region/upload-timing.json
+
+      - name: Restore from a clean directory with size + SHA-256 verified downloads
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          python "$GITHUB_WORKSPACE/scripts/r2_verified_store.py" \
+            --bucket geocoder-shards --endpoint-url "$ENDPOINT" restore-manifest \
+            --manifest /tmp/region/store-manifest.json \
+            --output-dir /tmp/region/restore --report /tmp/region/restore.json
+          jq -e 'all(.artifacts[]; .verified == true)' /tmp/region/restore.json
+          while read -r OBJ; do
+            cmp "/tmp/region/a/${OBJ}" "/tmp/region/restore/${OBJ}"
+          done < <(jq -r '.produced_objects[]' /tmp/region/build-report.json)
+
+      - name: Build, verify, and upload the family manifest
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          # Each family-manifest artifact's object_key is the immutable published
+          # R2 key; its bytes/sha256 are recomputed from the local shard file.
+          ARTIFACT_ARGS=()
+          while IFS=$'\t' read -r KEY NAME; do
+            ARTIFACT_ARGS+=(--artifact "${KEY}=/tmp/region/a/${NAME}")
+          done < <(jq -r '.artifacts[] | "\(.key)\t\(.path)"' /tmp/region/store-manifest.json)
+          python scripts/global_build_manifest.py family-manifest \
+            --family places --overture-release "$RELEASE" \
+            --producer-commit "$GITHUB_SHA" \
+            --producer-script scripts/build_places_region_shards.py \
+            --producer-version 1 \
+            --region-name "$REGION_NAME" \
+            --bbox "$BBOX_XMIN" "$BBOX_YMIN" "$BBOX_XMAX" "$BBOX_YMAX" \
+            --bbox-scope exact \
+            "${ARTIFACT_ARGS[@]}" \
+            --output /tmp/region/family-manifest.json
+          # Verify the family manifest against the verified upload listing.
+          jq '[.artifacts[] | {key, value: [.bytes, .sha256]}] | from_entries' \
+            /tmp/region/upload.json > /tmp/region/listing.json
+          python scripts/global_build_manifest.py verify-family-manifest \
+            --manifest /tmp/region/family-manifest.json \
+            --listing /tmp/region/listing.json \
+            --output /tmp/region/family-verify.json
+          # Publish the family manifest object itself under the isolated prefix.
+          python scripts/r2_verified_store.py build-manifest \
+            --prefix "$REGION_PREFIX" --output /tmp/region/family-store-manifest.json \
+            /tmp/region/family-manifest.json
+          python scripts/r2_verified_store.py \
+            --bucket geocoder-shards --endpoint-url "$ENDPOINT" upload-manifest \
+            --prefix "$REGION_PREFIX" --manifest /tmp/region/family-store-manifest.json \
+            --report /tmp/region/family-upload.json
+          jq -e 'all(.artifacts[]; .readback_verified == true)' /tmp/region/family-upload.json
+
+      - name: Assemble the retained evidence record
+        if: always()
+        run: |
+          set -euo pipefail
+          # Assemble the full record only when every input exists. On a partial
+          # failure this cleanly no-ops; the upload-artifact step still retains
+          # whatever intermediate JSON was produced.
+          for name in extract build-report determinism upload-timing upload \
+            family-manifest family-verify; do
+            if [ ! -f "/tmp/region/${name}.json" ]; then
+              echo "partial run: /tmp/region/${name}.json missing, skipping evidence"
+              exit 0
+            fi
+          done
+          jq -n \
+            --slurpfile extract /tmp/region/extract.json \
+            --slurpfile build /tmp/region/build-report.json \
+            --slurpfile determinism /tmp/region/determinism.json \
+            --slurpfile upload_timing /tmp/region/upload-timing.json \
+            --slurpfile upload /tmp/region/upload.json \
+            --slurpfile family /tmp/region/family-manifest.json \
+            --slurpfile family_verify /tmp/region/family-verify.json '
+            {
+              schema: "overture-places-region-build-evidence-v1",
+              region_prefix: env.REGION_PREFIX,
+              release: env.RELEASE,
+              promotion_eligible: false,
+              note: "Non-promoting regional build. A green run captured evidence and cleaned up; it is not launch or publication approval.",
+              extract: $extract[0],
+              determinism: $determinism[0],
+              totals: $build[0].totals,
+              shards: $build[0].shards,
+              head: $build[0].head,
+              catalog: $build[0].catalog,
+              upload_wall_seconds: $upload_timing[0].upload_wall_seconds,
+              uploaded_objects: [$upload[0].artifacts[] | {key, bytes, sha256}],
+              family_manifest_digest: $family[0].manifest_digest,
+              family_verification: $family_verify[0]
+            }' > /tmp/region/evidence.json
+          {
+            echo "## Places region build evidence"
+            echo
+            echo '```json'
+            cat /tmp/region/evidence.json
+            echo '```'
+            echo
+            echo "All objects live under the isolated, non-promoting prefix ${REGION_PREFIX}. Nothing here writes a production prefix or the production catalog."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload evidence artifacts for post-mortem diagnosis
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: places-region-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 14
+          path: |
+            /tmp/region/extract.json
+            /tmp/region/build-report.json
+            /tmp/region/determinism.json
+            /tmp/region/upload.json
+            /tmp/region/restore.json
+            /tmp/region/family-manifest.json
+            /tmp/region/family-verify.json
+            /tmp/region/family-upload.json
+            /tmp/region/evidence.json
+
+      - name: Delete the isolated R2 prefix
+        # Runs on success or failure, but only when cleanup is requested. A
+        # cleanup=false run retains the prefix for a follow-up slice run; the
+        # evidence artifact is retained either way.
+        if: ${{ always() && inputs.cleanup }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          aws s3 rm "s3://geocoder-shards/${REGION_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 --bucket geocoder-shards \
+            --prefix "${REGION_PREFIX}/" --max-keys 1 --query KeyCount --output text \
+            --endpoint-url "$ENDPOINT" --region auto)
+          test "$REMAINING" = "0"
