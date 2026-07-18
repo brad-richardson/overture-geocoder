@@ -1286,6 +1286,46 @@ def test_verify_release_rejects_tampered_family_manifest(tmp_path):
         _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
 
 
+@pytest.mark.parametrize(
+    "evil_key",
+    [
+        "families/addresses/../../catalog.json",
+        "families/addresses/../reverse/steal.db",
+        "families/addresses/sub/../../shards/0000.db",
+    ],
+)
+def test_verify_release_rejects_family_artifact_traversal_key(tmp_path, evil_key):
+    # A manifest artifact key that startswith the family prefix but escapes it via
+    # a `..` segment must be REJECTED, never admitted to the expected set: it would
+    # otherwise both whitelist an out-of-prefix key and make `readback_dir / key`
+    # resolve outside the readback dir, so the hash proves nothing about the object
+    # stored under that key. Even with a matching readback file placed at the
+    # traversal target, the key-shape gate fails closed.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    data = b"traversal-artifact-payload"
+    sha = hashlib.sha256(data).hexdigest()
+    manifest = _make_family_manifest(
+        "addresses", [{"object_key": evil_key, "bytes": len(data), "sha256": sha}]
+    )
+    manifest_bytes = gbm.canonical_json(manifest)
+    manifest_key = "families/addresses/family-manifest.json"
+    (metadata / manifest_key).parent.mkdir(parents=True, exist_ok=True)
+    (metadata / manifest_key).write_bytes(manifest_bytes)
+    # Place a readback file AT the traversal target so only the key-shape gate can
+    # stop the artifact from verifying against unrelated bytes.
+    target = readback / evil_key
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_bytes(data)
+
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry(evil_key, len(data)))
+    value["Contents"].append(_entry(manifest_key, len(manifest_bytes)))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="outside its prefix"):
+        _verify(metadata, readback, inventory, tmp_path, optional_families=["addresses"])
+
+
 def test_verify_release_two_families_do_not_touch_core_promotion_shape(tmp_path):
     # Both experimental families verified: the core forward/reverse/id families
     # and the promotable object shape are unchanged; the optional records are a
@@ -1419,6 +1459,30 @@ def test_publish_family_rejects_manifest_family_mismatch(tmp_path):
     with pytest.raises(ValueError, match="manifest declares family"):
         fr.publish_family(
             client, version=VERSION, family="places",
+            manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
+        )
+    assert fake.puts == []
+
+
+def test_publish_family_rejects_artifact_traversal_key(tmp_path):
+    # A manifest listing a `..`-escaping artifact key must abort before any
+    # publish, never writing bytes to a traversed local path or an out-of-prefix
+    # key.
+    root = tmp_path / "build"
+    evil_key = "families/addresses/../../catalog.json"
+    data = b"payload"
+    (root / "families/addresses").mkdir(parents=True, exist_ok=True)
+    manifest = _make_family_manifest(
+        "addresses",
+        [{"object_key": evil_key, "bytes": len(data), "sha256": hashlib.sha256(data).hexdigest()}],
+    )
+    manifest_path = root / "families/addresses/family-manifest.json"
+    manifest_path.write_bytes(gbm.canonical_json(manifest))
+    client, fake = _client_with()
+
+    with pytest.raises(ValueError, match="outside the family prefix"):
+        fr.publish_family(
+            client, version=VERSION, family="addresses",
             manifest_path=manifest_path, artifacts_root=root, log=lambda *_a, **_k: None,
         )
     assert fake.puts == []

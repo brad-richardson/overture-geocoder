@@ -229,6 +229,23 @@ def _family_manifest_key(family: str) -> str:
     return f"{FAMILY_PREFIX}/{family}/family-manifest.json"
 
 
+def _is_safe_family_artifact_key(key: str, *, prefix: str, manifest_key: str) -> bool:
+    """True iff ``key`` is a clean object key strictly under ``prefix``.
+
+    Rejects the manifest key itself, any key outside the family prefix, and any
+    key carrying a traversal or non-canonical path segment (``..``, ``.``, an
+    empty segment, or a leading slash). Without the segment check a key like
+    ``families/{family}/../../catalog.json`` passes a bare ``startswith(prefix)``
+    test yet escapes the family prefix -- both admitting it into the expected set
+    and, worse, making ``readback_dir / key`` resolve OUTSIDE the readback dir so
+    the artifact hash proves nothing about the object stored under that key. This
+    keeps every admitted artifact literally inside ``{version}/families/{family}/``.
+    """
+    if key == manifest_key or not key.startswith(prefix):
+        return False
+    return not any(segment in ("", ".", "..") for segment in key.split("/"))
+
+
 def _verify_optional_family(
     *,
     family: str,
@@ -273,7 +290,7 @@ def _verify_optional_family(
     objects: list[dict] = []
     for artifact in manifest["artifacts"]:
         key = artifact["object_key"]
-        if not key.startswith(prefix) or key == manifest_key:
+        if not _is_safe_family_artifact_key(key, prefix=prefix, manifest_key=manifest_key):
             raise ValueError(
                 f"optional family {family} artifact key is outside its prefix: {key}"
             )
@@ -1290,7 +1307,7 @@ def publish_family(
     local_by_key: dict[str, bytes] = {}
     for artifact in artifacts:
         key = artifact["object_key"]
-        if not key.startswith(prefix) or key == manifest_key:
+        if not _is_safe_family_artifact_key(key, prefix=prefix, manifest_key=manifest_key):
             raise ValueError(f"artifact key is outside the family prefix: {key}")
         local = artifacts_root / key
         if not local.is_file():
