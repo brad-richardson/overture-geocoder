@@ -25,10 +25,15 @@ classified out-of-coverage, never not-found.
   `experiment_places_partition_extract.py` takes `--xmin/--xmax/--ymin/--ymax`,
   applies the pushdown predicate, and has a `--count-only` sizing mode. The
   smoke fixtures (Boston/Tokyo/Mexico City) are exactly this pattern at
-  0.4-degree scale. US-NE is either ~4 metro boxes (boston, nyc, philadelphia,
-  dc) or one NE box split at the 1.5M-row/256 MB shard cap (~3-8 shards;
-  `--count-only` decides). Latin-script byte coefficient ~116 B/place
-  (Boston-measured).
+  0.4-degree scale. Measured against release 2026-06-17.0 (`--count-only`,
+  2026-07-18): full NE box **4,133,950 places**; metro boxes boston 173,095 /
+  nyc 539,642 / philadelphia 149,585 / dc 151,187 (~1.01M combined). At the
+  Latin-script coefficient ~116.4 B/place (Boston-measured) the full box is
+  ~481 MB — 3-4 shards at the 1.5M-row/256 MB cap — and the metros-only cut
+  is ~118 MB. Decision: build the **full NE box** (it is the meaningful
+  region, the cost is trivial, and rural coverage differentiates the deploy
+  from a metros-only demo); the four metro boxes remain natural
+  routing-catalog context entries if the shard split follows metro lines.
 - **Address**: the pushdown pattern is proven in-repo
   (`download_addresses.sql` filters `bbox.*` and even `address_levels`
   state values) but the family producer that feeds R2
