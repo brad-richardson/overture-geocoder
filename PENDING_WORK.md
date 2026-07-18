@@ -26,7 +26,9 @@ Places relevance verdict (step 2).
    dependency-thin).
    RESOLVED 2026-07-18: re-dispatch as `2026-07-18.0` (run 29624600543)
    **green end-to-end** — build, all id stages, finalize-release,
-   post-finalize, smoke. The #96/#97/#104 finalize path is validated over a
+   post-finalize (the promote+smoke step is gated on `promote=true` and was
+   correctly skipped for this `promote=false` dry-run). The #96/#97/#104
+   finalize path is validated over a
    real v3 build; the July 25 scheduled rebuild is cleared. Two notes:
    (a) the workflow fails closed on a version-prefix collision rather than
    resuming, so the first attempt's `2026-07-17.0/` prefix is orphaned,
