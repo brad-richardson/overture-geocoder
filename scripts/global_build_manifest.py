@@ -870,6 +870,74 @@ def verify_family_manifest_against_directory(manifest: Any, directory: Path) -> 
     return validated
 
 
+# ---------------------------------------------------------------------------
+# Standalone family-manifest CLI
+#
+# The fan-in path derives a family manifest from a full map/reduce plan and its
+# reduce artifacts. A direct regional producer (e.g. the Places region build
+# workflow) has no map/reduce plan: it splits one bbox extraction into shards
+# and publishes them under an isolated prefix. These helpers let such a producer
+# assemble and verify the same `overture-global-family-manifest-v1` object from
+# the published object identities directly, reusing `build_family_manifest` and
+# `verify_family_manifest_against_listing` unchanged.
+# ---------------------------------------------------------------------------
+
+
+DEFAULT_FORMAT_VERSION = {
+    "places": PLACES_FORMAT_VERSION,
+    "addresses": ADDRESS_FORMAT_VERSION,
+}
+DEFAULT_TOKENIZER_VERSION = {"places": PLACES_TOKENIZER_VERSION, "addresses": None}
+DEFAULT_NORMALIZATION_VERSION = {
+    "places": None,
+    "addresses": ADDRESS_NORMALIZATION_VERSION,
+}
+
+
+def artifact_from_spec(spec: str) -> dict[str, Any]:
+    """Turn an ``object_key=local_path`` spec into an artifact identity.
+
+    The object key is the immutable published key (verified later against a
+    remote listing); the byte size and SHA-256 are recomputed from the local
+    file so the manifest can never claim an identity the bytes do not carry.
+    """
+    key, separator, path = spec.partition("=")
+    if not separator or not key or not path:
+        raise ValueError(f"artifact spec must be object_key=local_path: {spec!r}")
+    data = Path(path).read_bytes()
+    if not data:
+        raise ValueError(f"artifact file is empty: {path}")
+    return {
+        "object_key": key,
+        "bytes": len(data),
+        "sha256": hashlib.sha256(data).hexdigest(),
+    }
+
+
+def derive_direct_build_id(
+    *, family: str, release: str, producer_commit: str, region: dict[str, Any],
+    artifacts: list[dict[str, Any]],
+) -> str:
+    """A deterministic lineage build id for a build with no map/reduce plan."""
+    return digest(
+        {
+            "kind": "regional-direct-build",
+            "family": family,
+            "overture_release": release,
+            "producer_commit": producer_commit,
+            "region": region,
+            "artifact_object_keys": sorted(item["object_key"] for item in artifacts),
+        }
+    )
+
+
+def load_listing(path: Path) -> dict[str, Any]:
+    raw = read_json(path)
+    if not isinstance(raw, dict):
+        raise ValueError("listing must be a JSON object of object_key -> [bytes, sha256]")
+    return raw
+
+
 def main() -> None:
     parser = argparse.ArgumentParser()
     commands = parser.add_subparsers(dest="command", required=True)
@@ -909,6 +977,35 @@ def main() -> None:
     fan_in_parser.add_argument("--generated-at")
     fan_in_parser.add_argument("--family-manifest-output", type=Path)
 
+    family_parser = commands.add_parser("family-manifest")
+    family_parser.add_argument("--family", choices=sorted(FAMILIES), required=True)
+    family_parser.add_argument("--overture-release", required=True)
+    family_parser.add_argument("--producer-commit", required=True)
+    family_parser.add_argument("--producer-script", required=True)
+    family_parser.add_argument("--producer-version", required=True)
+    family_parser.add_argument("--region-name", required=True)
+    family_parser.add_argument(
+        "--bbox", nargs=4, type=float, metavar=("XMIN", "YMIN", "XMAX", "YMAX"),
+        required=True,
+    )
+    family_parser.add_argument("--bbox-scope", choices=sorted(BBOX_SCOPES), required=True)
+    family_parser.add_argument("--format-version")
+    family_parser.add_argument("--tokenizer-version")
+    family_parser.add_argument("--normalization-version")
+    family_parser.add_argument("--build-id")
+    family_parser.add_argument("--generated-at")
+    family_parser.add_argument(
+        "--artifact", action="append", required=True, metavar="OBJECT_KEY=LOCAL_PATH"
+    )
+    family_parser.add_argument("--output", type=Path, required=True)
+
+    verify_parser = commands.add_parser("verify-family-manifest")
+    verify_parser.add_argument("--manifest", type=Path, required=True)
+    verify_group = verify_parser.add_mutually_exclusive_group(required=True)
+    verify_group.add_argument("--listing", type=Path)
+    verify_group.add_argument("--against-directory", type=Path)
+    verify_parser.add_argument("--output", type=Path)
+
     args = parser.parse_args()
     if args.command == "plan":
         result = build_plan(
@@ -922,6 +1019,70 @@ def main() -> None:
         write_json(args.output, result)
     elif args.command == "describe-task":
         print(canonical_json(describe_task(read_json(args.plan), args.kind, args.index)).decode(), end="")
+    elif args.command == "family-manifest":
+        artifacts = [artifact_from_spec(spec) for spec in args.artifact]
+        region = {
+            "name": args.region_name,
+            "bbox": list(args.bbox),
+            "bbox_scope": args.bbox_scope,
+        }
+        build_id = args.build_id or derive_direct_build_id(
+            family=args.family,
+            release=args.overture_release,
+            producer_commit=args.producer_commit,
+            region=region,
+            artifacts=artifacts,
+        )
+        require_hex_digest(build_id, "build_id")
+        versions = {
+            "format": args.format_version or DEFAULT_FORMAT_VERSION[args.family],
+            "tokenizer": (
+                args.tokenizer_version
+                if args.tokenizer_version is not None
+                else DEFAULT_TOKENIZER_VERSION[args.family]
+            ),
+            "normalization": (
+                args.normalization_version
+                if args.normalization_version is not None
+                else DEFAULT_NORMALIZATION_VERSION[args.family]
+            ),
+        }
+        manifest = build_family_manifest(
+            args.family,
+            lineage={
+                "overture_release": args.overture_release,
+                "build_id": build_id,
+                "producer_commit": args.producer_commit,
+                "producer_script": args.producer_script,
+                "producer_version": args.producer_version,
+            },
+            versions=versions,
+            region=region,
+            artifacts=artifacts,
+            generated_at=args.generated_at,
+        )
+        write_json(args.output, manifest)
+    elif args.command == "verify-family-manifest":
+        manifest = read_json(args.manifest)
+        if args.against_directory is not None:
+            verified = verify_family_manifest_against_directory(
+                manifest, args.against_directory
+            )
+        else:
+            verified = verify_family_manifest_against_listing(
+                manifest, load_listing(args.listing)
+            )
+        summary = {
+            "schema": "overture-family-manifest-verification-v1",
+            "family": verified["family"],
+            "manifest_digest": verified["manifest_digest"],
+            "region": verified["region"],
+            "verified_objects": verified["totals"]["artifacts"],
+            "verified_bytes": verified["totals"]["bytes"],
+        }
+        if args.output is not None:
+            write_json(args.output, summary)
+        print(canonical_json(summary).decode(), end="")
     else:
         plan = read_json(args.plan)
         completions = [read_json(path) for path in args.map_completion]
