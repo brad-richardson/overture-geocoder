@@ -42,6 +42,9 @@ DEFAULT_FAMILY_OPERATIONS = {
     "addresses": ["structured_forward"],
     "places": ["forward"],
 }
+FAMILY_OPERATION_DEPENDENCIES = {
+    ("places", "forward"): ["families/places/head.phrp"],
+}
 CORE_OPERATIONS = {
     "feature_lookup": ["id"],
     "forward": ["divisions"],
@@ -460,6 +463,15 @@ def build_release_manifest(
         artifacts_by_key = {
             artifact["object_key"]: artifact for artifact in validated["artifacts"]
         }
+        for operation in operations:
+            for required_key in FAMILY_OPERATION_DEPENDENCIES.get(
+                (family, operation), []
+            ):
+                if required_key not in artifacts_by_key:
+                    raise ValueError(
+                        f"{family} {operation} requires manifest artifact "
+                        f"{required_key}"
+                    )
         normalized_entrypoints: dict[str, dict[str, Any]] = {}
         for operation, key in sorted(entrypoints.items()):
             safe_key = _require_family_artifact_key(
