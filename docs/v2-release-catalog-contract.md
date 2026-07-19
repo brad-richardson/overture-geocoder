@@ -27,6 +27,9 @@ An operation cannot be advertised from shard presence alone. Its entrypoint
 must be one of the family manifest's hashed artifacts, such as Places
 `forward -> catalog.pcat` or addresses
 `structured_forward -> address-collection.json`.
+The CLI accepts those artifact keys relative to the release, exactly as they
+appear in a family manifest; the generated v2 release exposes bucket-root keys
+prefixed by the immutable legacy version so Workers can fetch them directly.
 
 ## Namespace
 

@@ -99,6 +99,16 @@ def _require_family_artifact_key(value: Any, family: str, field: str) -> str:
     return key
 
 
+def _require_published_family_artifact_key(
+    value: Any, legacy_version: str, family: str, field: str
+) -> str:
+    key = _require_safe_key(value, field)
+    prefix = f"{legacy_version}/families/{family}/"
+    if not key.startswith(prefix):
+        raise ValueError(f"{field} must remain under {prefix}")
+    return key
+
+
 def _validate_legacy_release(manifest: Any, overture_release: str) -> dict[str, Any]:
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
         raise ValueError("legacy release manifest must use schema_version 1")
@@ -204,7 +214,10 @@ def build_release_manifest(
                     f"{family} {operation} entrypoint is not a manifest artifact"
                 )
             normalized_entrypoints[operation] = {
-                "object_key": safe_key,
+                # Family manifests use keys relative to the immutable release
+                # prefix. V2 entrypoints are bucket-root keys that a Worker can
+                # fetch directly, so expose the actually published location.
+                "object_key": f"{legacy['version']}/{safe_key}",
                 "bytes": artifact["bytes"],
                 "sha256": artifact["sha256"],
             }
@@ -344,8 +357,11 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
                 {"object_key", "bytes", "sha256"},
                 f"{family} {operation} entrypoint",
             )
-            _require_family_artifact_key(
-                identity["object_key"], family, f"{family} {operation} entrypoint"
+            _require_published_family_artifact_key(
+                identity["object_key"],
+                legacy_version,
+                family,
+                f"{family} {operation} entrypoint",
             )
             gbm.require_int(
                 identity["bytes"], f"{family} {operation} entrypoint bytes", minimum=1
@@ -425,7 +441,11 @@ def verify_release_sources(
                     f"{family} family reference {field} differs from its source manifest"
                 )
         artifacts_by_key = {
-            artifact["object_key"]: artifact
+            f"{legacy['version']}/{artifact['object_key']}": {
+                "object_key": f"{legacy['version']}/{artifact['object_key']}",
+                "bytes": artifact["bytes"],
+                "sha256": artifact["sha256"],
+            }
             for artifact in family_manifest["artifacts"]
         }
         for operation, identity in reference["entrypoints"].items():

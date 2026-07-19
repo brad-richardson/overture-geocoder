@@ -124,7 +124,7 @@ def test_release_binds_core_and_family_capabilities():
     }
     assert manifest["families"]["places"]["coverage"]["name"] == "us-northeast"
     assert manifest["families"]["places"]["entrypoints"]["forward"] == {
-        "object_key": "families/places/catalog.pcat",
+        "object_key": "2026-07-18.0/families/places/catalog.pcat",
         "bytes": 123,
         "sha256": "c" * 64,
     }
@@ -264,11 +264,13 @@ def test_release_validation_detects_capability_and_digest_tampering():
 
     tampered = copy.deepcopy(manifest)
     tampered["families"]["places"]["entrypoints"]["forward"]["object_key"] = (
-        "families/addresses/address-collection.json"
+        "2026-07-18.0/families/addresses/address-collection.json"
     )
     unsigned = {key: value for key, value in tampered.items() if key != "release_digest"}
     tampered["release_digest"] = gbm.digest(unsigned)
-    with pytest.raises(ValueError, match="must remain under families/places"):
+    with pytest.raises(
+        ValueError, match="must remain under 2026-07-18.0/families/places"
+    ):
         v2.validate_release_manifest(tampered)
 
 
@@ -279,7 +281,7 @@ def test_source_verification_rejects_recomputed_unlisted_entrypoint():
     addresses = family_manifest("addresses")
     tampered = copy.deepcopy(manifest)
     tampered["families"]["places"]["entrypoints"]["forward"] = {
-        "object_key": "families/places/unlisted.pcat",
+        "object_key": "2026-07-18.0/families/places/unlisted.pcat",
         "bytes": 999,
         "sha256": "d" * 64,
     }
