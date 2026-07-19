@@ -1,34 +1,19 @@
-//! Production structured `/address` exact-lookup route.
-//!
-//! This is the additive, always-compiled counterpart to the isolated
-//! `/__address-page-spike` smoke route. It accepts the eight structured fields
-//! from the address contract (`docs/address-structured-endpoint-contract.md`),
-//! normalizes them exactly as the producer does, discovers the address family
-//! from the release catalog, and reads candidates through the shared address
-//! page reader ([`ShardLoader::lookup_address_page`]).
-//!
-//! The route is safe to ship before any address family is published: when the
-//! catalog carries no `{version}/address-collection.json`, it returns a stable
-//! `address_family_unavailable` 404 without touching the address read path.
-//! It shares no state with, and does not change the behavior of, the existing
-//! `/search`, `/reverse`, `/id`, or `/health` routes.
+//! Structured address normalization, routing, and page lookup for `/v2/forward`.
 
 use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
-use serde_json::{json, Value};
 use unicode_normalization::UnicodeNormalization;
 use worker::*;
 
 use crate::address_pages::AddressPageRecord;
-use crate::range_reader::RangeReadMetrics;
 use crate::stac::cache::IMMUTABLE_CACHE_TTL;
 use crate::stac::ShardLoader;
 
 /// The eight structured request fields, in the contract's normalized lookup
 /// order. Positions 1 and 2 are the first and last retained source
 /// `address_levels` values (`admin_level_general` / `admin_level_specific`).
-const FIELD_NAMES: [&str; 8] = [
+pub(crate) const FIELD_NAMES: [&str; 8] = [
     "country",
     "admin_level_general",
     "admin_level_specific",
@@ -48,11 +33,6 @@ const REQUIRED_NONEMPTY: [usize; 3] = [0, 5, 6];
 /// inputs before any normalization or R2 work.
 const MAX_FIELD_BYTES: usize = 512;
 
-/// Hard response candidate cap from the contract. Above the measured maximum
-/// exact-key fanout of 252. Exceeding it is a bounded error, never a silent
-/// truncation.
-const CANDIDATE_CAP: usize = 512;
-
 /// Normalization contract version echoed to clients so a miss can be diagnosed.
 /// Bumps when the NFC / Unicode-whitespace-collapse / ASCII-lowercase contract
 /// changes (e.g. adopting broader Unicode case folding).
@@ -63,14 +43,14 @@ const MAX_HASH_PREFIX_BITS: usize = 24;
 
 /// A request field failed contract validation.
 #[derive(Debug)]
-enum ValidationError {
+pub(crate) enum ValidationError {
     Missing(&'static str),
     Empty(&'static str),
     TooLong(&'static str),
 }
 
 impl ValidationError {
-    fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match self {
             Self::Missing(name) => format!("Missing required parameter: {name}"),
             Self::Empty(name) => format!("Parameter must not be empty: {name}"),
@@ -121,7 +101,7 @@ fn normalize_field(value: &str) -> String {
 ///
 /// All eight keys must be present (an omitted field is a 400, never a wildcard).
 /// `country`, `street`, and `number` must be non-empty after normalization.
-fn build_lookup_key(
+pub(crate) fn build_lookup_key(
     params: &HashMap<String, String>,
 ) -> std::result::Result<[String; 8], ValidationError> {
     let mut normalized: [String; 8] = Default::default();
@@ -477,13 +457,6 @@ fn positive_identity(bytes: Option<usize>, sha256: Option<&str>) -> bool {
         })
 }
 
-fn address_collection_keys(version: &str) -> [String; 2] {
-    [
-        format!("{version}/families/addresses/address-collection.json"),
-        format!("{version}/address-collection.json"),
-    ]
-}
-
 /// Stable 64-bit hash of the complete normalized eight-field key (FNV-1a over
 /// the fields joined by `0x1f`). This is the Worker's routing contract: a
 /// producer that splits a country across shards MUST partition by this exact
@@ -571,9 +544,7 @@ fn select_shard<'a>(collection: &'a AddressCollection, key: &[String; 8]) -> Sha
 }
 
 /// Outcome of an address lookup, before HTTP shaping.
-enum AddressOutcome {
-    /// No address family in the catalog -> stable 404.
-    FamilyUnavailable,
+pub(crate) enum AddressOutcome {
     /// The family provably does not serve the query's country.
     OutOfCoverage {
         data_version: String,
@@ -585,209 +556,83 @@ enum AddressOutcome {
         data_version: String,
         normalization_version: &'static str,
         candidates: Vec<AddressPageRecord>,
-        read_metrics: RangeReadMetrics,
     },
 }
 
 impl ShardLoader {
-    /// Fetch the latest release's address family manifest, or `None` when the
-    /// family is not published (a cheap, negative-cacheable catalog probe).
-    async fn load_address_collection(&self) -> Result<Option<(String, AddressCollection)>> {
-        let Some(version) = self.latest_version().await? else {
-            return Err(Error::RustError("No versions found in catalog".into()));
+    async fn load_address_collection_key(&self, key: &str) -> Result<Option<AddressCollection>> {
+        let Some(text) = self.memoized_get_text(key, IMMUTABLE_CACHE_TTL).await? else {
+            return Ok(None);
         };
-        for key in address_collection_keys(&version) {
-            let Some(text) = self.memoized_get_text(&key, IMMUTABLE_CACHE_TTL).await? else {
-                continue;
-            };
-            let collection: AddressCollection = serde_json::from_str(&text)
-                .map_err(|e| Error::RustError(format!("Invalid {key}: {e}")))?;
-            if !collection.supported() {
-                return Err(Error::RustError(format!(
-                    "Unsupported address collection contract: {key}"
-                )));
-            }
-            return Ok(Some((version, collection)));
+        let collection: AddressCollection = serde_json::from_str(&text)
+            .map_err(|e| Error::RustError(format!("Invalid {key}: {e}")))?;
+        if !collection.supported() {
+            return Err(Error::RustError(format!(
+                "Unsupported address collection contract: {key}"
+            )));
         }
-        Ok(None)
+        Ok(Some(collection))
     }
 
-    /// Resolve a normalized eight-field key to its address candidates.
-    async fn lookup_address(&self, key: &[String; 8]) -> Result<AddressOutcome> {
-        let Some((version, collection)) = self.load_address_collection().await? else {
-            return Ok(AddressOutcome::FamilyUnavailable);
-        };
+    /// Resolve an exact structured lookup through the collection object named
+    /// by an atomic v2 release manifest. Shard hrefs are relative to the
+    /// independent family source version, not to the geocoder build identity.
+    pub(crate) async fn lookup_address_entrypoint(
+        &self,
+        key: &[String; 8],
+        collection_key: &str,
+        geocoder_build: &str,
+    ) -> Result<AddressOutcome> {
+        const SUFFIX: &str = "/families/addresses/address-collection.json";
+        let data_root = collection_key.strip_suffix(SUFFIX).ok_or_else(|| {
+            Error::RustError("v2 address entrypoint is outside its canonical family path".into())
+        })?;
+        if data_root.is_empty() || data_root.contains('/') {
+            return Err(Error::RustError(
+                "v2 address entrypoint has an invalid source version".into(),
+            ));
+        }
+        let collection = self
+            .load_address_collection_key(collection_key)
+            .await?
+            .ok_or_else(|| crate::stac::not_found(collection_key))?;
+        self.lookup_address_collection(key, data_root, geocoder_build.to_string(), &collection)
+            .await
+    }
+
+    async fn lookup_address_collection(
+        &self,
+        key: &[String; 8],
+        data_root: &str,
+        data_version: String,
+        collection: &AddressCollection,
+    ) -> Result<AddressOutcome> {
         let normalization_version = collection.response_normalization_version();
-        match select_shard(&collection, key) {
+        match select_shard(collection, key) {
             ShardSelection::OutOfCoverage => Ok(AddressOutcome::OutOfCoverage {
-                data_version: version,
+                data_version,
                 normalization_version,
             }),
             ShardSelection::Unroutable => Err(Error::RustError(format!(
-                "address family manifest for {version} has no shard range covering the key"
+                "address family manifest for {data_version} has no shard range covering the key"
             ))),
             ShardSelection::Empty => Ok(AddressOutcome::Resolved {
-                data_version: version,
+                data_version,
                 normalization_version,
                 candidates: Vec::new(),
-                read_metrics: RangeReadMetrics::default(),
             }),
             ShardSelection::Shard(shard) => {
-                let index_key = format!("{version}/{}", shard.index_href);
-                let data_key = format!("{version}/{}", shard.data_href);
+                let index_key = format!("{data_root}/{}", shard.index_href);
+                let data_key = format!("{data_root}/{}", shard.data_href);
                 let lookup = self.lookup_address_page(&index_key, &data_key, key).await?;
                 Ok(AddressOutcome::Resolved {
-                    data_version: version,
+                    data_version,
                     normalization_version,
                     candidates: lookup.records,
-                    read_metrics: lookup.read_metrics,
                 })
             }
         }
     }
-}
-
-/// Stable machine-readable family-unavailable body.
-fn family_unavailable_body() -> Value {
-    json!({ "error": "address_family_unavailable" })
-}
-
-/// Out-of-coverage body: an explicit, non-error signal distinct from an exact
-/// miss (`coverage: "in_coverage"`, empty candidates).
-fn out_of_coverage_body(data_version: &str, normalization_version: &str) -> Value {
-    json!({
-        "candidates": [],
-        "candidate_count": 0,
-        "ambiguous": false,
-        "overflow": false,
-        "coverage": "out_of_coverage",
-        "data_version": data_version,
-        "normalization_version": normalization_version,
-    })
-}
-
-fn candidate_json(record: &AddressPageRecord) -> Value {
-    json!({
-        "id": record.id,
-        "longitude": record.longitude,
-        "latitude": record.latitude,
-        "country": record.country,
-        "postal_city": record.postal_city,
-        "postcode": record.postcode,
-        "street": record.street,
-        "number": record.number,
-        "unit": record.unit,
-        "address_levels": record.address_levels,
-        "source": {
-            "object_index": record.source_object_index,
-            "row_group": record.source_row_group,
-            "row_index": record.source_row_index,
-        },
-    })
-}
-
-/// Shape resolved candidates into `(status, body)`. Every exact-key match is
-/// returned in producer order with no dedup. Over the candidate cap is a bounded
-/// 413 error carrying the observed count, never a truncation.
-fn resolved_body(
-    data_version: &str,
-    normalization_version: &str,
-    candidates: &[AddressPageRecord],
-    debug_metrics: Option<&RangeReadMetrics>,
-) -> (u16, Value) {
-    if candidates.len() > CANDIDATE_CAP {
-        return (
-            413,
-            json!({
-                "error": "address_candidate_overflow",
-                "observed_candidates": candidates.len(),
-                "candidate_cap": CANDIDATE_CAP,
-                "overflow": true,
-                "data_version": data_version,
-                "normalization_version": normalization_version,
-            }),
-        );
-    }
-    let items: Vec<Value> = candidates.iter().map(candidate_json).collect();
-    let mut body = json!({
-        "candidates": items,
-        "candidate_count": candidates.len(),
-        "ambiguous": candidates.len() > 1,
-        "overflow": false,
-        "coverage": "in_coverage",
-        "data_version": data_version,
-        "normalization_version": normalization_version,
-    });
-    if let Some(metrics) = debug_metrics {
-        if let Some(object) = body.as_object_mut() {
-            object.insert("debug".to_string(), json!({ "read_metrics": metrics }));
-        }
-    }
-    (200, body)
-}
-
-/// Map a lookup outcome to `(status, X-Data-Version, body)`. Pure so the route
-/// contract (status codes, coverage distinction, version echo) is unit-tested
-/// without a Worker environment.
-fn shape_outcome(outcome: AddressOutcome, include_debug: bool) -> (u16, Option<String>, Value) {
-    match outcome {
-        AddressOutcome::FamilyUnavailable => (404, None, family_unavailable_body()),
-        AddressOutcome::OutOfCoverage {
-            data_version,
-            normalization_version,
-        } => {
-            let body = out_of_coverage_body(&data_version, normalization_version);
-            (200, Some(data_version), body)
-        }
-        AddressOutcome::Resolved {
-            data_version,
-            normalization_version,
-            candidates,
-            read_metrics,
-        } => {
-            let (status, body) = resolved_body(
-                &data_version,
-                normalization_version,
-                &candidates,
-                include_debug.then_some(&read_metrics),
-            );
-            (status, Some(data_version), body)
-        }
-    }
-}
-
-/// Structured exact-address lookup handler.
-pub async fn handle_address(
-    req: Request,
-    ctx: RouteContext<std::rc::Rc<Context>>,
-) -> Result<Response> {
-    let url = req.url()?;
-    let params: HashMap<String, String> = url
-        .query_pairs()
-        .map(|(k, v)| (k.to_string(), v.to_string()))
-        .collect();
-    let include_debug = params
-        .get("debug")
-        .map(|d| d == "1" || d == "true")
-        .unwrap_or(false);
-
-    let key = match build_lookup_key(&params) {
-        Ok(key) => key,
-        Err(error) => return Response::error(error.message(), 400),
-    };
-
-    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
-    let outcome = loader.lookup_address(&key).await?;
-    let (status, data_version, body) = shape_outcome(outcome, include_debug);
-
-    let mut response = Response::from_json(&body)?.with_status(status);
-    response
-        .headers_mut()
-        .set("Content-Type", "application/json; charset=utf-8")?;
-    if let Some(version) = data_version {
-        response.headers_mut().set("X-Data-Version", &version)?;
-    }
-    Ok(response)
 }
 
 #[cfg(test)]
@@ -812,35 +657,6 @@ mod tests {
             ("number", "10"),
             ("unit", ""),
         ]
-    }
-
-    fn record(id: &str, number: &str) -> AddressPageRecord {
-        AddressPageRecord {
-            key: [
-                "us",
-                "ma",
-                "middlesex",
-                "stoneham",
-                "02180",
-                "main street",
-                number,
-                "",
-            ]
-            .map(str::to_string),
-            id: id.to_string(),
-            longitude: -71.0999,
-            latitude: 42.4801,
-            source_object_index: 0,
-            source_row_group: 12,
-            source_row_index: 5,
-            country: "US".to_string(),
-            postal_city: "Stoneham".to_string(),
-            postcode: "02180".to_string(),
-            street: "Main Street".to_string(),
-            number: number.to_string(),
-            unit: String::new(),
-            address_levels: vec!["MA".to_string(), "Middlesex".to_string()],
-        }
     }
 
     fn shard(country: &str, hash: Option<(u64, u64)>) -> AddressShard {
@@ -1172,17 +988,6 @@ mod tests {
         assert!(!unused_split.supported());
     }
 
-    #[test]
-    fn address_collection_discovery_prefers_the_family_prefix() {
-        assert_eq!(
-            address_collection_keys("2026-07-19.0"),
-            [
-                "2026-07-19.0/families/addresses/address-collection.json",
-                "2026-07-19.0/address-collection.json",
-            ]
-        );
-    }
-
     // --- Manifest deserialization ---
 
     #[test]
@@ -1213,139 +1018,5 @@ mod tests {
         assert_eq!(shard.index_href, "address/us-ne-0.idx");
         assert!(shard.contains_hash(50));
         assert!(!shard.contains_hash(101));
-    }
-
-    // --- Response shaping ---
-
-    #[test]
-    fn family_unavailable_body_is_stable() {
-        assert_eq!(
-            family_unavailable_body(),
-            json!({ "error": "address_family_unavailable" })
-        );
-    }
-
-    #[test]
-    fn out_of_coverage_is_distinct_from_an_exact_miss() {
-        let out = out_of_coverage_body("2026-07-13.0", NORMALIZATION_VERSION);
-        assert_eq!(out["coverage"], "out_of_coverage");
-        assert_eq!(out["candidate_count"], 0);
-
-        let (status, miss) = resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &[], None);
-        assert_eq!(status, 200);
-        assert_eq!(miss["coverage"], "in_coverage");
-        assert_eq!(miss["candidate_count"], 0);
-        assert_eq!(miss["ambiguous"], false);
-    }
-
-    #[test]
-    fn returns_all_duplicate_candidates_in_order_without_dedup() {
-        let candidates = vec![
-            record("id-a", "10"),
-            record("id-b", "10"),
-            record("id-c", "10"),
-        ];
-        let (status, body) =
-            resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &candidates, None);
-        assert_eq!(status, 200);
-        assert_eq!(body["candidate_count"], 3);
-        assert_eq!(body["ambiguous"], true);
-        assert_eq!(body["overflow"], false);
-        let ids: Vec<&str> = body["candidates"]
-            .as_array()
-            .unwrap()
-            .iter()
-            .map(|c| c["id"].as_str().unwrap())
-            .collect();
-        assert_eq!(ids, ["id-a", "id-b", "id-c"]);
-        assert_eq!(body["candidates"][0]["source"]["row_group"], 12);
-        assert_eq!(body["data_version"], "2026-07-13.0");
-        assert_eq!(body["normalization_version"], NORMALIZATION_VERSION);
-    }
-
-    #[test]
-    fn signals_bounded_overflow_instead_of_truncating() {
-        let candidates: Vec<AddressPageRecord> = (0..=CANDIDATE_CAP)
-            .map(|i| record(&format!("id-{i}"), "10"))
-            .collect();
-        assert_eq!(candidates.len(), CANDIDATE_CAP + 1);
-        let (status, body) =
-            resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &candidates, None);
-        assert_eq!(status, 413);
-        assert_eq!(body["error"], "address_candidate_overflow");
-        assert_eq!(body["observed_candidates"], CANDIDATE_CAP + 1);
-        assert_eq!(body["candidate_cap"], CANDIDATE_CAP);
-        assert!(body.get("candidates").is_none());
-    }
-
-    #[test]
-    fn debug_metrics_are_opt_in() {
-        let candidates = vec![record("id-a", "10")];
-        let (_, plain) = resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &candidates, None);
-        assert!(plain.get("debug").is_none());
-        let (_, debug) = resolved_body(
-            "2026-07-13.0",
-            NORMALIZATION_VERSION,
-            &candidates,
-            Some(&RangeReadMetrics::default()),
-        );
-        assert!(debug["debug"]["read_metrics"].is_object());
-    }
-
-    // --- Route-level outcome mapping ---
-
-    #[test]
-    fn family_unavailable_outcome_is_a_stable_404_without_version() {
-        let (status, version, body) = shape_outcome(AddressOutcome::FamilyUnavailable, false);
-        assert_eq!(status, 404);
-        assert_eq!(version, None);
-        assert_eq!(body, json!({ "error": "address_family_unavailable" }));
-    }
-
-    #[test]
-    fn out_of_coverage_outcome_is_200_with_version_and_coverage() {
-        let (status, version, body) = shape_outcome(
-            AddressOutcome::OutOfCoverage {
-                data_version: "2026-07-13.0".to_string(),
-                normalization_version: V2_NORMALIZATION_VERSION,
-            },
-            false,
-        );
-        assert_eq!(status, 200);
-        assert_eq!(version.as_deref(), Some("2026-07-13.0"));
-        assert_eq!(body["coverage"], "out_of_coverage");
-        assert_eq!(body["normalization_version"], V2_NORMALIZATION_VERSION);
-    }
-
-    #[test]
-    fn resolved_outcome_echoes_version_and_candidates() {
-        let (status, version, body) = shape_outcome(
-            AddressOutcome::Resolved {
-                data_version: "2026-07-13.0".to_string(),
-                normalization_version: V2_NORMALIZATION_VERSION,
-                candidates: vec![record("id-a", "10")],
-                read_metrics: RangeReadMetrics::default(),
-            },
-            false,
-        );
-        assert_eq!(status, 200);
-        assert_eq!(version.as_deref(), Some("2026-07-13.0"));
-        assert_eq!(body["candidate_count"], 1);
-        assert_eq!(body["coverage"], "in_coverage");
-        assert_eq!(body["normalization_version"], V2_NORMALIZATION_VERSION);
-    }
-
-    /// Reader-level tie-in: decode the committed cross-language page fixture and
-    /// shape those real records through the response builder.
-    #[test]
-    fn shapes_candidates_decoded_from_the_committed_page_fixture() {
-        let plain = include_bytes!("../../../tests/fixtures/pages/plain_page.bin");
-        let records = crate::address_pages::decode_useful_page(plain).unwrap();
-        assert!(!records.is_empty());
-        let (status, body) = resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &records, None);
-        assert_eq!(status, 200);
-        assert_eq!(body["candidate_count"], records.len());
-        assert_eq!(body["candidates"][0]["street"], records[0].street.as_str());
-        assert_eq!(body["candidates"][0]["id"], records[0].id.as_str());
     }
 }

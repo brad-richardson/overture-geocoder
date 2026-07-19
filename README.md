@@ -1,6 +1,6 @@
 # Overture Geocoder
 
-An administrative gazetteer and experimental forward/reverse geocoder built on [Overture Maps](https://overturemaps.org/) data, powered by **Rust**, **Cloudflare Workers**, and **R2**. Production coverage is divisions-first; Places/POI support is opt-in and experimental, and addresses, streets, fuzzy matching, and a broadly Nominatim-compatible contract are not yet provided.
+An administrative gazetteer and experimental forward/reverse geocoder built on [Overture Maps](https://overturemaps.org/) data, powered by **Rust**, **Cloudflare Workers**, and **R2**. Production coverage is divisions-first. A unified v2 Worker contract for bounded Places/POI search and structured exact-address lookup is implemented but remains unavailable until a verified v2 data release is published; free-text addresses, streets, fuzzy matching, and broad Nominatim compatibility are not yet provided.
 
 ## Features
 
@@ -15,6 +15,10 @@ An administrative gazetteer and experimental forward/reverse geocoder built on [
 ## API
 
 Base URL: `https://geocoder.bradr.dev`
+
+The current production endpoints are documented below. The staged unified
+`/v2/forward`, `/v2/reverse`, and `/v2/features/:gers_id` contract is documented
+in [docs/api-v2.md](docs/api-v2.md). There is no batch endpoint.
 
 ### Forward Geocoding (Search)
 

@@ -9,7 +9,8 @@ The first address surface is structured exact lookup only. It does not parse a
 free-form line, expand prefixes, correct spelling, or silently treat omitted
 context as a wildcard.
 
-The request has eight named string fields, in this normalized lookup order:
+The `/v2/forward` request maps eight named string fields into this normalized
+lookup order:
 
 1. `country`
 2. `admin_level_general`
@@ -23,9 +24,9 @@ The request has eight named string fields, in this normalized lookup order:
 The two administrative values are the first and last retained source
 `address_levels` values; the response also preserves the complete raw list.
 They are deliberately not relabelled as region/locality until division
-enrichment defines that mapping. All eight keys must be present. `country`,
-`street`, and `number` must be
-non-empty. The other values may be empty, but an empty value is literal: it
+enrichment defines that mapping. `country`, `street`, and `number` must be
+present and non-empty. The other values may be omitted or empty; either maps to
+the literal empty string. An empty value is literal: it
 matches producer rows whose corresponding normalized value is empty and is not
 a wildcard. A client that has less context needs a separately designed search
 surface rather than surprising exact-lookup fanout.

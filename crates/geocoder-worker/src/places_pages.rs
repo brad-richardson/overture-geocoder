@@ -1,9 +1,10 @@
-//! Strict range reader for the experimental compact Places spatial shard.
+//! Strict range reader for compact Places spatial shards.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use geocoder_core::pages::{format_uuid, ByteRange, ByteReader, PageError};
 use serde::{Deserialize, Serialize};
+use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 use worker::*;
 
 use crate::range_reader::{RangeReadMetrics, RangeReader};
@@ -59,6 +60,80 @@ const MAX_CATALOG_BYTES: usize = 2 * 1024 * 1024;
 const MAX_CATALOG_SHARDS: usize = 32_768;
 const MAX_QUADKEY_LEVEL: usize = 15;
 const PARTITION_SCHEME: &str = "world-quadkey-v1";
+pub(crate) const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v3";
+const LEGACY_TOKENIZER_VERSION: &str = "nfkd-latin-fold-cjk-bigram-v2";
+
+fn supported_tokenizer(value: &str) -> bool {
+    matches!(value, TOKENIZER_VERSION | LEGACY_TOKENIZER_VERSION)
+}
+
+fn is_cjk(character: char) -> bool {
+    matches!(
+        character as u32,
+        0x3400..=0x4DBF
+            | 0x4E00..=0x9FFF
+            | 0x3040..=0x30FF
+            | 0x31F0..=0x31FF
+            | 0xAC00..=0xD7AF
+    )
+}
+
+/// Query tokenizer shared with the global v3 producer contract.
+pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
+    let folded: String = value
+        .trim()
+        .chars()
+        .flat_map(char::to_lowercase)
+        .nfkd()
+        .filter(|character| !is_combining_mark(*character))
+        .collect();
+    let mut words = Vec::new();
+    let mut current = String::new();
+    for character in folded.chars() {
+        if character.is_alphanumeric() || character == '_' {
+            current.push(character);
+        } else if !current.is_empty() {
+            words.push(std::mem::take(&mut current));
+        }
+    }
+    if !current.is_empty() {
+        words.push(current);
+    }
+    let mut result = Vec::new();
+    let mut seen = HashSet::new();
+    for word in words {
+        if seen.insert(word.clone()) {
+            result.push(word.clone());
+        }
+        let characters: Vec<char> = word.chars().collect();
+        let mut start = 0;
+        while start < characters.len() {
+            if !is_cjk(characters[start]) {
+                start += 1;
+                continue;
+            }
+            let mut end = start + 1;
+            while end < characters.len() && is_cjk(characters[end]) {
+                end += 1;
+            }
+            if end - start == 1 {
+                let token = characters[start].to_string();
+                if seen.insert(token.clone()) {
+                    result.push(token);
+                }
+            } else {
+                for index in start..end - 1 {
+                    let token: String = characters[index..=index + 1].iter().collect();
+                    if seen.insert(token.clone()) {
+                        result.push(token);
+                    }
+                }
+            }
+            start = end;
+        }
+    }
+    result
+}
 
 const FIELD_NAME: u8 = 1;
 const FIELD_BRAND: u8 = 2;
@@ -222,10 +297,6 @@ pub(crate) struct PlacesCatalog {
 }
 
 impl PlacesCatalog {
-    pub(crate) fn route_context(&self, context: &str) -> Option<&PlacesCatalogShard> {
-        self.shards.iter().find(|shard| shard.id == context)
-    }
-
     pub(crate) fn route_point(&self, longitude: f64, latitude: f64) -> Option<&PlacesCatalogShard> {
         if self.schema_version == 2 {
             if !longitude.is_finite() || !latitude.is_finite() {
@@ -270,7 +341,7 @@ impl PlacesCatalog {
     }
 
     fn supported(&self) -> bool {
-        if self.tokenizer_version != "nfkd-latin-fold-cjk-bigram-v2"
+        if !supported_tokenizer(&self.tokenizer_version)
             || self.shards.is_empty()
             || self.shards.len() > MAX_CATALOG_SHARDS
         {
@@ -834,7 +905,7 @@ fn decode_head_entry(bytes: &[u8]) -> PageResult<Vec<PlaceProjection>> {
 }
 
 impl ShardLoader {
-    pub(crate) async fn lookup_places_catalog_spike(
+    pub(crate) async fn lookup_places_catalog(
         &self,
         object_key: &str,
     ) -> Result<PlacesCatalogLookup> {
@@ -870,7 +941,7 @@ impl ShardLoader {
         })
     }
 
-    pub(crate) async fn lookup_places_head_spike(
+    pub(crate) async fn lookup_places_head(
         &self,
         object_key: &str,
         clauses: &[PlacesClause],
@@ -988,7 +1059,7 @@ impl ShardLoader {
         })
     }
 
-    pub(crate) async fn lookup_places_shard_spike(
+    pub(crate) async fn lookup_places_shard(
         &self,
         key: &str,
         clauses: &[PlacesClause],
@@ -1020,7 +1091,7 @@ impl ShardLoader {
         let directory: Directory = serde_json::from_slice(&directory_bytes)
             .map_err(|_| Error::RustError("Invalid Places directory JSON".into()))?;
         if directory.schema_version != 1
-            || directory.tokenizer_version != "nfkd-latin-fold-cjk-bigram-v2"
+            || !supported_tokenizer(&directory.tokenizer_version)
             || directory.record_count == 0
             || directory.token_count == 0
             || directory.lexicon_blocks.is_empty()
@@ -1253,6 +1324,26 @@ impl ShardLoader {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn v3_query_tokenizer_matches_global_producer_vectors() {
+        assert_eq!(
+            tokenize_query("  Caf\u{e9} / GOLDEN_gate  "),
+            ["cafe", "golden_gate"]
+        );
+        assert_eq!(
+            tokenize_query("\u{30b9}\u{30bf}\u{30fc}\u{30d0}\u{30c3}\u{30af}\u{30b9}"),
+            [
+                "\u{30b9}\u{30bf}\u{30fc}\u{30cf}\u{30c3}\u{30af}\u{30b9}",
+                "\u{30b9}\u{30bf}",
+                "\u{30bf}\u{30fc}",
+                "\u{30fc}\u{30cf}",
+                "\u{30cf}\u{30c3}",
+                "\u{30c3}\u{30af}",
+                "\u{30af}\u{30b9}",
+            ]
+        );
+    }
 
     fn varint(mut value: u64) -> Vec<u8> {
         let mut bytes = Vec::new();

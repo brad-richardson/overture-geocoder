@@ -121,6 +121,19 @@ impl ShardLoader {
         })
     }
 
+    /// Search one release selected by the atomic v2 release manifest. Unlike
+    /// the v1 route, this must not fall back to a different core build.
+    pub(crate) async fn search_version(
+        &self,
+        version: &str,
+        query: &GeocoderQuery,
+        user_location: &UserLocation,
+        include_debug: bool,
+    ) -> Result<SearchResult> {
+        self.try_search(version, query, user_location, include_debug)
+            .await
+    }
+
     fn country_name_to_code(name: &str) -> Option<&'static str> {
         match name {
             "afghanistan" => Some("AF"),

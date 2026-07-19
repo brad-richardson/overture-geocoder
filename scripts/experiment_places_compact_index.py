@@ -21,7 +21,6 @@ import argparse
 import csv
 import json
 import math
-import re
 import sqlite3
 import struct
 import sys
@@ -40,12 +39,7 @@ PREAMBLE = struct.Struct("<8sI")
 FIELDS = ("name", "brand", "category", "context")
 FIELD_IDS = {name: number for number, name in enumerate(FIELDS)}
 FIELD_WEIGHTS = {"name": 8, "brand": 6, "category": 3, "context": 1}
-TOKEN_RE = re.compile(r"[\w]+", re.UNICODE)
-TOKENIZER_VERSION = "nfkd-latin-fold-cjk-bigram-v2"
-
-
-def _is_latin(character: str) -> bool:
-    return "LATIN" in unicodedata.name(character, "")
+TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v3"
 
 
 def _is_cjk(character: str) -> bool:
@@ -60,21 +54,21 @@ def _is_cjk(character: str) -> bool:
 
 
 def normalize(value: Any) -> str:
-    text = unicodedata.normalize("NFKD", str(value or "").strip().casefold())
-    folded = []
-    last_base = ""
-    for character in text:
-        if unicodedata.combining(character):
-            # Preserve Japanese voicing marks (dakuten/handakuten) and other
-            # non-Latin distinctions, while retaining the established
-            # accent-insensitive behavior for Latin names such as Café.
-            if last_base and _is_latin(last_base):
-                continue
-        else:
-            last_base = character
-        folded.append(character)
-    normalized = unicodedata.normalize("NFC", "".join(folded))
-    return " ".join(TOKEN_RE.findall(normalized))
+    text = unicodedata.normalize("NFKD", str(value or "").strip().lower())
+    folded = "".join(
+        character for character in text if not unicodedata.combining(character)
+    )
+    words: list[str] = []
+    current: list[str] = []
+    for character in folded:
+        if character.isalnum() or character == "_":
+            current.append(character)
+        elif current:
+            words.append("".join(current))
+            current = []
+    if current:
+        words.append("".join(current))
+    return " ".join(words)
 
 
 def tokens(value: Any) -> tuple[str, ...]:

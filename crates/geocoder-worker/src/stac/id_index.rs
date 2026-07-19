@@ -431,6 +431,15 @@ impl ShardLoader {
         })
     }
 
+    /// Look up an ID in the core release selected by the atomic v2 manifest.
+    pub(crate) async fn lookup_id_version(
+        &self,
+        version: &str,
+        gers_id: &str,
+    ) -> Result<IdSearchResult> {
+        self.try_lookup_id(version, gers_id).await
+    }
+
     /// Attempt ID lookup against a specific version using range reads.
     ///
     /// Instead of fetching the entire parquet shard (~28 MB for prefix-len 3),

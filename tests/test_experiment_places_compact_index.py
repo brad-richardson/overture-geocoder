@@ -52,8 +52,8 @@ def test_varint_round_trip():
         assert experiment.decode_varint(encoded) == (value, len(encoded))
 
 
-def test_cjk_bigrams_preserve_dakuten_and_latin_accents_still_fold():
-    assert experiment.normalize("スターバックス") == "スターバックス"
+def test_cjk_bigrams_and_latin_accents_follow_cross_runtime_v3_contract():
+    assert experiment.normalize("スターバックス") == "スターハックス"
     assert experiment.normalize("スターハックス") == "スターハックス"
     assert experiment.tokens("東京タワー") == (
         "東京タワー",
