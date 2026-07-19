@@ -19,6 +19,7 @@ SPEC.loader.exec_module(v2)
 gbm = v2.gbm
 
 RELEASE = "2026-06-17.0"
+SLICE = "slice-2026-07-19.0"
 
 
 def payload_sha(value) -> str:
@@ -80,10 +81,59 @@ def family_manifest(family: str, release: str = RELEASE) -> dict:
     )
 
 
+def family_source_manifest(
+    *families: str, release: str = RELEASE, version: str = SLICE
+) -> dict:
+    manifests = {family: family_manifest(family, release) for family in families}
+    summaries = {}
+    verified_objects = []
+    for family, manifest in manifests.items():
+        artifacts = manifest["artifacts"]
+        manifest_href = f"./families/{family}/family-manifest.json"
+        summaries[family] = {
+            "manifest": manifest_href,
+            "manifest_digest": manifest["manifest_digest"],
+            "region": manifest["region"],
+            "artifact_count": len(artifacts),
+            "total_bytes": sum(artifact["bytes"] for artifact in artifacts),
+            "objects": [
+                {
+                    "href": f"./{artifact['object_key']}",
+                    "size_bytes": artifact["bytes"],
+                    "sha256": artifact["sha256"],
+                }
+                for artifact in artifacts
+            ],
+            "promotion_eligible": False,
+        }
+        verified_objects.append({"href": manifest_href})
+        verified_objects.extend(summaries[family]["objects"])
+    return {
+        "schema_version": 1,
+        "slice_version": version,
+        "overture_release": release,
+        "generated_at": "2026-07-19T12:00:00+00:00",
+        "is_slice": True,
+        "promotion_eligible": False,
+        "families": summaries,
+        "verified_version_objects": verified_objects,
+    }
+
+
+def family_source_args(family: str, release: str = RELEASE) -> dict:
+    source = family_source_manifest(family, release=release)
+    return {
+        "family_source_manifests": {
+            family: (source, payload_sha(source)),
+        }
+    }
+
+
 def release_manifest(build: str = "2026-07-19.1") -> dict:
     legacy = legacy_release()
     places = family_manifest("places")
     addresses = family_manifest("addresses")
+    source = family_source_manifest("places", "addresses")
     return v2.build_release_manifest(
         geocoder_build=build,
         overture_release=RELEASE,
@@ -92,6 +142,10 @@ def release_manifest(build: str = "2026-07-19.1") -> dict:
         family_manifests={
             "places": (places, payload_sha(places)),
             "addresses": (addresses, payload_sha(addresses)),
+        },
+        family_source_manifests={
+            "places": (source, payload_sha(source)),
+            "addresses": (source, payload_sha(source)),
         },
         family_entrypoints={
             "places": {"forward": "families/places/catalog.pcat"},
@@ -109,12 +163,17 @@ def catalog_sources() -> dict:
     legacy = legacy_release()
     places = family_manifest("places")
     addresses = family_manifest("addresses")
+    source = family_source_manifest("places", "addresses")
     return {
         "legacy_release": legacy,
         "legacy_manifest_sha256": payload_sha(legacy),
         "family_manifests": {
             "places": (places, payload_sha(places)),
             "addresses": (addresses, payload_sha(addresses)),
+        },
+        "family_source_manifests": {
+            "places": (source, payload_sha(source)),
+            "addresses": (source, payload_sha(source)),
         },
     }
 
@@ -138,9 +197,17 @@ def test_release_binds_core_and_family_capabilities():
     }
     assert manifest["families"]["places"]["coverage"]["name"] == "us-northeast"
     assert manifest["families"]["places"]["entrypoints"]["forward"] == {
-        "object_key": "2026-07-18.0/families/places/catalog.pcat",
+        "object_key": "slice-2026-07-19.0/families/places/catalog.pcat",
         "bytes": 123,
         "sha256": "c" * 64,
+    }
+    assert manifest["families"]["places"]["source"] == {
+        "kind": "family_slice",
+        "version": SLICE,
+        "manifest_key": f"{SLICE}/slice-manifest.json",
+        "manifest_sha256": payload_sha(
+            family_source_manifest("places", "addresses")
+        ),
     }
 
 
@@ -153,6 +220,7 @@ def test_release_can_explicitly_enable_future_family_operations():
         legacy_release=legacy,
         legacy_manifest_sha256=payload_sha(legacy),
         family_manifests={"addresses": (addresses, payload_sha(addresses))},
+        **family_source_args("addresses"),
         family_operations={"addresses": ["reverse", "forward"]},
         family_entrypoints={
             "addresses": {
@@ -178,6 +246,7 @@ def test_release_rejects_cross_release_family_and_core():
             legacy_release=legacy,
             legacy_manifest_sha256=payload_sha(legacy),
             family_manifests={"places": (wrong_family, payload_sha(wrong_family))},
+            **family_source_args("places", release="2026-05-20.0"),
         )
 
     with pytest.raises(ValueError, match="legacy release Overture release differs"):
@@ -186,6 +255,23 @@ def test_release_rejects_cross_release_family_and_core():
             overture_release=RELEASE,
             legacy_release=legacy_release(release="2026-05-20.0"),
             legacy_manifest_sha256="d" * 64,
+        )
+
+
+def test_release_rejects_family_not_blessed_by_its_source_manifest():
+    legacy = legacy_release()
+    places = family_manifest("places")
+    with pytest.raises(ValueError, match="not verified by its source manifest"):
+        v2.build_release_manifest(
+            geocoder_build="2026-07-19.1",
+            overture_release=RELEASE,
+            legacy_release=legacy,
+            legacy_manifest_sha256=payload_sha(legacy),
+            family_manifests={"places": (places, payload_sha(places))},
+            family_source_manifests={"places": (legacy, payload_sha(legacy))},
+            family_entrypoints={
+                "places": {"forward": "families/places/catalog.pcat"}
+            },
         )
 
 
@@ -223,6 +309,7 @@ def test_release_rejects_unsupported_or_orphan_operations():
             legacy_release=legacy,
             legacy_manifest_sha256=payload_sha(legacy),
             family_manifests={"places": (places, payload_sha(places))},
+            **family_source_args("places"),
             family_operations={"places": ["structured_forward"]},
             family_entrypoints={
                 "places": {
@@ -250,6 +337,7 @@ def test_release_requires_verified_entrypoint_for_every_operation():
             legacy_release=legacy,
             legacy_manifest_sha256=payload_sha(legacy),
             family_manifests={"places": (places, payload_sha(places))},
+            **family_source_args("places"),
         )
     with pytest.raises(ValueError, match="not a manifest artifact"):
         v2.build_release_manifest(
@@ -258,6 +346,7 @@ def test_release_requires_verified_entrypoint_for_every_operation():
             legacy_release=legacy,
             legacy_manifest_sha256=payload_sha(legacy),
             family_manifests={"places": (places, payload_sha(places))},
+            **family_source_args("places"),
             family_entrypoints={
                 "places": {"forward": "families/places/missing.pcat"}
             },
@@ -278,12 +367,12 @@ def test_release_validation_detects_capability_and_digest_tampering():
 
     tampered = copy.deepcopy(manifest)
     tampered["families"]["places"]["entrypoints"]["forward"]["object_key"] = (
-        "2026-07-18.0/families/addresses/address-collection.json"
+        "slice-2026-07-19.0/families/addresses/address-collection.json"
     )
     unsigned = {key: value for key, value in tampered.items() if key != "release_digest"}
     tampered["release_digest"] = gbm.digest(unsigned)
     with pytest.raises(
-        ValueError, match="must remain under 2026-07-18.0/families/places"
+        ValueError, match="must remain under slice-2026-07-19.0/families/places"
     ):
         v2.validate_release_manifest(tampered)
 
@@ -295,7 +384,7 @@ def test_source_verification_rejects_recomputed_unlisted_entrypoint():
     addresses = family_manifest("addresses")
     tampered = copy.deepcopy(manifest)
     tampered["families"]["places"]["entrypoints"]["forward"] = {
-        "object_key": "2026-07-18.0/families/places/unlisted.pcat",
+        "object_key": "slice-2026-07-19.0/families/places/unlisted.pcat",
         "bytes": 999,
         "sha256": "d" * 64,
     }
@@ -314,6 +403,9 @@ def test_source_verification_rejects_recomputed_unlisted_entrypoint():
                 "places": (places, payload_sha(places)),
                 "addresses": (addresses, payload_sha(addresses)),
             },
+            family_source_manifests=catalog_sources()[
+                "family_source_manifests"
+            ],
         )
 
     with pytest.raises(ValueError, match="differs from its source artifact"):
@@ -413,10 +505,13 @@ def test_catalog_requires_explicit_initialization_or_history():
 def test_cli_builds_and_validates_release_and_catalog(tmp_path):
     legacy = legacy_release()
     places = family_manifest("places")
+    source = family_source_manifest("places")
     legacy_path = tmp_path / "legacy.json"
     places_path = tmp_path / "places.json"
+    source_path = tmp_path / "slice.json"
     legacy_path.write_text(json.dumps(legacy))
     places_path.write_bytes(gbm.canonical_json(places))
+    source_path.write_bytes(gbm.canonical_json(source))
     release_path = tmp_path / "release.json"
     catalog_path = tmp_path / "catalog.json"
 
@@ -433,6 +528,8 @@ def test_cli_builds_and_validates_release_and_catalog(tmp_path):
             str(legacy_path),
             "--family-manifest",
             f"places={places_path}",
+            "--family-source-manifest",
+            f"places={source_path}",
             "--entrypoint",
             "places.forward=families/places/catalog.pcat",
             "--generated-at",
@@ -455,6 +552,8 @@ def test_cli_builds_and_validates_release_and_catalog(tmp_path):
             str(legacy_path),
             "--family-manifest",
             f"places={places_path}",
+            "--family-source-manifest",
+            f"places={source_path}",
         ],
         text=True,
         capture_output=True,
@@ -472,6 +571,8 @@ def test_cli_builds_and_validates_release_and_catalog(tmp_path):
             str(legacy_path),
             "--family-manifest",
             f"places={places_path}",
+            "--family-source-manifest",
+            f"places={source_path}",
             "--initialize",
             "--generated-at",
             "fixed",

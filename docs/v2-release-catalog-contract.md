@@ -12,8 +12,9 @@ One v2 release binds these identities atomically:
 - `data_version.geocoder_build`: the geocoder build and rollback identity;
 - one verified legacy core release containing division forward/reverse shards
   and the UUID-prefix ID index; and
-- zero or more verified Places/address family manifests from the same Overture
-  release.
+- zero or more Places/address family manifests from the same Overture release,
+  each bound to the finalizer-produced core-release or families-only slice
+  manifest that verified its exact object set.
 
 The builder rejects cross-release composition. It records each optional
 family's manifest key, file SHA-256, self-digest, format versions, coverage,
@@ -29,14 +30,17 @@ must be one of the family manifest's hashed artifacts, such as Places
 `structured_forward -> address-collection.json`.
 The CLI accepts those artifact keys relative to the release, exactly as they
 appear in a family manifest; the generated v2 release exposes bucket-root keys
-prefixed by the immutable legacy version so Workers can fetch them directly.
+prefixed by the immutable family source version so Workers can fetch them
+directly. This lets new global families live in a non-promoting `slice-*`
+namespace without rebuilding divisions or mutating their historical prefix.
 
 ## Namespace
 
 ```text
 catalog.json                                      # unchanged v1 root
 {legacy_version}/release-manifest.json            # existing verified core
-{legacy_version}/families/{family}/...            # existing family objects
+{family_source_version}/slice-manifest.json       # verified families-only proof
+{family_source_version}/families/{family}/...     # verified family objects
 v2/catalog.json                                   # future v2 discovery root
 v2/releases/{geocoder_build}/release.json          # v2 composition manifest
 ```
@@ -57,6 +61,8 @@ python scripts/v2_release_manifest.py release \
   --legacy-release-manifest release-manifest.json \
   --family-manifest places=places-family-manifest.json \
   --family-manifest addresses=addresses-family-manifest.json \
+  --family-source-manifest places=slice-manifest.json \
+  --family-source-manifest addresses=slice-manifest.json \
   --entrypoint places.forward=families/places/catalog.pcat \
   --entrypoint addresses.structured_forward=families/addresses/address-collection.json \
   --output v2-release.json
@@ -65,7 +71,9 @@ python scripts/v2_release_manifest.py validate-release \
   --manifest v2-release.json \
   --legacy-release-manifest release-manifest.json \
   --family-manifest places=places-family-manifest.json \
-  --family-manifest addresses=addresses-family-manifest.json
+  --family-manifest addresses=addresses-family-manifest.json \
+  --family-source-manifest places=slice-manifest.json \
+  --family-source-manifest addresses=slice-manifest.json
 ```
 
 Build a new catalog or extend an existing one:
@@ -76,6 +84,8 @@ python scripts/v2_release_manifest.py catalog \
   --legacy-release-manifest release-manifest.json \
   --family-manifest places=places-family-manifest.json \
   --family-manifest addresses=addresses-family-manifest.json \
+  --family-source-manifest places=slice-manifest.json \
+  --family-source-manifest addresses=slice-manifest.json \
   --before v2-catalog-before.json \
   --output v2-catalog-next.json
 ```
