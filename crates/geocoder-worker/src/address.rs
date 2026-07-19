@@ -239,6 +239,14 @@ pub(crate) struct AddressCollection {
 }
 
 impl AddressCollection {
+    fn response_normalization_version(&self) -> &'static str {
+        if self.schema_version == 2 {
+            V2_NORMALIZATION_VERSION
+        } else {
+            NORMALIZATION_VERSION
+        }
+    }
+
     fn supported(&self) -> bool {
         match self.schema_version {
             0 | 1 => self.supported_legacy(),
@@ -560,11 +568,15 @@ enum AddressOutcome {
     /// No address family in the catalog -> stable 404.
     FamilyUnavailable,
     /// The family provably does not serve the query's country.
-    OutOfCoverage { data_version: String },
+    OutOfCoverage {
+        data_version: String,
+        normalization_version: &'static str,
+    },
     /// The family served the query; `candidates` is every exact-key match in
     /// producer order (possibly empty for a successful exact miss).
     Resolved {
         data_version: String,
+        normalization_version: &'static str,
         candidates: Vec<AddressPageRecord>,
         read_metrics: RangeReadMetrics,
     },
@@ -596,15 +608,18 @@ impl ShardLoader {
         let Some((version, collection)) = self.load_address_collection().await? else {
             return Ok(AddressOutcome::FamilyUnavailable);
         };
+        let normalization_version = collection.response_normalization_version();
         match select_shard(&collection, key) {
             ShardSelection::OutOfCoverage => Ok(AddressOutcome::OutOfCoverage {
                 data_version: version,
+                normalization_version,
             }),
             ShardSelection::Unroutable => Err(Error::RustError(format!(
                 "address family manifest for {version} has no shard range covering the key"
             ))),
             ShardSelection::Empty => Ok(AddressOutcome::Resolved {
                 data_version: version,
+                normalization_version,
                 candidates: Vec::new(),
                 read_metrics: RangeReadMetrics::default(),
             }),
@@ -614,6 +629,7 @@ impl ShardLoader {
                 let lookup = self.lookup_address_page(&index_key, &data_key, key).await?;
                 Ok(AddressOutcome::Resolved {
                     data_version: version,
+                    normalization_version,
                     candidates: lookup.records,
                     read_metrics: lookup.read_metrics,
                 })
@@ -629,7 +645,7 @@ fn family_unavailable_body() -> Value {
 
 /// Out-of-coverage body: an explicit, non-error signal distinct from an exact
 /// miss (`coverage: "in_coverage"`, empty candidates).
-fn out_of_coverage_body(data_version: &str) -> Value {
+fn out_of_coverage_body(data_version: &str, normalization_version: &str) -> Value {
     json!({
         "candidates": [],
         "candidate_count": 0,
@@ -637,7 +653,7 @@ fn out_of_coverage_body(data_version: &str) -> Value {
         "overflow": false,
         "coverage": "out_of_coverage",
         "data_version": data_version,
-        "normalization_version": NORMALIZATION_VERSION,
+        "normalization_version": normalization_version,
     })
 }
 
@@ -666,6 +682,7 @@ fn candidate_json(record: &AddressPageRecord) -> Value {
 /// 413 error carrying the observed count, never a truncation.
 fn resolved_body(
     data_version: &str,
+    normalization_version: &str,
     candidates: &[AddressPageRecord],
     debug_metrics: Option<&RangeReadMetrics>,
 ) -> (u16, Value) {
@@ -678,7 +695,7 @@ fn resolved_body(
                 "candidate_cap": CANDIDATE_CAP,
                 "overflow": true,
                 "data_version": data_version,
-                "normalization_version": NORMALIZATION_VERSION,
+                "normalization_version": normalization_version,
             }),
         );
     }
@@ -690,7 +707,7 @@ fn resolved_body(
         "overflow": false,
         "coverage": "in_coverage",
         "data_version": data_version,
-        "normalization_version": NORMALIZATION_VERSION,
+        "normalization_version": normalization_version,
     });
     if let Some(metrics) = debug_metrics {
         if let Some(object) = body.as_object_mut() {
@@ -706,17 +723,22 @@ fn resolved_body(
 fn shape_outcome(outcome: AddressOutcome, include_debug: bool) -> (u16, Option<String>, Value) {
     match outcome {
         AddressOutcome::FamilyUnavailable => (404, None, family_unavailable_body()),
-        AddressOutcome::OutOfCoverage { data_version } => {
-            let body = out_of_coverage_body(&data_version);
+        AddressOutcome::OutOfCoverage {
+            data_version,
+            normalization_version,
+        } => {
+            let body = out_of_coverage_body(&data_version, normalization_version);
             (200, Some(data_version), body)
         }
         AddressOutcome::Resolved {
             data_version,
+            normalization_version,
             candidates,
             read_metrics,
         } => {
             let (status, body) = resolved_body(
                 &data_version,
+                normalization_version,
                 &candidates,
                 include_debug.then_some(&read_metrics),
             );
@@ -1185,11 +1207,11 @@ mod tests {
 
     #[test]
     fn out_of_coverage_is_distinct_from_an_exact_miss() {
-        let out = out_of_coverage_body("2026-07-13.0");
+        let out = out_of_coverage_body("2026-07-13.0", NORMALIZATION_VERSION);
         assert_eq!(out["coverage"], "out_of_coverage");
         assert_eq!(out["candidate_count"], 0);
 
-        let (status, miss) = resolved_body("2026-07-13.0", &[], None);
+        let (status, miss) = resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &[], None);
         assert_eq!(status, 200);
         assert_eq!(miss["coverage"], "in_coverage");
         assert_eq!(miss["candidate_count"], 0);
@@ -1203,7 +1225,8 @@ mod tests {
             record("id-b", "10"),
             record("id-c", "10"),
         ];
-        let (status, body) = resolved_body("2026-07-13.0", &candidates, None);
+        let (status, body) =
+            resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &candidates, None);
         assert_eq!(status, 200);
         assert_eq!(body["candidate_count"], 3);
         assert_eq!(body["ambiguous"], true);
@@ -1226,7 +1249,8 @@ mod tests {
             .map(|i| record(&format!("id-{i}"), "10"))
             .collect();
         assert_eq!(candidates.len(), CANDIDATE_CAP + 1);
-        let (status, body) = resolved_body("2026-07-13.0", &candidates, None);
+        let (status, body) =
+            resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &candidates, None);
         assert_eq!(status, 413);
         assert_eq!(body["error"], "address_candidate_overflow");
         assert_eq!(body["observed_candidates"], CANDIDATE_CAP + 1);
@@ -1237,10 +1261,11 @@ mod tests {
     #[test]
     fn debug_metrics_are_opt_in() {
         let candidates = vec![record("id-a", "10")];
-        let (_, plain) = resolved_body("2026-07-13.0", &candidates, None);
+        let (_, plain) = resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &candidates, None);
         assert!(plain.get("debug").is_none());
         let (_, debug) = resolved_body(
             "2026-07-13.0",
+            NORMALIZATION_VERSION,
             &candidates,
             Some(&RangeReadMetrics::default()),
         );
@@ -1262,12 +1287,14 @@ mod tests {
         let (status, version, body) = shape_outcome(
             AddressOutcome::OutOfCoverage {
                 data_version: "2026-07-13.0".to_string(),
+                normalization_version: V2_NORMALIZATION_VERSION,
             },
             false,
         );
         assert_eq!(status, 200);
         assert_eq!(version.as_deref(), Some("2026-07-13.0"));
         assert_eq!(body["coverage"], "out_of_coverage");
+        assert_eq!(body["normalization_version"], V2_NORMALIZATION_VERSION);
     }
 
     #[test]
@@ -1275,6 +1302,7 @@ mod tests {
         let (status, version, body) = shape_outcome(
             AddressOutcome::Resolved {
                 data_version: "2026-07-13.0".to_string(),
+                normalization_version: V2_NORMALIZATION_VERSION,
                 candidates: vec![record("id-a", "10")],
                 read_metrics: RangeReadMetrics::default(),
             },
@@ -1284,6 +1312,7 @@ mod tests {
         assert_eq!(version.as_deref(), Some("2026-07-13.0"));
         assert_eq!(body["candidate_count"], 1);
         assert_eq!(body["coverage"], "in_coverage");
+        assert_eq!(body["normalization_version"], V2_NORMALIZATION_VERSION);
     }
 
     /// Reader-level tie-in: decode the committed cross-language page fixture and
@@ -1293,7 +1322,7 @@ mod tests {
         let plain = include_bytes!("../../../tests/fixtures/pages/plain_page.bin");
         let records = crate::address_pages::decode_useful_page(plain).unwrap();
         assert!(!records.is_empty());
-        let (status, body) = resolved_body("2026-07-13.0", &records, None);
+        let (status, body) = resolved_body("2026-07-13.0", NORMALIZATION_VERSION, &records, None);
         assert_eq!(status, 200);
         assert_eq!(body["candidate_count"], records.len());
         assert_eq!(body["candidates"][0]["street"], records[0].street.as_str());

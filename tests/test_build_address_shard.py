@@ -45,7 +45,13 @@ def _record(index: int, *, number: str = "10"):
     }
 
 
-def _write_reduce(path: Path, records: list[dict]) -> None:
+def _write_reduce(
+    path: Path,
+    records: list[dict],
+    *,
+    release: str = "2026-06-17.0",
+    family: str = "addresses",
+) -> None:
     records = sorted(records, key=reduce.record_key)
     payloads = [reduce.encode_record(item) for item in records]
     first_key = reduce.record_key(records[0])
@@ -66,7 +72,7 @@ def _write_reduce(path: Path, records: list[dict]) -> None:
         "sparse_stride": 256,
         "sparse_bytes": len(sparse),
         "record_bytes": len(record_payload),
-        "source": {},
+        "source": {"release": release, "family": family},
         "fragment_sha256": ["a" * 64],
         "fields": [],
     }
@@ -132,3 +138,32 @@ def test_rejects_reduce_count_that_differs_from_plan(tmp_path):
             _plan(2),
             identifier="a-us",
         )
+
+
+@pytest.mark.parametrize(
+    ("release", "family"),
+    [("2026-05-20.0", "addresses"), ("2026-06-17.0", "places")],
+)
+def test_rejects_reduce_artifact_from_another_source(tmp_path, release, family):
+    source = tmp_path / "source.aidx"
+    _write_reduce(source, [_record(1)], release=release, family=family)
+    with pytest.raises(ValueError, match="source differs"):
+        shard.build_shard(
+            source,
+            tmp_path / "out",
+            _plan(1),
+            identifier="a-us",
+        )
+
+
+def test_refuses_to_overwrite_either_member_of_a_serving_pair(tmp_path):
+    source = tmp_path / "source.aidx"
+    _write_reduce(source, [_record(1)])
+    output = tmp_path / "out"
+    output.mkdir()
+    stale = output / "a-us.adat"
+    stale.write_bytes(b"stale")
+    with pytest.raises(ValueError, match="create-only"):
+        shard.build_shard(source, output, _plan(1), identifier="a-us")
+    assert stale.read_bytes() == b"stale"
+    assert not (output / "a-us.aidx").exists()

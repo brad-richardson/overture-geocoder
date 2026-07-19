@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -24,8 +25,17 @@ from experiment_address_reduce import AddressReduceArtifact, sha256_file  # noqa
 REPORT_SCHEMA = "overture-address-serving-shard-v1"
 
 
-def validate_reduce_partition(path: Path, leaf: dict[str, Any]) -> dict[str, Any]:
+def validate_reduce_partition(
+    path: Path, leaf: dict[str, Any], *, overture_release: str
+) -> dict[str, Any]:
     with AddressReduceArtifact(path) as artifact:
+        source = artifact.header.get("source")
+        if (
+            not isinstance(source, dict)
+            or source.get("release") != overture_release
+            or source.get("family") != "addresses"
+        ):
+            raise ValueError("address reduce source differs from the partition plan")
         if artifact.header["records"] != leaf["rows"]:
             raise ValueError("address reduce rows differ from the partition plan")
         offset = 0
@@ -66,8 +76,14 @@ def build_shard(
     leaf = matches[0]
     if leaf["rows"] == 0:
         raise ValueError("empty address ranges do not have serving artifacts")
-    verification = validate_reduce_partition(input_path, leaf)
+    verification = validate_reduce_partition(
+        input_path, leaf, overture_release=plan["overture_release"]
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
+    index_path = output_dir / f"{identifier}.aidx"
+    data_path = output_dir / f"{identifier}.adat"
+    if index_path.exists() or data_path.exists():
+        raise ValueError("address serving shard outputs are create-only")
     with tempfile.TemporaryDirectory(prefix=f".{identifier}-", dir=output_dir) as name:
         temporary = Path(name)
         compression = build_pages(
@@ -80,10 +96,12 @@ def build_shard(
             max_workspace_bytes=max_workspace_bytes,
             variant_names=["useful_gzip"],
         )
-        index_path = output_dir / f"{identifier}.aidx"
-        data_path = output_dir / f"{identifier}.adat"
-        (temporary / "useful_gzip.idx").replace(index_path)
-        (temporary / "useful_gzip.bin").replace(data_path)
+        os.link(temporary / "useful_gzip.idx", index_path)
+        try:
+            os.link(temporary / "useful_gzip.bin", data_path)
+        except BaseException:
+            index_path.unlink(missing_ok=True)
+            raise
     report = {
         "schema": REPORT_SCHEMA,
         "overture_release": plan["overture_release"],

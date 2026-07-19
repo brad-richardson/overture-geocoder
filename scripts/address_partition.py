@@ -180,6 +180,7 @@ def plan_partitions(
     maximum_hash_bits: int = DEFAULT_MAXIMUM_HASH_BITS,
     row_cap: int = DEFAULT_SHARD_ROW_CAP,
     sticky_split_ids: Iterable[str] = (),
+    sticky_countries: Iterable[str] = (),
 ) -> tuple[list[AddressPartition], list[str]]:
     """Plan stable leaves from sorted `(country, max-bit bucket, rows)` counts."""
     if not 1 <= maximum_hash_bits <= MAXIMUM_SUPPORTED_HASH_BITS:
@@ -189,8 +190,12 @@ def plan_partitions(
     sticky = validate_split_ids(
         sticky_split_ids, maximum_hash_bits=maximum_hash_bits
     )
+    preserved_countries = set(sticky_countries) | {country for country, _ in sticky}
+    for country in preserved_countries:
+        validate_country(country)
     splits = set(sticky)
     partitions: list[AddressPartition] = []
+    seen_countries: set[str] = set()
     current_country: str | None = None
     country_counts: list[tuple[str, int]] = []
     previous: tuple[str, int] | None = None
@@ -211,7 +216,7 @@ def plan_partitions(
 
     for country, bucket, rows in full_counts:
         validate_country(country)
-        if not 0 <= bucket < 1 << maximum_hash_bits:
+        if type(bucket) is not int or not 0 <= bucket < 1 << maximum_hash_bits:
             raise ValueError("address maximum-level bucket is outside hard bounds")
         if type(rows) is not int or rows <= 0:
             raise ValueError("address maximum-level counts must be positive integers")
@@ -222,12 +227,27 @@ def plan_partitions(
             flush()
             country_counts = []
         current_country = country
+        seen_countries.add(country)
         country_counts.append((bucket_prefix(bucket, maximum_hash_bits), rows))
         previous = identity
     flush()
+    for country in sorted(preserved_countries - seen_countries):
+        partitions.extend(
+            _plan_prefix(
+                country,
+                "",
+                [],
+                maximum_hash_bits=maximum_hash_bits,
+                row_cap=row_cap,
+                sticky=sticky,
+                splits=splits,
+            )
+        )
     if not partitions:
         raise ValueError("address partition input contains no retained rows")
-    return partitions, sorted(split_id(*item) for item in splits)
+    return sorted(partitions, key=lambda item: (item.country, item.hash_start)), sorted(
+        split_id(*item) for item in splits
+    )
 
 
 def validate_plan(
@@ -336,11 +356,13 @@ def build_plan(
     if not isinstance(release, str) or not release:
         raise ValueError("address partition counts omit the Overture release")
     sticky: list[str] = []
+    sticky_countries: set[str] = set()
     if previous is not None:
         validate_plan(
             previous, expected_maximum_hash_bits=maximum_hash_bits
         )
         sticky = previous["partition"]["split_ids"]
+        sticky_countries = {item["country"] for item in previous["partitions"]}
     rows = [
         (item["country"], item["bucket"], item["rows"])
         for item in counts["counts"]
@@ -353,6 +375,7 @@ def build_plan(
         maximum_hash_bits=maximum_hash_bits,
         row_cap=row_cap,
         sticky_split_ids=sticky,
+        sticky_countries=sticky_countries,
     )
     return {
         "schema": PLAN_SCHEMA,

@@ -150,3 +150,38 @@ def test_plan_rejects_unused_split_history():
     plan["partition"]["split_ids"] = ["ca:"]
     with pytest.raises(ValueError, match="differs from the leaf tree"):
         address.validate_plan(plan)
+
+
+def test_previous_countries_remain_explicit_when_current_rows_are_zero():
+    previous = address.build_plan(
+        {
+            "schema": address.COUNT_SCHEMA,
+            "overture_release": "2026-06-17.0",
+            "counts": [
+                {"country": "ca", "bucket": 0, "rows": 1},
+                {"country": "us", "bucket": 0, "rows": 60},
+                {"country": "us", "bucket": 1, "rows": 40},
+            ],
+        },
+        maximum_hash_bits=2,
+        row_cap=75,
+    )
+    current = address.build_plan(
+        {
+            "schema": address.COUNT_SCHEMA,
+            "overture_release": "2026-07-15.0",
+            "counts": [{"country": "mx", "bucket": 0, "rows": 1}],
+        },
+        maximum_hash_bits=2,
+        row_cap=75,
+        previous=previous,
+    )
+    assert [(item["id"], item["rows"]) for item in current["partitions"]] == [
+        ("a-ca", 0),
+        ("a-mx", 1),
+        ("a-us-h-00", 0),
+        ("a-us-h-01", 0),
+        ("a-us-h-1", 0),
+    ]
+    assert current["partition"]["split_ids"] == ["us:", "us:0"]
+    address.validate_plan(current)
