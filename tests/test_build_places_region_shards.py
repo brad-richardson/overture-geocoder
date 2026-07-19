@@ -98,6 +98,17 @@ def _build(path: Path, output: Path, **kwargs):
     )
 
 
+def _catalog_payload(path: Path) -> dict:
+    encoded = path.read_bytes()
+    _, length = struct.unpack("<8sI", encoded[:12])
+    return json.loads(encoded[12 : 12 + length])
+
+
+def _write_catalog(path: Path, payload: dict) -> None:
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    path.write_bytes(struct.pack("<8sI", b"PCAT0001", len(encoded)) + encoded)
+
+
 def test_world_quadkeys_are_deterministic_and_cover_boundaries():
     assert partition.point_quadkey(-180.0, -90.0, 3) == "000"
     assert partition.point_quadkey(180.0, 90.0, 3) == "333"
@@ -270,6 +281,42 @@ def test_previous_catalog_retains_split_ownership(tmp_path):
     assert second["catalog"]["partition"]["split_cells"] == first["catalog"][
         "partition"
     ]["split_cells"]
+
+
+def test_previous_catalog_rejects_leaf_without_split_ancestry(tmp_path):
+    fixture = _fixture(tmp_path, 40)
+    first = _build(
+        fixture,
+        tmp_path / "first",
+        row_cap=1_000,
+        minimum_level=2,
+        maximum_level=8,
+        build_head=False,
+    )
+    assert first["catalog"]["partition"]["split_cells"] == []
+    payload = _catalog_payload(tmp_path / "first" / "catalog.pcat")
+    shard = payload["shards"][0]
+    shard["cell"] += "0"
+    shard["id"] = f"q-{shard['cell']}"
+    shard["object"] = f"{shard['id']}.pcsh"
+    shard["bbox"] = partition.quadkey_bbox(shard["cell"])
+    shard["center"] = [
+        (shard["bbox"][0] + shard["bbox"][2]) / 2,
+        (shard["bbox"][1] + shard["bbox"][3]) / 2,
+    ]
+    malformed = tmp_path / "malformed.pcat"
+    _write_catalog(malformed, payload)
+
+    with pytest.raises(ValueError, match="split history"):
+        _build(
+            fixture,
+            tmp_path / "second",
+            row_cap=1_000,
+            minimum_level=2,
+            maximum_level=8,
+            previous_catalog=malformed,
+            build_head=False,
+        )
 
 
 def test_rejects_input_outside_declared_coverage(tmp_path):

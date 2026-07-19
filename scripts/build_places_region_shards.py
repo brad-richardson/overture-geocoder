@@ -52,6 +52,7 @@ from places_partition import (  # noqa: E402
     point_morton,
     quadkey_bbox,
     validate_levels,
+    validate_quadkey,
     validate_split_cells,
 )
 from prepare_places_worker_smoke import TOKENIZER_VERSION  # noqa: E402
@@ -290,16 +291,65 @@ def previous_split_cells(
         or partition.get("scheme") != PARTITION_SCHEME
         or partition.get("minimum_level") != minimum_level
         or partition.get("maximum_level") != maximum_level
+        or not isinstance(partition.get("split_row_cap"), int)
+        or partition["split_row_cap"] < 1
         or not isinstance(partition.get("split_cells"), list)
     ):
         raise ValueError("previous Places catalog has an incompatible partition contract")
-    return sorted(
-        validate_split_cells(
-            partition["split_cells"],
-            minimum_level=minimum_level,
-            maximum_level=maximum_level,
-        )
+    splits = validate_split_cells(
+        partition["split_cells"],
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
     )
+    _validate_previous_shards(
+        payload.get("shards"),
+        split_cells=splits,
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
+    )
+    return sorted(splits)
+
+
+def _validate_previous_shards(
+    raw_shards: Any,
+    *,
+    split_cells: set[str],
+    minimum_level: int,
+    maximum_level: int,
+) -> None:
+    if not isinstance(raw_shards, list) or not raw_shards:
+        raise ValueError("previous Places catalog must contain routed shards")
+    cells: list[str] = []
+    ids: set[str] = set()
+    objects: set[str] = set()
+    for shard in raw_shards:
+        if not isinstance(shard, dict) or not isinstance(shard.get("cell"), str):
+            raise ValueError("previous Places catalog has an invalid shard")
+        cell = shard["cell"]
+        validate_quadkey(cell, minimum=minimum_level, maximum=maximum_level)
+        expected_id = f"q-{cell}"
+        expected_object = f"{expected_id}.pcsh"
+        bbox = quadkey_bbox(cell)
+        center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+        if (
+            shard.get("id") != expected_id
+            or shard.get("object") != expected_object
+            or shard.get("bbox") != bbox
+            or shard.get("center") != center
+            or cell in split_cells
+            or (len(cell) > minimum_level and cell[:-1] not in split_cells)
+            or expected_id in ids
+            or expected_object in objects
+        ):
+            raise ValueError(
+                "previous Places catalog shard is inconsistent with split history"
+            )
+        cells.append(cell)
+        ids.add(expected_id)
+        objects.add(expected_object)
+    cells.sort()
+    if any(right.startswith(left) for left, right in zip(cells, cells[1:])):
+        raise ValueError("previous Places catalog has overlapping leaf ownership")
 
 
 def _route(cell: str) -> dict[str, Any]:
