@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Deterministic stratified task selection for the address R2 map-reduce sweep.
+"""Deterministic task selection for address R2 map-reduce rehearsals.
 
 The sweep exercises the fixed 127-task address row-group inventory
 (``benchmarks/address-rowgroup-inventory-report.json``). Rather than hand-type
@@ -15,6 +15,14 @@ Every rule is a pure function of the checked-in inventory, so re-running
 ``generate`` on the same inventory reproduces byte-identical output. The
 companion unit test pins the resulting indices against the checked-in
 inventory.
+
+The ``generate-country`` / ``check-country`` commands derive the larger scale
+signal used for a USA run.  It selects every task whose largest exact-country
+footer population is the requested country.  This is deliberately an upper
+bound, not an exact country export: mixed and other-country rows sharing those
+tasks remain in the projected/reduced artifacts.  The selection document makes
+that coverage contract explicit so a green scale run cannot be mistaken for
+publishable country coverage.
 
 Strata (see docs/plans/2026-07-17-address-stratified-sweep.md):
 
@@ -42,6 +50,7 @@ from pathlib import Path
 from typing import Any
 
 SCHEMA = "overture-address-sweep-selection-v1"
+COUNTRY_SCHEMA = "overture-address-country-dominant-selection-v1"
 INVENTORY_SCHEMA = "overture-address-rowgroup-inventory-v1"
 
 # Countries whose "first dominant task" is taken verbatim as the stratum
@@ -285,6 +294,81 @@ def build_selection_document(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def select_country_dominant_tasks(
+    report: dict[str, Any], *, country: str, max_tasks: int
+) -> list[dict[str, Any]]:
+    """Select every task dominated by ``country`` footer statistics.
+
+    The result is a scale-signal upper bound.  Tasks are indivisible contiguous
+    row-group ranges, so their outputs retain every structured row they carry;
+    no row-level country filter is implied here.
+    """
+    if not isinstance(country, str) or len(country) != 2 or country != country.upper():
+        raise SelectionError("country must be a two-letter uppercase code")
+    if max_tasks <= 0:
+        raise SelectionError("max_tasks must be positive")
+    selected = [
+        task for task in report["plan"]["tasks"] if dominant_country(task) == country
+    ]
+    if not selected:
+        raise SelectionError(f"no tasks are dominated by {country}")
+    if len(selected) > max_tasks:
+        raise SelectionError(
+            f"{len(selected)} tasks are dominated by {country}, exceeding the "
+            f"hard cap of {max_tasks}; raise the cap deliberately"
+        )
+    entries = [
+        _entry(
+            task,
+            f"{country.lower()}-dominant-{task['index']:03d}",
+            "country-dominant-scale-signal",
+            (
+                f"task's largest exact-country footer population is {country}; "
+                "the complete task is retained as an upper-bound scale signal"
+            ),
+        )
+        for task in selected
+    ]
+    _validate(entries)
+    entries.sort(key=lambda entry: entry["task_index"])
+    return entries
+
+
+def build_country_selection_document(
+    report: dict[str, Any], *, country: str, max_tasks: int
+) -> dict[str, Any]:
+    entries = select_country_dominant_tasks(
+        report, country=country, max_tasks=max_tasks
+    )
+    canonical_tasks = json.dumps(
+        report["plan"]["tasks"], sort_keys=True, separators=(",", ":")
+    )
+    inventory_tasks_sha256 = hashlib.sha256(
+        canonical_tasks.encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema": COUNTRY_SCHEMA,
+        "release": report.get("release"),
+        "generated_from": "benchmarks/address-rowgroup-inventory-report.json",
+        "inventory_tasks_sha256": inventory_tasks_sha256,
+        "selection_basis": "dominant_exact_country_footer_rows",
+        "country": country,
+        "coverage_contract": (
+            "upper-bound task fleet; includes every complete inventory task whose "
+            f"largest exact-country footer population is {country}; no row-level "
+            "country filter is applied"
+        ),
+        "exact_country_export": False,
+        "max_tasks": max_tasks,
+        "task_count": len(entries),
+        "projected_rows": sum(entry["expected_rows"] for entry in entries),
+        "projected_selected_compressed_bytes": sum(
+            entry["expected_selected_compressed_bytes"] for entry in entries
+        ),
+        "tasks": entries,
+    }
+
+
 def matrix_from_selection(selection: dict[str, Any]) -> dict[str, Any]:
     """Strip a selection document down to the GitHub Actions matrix payload."""
     tasks = selection.get("tasks")
@@ -302,7 +386,7 @@ def matrix_from_selection(selection: dict[str, Any]) -> dict[str, Any]:
         ):
             raise SelectionError(f"invalid selection entry: {task!r}")
         include.append({"name": name, "task_index": index})
-    _validate(include, count=12)
+    _validate(include)
     return {"include": include}
 
 
@@ -368,6 +452,35 @@ def _cmd_check(args: argparse.Namespace) -> int:
     return 0
 
 
+def _cmd_generate_country(args: argparse.Namespace) -> int:
+    report = load_inventory(args.inventory_report)
+    document = build_country_selection_document(
+        report, country=args.country, max_tasks=args.max_tasks
+    )
+    text = json.dumps(document, indent=2, sort_keys=True) + "\n"
+    if args.output is None or str(args.output) == "-":
+        sys.stdout.write(text)
+    else:
+        args.output.parent.mkdir(parents=True, exist_ok=True)
+        args.output.write_text(text)
+    return 0
+
+
+def _cmd_check_country(args: argparse.Namespace) -> int:
+    report = load_inventory(args.inventory_report)
+    expected = build_country_selection_document(
+        report, country=args.country, max_tasks=args.max_tasks
+    )
+    actual = json.loads(args.selection.read_text())
+    if actual != expected:
+        sys.stderr.write(
+            "committed country-dominant selection is stale; regenerate with "
+            "`python scripts/select_address_sweep_tasks.py generate-country`\n"
+        )
+        return 1
+    return 0
+
+
 def _cmd_matrix(args: argparse.Namespace) -> int:
     if args.override_json is not None and args.override_json.strip():
         matrix = validate_override(args.override_json)
@@ -403,6 +516,26 @@ def main(argv: list[str] | None = None) -> int:
     chk.add_argument("--inventory-report", type=Path, required=True)
     chk.add_argument("--selection", type=Path, required=True)
     chk.set_defaults(func=_cmd_check)
+
+    gen_country = sub.add_parser(
+        "generate-country",
+        help="compute every country-dominant task for an upper-bound scale run",
+    )
+    gen_country.add_argument("--inventory-report", type=Path, required=True)
+    gen_country.add_argument("--country", required=True)
+    gen_country.add_argument("--max-tasks", type=int, required=True)
+    gen_country.add_argument("--output", type=Path, default=None)
+    gen_country.set_defaults(func=_cmd_generate_country)
+
+    check_country = sub.add_parser(
+        "check-country",
+        help="verify a committed country-dominant selection",
+    )
+    check_country.add_argument("--inventory-report", type=Path, required=True)
+    check_country.add_argument("--selection", type=Path, required=True)
+    check_country.add_argument("--country", required=True)
+    check_country.add_argument("--max-tasks", type=int, required=True)
+    check_country.set_defaults(func=_cmd_check_country)
 
     mat = sub.add_parser(
         "matrix", help="emit the GitHub Actions matrix payload for the workflow"

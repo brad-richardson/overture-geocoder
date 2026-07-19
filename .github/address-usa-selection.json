@@ -1,0 +1,280 @@
+{
+  "country": "US",
+  "coverage_contract": "upper-bound task fleet; includes every complete inventory task whose largest exact-country footer population is US; no row-level country filter is applied",
+  "exact_country_export": false,
+  "generated_from": "benchmarks/address-rowgroup-inventory-report.json",
+  "inventory_tasks_sha256": "d21a8354b76c47952bcbe3b8c79a06d140c083367fe672ab012a65677aa1a0e2",
+  "max_tasks": 40,
+  "projected_rows": 130996768,
+  "projected_selected_compressed_bytes": 4841088837,
+  "release": "2026-06-17.0",
+  "schema": "overture-address-country-dominant-selection-v1",
+  "selection_basis": "dominant_exact_country_footer_rows",
+  "task_count": 33,
+  "tasks": [
+    {
+      "expected_rows": 3972943,
+      "expected_selected_compressed_bytes": 147137882,
+      "name": "us-dominant-008",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 8
+    },
+    {
+      "expected_rows": 3980462,
+      "expected_selected_compressed_bytes": 149870570,
+      "name": "us-dominant-009",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 9
+    },
+    {
+      "expected_rows": 3957670,
+      "expected_selected_compressed_bytes": 149936072,
+      "name": "us-dominant-010",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 10
+    },
+    {
+      "expected_rows": 3976855,
+      "expected_selected_compressed_bytes": 148247317,
+      "name": "us-dominant-011",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 11
+    },
+    {
+      "expected_rows": 3948219,
+      "expected_selected_compressed_bytes": 149753640,
+      "name": "us-dominant-012",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 12
+    },
+    {
+      "expected_rows": 3965894,
+      "expected_selected_compressed_bytes": 141608828,
+      "name": "us-dominant-013",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 13
+    },
+    {
+      "expected_rows": 3984003,
+      "expected_selected_compressed_bytes": 146918405,
+      "name": "us-dominant-014",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 14
+    },
+    {
+      "expected_rows": 3962354,
+      "expected_selected_compressed_bytes": 139238520,
+      "name": "us-dominant-030",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 30
+    },
+    {
+      "expected_rows": 3979791,
+      "expected_selected_compressed_bytes": 138139152,
+      "name": "us-dominant-031",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 31
+    },
+    {
+      "expected_rows": 3957354,
+      "expected_selected_compressed_bytes": 148454115,
+      "name": "us-dominant-032",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 32
+    },
+    {
+      "expected_rows": 3945519,
+      "expected_selected_compressed_bytes": 145816567,
+      "name": "us-dominant-033",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 33
+    },
+    {
+      "expected_rows": 3962178,
+      "expected_selected_compressed_bytes": 148509347,
+      "name": "us-dominant-034",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 34
+    },
+    {
+      "expected_rows": 3999329,
+      "expected_selected_compressed_bytes": 150817635,
+      "name": "us-dominant-035",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 35
+    },
+    {
+      "expected_rows": 3996147,
+      "expected_selected_compressed_bytes": 144592574,
+      "name": "us-dominant-036",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 36
+    },
+    {
+      "expected_rows": 3967816,
+      "expected_selected_compressed_bytes": 147597389,
+      "name": "us-dominant-037",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 37
+    },
+    {
+      "expected_rows": 3962846,
+      "expected_selected_compressed_bytes": 151150439,
+      "name": "us-dominant-038",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 38
+    },
+    {
+      "expected_rows": 3934483,
+      "expected_selected_compressed_bytes": 148831467,
+      "name": "us-dominant-039",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 39
+    },
+    {
+      "expected_rows": 3982719,
+      "expected_selected_compressed_bytes": 151930337,
+      "name": "us-dominant-040",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 40
+    },
+    {
+      "expected_rows": 3972744,
+      "expected_selected_compressed_bytes": 148288860,
+      "name": "us-dominant-041",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 41
+    },
+    {
+      "expected_rows": 3945041,
+      "expected_selected_compressed_bytes": 145368873,
+      "name": "us-dominant-042",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 42
+    },
+    {
+      "expected_rows": 3954621,
+      "expected_selected_compressed_bytes": 147800540,
+      "name": "us-dominant-043",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 43
+    },
+    {
+      "expected_rows": 3976755,
+      "expected_selected_compressed_bytes": 147433257,
+      "name": "us-dominant-044",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 44
+    },
+    {
+      "expected_rows": 3989214,
+      "expected_selected_compressed_bytes": 149517887,
+      "name": "us-dominant-045",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 45
+    },
+    {
+      "expected_rows": 3976778,
+      "expected_selected_compressed_bytes": 150518066,
+      "name": "us-dominant-046",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 46
+    },
+    {
+      "expected_rows": 3915996,
+      "expected_selected_compressed_bytes": 146206453,
+      "name": "us-dominant-047",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 47
+    },
+    {
+      "expected_rows": 3999111,
+      "expected_selected_compressed_bytes": 153316171,
+      "name": "us-dominant-048",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 48
+    },
+    {
+      "expected_rows": 3965016,
+      "expected_selected_compressed_bytes": 149802623,
+      "name": "us-dominant-049",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 49
+    },
+    {
+      "expected_rows": 3995307,
+      "expected_selected_compressed_bytes": 144727755,
+      "name": "us-dominant-050",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 50
+    },
+    {
+      "expected_rows": 3974940,
+      "expected_selected_compressed_bytes": 148279737,
+      "name": "us-dominant-051",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 51
+    },
+    {
+      "expected_rows": 3944833,
+      "expected_selected_compressed_bytes": 147044866,
+      "name": "us-dominant-052",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 52
+    },
+    {
+      "expected_rows": 3956653,
+      "expected_selected_compressed_bytes": 141771698,
+      "name": "us-dominant-054",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 54
+    },
+    {
+      "expected_rows": 3996606,
+      "expected_selected_compressed_bytes": 142679801,
+      "name": "us-dominant-056",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 56
+    },
+    {
+      "expected_rows": 3996571,
+      "expected_selected_compressed_bytes": 129781994,
+      "name": "us-dominant-058",
+      "rationale": "task's largest exact-country footer population is US; the complete task is retained as an upper-bound scale signal",
+      "stratum": "country-dominant-scale-signal",
+      "task_index": 58
+    }
+  ]
+}

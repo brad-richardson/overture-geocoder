@@ -290,4 +290,4 @@ def test_cli_writes_json_and_markdown(tmp_path):
     )
     assert rc == 0
     assert json.loads(json_out.read_text())["completed_count"] == 1
-    assert md_out.read_text().startswith("# Stratified address sweep aggregate")
+    assert md_out.read_text().startswith("# Address sweep aggregate")

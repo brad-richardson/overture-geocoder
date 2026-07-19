@@ -1,0 +1,161 @@
+name: USA Scale Signal (non-promoting)
+
+# Runs the next scale step after the green US-NE slice: a full CONUS Places
+# region build and the complete US-dominant address task fleet. Both called
+# workflows write only run-unique smoke prefixes, verify their bytes, and clean
+# them up. This workflow combines their retained evidence; it never publishes a
+# release, updates a catalog, or claims an exact country-filtered address export.
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm:
+        description: Type USA to run the 33-task address fleet and full CONUS Places build.
+        required: true
+        type: string
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: usa-scale-signal
+  cancel-in-progress: false
+
+jobs:
+  preflight:
+    name: Validate the pinned USA scale plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Require an explicit scale-run confirmation
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "${CONFIRM}" != "USA" ]; then
+            echo "::error::confirmation must be exactly USA"
+            exit 1
+          fi
+
+      - name: Reproduce the complete US-dominant task selection
+        run: |
+          set -euo pipefail
+          python scripts/select_address_sweep_tasks.py check-country \
+            --inventory-report benchmarks/address-rowgroup-inventory-report.json \
+            --selection .github/address-usa-selection.json \
+            --country US \
+            --max-tasks 40
+          jq -e '
+            .task_count == 33
+            and .projected_rows == 130996768
+            and .exact_country_export == false
+          ' .github/address-usa-selection.json
+
+      - name: Record the non-promoting scope
+        run: |
+          {
+            echo "## USA scale plan"
+            echo
+            echo "- Places: CONUS bbox (-125.0, 24.4) .. (-66.9, 49.4)"
+            echo "- Addresses: all 33 US-dominant inventory tasks (~131M projected rows)"
+            echo "- Address contract: upper-bound task fleet; no row-level country filter"
+            echo "- Cleanup: enabled for every isolated R2 prefix"
+            echo "- Promotion/catalog writes: none"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  places:
+    name: Build full CONUS Places evidence
+    needs: preflight
+    uses: ./.github/workflows/build-places-region.yml
+    with:
+      region_name: conus
+      bbox_xmin: "-125.0"
+      bbox_ymin: "24.4"
+      bbox_xmax: "-66.9"
+      bbox_ymax: "49.4"
+      shard_row_cap: "1500000"
+      extract_limit: "22000000"
+      release: "2026-06-17.0"
+      cleanup: true
+    secrets:
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  addresses:
+    name: Run the complete USA address scale fleet
+    needs: preflight
+    uses: ./.github/workflows/rehearse-address-r2-map-reduce.yml
+    with:
+      mode: usa
+      tasks: ""
+    secrets:
+      R2_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      R2_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+
+  report:
+    name: Retain the combined USA scale gate
+    needs: [places, addresses]
+    if: ${{ always() && !cancelled() && github.ref == 'refs/heads/main' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Download CONUS Places evidence
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: places-region-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          path: usa-evidence/places
+
+      - name: Download the USA address aggregate
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          name: address-sweep-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: usa-evidence/addresses
+
+      - name: Build and enforce the combined scale report
+        run: |
+          set -euo pipefail
+          python scripts/usa_scale_report.py \
+            --places usa-evidence/places/evidence.json \
+            --addresses usa-evidence/addresses/sweep-aggregate.json \
+            --selection .github/address-usa-selection.json \
+            --output usa-scale-report.json \
+            --markdown usa-scale-report.md
+          cat usa-scale-report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the combined USA scale evidence
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: usa-scale-report-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            usa-scale-report.json
+            usa-scale-report.md
+            usa-evidence/places/evidence.json
+            usa-evidence/addresses/sweep-aggregate.json
+            .github/address-usa-selection.json

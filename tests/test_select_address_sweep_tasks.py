@@ -7,6 +7,7 @@ import pytest
 ROOT = Path(__file__).parents[1]
 INVENTORY = ROOT / "benchmarks" / "address-rowgroup-inventory-report.json"
 SELECTION = ROOT / ".github" / "address-sweep-selection.json"
+USA_SELECTION = ROOT / ".github" / "address-usa-selection.json"
 
 _spec = importlib.util.spec_from_file_location(
     "select_address_sweep_tasks", ROOT / "scripts" / "select_address_sweep_tasks.py"
@@ -89,6 +90,71 @@ def test_matrix_from_selection_rejects_bool_index():
     bad = {"tasks": [{"name": "x", "task_index": True}]}
     with pytest.raises(sel.SelectionError):
         sel.matrix_from_selection(bad)
+
+
+def test_usa_country_dominant_selection_is_complete_and_pinned(report):
+    document = sel.build_country_selection_document(
+        report, country="US", max_tasks=40
+    )
+
+    assert document["schema"] == sel.COUNTRY_SCHEMA
+    assert document["country"] == "US"
+    assert document["exact_country_export"] is False
+    assert document["task_count"] == 33
+    assert document["projected_rows"] == 130_996_768
+    assert document["projected_selected_compressed_bytes"] == 4_841_088_837
+    assert [task["task_index"] for task in document["tasks"]] == [
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        30,
+        31,
+        32,
+        33,
+        34,
+        35,
+        36,
+        37,
+        38,
+        39,
+        40,
+        41,
+        42,
+        43,
+        44,
+        45,
+        46,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        54,
+        56,
+        58,
+    ]
+    assert json.loads(USA_SELECTION.read_text()) == document
+
+
+def test_country_dominant_matrix_is_not_limited_to_stratified_count(report):
+    selection = sel.build_country_selection_document(
+        report, country="US", max_tasks=40
+    )
+    matrix = sel.matrix_from_selection(selection)
+    assert len(matrix["include"]) == 33
+    assert matrix["include"][0] == {"name": "us-dominant-008", "task_index": 8}
+
+
+def test_country_dominant_selection_fails_closed_on_cap_and_country(report):
+    with pytest.raises(sel.SelectionError, match="exceeding the hard cap"):
+        sel.build_country_selection_document(report, country="US", max_tasks=32)
+    with pytest.raises(sel.SelectionError, match="two-letter uppercase"):
+        sel.build_country_selection_document(report, country="us", max_tasks=40)
 
 
 def test_validate_override_accepts_include_object():
