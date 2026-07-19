@@ -73,6 +73,9 @@ Build a new catalog or extend an existing one:
 ```bash
 python scripts/v2_release_manifest.py catalog \
   --release-manifest v2-release.json \
+  --legacy-release-manifest release-manifest.json \
+  --family-manifest places=places-family-manifest.json \
+  --family-manifest addresses=addresses-family-manifest.json \
   --before v2-catalog-before.json \
   --output v2-catalog-next.json
 ```
@@ -80,6 +83,8 @@ python scripts/v2_release_manifest.py catalog \
 The first catalog requires `--initialize`; every later catalog requires
 `--before`. There is no implicit singleton mode, so forgetting the prior
 catalog cannot silently discard rollback history or promote an older build.
+Catalog construction repeats source verification; a merely self-digested v2
+release cannot enter the discovery root.
 
 Build IDs use `YYYY-MM-DD.N` and must increase monotonically. Every generated
 object is deterministic when `--generated-at` is supplied.

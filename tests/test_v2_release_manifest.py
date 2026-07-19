@@ -105,6 +105,20 @@ def release_manifest(build: str = "2026-07-19.1") -> dict:
     )
 
 
+def catalog_sources() -> dict:
+    legacy = legacy_release()
+    places = family_manifest("places")
+    addresses = family_manifest("addresses")
+    return {
+        "legacy_release": legacy,
+        "legacy_manifest_sha256": payload_sha(legacy),
+        "family_manifests": {
+            "places": (places, payload_sha(places)),
+            "addresses": (addresses, payload_sha(addresses)),
+        },
+    }
+
+
 def test_release_binds_core_and_family_capabilities():
     manifest = release_manifest()
 
@@ -302,12 +316,21 @@ def test_source_verification_rejects_recomputed_unlisted_entrypoint():
             },
         )
 
+    with pytest.raises(ValueError, match="differs from its source artifact"):
+        v2.build_catalog(
+            release_manifest=tampered,
+            release_manifest_sha256=payload_sha(tampered),
+            **catalog_sources(),
+            initialize=True,
+        )
+
 
 def test_catalog_is_monotonic_and_preserves_history():
     first_release = release_manifest("2026-07-19.1")
     first = v2.build_catalog(
         release_manifest=first_release,
         release_manifest_sha256=payload_sha(first_release),
+        **catalog_sources(),
         initialize=True,
         generated_at="first",
     )
@@ -315,6 +338,7 @@ def test_catalog_is_monotonic_and_preserves_history():
     second = v2.build_catalog(
         release_manifest=second_release,
         release_manifest_sha256=payload_sha(second_release),
+        **catalog_sources(),
         before=first,
         generated_at="second",
     )
@@ -335,6 +359,7 @@ def test_catalog_rejects_duplicate_or_rollback_build():
     current = v2.build_catalog(
         release_manifest=current_release,
         release_manifest_sha256=payload_sha(current_release),
+        **catalog_sources(),
         initialize=True,
     )
     for build in ("2026-07-19.2", "2026-07-19.1"):
@@ -343,6 +368,7 @@ def test_catalog_rejects_duplicate_or_rollback_build():
             v2.build_catalog(
                 release_manifest=candidate,
                 release_manifest_sha256=payload_sha(candidate),
+                **catalog_sources(),
                 before=current,
             )
 
@@ -352,6 +378,7 @@ def test_catalog_validation_detects_key_and_digest_tampering():
     catalog = v2.build_catalog(
         release_manifest=release,
         release_manifest_sha256=payload_sha(release),
+        **catalog_sources(),
         initialize=True,
     )
     bad_key = copy.deepcopy(catalog)
@@ -371,11 +398,13 @@ def test_catalog_requires_explicit_initialization_or_history():
         v2.build_catalog(
             release_manifest=release,
             release_manifest_sha256=payload_sha(release),
+            **catalog_sources(),
         )
     with pytest.raises(ValueError, match="exactly one"):
         v2.build_catalog(
             release_manifest=release,
             release_manifest_sha256=payload_sha(release),
+            **catalog_sources(),
             before={"not": "used"},
             initialize=True,
         )
@@ -439,6 +468,10 @@ def test_cli_builds_and_validates_release_and_catalog(tmp_path):
             "catalog",
             "--release-manifest",
             str(release_path),
+            "--legacy-release-manifest",
+            str(legacy_path),
+            "--family-manifest",
+            f"places={places_path}",
             "--initialize",
             "--generated-at",
             "fixed",

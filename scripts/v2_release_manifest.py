@@ -473,11 +473,22 @@ def build_catalog(
     *,
     release_manifest: Any,
     release_manifest_sha256: str,
+    legacy_release: Any,
+    legacy_manifest_sha256: str,
+    family_manifests: dict[str, tuple[Any, str]] | None = None,
     before: Any | None = None,
     initialize: bool = False,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
-    release = validate_release_manifest(release_manifest)
+    # Catalog construction is the discovery-root boundary. A self-consistent
+    # release digest is insufficient here: re-prove every reference against
+    # the source manifests before making the release discoverable.
+    release = verify_release_sources(
+        release_manifest,
+        legacy_release=legacy_release,
+        legacy_manifest_sha256=legacy_manifest_sha256,
+        family_manifests=family_manifests,
+    )
     generated_at = _require_string(generated_at or _now(), "generated_at")
     previous: list[dict[str, Any]] = []
     if (before is None) == (not initialize):
@@ -579,6 +590,8 @@ def main() -> None:
 
     catalog = commands.add_parser("catalog", help="build a v2 catalog candidate")
     catalog.add_argument("--release-manifest", type=Path, required=True)
+    catalog.add_argument("--legacy-release-manifest", type=Path, required=True)
+    catalog.add_argument("--family-manifest", action="append", default=[])
     catalog_mode = catalog.add_mutually_exclusive_group(required=True)
     catalog_mode.add_argument("--before", type=Path)
     catalog_mode.add_argument("--initialize", action="store_true")
@@ -641,9 +654,20 @@ def main() -> None:
         print(json.dumps({"status": "ok", "release_digest": result["release_digest"]}))
     elif args.command == "catalog":
         release_payload = _read_json(args.release_manifest)
+        family_manifests = {}
+        for raw in args.family_manifest:
+            family, path_value = _parse_assignment(raw, "family manifest")
+            if family in family_manifests:
+                raise ValueError(f"duplicate family manifest: {family}")
+            path = Path(path_value)
+            family_manifests[family] = (_read_json(path), sha256_file(path))
+        legacy_path = args.legacy_release_manifest
         result = build_catalog(
             release_manifest=release_payload,
             release_manifest_sha256=sha256_file(args.release_manifest),
+            legacy_release=_read_json(legacy_path),
+            legacy_manifest_sha256=sha256_file(legacy_path),
+            family_manifests=family_manifests,
             before=_read_json(args.before) if args.before else None,
             initialize=args.initialize,
             generated_at=args.generated_at,
