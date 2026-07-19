@@ -477,6 +477,13 @@ fn positive_identity(bytes: Option<usize>, sha256: Option<&str>) -> bool {
         })
 }
 
+fn address_collection_keys(version: &str) -> [String; 2] {
+    [
+        format!("{version}/families/addresses/address-collection.json"),
+        format!("{version}/address-collection.json"),
+    ]
+}
+
 /// Stable 64-bit hash of the complete normalized eight-field key (FNV-1a over
 /// the fields joined by `0x1f`). This is the Worker's routing contract: a
 /// producer that splits a country across shards MUST partition by this exact
@@ -589,18 +596,20 @@ impl ShardLoader {
         let Some(version) = self.latest_version().await? else {
             return Err(Error::RustError("No versions found in catalog".into()));
         };
-        let key = format!("{version}/address-collection.json");
-        let Some(text) = self.memoized_get_text(&key, IMMUTABLE_CACHE_TTL).await? else {
-            return Ok(None);
-        };
-        let collection: AddressCollection = serde_json::from_str(&text)
-            .map_err(|e| Error::RustError(format!("Invalid {key}: {e}")))?;
-        if !collection.supported() {
-            return Err(Error::RustError(format!(
-                "Unsupported address collection contract: {key}"
-            )));
+        for key in address_collection_keys(&version) {
+            let Some(text) = self.memoized_get_text(&key, IMMUTABLE_CACHE_TTL).await? else {
+                continue;
+            };
+            let collection: AddressCollection = serde_json::from_str(&text)
+                .map_err(|e| Error::RustError(format!("Invalid {key}: {e}")))?;
+            if !collection.supported() {
+                return Err(Error::RustError(format!(
+                    "Unsupported address collection contract: {key}"
+                )));
+            }
+            return Ok(Some((version, collection)));
         }
-        Ok(Some((version, collection)))
+        Ok(None)
     }
 
     /// Resolve a normalized eight-field key to its address candidates.
@@ -1161,6 +1170,17 @@ mod tests {
             .split_ids
             .push("ca:".into());
         assert!(!unused_split.supported());
+    }
+
+    #[test]
+    fn address_collection_discovery_prefers_the_family_prefix() {
+        assert_eq!(
+            address_collection_keys("2026-07-19.0"),
+            [
+                "2026-07-19.0/families/addresses/address-collection.json",
+                "2026-07-19.0/address-collection.json",
+            ]
+        );
     }
 
     // --- Manifest deserialization ---
