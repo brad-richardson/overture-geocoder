@@ -119,7 +119,10 @@ def validate_split_cells(
     cells: Iterable[str], *, minimum_level: int, maximum_level: int
 ) -> set[str]:
     validate_levels(minimum_level, maximum_level)
-    result = set(cells)
+    supplied = list(cells)
+    result = set(supplied)
+    if len(result) != len(supplied):
+        raise ValueError("split cells must be unique")
     for cell in result:
         validate_quadkey(
             cell, minimum=minimum_level, maximum=maximum_level - 1

@@ -127,6 +127,17 @@ def test_adaptive_splits_are_sticky_and_never_merge():
     assert retained == splits
 
 
+def test_split_history_rejects_duplicate_or_orphaned_cells():
+    with pytest.raises(ValueError, match="unique"):
+        partition.validate_split_cells(
+            ["00", "00"], minimum_level=2, maximum_level=4
+        )
+    with pytest.raises(ValueError, match="ancestor"):
+        partition.validate_split_cells(
+            ["000"], minimum_level=2, maximum_level=4
+        )
+
+
 def test_build_region_produces_stable_spatial_shards(tmp_path):
     report = _build(
         _fixture(tmp_path, 210),
