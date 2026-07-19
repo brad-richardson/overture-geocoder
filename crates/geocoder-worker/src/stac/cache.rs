@@ -10,9 +10,9 @@ use worker::*;
 
 use crate::address_pages::{
     decode_useful_gzip_range_measured, parse_address_index, parse_useful_gzip_header,
-    AddressPageDecode, AddressPageRecord, MAX_INDEX_BYTES, MAX_STORED_PAGE_RANGE,
+    AddressPageRecord, MAX_INDEX_BYTES, MAX_STORED_PAGE_RANGE,
 };
-use crate::range_reader::{RangeReadMetrics, RangeReader};
+use crate::range_reader::RangeReader;
 
 use super::{not_found, ShardLoader};
 
@@ -32,17 +32,6 @@ fn validate_at_most_prefix_length(actual: usize, max_bytes: usize) -> Result<()>
 
 pub(crate) struct AddressPageLookup {
     pub records: Vec<AddressPageRecord>,
-    pub read_metrics: RangeReadMetrics,
-    // Byte-accounting fields consumed only by the isolated `address-spike` smoke
-    // response; the production `/address` route reads `records`/`read_metrics`.
-    #[allow(dead_code)]
-    pub index_bytes: usize,
-    #[allow(dead_code)]
-    pub stored_page_bytes: usize,
-    #[allow(dead_code)]
-    pub decoded_page_bytes: usize,
-    #[allow(dead_code)]
-    pub materialized_page_bytes: usize,
 }
 
 // Cache TTLs for different resource types
@@ -337,8 +326,7 @@ impl ShardLoader {
         }))
     }
 
-    /// Exact-address storage read path, shared by the production `/address`
-    /// route and the isolated `/__address-page-spike` smoke route.
+    /// Exact-address storage read path used by unified `/v2/forward`.
     ///
     /// The caller supplies immutable versioned object keys and an already
     /// normalized eight-field address key. The small side index is edge-cached,
@@ -364,11 +352,6 @@ impl ShardLoader {
         let Some(extent) = index.find(lookup_key).copied() else {
             return Ok(AddressPageLookup {
                 records: Vec::new(),
-                read_metrics: index_reader.metrics(),
-                index_bytes: index_bytes.len(),
-                stored_page_bytes: 0,
-                decoded_page_bytes: 0,
-                materialized_page_bytes: 0,
             });
         };
 
@@ -398,19 +381,8 @@ impl ShardLoader {
             .ok_or_else(|| Error::RustError("Address range plan returned no page".into()))?;
         let decode = decode_useful_gzip_range_measured(&page, extent.rows, lookup_key)
             .map_err(|error| Error::RustError(format!("Invalid address page: {error}")))?;
-        let AddressPageDecode {
-            records,
-            stored_bytes,
-            decoded_bytes,
-            materialized_bytes,
-        } = decode;
         Ok(AddressPageLookup {
-            records,
-            read_metrics: index_reader.metrics().add(data_reader.metrics()),
-            index_bytes: index_bytes.len(),
-            stored_page_bytes: stored_bytes,
-            decoded_page_bytes: decoded_bytes,
-            materialized_page_bytes: materialized_bytes,
+            records: decode.records,
         })
     }
 

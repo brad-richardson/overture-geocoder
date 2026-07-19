@@ -34,7 +34,7 @@ identify the object. Its JSON payload has `schema_version: 2`:
 ```json
 {
   "schema_version": 2,
-  "tokenizer_version": "nfkd-latin-fold-cjk-bigram-v2",
+  "tokenizer_version": "nfkd-lower-stripmark-cjk-bigram-v3",
   "coverage": [-180.0, -90.0, 180.0, 90.0],
   "partition": {
     "scheme": "world-quadkey-v1",

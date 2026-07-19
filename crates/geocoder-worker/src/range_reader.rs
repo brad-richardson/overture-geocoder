@@ -6,8 +6,8 @@
 //! this component decides *how many physical range reads to issue* and slices
 //! each want back out.
 //!
-//! It has no payload-specific logic: the production `/address` route and the
-//! experimental Places compact-shard reader are both consumers.
+//! It has no payload-specific logic: the unified v2 address and compact Places
+//! readers are both consumers.
 
 use bytes::Bytes;
 use futures::stream::{self, StreamExt, TryStreamExt};
@@ -47,24 +47,9 @@ impl RangeReadMetrics {
         }
     }
 
-    pub(crate) fn add(self, other: Self) -> Self {
-        Self {
-            logical_ranges: self.logical_ranges.saturating_add(other.logical_ranges),
-            planned_physical_ranges: self
-                .planned_physical_ranges
-                .saturating_add(other.planned_physical_ranges),
-            cache_hits: self.cache_hits.saturating_add(other.cache_hits),
-            r2_reads: self.r2_reads.saturating_add(other.r2_reads),
-            bytes_fetched: self.bytes_fetched.saturating_add(other.bytes_fetched),
-            cache_bytes: self.cache_bytes.saturating_add(other.cache_bytes),
-            r2_bytes: self.r2_bytes.saturating_add(other.r2_bytes),
-        }
-    }
-
     /// Difference between two metric snapshots. Only the Places multi-stage
     /// reader attributes per-stage byte/read deltas, so this is compiled with
     /// that feature.
-    #[cfg(feature = "places-spike")]
     pub(crate) fn since(self, earlier: Self) -> Self {
         Self {
             logical_ranges: self.logical_ranges.saturating_sub(earlier.logical_ranges),
@@ -148,7 +133,6 @@ impl<'a> RangeReader<'a> {
     /// Read one exact byte range, edge-cached. Only the Places multi-stage
     /// reader issues single exact ranges directly; the address path plans its
     /// page reads through [`RangeReader::coalesced`].
-    #[cfg(feature = "places-spike")]
     pub(crate) async fn range(&mut self, offset: u64, length: u64) -> Result<Option<Bytes>> {
         self.metrics.logical_ranges = self.metrics.logical_ranges.saturating_add(1);
         self.metrics.planned_physical_ranges =

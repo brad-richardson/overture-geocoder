@@ -45,6 +45,16 @@ impl ShardLoader {
         })
     }
 
+    /// Reverse geocode one core release selected by the atomic v2 manifest.
+    pub(crate) async fn reverse_geocode_version(
+        &self,
+        version: &str,
+        lat: f64,
+        lon: f64,
+    ) -> Result<ReverseSearchResult> {
+        self.try_reverse_geocode(version, lat, lon).await
+    }
+
     /// Attempt reverse geocode against a specific version.
     async fn try_reverse_geocode(
         &self,

@@ -7,10 +7,10 @@ use worker::*;
 mod address;
 mod address_pages;
 mod handlers;
-#[cfg(feature = "places-spike")]
 mod places_pages;
 mod range_reader;
 mod stac;
+mod v2;
 
 #[event(fetch)]
 async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
@@ -65,15 +65,10 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     let router = Router::with_data(std::rc::Rc::new(ctx))
         .get_async("/search", handlers::handle_search)
         .get_async("/reverse", handlers::handle_reverse)
-        .get_async("/address", address::handle_address)
-        .get_async("/id/:gers_id", handlers::handle_id_lookup);
-
-    // The address-page spike route ships only in the smoke build; production
-    // wasm bundles omit both the route and the decoder module.
-    #[cfg(feature = "address-spike")]
-    let router = router.get_async("/__address-page-spike", handlers::handle_address_page_spike);
-    #[cfg(feature = "places-spike")]
-    let router = router.get_async("/__places-page-spike", handlers::handle_places_page_spike);
+        .get_async("/id/:gers_id", handlers::handle_id_lookup)
+        .get_async("/v2/forward", v2::handle_forward)
+        .get_async("/v2/reverse", v2::handle_reverse)
+        .get_async("/v2/features/:gers_id", v2::handle_feature);
 
     let result = router
         .get_async("/health", handlers::handle_health)
@@ -81,7 +76,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
             Response::ok(concat!(
                 r#"{"name":"overture-geocoder","version":""#,
                 env!("CARGO_PKG_VERSION"),
-                r#"","endpoints":["/search","/reverse","/address","/id/:id"]}"#,
+                r#"","endpoints":["/search","/reverse","/id/:id","/v2/forward","/v2/reverse","/v2/features/:gers_id"]}"#,
             ))
         })
         .run(req, env)
@@ -126,12 +121,12 @@ fn request_endpoint(path: &str) -> &'static str {
     match path {
         "/search" => "search",
         "/reverse" => "reverse",
-        "/address" => "address",
+        "/v2/forward" => "v2_forward",
+        "/v2/reverse" => "v2_reverse",
         "/health" => "health",
         "/" => "root",
         path if path.starts_with("/id/") => "id",
-        "/__address-page-spike" => "address_page_spike",
-        "/__places-page-spike" => "places_page_spike",
+        path if path.starts_with("/v2/features/") => "v2_feature",
         _ => "other",
     }
 }
@@ -184,16 +179,10 @@ mod tests {
     fn classifies_known_endpoints_without_retaining_path_parameters() {
         assert_eq!(request_endpoint("/search"), "search");
         assert_eq!(request_endpoint("/reverse"), "reverse");
-        assert_eq!(request_endpoint("/address"), "address");
         assert_eq!(request_endpoint("/id/abc-123"), "id");
-        assert_eq!(
-            request_endpoint("/__address-page-spike"),
-            "address_page_spike"
-        );
-        assert_eq!(
-            request_endpoint("/__places-page-spike"),
-            "places_page_spike"
-        );
+        assert_eq!(request_endpoint("/v2/forward"), "v2_forward");
+        assert_eq!(request_endpoint("/v2/reverse"), "v2_reverse");
+        assert_eq!(request_endpoint("/v2/features/abc-123"), "v2_feature");
         assert_eq!(request_endpoint("/unexpected"), "other");
     }
 

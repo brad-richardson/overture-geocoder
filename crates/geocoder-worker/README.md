@@ -8,8 +8,9 @@ public API reference and `SPEC.md` for architecture details.
 
 ## Features
 
-- Worker routing (`/search`, `/reverse`, `/address`, `/id/:gers_id`,
-  `/health`, `/`), with HEAD request support on all endpoints
+- Worker routing (`/search`, `/reverse`, `/id/:gers_id`, `/v2/forward`,
+  `/v2/reverse`, `/v2/features/:gers_id`, `/health`, `/`), with HEAD request
+  support on all endpoints
 - STAC catalog loading from R2 with version fallback
 - Forward shard selection: HEAD + location shards (coordinates or
   CF-IPCountry/CF-Region-Code headers)
@@ -45,7 +46,8 @@ npx wrangler deploy
 1. R2 bucket named `geocoder-shards`
 2. Shards built and uploaded by the `Rebuild R2 Shards` workflow
    (`scripts/build_shards.py` + `scripts/build_id_index.py`)
-3. STAC catalog at `catalog.json` in bucket root
+3. STAC catalog at `catalog.json` in bucket root; unified v2 additionally
+   requires an atomic `v2/catalog.json` and its referenced immutable release
 
 ## API
 
@@ -58,16 +60,14 @@ Summary:
 - `GET /reverse?lat=<f>&lon=<f>&format=json|geojson` — reverse geocode
   (bbox-based containment over countries, regions, counties, and populated
   localities)
-- `GET /address?country=&admin_level_general=&admin_level_specific=&postal_city=&postcode=&street=&number=&unit=`
-  — structured exact-address lookup (all eight fields required; `country`,
-  `street`, `number` must be non-empty). Returns every duplicate/ambiguous
-  candidate (no dedup) with `ambiguous`/`overflow` signaling, `coverage`
-  (`in_coverage`/`out_of_coverage`), `data_version`, and
-  `normalization_version`. Returns a `404 {"error":"address_family_unavailable"}`
-  until an address family is published in the release catalog. See
-  `docs/address-structured-endpoint-contract.md`.
 - `GET /id/:gers_id` — resolve a GERS ID to its bounding box
+- `GET /v2/forward` — unified division/POI text search or structured exact
+  address lookup, with comma-separated `types`
+- `GET /v2/reverse?lat=<f>&lon=<f>` — division reverse geocoding
+- `GET /v2/features/:gers_id` — release-pinned GeoJSON feature lookup
 - `GET /health` — verifies the catalog loads and a version exists
+
+See `docs/api-v2.md` for the full staged v2 contract and current limitations.
 
 ## Architecture
 
