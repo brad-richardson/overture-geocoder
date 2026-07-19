@@ -19,6 +19,10 @@ One v2 release binds these identities atomically:
 The builder rejects cross-release composition. It records each optional
 family's manifest key, file SHA-256, self-digest, format versions, coverage,
 enabled operations, and the verified artifact key/size/SHA-256 for each operation.
+The legacy core is also re-proved from its release manifest: canonical
+collection paths, hashed forward/reverse shards, the router, the exact 4096
+v3 ID shards, and the locator dictionary must all occur in its verified object
+set before v2 can reference it.
 Presence does not imply every operation: the first
 address family advertises only `structured_forward`, while Places advertises
 `forward`. General address forward/reverse can be enabled only by a later build

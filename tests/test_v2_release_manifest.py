@@ -27,11 +27,63 @@ def payload_sha(value) -> str:
 
 
 def legacy_release(version: str = "2026-07-18.0", release: str = RELEASE) -> dict:
+    forward = {"href": "./shards/AA.db", "size_bytes": 11, "sha256": "a" * 64}
+    reverse = {"href": "./reverse/AA.db", "size_bytes": 12, "sha256": "b" * 64}
+    router = {"href": "./router.db", "size_bytes": 13, "sha256": "c" * 64}
+    dictionary = {
+        "href": f"./id-locator-dictionary-{'d' * 64}.json",
+        "size_bytes": 14,
+        "sha256": "d" * 64,
+    }
+    identifiers = [
+        {
+            "href": f"./id-index/{prefix:03x}.parquet",
+            "size_bytes": 1,
+            "sha256": "e" * 64,
+        }
+        for prefix in range(16**3)
+    ]
+    verified = [
+        {"href": "./collection.json", "size_bytes": 21},
+        {"href": "./reverse-collection.json", "size_bytes": 22},
+        {"href": "./id-collection.json", "size_bytes": 23},
+        {"href": forward["href"], "size_bytes": forward["size_bytes"]},
+        {"href": reverse["href"], "size_bytes": reverse["size_bytes"]},
+        {"href": router["href"], "size_bytes": router["size_bytes"]},
+        {"href": dictionary["href"], "size_bytes": dictionary["size_bytes"]},
+        *[
+            {"href": item["href"], "size_bytes": item["size_bytes"]}
+            for item in identifiers
+        ],
+    ]
     return {
         "schema_version": 1,
         "version": version,
         "overture_release": release,
-        "families": {"forward": {}, "reverse": {}, "id": {}},
+        "generated_at": "2026-07-19T12:00:00+00:00",
+        "families": {
+            "forward": {
+                "collection": "./collection.json",
+                "shard_count": 1,
+                "objects": [forward],
+                "router": router,
+            },
+            "reverse": {
+                "collection": "./reverse-collection.json",
+                "shard_count": 1,
+                "objects": [reverse],
+            },
+            "id": {
+                "collection": "./id-collection.json",
+                "format_version": 3,
+                "shard_count": 4096,
+                "total_size_bytes": 4096,
+                "objects": identifiers,
+                "integrity": "fixture",
+                "locator_dictionary": dictionary,
+            },
+        },
+        "verified_version_objects": verified,
     }
 
 
@@ -258,6 +310,24 @@ def test_release_rejects_cross_release_family_and_core():
         )
 
 
+def test_release_rejects_stubbed_legacy_core_manifest():
+    stub = {
+        "schema_version": 1,
+        "version": "2026-07-18.0",
+        "overture_release": RELEASE,
+        "generated_at": "now",
+        "families": {"forward": {}, "reverse": {}, "id": {}},
+        "verified_version_objects": [],
+    }
+    with pytest.raises(ValueError, match="forward collection path differs"):
+        v2.build_release_manifest(
+            geocoder_build="2026-07-19.1",
+            overture_release=RELEASE,
+            legacy_release=stub,
+            legacy_manifest_sha256=payload_sha(stub),
+        )
+
+
 def test_release_rejects_family_not_blessed_by_its_source_manifest():
     legacy = legacy_release()
     places = family_manifest("places")
@@ -309,7 +379,7 @@ def test_release_rejects_conflicting_proofs_for_one_source_key():
 @pytest.mark.parametrize("version", ["../catalog", "nested/version", r"nested\version"])
 def test_release_builder_rejects_unsafe_legacy_version(version):
     legacy = legacy_release(version=version)
-    with pytest.raises(ValueError, match="canonical object-key component"):
+    with pytest.raises(ValueError, match="YYYY-MM-DD.N"):
         v2.build_release_manifest(
             geocoder_build="2026-07-19.1",
             overture_release=RELEASE,

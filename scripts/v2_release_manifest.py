@@ -110,17 +110,142 @@ def _require_published_family_artifact_key(
     return key
 
 
+def _validate_core_object(value: Any, label: str) -> tuple[str, int]:
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be an object")
+    href = _require_string(value.get("href"), f"{label} href")
+    if not href.startswith("./"):
+        raise ValueError(f"{label} href must be release-relative")
+    _require_safe_key(href[2:], f"{label} href")
+    size = gbm.require_int(value.get("size_bytes"), f"{label} bytes", minimum=1)
+    _require_sha256(value.get("sha256"), f"{label} SHA-256")
+    return href, size
+
+
+def _validate_core_family_objects(
+    value: Any,
+    *,
+    label: str,
+    prefix: str,
+    suffix: str,
+) -> dict[str, int]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"legacy {label} objects must be a non-empty array")
+    objects: dict[str, int] = {}
+    for index, item in enumerate(value):
+        href, size = _validate_core_object(item, f"legacy {label} object {index}")
+        key = href[2:]
+        if (
+            not key.startswith(prefix)
+            or not key.endswith(suffix)
+            or key.count("/") != 1
+        ):
+            raise ValueError(f"legacy {label} object is outside {prefix}*{suffix}")
+        if href in objects:
+            raise ValueError(f"legacy {label} objects contain duplicate hrefs")
+        objects[href] = size
+    return objects
+
+
 def _validate_legacy_release(manifest: Any, overture_release: str) -> dict[str, Any]:
     if not isinstance(manifest, dict) or manifest.get("schema_version") != 1:
         raise ValueError("legacy release manifest must use schema_version 1")
-    version = _require_key_component(
-        manifest.get("version"), "legacy release version"
-    )
+    version = _require_build(manifest.get("version"))
     if manifest.get("overture_release") != overture_release:
         raise ValueError("legacy release Overture release differs")
+    _require_string(manifest.get("generated_at"), "legacy release generated_at")
+
     families = manifest.get("families")
-    if not isinstance(families, dict) or not {"forward", "reverse", "id"}.issubset(families):
-        raise ValueError("legacy release must contain forward, reverse, and id families")
+    if not isinstance(families, dict) or set(families) != {
+        "forward",
+        "reverse",
+        "id",
+    }:
+        raise ValueError("legacy release must contain exactly forward, reverse, and id")
+    forward = families["forward"]
+    reverse = families["reverse"]
+    identifier = families["id"]
+    if not all(isinstance(value, dict) for value in (forward, reverse, identifier)):
+        raise ValueError("legacy core family summaries must be objects")
+    if forward.get("collection") != "./collection.json":
+        raise ValueError("legacy forward collection path differs")
+    if reverse.get("collection") != "./reverse-collection.json":
+        raise ValueError("legacy reverse collection path differs")
+    if identifier.get("collection") != "./id-collection.json":
+        raise ValueError("legacy ID collection path differs")
+
+    forward_objects = _validate_core_family_objects(
+        forward.get("objects"), label="forward", prefix="shards/", suffix=".db"
+    )
+    reverse_objects = _validate_core_family_objects(
+        reverse.get("objects"), label="reverse", prefix="reverse/", suffix=".db"
+    )
+    id_objects = _validate_core_family_objects(
+        identifier.get("objects"),
+        label="ID",
+        prefix="id-index/",
+        suffix=".parquet",
+    )
+    if forward.get("shard_count") != len(forward_objects):
+        raise ValueError("legacy forward shard count differs")
+    if reverse.get("shard_count") != len(reverse_objects):
+        raise ValueError("legacy reverse shard count differs")
+    expected_id_hrefs = {
+        f"./id-index/{prefix:03x}.parquet" for prefix in range(16**3)
+    }
+    if (
+        identifier.get("format_version") != 3
+        or identifier.get("shard_count") != 4096
+        or set(id_objects) != expected_id_hrefs
+    ):
+        raise ValueError("legacy ID family must contain the exact v3 4096-shard set")
+    if identifier.get("total_size_bytes") != sum(id_objects.values()):
+        raise ValueError("legacy ID total bytes differ")
+
+    router_href, router_size = _validate_core_object(
+        forward.get("router"), "legacy forward router"
+    )
+    if router_href != "./router.db":
+        raise ValueError("legacy forward router path differs")
+    dictionary_href, dictionary_size = _validate_core_object(
+        identifier.get("locator_dictionary"), "legacy ID locator dictionary"
+    )
+
+    verified = manifest.get("verified_version_objects")
+    if not isinstance(verified, list) or not verified:
+        raise ValueError("legacy release has no verified object set")
+    verified_sizes: dict[str, int] = {}
+    for index, item in enumerate(verified):
+        if not isinstance(item, dict):
+            raise ValueError(f"legacy verified object {index} is invalid")
+        href = _require_string(item.get("href"), f"legacy verified object {index} href")
+        if not href.startswith("./"):
+            raise ValueError("legacy verified object href must be release-relative")
+        _require_safe_key(href[2:], f"legacy verified object {index} href")
+        size = gbm.require_int(
+            item.get("size_bytes"), f"legacy verified object {index} bytes", minimum=1
+        )
+        if href in verified_sizes:
+            raise ValueError("legacy verified object set contains duplicate hrefs")
+        verified_sizes[href] = size
+
+    bound_objects = {
+        **forward_objects,
+        **reverse_objects,
+        **id_objects,
+        router_href: router_size,
+        dictionary_href: dictionary_size,
+    }
+    for href, size in bound_objects.items():
+        if verified_sizes.get(href) != size:
+            raise ValueError(f"legacy verified object set differs for {href}")
+    required_metadata = {
+        "./collection.json",
+        "./reverse-collection.json",
+        "./id-collection.json",
+    }
+    if not required_metadata.issubset(verified_sizes):
+        raise ValueError("legacy verified object set omits a core collection")
     return {"version": version}
 
 
