@@ -67,6 +67,7 @@ fn supported_tokenizer(value: &str) -> bool {
     matches!(value, TOKENIZER_VERSION | LEGACY_TOKENIZER_VERSION)
 }
 
+#[cfg(test)]
 fn is_cjk(character: char) -> bool {
     matches!(
         character as u32,
@@ -78,8 +79,7 @@ fn is_cjk(character: char) -> bool {
     )
 }
 
-/// Query tokenizer shared with the global v3 producer contract.
-pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
+fn normalized_words(value: &str) -> Vec<String> {
     let folded: String = value
         .trim()
         .chars()
@@ -99,6 +99,13 @@ pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
     if !current.is_empty() {
         words.push(current);
     }
+    words
+}
+
+/// Full document tokenizer shared with the global v3 producer contract.
+#[cfg(test)]
+pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
+    let words = normalized_words(value);
     let mut result = Vec::new();
     let mut seen = HashSet::new();
     for word in words {
@@ -133,6 +140,13 @@ pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
         }
     }
     result
+}
+
+/// Exact query clauses use the full normalized word tokens. Those tokens are
+/// always present in the document index; adding every CJK bigram as an AND
+/// clause would make ordinary long CJK names exceed the four-clause read cap.
+pub(crate) fn query_terms(value: &str) -> Vec<String> {
+    normalized_words(value)
 }
 
 const FIELD_NAME: u8 = 1;
@@ -1342,6 +1356,10 @@ mod tests {
                 "\u{30c3}\u{30af}",
                 "\u{30af}\u{30b9}",
             ]
+        );
+        assert_eq!(
+            query_terms("\u{30b9}\u{30bf}\u{30fc}\u{30d0}\u{30c3}\u{30af}\u{30b9}"),
+            ["\u{30b9}\u{30bf}\u{30fc}\u{30cf}\u{30c3}\u{30af}\u{30b9}"]
         );
     }
 

@@ -56,6 +56,11 @@ shard and supports up to four tokens, with optional last-token prefix matching.
 Reported distance is diagnostic within that bounded candidate set; it is not a
 claim of exhaustive global nearest-POI ranking.
 
+The index also stores CJK bigrams for later substring work, but v2 query
+planning currently uses full normalized word tokens. This keeps ordinary long
+CJK names inside the four-clause bound without pretending that a partial-name
+substring parser is already supported.
+
 Structured exact-address mode uses the same endpoint without `q`. Required
 fields are `country`, `street`, and `number` (or `address_number`). Optional
 fields default to the literal empty string:

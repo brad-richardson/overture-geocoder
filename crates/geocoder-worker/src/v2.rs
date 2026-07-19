@@ -9,7 +9,7 @@ use sha2::{Digest, Sha256};
 use worker::*;
 
 use crate::address::{build_lookup_key, AddressOutcome};
-use crate::places_pages::{tokenize_query, PlaceProjection, PlacesClause, TOKENIZER_VERSION};
+use crate::places_pages::{query_terms, PlaceProjection, PlacesClause, TOKENIZER_VERSION};
 use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL};
 use crate::stac::{ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
 
@@ -639,7 +639,7 @@ async fn search_places(
         .object_key
         .strip_suffix(SUFFIX)
         .ok_or_else(|| Error::RustError("v2 Places entrypoint is not a catalog object".into()))?;
-    let tokens = tokenize_query(query);
+    let tokens = query_terms(query);
     if tokens.is_empty() || tokens.len() > 4 {
         return Ok(Vec::new());
     }
