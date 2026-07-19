@@ -6,6 +6,7 @@ import struct
 import sys
 from pathlib import Path
 
+import duckdb
 import pytest
 
 
@@ -43,6 +44,44 @@ def _fixture(tmp_path: Path, count: int) -> Path:
     path = tmp_path / f"places-{count}.jsonl"
     write_places(path, count)
     return path
+
+
+def _serving_order_parquet(source: Path, output: Path, *, reverse: bool = False) -> None:
+    source_sql = str(source).replace("'", "''")
+    output_sql = str(output).replace("'", "''")
+    direction = "DESC" if reverse else "ASC"
+    connection = duckdb.connect()
+    try:
+        connection.execute(
+            f"""
+            COPY (
+              SELECT
+                id AS gers_id,
+                name AS primary_name,
+                '' AS brand_name,
+                category AS category_primary,
+                locality,
+                region,
+                country,
+                lat,
+                lon,
+                confidence,
+                '' AS alt_names
+              FROM read_json_auto('{source_sql}', format='newline_delimited')
+              ORDER BY
+                FLOOR((lat + 90.0) / 0.25) {direction},
+                FLOOR((lon + 180.0) / 0.25) {direction},
+                -CAST(round_even(confidence * 255, 0) AS BIGINT) {direction},
+                id {direction}
+            ) TO '{output_sql}' (
+              FORMAT PARQUET,
+              COMPRESSION ZSTD,
+              ROW_GROUP_SIZE 2048
+            )
+            """
+        )
+    finally:
+        connection.close()
 
 
 def test_split_respects_cap_and_preserves_every_row(tmp_path):
@@ -104,6 +143,54 @@ def test_build_region_is_byte_deterministic(tmp_path):
     assert first["produced_objects"] == second["produced_objects"]
     for name in first["produced_objects"]:
         assert (tmp_path / "a" / name).read_bytes() == (tmp_path / "b" / name).read_bytes()
+
+
+def test_streamed_serving_order_matches_in_memory_bytes(tmp_path):
+    # Span multiple Parquet row groups so the sequential-reader contract is
+    # exercised rather than accidentally passing on a one-group fixture.
+    fixture = _fixture(tmp_path, 5_000)
+    parquet = tmp_path / "places-serving-order.parquet"
+    _serving_order_parquet(fixture, parquet)
+
+    in_memory = region.build_region(
+        fixture,
+        tmp_path / "in-memory",
+        region_name="ne",
+        row_cap=2_000,
+        build_head=False,
+    )
+    streamed = region.build_region(
+        parquet,
+        tmp_path / "streamed",
+        region_name="ne",
+        row_cap=2_000,
+        build_head=False,
+        input_serving_ordered=True,
+    )
+
+    assert streamed["totals"] == in_memory["totals"]
+    assert streamed["shards"] == in_memory["shards"]
+    assert streamed["catalog"] == in_memory["catalog"]
+    assert streamed["produced_objects"] == in_memory["produced_objects"]
+    for name in streamed["produced_objects"]:
+        assert (tmp_path / "streamed" / name).read_bytes() == (
+            tmp_path / "in-memory" / name
+        ).read_bytes()
+
+
+def test_streamed_serving_order_rejects_false_order_claim(tmp_path):
+    fixture = _fixture(tmp_path, 80)
+    parquet = tmp_path / "places-reversed.parquet"
+    _serving_order_parquet(fixture, parquet, reverse=True)
+
+    with pytest.raises(ValueError, match="not monotonic"):
+        list(
+            region.iter_serving_order_chunks(
+                parquet,
+                row_cap=40,
+                cell_degrees=region.DEFAULT_CELL_DEGREES,
+            )
+        )
 
 
 def test_single_shard_when_under_cap(tmp_path):

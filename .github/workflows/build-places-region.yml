@@ -159,7 +159,7 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Extract the full region and assert no truncation
+      - name: Extract the full region in serving order and assert no truncation
         run: |
           set -euo pipefail
           mkdir -p /tmp/region
@@ -168,6 +168,7 @@ jobs:
             --release "$RELEASE" --limit "$EXTRACT_LIMIT" \
             --xmin "$BBOX_XMIN" --xmax "$BBOX_XMAX" \
             --ymin "$BBOX_YMIN" --ymax "$BBOX_YMAX" \
+            --serving-order \
             --output /tmp/region/region.parquet | tee /tmp/region/extract.log
           ROWS=$(sed -n 's/^rows=\([0-9][0-9]*\).*/\1/p' /tmp/region/extract.log)
           test -n "$ROWS"
@@ -189,10 +190,12 @@ jobs:
           python scripts/build_places_region_shards.py \
             --input /tmp/region/region.parquet --output-dir /tmp/region/a \
             --region-name "$REGION_NAME" --shard-row-cap "$SHARD_ROW_CAP" \
+            --input-serving-ordered --no-head \
             --report /tmp/region/build-report.json
           python scripts/build_places_region_shards.py \
             --input /tmp/region/region.parquet --output-dir /tmp/region/b \
             --region-name "$REGION_NAME" --shard-row-cap "$SHARD_ROW_CAP" \
+            --input-serving-ordered --no-head \
             --report /tmp/region/build-report-b.json
           # Every produced object must be byte-identical across the two builds.
           while read -r OBJ; do

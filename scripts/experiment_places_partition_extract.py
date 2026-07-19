@@ -48,6 +48,22 @@ PROJECTION = """
 """
 
 
+# Exact counterpart of the compact shard builder's Python serving key:
+# ``spatial_cell(place, 0.25), -round(confidence * 255), place_id``. DuckDB's
+# round_even matches Python's bankers-rounding ``round`` at half-way values.
+# The Overture extractor already requires Point geometries, so lat/lon are
+# finite and inside the spatial cell domain used by the builder.
+SERVING_ORDER = """
+          CAST(FLOOR((ST_Y(geometry) + 90.0) / 0.25) AS BIGINT),
+          CAST(FLOOR((ST_X(geometry) + 180.0) / 0.25) AS BIGINT),
+          -CAST(round_even(
+            LEAST(1.0, GREATEST(0.0, COALESCE(confidence, 0.5))) * 255,
+            0
+          ) AS BIGINT),
+          id
+"""
+
+
 def _connect(release: str) -> tuple[duckdb.DuckDBPyConnection, str]:
     connection = duckdb.connect()
     connection.execute("INSTALL httpfs; LOAD httpfs; INSTALL spatial; LOAD spatial")
@@ -82,6 +98,14 @@ def main() -> None:
     parser.add_argument("--ymin", type=float, required=True)
     parser.add_argument("--ymax", type=float, required=True)
     parser.add_argument(
+        "--serving-order",
+        action="store_true",
+        help=(
+            "Write the complete result in compact-shard serving order so a "
+            "region builder can stream bounded chunks without a full Python sort."
+        ),
+    )
+    parser.add_argument(
         "--count-only",
         action="store_true",
         help="Count matching rows in the bbox (before LIMIT) and exit.",
@@ -115,6 +139,9 @@ def main() -> None:
     output = args.output.resolve()
     output.parent.mkdir(parents=True, exist_ok=True)
     output_sql = str(output).replace("'", "''")
+    order_by = SERVING_ORDER if args.serving_order else (
+        "          COALESCE(confidence, 0.5) DESC, id\n"
+    )
     connection.execute(
         f"""
         COPY (
@@ -124,7 +151,8 @@ def main() -> None:
           WHERE {predicate}
             AND names.primary IS NOT NULL
             AND COALESCE(operating_status, 'open') != 'permanently_closed'
-          ORDER BY COALESCE(confidence, 0.5) DESC, id
+          ORDER BY
+{order_by.rstrip()}
           LIMIT {args.limit}
         ) TO '{output_sql}' (FORMAT PARQUET, COMPRESSION ZSTD)
         """

@@ -62,6 +62,12 @@ point-routed queries are unaffected. A region reported ``over_reader_caps`` is
 therefore only servable for routed queries; the head-key overflow must be
 resolved (or the head query class accepted as unserved) before promotion.
 
+For a full-region, non-promoting scale measurement the CLI supports
+``--input-serving-ordered --no-head``. That mode validates the extractor's
+total serving order and holds only one shard-sized chunk in Python at a time;
+it explicitly records the head as skipped. This bounded-memory signal measures
+the load-bearing routed shards and catalog, not context-free serving readiness.
+
 This is an offline producer. It does not access Cloudflare, R2, or Overture S3
 and cannot promote a catalog.
 """
@@ -69,9 +75,11 @@ and cannot promote a catalog.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import math
 import sys
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -80,13 +88,17 @@ SCRIPT_DIR = Path(__file__).resolve().parent
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from experiment_places_compact_index import Place, load_places  # noqa: E402
+from experiment_places_compact_index import (  # noqa: E402
+    Place,
+    load_places,
+    place_from_row,
+)
 from experiment_places_compact_shard import build_artifact  # noqa: E402
 from experiment_places_head_repack import (  # noqa: E402
     build_heads_and_baseline,
     build_repack_object,
 )
-from experiment_places_locality_head import ordered_places  # noqa: E402
+from experiment_places_locality_head import ordered_places, spatial_cell  # noqa: E402
 
 # Reuse the smoke builder's catalog framing and route record verbatim so the
 # region catalog is byte-compatible with the Worker's PCAT parser.
@@ -104,6 +116,114 @@ DEFAULT_HEAD_MINIMUM_CANDIDATES = 64
 DEFAULT_HEAD_FAMOUS_CAP = 1024
 
 
+def _chunk_sizes(total: int, row_cap: int) -> list[int]:
+    if row_cap < 1:
+        raise ValueError("row_cap must be a positive integer")
+    if total < 1:
+        raise ValueError("input contains no named Places")
+    chunk_count = math.ceil(total / row_cap)
+    base, remainder = divmod(total, chunk_count)
+    return [base + (1 if index < remainder else 0) for index in range(chunk_count)]
+
+
+def _serving_key(place: Place, cell_degrees: float) -> tuple[str, int, str]:
+    return (
+        spatial_cell(place, cell_degrees),
+        -round(place.confidence * 255),
+        place.place_id,
+    )
+
+
+def _parquet_row_count(path: Path) -> int:
+    try:
+        import duckdb  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("Parquet input requires duckdb") from exc
+    connection = duckdb.connect()
+    try:
+        row = connection.execute(
+            "SELECT count(*) FROM read_parquet(?)", [str(path)]
+        ).fetchone()
+    finally:
+        connection.close()
+    if row is None:
+        raise RuntimeError("failed to count serving-ordered Parquet rows")
+    return int(row[0])
+
+
+def _iter_parquet_rows_in_file_order(path: Path) -> Iterator[dict[str, Any]]:
+    """Read one Parquet file sequentially in its physical insertion order."""
+    try:
+        import duckdb  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("Parquet input requires duckdb") from exc
+    connection = duckdb.connect()
+    try:
+        # A single scan thread avoids parallel row-group interleaving. The
+        # monotonic serving-key check below remains the fail-closed proof that
+        # the observed stream matches the extractor's declared total order.
+        connection.execute("SET threads=1")
+        connection.execute("SET preserve_insertion_order=true")
+        cursor = connection.execute("SELECT * FROM read_parquet(?)", [str(path)])
+        columns = [item[0] for item in cursor.description]
+        while batch := cursor.fetchmany(10_000):
+            for row in batch:
+                yield dict(zip(columns, row))
+    finally:
+        connection.close()
+
+
+def iter_serving_order_chunks(
+    path: Path,
+    *,
+    row_cap: int,
+    cell_degrees: float,
+) -> Iterator[list[Place]]:
+    """Stream validated, near-even chunks from a serving-ordered Parquet file.
+
+    The extractor writes a total serving order into the Parquet row stream.
+    Only one shard's Python objects are retained at a time, avoiding the full
+    region list + global sort + combined-list memory multiplier that can make a
+    hosted runner lose communication at CONUS scale.
+    """
+    if path.suffix.lower() != ".parquet":
+        raise ValueError("serving-ordered streaming requires Parquet input")
+    total = _parquet_row_count(path)
+    sizes = _chunk_sizes(total, row_cap)
+    rows = iter(_iter_parquet_rows_in_file_order(path))
+    row_number = 0
+    previous_key: tuple[str, int, str] | None = None
+    for chunk_index, target_size in enumerate(sizes):
+        chunk: list[Place] = []
+        while len(chunk) < target_size:
+            try:
+                row = next(rows)
+            except StopIteration as exc:
+                raise RuntimeError(
+                    f"serving-ordered input ended inside chunk {chunk_index}"
+                ) from exc
+            row_number += 1
+            place = place_from_row(row, row_number)
+            if not place.name:
+                raise ValueError(
+                    f"serving-ordered input row {row_number} has no primary name"
+                )
+            key = _serving_key(place, cell_degrees)
+            if previous_key is not None and key < previous_key:
+                raise ValueError(
+                    "input declared as serving-ordered is not monotonic at "
+                    f"row {row_number}: {key!r} < {previous_key!r}"
+                )
+            previous_key = key
+            chunk.append(place)
+        yield chunk
+    try:
+        next(rows)
+    except StopIteration:
+        return
+    raise RuntimeError("serving-ordered input contains more rows than its Parquet count")
+
+
 def split_serving_order(
     places: list[Place], cell_degrees: float, row_cap: int
 ) -> list[list[Place]]:
@@ -114,16 +234,12 @@ def split_serving_order(
     is always <= ``row_cap``. Each chunk is a contiguous slice of the globally
     ordered list, so it is spatially clustered and already in serving order.
     """
-    if row_cap < 1:
-        raise ValueError("row_cap must be a positive integer")
     ordered = ordered_places(places, cell_degrees)
     total = len(ordered)
-    chunk_count = max(1, math.ceil(total / row_cap))
-    base, remainder = divmod(total, chunk_count)
+    sizes = _chunk_sizes(total, row_cap)
     chunks: list[list[Place]] = []
     start = 0
-    for index in range(chunk_count):
-        size = base + (1 if index < remainder else 0)
+    for size in sizes:
         chunks.append(ordered[start : start + size])
         start += size
     if start != total:
@@ -186,6 +302,7 @@ def build_region(
     head_minimum_candidates: int = DEFAULT_HEAD_MINIMUM_CANDIDATES,
     head_famous_cap: int = DEFAULT_HEAD_FAMOUS_CAP,
     build_head: bool = True,
+    input_serving_ordered: bool = False,
 ) -> dict[str, Any]:
     if not region_name or len(region_name) > 48 or any(
         not (character.isascii() and (character.isalnum() or character == "-"))
@@ -193,20 +310,46 @@ def build_region(
     ):
         raise ValueError("region_name must be <=48 ASCII alphanumeric/hyphen chars")
     output_dir.mkdir(parents=True, exist_ok=True)
-    places = load_places(input_path)
-    chunks = split_serving_order(places, cell_degrees, row_cap)
+    if input_serving_ordered:
+        if build_head:
+            raise ValueError(
+                "serving-ordered streaming requires build_head=False so the "
+                "full region is not retained in memory"
+            )
+        loaded_places = _parquet_row_count(input_path)
+        chunk_sizes = _chunk_sizes(loaded_places, row_cap)
+        chunks: Iterator[list[Place]] | list[list[Place]] = iter_serving_order_chunks(
+            input_path,
+            row_cap=row_cap,
+            cell_degrees=cell_degrees,
+        )
+    else:
+        places = load_places(input_path)
+        loaded_places = len(places)
+        chunks = split_serving_order(places, cell_degrees, row_cap)
+        chunk_sizes = [len(chunk) for chunk in chunks]
 
     shard_reports: list[dict[str, Any]] = []
     routes: list[dict[str, Any]] = []
-    combined: list[Place] = []
+    combined: list[Place] | None = [] if build_head else None
     for index, chunk in enumerate(chunks):
+        print(
+            f"building shard {index + 1}/{len(chunk_sizes)} rows={len(chunk)}",
+            file=sys.stderr,
+            flush=True,
+        )
         shard_id = f"{region_name}-{index:04d}"
         object_name = f"{shard_id}.pcsh"
         artifact_path = output_dir / object_name
-        ordered, report = build_artifact(chunk, artifact_path)
+        # Both split paths have already established and (for streamed input)
+        # validated the exact serving order.
+        ordered, report = build_artifact(
+            chunk, artifact_path, preserve_input_order=True
+        )
         route = shard_route(shard_id, object_name, ordered)
         routes.append(route)
-        combined.extend(ordered)
+        if combined is not None:
+            combined.extend(ordered)
         shard_reports.append(
             {
                 "id": shard_id,
@@ -219,18 +362,37 @@ def build_region(
                 "center": route["center"],
             }
         )
+        print(
+            f"built shard {index + 1}/{len(chunk_sizes)} "
+            f"bytes={report['artifact_bytes']}",
+            file=sys.stderr,
+            flush=True,
+        )
+        # ``build_artifact`` creates large temporary posting maps and byte
+        # buffers. Force collection between shards so the next bounded chunk
+        # can reuse the process heap rather than accumulating dead cycles.
+        del ordered, chunk
+        gc.collect()
 
     catalog_report = build_catalog(routes, output_dir / "catalog.pcat")
-    head_info = (
-        build_region_head(
+    if build_head:
+        if combined is None:
+            raise RuntimeError("head build requested without a combined place list")
+        head_info = build_region_head(
             combined,
             output_dir,
             head_minimum_candidates=head_minimum_candidates,
             head_famous_cap=head_famous_cap,
         )
-        if build_head
-        else {"status": "skipped", "object": None}
-    )
+    else:
+        head_info = {
+            "status": "skipped",
+            "object": None,
+            "reason": (
+                "non-promoting region measurement skips the context-free global "
+                "head so full-region rows are not retained in memory"
+            ),
+        }
 
     produced_objects = [shard["object"] for shard in shard_reports]
     produced_objects.append("catalog.pcat")
@@ -251,7 +413,7 @@ def build_region(
             "head_famous_cap": head_famous_cap,
         },
         "totals": {
-            "loaded_places": len(places),
+            "loaded_places": loaded_places,
             "shard_rows": total_rows,
             "shards": len(shard_reports),
             "shard_bytes": total_shard_bytes,
@@ -278,6 +440,14 @@ def main() -> None:
     )
     parser.add_argument("--head-famous-cap", type=int, default=DEFAULT_HEAD_FAMOUS_CAP)
     parser.add_argument("--no-head", action="store_true")
+    parser.add_argument(
+        "--input-serving-ordered",
+        action="store_true",
+        help=(
+            "Stream a Parquet file already written in the exact serving order; "
+            "requires --no-head and validates monotonic order while reading."
+        ),
+    )
     parser.add_argument("--report", type=Path)
     args = parser.parse_args()
     report = build_region(
@@ -289,6 +459,7 @@ def main() -> None:
         head_minimum_candidates=args.head_minimum_candidates,
         head_famous_cap=args.head_famous_cap,
         build_head=not args.no_head,
+        input_serving_ordered=args.input_serving_ordered,
     )
     serialized = json.dumps(report, indent=2, sort_keys=True) + "\n"
     if args.report is not None:
