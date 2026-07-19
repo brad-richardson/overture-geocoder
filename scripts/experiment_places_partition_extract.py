@@ -25,15 +25,28 @@ from __future__ import annotations
 
 import argparse
 import re
+import sys
 from pathlib import Path
 
 import duckdb
 
 
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+from places_partition import DEFAULT_MAXIMUM_LEVEL, morton_sql  # noqa: E402
+
+
 # Kept identical (column list, COALESCE order, casts) to
 # factory_extract_places.py so that the California bbox reproduces its output
 # byte-for-byte. A test asserts the projection columns stay in sync.
-PROJECTION = """
+PARTITION_KEY_SQL = morton_sql(
+    "ST_X(geometry)", "ST_Y(geometry)", DEFAULT_MAXIMUM_LEVEL
+)
+
+
+PROJECTION = f"""
             id AS gers_id,
             names.primary AS primary_name,
             COALESCE(brand.names.primary, '') AS brand_name,
@@ -44,18 +57,18 @@ PROJECTION = """
             ST_Y(geometry) AS lat,
             ST_X(geometry) AS lon,
             COALESCE(confidence, 0.5) AS confidence,
-            COALESCE(array_to_string(map_values(names.common), ' '), '') AS alt_names
+            COALESCE(array_to_string(map_values(names.common), ' '), '') AS alt_names,
+            {PARTITION_KEY_SQL} AS partition_key
 """
 
 
-# Exact counterpart of the compact shard builder's Python serving key:
-# ``spatial_cell(place, 0.25), -round(confidence * 255), place_id``. DuckDB's
+# Exact counterpart of the stable builder's Python serving key:
+# ``world_morton(place, 12), -round(confidence * 255), place_id``. The numeric
+# Morton key is the lexicographic order of the fixed-length world quadkey, so
+# every adaptive prefix is contiguous in the Parquet stream. DuckDB's
 # round_even matches Python's bankers-rounding ``round`` at half-way values.
-# The Overture extractor already requires Point geometries, so lat/lon are
-# finite and inside the spatial cell domain used by the builder.
 SERVING_ORDER = """
-          CAST(FLOOR((ST_Y(geometry) + 90.0) / 0.25) AS BIGINT),
-          CAST(FLOOR((ST_X(geometry) + 180.0) / 0.25) AS BIGINT),
+          partition_key,
           -CAST(round_even(
             LEAST(1.0, GREATEST(0.0, COALESCE(confidence, 0.5))) * 255,
             0

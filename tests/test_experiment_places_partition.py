@@ -43,10 +43,11 @@ def test_partition_extractor_can_write_exact_serving_order():
     partition = _load("experiment_places_partition_extract")
     serving_order = partition.SERVING_ORDER
 
-    # Match spatial_cell(), Python round(), and the unique ID tiebreak used by
-    # build_places_region_shards.py without retaining the full region in Python.
-    assert "FLOOR((ST_Y(geometry) + 90.0) / 0.25)" in serving_order
-    assert "FLOOR((ST_X(geometry) + 180.0) / 0.25)" in serving_order
+    # The projected numeric Morton key is the stable world-quadkey order used
+    # by build_places_region_shards.py without retaining the world in Python.
+    assert "partition_key" in partition.PROJECTION
+    assert "AS UBIGINT" in partition.PARTITION_KEY_SQL
+    assert serving_order.lstrip().startswith("partition_key,")
     assert "round_even(" in serving_order
     assert serving_order.rstrip().endswith("id")
 

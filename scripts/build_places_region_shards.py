@@ -1,72 +1,15 @@
 #!/usr/bin/env python3
-"""Split an extracted Places bbox region into routed compact shards + a head.
+"""Build stable, spatially owned compact Places shards and a routing catalog.
 
-This is the region-scale companion to ``prepare_places_worker_smoke.py``. That
-script builds a three-fixture relevance oracle; this one takes a single
-full-scale bbox extraction (produced by
-``experiment_places_partition_extract.py``) and splits it, by serving order,
-into as many compact ``.pcsh`` shards as the row cap requires, then writes the
-routing ``catalog.pcat`` and (best-effort) the context-free ``head.phrp``.
+Shard IDs are world quadkeys, not region-local ordinals. The input is planned
+into fixed minimum-level cells and only cells above the row cap split further.
+Supplying the prior catalog makes those splits sticky, so a later release never
+merges a cell and silently changes its ownership again.
 
-Format code is reused, not forked: shard bodies come from
-``experiment_places_compact_shard.build_artifact``, catalog framing and route
-records from ``prepare_places_worker_smoke.build_catalog`` / ``shard_route``,
-and the packed head from ``experiment_places_head_repack``. The only new logic
-here is the deterministic split.
-
-Serving-order split
--------------------
-``ordered_places`` sorts every place by spatial cell (0.25 deg), then by
-descending quantized confidence, then by id -- the same order a single shard
-stores internally. Splitting that global order into contiguous, near-equal
-chunks yields shards that are internally already in serving order, so re-running
-``build_artifact`` on a chunk is idempotent, and each shard's unique id doubles
-as a routing-catalog ``context`` entry. Two runs are byte-identical because
-every step is a total-order sort.
-
-Point-routing recall is NOT single-shard-equivalent -- measure before promotion.
-The cell key is row-major (``y`` then ``x``), so a contiguous run of cells is
-not a spatially compact rectangle: it steps across ``x`` within a latitude band
-and wraps to the next band, giving each shard a wide "staircase" bounding box
-whose extent overlaps its neighbours' -- across the whole band, not merely at
-the chunk seam. The Worker's ``route_point`` (crates/geocoder-worker/src/
-places_pages.rs) picks the single smallest-area covering bbox, so a query point
-can route to a shard that overlaps the point but does not contain the point's
-cell, and a place can be unreachable via a point query at its own coordinates
-(demonstrated: multi-shard point routing returns a strict subset of the
-single-shard result for a fraction of points). This is the pre-existing
-``route_point`` bounded-result-window contract, now at region scale; it is a
-recall regression versus a single shard that MUST be quantified before any slice
-built from these shards is promoted. Context routing (by shard id) is exact and
-unaffected.
-
-Packed head at region scale
----------------------------
-The packed head is a single context-free object consulted before routing, so it
-is built over the concatenation of all shards' serving orders. At region scale
-the number of admitted head keys can exceed the Worker reader's hard caps
-(``READER_MAX_HEAD_KEYS`` / ``READER_MAX_HEAD_INDEX_BYTES`` in
-``experiment_places_head_repack``). That is a real, measured guardrail outcome,
-not a build error: the head is then reported ``over_reader_caps`` and omitted
-from the produced object set rather than failing the whole region build. The
-shards and routing catalog -- the load-bearing deliverables -- are always
-produced.
-
-The head is not optional at serving time for the query class it owns. The
-Worker's ``lookup_places_head_spike`` hard-requires ``head.phrp`` for a
-head-eligible query (context-free, one-or-two exact unfielded tokens) and
-returns early with no routing fallback, so an omitted head means that query
-class cannot be served -- its absence is a hard read error for those queries,
-not a graceful miss that falls through to shard routing. Context- and
-point-routed queries are unaffected. A region reported ``over_reader_caps`` is
-therefore only servable for routed queries; the head-key overflow must be
-resolved (or the head query class accepted as unserved) before promotion.
-
-For a full-region, non-promoting scale measurement the CLI supports
-``--input-serving-ordered --no-head``. That mode validates the extractor's
-total serving order and holds only one shard-sized chunk in Python at a time;
-it explicitly records the head as skipped. This bounded-memory signal measures
-the load-bearing routed shards and catalog, not context-free serving readiness.
+For a global build, the extractor writes maximum-level Morton order and this
+builder performs two bounded-memory passes over that local Parquet file: a
+coordinate/count planning pass followed by the compact-shard build pass. At no
+point does it retain the complete global Places collection in Python.
 
 This is an offline producer. It does not access Cloudflare, R2, or Overture S3
 and cannot promote a catalog.
@@ -78,8 +21,9 @@ import argparse
 import gc
 import json
 import math
+import struct
 import sys
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -98,70 +42,58 @@ from experiment_places_head_repack import (  # noqa: E402
     build_heads_and_baseline,
     build_repack_object,
 )
-from experiment_places_locality_head import ordered_places, spatial_cell  # noqa: E402
-
-# Reuse the smoke builder's catalog framing and route record verbatim so the
-# region catalog is byte-compatible with the Worker's PCAT parser.
-from prepare_places_worker_smoke import (  # noqa: E402
-    TOKENIZER_VERSION,
-    build_catalog,
-    shard_route,
+from places_partition import (  # noqa: E402
+    DEFAULT_MAXIMUM_LEVEL,
+    DEFAULT_MINIMUM_LEVEL,
+    PARTITION_SCHEME,
+    PartitionCell,
+    morton_quadkey,
+    plan_partition_cells,
+    point_morton,
+    quadkey_bbox,
+    validate_levels,
+    validate_quadkey,
+    validate_split_cells,
 )
+from prepare_places_worker_smoke import TOKENIZER_VERSION  # noqa: E402
 
 
-REPORT_SCHEMA = "overture-places-region-build-v1"
+CATALOG_MAGIC = b"PCAT0001"
+CATALOG_PREAMBLE = struct.Struct("<8sI")
+REPORT_SCHEMA = "overture-places-region-build-v2"
 DEFAULT_SHARD_ROW_CAP = 1_500_000
-DEFAULT_CELL_DEGREES = 0.25
 DEFAULT_HEAD_MINIMUM_CANDIDATES = 64
 DEFAULT_HEAD_FAMOUS_CAP = 1024
+WORLD_COVERAGE = [-180.0, -90.0, 180.0, 90.0]
 
 
-def _chunk_sizes(total: int, row_cap: int) -> list[int]:
-    if row_cap < 1:
-        raise ValueError("row_cap must be a positive integer")
-    if total < 1:
-        raise ValueError("input contains no named Places")
-    chunk_count = math.ceil(total / row_cap)
-    base, remainder = divmod(total, chunk_count)
-    return [base + (1 if index < remainder else 0) for index in range(chunk_count)]
+def validate_coverage(values: Iterable[float]) -> list[float]:
+    coverage = [float(value) for value in values]
+    if len(coverage) != 4 or not all(math.isfinite(value) for value in coverage):
+        raise ValueError("coverage_bbox must contain four finite numbers")
+    xmin, ymin, xmax, ymax = coverage
+    if (
+        not -180.0 <= xmin < xmax <= 180.0
+        or not -90.0 <= ymin < ymax <= 90.0
+    ):
+        raise ValueError("coverage_bbox is outside the world bounds")
+    return coverage
 
 
-def _serving_key(place: Place, cell_degrees: float) -> tuple[str, int, str]:
+def _inside_coverage(place: Place, coverage: list[float]) -> bool:
     return (
-        spatial_cell(place, cell_degrees),
-        -round(place.confidence * 255),
-        place.place_id,
+        coverage[0] <= place.lon <= coverage[2]
+        and coverage[1] <= place.lat <= coverage[3]
     )
 
 
-def _parquet_row_count(path: Path) -> int:
-    try:
-        import duckdb  # type: ignore
-    except ImportError as exc:
-        raise RuntimeError("Parquet input requires duckdb") from exc
-    connection = duckdb.connect()
-    try:
-        row = connection.execute(
-            "SELECT count(*) FROM read_parquet(?)", [str(path)]
-        ).fetchone()
-    finally:
-        connection.close()
-    if row is None:
-        raise RuntimeError("failed to count serving-ordered Parquet rows")
-    return int(row[0])
-
-
 def _iter_parquet_rows_in_file_order(path: Path) -> Iterator[dict[str, Any]]:
-    """Read one Parquet file sequentially in its physical insertion order."""
     try:
         import duckdb  # type: ignore
     except ImportError as exc:
         raise RuntimeError("Parquet input requires duckdb") from exc
     connection = duckdb.connect()
     try:
-        # A single scan thread avoids parallel row-group interleaving. The
-        # monotonic serving-key check below remains the fail-closed proof that
-        # the observed stream matches the extractor's declared total order.
         connection.execute("SET threads=1")
         connection.execute("SET preserve_insertion_order=true")
         cursor = connection.execute("SELECT * FROM read_parquet(?)", [str(path)])
@@ -173,80 +105,298 @@ def _iter_parquet_rows_in_file_order(path: Path) -> Iterator[dict[str, Any]]:
         connection.close()
 
 
-def iter_serving_order_chunks(
+def _iter_parquet_partition_rows(path: Path) -> Iterator[tuple[int | None, float, float]]:
+    """Read only the planning columns in physical file order."""
+    try:
+        import duckdb  # type: ignore
+    except ImportError as exc:
+        raise RuntimeError("Parquet input requires duckdb") from exc
+    connection = duckdb.connect()
+    try:
+        connection.execute("SET threads=1")
+        connection.execute("SET preserve_insertion_order=true")
+        probe = connection.execute("SELECT * FROM read_parquet(?) LIMIT 0", [str(path)])
+        columns = {item[0] for item in probe.description}
+        if not {"lat", "lon"}.issubset(columns):
+            raise ValueError("serving-ordered Parquet is missing lat/lon")
+        select = "partition_key, lon, lat" if "partition_key" in columns else "NULL, lon, lat"
+        cursor = connection.execute(f"SELECT {select} FROM read_parquet(?)", [str(path)])
+        while batch := cursor.fetchmany(50_000):
+            for raw_key, longitude, latitude in batch:
+                yield (
+                    None if raw_key is None else int(raw_key),
+                    float(longitude),
+                    float(latitude),
+                )
+    finally:
+        connection.close()
+
+
+def _validate_declared_morton(
+    declared: int | None, longitude: float, latitude: float, maximum_level: int
+) -> int:
+    computed = point_morton(longitude, latitude, maximum_level)
+    if declared is not None and declared != computed:
+        raise ValueError(
+            f"input partition_key {declared} does not match coordinate key {computed}"
+        )
+    return computed
+
+
+def iter_parquet_full_counts(
+    path: Path, *, maximum_level: int
+) -> Iterator[tuple[str, int]]:
+    """Yield ordered, run-length encoded maximum-level cell counts."""
+    previous: int | None = None
+    current: int | None = None
+    count = 0
+    for declared, longitude, latitude in _iter_parquet_partition_rows(path):
+        key = _validate_declared_morton(declared, longitude, latitude, maximum_level)
+        if previous is not None and key < previous:
+            raise ValueError("input declared as serving-ordered is not Morton-monotonic")
+        if current is not None and key != current:
+            yield morton_quadkey(current, maximum_level), count
+            count = 0
+        current = key
+        previous = key
+        count += 1
+    if current is not None:
+        yield morton_quadkey(current, maximum_level), count
+
+
+def _serving_key(place: Place, maximum_level: int) -> tuple[int, int, str]:
+    return (
+        point_morton(place.lon, place.lat, maximum_level),
+        -round(place.confidence * 255),
+        place.place_id,
+    )
+
+
+def _iter_streamed_places(
     path: Path,
     *,
+    maximum_level: int,
+    coverage: list[float],
+) -> Iterator[tuple[str, Place]]:
+    previous: tuple[int, int, str] | None = None
+    for row_number, row in enumerate(_iter_parquet_rows_in_file_order(path), start=1):
+        place = place_from_row(row, row_number)
+        if not place.name:
+            raise ValueError(f"serving-ordered input row {row_number} has no primary name")
+        if not _inside_coverage(place, coverage):
+            raise ValueError(f"input row {row_number} is outside the declared coverage")
+        declared = row.get("partition_key")
+        morton = _validate_declared_morton(
+            None if declared is None else int(declared),
+            place.lon,
+            place.lat,
+            maximum_level,
+        )
+        key = (morton, -round(place.confidence * 255), place.place_id)
+        if previous is not None and key < previous:
+            raise ValueError(
+                "input declared as serving-ordered is not monotonic at "
+                f"row {row_number}: {key!r} < {previous!r}"
+            )
+        previous = key
+        yield morton_quadkey(morton, maximum_level), place
+
+
+def _full_counts_from_ordered(
+    ordered: Iterable[tuple[str, Place]],
+) -> Iterator[tuple[str, int]]:
+    current: str | None = None
+    count = 0
+    for full_cell, _ in ordered:
+        if current is not None and full_cell != current:
+            yield current, count
+            count = 0
+        current = full_cell
+        count += 1
+    if current is not None:
+        yield current, count
+
+
+def _leaf_for(full_cell: str, leaves: set[str], minimum_level: int) -> str:
+    for length in range(minimum_level, len(full_cell) + 1):
+        candidate = full_cell[:length]
+        if candidate in leaves:
+            return candidate
+    raise RuntimeError(f"partition plan does not own maximum-level cell {full_cell}")
+
+
+def iter_partition_chunks(
+    ordered: Iterable[tuple[str, Place]],
+    cells: list[PartitionCell],
+    *,
+    minimum_level: int,
+) -> Iterator[tuple[PartitionCell, list[Place]]]:
+    by_cell = {cell.cell: cell for cell in cells}
+    expected = set(by_cell)
+    completed: set[str] = set()
+    current: str | None = None
+    chunk: list[Place] = []
+    for full_cell, place in ordered:
+        leaf = _leaf_for(full_cell, expected, minimum_level)
+        if current is not None and leaf != current:
+            planned = by_cell[current]
+            if len(chunk) != planned.rows:
+                raise RuntimeError(f"partition {current} row count changed after planning")
+            completed.add(current)
+            yield planned, chunk
+            chunk = []
+            if leaf in completed:
+                raise RuntimeError("partition input is not spatially contiguous")
+        current = leaf
+        chunk.append(place)
+    if current is not None:
+        planned = by_cell[current]
+        if len(chunk) != planned.rows:
+            raise RuntimeError(f"partition {current} row count changed after planning")
+        completed.add(current)
+        yield planned, chunk
+    if completed != expected:
+        raise RuntimeError("partition build did not produce every planned cell")
+
+
+def _read_catalog_payload(path: Path) -> dict[str, Any]:
+    encoded = path.read_bytes()
+    if len(encoded) < CATALOG_PREAMBLE.size:
+        raise ValueError("previous Places catalog is truncated")
+    magic, length = CATALOG_PREAMBLE.unpack(encoded[: CATALOG_PREAMBLE.size])
+    if magic != CATALOG_MAGIC or len(encoded) != CATALOG_PREAMBLE.size + length:
+        raise ValueError("previous Places catalog has invalid framing")
+    payload = json.loads(encoded[CATALOG_PREAMBLE.size :])
+    if not isinstance(payload, dict):
+        raise ValueError("previous Places catalog payload must be an object")
+    return payload
+
+
+def previous_split_cells(
+    path: Path | None,
+    *,
+    minimum_level: int,
+    maximum_level: int,
+    coverage: list[float],
+) -> list[str]:
+    if path is None:
+        return []
+    payload = _read_catalog_payload(path)
+    partition = payload.get("partition")
+    if (
+        payload.get("schema_version") != 2
+        or payload.get("tokenizer_version") != TOKENIZER_VERSION
+        or payload.get("coverage") != coverage
+        or not isinstance(partition, dict)
+        or partition.get("scheme") != PARTITION_SCHEME
+        or partition.get("minimum_level") != minimum_level
+        or partition.get("maximum_level") != maximum_level
+        or not isinstance(partition.get("split_row_cap"), int)
+        or partition["split_row_cap"] < 1
+        or not isinstance(partition.get("split_cells"), list)
+    ):
+        raise ValueError("previous Places catalog has an incompatible partition contract")
+    splits = validate_split_cells(
+        partition["split_cells"],
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
+    )
+    _validate_previous_shards(
+        payload.get("shards"),
+        split_cells=splits,
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
+    )
+    return sorted(splits)
+
+
+def _validate_previous_shards(
+    raw_shards: Any,
+    *,
+    split_cells: set[str],
+    minimum_level: int,
+    maximum_level: int,
+) -> None:
+    if not isinstance(raw_shards, list) or not raw_shards:
+        raise ValueError("previous Places catalog must contain routed shards")
+    cells: list[str] = []
+    ids: set[str] = set()
+    objects: set[str] = set()
+    for shard in raw_shards:
+        if not isinstance(shard, dict) or not isinstance(shard.get("cell"), str):
+            raise ValueError("previous Places catalog has an invalid shard")
+        cell = shard["cell"]
+        validate_quadkey(cell, minimum=minimum_level, maximum=maximum_level)
+        expected_id = f"q-{cell}"
+        expected_object = f"{expected_id}.pcsh"
+        bbox = quadkey_bbox(cell)
+        center = [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2]
+        if (
+            shard.get("id") != expected_id
+            or shard.get("object") != expected_object
+            or shard.get("bbox") != bbox
+            or shard.get("center") != center
+            or cell in split_cells
+            or (len(cell) > minimum_level and cell[:-1] not in split_cells)
+            or expected_id in ids
+            or expected_object in objects
+        ):
+            raise ValueError(
+                "previous Places catalog shard is inconsistent with split history"
+            )
+        cells.append(cell)
+        ids.add(expected_id)
+        objects.add(expected_object)
+    cells.sort()
+    if any(right.startswith(left) for left, right in zip(cells, cells[1:])):
+        raise ValueError("previous Places catalog has overlapping leaf ownership")
+
+
+def _route(cell: str) -> dict[str, Any]:
+    bbox = quadkey_bbox(cell)
+    identifier = f"q-{cell}"
+    return {
+        "id": identifier,
+        "object": f"{identifier}.pcsh",
+        "cell": cell,
+        "bbox": bbox,
+        "center": [(bbox[0] + bbox[2]) / 2, (bbox[1] + bbox[3]) / 2],
+    }
+
+
+def build_catalog(
+    routes: list[dict[str, Any]],
+    output: Path,
+    *,
+    coverage: list[float],
+    minimum_level: int,
+    maximum_level: int,
     row_cap: int,
-    cell_degrees: float,
-) -> Iterator[list[Place]]:
-    """Stream validated, near-even chunks from a serving-ordered Parquet file.
-
-    The extractor writes a total serving order into the Parquet row stream.
-    Only one shard's Python objects are retained at a time, avoiding the full
-    region list + global sort + combined-list memory multiplier that can make a
-    hosted runner lose communication at CONUS scale.
-    """
-    if path.suffix.lower() != ".parquet":
-        raise ValueError("serving-ordered streaming requires Parquet input")
-    total = _parquet_row_count(path)
-    sizes = _chunk_sizes(total, row_cap)
-    rows = iter(_iter_parquet_rows_in_file_order(path))
-    row_number = 0
-    previous_key: tuple[str, int, str] | None = None
-    for chunk_index, target_size in enumerate(sizes):
-        chunk: list[Place] = []
-        while len(chunk) < target_size:
-            try:
-                row = next(rows)
-            except StopIteration as exc:
-                raise RuntimeError(
-                    f"serving-ordered input ended inside chunk {chunk_index}"
-                ) from exc
-            row_number += 1
-            place = place_from_row(row, row_number)
-            if not place.name:
-                raise ValueError(
-                    f"serving-ordered input row {row_number} has no primary name"
-                )
-            key = _serving_key(place, cell_degrees)
-            if previous_key is not None and key < previous_key:
-                raise ValueError(
-                    "input declared as serving-ordered is not monotonic at "
-                    f"row {row_number}: {key!r} < {previous_key!r}"
-                )
-            previous_key = key
-            chunk.append(place)
-        yield chunk
-    try:
-        next(rows)
-    except StopIteration:
-        return
-    raise RuntimeError("serving-ordered input contains more rows than its Parquet count")
-
-
-def split_serving_order(
-    places: list[Place], cell_degrees: float, row_cap: int
-) -> list[list[Place]]:
-    """Order every place by serving key, then split into <= row_cap chunks.
-
-    The chunk count is ``ceil(n / row_cap)`` and the split is as even as
-    possible, so the largest chunk holds ``ceil(n / chunk_count)`` rows -- which
-    is always <= ``row_cap``. Each chunk is a contiguous slice of the globally
-    ordered list, so it is spatially clustered and already in serving order.
-    """
-    ordered = ordered_places(places, cell_degrees)
-    total = len(ordered)
-    sizes = _chunk_sizes(total, row_cap)
-    chunks: list[list[Place]] = []
-    start = 0
-    for size in sizes:
-        chunks.append(ordered[start : start + size])
-        start += size
-    if start != total:
-        raise RuntimeError("serving-order split dropped rows")
-    if any(len(chunk) > row_cap for chunk in chunks):
-        raise RuntimeError("a split chunk exceeds the row cap")
-    return chunks
+    split_cells: list[str],
+) -> dict[str, Any]:
+    payload = {
+        "schema_version": 2,
+        "tokenizer_version": TOKENIZER_VERSION,
+        "coverage": coverage,
+        "partition": {
+            "scheme": PARTITION_SCHEME,
+            "minimum_level": minimum_level,
+            "maximum_level": maximum_level,
+            "split_row_cap": row_cap,
+            "split_cells": split_cells,
+        },
+        "shards": routes,
+    }
+    encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    output.write_bytes(CATALOG_PREAMBLE.pack(CATALOG_MAGIC, len(encoded)) + encoded)
+    return {
+        "schema_version": 2,
+        "object": output.name,
+        "bytes": output.stat().st_size,
+        "coverage": coverage,
+        "partition": payload["partition"],
+        "shards": routes,
+    }
 
 
 def build_region_head(
@@ -256,12 +406,6 @@ def build_region_head(
     head_minimum_candidates: int,
     head_famous_cap: int,
 ) -> dict[str, Any]:
-    """Best-effort packed head over the combined serving order.
-
-    Returns a status record. ``over_reader_caps`` is a legitimate measured
-    outcome at region scale, not a failure: the head object is removed and the
-    region build continues with shards + catalog only.
-    """
     ordered, heads, _ = build_heads_and_baseline(
         combined,
         head_minimum_candidates=head_minimum_candidates,
@@ -297,8 +441,11 @@ def build_region(
     output_dir: Path,
     *,
     region_name: str,
+    coverage_bbox: Iterable[float],
     row_cap: int = DEFAULT_SHARD_ROW_CAP,
-    cell_degrees: float = DEFAULT_CELL_DEGREES,
+    minimum_level: int = DEFAULT_MINIMUM_LEVEL,
+    maximum_level: int = DEFAULT_MAXIMUM_LEVEL,
+    previous_catalog: Path | None = None,
     head_minimum_candidates: int = DEFAULT_HEAD_MINIMUM_CANDIDATES,
     head_famous_cap: int = DEFAULT_HEAD_FAMOUS_CAP,
     build_head: bool = True,
@@ -309,51 +456,76 @@ def build_region(
         for character in region_name
     ):
         raise ValueError("region_name must be <=48 ASCII alphanumeric/hyphen chars")
+    validate_levels(minimum_level, maximum_level)
+    coverage = validate_coverage(coverage_bbox)
+    sticky_splits = previous_split_cells(
+        previous_catalog,
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
+        coverage=coverage,
+    )
     output_dir.mkdir(parents=True, exist_ok=True)
+
     if input_serving_ordered:
         if build_head:
             raise ValueError(
                 "serving-ordered streaming requires build_head=False so the "
                 "full region is not retained in memory"
             )
-        loaded_places = _parquet_row_count(input_path)
-        chunk_sizes = _chunk_sizes(loaded_places, row_cap)
-        chunks: Iterator[list[Place]] | list[list[Place]] = iter_serving_order_chunks(
-            input_path,
-            row_cap=row_cap,
-            cell_degrees=cell_degrees,
+        full_counts: Iterable[tuple[str, int]] = iter_parquet_full_counts(
+            input_path, maximum_level=maximum_level
         )
+        ordered_factory = lambda: _iter_streamed_places(  # noqa: E731
+            input_path, maximum_level=maximum_level, coverage=coverage
+        )
+        combined: list[Place] | None = None
     else:
         places = load_places(input_path)
-        loaded_places = len(places)
-        chunks = split_serving_order(places, cell_degrees, row_cap)
-        chunk_sizes = [len(chunk) for chunk in chunks]
+        for index, place in enumerate(places, start=1):
+            if not _inside_coverage(place, coverage):
+                raise ValueError(f"input row {index} is outside the declared coverage")
+        ordered_items = sorted(
+            (
+                (morton_quadkey(point_morton(place.lon, place.lat, maximum_level), maximum_level), place)
+                for place in places
+            ),
+            key=lambda item: _serving_key(item[1], maximum_level),
+        )
+        full_counts = _full_counts_from_ordered(ordered_items)
+        ordered_factory = lambda: iter(ordered_items)  # noqa: E731
+        combined = [] if build_head else None
+
+    cells, split_cells = plan_partition_cells(
+        full_counts,
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
+        row_cap=row_cap,
+        sticky_splits=sticky_splits,
+    )
+    loaded_places = sum(cell.rows for cell in cells)
+    chunks = iter_partition_chunks(
+        ordered_factory(), cells, minimum_level=minimum_level
+    )
 
     shard_reports: list[dict[str, Any]] = []
     routes: list[dict[str, Any]] = []
-    combined: list[Place] | None = [] if build_head else None
-    for index, chunk in enumerate(chunks):
+    for index, (cell, chunk) in enumerate(chunks):
         print(
-            f"building shard {index + 1}/{len(chunk_sizes)} rows={len(chunk)}",
+            f"building shard {index + 1}/{len(cells)} cell={cell.cell} rows={len(chunk)}",
             file=sys.stderr,
             flush=True,
         )
-        shard_id = f"{region_name}-{index:04d}"
-        object_name = f"{shard_id}.pcsh"
-        artifact_path = output_dir / object_name
-        # Both split paths have already established and (for streamed input)
-        # validated the exact serving order.
-        ordered, report = build_artifact(
-            chunk, artifact_path, preserve_input_order=True
-        )
-        route = shard_route(shard_id, object_name, ordered)
+        route = _route(cell.cell)
+        artifact_path = output_dir / route["object"]
+        ordered, report = build_artifact(chunk, artifact_path, preserve_input_order=True)
         routes.append(route)
         if combined is not None:
             combined.extend(ordered)
         shard_reports.append(
             {
-                "id": shard_id,
-                "object": object_name,
+                "id": route["id"],
+                "object": route["object"],
+                "cell": cell.cell,
                 "rows": report["places"],
                 "artifact_bytes": report["artifact_bytes"],
                 "bytes_per_place": report["bytes_per_place"],
@@ -362,19 +534,18 @@ def build_region(
                 "center": route["center"],
             }
         )
-        print(
-            f"built shard {index + 1}/{len(chunk_sizes)} "
-            f"bytes={report['artifact_bytes']}",
-            file=sys.stderr,
-            flush=True,
-        )
-        # ``build_artifact`` creates large temporary posting maps and byte
-        # buffers. Force collection between shards so the next bounded chunk
-        # can reuse the process heap rather than accumulating dead cycles.
         del ordered, chunk
         gc.collect()
 
-    catalog_report = build_catalog(routes, output_dir / "catalog.pcat")
+    catalog_report = build_catalog(
+        routes,
+        output_dir / "catalog.pcat",
+        coverage=coverage,
+        minimum_level=minimum_level,
+        maximum_level=maximum_level,
+        row_cap=row_cap,
+        split_cells=split_cells,
+    )
     if build_head:
         if combined is None:
             raise RuntimeError("head build requested without a combined place list")
@@ -389,8 +560,8 @@ def build_region(
             "status": "skipped",
             "object": None,
             "reason": (
-                "non-promoting region measurement skips the context-free global "
-                "head so full-region rows are not retained in memory"
+                "bounded-memory build skips the context-free global head; "
+                "general forward search will use its separately built global tier"
             ),
         }
 
@@ -398,7 +569,6 @@ def build_region(
     produced_objects.append("catalog.pcat")
     if head_info.get("object"):
         produced_objects.append(head_info["object"])
-
     total_rows = sum(shard["rows"] for shard in shard_reports)
     total_shard_bytes = sum(shard["artifact_bytes"] for shard in shard_reports)
     return {
@@ -407,8 +577,12 @@ def build_region(
         "tokenizer_version": TOKENIZER_VERSION,
         "input": str(input_path),
         "config": {
+            "coverage_bbox": coverage,
+            "partition_scheme": PARTITION_SCHEME,
+            "minimum_level": minimum_level,
+            "maximum_level": maximum_level,
             "shard_row_cap": row_cap,
-            "cell_degrees": cell_degrees,
+            "previous_catalog": None if previous_catalog is None else str(previous_catalog),
             "head_minimum_candidates": head_minimum_candidates,
             "head_famous_cap": head_famous_cap,
         },
@@ -416,10 +590,9 @@ def build_region(
             "loaded_places": loaded_places,
             "shard_rows": total_rows,
             "shards": len(shard_reports),
+            "split_cells": len(split_cells),
             "shard_bytes": total_shard_bytes,
-            "bytes_per_place": (
-                total_shard_bytes / total_rows if total_rows else 0.0
-            ),
+            "bytes_per_place": total_shard_bytes / total_rows if total_rows else 0.0,
         },
         "shards": shard_reports,
         "catalog": catalog_report,
@@ -433,8 +606,22 @@ def main() -> None:
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--region-name", required=True)
+    parser.add_argument(
+        "--coverage-bbox",
+        type=float,
+        nargs=4,
+        required=True,
+        metavar=("XMIN", "YMIN", "XMAX", "YMAX"),
+        help="Exact coverage of the extracted input; use -180 -90 180 90 globally.",
+    )
     parser.add_argument("--shard-row-cap", type=int, default=DEFAULT_SHARD_ROW_CAP)
-    parser.add_argument("--cell-degrees", type=float, default=DEFAULT_CELL_DEGREES)
+    parser.add_argument("--minimum-level", type=int, default=DEFAULT_MINIMUM_LEVEL)
+    parser.add_argument("--maximum-level", type=int, default=DEFAULT_MAXIMUM_LEVEL)
+    parser.add_argument(
+        "--previous-catalog",
+        type=Path,
+        help="Prior v2 catalog whose split cells must remain split.",
+    )
     parser.add_argument(
         "--head-minimum-candidates", type=int, default=DEFAULT_HEAD_MINIMUM_CANDIDATES
     )
@@ -444,8 +631,8 @@ def main() -> None:
         "--input-serving-ordered",
         action="store_true",
         help=(
-            "Stream a Parquet file already written in the exact serving order; "
-            "requires --no-head and validates monotonic order while reading."
+            "Stream a Parquet file already written in exact Morton serving order; "
+            "requires --no-head and validates both planning and record order."
         ),
     )
     parser.add_argument("--report", type=Path)
@@ -454,8 +641,11 @@ def main() -> None:
         args.input,
         args.output_dir,
         region_name=args.region_name,
+        coverage_bbox=args.coverage_bbox,
         row_cap=args.shard_row_cap,
-        cell_degrees=args.cell_degrees,
+        minimum_level=args.minimum_level,
+        maximum_level=args.maximum_level,
+        previous_catalog=args.previous_catalog,
         head_minimum_candidates=args.head_minimum_candidates,
         head_famous_cap=args.head_famous_cap,
         build_head=not args.no_head,

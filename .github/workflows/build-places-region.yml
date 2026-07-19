@@ -190,11 +190,13 @@ jobs:
           python scripts/build_places_region_shards.py \
             --input /tmp/region/region.parquet --output-dir /tmp/region/a \
             --region-name "$REGION_NAME" --shard-row-cap "$SHARD_ROW_CAP" \
+            --coverage-bbox "$BBOX_XMIN" "$BBOX_YMIN" "$BBOX_XMAX" "$BBOX_YMAX" \
             --input-serving-ordered --no-head \
             --report /tmp/region/build-report.json
           python scripts/build_places_region_shards.py \
             --input /tmp/region/region.parquet --output-dir /tmp/region/b \
             --region-name "$REGION_NAME" --shard-row-cap "$SHARD_ROW_CAP" \
+            --coverage-bbox "$BBOX_XMIN" "$BBOX_YMIN" "$BBOX_XMAX" "$BBOX_YMAX" \
             --input-serving-ordered --no-head \
             --report /tmp/region/build-report-b.json
           # Every produced object must be byte-identical across the two builds.
@@ -272,7 +274,7 @@ jobs:
             --family places --overture-release "$RELEASE" \
             --producer-commit "$GITHUB_SHA" \
             --producer-script scripts/build_places_region_shards.py \
-            --producer-version 1 \
+            --producer-version 2 \
             --region-name "$REGION_NAME" \
             --bbox "$BBOX_XMIN" "$BBOX_YMIN" "$BBOX_XMAX" "$BBOX_YMAX" \
             --bbox-scope exact \

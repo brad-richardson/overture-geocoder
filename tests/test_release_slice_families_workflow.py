@@ -130,6 +130,15 @@ def test_parsed_corners_route_to_family_jobs_via_preflight_outputs():
                 assert "inputs.region_" not in val
 
 
+def test_places_builder_receives_each_exact_coverage_bbox():
+    places_run = "\n".join(
+        step.get("run", "") for step in jobs()["places"]["steps"]
+    )
+    assert "scripts/build_places_region_shards.py" in places_run
+    assert '--coverage-bbox "$xmin" "$ymin" "$xmax" "$ymax"' in places_run
+    assert "--producer-version 2" in places_run
+
+
 def test_every_job_is_main_only():
     for name, job in jobs().items():
         assert "github.ref == 'refs/heads/main'" in job.get("if", ""), name

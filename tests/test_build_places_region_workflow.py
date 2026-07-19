@@ -49,6 +49,7 @@ def test_region_build_asserts_no_truncation_and_determinism():
     assert 'if [ "$ROWS" -ge "$EXTRACT_LIMIT" ]; then' in workflow
     # Build twice and byte-compare every produced object.
     assert workflow.count("build_places_region_shards.py") >= 2
+    assert workflow.count("--coverage-bbox") == 2
     assert workflow.count("--input-serving-ordered --no-head") == 2
     assert 'cmp "/tmp/region/a/${OBJ}" "/tmp/region/b/${OBJ}"' in workflow
     assert "determinism_ok:true" in workflow
