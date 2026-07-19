@@ -1,6 +1,7 @@
 # Structured address exact-lookup contract
 
-Status: prototype contract; not a production endpoint or publication approval.
+Status: build-ready structured-index contract. It does not approve or dispatch
+a global build, publication, or endpoint migration.
 
 ## Launch slice
 
@@ -52,27 +53,44 @@ Rows missing `street` or `number`, or with invalid point geometry, remain in the
 producer coverage report but are not representable in this exact family. They
 must not be inferred, repaired, or discarded without per-task accounting.
 
-## Candidate partition and catalog rule
+## Partition and catalog rule
 
-For the next producer rehearsal, route by a stable hash of the complete
+Route by a stable hash of the complete
 normalized eight-field key, nested under country. The versioned address catalog
 maps `(country, hash range)` to exactly one immutable shard. Consequently every
 exact lookup reads one shard and all duplicate candidates for a key remain
 together.
 
+The stable partition scheme is `country-fnv1a-high-bits-v1`. Each country starts
+as one full 64-bit range. A leaf above the one-million-row cap splits by the next
+high hash bit, and a prior split is sticky: cells can split but never merge in a
+later release. Partition IDs are `a-{country}` or
+`a-{country}-h-{binary_prefix}`. The collection records every empty child range
+explicitly, allowing a Worker to return a proven exact miss without an object
+read while still rejecting an accidental catalog gap.
+
 Start with a target of roughly one million retained rows per serving shard,
-then size from measured bytes rather than forcing a fixed global shard count.
+then size future caps from measured bytes rather than forcing a fixed global shard count.
 At the current four-million-row evidence point the resident side index was
 941,745 bytes; the one-million-row target is intended to test a materially
 smaller cold index while preserving exact predecessor selection and the
-three-range serving cap. Split or merge only at hash-range boundaries and
-record parent lineage in the release manifest.
+three-range serving cap. The schema-v2 collection validates complete country
+hash coverage, split ancestry, canonical object paths, row caps, and immutable
+size/SHA identities before routing.
 
-The rule is a candidate until the multi-task verified-R2 rehearsal records
-retention, fragment and artifact bytes, peak RAM/disk, retry amplification, and
-wall time. Partial task outputs remain outside every discoverable catalog. The
-shared release finalizer may reference address artifacts only after object-level
-conditional publication and complete family verification are in place.
+`build_address_shard.py` verifies that every row of one reduced partition belongs
+to its country/hash range, then emits only the Worker's independently gzipped
+`useful_gzip` pages and bounded predecessor index. `build_address_collection.py`
+requires exactly one page pair for every non-empty planned leaf and none for
+proven-empty ranges. Partial task outputs remain outside every discoverable
+catalog. The shared release finalizer may reference address artifacts only after
+object-level conditional publication and complete family verification.
+
+This exact-key view is not the future general-search layout. Free-form street
+forward search and nearest-address reverse search should be separate secondary
+indexes (likely country/postcode/locality and spatial ownership respectively)
+behind the same v2 API. Forcing all three access patterns into this hash layout
+would make each of them worse and would not make the public API more standard.
 
 ## Unsupported in this slice
 

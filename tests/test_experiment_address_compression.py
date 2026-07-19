@@ -134,6 +134,22 @@ def test_full_experiment_preserves_oracle_and_measures_every_variant(tmp_path):
     assert "lossless" in report["variants"]["useful_gzip"]["accuracy"]
 
 
+def test_production_build_can_emit_only_worker_variant(tmp_path):
+    baseline = tmp_path / "baseline.aidx"
+    write_baseline(baseline)
+    report = compression.run(
+        baseline,
+        tmp_path / "variants",
+        page_rows=2,
+        planning_rows=10,
+        variant_names=["useful_gzip"],
+    )
+    assert set(report["variants"]) == {"useful_gzip"}
+    assert (tmp_path / "variants" / "useful_gzip.bin").is_file()
+    assert (tmp_path / "variants" / "useful_gzip.idx").is_file()
+    assert not (tmp_path / "variants" / "bare.bin").exists()
+
+
 def test_compression_caps_and_bounded_gzip_decode(tmp_path):
     baseline = tmp_path / "baseline.aidx"
     write_baseline(baseline)

@@ -21,7 +21,7 @@ import time
 import uuid
 import zlib
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from experiment_address_reduce import (
     AddressReduceArtifact,
@@ -345,6 +345,7 @@ def run(
     max_workspace_bytes: int = 6_000_000_000,
     max_page_bytes: int = 8 * 1024 * 1024,
     max_page_rows: int = 10_000,
+    variant_names: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     if page_rows <= 0 or page_rows > 4096:
         raise ValueError("page rows must be between 1 and 4096")
@@ -360,6 +361,13 @@ def run(
         <= 0
     ):
         raise ValueError("compression planning values and hard caps must be positive")
+    selected_names = list(VARIANTS) if variant_names is None else list(variant_names)
+    if (
+        not selected_names
+        or len(set(selected_names)) != len(selected_names)
+        or any(name not in VARIANTS for name in selected_names)
+    ):
+        raise ValueError("compression variants must be a unique supported subset")
     input_bytes = input_path.stat().st_size
     if input_bytes > max_input_bytes:
         raise ValueError("compression input exceeds hard byte cap")
@@ -369,7 +377,8 @@ def run(
     output_dir.mkdir(parents=True, exist_ok=True)
     started = time.monotonic()
     states: dict[str, dict[str, Any]] = {}
-    for name, config in VARIANTS.items():
+    for name in selected_names:
+        config = VARIANTS[name]
         data_path = output_dir / f"{name}.bin"
         index_path = output_dir / f"{name}.idx"
         header = canonical_json({"format": 2, "variant": name, "page_rows": page_rows})
