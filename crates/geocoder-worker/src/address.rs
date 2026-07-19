@@ -13,7 +13,7 @@
 //! It shares no state with, and does not change the behavior of, the existing
 //! `/search`, `/reverse`, `/id`, or `/health` routes.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -57,6 +57,9 @@ const CANDIDATE_CAP: usize = 512;
 /// Bumps when the NFC / Unicode-whitespace-collapse / ASCII-lowercase contract
 /// changes (e.g. adopting broader Unicode case folding).
 const NORMALIZATION_VERSION: &str = "nfc-uniws-asciilower-1";
+const V2_NORMALIZATION_VERSION: &str = "nfc-uniws-collapse-ascii-lower-1";
+const ADDRESS_PARTITION_SCHEME: &str = "country-fnv1a-high-bits-v1";
+const MAX_HASH_PREFIX_BITS: usize = 24;
 
 /// A request field failed contract validation.
 #[derive(Debug)]
@@ -152,6 +155,45 @@ pub(crate) struct AddressShard {
     pub(crate) hash_start: Option<u64>,
     #[serde(default)]
     pub(crate) hash_end: Option<u64>,
+    #[serde(default)]
+    pub(crate) hash_prefix: Option<String>,
+    #[serde(default)]
+    pub(crate) hash_bits: Option<usize>,
+    #[serde(default)]
+    pub(crate) rows: Option<usize>,
+    #[serde(default)]
+    pub(crate) index_bytes: Option<usize>,
+    #[serde(default)]
+    pub(crate) index_sha256: Option<String>,
+    #[serde(default)]
+    pub(crate) data_bytes: Option<usize>,
+    #[serde(default)]
+    pub(crate) data_sha256: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AddressEmptyRange {
+    id: String,
+    country: String,
+    hash_prefix: String,
+    hash_bits: usize,
+    hash_start: u64,
+    hash_end: u64,
+    rows: usize,
+}
+
+impl AddressEmptyRange {
+    fn contains_hash(&self, hash: u64) -> bool {
+        self.hash_start <= hash && hash <= self.hash_end
+    }
+}
+
+#[derive(Debug, Deserialize)]
+pub(crate) struct AddressPartitionContract {
+    scheme: String,
+    maximum_hash_bits: usize,
+    split_row_cap: usize,
+    split_ids: Vec<String>,
 }
 
 impl AddressShard {
@@ -174,6 +216,10 @@ impl AddressShard {
 #[derive(Debug, Deserialize)]
 pub(crate) struct AddressCollection {
     #[serde(default)]
+    pub(crate) schema_version: u32,
+    #[serde(default)]
+    pub(crate) overture_release: Option<String>,
+    #[serde(default)]
     #[allow(dead_code)]
     pub(crate) normalization_version: Option<String>,
     /// Family spatial scope `[min_lon, min_lat, max_lon, max_lat]`. Parsed and
@@ -183,7 +229,247 @@ pub(crate) struct AddressCollection {
     #[allow(dead_code)]
     pub(crate) bbox: Option<[f64; 4]>,
     #[serde(default)]
+    pub(crate) coverage: Option<[f64; 4]>,
+    #[serde(default)]
+    pub(crate) partition: Option<AddressPartitionContract>,
+    #[serde(default)]
     pub(crate) items: HashMap<String, AddressShard>,
+    #[serde(default)]
+    pub(crate) empty_ranges: Vec<AddressEmptyRange>,
+}
+
+impl AddressCollection {
+    fn supported(&self) -> bool {
+        match self.schema_version {
+            0 | 1 => self.supported_legacy(),
+            2 => self.supported_v2(),
+            _ => false,
+        }
+    }
+
+    fn supported_legacy(&self) -> bool {
+        self.partition.is_none()
+            && self.coverage.is_none()
+            && self.empty_ranges.is_empty()
+            && !self.items.is_empty()
+            && self.items.values().all(|shard| {
+                valid_country(&shard.country)
+                    && safe_relative_href(&shard.index_href)
+                    && safe_relative_href(&shard.data_href)
+                    && match (shard.hash_start, shard.hash_end) {
+                        (None, None) => true,
+                        (Some(lo), Some(hi)) => lo <= hi,
+                        _ => false,
+                    }
+            })
+    }
+
+    fn supported_v2(&self) -> bool {
+        let (Some(normalization), Some(release), Some(coverage), Some(contract)) = (
+            self.normalization_version.as_deref(),
+            self.overture_release.as_deref(),
+            self.coverage,
+            self.partition.as_ref(),
+        ) else {
+            return false;
+        };
+        if normalization != V2_NORMALIZATION_VERSION
+            || release.is_empty()
+            || coverage != [-180.0, -90.0, 180.0, 90.0]
+            || self.bbox.is_some()
+            || contract.scheme != ADDRESS_PARTITION_SCHEME
+            || contract.maximum_hash_bits == 0
+            || contract.maximum_hash_bits > MAX_HASH_PREFIX_BITS
+            || contract.split_row_cap == 0
+        {
+            return false;
+        }
+        let Some(splits) = validated_split_ids(&contract.split_ids, contract.maximum_hash_bits)
+        else {
+            return false;
+        };
+        let mut countries: HashMap<&str, Vec<(u64, u64)>> = HashMap::new();
+        let mut leaf_ids = HashSet::new();
+        let mut used_splits = HashSet::new();
+        for (id, shard) in &self.items {
+            let (Some(prefix), Some(bits), Some(rows)) =
+                (shard.hash_prefix.as_deref(), shard.hash_bits, shard.rows)
+            else {
+                return false;
+            };
+            if rows == 0
+                || rows > contract.split_row_cap
+                || !valid_leaf(
+                    id,
+                    &shard.country,
+                    prefix,
+                    bits,
+                    shard.hash_start,
+                    shard.hash_end,
+                    &splits,
+                    contract.maximum_hash_bits,
+                )
+                || shard.index_href != format!("families/addresses/shards/{id}.aidx")
+                || shard.data_href != format!("families/addresses/shards/{id}.adat")
+                || !positive_identity(shard.index_bytes, shard.index_sha256.as_deref())
+                || !positive_identity(shard.data_bytes, shard.data_sha256.as_deref())
+                || !leaf_ids.insert(id.as_str())
+            {
+                return false;
+            }
+            countries
+                .entry(&shard.country)
+                .or_default()
+                .push((shard.hash_start.unwrap(), shard.hash_end.unwrap()));
+            for length in 0..prefix.len() {
+                used_splits.insert((shard.country.as_str(), &prefix[..length]));
+            }
+        }
+        for empty in &self.empty_ranges {
+            if empty.rows != 0
+                || !valid_leaf(
+                    &empty.id,
+                    &empty.country,
+                    &empty.hash_prefix,
+                    empty.hash_bits,
+                    Some(empty.hash_start),
+                    Some(empty.hash_end),
+                    &splits,
+                    contract.maximum_hash_bits,
+                )
+                || !leaf_ids.insert(empty.id.as_str())
+            {
+                return false;
+            }
+            countries
+                .entry(&empty.country)
+                .or_default()
+                .push((empty.hash_start, empty.hash_end));
+            for length in 0..empty.hash_prefix.len() {
+                used_splits.insert((empty.country.as_str(), &empty.hash_prefix[..length]));
+            }
+        }
+        if countries.is_empty() || used_splits != splits {
+            return false;
+        }
+        countries.values_mut().all(|ranges| {
+            ranges.sort_unstable();
+            let mut expected = 0_u128;
+            for (start, end) in ranges {
+                if u128::from(*start) != expected || start > end {
+                    return false;
+                }
+                expected = u128::from(*end) + 1;
+            }
+            expected == 1_u128 << 64
+        })
+    }
+}
+
+fn valid_country(country: &str) -> bool {
+    (2..=3).contains(&country.len())
+        && country
+            .bytes()
+            .all(|value| value.is_ascii_lowercase() || value.is_ascii_digit())
+}
+
+fn safe_relative_href(href: &str) -> bool {
+    !href.is_empty()
+        && !href.starts_with('/')
+        && href.len() <= 256
+        && href.split('/').all(|component| {
+            !component.is_empty()
+                && component != "."
+                && component != ".."
+                && component.bytes().all(|value| {
+                    value.is_ascii_alphanumeric() || matches!(value, b'-' | b'_' | b'.')
+                })
+        })
+}
+
+fn valid_hash_prefix(prefix: &str, maximum: usize) -> bool {
+    prefix.len() <= maximum && prefix.bytes().all(|value| matches!(value, b'0' | b'1'))
+}
+
+fn prefix_range(prefix: &str) -> Option<(u64, u64)> {
+    if !valid_hash_prefix(prefix, MAX_HASH_PREFIX_BITS) {
+        return None;
+    }
+    if prefix.is_empty() {
+        return Some((0, u64::MAX));
+    }
+    let value = u64::from_str_radix(prefix, 2).ok()?;
+    let remaining = 64 - prefix.len();
+    let start = value << remaining;
+    Some((start, start + ((1_u64 << remaining) - 1)))
+}
+
+fn route_id(country: &str, prefix: &str) -> String {
+    if prefix.is_empty() {
+        format!("a-{country}")
+    } else {
+        format!("a-{country}-h-{prefix}")
+    }
+}
+
+fn parse_split_id(value: &str, maximum: usize) -> Option<(&str, &str)> {
+    let (country, prefix) = value.split_once(':')?;
+    if !valid_country(country) || !valid_hash_prefix(prefix, maximum) || prefix.len() >= maximum {
+        return None;
+    }
+    Some((country, prefix))
+}
+
+fn validated_split_ids(
+    values: &[String],
+    maximum: usize,
+) -> Option<HashSet<(&str, &str)>> {
+    let mut result = HashSet::new();
+    for value in values {
+        let identity = parse_split_id(value, maximum)?;
+        if !result.insert(identity) {
+            return None;
+        }
+    }
+    if result.iter().any(|(country, prefix)| {
+        !prefix.is_empty() && !result.contains(&(*country, &prefix[..prefix.len() - 1]))
+    }) {
+        return None;
+    }
+    Some(result)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn valid_leaf(
+    id: &str,
+    country: &str,
+    prefix: &str,
+    bits: usize,
+    start: Option<u64>,
+    end: Option<u64>,
+    splits: &HashSet<(&str, &str)>,
+    maximum: usize,
+) -> bool {
+    let (Some(start), Some(end)) = (start, end) else {
+        return false;
+    };
+    valid_country(country)
+        && valid_hash_prefix(prefix, maximum)
+        && bits == prefix.len()
+        && Some((start, end)) == prefix_range(prefix)
+        && id == route_id(country, prefix)
+        && !splits.contains(&(country, prefix))
+        && (prefix.is_empty() || splits.contains(&(country, &prefix[..prefix.len() - 1])))
+}
+
+fn positive_identity(bytes: Option<usize>, sha256: Option<&str>) -> bool {
+    bytes.is_some_and(|value| value > 0)
+        && sha256.is_some_and(|value| {
+            value.len() == 64
+                && value
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        })
 }
 
 /// Stable 64-bit hash of the complete normalized eight-field key (FNV-1a over
@@ -211,6 +497,8 @@ fn address_key_hash(key: &[String; 8]) -> u64 {
 /// Result of routing a normalized key to a serving shard.
 enum ShardSelection<'a> {
     Shard(&'a AddressShard),
+    /// The v2 collection proves this hash range contains no retained rows.
+    Empty,
     /// The family serves no shard for the query's country.
     OutOfCoverage,
     /// The country is served but no shard's hash range covers the key (a
@@ -222,6 +510,36 @@ enum ShardSelection<'a> {
 /// country split across shards, select by [`address_key_hash`] range.
 fn select_shard<'a>(collection: &'a AddressCollection, key: &[String; 8]) -> ShardSelection<'a> {
     let country = key[0].as_str();
+    if collection.schema_version == 2 {
+        let hash = address_key_hash(key);
+        if let Some(shard) = collection
+            .items
+            .values()
+            .find(|shard| shard.country == country && shard.contains_hash(hash))
+        {
+            return ShardSelection::Shard(shard);
+        }
+        if collection
+            .empty_ranges
+            .iter()
+            .any(|range| range.country == country && range.contains_hash(hash))
+        {
+            return ShardSelection::Empty;
+        }
+        return if collection
+            .items
+            .values()
+            .any(|shard| shard.country == country)
+            || collection
+                .empty_ranges
+                .iter()
+                .any(|range| range.country == country)
+        {
+            ShardSelection::Unroutable
+        } else {
+            ShardSelection::OutOfCoverage
+        };
+    }
     let matching: Vec<&AddressShard> = collection
         .items
         .values()
@@ -268,6 +586,11 @@ impl ShardLoader {
         };
         let collection: AddressCollection = serde_json::from_str(&text)
             .map_err(|e| Error::RustError(format!("Invalid {key}: {e}")))?;
+        if !collection.supported() {
+            return Err(Error::RustError(format!(
+                "Unsupported address collection contract: {key}"
+            )));
+        }
         Ok(Some((version, collection)))
     }
 
@@ -283,6 +606,11 @@ impl ShardLoader {
             ShardSelection::Unroutable => Err(Error::RustError(format!(
                 "address family manifest for {version} has no shard range covering the key"
             ))),
+            ShardSelection::Empty => Ok(AddressOutcome::Resolved {
+                data_version: version,
+                candidates: Vec::new(),
+                read_metrics: RangeReadMetrics::default(),
+            }),
             ShardSelection::Shard(shard) => {
                 let index_key = format!("{version}/{}", shard.index_href);
                 let data_key = format!("{version}/{}", shard.data_href);
@@ -494,6 +822,26 @@ mod tests {
             data_href: format!("address/{country}.bin"),
             hash_start: hash.map(|(lo, _)| lo),
             hash_end: hash.map(|(_, hi)| hi),
+            hash_prefix: None,
+            hash_bits: None,
+            rows: None,
+            index_bytes: None,
+            index_sha256: None,
+            data_bytes: None,
+            data_sha256: None,
+        }
+    }
+
+    fn legacy_collection(items: HashMap<String, AddressShard>) -> AddressCollection {
+        AddressCollection {
+            schema_version: 0,
+            overture_release: None,
+            normalization_version: None,
+            bbox: None,
+            coverage: None,
+            partition: None,
+            items,
+            empty_ranges: Vec::new(),
         }
     }
 
@@ -630,11 +978,7 @@ mod tests {
     fn routes_single_country_shard_without_hashing() {
         let mut items = HashMap::new();
         items.insert("us-0".to_string(), shard("us", None));
-        let collection = AddressCollection {
-            normalization_version: None,
-            bbox: None,
-            items,
-        };
+        let collection = legacy_collection(items);
         let key = build_lookup_key(&params(&full_params())).unwrap();
         assert!(matches!(
             select_shard(&collection, &key),
@@ -646,11 +990,7 @@ mod tests {
     fn reports_out_of_coverage_for_an_unserved_country() {
         let mut items = HashMap::new();
         items.insert("us-0".to_string(), shard("us", None));
-        let collection = AddressCollection {
-            normalization_version: None,
-            bbox: None,
-            items,
-        };
+        let collection = legacy_collection(items);
         let mut pairs = full_params();
         for pair in &mut pairs {
             if pair.0 == "country" {
@@ -676,11 +1016,7 @@ mod tests {
             "us-hi".to_string(),
             shard("us", Some((hash.wrapping_add(1), u64::MAX))),
         );
-        let collection = AddressCollection {
-            normalization_version: None,
-            bbox: None,
-            items,
-        };
+        let collection = legacy_collection(items);
         match select_shard(&collection, &key) {
             ShardSelection::Shard(shard) => {
                 assert_eq!(shard.hash_start, Some(0));
@@ -695,11 +1031,7 @@ mod tests {
         let mut items = HashMap::new();
         items.insert("us-a".to_string(), shard("us", Some((0, 0))));
         items.insert("us-b".to_string(), shard("us", Some((1, 1))));
-        let collection = AddressCollection {
-            normalization_version: None,
-            bbox: None,
-            items,
-        };
+        let collection = legacy_collection(items);
         let key = build_lookup_key(&params(&full_params())).unwrap();
         assert!(matches!(
             select_shard(&collection, &key),
@@ -721,6 +1053,95 @@ mod tests {
         assert_eq!(address_key_hash(&key), 0x0ce4_f784_42ca_30b4);
         let key2 = ["fr", "", "", "", "", "rue de la paix", "1", ""].map(str::to_string);
         assert_eq!(address_key_hash(&key2), 0x20fd_8a67_97be_2b2b);
+    }
+
+    fn v2_collection() -> AddressCollection {
+        let mut items = HashMap::new();
+        items.insert(
+            "a-us-h-0".into(),
+            AddressShard {
+                country: "us".into(),
+                index_href: "families/addresses/shards/a-us-h-0.aidx".into(),
+                data_href: "families/addresses/shards/a-us-h-0.adat".into(),
+                hash_start: Some(0),
+                hash_end: Some((1_u64 << 63) - 1),
+                hash_prefix: Some("0".into()),
+                hash_bits: Some(1),
+                rows: Some(10),
+                index_bytes: Some(100),
+                index_sha256: Some("a".repeat(64)),
+                data_bytes: Some(200),
+                data_sha256: Some("b".repeat(64)),
+            },
+        );
+        AddressCollection {
+            schema_version: 2,
+            overture_release: Some("2026-06-17.0".into()),
+            normalization_version: Some(V2_NORMALIZATION_VERSION.into()),
+            bbox: None,
+            coverage: Some([-180.0, -90.0, 180.0, 90.0]),
+            partition: Some(AddressPartitionContract {
+                scheme: ADDRESS_PARTITION_SCHEME.into(),
+                maximum_hash_bits: 16,
+                split_row_cap: 1_000_000,
+                split_ids: vec!["us:".into()],
+            }),
+            items,
+            empty_ranges: vec![AddressEmptyRange {
+                id: "a-us-h-1".into(),
+                country: "us".into(),
+                hash_prefix: "1".into(),
+                hash_bits: 1,
+                hash_start: 1_u64 << 63,
+                hash_end: u64::MAX,
+                rows: 0,
+            }],
+        }
+    }
+
+    #[test]
+    fn v2_collection_routes_artifact_and_proven_empty_ranges() {
+        let collection = v2_collection();
+        assert!(collection.supported());
+        let key = build_lookup_key(&params(&full_params())).unwrap();
+        assert_eq!(address_key_hash(&key) >> 63, 0);
+        assert!(matches!(
+            select_shard(&collection, &key),
+            ShardSelection::Shard(shard) if shard.hash_prefix.as_deref() == Some("0")
+        ));
+
+        let mut empty_key = key;
+        for number in 0..10_000 {
+            empty_key[6] = number.to_string();
+            if address_key_hash(&empty_key) >> 63 == 1 {
+                break;
+            }
+        }
+        assert_eq!(address_key_hash(&empty_key) >> 63, 1);
+        assert!(matches!(
+            select_shard(&collection, &empty_key),
+            ShardSelection::Empty
+        ));
+    }
+
+    #[test]
+    fn v2_collection_rejects_missing_split_ancestry_and_unsafe_hrefs() {
+        let mut missing_split = v2_collection();
+        missing_split.partition.as_mut().unwrap().split_ids.clear();
+        assert!(!missing_split.supported());
+
+        let mut unsafe_href = v2_collection();
+        unsafe_href.items.get_mut("a-us-h-0").unwrap().index_href = "../a-us-h-0.aidx".into();
+        assert!(!unsafe_href.supported());
+
+        let mut unused_split = v2_collection();
+        unused_split
+            .partition
+            .as_mut()
+            .unwrap()
+            .split_ids
+            .push("ca:".into());
+        assert!(!unused_split.supported());
     }
 
     // --- Manifest deserialization ---
