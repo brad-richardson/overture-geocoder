@@ -55,8 +55,10 @@ const MAX_QUERY_POSTING_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_HEAD_INDEX_BYTES: u64 = 1024 * 1024;
 const MAX_HEAD_KEYS: usize = 100_000;
 const MAX_HEAD_ENTRY_BYTES: u64 = 128 * 1024;
-const MAX_CATALOG_BYTES: usize = 256 * 1024;
-const MAX_CATALOG_SHARDS: usize = 4096;
+const MAX_CATALOG_BYTES: usize = 2 * 1024 * 1024;
+const MAX_CATALOG_SHARDS: usize = 32_768;
+const MAX_QUADKEY_LEVEL: usize = 15;
+const PARTITION_SCHEME: &str = "world-quadkey-v1";
 
 const FIELD_NAME: u8 = 1;
 const FIELD_BRAND: u8 = 2;
@@ -193,14 +195,29 @@ impl PlacesClause {
 pub(crate) struct PlacesCatalogShard {
     pub id: String,
     pub object: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cell: Option<String>,
     pub bbox: [f64; 4],
     pub center: [f64; 2],
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+struct PlacesPartition {
+    scheme: String,
+    minimum_level: usize,
+    maximum_level: usize,
+    split_row_cap: usize,
+    split_cells: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(crate) struct PlacesCatalog {
     schema_version: u32,
     tokenizer_version: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    coverage: Option<[f64; 4]>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    partition: Option<PlacesPartition>,
     pub shards: Vec<PlacesCatalogShard>,
 }
 
@@ -210,6 +227,31 @@ impl PlacesCatalog {
     }
 
     pub(crate) fn route_point(&self, longitude: f64, latitude: f64) -> Option<&PlacesCatalogShard> {
+        if self.schema_version == 2 {
+            if !longitude.is_finite() || !latitude.is_finite() {
+                return None;
+            }
+            let coverage = self.coverage.as_ref()?;
+            if longitude < coverage[0]
+                || longitude > coverage[2]
+                || latitude < coverage[1]
+                || latitude > coverage[3]
+            {
+                return None;
+            }
+            let maximum_level = self.partition.as_ref()?.maximum_level;
+            let point_cell = point_quadkey(longitude, latitude, maximum_level)?;
+            return self
+                .shards
+                .iter()
+                .filter(|shard| {
+                    shard
+                        .cell
+                        .as_deref()
+                        .is_some_and(|cell| point_cell.starts_with(cell))
+                })
+                .max_by_key(|shard| shard.cell.as_ref().map_or(0, String::len));
+        }
         self.shards
             .iter()
             .filter(|shard| {
@@ -226,6 +268,168 @@ impl PlacesCatalog {
                     .then(left.id.cmp(&right.id))
             })
     }
+
+    fn supported(&self) -> bool {
+        if self.tokenizer_version != "nfkd-latin-fold-cjk-bigram-v2"
+            || self.shards.is_empty()
+            || self.shards.len() > MAX_CATALOG_SHARDS
+        {
+            return false;
+        }
+        let mut ids = HashSet::new();
+        for shard in &self.shards {
+            let valid_id = !shard.id.is_empty()
+                && shard.id.len() <= 64
+                && shard
+                    .id
+                    .chars()
+                    .all(|character| character.is_ascii_alphanumeric() || character == '-');
+            let valid_object = shard.object.ends_with(".pcsh")
+                && shard.object.len() <= 128
+                && shard.object.chars().all(|character| {
+                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
+                });
+            if !valid_id
+                || !valid_object
+                || !valid_geometry(shard)
+                || !ids.insert(shard.id.as_str())
+            {
+                return false;
+            }
+        }
+        match self.schema_version {
+            1 => {
+                self.coverage.is_none()
+                    && self.partition.is_none()
+                    && self.shards.iter().all(|shard| shard.cell.is_none())
+            }
+            2 => self.supported_spatial_partition(),
+            _ => false,
+        }
+    }
+
+    fn supported_spatial_partition(&self) -> bool {
+        let (Some(coverage), Some(partition)) = (&self.coverage, &self.partition) else {
+            return false;
+        };
+        if !valid_bbox(coverage)
+            || coverage[0] >= coverage[2]
+            || coverage[1] >= coverage[3]
+            || partition.scheme != PARTITION_SCHEME
+            || partition.minimum_level == 0
+            || partition.minimum_level > partition.maximum_level
+            || partition.maximum_level > MAX_QUADKEY_LEVEL
+            || partition.split_row_cap == 0
+        {
+            return false;
+        }
+        let split_cells: HashSet<&str> = partition.split_cells.iter().map(String::as_str).collect();
+        if split_cells.len() != partition.split_cells.len()
+            || partition.split_cells.iter().any(|cell| {
+                !valid_quadkey(
+                    cell,
+                    partition.minimum_level,
+                    partition.maximum_level.saturating_sub(1),
+                ) || (cell.len() > partition.minimum_level
+                    && !split_cells.contains(&cell[..cell.len() - 1]))
+            })
+        {
+            return false;
+        }
+        let mut leaf_cells = Vec::with_capacity(self.shards.len());
+        for shard in &self.shards {
+            let Some(cell) = shard.cell.as_deref() else {
+                return false;
+            };
+            if !valid_quadkey(cell, partition.minimum_level, partition.maximum_level)
+                || shard.id != format!("q-{cell}")
+                || shard.object != format!("q-{cell}.pcsh")
+                || split_cells.contains(cell)
+                || (cell.len() > partition.minimum_level
+                    && !split_cells.contains(&cell[..cell.len() - 1]))
+            {
+                return false;
+            }
+            let Some(bbox) = quadkey_bbox(cell) else {
+                return false;
+            };
+            let center = [(bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0];
+            if shard.bbox != bbox || shard.center != center {
+                return false;
+            }
+            leaf_cells.push(cell);
+        }
+        leaf_cells.sort_unstable();
+        !leaf_cells
+            .windows(2)
+            .any(|pair| pair[1].starts_with(pair[0]))
+    }
+}
+
+fn valid_bbox(bbox: &[f64; 4]) -> bool {
+    let [xmin, ymin, xmax, ymax] = *bbox;
+    bbox.iter().all(|value| value.is_finite())
+        && (-180.0..=180.0).contains(&xmin)
+        && (-180.0..=180.0).contains(&xmax)
+        && (-90.0..=90.0).contains(&ymin)
+        && (-90.0..=90.0).contains(&ymax)
+        && xmin <= xmax
+        && ymin <= ymax
+}
+
+fn valid_geometry(shard: &PlacesCatalogShard) -> bool {
+    valid_bbox(&shard.bbox)
+        && shard.center.iter().all(|value| value.is_finite())
+        && (shard.bbox[0]..=shard.bbox[2]).contains(&shard.center[0])
+        && (shard.bbox[1]..=shard.bbox[3]).contains(&shard.center[1])
+}
+
+fn valid_quadkey(cell: &str, minimum_level: usize, maximum_level: usize) -> bool {
+    minimum_level <= cell.len()
+        && cell.len() <= maximum_level
+        && cell.bytes().all(|digit| (b'0'..=b'3').contains(&digit))
+}
+
+fn point_quadkey(longitude: f64, latitude: f64, level: usize) -> Option<String> {
+    if level == 0
+        || level > MAX_QUADKEY_LEVEL
+        || !(-180.0..=180.0).contains(&longitude)
+        || !(-90.0..=90.0).contains(&latitude)
+    {
+        return None;
+    }
+    let size = 1_u32 << level;
+    let x = (((longitude + 180.0) / 360.0 * f64::from(size)).floor() as i64)
+        .clamp(0, i64::from(size - 1)) as u32;
+    let y = (((latitude + 90.0) / 180.0 * f64::from(size)).floor() as i64)
+        .clamp(0, i64::from(size - 1)) as u32;
+    let mut result = String::with_capacity(level);
+    for bit in (0..level).rev() {
+        let digit = (((y >> bit) & 1) << 1) | ((x >> bit) & 1);
+        result.push(char::from(b'0' + digit as u8));
+    }
+    Some(result)
+}
+
+fn quadkey_bbox(cell: &str) -> Option<[f64; 4]> {
+    if !valid_quadkey(cell, 1, MAX_QUADKEY_LEVEL) {
+        return None;
+    }
+    let mut x = 0_u32;
+    let mut y = 0_u32;
+    for digit in cell.bytes().map(|value| value - b'0') {
+        x = (x << 1) | u32::from(digit & 1);
+        y = (y << 1) | u32::from((digit >> 1) & 1);
+    }
+    let size = 1_u32 << cell.len();
+    let width = 360.0 / f64::from(size);
+    let height = 180.0 / f64::from(size);
+    Some([
+        -180.0 + f64::from(x) * width,
+        -90.0 + f64::from(y) * height,
+        -180.0 + f64::from(x + 1) * width,
+        -90.0 + f64::from(y + 1) * height,
+    ])
 }
 
 #[derive(Debug, Serialize)]
@@ -655,44 +859,10 @@ impl ShardLoader {
             .ok_or_else(|| not_found(object_key))?;
         let catalog: PlacesCatalog = serde_json::from_slice(&payload)
             .map_err(|_| Error::RustError("Invalid Places catalog JSON".into()))?;
-        if catalog.schema_version != 1
-            || catalog.tokenizer_version != "nfkd-latin-fold-cjk-bigram-v2"
-            || catalog.shards.is_empty()
-            || catalog.shards.len() > MAX_CATALOG_SHARDS
-        {
+        if !catalog.supported() {
             return Err(Error::RustError(
                 "Unsupported Places catalog contract".into(),
             ));
-        }
-        let mut ids = HashSet::new();
-        for shard in &catalog.shards {
-            let valid_id = !shard.id.is_empty()
-                && shard.id.len() <= 64
-                && shard
-                    .id
-                    .chars()
-                    .all(|character| character.is_ascii_alphanumeric() || character == '-');
-            let valid_object = shard.object.ends_with(".pcsh")
-                && shard.object.len() <= 128
-                && shard.object.chars().all(|character| {
-                    character.is_ascii_alphanumeric() || matches!(character, '-' | '_' | '.')
-                });
-            let [xmin, ymin, xmax, ymax] = shard.bbox;
-            let valid_geometry = shard.bbox.iter().all(|value| value.is_finite())
-                && shard.center.iter().all(|value| value.is_finite())
-                && (-180.0..=180.0).contains(&xmin)
-                && (-180.0..=180.0).contains(&xmax)
-                && (-90.0..=90.0).contains(&ymin)
-                && (-90.0..=90.0).contains(&ymax)
-                && xmin <= xmax
-                && ymin <= ymax
-                && (xmin..=xmax).contains(&shard.center[0])
-                && (ymin..=ymax).contains(&shard.center[1]);
-            if !valid_id || !valid_object || !valid_geometry || !ids.insert(shard.id.as_str()) {
-                return Err(Error::RustError(
-                    "Places catalog shard is outside hard bounds".into(),
-                ));
-            }
         }
         Ok(PlacesCatalogLookup {
             catalog,
@@ -1152,16 +1322,20 @@ mod tests {
         let catalog = PlacesCatalog {
             schema_version: 1,
             tokenizer_version: "nfkd-latin-fold-cjk-bigram-v2".into(),
+            coverage: None,
+            partition: None,
             shards: vec![
                 PlacesCatalogShard {
                     id: "large".into(),
                     object: "large.pcsh".into(),
+                    cell: None,
                     bbox: [-72.0, 41.0, -70.0, 43.0],
                     center: [-71.0, 42.0],
                 },
                 PlacesCatalogShard {
                     id: "small".into(),
                     object: "small.pcsh".into(),
+                    cell: None,
                     bbox: [-71.5, 41.5, -70.5, 42.5],
                     center: [-71.0, 42.0],
                 },
@@ -1169,6 +1343,77 @@ mod tests {
         };
         assert_eq!(catalog.route_point(-71.0, 42.0).unwrap().id, "small");
         assert!(catalog.route_point(0.0, 0.0).is_none());
+    }
+
+    fn spatial_shard(cell: &str) -> PlacesCatalogShard {
+        let bbox = quadkey_bbox(cell).unwrap();
+        PlacesCatalogShard {
+            id: format!("q-{cell}"),
+            object: format!("q-{cell}.pcsh"),
+            cell: Some(cell.into()),
+            bbox,
+            center: [(bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0],
+        }
+    }
+
+    #[test]
+    fn spatial_catalog_routes_by_exact_quadkey_ownership() {
+        let point_cell = point_quadkey(-71.0, 42.0, 4).unwrap();
+        let sibling = if point_cell.ends_with('0') {
+            format!("{}1", &point_cell[..3])
+        } else {
+            format!("{}0", &point_cell[..3])
+        };
+        let catalog = PlacesCatalog {
+            schema_version: 2,
+            tokenizer_version: "nfkd-latin-fold-cjk-bigram-v2".into(),
+            coverage: Some([-180.0, -90.0, 180.0, 90.0]),
+            partition: Some(PlacesPartition {
+                scheme: PARTITION_SCHEME.into(),
+                minimum_level: 4,
+                maximum_level: 8,
+                split_row_cap: 1_500_000,
+                split_cells: vec![],
+            }),
+            shards: vec![spatial_shard(&point_cell), spatial_shard(&sibling)],
+        };
+        assert!(catalog.supported());
+        assert_eq!(
+            catalog.route_point(-71.0, 42.0).unwrap().cell.as_deref(),
+            Some(point_cell.as_str())
+        );
+        assert!(catalog.route_point(0.0, -80.0).is_none());
+    }
+
+    #[test]
+    fn world_quadkey_matches_the_python_partition_contract() {
+        assert_eq!(point_quadkey(-180.0, -90.0, 3).as_deref(), Some("000"));
+        assert_eq!(point_quadkey(180.0, 90.0, 3).as_deref(), Some("333"));
+        assert_eq!(point_quadkey(-71.0, 42.0, 6).as_deref(), Some("212231"));
+        assert_eq!(
+            quadkey_bbox("212231"),
+            Some([-73.125, 39.375, -67.5, 42.1875])
+        );
+    }
+
+    #[test]
+    fn spatial_catalog_rejects_leaf_ancestor_overlap() {
+        let parent = point_quadkey(-71.0, 42.0, 4).unwrap();
+        let child = format!("{parent}0");
+        let catalog = PlacesCatalog {
+            schema_version: 2,
+            tokenizer_version: "nfkd-latin-fold-cjk-bigram-v2".into(),
+            coverage: Some([-180.0, -90.0, 180.0, 90.0]),
+            partition: Some(PlacesPartition {
+                scheme: PARTITION_SCHEME.into(),
+                minimum_level: 4,
+                maximum_level: 8,
+                split_row_cap: 1_500_000,
+                split_cells: vec![],
+            }),
+            shards: vec![spatial_shard(&parent), spatial_shard(&child)],
+        };
+        assert!(!catalog.supported());
     }
 
     #[test]

@@ -292,6 +292,7 @@ jobs:
               --input "/tmp/slice/${name}.parquet" \
               --output-dir "/tmp/slice/build-${name}" \
               --region-name "$name" --shard-row-cap "$SHARD_ROW_CAP" \
+              --coverage-bbox "$xmin" "$ymin" "$xmax" "$ymax" \
               --report "/tmp/slice/build-${name}.json"
             # Stage every produced object under a per-region subdirectory so the
             # original object names (and the routing catalog's internal shard
@@ -337,7 +338,7 @@ jobs:
             --family places --overture-release "$RELEASE" \
             --producer-commit "$GITHUB_SHA" \
             --producer-script scripts/build_places_region_shards.py \
-            --producer-version 1 \
+            --producer-version 2 \
             --region-name "slice-${REGION_A_NAME}-with-${REGION_B_NAME}" \
             --bbox "$(echo "$UNION" | jq -r '.[0]')" "$(echo "$UNION" | jq -r '.[1]')" \
                    "$(echo "$UNION" | jq -r '.[2]')" "$(echo "$UNION" | jq -r '.[3]')" \
