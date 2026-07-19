@@ -26,29 +26,9 @@ on:
         description: SHA-256 of that core release-manifest.json.
         required: true
         type: string
-      addresses_inventory_sha256:
-        description: SHA-256 of the pinned address source inventory.
+      family_inputs_json:
+        description: Exact addresses/places inventory, schema, and predecessor digests as JSON.
         required: true
-        type: string
-      addresses_schema_fingerprint_sha256:
-        description: SHA-256 of the address source schema fingerprint.
-        required: true
-        type: string
-      addresses_predecessor_family_manifest_sha256:
-        description: Prior address family manifest SHA-256; blank on first build.
-        required: false
-        type: string
-      places_inventory_sha256:
-        description: SHA-256 of the pinned Places source inventory.
-        required: true
-        type: string
-      places_schema_fingerprint_sha256:
-        description: SHA-256 of the Places source schema fingerprint.
-        required: true
-        type: string
-      places_predecessor_family_manifest_sha256:
-        description: Prior Places family manifest SHA-256; blank on first build.
-        required: false
         type: string
       confirmation:
         description: Type PREPARE_ONLY; this workflow never starts a data build.
@@ -93,15 +73,50 @@ jobs:
           SLICE_VERSION: ${{ inputs.slice_version }}
           LEGACY_CORE_VERSION: ${{ inputs.legacy_core_version }}
           LEGACY_CORE_MANIFEST_SHA256: ${{ inputs.legacy_core_manifest_sha256 }}
-          ADDRESSES_INVENTORY_SHA256: ${{ inputs.addresses_inventory_sha256 }}
-          ADDRESSES_SCHEMA_FINGERPRINT_SHA256: ${{ inputs.addresses_schema_fingerprint_sha256 }}
-          ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256: ${{ inputs.addresses_predecessor_family_manifest_sha256 }}
-          PLACES_INVENTORY_SHA256: ${{ inputs.places_inventory_sha256 }}
-          PLACES_SCHEMA_FINGERPRINT_SHA256: ${{ inputs.places_schema_fingerprint_sha256 }}
-          PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256: ${{ inputs.places_predecessor_family_manifest_sha256 }}
+          FAMILY_INPUTS_JSON: ${{ inputs.family_inputs_json }}
         run: |
           set -euo pipefail
           mkdir -p build-request
+          printf '%s\n' "$FAMILY_INPUTS_JSON" > build-request/family-inputs.json
+          jq -e '
+            type == "object" and
+            (keys == ["addresses", "places"]) and
+            all(
+              .[];
+              type == "object" and
+              (keys == [
+                "inventory_sha256",
+                "predecessor_family_manifest_sha256",
+                "schema_fingerprint_sha256"
+              ]) and
+              (.inventory_sha256 | type == "string") and
+              (.schema_fingerprint_sha256 | type == "string") and
+              (
+                .predecessor_family_manifest_sha256 == null or
+                (.predecessor_family_manifest_sha256 | type == "string")
+              )
+            )
+          ' build-request/family-inputs.json > /dev/null
+          ADDRESSES_INVENTORY_SHA256="$(
+            jq -r '.addresses.inventory_sha256' build-request/family-inputs.json
+          )"
+          ADDRESSES_SCHEMA_FINGERPRINT_SHA256="$(
+            jq -r '.addresses.schema_fingerprint_sha256' build-request/family-inputs.json
+          )"
+          ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256="$(
+            jq -r '.addresses.predecessor_family_manifest_sha256 // ""' \
+              build-request/family-inputs.json
+          )"
+          PLACES_INVENTORY_SHA256="$(
+            jq -r '.places.inventory_sha256' build-request/family-inputs.json
+          )"
+          PLACES_SCHEMA_FINGERPRINT_SHA256="$(
+            jq -r '.places.schema_fingerprint_sha256' build-request/family-inputs.json
+          )"
+          PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256="$(
+            jq -r '.places.predecessor_family_manifest_sha256 // ""' \
+              build-request/family-inputs.json
+          )"
           LEGACY_CORE_MANIFEST_KEY="$LEGACY_CORE_VERSION/release-manifest.json"
           REQUEST_ARGS=(
             --overture-release "$OVERTURE_RELEASE"

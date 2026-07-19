@@ -1,3 +1,4 @@
+import re
 from pathlib import Path
 
 
@@ -27,6 +28,7 @@ def test_workflow_is_manual_main_only_and_has_no_data_plane_credentials():
     assert "secrets." not in value
     assert "aws s3" not in value
     assert "wrangler" not in value
+    assert len(re.findall(r"^      [a-z_]+:$", trigger, re.MULTILINE)) <= 10
 
 
 def test_workflow_requires_prepare_only_and_reproduces_request():
@@ -47,12 +49,14 @@ def test_workflow_freezes_source_core_slice_and_predecessor_inputs():
         "slice_version",
         "legacy_core_version",
         "legacy_core_manifest_sha256",
-        "addresses_inventory_sha256",
-        "addresses_schema_fingerprint_sha256",
-        "places_inventory_sha256",
-        "places_schema_fingerprint_sha256",
+        "family_inputs_json",
     ):
         assert f"      {required}:" in trigger
+    assert "inputs.addresses_inventory_sha256" not in trigger
+    assert "inputs.places_inventory_sha256" not in trigger
+    assert '(keys == ["addresses", "places"])' in value
+    assert 'jq -r \'.addresses.inventory_sha256\'' in value
+    assert 'jq -r \'.places.inventory_sha256\'' in value
     assert "--legacy-core-overture-release \"$OVERTURE_RELEASE\"" in value
     assert "--legacy-core-manifest-key \"$LEGACY_CORE_MANIFEST_KEY\"" in value
     assert "--addresses-predecessor-family-manifest-sha256" in value
