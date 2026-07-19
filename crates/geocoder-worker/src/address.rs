@@ -420,10 +420,7 @@ fn parse_split_id(value: &str, maximum: usize) -> Option<(&str, &str)> {
     Some((country, prefix))
 }
 
-fn validated_split_ids(
-    values: &[String],
-    maximum: usize,
-) -> Option<HashSet<(&str, &str)>> {
+fn validated_split_ids(values: &[String], maximum: usize) -> Option<HashSet<(&str, &str)>> {
     let mut result = HashSet::new();
     for value in values {
         let identity = parse_split_id(value, maximum)?;
