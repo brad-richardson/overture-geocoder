@@ -238,6 +238,21 @@ def _derive_operations(families: dict[str, dict[str, Any]]) -> dict[str, list[st
     return {name: sorted(values) for name, values in sorted(operations.items())}
 
 
+def _require_consistent_family_source_keys(
+    families: dict[str, dict[str, Any]],
+) -> None:
+    identities: dict[str, str] = {}
+    for family, reference in sorted(families.items()):
+        source = reference["source"]
+        key = source["manifest_key"]
+        sha256 = source["manifest_sha256"]
+        previous = identities.setdefault(key, sha256)
+        if previous != sha256:
+            raise ValueError(
+                f"family source manifest key has conflicting SHA-256 values: {key}"
+            )
+
+
 def build_release_manifest(
     *,
     geocoder_build: str,
@@ -341,6 +356,8 @@ def build_release_manifest(
             "operations": operations,
             "entrypoints": normalized_entrypoints,
         }
+
+    _require_consistent_family_source_keys(references)
 
     manifest = {
         "schema": RELEASE_SCHEMA,
@@ -511,6 +528,7 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
             )
         normalized_references[family] = reference
 
+    _require_consistent_family_source_keys(normalized_references)
     if manifest["operations"] != _derive_operations(normalized_references):
         raise ValueError("top-level operations differ from family capabilities")
     unsigned = {key: value for key, value in manifest.items() if key != "release_digest"}

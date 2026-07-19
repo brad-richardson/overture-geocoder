@@ -275,6 +275,37 @@ def test_release_rejects_family_not_blessed_by_its_source_manifest():
         )
 
 
+def test_release_rejects_conflicting_proofs_for_one_source_key():
+    legacy = legacy_release()
+    places = family_manifest("places")
+    addresses = family_manifest("addresses")
+    places_source = family_source_manifest("places")
+    addresses_source = family_source_manifest("addresses")
+    with pytest.raises(ValueError, match="conflicting SHA-256"):
+        v2.build_release_manifest(
+            geocoder_build="2026-07-19.1",
+            overture_release=RELEASE,
+            legacy_release=legacy,
+            legacy_manifest_sha256=payload_sha(legacy),
+            family_manifests={
+                "places": (places, payload_sha(places)),
+                "addresses": (addresses, payload_sha(addresses)),
+            },
+            family_source_manifests={
+                "places": (places_source, payload_sha(places_source)),
+                "addresses": (addresses_source, payload_sha(addresses_source)),
+            },
+            family_entrypoints={
+                "places": {"forward": "families/places/catalog.pcat"},
+                "addresses": {
+                    "structured_forward": (
+                        "families/addresses/address-collection.json"
+                    )
+                },
+            },
+        )
+
+
 @pytest.mark.parametrize("version", ["../catalog", "nested/version", r"nested\version"])
 def test_release_builder_rejects_unsafe_legacy_version(version):
     legacy = legacy_release(version=version)
@@ -355,6 +386,13 @@ def test_release_requires_verified_entrypoint_for_every_operation():
 
 def test_release_validation_detects_capability_and_digest_tampering():
     manifest = release_manifest()
+    tampered = copy.deepcopy(manifest)
+    tampered["families"]["addresses"]["source"]["manifest_sha256"] = "d" * 64
+    unsigned = {key: value for key, value in tampered.items() if key != "release_digest"}
+    tampered["release_digest"] = gbm.digest(unsigned)
+    with pytest.raises(ValueError, match="conflicting SHA-256"):
+        v2.validate_release_manifest(tampered)
+
     tampered = copy.deepcopy(manifest)
     tampered["operations"]["forward"] = ["divisions"]
     with pytest.raises(ValueError, match="operations differ"):
