@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fan-in aggregation for the stratified address R2 map-reduce sweep.
+"""Fan-in aggregation for an address R2 map-reduce task sweep.
 
 Reads the committed selection document plus every per-task evidence file
 downloaded from the matrix jobs, and emits one summary artifact (JSON +
@@ -235,6 +235,9 @@ def aggregate(selection: dict[str, Any], evidence_dir: Path) -> dict[str, Any]:
     return {
         "schema": SCHEMA,
         "release": selection.get("release"),
+        "selection_schema": selection.get("schema"),
+        "selection_country": selection.get("country"),
+        "exact_country_export": selection.get("exact_country_export"),
         "task_count": len(per_task),
         "completed_count": len(complete),
         "incomplete_count": len(per_task) - len(complete),
@@ -268,9 +271,14 @@ def _fmt(value: Any) -> str:
 
 def render_markdown(summary: dict[str, Any]) -> str:
     lines: list[str] = []
-    lines.append("# Stratified address sweep aggregate")
+    lines.append("# Address sweep aggregate")
     lines.append("")
     lines.append(f"- Release: `{summary.get('release')}`")
+    if summary.get("selection_country"):
+        lines.append(
+            f"- Selection country: `{summary['selection_country']}` "
+            f"(exact export: **{_fmt(summary.get('exact_country_export'))}**)"
+        )
     lines.append(
         f"- Tasks completed: **{summary['completed_count']}/{summary['task_count']}**"
     )

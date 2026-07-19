@@ -43,6 +43,11 @@ classified out-of-coverage, never not-found.
   (33 existing US-dominant tasks — no bbox machinery needed) is the
   scale-signal pass, and that pair naturally satisfies the design doc's
   two-region-per-family slice with regions of different magnitude.
+  The dispatch path is now implemented in
+  `.github/workflows/usa-scale-signal.yml`: it reuses the verified isolated
+  workflows, pins the CONUS inputs and complete 33-task selection, cleans up,
+  and retains a combined report against the 40 GB measured-byte gate. It has
+  not yet been dispatched.
 - **Address**: the pushdown pattern is proven in-repo
   (`download_addresses.sql` filters `bbox.*` and even `address_levels`
   state values) but the family producer that feeds R2

@@ -161,12 +161,18 @@ Places relevance verdict (step 2).
        (~18 GB) inside but near the 40 GB combined gate — the compact
        serving-page format (35 B/row measured) rather than raw reduce
        fragments is the planet-scale path.
-     - NEXT: scale-signal pass (CONUS Places + all-US address), a Worker
-       smoke against retained slice data (re-run with cleanup=false),
-       and the Places serving gates (chain_name read-chain redesign,
-       comparator relevance panel, bounded located ranking + the
-       measured multi-shard route_point seam recall hole from #112's
-       review, per-shard head strategy).
+     - USA scale-signal dispatch path READY (not yet run):
+       `.github/workflows/usa-scale-signal.yml` composes the existing verified
+       region/address workflows into a typed-confirmation, main-only run. It
+       pins the full CONUS Places box plus all 33 US-dominant address tasks,
+       cleans every run-unique R2 prefix, and retains one combined fail-closed
+       report against the 40 GB measured-byte gate. The address fleet is
+       explicitly an upper bound, not an exact country-filtered export.
+     - NEXT: dispatch that USA scale-signal pass. Worker isolation is deferred
+       by owner preference. After the data-scale evidence, continue the Places
+       serving gates (chain_name read-chain redesign, comparator relevance
+       panel, bounded located ranking + the measured multi-shard route_point
+       seam recall hole from #112's review, per-shard head strategy).
 5. **After July 25:** verify the promoted rebuild's lineage/reverse baseline,
    then re-size exact-country work. It does not queue-jump the family work.
 

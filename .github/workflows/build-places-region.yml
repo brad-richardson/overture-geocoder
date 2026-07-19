@@ -57,6 +57,51 @@ on:
         required: false
         default: true
         type: boolean
+  workflow_call:
+    inputs:
+      region_name:
+        required: false
+        default: us-northeast
+        type: string
+      bbox_xmin:
+        required: false
+        default: "-80.5"
+        type: string
+      bbox_ymin:
+        required: false
+        default: "38.0"
+        type: string
+      bbox_xmax:
+        required: false
+        default: "-66.9"
+        type: string
+      bbox_ymax:
+        required: false
+        default: "47.5"
+        type: string
+      shard_row_cap:
+        required: false
+        default: "1500000"
+        type: string
+      extract_limit:
+        required: false
+        default: "6000000"
+        type: string
+      release:
+        required: false
+        default: "2026-06-17.0"
+        type: string
+      cleanup:
+        required: false
+        default: true
+        type: boolean
+    secrets:
+      R2_ACCESS_KEY_ID:
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
 
 permissions:
   contents: read

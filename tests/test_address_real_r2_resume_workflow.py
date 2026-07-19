@@ -112,6 +112,20 @@ def test_region_mode_input_and_us_ne_defaults_present():
     assert 'default: "40"' in workflow
 
 
+def test_usa_mode_uses_the_pinned_complete_selection_and_ignores_overrides():
+    workflow = WORKFLOW.read_text()
+
+    assert "- usa" in workflow
+    assert "select_address_sweep_tasks.py check-country" in workflow
+    assert "--selection .github/address-usa-selection.json" in workflow
+    assert '--country US' in workflow
+    assert 'if [ "${RUN_MODE}" = "usa" ]; then' in workflow
+    assert 'override=""' in workflow
+    assert "selection_path: ${{ steps.pick.outputs.selection_path }}" in workflow
+    assert 'SELECTION_PATH: ${{ needs.select.outputs.selection_path }}' in workflow
+    assert '--selection "${SELECTION_PATH}"' in workflow
+
+
 def test_region_plan_generates_scoped_inventory_and_enforces_hard_cap():
     workflow = WORKFLOW.read_text()
     plan = workflow[

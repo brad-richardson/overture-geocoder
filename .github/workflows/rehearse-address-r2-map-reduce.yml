@@ -6,21 +6,24 @@ on:
       mode:
         description: >-
           "stratified" (default) runs the committed 12-task stratified sample
-          over the fixed global inventory, exactly as before. "region" generates
-          a bbox-scoped inventory + task plan at run time and runs the whole
-          scoped plan, then reconciles rows and builds the family manifest.
+          over the fixed global inventory. "usa" runs every task whose largest
+          exact-country footer population is US (an upper-bound scale signal,
+          not an exact US export). "region" generates a bbox-scoped inventory +
+          task plan at run time and runs the whole scoped plan, then reconciles
+          rows and builds the family manifest.
         required: false
         type: choice
         default: stratified
         options:
           - stratified
+          - usa
           - region
       tasks:
         description: >-
           Optional JSON matrix override for debugging, e.g.
           {"include":[{"name":"us-full","task_index":48}]}. Leave blank to use
           the committed stratified selection (.github/address-sweep-selection.json).
-          Ignored in region mode.
+          Ignored in usa and region modes.
         required: false
         type: string
       region_name:
@@ -57,6 +60,47 @@ on:
         required: false
         type: string
         default: "40"
+  workflow_call:
+    inputs:
+      mode:
+        required: false
+        default: stratified
+        type: string
+      tasks:
+        required: false
+        default: ""
+        type: string
+      region_name:
+        required: false
+        default: us-northeast
+        type: string
+      bbox_xmin:
+        required: false
+        default: "-80.5"
+        type: string
+      bbox_ymin:
+        required: false
+        default: "38.0"
+        type: string
+      bbox_xmax:
+        required: false
+        default: "-66.9"
+        type: string
+      bbox_ymax:
+        required: false
+        default: "47.5"
+        type: string
+      max_region_tasks:
+        required: false
+        default: "40"
+        type: string
+    secrets:
+      R2_ACCESS_KEY_ID:
+        required: true
+      R2_SECRET_ACCESS_KEY:
+        required: true
+      CLOUDFLARE_ACCOUNT_ID:
+        required: true
 
 permissions:
   contents: read
@@ -70,11 +114,12 @@ env:
 
 jobs:
   select:
-    name: Select stratified sweep tasks
+    name: Select address rehearsal tasks
     if: github.ref == 'refs/heads/main' && inputs.mode != 'region'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.pick.outputs.matrix }}
+      selection_path: ${{ steps.pick.outputs.selection_path }}
     steps:
       - name: Check out main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -89,23 +134,41 @@ jobs:
       - name: Verify the committed selection reproduces from the inventory
         # Skip when a dispatch override is supplied: an override does not consume
         # the committed selection, so a stale default must not block debugging.
-        if: ${{ inputs.tasks == '' }}
+        if: ${{ inputs.mode == 'stratified' && inputs.tasks == '' }}
         run: |
           set -euo pipefail
           python scripts/select_address_sweep_tasks.py check \
             --inventory-report benchmarks/address-rowgroup-inventory-report.json \
             --selection .github/address-sweep-selection.json
 
-      - name: Resolve the sweep matrix (committed default or dispatch override)
+      - name: Verify the committed USA selection reproduces from the inventory
+        if: ${{ inputs.mode == 'usa' }}
+        run: |
+          set -euo pipefail
+          python scripts/select_address_sweep_tasks.py check-country \
+            --inventory-report benchmarks/address-rowgroup-inventory-report.json \
+            --selection .github/address-usa-selection.json \
+            --country US \
+            --max-tasks 40
+
+      - name: Resolve the sweep matrix
         id: pick
         env:
+          RUN_MODE: ${{ inputs.mode }}
           SWEEP_TASKS_OVERRIDE: ${{ inputs.tasks }}
         run: |
           set -euo pipefail
+          selection=.github/address-sweep-selection.json
+          override="${SWEEP_TASKS_OVERRIDE}"
+          if [ "${RUN_MODE}" = "usa" ]; then
+            selection=.github/address-usa-selection.json
+            override=""
+          fi
           matrix="$(python scripts/select_address_sweep_tasks.py matrix \
-            --selection .github/address-sweep-selection.json \
-            --override-json "${SWEEP_TASKS_OVERRIDE}")"
+            --selection "${selection}" \
+            --override-json "${override}")"
           echo "matrix=${matrix}" >> "$GITHUB_OUTPUT"
+          echo "selection_path=${selection}" >> "$GITHUB_OUTPUT"
 
   real-address-resume:
     name: Real address resume ${{ matrix.name }} (${{ matrix.task_index }})
@@ -373,7 +436,7 @@ jobs:
           test "$REMAINING" = "0"
 
   aggregate:
-    name: Aggregate stratified sweep evidence
+    name: Aggregate address sweep evidence
     needs: [select, real-address-resume]
     if: ${{ always() && github.ref == 'refs/heads/main' && inputs.mode != 'region' }}
     runs-on: ubuntu-latest
@@ -396,16 +459,18 @@ jobs:
           pattern: address-resume-evidence-*
 
       - name: Aggregate per-task retention, bytes, wall, RSS, and amplification
+        env:
+          SELECTION_PATH: ${{ needs.select.outputs.selection_path }}
         run: |
           set -euo pipefail
           mkdir -p sweep-evidence
           python scripts/aggregate_address_sweep.py \
-            --selection .github/address-sweep-selection.json \
+            --selection "${SELECTION_PATH}" \
             --evidence-dir sweep-evidence \
             --json-out sweep-aggregate.json \
             --markdown-out sweep-aggregate.md
           {
-            echo "## Stratified address sweep aggregate"
+            echo "## Address sweep aggregate (${SELECTION_PATH})"
             echo
             cat sweep-aggregate.md
           } >> "$GITHUB_STEP_SUMMARY"
