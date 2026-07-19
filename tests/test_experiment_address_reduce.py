@@ -62,6 +62,18 @@ def test_point_decoder_accepts_little_and_big_endian_wkb():
     assert experiment.point_coordinates(b"bad") is None
 
 
+def test_point_decoder_rejects_trailing_ewkb_and_dimensional_wkb():
+    point = b"\x01" + struct.pack("<Idd", 1, -71.0, 42.0)
+    ewkb_with_srid = b"\x01" + struct.pack(
+        "<IIdd", 0x20000001, 4326, -71.0, 42.0
+    )
+    dimensional = b"\x01" + struct.pack("<Iddd", 1001, -71.0, 42.0, 5.0)
+
+    assert experiment.point_coordinates(point + b"trailing") is None
+    assert experiment.point_coordinates(ewkb_with_srid) is None
+    assert experiment.point_coordinates(dimensional) is None
+
+
 def write_fragment(path: Path, records: list[dict], source_digest: str, index: int):
     encoded = sorted(
         (

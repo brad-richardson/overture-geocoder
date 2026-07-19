@@ -1,6 +1,8 @@
 //! Structured address normalization, routing, and page lookup for `/v2/forward`.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use serde::Deserialize;
 use unicode_normalization::UnicodeNormalization;
@@ -40,6 +42,18 @@ const NORMALIZATION_VERSION: &str = "nfc-uniws-asciilower-1";
 const V2_NORMALIZATION_VERSION: &str = "nfc-uniws-collapse-ascii-lower-1";
 const ADDRESS_PARTITION_SCHEME: &str = "country-fnv1a-high-bits-v1";
 const MAX_HASH_PREFIX_BITS: usize = 24;
+pub(crate) const MAX_ADDRESS_COLLECTION_BYTES: usize = 8 * 1024 * 1024;
+const MAX_ADDRESS_COLLECTION_ROUTES: usize = 4_096;
+const ADDRESS_COLLECTION_CACHE_MAX_ENTRIES: usize = 1;
+
+thread_local! {
+    /// Parsed immutable family routing manifests, LRU-last. The entry count is
+    /// deliberately tiny: the live v2 catalog selects one source version, and
+    /// roll-forward-only publication means an isolate needs only the current
+    /// generation; an in-flight request keeps its own `Rc` alive during swap.
+    static ADDRESS_COLLECTION_CACHE: RefCell<Vec<(String, Rc<PreparedAddressCollection>)>> =
+        const { RefCell::new(Vec::new()) };
+}
 
 /// A request field failed contract validation.
 #[derive(Debug)]
@@ -269,6 +283,11 @@ impl AddressCollection {
             || contract.maximum_hash_bits == 0
             || contract.maximum_hash_bits > MAX_HASH_PREFIX_BITS
             || contract.split_row_cap == 0
+            || self
+                .items
+                .len()
+                .checked_add(self.empty_ranges.len())
+                .is_none_or(|routes| routes > MAX_ADDRESS_COLLECTION_ROUTES)
         {
             return false;
         }
@@ -351,6 +370,82 @@ impl AddressCollection {
             }
             expected == 1_u128 << 64
         })
+    }
+}
+
+enum AddressRouteTarget {
+    Shard(String),
+    Empty,
+}
+
+struct AddressRoute {
+    hash_start: u64,
+    hash_end: u64,
+    target: AddressRouteTarget,
+}
+
+struct PreparedAddressCollection {
+    collection: AddressCollection,
+    routes: HashMap<String, Vec<AddressRoute>>,
+}
+
+impl PreparedAddressCollection {
+    fn new(collection: AddressCollection) -> Self {
+        let mut routes: HashMap<String, Vec<AddressRoute>> = HashMap::new();
+        if collection.schema_version == 2 {
+            for (id, shard) in &collection.items {
+                routes
+                    .entry(shard.country.clone())
+                    .or_default()
+                    .push(AddressRoute {
+                        hash_start: shard.hash_start.expect("validated v2 shard start"),
+                        hash_end: shard.hash_end.expect("validated v2 shard end"),
+                        target: AddressRouteTarget::Shard(id.clone()),
+                    });
+            }
+            for empty in &collection.empty_ranges {
+                routes
+                    .entry(empty.country.clone())
+                    .or_default()
+                    .push(AddressRoute {
+                        hash_start: empty.hash_start,
+                        hash_end: empty.hash_end,
+                        target: AddressRouteTarget::Empty,
+                    });
+            }
+            for country_routes in routes.values_mut() {
+                country_routes.sort_unstable_by_key(|route| route.hash_start);
+            }
+        }
+        Self { collection, routes }
+    }
+
+    fn select_shard<'a>(&'a self, key: &[String; 8]) -> ShardSelection<'a> {
+        if self.collection.schema_version != 2 {
+            return select_shard(&self.collection, key);
+        }
+        let Some(routes) = self.routes.get(key[0].as_str()) else {
+            return ShardSelection::OutOfCoverage;
+        };
+        let hash = address_key_hash(key);
+        let Some(index) = routes
+            .partition_point(|route| route.hash_start <= hash)
+            .checked_sub(1)
+        else {
+            return ShardSelection::Unroutable;
+        };
+        let route = &routes[index];
+        if hash > route.hash_end {
+            return ShardSelection::Unroutable;
+        }
+        match &route.target {
+            AddressRouteTarget::Shard(id) => self
+                .collection
+                .items
+                .get(id)
+                .map_or(ShardSelection::Unroutable, ShardSelection::Shard),
+            AddressRouteTarget::Empty => ShardSelection::Empty,
+        }
     }
 }
 
@@ -560,10 +655,33 @@ pub(crate) enum AddressOutcome {
 }
 
 impl ShardLoader {
-    async fn load_address_collection_key(&self, key: &str) -> Result<Option<AddressCollection>> {
-        let Some(text) = self.memoized_get_text(key, IMMUTABLE_CACHE_TTL).await? else {
+    async fn load_address_collection_key(
+        &self,
+        key: &str,
+    ) -> Result<Option<Rc<PreparedAddressCollection>>> {
+        let cached = ADDRESS_COLLECTION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            cache
+                .iter()
+                .position(|(cached_key, _)| cached_key == key)
+                .map(|position| {
+                    let entry = cache.remove(position);
+                    let collection = Rc::clone(&entry.1);
+                    cache.push(entry);
+                    collection
+                })
+        });
+        if let Some(collection) = cached {
+            return Ok(Some(collection));
+        }
+
+        let Some(text) = self
+            .memoized_get_bounded_text(key, MAX_ADDRESS_COLLECTION_BYTES, IMMUTABLE_CACHE_TTL)
+            .await?
+        else {
             return Ok(None);
         };
+        self.forget_memoized_text(key);
         let collection: AddressCollection = serde_json::from_str(&text)
             .map_err(|e| Error::RustError(format!("Invalid {key}: {e}")))?;
         if !collection.supported() {
@@ -571,6 +689,16 @@ impl ShardLoader {
                 "Unsupported address collection contract: {key}"
             )));
         }
+        let collection = Rc::new(PreparedAddressCollection::new(collection));
+        ADDRESS_COLLECTION_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if !cache.iter().any(|(cached_key, _)| cached_key == key) {
+                cache.push((key.to_string(), Rc::clone(&collection)));
+                while cache.len() > ADDRESS_COLLECTION_CACHE_MAX_ENTRIES {
+                    cache.remove(0);
+                }
+            }
+        });
         Ok(Some(collection))
     }
 
@@ -596,8 +724,13 @@ impl ShardLoader {
             .load_address_collection_key(collection_key)
             .await?
             .ok_or_else(|| crate::stac::not_found(collection_key))?;
-        self.lookup_address_collection(key, data_root, geocoder_build.to_string(), &collection)
-            .await
+        self.lookup_address_collection(
+            key,
+            data_root,
+            geocoder_build.to_string(),
+            collection.as_ref(),
+        )
+        .await
     }
 
     async fn lookup_address_collection(
@@ -605,10 +738,10 @@ impl ShardLoader {
         key: &[String; 8],
         data_root: &str,
         data_version: String,
-        collection: &AddressCollection,
+        collection: &PreparedAddressCollection,
     ) -> Result<AddressOutcome> {
-        let normalization_version = collection.response_normalization_version();
-        match select_shard(collection, key) {
+        let normalization_version = collection.collection.response_normalization_version();
+        match collection.select_shard(key) {
             ShardSelection::OutOfCoverage => Ok(AddressOutcome::OutOfCoverage {
                 data_version,
                 normalization_version,
@@ -954,7 +1087,7 @@ mod tests {
             ShardSelection::Shard(shard) if shard.hash_prefix.as_deref() == Some("0")
         ));
 
-        let mut empty_key = key;
+        let mut empty_key = key.clone();
         for number in 0..10_000 {
             empty_key[6] = number.to_string();
             if address_key_hash(&empty_key) >> 63 == 1 {
@@ -964,6 +1097,16 @@ mod tests {
         assert_eq!(address_key_hash(&empty_key) >> 63, 1);
         assert!(matches!(
             select_shard(&collection, &empty_key),
+            ShardSelection::Empty
+        ));
+
+        let prepared = PreparedAddressCollection::new(collection);
+        assert!(matches!(
+            prepared.select_shard(&key),
+            ShardSelection::Shard(shard) if shard.hash_prefix.as_deref() == Some("0")
+        ));
+        assert!(matches!(
+            prepared.select_shard(&empty_key),
             ShardSelection::Empty
         ));
     }

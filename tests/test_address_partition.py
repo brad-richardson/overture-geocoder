@@ -115,6 +115,58 @@ def test_plan_cli_contract_carries_release_and_versions(tmp_path):
     assert rebuilt["partition"]["split_ids"] == plan["partition"]["split_ids"]
 
 
+def test_previous_plan_allows_maximum_hash_bits_growth():
+    counts = {
+        "schema": address.COUNT_SCHEMA,
+        "overture_release": "2026-06-17.0",
+        "counts": [
+            {"country": "us", "bucket": 0, "rows": 60},
+            {"country": "us", "bucket": 1, "rows": 40},
+        ],
+    }
+    previous = address.build_plan(
+        counts, maximum_hash_bits=2, row_cap=75
+    )
+    current = address.build_plan(
+        {
+            **counts,
+            "overture_release": "2026-07-15.0",
+            "counts": [
+                {"country": "us", "bucket": 0, "rows": 60},
+                {"country": "us", "bucket": 1, "rows": 40},
+            ],
+        },
+        maximum_hash_bits=3,
+        row_cap=1_000,
+        previous=previous,
+    )
+    assert current["partition"]["maximum_hash_bits"] == 3
+    assert current["partition"]["split_ids"] == previous["partition"]["split_ids"]
+
+
+def test_previous_plan_rejects_maximum_hash_bits_decrease():
+    previous = address.build_plan(
+        {
+            "schema": address.COUNT_SCHEMA,
+            "overture_release": "2026-06-17.0",
+            "counts": [{"country": "us", "bucket": 0, "rows": 1}],
+        },
+        maximum_hash_bits=3,
+        row_cap=100,
+    )
+    with pytest.raises(ValueError, match="limits are incompatible"):
+        address.build_plan(
+            {
+                "schema": address.COUNT_SCHEMA,
+                "overture_release": "2026-07-15.0",
+                "counts": [{"country": "us", "bucket": 0, "rows": 1}],
+            },
+            maximum_hash_bits=2,
+            row_cap=100,
+            previous=previous,
+        )
+
+
 def test_previous_plan_must_prove_leaf_ancestry_and_coverage():
     counts = {
         "schema": address.COUNT_SCHEMA,

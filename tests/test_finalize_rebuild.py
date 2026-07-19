@@ -1394,6 +1394,48 @@ def test_publish_family_publishes_artifacts_before_manifest(tmp_path):
     assert manifest_key in fake.store
 
 
+def test_publish_family_never_materializes_artifact_bytes(tmp_path, monkeypatch):
+    root, manifest_path, _manifest, artifacts = _local_family(tmp_path)
+
+    class StreamingClient:
+        def __init__(self):
+            self.identities = {}
+            self.keys = []
+
+        def put_immutable_path(
+            self, key, path, *, expected_size, expected_sha256
+        ):
+            assert path.is_file()
+            self.identities[key] = (expected_size, expected_sha256)
+            self.keys.append(key)
+
+        def put_immutable(self, key, data):
+            self.identities[key] = (len(data), hashlib.sha256(data).hexdigest())
+            self.keys.append(key)
+
+        def list_prefix(self, prefix):
+            return sorted(key for key in self.keys if key.startswith(prefix))
+
+        def object_identity(self, key):
+            return self.identities[key]
+
+    def forbid_read_bytes(_path):
+        raise AssertionError("family artifacts must be streamed from disk")
+
+    client = StreamingClient()
+    monkeypatch.setattr(Path, "read_bytes", forbid_read_bytes)
+    fr.publish_family(
+        client,
+        version=VERSION,
+        family="addresses",
+        manifest_path=manifest_path,
+        artifacts_root=root,
+        log=lambda *_a, **_k: None,
+    )
+
+    assert len(client.keys) == len(artifacts) + 1
+
+
 def test_publish_family_identical_rerun_is_idempotent(tmp_path):
     root, manifest_path, manifest, artifacts = _local_family(tmp_path)
     store = {

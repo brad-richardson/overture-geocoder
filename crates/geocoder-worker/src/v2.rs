@@ -1,6 +1,8 @@
 //! Unified v2 geocoding API and atomic release discovery.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
 
 use geocoder_core::{GeocoderQuery, LocationBias};
 use serde::{Deserialize, Serialize};
@@ -8,9 +10,12 @@ use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use worker::*;
 
+use crate::address::MAX_ADDRESS_COLLECTION_BYTES;
 use crate::address::{build_lookup_key, AddressOutcome};
-use crate::places_pages::{query_terms, PlaceProjection, PlacesClause, TOKENIZER_VERSION};
-use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL};
+use crate::places_pages::{
+    query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
+};
+use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL, TEXT_MEMO_TTL_MS};
 use crate::stac::{ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
 
 const CATALOG_SCHEMA: &str = "overture-geocoder-v2-catalog-v1";
@@ -19,6 +24,14 @@ const PLACES_FORMAT_VERSION: &str = "PCSH0001";
 const ADDRESS_FORMAT_VERSION: &str = "address-reduce-2";
 const ADDRESS_NORMALIZATION_VERSION: &str = "nfc-uniws-collapse-ascii-lower-1";
 const MAX_CATALOG_RELEASES: usize = 64;
+const MAX_V2_CATALOG_BYTES: usize = 1024 * 1024;
+const MAX_V2_RELEASE_BYTES: usize = 1024 * 1024;
+const MAX_READINESS_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
+const MAX_PLACES_FAMILY_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
+const MAX_FAMILY_MANIFEST_ARTIFACTS: usize = 65_536;
+const FAMILY_MANIFEST_SCHEMA: &str = "overture-global-family-manifest-v1";
+const PLACES_HEAD_ARTIFACT_KEY: &str = "families/places/head.phrp";
+const V2_RELEASE_CACHE_MAX_ENTRIES: usize = 1;
 const MAX_QUERY_BYTES: usize = 200;
 const MAX_RESULTS: usize = 10;
 const ADDRESS_CANDIDATE_CAP: usize = 512;
@@ -31,6 +44,18 @@ const DIVISION_TYPES: &[&str] = &[
     "neighborhood",
     "macrohood",
 ];
+
+thread_local! {
+    /// Short-lived mutable discovery pointer, aligned with the text memo TTL.
+    /// Warm requests therefore skip both catalog/release parsing and R2 HEADs.
+    static V2_LIVE_RELEASE: RefCell<Option<(Rc<V2Release>, u64)>> =
+        const { RefCell::new(None) };
+    /// Fully validated and readiness-probed immutable v2 release.
+    /// Caching here removes repeat JSON parsing and, importantly, keeps the
+    /// completion-marker HEAD probes off the per-request warm path.
+    static V2_RELEASE_CACHE: RefCell<Vec<(String, Rc<V2Release>)>> =
+        const { RefCell::new(Vec::new()) };
+}
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, Eq)]
 pub(crate) struct DataVersion {
@@ -78,7 +103,7 @@ struct FamilySource {
     manifest_sha256: String,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, PartialEq, Eq)]
 struct FamilyVersions {
     format: String,
     tokenizer: Option<String>,
@@ -92,6 +117,7 @@ struct FamilyReference {
     manifest_digest: String,
     manifest_sha256: String,
     versions: FamilyVersions,
+    coverage: Value,
     operations: Vec<String>,
     entrypoints: HashMap<String, ArtifactIdentity>,
 }
@@ -166,6 +192,38 @@ fn safe_key(value: &str) -> bool {
         })
 }
 
+fn valid_coverage(value: &Value) -> bool {
+    let Some(object) = value.as_object() else {
+        return false;
+    };
+    if object.len() != 3
+        || object
+            .get("name")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || !object
+            .get("bbox_scope")
+            .and_then(Value::as_str)
+            .is_some_and(|scope| matches!(scope, "exact" | "row_group_approximate"))
+    {
+        return false;
+    }
+    let Some(bbox) = object.get("bbox").and_then(Value::as_array) else {
+        return false;
+    };
+    let coordinates = bbox.iter().map(Value::as_f64).collect::<Option<Vec<_>>>();
+    coordinates.is_some_and(|bbox| {
+        bbox.len() == 4
+            && bbox.iter().all(|value| value.is_finite())
+            && -180.0 <= bbox[0]
+            && bbox[0] < bbox[2]
+            && bbox[2] <= 180.0
+            && -90.0 <= bbox[1]
+            && bbox[1] < bbox[3]
+            && bbox[3] <= 90.0
+    })
+}
+
 fn validate_catalog(catalog: &V2Catalog) -> std::result::Result<&CatalogEntry, String> {
     if catalog.schema != CATALOG_SCHEMA
         || !valid_build(&catalog.latest)
@@ -225,6 +283,7 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
             )
         || !valid_sha256(&family.manifest_digest)
         || !valid_sha256(&family.manifest_sha256)
+        || !valid_coverage(&family.coverage)
         || family.operations.is_empty()
     {
         return Err(format!("invalid v2 {name} family reference"));
@@ -259,6 +318,8 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
             || !safe_key(&identity.object_key)
             || identity.bytes == 0
             || !valid_sha256(&identity.sha256)
+            || (name == "places" && identity.bytes > MAX_CATALOG_OBJECT_BYTES)
+            || (name == "addresses" && identity.bytes > MAX_ADDRESS_COLLECTION_BYTES)
             || (name == "places"
                 && identity.object_key
                     != format!("{}/families/places/catalog.pcat", family.source.version))
@@ -359,18 +420,203 @@ fn validate_release(
     Ok(())
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct ReadinessObject {
+    key: String,
+    expected_bytes: Option<u64>,
+    expected_sha256: String,
+}
+
+#[derive(Deserialize)]
+struct ServingFamilyManifest {
+    schema: String,
+    family: String,
+    manifest_digest: String,
+    artifacts: Vec<ServingFamilyArtifact>,
+}
+
+#[derive(Deserialize)]
+struct ServingFamilyArtifact {
+    object_key: String,
+    bytes: u64,
+    sha256: String,
+}
+
+fn release_readiness_objects(release: &V2Release) -> Vec<ReadinessObject> {
+    let mut objects = vec![ReadinessObject {
+        key: release.legacy_core.manifest_key.clone(),
+        expected_bytes: None,
+        expected_sha256: release.legacy_core.manifest_sha256.clone(),
+    }];
+    let mut source_keys = HashSet::new();
+    for (family_name, family) in &release.families {
+        if source_keys.insert(family.source.manifest_key.as_str()) {
+            objects.push(ReadinessObject {
+                key: family.source.manifest_key.clone(),
+                expected_bytes: None,
+                expected_sha256: family.source.manifest_sha256.clone(),
+            });
+        }
+        // The Places manifest is loaded under a bounded parse below so its
+        // canonical head identity can be extracted before admission. Other
+        // family manifests only need their release-pinned streaming identity.
+        if family_name != "places" {
+            objects.push(ReadinessObject {
+                key: family.manifest_key.clone(),
+                expected_bytes: None,
+                expected_sha256: family.manifest_sha256.clone(),
+            });
+        }
+        objects.extend(family.entrypoints.values().map(|identity| ReadinessObject {
+            key: identity.object_key.clone(),
+            expected_bytes: Some(identity.bytes as u64),
+            expected_sha256: identity.sha256.clone(),
+        }));
+    }
+    objects
+}
+
+fn places_head_requirement(
+    manifest_text: &str,
+    family: &FamilyReference,
+) -> std::result::Result<ReadinessObject, String> {
+    let actual_manifest_sha = format!("{:x}", Sha256::digest(manifest_text.as_bytes()));
+    if actual_manifest_sha != family.manifest_sha256 {
+        return Err("v2 Places family manifest SHA-256 differs from release".into());
+    }
+    let manifest: ServingFamilyManifest = serde_json::from_str(manifest_text)
+        .map_err(|error| format!("Invalid v2 Places family manifest: {error}"))?;
+    if manifest.schema != FAMILY_MANIFEST_SCHEMA
+        || manifest.family != "places"
+        || manifest.manifest_digest != family.manifest_digest
+        || manifest.artifacts.is_empty()
+        || manifest.artifacts.len() > MAX_FAMILY_MANIFEST_ARTIFACTS
+    {
+        return Err("unsupported v2 Places family manifest contract".into());
+    }
+    let mut heads = manifest
+        .artifacts
+        .into_iter()
+        .filter(|artifact| artifact.object_key == PLACES_HEAD_ARTIFACT_KEY);
+    let head = heads
+        .next()
+        .ok_or_else(|| "v2 Places family manifest omits canonical head.phrp".to_string())?;
+    if heads.next().is_some() || head.bytes == 0 || !valid_sha256(&head.sha256) {
+        return Err("v2 Places family manifest has an invalid canonical head identity".into());
+    }
+    Ok(ReadinessObject {
+        key: format!("{}/{}", family.source.version, PLACES_HEAD_ARTIFACT_KEY),
+        expected_bytes: Some(head.bytes),
+        expected_sha256: head.sha256,
+    })
+}
+
+fn readiness_identity_matches(
+    requirement: &ReadinessObject,
+    actual_bytes: u64,
+    actual_sha256: &str,
+) -> bool {
+    requirement
+        .expected_bytes
+        .map_or(actual_bytes > 0, |expected| actual_bytes == expected)
+        && actual_sha256 == requirement.expected_sha256
+}
+
 impl ShardLoader {
-    pub(crate) async fn load_v2_release(&self) -> Result<V2Release> {
+    async fn verified_places_head_requirement(
+        &self,
+        family: &FamilyReference,
+    ) -> Result<ReadinessObject> {
+        let manifest_text = self
+            .memoized_get_bounded_text(
+                &family.manifest_key,
+                MAX_PLACES_FAMILY_MANIFEST_BYTES,
+                IMMUTABLE_CACHE_TTL,
+            )
+            .await?
+            .ok_or_else(|| crate::stac::not_found(&family.manifest_key))?;
+        // Do not retain the raw proof document beside the parsed Places and
+        // address routing structures. The edge cache still serves later cold
+        // isolates; this isolate only retains the admitted release.
+        self.forget_memoized_text(&family.manifest_key);
+        places_head_requirement(&manifest_text, family).map_err(Error::RustError)
+    }
+
+    async fn verify_readiness_object(&self, requirement: &ReadinessObject) -> Result<()> {
+        let max_bytes = requirement
+            .expected_bytes
+            .unwrap_or(MAX_READINESS_MANIFEST_BYTES);
+        let (actual_bytes, actual_sha256) = self
+            .immutable_object_identity(&requirement.key, max_bytes)
+            .await?;
+        let ready = readiness_identity_matches(requirement, actual_bytes, &actual_sha256);
+        if !ready {
+            return Err(Error::RustError(format!(
+                "v2 readiness object identity is invalid: {}",
+                requirement.key
+            )));
+        }
+        Ok(())
+    }
+
+    async fn verify_v2_release_readiness(&self, release: &V2Release) -> Result<()> {
+        for requirement in release_readiness_objects(release) {
+            self.verify_readiness_object(&requirement).await?;
+        }
+        if let Some(places) = release.families.get("places") {
+            let head = self.verified_places_head_requirement(places).await?;
+            self.verify_readiness_object(&head).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn load_v2_release(&self) -> Result<Rc<V2Release>> {
+        let now = Date::now().as_millis();
+        if let Some(release) = V2_LIVE_RELEASE.with(|cached| {
+            cached
+                .borrow()
+                .as_ref()
+                .filter(|(_, expires)| *expires > now)
+                .map(|(release, _)| Rc::clone(release))
+        }) {
+            return Ok(release);
+        }
+
         let catalog_key = "v2/catalog.json";
         let catalog_text = self
-            .memoized_get_text(catalog_key, CATALOG_CACHE_TTL)
+            .memoized_get_bounded_text(catalog_key, MAX_V2_CATALOG_BYTES, CATALOG_CACHE_TTL)
             .await?
             .ok_or_else(|| crate::stac::not_found(catalog_key))?;
         let catalog: V2Catalog = serde_json::from_str(&catalog_text)
             .map_err(|error| Error::RustError(format!("Invalid {catalog_key}: {error}")))?;
         let entry = validate_catalog(&catalog).map_err(Error::RustError)?;
+        let cache_key = format!("{}#{}", entry.manifest_key, entry.manifest_sha256);
+        let cached = V2_RELEASE_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            cache
+                .iter()
+                .position(|(candidate, _)| candidate == &cache_key)
+                .map(|position| {
+                    let entry = cache.remove(position);
+                    let release = Rc::clone(&entry.1);
+                    cache.push(entry);
+                    release
+                })
+        });
+        if let Some(release) = cached {
+            V2_LIVE_RELEASE.with(|cached| {
+                *cached.borrow_mut() =
+                    Some((Rc::clone(&release), now.saturating_add(TEXT_MEMO_TTL_MS)));
+            });
+            return Ok(release);
+        }
+
         let manifest_text = self
-            .memoized_get_text(&entry.manifest_key, IMMUTABLE_CACHE_TTL)
+            .memoized_get_bounded_text(
+                &entry.manifest_key,
+                MAX_V2_RELEASE_BYTES,
+                IMMUTABLE_CACHE_TTL,
+            )
             .await?
             .ok_or_else(|| crate::stac::not_found(&entry.manifest_key))?;
         let actual_sha = format!("{:x}", Sha256::digest(manifest_text.as_bytes()));
@@ -383,18 +629,33 @@ impl ShardLoader {
             Error::RustError(format!("Invalid {}: {error}", entry.manifest_key))
         })?;
         validate_release(&release, entry).map_err(Error::RustError)?;
+        self.verify_v2_release_readiness(&release).await?;
+        let release = Rc::new(release);
+        V2_RELEASE_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if !cache.iter().any(|(candidate, _)| candidate == &cache_key) {
+                cache.push((cache_key, Rc::clone(&release)));
+                while cache.len() > V2_RELEASE_CACHE_MAX_ENTRIES {
+                    cache.remove(0);
+                }
+            }
+        });
+        V2_LIVE_RELEASE.with(|cached| {
+            *cached.borrow_mut() =
+                Some((Rc::clone(&release), now.saturating_add(TEXT_MEMO_TTL_MS)));
+        });
         Ok(release)
     }
 }
 
 enum ReleaseAvailability {
-    Ready(Box<V2Release>),
+    Ready(Rc<V2Release>),
     Unavailable(Response),
 }
 
 async fn load_available_release(loader: &ShardLoader) -> Result<ReleaseAvailability> {
     match loader.load_v2_release().await {
-        Ok(release) => Ok(ReleaseAvailability::Ready(Box::new(release))),
+        Ok(release) => Ok(ReleaseAvailability::Ready(release)),
         Err(error) if format!("{error:?}").contains(NOT_FOUND_SENTINEL) => {
             Ok(ReleaseAvailability::Unavailable(json_error(
                 "release_unavailable",
@@ -658,7 +919,7 @@ async fn search_places(
             })
             .collect::<Result<Vec<_>>>()?;
         let catalog = loader.lookup_places_catalog(&entrypoint.object_key).await?;
-        let Some(route) = catalog.catalog.route_point(longitude, latitude).cloned() else {
+        let Some(route) = catalog.route_point(longitude, latitude).cloned() else {
             return Ok(Vec::new());
         };
         let mut lookup = loader
@@ -1098,6 +1359,11 @@ mod tests {
                         "tokenizer": TOKENIZER_VERSION,
                         "normalization": null
                     },
+                    "coverage": {
+                        "name": "world",
+                        "bbox": [-180.0, -90.0, 180.0, 90.0],
+                        "bbox_scope": "exact"
+                    },
                     "operations": ["forward"],
                     "entrypoints": {"forward": {
                         "object_key": "slice-2026-07-19.0/families/places/catalog.pcat",
@@ -1119,6 +1385,11 @@ mod tests {
                         "format": ADDRESS_FORMAT_VERSION,
                         "tokenizer": null,
                         "normalization": ADDRESS_NORMALIZATION_VERSION
+                    },
+                    "coverage": {
+                        "name": "world",
+                        "bbox": [-180.0, -90.0, 180.0, 90.0],
+                        "bbox_scope": "exact"
                     },
                     "operations": ["structured_forward"],
                     "entrypoints": {"structured_forward": {
@@ -1175,6 +1446,125 @@ mod tests {
             },
         )]);
         assert!(validate_release(&unsupported_operation, &catalog().releases[0]).is_err());
+
+        let mut oversized_entrypoint = release();
+        oversized_entrypoint
+            .families
+            .get_mut("places")
+            .unwrap()
+            .entrypoints
+            .get_mut("forward")
+            .unwrap()
+            .bytes = MAX_CATALOG_OBJECT_BYTES + 1;
+        assert!(validate_release(&oversized_entrypoint, &catalog().releases[0]).is_err());
+    }
+
+    #[test]
+    fn readiness_gate_requires_completion_markers_and_places_head() {
+        let mut release = release();
+        let family_manifest = serde_json::to_string(&json!({
+            "schema": FAMILY_MANIFEST_SCHEMA,
+            "family": "places",
+            "manifest_digest": sha(),
+            "artifacts": [{
+                "object_key": PLACES_HEAD_ARTIFACT_KEY,
+                "bytes": 456,
+                "sha256": "c".repeat(64)
+            }]
+        }))
+        .unwrap();
+        release.families.get_mut("places").unwrap().manifest_sha256 =
+            format!("{:x}", Sha256::digest(family_manifest.as_bytes()));
+        let requirements = release_readiness_objects(&release);
+        let keys = requirements
+            .iter()
+            .map(|requirement| requirement.key.as_str())
+            .collect::<HashSet<_>>();
+        assert!(keys.contains("2026-07-18.0/release-manifest.json"));
+        assert!(keys.contains("slice-2026-07-19.0/slice-manifest.json"));
+        assert!(keys.contains("slice-2026-07-19.0/families/addresses/family-manifest.json"));
+        assert!(!keys.contains("slice-2026-07-19.0/families/places/head.phrp"));
+        assert_eq!(
+            requirements
+                .iter()
+                .find(|requirement| requirement.key.ends_with("catalog.pcat"))
+                .unwrap()
+                .expected_bytes,
+            Some(123)
+        );
+        assert_eq!(
+            requirements
+                .iter()
+                .find(|requirement| requirement.key.ends_with("catalog.pcat"))
+                .unwrap()
+                .expected_sha256
+                .clone(),
+            sha()
+        );
+        assert_eq!(
+            requirements
+                .iter()
+                .filter(|requirement| requirement.key.ends_with("slice-manifest.json"))
+                .count(),
+            1
+        );
+
+        let catalog_requirement = requirements
+            .iter()
+            .find(|requirement| requirement.key.ends_with("catalog.pcat"))
+            .unwrap();
+        assert!(readiness_identity_matches(catalog_requirement, 123, &sha()));
+        assert!(!readiness_identity_matches(
+            catalog_requirement,
+            123,
+            &"b".repeat(64)
+        ));
+
+        let head =
+            places_head_requirement(&family_manifest, release.families.get("places").unwrap())
+                .unwrap();
+        assert_eq!(head.key, "slice-2026-07-19.0/families/places/head.phrp");
+        assert_eq!(head.expected_bytes, Some(456));
+        assert_eq!(head.expected_sha256, "c".repeat(64));
+        assert!(readiness_identity_matches(&head, 456, &"c".repeat(64)));
+        assert!(!readiness_identity_matches(&head, 455, &"c".repeat(64)));
+        assert!(!readiness_identity_matches(&head, 456, &"d".repeat(64)));
+    }
+
+    #[test]
+    fn places_head_extraction_rejects_tampered_missing_or_duplicate_identity() {
+        let mut release = release();
+        let places = release.families.get_mut("places").unwrap();
+        let manifest = |artifacts: Value| {
+            serde_json::to_string(&json!({
+                "schema": FAMILY_MANIFEST_SCHEMA,
+                "family": "places",
+                "manifest_digest": sha(),
+                "artifacts": artifacts
+            }))
+            .unwrap()
+        };
+        let valid_artifact = json!({
+            "object_key": PLACES_HEAD_ARTIFACT_KEY,
+            "bytes": 456,
+            "sha256": "c".repeat(64)
+        });
+
+        let missing = manifest(json!([{
+            "object_key": "families/places/not-head.phrp",
+            "bytes": 456,
+            "sha256": "c".repeat(64)
+        }]));
+        places.manifest_sha256 = format!("{:x}", Sha256::digest(missing.as_bytes()));
+        assert!(places_head_requirement(&missing, places).is_err());
+
+        let duplicate = manifest(json!([valid_artifact.clone(), valid_artifact.clone()]));
+        places.manifest_sha256 = format!("{:x}", Sha256::digest(duplicate.as_bytes()));
+        assert!(places_head_requirement(&duplicate, places).is_err());
+
+        let valid = manifest(json!([valid_artifact]));
+        places.manifest_sha256 = "f".repeat(64);
+        assert!(places_head_requirement(&valid, places).is_err());
     }
 
     #[test]

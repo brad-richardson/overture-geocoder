@@ -1020,42 +1020,70 @@ class R2Client:
         with tempfile.TemporaryDirectory() as work:
             body = Path(work) / "body"
             body.write_bytes(data)
-            args = [
-                "s3api", "put-object",
-                "--bucket", self.bucket, "--key", key,
-                "--body", str(body),
-                "--content-type", "application/json",
-                "--no-cli-pager",
-            ]
-            if if_none_match is not None:
-                args += ["--if-none-match", if_none_match]
-            if if_match is not None:
-                args += ["--if-match", if_match]
-            try:
-                self._aws(*args, capture=True)
-            except subprocess.CalledProcessError as exc:
-                if _is_precondition_failed(exc):
-                    raise PreconditionFailed(
-                        f"conditional PUT of {key} rejected by R2 (412 precondition failed)"
-                    ) from exc
-                if _is_unsupported_conditional_option(exc):
-                    # A pre-2.15-ish aws CLI has no --if-match/--if-none-match, so
-                    # the guarded write silently degrades to unguarded. Refuse
-                    # rather than retry a request that can never parse.
-                    raise PromotionError(
-                        "aws CLI does not support PutObject conditional writes "
-                        "(--if-match/--if-none-match); upgrade the CLI on the runner "
-                        "before publishing the production catalog"
-                    ) from exc
-                raise
+            self._put_object_path(
+                key,
+                body,
+                content_type="application/json",
+                if_match=if_match,
+                if_none_match=if_none_match,
+            )
+
+    def _put_object_path(
+        self,
+        key: str,
+        body: Path,
+        *,
+        content_type: str,
+        if_match: str | None = None,
+        if_none_match: str | None = None,
+    ) -> None:
+        """Conditionally upload ``body`` without materializing it in memory."""
+        args = [
+            "s3api", "put-object",
+            "--bucket", self.bucket, "--key", key,
+            "--body", str(body),
+            "--content-type", content_type,
+            "--no-cli-pager",
+        ]
+        if if_none_match is not None:
+            args += ["--if-none-match", if_none_match]
+        if if_match is not None:
+            args += ["--if-match", if_match]
+        try:
+            self._aws(*args, capture=True)
+        except subprocess.CalledProcessError as exc:
+            if _is_precondition_failed(exc):
+                raise PreconditionFailed(
+                    f"conditional PUT of {key} rejected by R2 (412 precondition failed)"
+                ) from exc
+            if _is_unsupported_conditional_option(exc):
+                # A pre-2.15-ish aws CLI has no --if-match/--if-none-match, so
+                # the guarded write silently degrades to unguarded. Refuse
+                # rather than retry a request that can never parse.
+                raise PromotionError(
+                    "aws CLI does not support PutObject conditional writes "
+                    "(--if-match/--if-none-match); upgrade the CLI on the runner "
+                    "before publishing the production catalog"
+                ) from exc
+            raise
+
+    def _download_object(self, key: str, dest: Path) -> None:
+        self._aws(
+            "s3", "cp", f"s3://{self.bucket}/{key}", str(dest), "--only-show-errors"
+        )
 
     def _get_object(self, key: str) -> bytes:
         with tempfile.TemporaryDirectory() as work:
             dest = Path(work) / "obj"
-            self._aws(
-                "s3", "cp", f"s3://{self.bucket}/{key}", str(dest), "--only-show-errors"
-            )
+            self._download_object(key, dest)
             return dest.read_bytes()
+
+    def object_identity(self, key: str) -> tuple[int, str]:
+        """Download one object to disk and return its size and streaming SHA-256."""
+        with tempfile.TemporaryDirectory() as work:
+            dest = Path(work) / "obj"
+            self._download_object(key, dest)
+            return dest.stat().st_size, _sha256(dest)
 
     def _verify_readback(self, key: str, data: bytes) -> None:
         """Read the object back and hard-fail if its digest is not ``data``.
@@ -1132,10 +1160,45 @@ class R2Client:
         try:
             self.publish_create_only(key, data)
         except PreconditionFailed:
-            existing = self._get_object(key)
-            if existing != data:
+            expected = (len(data), hashlib.sha256(data).hexdigest())
+            if self.object_identity(key) != expected:
                 raise
             # Same key, same bytes: the immutable object already exists.
+
+    def put_immutable_path(
+        self,
+        key: str,
+        path: Path,
+        *,
+        expected_size: int,
+        expected_sha256: str,
+    ) -> None:
+        """Create-only publish a large immutable file without loading it in RAM.
+
+        The caller supplies the already-validated manifest identity. Re-check it
+        immediately before upload, then verify R2's readback by streaming one
+        downloaded object from disk. An identical pre-existing object makes a
+        retry idempotent; any identity mismatch remains a hard conflict.
+        """
+        local_identity = (path.stat().st_size, _sha256(path))
+        expected_identity = (expected_size, expected_sha256)
+        if local_identity != expected_identity:
+            raise PromotionError(f"local artifact changed before upload: {path}")
+        try:
+            self._put_object_path(
+                key,
+                path,
+                content_type="application/octet-stream",
+                if_none_match="*",
+            )
+        except PreconditionFailed:
+            if self.object_identity(key) != expected_identity:
+                raise
+            return
+        if self.object_identity(key) != expected_identity:
+            raise PromotionError(
+                f"read-back digest mismatch for {key}: R2 stored unexpected bytes"
+            )
 
     def put_backup(self, name: str, data: bytes) -> None:
         """Write a durable operator-recovery copy, create-only (idempotent)."""
@@ -1405,10 +1468,11 @@ def publish_family(
     1. Validate the #107 manifest and verify it locally against ``artifacts_root``
        (every artifact present, size + SHA-256 match, keys inside the family
        prefix, no extra local file under the prefix).
-    2. Publish each artifact create-only (idempotent on an identical re-run).
+    2. Stream each artifact from disk to a create-only upload (idempotent on an
+       identical re-run).
     3. Publish the manifest last, create-only.
-    4. Re-verify remotely: list the family prefix, download every non-manifest
-       object, and check the fleet against the manifest via #107's
+    4. Re-verify remotely: list the family prefix, stream-hash every non-manifest
+       object one at a time, and check the fleet against the manifest via #107's
        ``verify_family_manifest_against_listing`` (catches a missing, extra,
        resized, or tampered remote object).
     """
@@ -1428,7 +1492,7 @@ def publish_family(
     artifacts = manifest["artifacts"]
 
     # 1. Local verification (before any publish).
-    local_by_key: dict[str, bytes] = {}
+    local_by_key: dict[str, tuple[Path, int, str]] = {}
     for artifact in artifacts:
         key = artifact["object_key"]
         if not _is_safe_family_artifact_key(key, prefix=prefix, manifest_key=manifest_key):
@@ -1436,12 +1500,11 @@ def publish_family(
         local = artifacts_root / key
         if not local.is_file():
             raise ValueError(f"artifact missing from local build: {key}")
-        data = local.read_bytes()
-        if len(data) != artifact["bytes"]:
+        if local.stat().st_size != artifact["bytes"]:
             raise ValueError(f"artifact size mismatch for {key}")
-        if hashlib.sha256(data).hexdigest() != artifact["sha256"]:
+        if _sha256(local) != artifact["sha256"]:
             raise ValueError(f"artifact SHA-256 mismatch for {key}")
-        local_by_key[key] = data
+        local_by_key[key] = (local, artifact["bytes"], artifact["sha256"])
 
     # No stray local artifact under the family prefix (the manifest excepted).
     prefix_root = artifacts_root / prefix
@@ -1458,20 +1521,25 @@ def publish_family(
     # 2. Publish artifacts create-only (data before marker), deterministic order.
     for key in sorted(local_by_key):
         log(f"Publishing family artifact {version}/{key}")
-        client.put_immutable(f"{version}/{key}", local_by_key[key])
+        local, expected_size, expected_sha256 = local_by_key[key]
+        client.put_immutable_path(
+            f"{version}/{key}",
+            local,
+            expected_size=expected_size,
+            expected_sha256=expected_sha256,
+        )
 
     # 3. Publish the manifest LAST.
     log(f"Publishing family manifest {version}/{manifest_key}")
     client.put_immutable(f"{version}/{manifest_key}", manifest_bytes)
 
-    # 4. Remote re-verification via a downloaded-hash listing.
+    # 4. Remote re-verification via a disk-backed downloaded-hash listing.
     listing: dict[str, tuple[int, str]] = {}
     for full_key in client.list_prefix(f"{version}/{prefix}"):
         relative = full_key[len(f"{version}/"):]
         if relative == manifest_key:
             continue
-        data = client.get_object(full_key)
-        listing[relative] = (len(data), hashlib.sha256(data).hexdigest())
+        listing[relative] = client.object_identity(full_key)
     verify_family_manifest_against_listing(manifest, listing)
     log(
         f"Published and remotely verified family {family}: "

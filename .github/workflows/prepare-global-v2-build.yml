@@ -14,6 +14,22 @@ on:
         description: Planned geocoder build identity (YYYY-MM-DD.N).
         required: true
         type: string
+      slice_version:
+        description: Unpublished family slice identity (slice-YYYY-MM-DD.N).
+        required: true
+        type: string
+      legacy_core_version:
+        description: Verified legacy core build to reuse (YYYY-MM-DD.N).
+        required: true
+        type: string
+      legacy_core_manifest_sha256:
+        description: SHA-256 of that core release-manifest.json.
+        required: true
+        type: string
+      family_inputs_json:
+        description: Exact addresses/places inventory, schema, and predecessor digests as JSON.
+        required: true
+        type: string
       confirmation:
         description: Type PREPARE_ONLY; this workflow never starts a data build.
         required: true
@@ -54,19 +70,84 @@ jobs:
         env:
           OVERTURE_RELEASE: ${{ inputs.overture_release }}
           GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+          SLICE_VERSION: ${{ inputs.slice_version }}
+          LEGACY_CORE_VERSION: ${{ inputs.legacy_core_version }}
+          LEGACY_CORE_MANIFEST_SHA256: ${{ inputs.legacy_core_manifest_sha256 }}
+          FAMILY_INPUTS_JSON: ${{ inputs.family_inputs_json }}
         run: |
           set -euo pipefail
           mkdir -p build-request
+          printf '%s\n' "$FAMILY_INPUTS_JSON" > build-request/family-inputs.json
+          jq -e '
+            type == "object" and
+            (keys == ["addresses", "places"]) and
+            all(
+              .[];
+              type == "object" and
+              (keys == [
+                "inventory_sha256",
+                "predecessor_family_manifest_sha256",
+                "schema_fingerprint_sha256"
+              ]) and
+              (.inventory_sha256 | type == "string") and
+              (.schema_fingerprint_sha256 | type == "string") and
+              (
+                .predecessor_family_manifest_sha256 == null or
+                (.predecessor_family_manifest_sha256 | type == "string")
+              )
+            )
+          ' build-request/family-inputs.json > /dev/null
+          ADDRESSES_INVENTORY_SHA256="$(
+            jq -r '.addresses.inventory_sha256' build-request/family-inputs.json
+          )"
+          ADDRESSES_SCHEMA_FINGERPRINT_SHA256="$(
+            jq -r '.addresses.schema_fingerprint_sha256' build-request/family-inputs.json
+          )"
+          ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256="$(
+            jq -r '.addresses.predecessor_family_manifest_sha256 // ""' \
+              build-request/family-inputs.json
+          )"
+          PLACES_INVENTORY_SHA256="$(
+            jq -r '.places.inventory_sha256' build-request/family-inputs.json
+          )"
+          PLACES_SCHEMA_FINGERPRINT_SHA256="$(
+            jq -r '.places.schema_fingerprint_sha256' build-request/family-inputs.json
+          )"
+          PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256="$(
+            jq -r '.places.predecessor_family_manifest_sha256 // ""' \
+              build-request/family-inputs.json
+          )"
+          LEGACY_CORE_MANIFEST_KEY="$LEGACY_CORE_VERSION/release-manifest.json"
+          REQUEST_ARGS=(
+            --overture-release "$OVERTURE_RELEASE"
+            --geocoder-build "$GEOCODER_BUILD"
+            --slice-version "$SLICE_VERSION"
+            --legacy-core-version "$LEGACY_CORE_VERSION"
+            --legacy-core-overture-release "$OVERTURE_RELEASE"
+            --legacy-core-manifest-key "$LEGACY_CORE_MANIFEST_KEY"
+            --legacy-core-manifest-sha256 "$LEGACY_CORE_MANIFEST_SHA256"
+            --addresses-inventory-sha256 "$ADDRESSES_INVENTORY_SHA256"
+            --addresses-schema-fingerprint-sha256 "$ADDRESSES_SCHEMA_FINGERPRINT_SHA256"
+            --places-inventory-sha256 "$PLACES_INVENTORY_SHA256"
+            --places-schema-fingerprint-sha256 "$PLACES_SCHEMA_FINGERPRINT_SHA256"
+            --producer-commit "$GITHUB_SHA"
+          )
+          if [[ -n "$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256" ]]; then
+            REQUEST_ARGS+=(
+              --addresses-predecessor-family-manifest-sha256
+              "$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256"
+            )
+          fi
+          if [[ -n "$PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256" ]]; then
+            REQUEST_ARGS+=(
+              --places-predecessor-family-manifest-sha256
+              "$PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256"
+            )
+          fi
           python scripts/global_v2_build_request.py build \
-            --overture-release "$OVERTURE_RELEASE" \
-            --geocoder-build "$GEOCODER_BUILD" \
-            --producer-commit "$GITHUB_SHA" \
-            --output build-request/request.json
+            "${REQUEST_ARGS[@]}" --output build-request/request.json
           python scripts/global_v2_build_request.py build \
-            --overture-release "$OVERTURE_RELEASE" \
-            --geocoder-build "$GEOCODER_BUILD" \
-            --producer-commit "$GITHUB_SHA" \
-            --output build-request/request-repeat.json
+            "${REQUEST_ARGS[@]}" --output build-request/request-repeat.json
           cmp build-request/request.json build-request/request-repeat.json
           python scripts/global_v2_build_request.py validate \
             --request build-request/request.json
@@ -77,7 +158,7 @@ jobs:
           {
             echo '## Global v2 family build request'
             echo
-            jq '{overture_release, geocoder_build, scope, families, execution}' \
+            jq '{overture_release, geocoder_build, slice_version, legacy_core, scope, families, execution}' \
               build-request/request.json
             echo
             echo 'No Overture object was read, no R2 object was written, no shard was rebuilt, and no catalog was published.'
