@@ -13,6 +13,8 @@ def test_usa_scale_signal_is_manual_confirmed_main_only_and_non_promoting():
     assert "push:" not in trigger
     assert "pull_request:" not in trigger
     assert "confirm:" in trigger
+    assert "- full" in trigger and "- recover" in trigger
+    assert "places_run_id:" in trigger and "addresses_run_id:" in trigger
     assert 'if [ "${CONFIRM}" != "USA" ]; then' in workflow
     assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "persist-credentials: false" in workflow
@@ -47,10 +49,25 @@ def test_usa_selection_and_combined_report_are_fail_closed_and_retained():
     assert ".projected_rows == 130996768" in workflow
     assert ".exact_country_export == false" in workflow
     assert "scripts/usa_scale_report.py" in workflow
-    assert "places-region-evidence-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
-    assert "address-sweep-aggregate-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
+    assert "pattern: places-region-evidence-" in workflow
+    assert "pattern: address-sweep-aggregate-" in workflow
+    assert workflow.count("merge-multiple: true") == 2
+    assert workflow.count("github-token: ${{ github.token }}") == 2
+    assert "inputs.places_run_id || github.run_id" in workflow
+    assert "inputs.addresses_run_id || github.run_id" in workflow
     assert "usa-scale-report-${{ github.run_id }}-${{ github.run_attempt }}" in workflow
     assert "retention-days: 90" in workflow
+
+
+def test_recovery_mode_skips_expensive_builds_and_requires_source_run_ids():
+    workflow = WORKFLOW.read_text()
+
+    assert workflow.count("if: inputs.mode == 'full'") == 2
+    assert 'if [ "${RUN_MODE}" = "recover" ]; then' in workflow
+    assert '[[ "${PLACES_RUN_ID}" =~ ^[1-9][0-9]*$ ]]' in workflow
+    assert '[[ "${ADDRESSES_RUN_ID}" =~ ^[1-9][0-9]*$ ]]' in workflow
+    assert "needs: [preflight, places, addresses]" in workflow
+    assert "needs.preflight.result == 'success'" in workflow
 
 
 def test_called_workflows_expose_reusable_contracts():

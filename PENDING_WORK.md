@@ -168,6 +168,9 @@ Places relevance verdict (step 2).
        cleans every run-unique R2 prefix, and retains one combined fail-closed
        report against the 40 GB measured-byte gate. The address fleet is
        explicitly an upper bound, not an exact country-filtered export.
+       Recovery mode can combine retained evidence from separate successful
+       Places/address run IDs, so transient hosted-runner loss does not force a
+       second 33-task address fleet.
      - NEXT: dispatch that USA scale-signal pass. Worker isolation is deferred
        by owner preference. After the data-scale evidence, continue the Places
        serving gates (chain_name read-chain redesign, comparator relevance

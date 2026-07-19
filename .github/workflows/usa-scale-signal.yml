@@ -9,9 +9,27 @@ name: USA Scale Signal (non-promoting)
 on:
   workflow_dispatch:
     inputs:
+      mode:
+        description: >-
+          "full" runs both scale branches. "recover" only combines retained
+          evidence from earlier Places and address run IDs.
+        required: false
+        default: full
+        type: choice
+        options:
+          - full
+          - recover
       confirm:
-        description: Type USA to run the 33-task address fleet and full CONUS Places build.
+        description: Type USA to run or recover the guarded scale signal.
         required: true
+        type: string
+      places_run_id:
+        description: Recovery mode only; successful standalone CONUS Places run ID.
+        required: false
+        type: string
+      addresses_run_id:
+        description: Recovery mode only; run ID containing the successful USA address aggregate.
+        required: false
         type: string
 
 permissions:
@@ -41,10 +59,26 @@ jobs:
       - name: Require an explicit scale-run confirmation
         env:
           CONFIRM: ${{ inputs.confirm }}
+          RUN_MODE: ${{ inputs.mode }}
+          PLACES_RUN_ID: ${{ inputs.places_run_id }}
+          ADDRESSES_RUN_ID: ${{ inputs.addresses_run_id }}
         run: |
           set -euo pipefail
           if [ "${CONFIRM}" != "USA" ]; then
             echo "::error::confirmation must be exactly USA"
+            exit 1
+          fi
+          if [ "${RUN_MODE}" = "recover" ]; then
+            if ! [[ "${PLACES_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::recovery places_run_id must be a positive integer"
+              exit 1
+            fi
+            if ! [[ "${ADDRESSES_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
+              echo "::error::recovery addresses_run_id must be a positive integer"
+              exit 1
+            fi
+          elif [ "${RUN_MODE}" != "full" ]; then
+            echo "::error::mode must be full or recover"
             exit 1
           fi
 
@@ -70,6 +104,11 @@ jobs:
             echo "- Places: CONUS bbox (-125.0, 24.4) .. (-66.9, 49.4)"
             echo "- Addresses: all 33 US-dominant inventory tasks (~131M projected rows)"
             echo "- Address contract: upper-bound task fleet; no row-level country filter"
+            echo "- Mode: ${{ inputs.mode }}"
+            if [ "${{ inputs.mode }}" = "recover" ]; then
+              echo "- Places evidence run: ${{ inputs.places_run_id }}"
+              echo "- Address evidence run: ${{ inputs.addresses_run_id }}"
+            fi
             echo "- Cleanup: enabled for every isolated R2 prefix"
             echo "- Promotion/catalog writes: none"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -77,6 +116,7 @@ jobs:
   places:
     name: Build full CONUS Places evidence
     needs: preflight
+    if: inputs.mode == 'full'
     uses: ./.github/workflows/build-places-region.yml
     with:
       region_name: conus
@@ -96,6 +136,7 @@ jobs:
   addresses:
     name: Run the complete USA address scale fleet
     needs: preflight
+    if: inputs.mode == 'full'
     uses: ./.github/workflows/rehearse-address-r2-map-reduce.yml
     with:
       mode: usa
@@ -107,8 +148,10 @@ jobs:
 
   report:
     name: Retain the combined USA scale gate
-    needs: [places, addresses]
-    if: ${{ always() && !cancelled() && github.ref == 'refs/heads/main' }}
+    needs: [preflight, places, addresses]
+    if: >-
+      ${{ always() && !cancelled() && github.ref == 'refs/heads/main' &&
+          needs.preflight.result == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - name: Check out main without persisted credentials
@@ -125,15 +168,21 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
-          name: places-region-evidence-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: places-region-evidence-${{ inputs.mode == 'recover' && inputs.places_run_id || github.run_id }}-*
           path: usa-evidence/places
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.mode == 'recover' && inputs.places_run_id || github.run_id }}
 
       - name: Download the USA address aggregate
         continue-on-error: true
         uses: actions/download-artifact@v7
         with:
-          name: address-sweep-aggregate-${{ github.run_id }}-${{ github.run_attempt }}
+          pattern: address-sweep-aggregate-${{ inputs.mode == 'recover' && inputs.addresses_run_id || github.run_id }}-*
           path: usa-evidence/addresses
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: ${{ inputs.mode == 'recover' && inputs.addresses_run_id || github.run_id }}
 
       - name: Build and enforce the combined scale report
         run: |
