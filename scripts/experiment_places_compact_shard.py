@@ -212,9 +212,16 @@ def build_artifact(
     block_entries: int = 256,
     cell_degrees: float = 0.25,
     posting_layout: list[str] | None = None,
+    preserve_input_order: bool = False,
 ) -> tuple[list[Place], dict[str, Any]]:
     started = time.perf_counter()
-    ordered = ordered_places(places, cell_degrees)
+    # Region-scale callers can stream an already validated serving-order
+    # Parquet file one shard at a time. Re-sorting that chunk would allocate a
+    # second list of up to ~1.5M references for no byte-level change. The
+    # default remains the established total-order sort for every other caller.
+    ordered = (
+        places if preserve_input_order else ordered_places(places, cell_degrees)
+    )
     exact = posting_map(ordered)
     postings = bytearray()
     entries: list[tuple[str, int, int, int]] = []

@@ -27,16 +27,28 @@ def test_partition_extractor_is_deterministic_and_bbox_parameterized():
     # Prominence-ordered (confidence DESC) with an id tiebreak so the sample
     # keeps landmarks the relevance seeds query instead of the smallest UUIDs,
     # while staying deterministic via the tiebreak + preserved insertion order.
-    order_by = "ORDER BY COALESCE(confidence, 0.5) DESC, id"
+    order_by = '"          COALESCE(confidence, 0.5) DESC, id\\n"'
     assert order_by in source
     assert "LIMIT {args.limit}" in source
     assert "preserve_insertion_order=true" in source
     assert "preserve_insertion_order=false" not in source
-    assert source.index(order_by) < source.index("LIMIT {args.limit}")
+    assert source.index("ORDER BY") < source.index("LIMIT {args.limit}")
     # bbox is parameterized, not hard-coded to California.
     assert "bbox.xmin BETWEEN {xmin} AND {xmax}" in source
     # Alternate/common names are projected for cross-lingual name matching.
     assert "AS alt_names" in source
+
+
+def test_partition_extractor_can_write_exact_serving_order():
+    partition = _load("experiment_places_partition_extract")
+    serving_order = partition.SERVING_ORDER
+
+    # Match spatial_cell(), Python round(), and the unique ID tiebreak used by
+    # build_places_region_shards.py without retaining the full region in Python.
+    assert "FLOOR((ST_Y(geometry) + 90.0) / 0.25)" in serving_order
+    assert "FLOOR((ST_X(geometry) + 180.0) / 0.25)" in serving_order
+    assert "round_even(" in serving_order
+    assert serving_order.rstrip().endswith("id")
 
 
 def test_partition_extractor_projection_matches_factory():

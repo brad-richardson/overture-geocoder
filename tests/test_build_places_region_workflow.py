@@ -45,9 +45,11 @@ def test_region_build_asserts_no_truncation_and_determinism():
 
     # Full extraction: a count at the extract limit is truncation and fails.
     assert "experiment_places_partition_extract.py" in workflow
+    assert "--serving-order" in workflow
     assert 'if [ "$ROWS" -ge "$EXTRACT_LIMIT" ]; then' in workflow
     # Build twice and byte-compare every produced object.
     assert workflow.count("build_places_region_shards.py") >= 2
+    assert workflow.count("--input-serving-ordered --no-head") == 2
     assert 'cmp "/tmp/region/a/${OBJ}" "/tmp/region/b/${OBJ}"' in workflow
     assert "determinism_ok:true" in workflow
 
