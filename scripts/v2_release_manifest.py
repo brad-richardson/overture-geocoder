@@ -210,6 +210,17 @@ def _validate_legacy_release(manifest: Any, overture_release: str) -> dict[str, 
     dictionary_href, dictionary_size = _validate_core_object(
         identifier.get("locator_dictionary"), "legacy ID locator dictionary"
     )
+    dictionary_sha256 = identifier["locator_dictionary"]["sha256"]
+    if dictionary_href != f"./id-locator-dictionary-{dictionary_sha256}.json":
+        raise ValueError("legacy ID locator dictionary path differs from its SHA-256")
+    existing_core_hrefs = (
+        set(forward_objects)
+        | set(reverse_objects)
+        | set(id_objects)
+        | {router_href}
+    )
+    if dictionary_href in existing_core_hrefs:
+        raise ValueError("legacy ID locator dictionary href aliases a core object")
 
     verified = manifest.get("verified_version_objects")
     if not isinstance(verified, list) or not verified:

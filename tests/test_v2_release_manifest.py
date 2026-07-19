@@ -328,6 +328,20 @@ def test_release_rejects_stubbed_legacy_core_manifest():
         )
 
 
+def test_release_rejects_locator_dictionary_aliasing_a_core_object():
+    legacy = legacy_release()
+    legacy["families"]["id"]["locator_dictionary"] = copy.deepcopy(
+        legacy["families"]["id"]["objects"][0]
+    )
+    with pytest.raises(ValueError, match="dictionary path differs"):
+        v2.build_release_manifest(
+            geocoder_build="2026-07-19.1",
+            overture_release=RELEASE,
+            legacy_release=legacy,
+            legacy_manifest_sha256=payload_sha(legacy),
+        )
+
+
 def test_release_rejects_family_not_blessed_by_its_source_manifest():
     legacy = legacy_release()
     places = family_manifest("places")
