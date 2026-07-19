@@ -32,6 +32,10 @@ An operation cannot be advertised from shard presence alone. Its entrypoint
 must be one of the family manifest's hashed artifacts, such as Places
 `forward -> catalog.pcat` or addresses
 `structured_forward -> address-collection.json`.
+Places forward also requires `families/places/head.phrp` in that same verified
+artifact set. The catalog routes located searches; the head supplies bounded
+context-free search, so proving only the catalog would advertise an operation
+that can still fail for a standard request.
 The CLI accepts those artifact keys relative to the release, exactly as they
 appear in a family manifest; the generated v2 release exposes bucket-root keys
 prefixed by the immutable family source version so Workers can fetch them

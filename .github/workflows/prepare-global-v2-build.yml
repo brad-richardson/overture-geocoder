@@ -1,0 +1,92 @@
+name: Prepare global v2 family build (no dispatch)
+
+# This workflow freezes and checks the build request only. It has no cloud
+# credentials and no data-plane job, so it cannot rebuild shards or publish a
+# release. The resulting request is the input contract for the future executor.
+on:
+  workflow_dispatch:
+    inputs:
+      overture_release:
+        description: Pinned Overture release (YYYY-MM-DD.N).
+        required: true
+        type: string
+      geocoder_build:
+        description: Planned geocoder build identity (YYYY-MM-DD.N).
+        required: true
+        type: string
+      confirmation:
+        description: Type PREPARE_ONLY; this workflow never starts a data build.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: prepare-global-v2-build-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  request:
+    name: Validate undispatched build request
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11"
+
+      - name: Require explicit preparation-only confirmation
+        env:
+          CONFIRMATION: ${{ inputs.confirmation }}
+        run: |
+          set -euo pipefail
+          test "$CONFIRMATION" = PREPARE_ONLY
+
+      - name: Build, reproduce, and validate the request
+        env:
+          OVERTURE_RELEASE: ${{ inputs.overture_release }}
+          GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+        run: |
+          set -euo pipefail
+          mkdir -p build-request
+          python scripts/global_v2_build_request.py build \
+            --overture-release "$OVERTURE_RELEASE" \
+            --geocoder-build "$GEOCODER_BUILD" \
+            --producer-commit "$GITHUB_SHA" \
+            --output build-request/request.json
+          python scripts/global_v2_build_request.py build \
+            --overture-release "$OVERTURE_RELEASE" \
+            --geocoder-build "$GEOCODER_BUILD" \
+            --producer-commit "$GITHUB_SHA" \
+            --output build-request/request-repeat.json
+          cmp build-request/request.json build-request/request-repeat.json
+          python scripts/global_v2_build_request.py validate \
+            --request build-request/request.json
+          sha256sum build-request/request.json > build-request/request.sha256
+
+      - name: Summarize the preparation boundary
+        run: |
+          {
+            echo '## Global v2 family build request'
+            echo
+            jq '{overture_release, geocoder_build, scope, families, execution}' \
+              build-request/request.json
+            echo
+            echo 'No Overture object was read, no R2 object was written, no shard was rebuilt, and no catalog was published.'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain the exact request for the executor
+        uses: actions/upload-artifact@v7
+        with:
+          name: global-v2-build-request-${{ github.run_id }}-${{ github.run_attempt }}
+          path: build-request/
+          if-no-files-found: error
+          retention-days: 30

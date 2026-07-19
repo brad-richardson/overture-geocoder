@@ -107,6 +107,21 @@ def family_manifest(family: str, release: str = RELEASE) -> dict:
         if family == "places"
         else f"families/{family}/address-collection.json"
     )
+    artifacts = [
+        {
+            "object_key": entrypoint,
+            "bytes": 123,
+            "sha256": "c" * 64,
+        }
+    ]
+    if family == "places":
+        artifacts.append(
+            {
+                "object_key": "families/places/head.phrp",
+                "bytes": 45,
+                "sha256": "f" * 64,
+            }
+        )
     return gbm.build_family_manifest(
         family,
         lineage={
@@ -122,13 +137,7 @@ def family_manifest(family: str, release: str = RELEASE) -> dict:
             "bbox": [-80.5, 38.0, -66.9, 47.5],
             "bbox_scope": scope,
         },
-        artifacts=[
-            {
-                "object_key": entrypoint,
-                "bytes": 123,
-                "sha256": "c" * 64,
-            }
-        ],
+        artifacts=artifacts,
         generated_at="2026-07-19T12:00:00+00:00",
     )
 
@@ -286,6 +295,57 @@ def test_release_can_explicitly_enable_future_family_operations():
     assert manifest["operations"]["forward"] == ["addresses", "divisions"]
     assert manifest["operations"]["reverse"] == ["addresses", "divisions"]
     assert "structured_forward" not in manifest["operations"]
+
+
+def test_places_forward_requires_hashed_global_head_artifact():
+    legacy = legacy_release()
+    places = family_manifest("places")
+    places["artifacts"] = [
+        artifact
+        for artifact in places["artifacts"]
+        if artifact["object_key"] != "families/places/head.phrp"
+    ]
+    places["totals"] = {
+        "artifacts": len(places["artifacts"]),
+        "bytes": sum(artifact["bytes"] for artifact in places["artifacts"]),
+    }
+    unsigned = {key: value for key, value in places.items() if key != "manifest_digest"}
+    places["manifest_digest"] = gbm.digest(unsigned)
+    source = family_source_manifest("places")
+    source["families"]["places"]["manifest_digest"] = places["manifest_digest"]
+    source["families"]["places"]["artifact_count"] = len(places["artifacts"])
+    source["families"]["places"]["total_bytes"] = sum(
+        artifact["bytes"] for artifact in places["artifacts"]
+    )
+    source["families"]["places"]["objects"] = [
+        {
+            "href": f"./{artifact['object_key']}",
+            "size_bytes": artifact["bytes"],
+            "sha256": artifact["sha256"],
+        }
+        for artifact in places["artifacts"]
+    ]
+    source["verified_version_objects"] = [
+        {"href": "./families/places/family-manifest.json"},
+        *source["families"]["places"]["objects"],
+    ]
+
+    with pytest.raises(
+        ValueError,
+        match="places forward requires manifest artifact families/places/head.phrp",
+    ):
+        v2.build_release_manifest(
+            geocoder_build="2026-07-19.2",
+            overture_release=RELEASE,
+            legacy_release=legacy,
+            legacy_manifest_sha256=payload_sha(legacy),
+            family_manifests={"places": (places, payload_sha(places))},
+            family_source_manifests={"places": (source, payload_sha(source))},
+            family_entrypoints={
+                "places": {"forward": "families/places/catalog.pcat"}
+            },
+            generated_at="now",
+        )
 
 
 def test_release_rejects_cross_release_family_and_core():
