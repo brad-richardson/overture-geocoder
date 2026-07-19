@@ -17,7 +17,7 @@ One v2 release binds these identities atomically:
 
 The builder rejects cross-release composition. It records each optional
 family's manifest key, file SHA-256, self-digest, format versions, coverage,
-enabled operations, and the verified artifact entrypoint for each operation.
+enabled operations, and the verified artifact key/size/SHA-256 for each operation.
 Presence does not imply every operation: the first
 address family advertises only `structured_forward`, while Places advertises
 `forward`. General address forward/reverse can be enabled only by a later build
@@ -59,7 +59,10 @@ python scripts/v2_release_manifest.py release \
   --output v2-release.json
 
 python scripts/v2_release_manifest.py validate-release \
-  --manifest v2-release.json
+  --manifest v2-release.json \
+  --legacy-release-manifest release-manifest.json \
+  --family-manifest places=places-family-manifest.json \
+  --family-manifest addresses=addresses-family-manifest.json
 ```
 
 Build a new catalog or extend an existing one:
@@ -70,6 +73,10 @@ python scripts/v2_release_manifest.py catalog \
   --before v2-catalog-before.json \
   --output v2-catalog-next.json
 ```
+
+The first catalog requires `--initialize`; every later catalog requires
+`--before`. There is no implicit singleton mode, so forgetting the prior
+catalog cannot silently discard rollback history or promote an older build.
 
 Build IDs use `YYYY-MM-DD.N` and must increase monotonically. Every generated
 object is deterministic when `--generated-at` is supplied.

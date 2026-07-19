@@ -190,17 +190,24 @@ def build_release_manifest(
             raise ValueError(
                 f"{family} entrypoints must name exactly its advertised operations"
             )
-        artifact_keys = {artifact["object_key"] for artifact in validated["artifacts"]}
-        normalized_entrypoints: dict[str, str] = {}
+        artifacts_by_key = {
+            artifact["object_key"]: artifact for artifact in validated["artifacts"]
+        }
+        normalized_entrypoints: dict[str, dict[str, Any]] = {}
         for operation, key in sorted(entrypoints.items()):
             safe_key = _require_family_artifact_key(
                 key, family, f"{family} {operation} entrypoint"
             )
-            if safe_key not in artifact_keys:
+            artifact = artifacts_by_key.get(safe_key)
+            if artifact is None:
                 raise ValueError(
                     f"{family} {operation} entrypoint is not a manifest artifact"
                 )
-            normalized_entrypoints[operation] = safe_key
+            normalized_entrypoints[operation] = {
+                "object_key": safe_key,
+                "bytes": artifact["bytes"],
+                "sha256": artifact["sha256"],
+            }
         references[family] = {
             "manifest_key": (
                 f"{legacy['version']}/families/{family}/family-manifest.json"
@@ -329,9 +336,22 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
             raise ValueError(
                 f"{family} entrypoints must name exactly its advertised operations"
             )
-        for operation, key in entrypoints.items():
+        for operation, identity in entrypoints.items():
+            if not isinstance(identity, dict):
+                raise ValueError(f"{family} {operation} entrypoint must be an object")
+            _require_exact_fields(
+                identity,
+                {"object_key", "bytes", "sha256"},
+                f"{family} {operation} entrypoint",
+            )
             _require_family_artifact_key(
-                key, family, f"{family} {operation} entrypoint"
+                identity["object_key"], family, f"{family} {operation} entrypoint"
+            )
+            gbm.require_int(
+                identity["bytes"], f"{family} {operation} entrypoint bytes", minimum=1
+            )
+            _require_sha256(
+                identity["sha256"], f"{family} {operation} entrypoint SHA-256"
             )
         normalized_references[family] = reference
 
@@ -341,6 +361,79 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
     if gbm.digest(unsigned) != manifest["release_digest"]:
         raise ValueError("v2 release manifest does not match its release_digest")
     return manifest
+
+
+def verify_release_sources(
+    manifest: Any,
+    *,
+    legacy_release: Any,
+    legacy_manifest_sha256: str,
+    family_manifests: dict[str, tuple[Any, str]] | None = None,
+) -> dict[str, Any]:
+    """Re-prove every release reference against its source manifest bytes.
+
+    ``validate_release_manifest`` proves the v2 object's own canonical shape and
+    digest.  This stronger boundary additionally requires the legacy and family
+    manifests, binds their file SHA-256 values, and checks that every advertised
+    entrypoint is exactly one of the family's hashed artifacts.
+    """
+    validated = validate_release_manifest(manifest)
+    release = validated["overture_release"]
+    legacy = _validate_legacy_release(legacy_release, release)
+    expected_legacy = {
+        "version": legacy["version"],
+        "manifest_key": f"{legacy['version']}/release-manifest.json",
+        "manifest_sha256": _require_sha256(
+            legacy_manifest_sha256, "legacy manifest SHA-256"
+        ),
+        "entrypoints": {
+            "feature_lookup": f"{legacy['version']}/id-collection.json",
+            "forward": f"{legacy['version']}/collection.json",
+            "reverse": f"{legacy['version']}/reverse-collection.json",
+        },
+    }
+    if validated["legacy_core"] != expected_legacy:
+        raise ValueError("v2 release legacy core differs from its source manifest")
+
+    supplied = family_manifests or {}
+    if set(supplied) != set(validated["families"]):
+        raise ValueError("v2 release family source set differs")
+    for family, source in sorted(supplied.items()):
+        if not isinstance(source, tuple) or len(source) != 2:
+            raise ValueError(f"{family} family input must be (manifest, sha256)")
+        source_manifest, source_sha = source
+        family_manifest = gbm.validate_family_manifest(source_manifest)
+        if family_manifest["family"] != family:
+            raise ValueError(f"{family} family manifest declares another family")
+        if family_manifest["lineage"]["overture_release"] != release:
+            raise ValueError(f"{family} family Overture release differs")
+        reference = validated["families"][family]
+        expected_reference_fields = {
+            "manifest_key": (
+                f"{legacy['version']}/families/{family}/family-manifest.json"
+            ),
+            "manifest_digest": family_manifest["manifest_digest"],
+            "manifest_sha256": _require_sha256(
+                source_sha, f"{family} manifest SHA-256"
+            ),
+            "versions": family_manifest["versions"],
+            "coverage": family_manifest["region"],
+        }
+        for field, expected in expected_reference_fields.items():
+            if reference[field] != expected:
+                raise ValueError(
+                    f"{family} family reference {field} differs from its source manifest"
+                )
+        artifacts_by_key = {
+            artifact["object_key"]: artifact
+            for artifact in family_manifest["artifacts"]
+        }
+        for operation, identity in reference["entrypoints"].items():
+            if artifacts_by_key.get(identity["object_key"]) != identity:
+                raise ValueError(
+                    f"{family} {operation} entrypoint differs from its source artifact"
+                )
+    return validated
 
 
 def _catalog_entry(release: dict[str, Any], manifest_sha256: str) -> dict[str, Any]:
@@ -361,11 +454,14 @@ def build_catalog(
     release_manifest: Any,
     release_manifest_sha256: str,
     before: Any | None = None,
+    initialize: bool = False,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     release = validate_release_manifest(release_manifest)
     generated_at = _require_string(generated_at or _now(), "generated_at")
     previous: list[dict[str, Any]] = []
+    if (before is None) == (not initialize):
+        raise ValueError("catalog build requires exactly one of before or initialize")
     if before is not None:
         previous = validate_catalog(before)["releases"]
         latest = previous[0]["geocoder_build"]
@@ -458,10 +554,14 @@ def main() -> None:
 
     validate_release = commands.add_parser("validate-release")
     validate_release.add_argument("--manifest", type=Path, required=True)
+    validate_release.add_argument("--legacy-release-manifest", type=Path, required=True)
+    validate_release.add_argument("--family-manifest", action="append", default=[])
 
     catalog = commands.add_parser("catalog", help="build a v2 catalog candidate")
     catalog.add_argument("--release-manifest", type=Path, required=True)
-    catalog.add_argument("--before", type=Path)
+    catalog_mode = catalog.add_mutually_exclusive_group(required=True)
+    catalog_mode.add_argument("--before", type=Path)
+    catalog_mode.add_argument("--initialize", action="store_true")
     catalog.add_argument("--generated-at")
     catalog.add_argument("--output", type=Path, required=True)
 
@@ -504,7 +604,20 @@ def main() -> None:
         )
         gbm.write_json(args.output, result)
     elif args.command == "validate-release":
-        result = validate_release_manifest(_read_json(args.manifest))
+        family_manifests = {}
+        for raw in args.family_manifest:
+            family, path_value = _parse_assignment(raw, "family manifest")
+            if family in family_manifests:
+                raise ValueError(f"duplicate family manifest: {family}")
+            path = Path(path_value)
+            family_manifests[family] = (_read_json(path), sha256_file(path))
+        legacy_path = args.legacy_release_manifest
+        result = verify_release_sources(
+            _read_json(args.manifest),
+            legacy_release=_read_json(legacy_path),
+            legacy_manifest_sha256=sha256_file(legacy_path),
+            family_manifests=family_manifests,
+        )
         print(json.dumps({"status": "ok", "release_digest": result["release_digest"]}))
     elif args.command == "catalog":
         release_payload = _read_json(args.release_manifest)
@@ -512,6 +625,7 @@ def main() -> None:
             release_manifest=release_payload,
             release_manifest_sha256=sha256_file(args.release_manifest),
             before=_read_json(args.before) if args.before else None,
+            initialize=args.initialize,
             generated_at=args.generated_at,
         )
         gbm.write_json(args.output, result)
