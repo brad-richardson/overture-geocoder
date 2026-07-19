@@ -283,14 +283,17 @@ def previous_split_cells(
         return []
     payload = _read_catalog_payload(path)
     partition = payload.get("partition")
+    previous_maximum_level = (
+        partition.get("maximum_level") if isinstance(partition, dict) else None
+    )
     if (
         payload.get("schema_version") != 2
-        or payload.get("tokenizer_version") != TOKENIZER_VERSION
         or payload.get("coverage") != coverage
         or not isinstance(partition, dict)
         or partition.get("scheme") != PARTITION_SCHEME
         or partition.get("minimum_level") != minimum_level
-        or partition.get("maximum_level") != maximum_level
+        or not isinstance(previous_maximum_level, int)
+        or not minimum_level <= previous_maximum_level <= maximum_level
         or not isinstance(partition.get("split_row_cap"), int)
         or partition["split_row_cap"] < 1
         or not isinstance(partition.get("split_cells"), list)
@@ -299,13 +302,13 @@ def previous_split_cells(
     splits = validate_split_cells(
         partition["split_cells"],
         minimum_level=minimum_level,
-        maximum_level=maximum_level,
+        maximum_level=previous_maximum_level,
     )
     _validate_previous_shards(
         payload.get("shards"),
         split_cells=splits,
         minimum_level=minimum_level,
-        maximum_level=maximum_level,
+        maximum_level=previous_maximum_level,
     )
     return sorted(splits)
 

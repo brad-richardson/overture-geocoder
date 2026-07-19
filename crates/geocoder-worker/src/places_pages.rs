@@ -1,6 +1,8 @@
 //! Strict range reader for compact Places spatial shards.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::rc::Rc;
 
 use geocoder_core::pages::{format_uuid, ByteRange, ByteReader, PageError};
 use serde::{Deserialize, Serialize};
@@ -57,11 +59,21 @@ const MAX_HEAD_INDEX_BYTES: u64 = 1024 * 1024;
 const MAX_HEAD_KEYS: usize = 100_000;
 const MAX_HEAD_ENTRY_BYTES: u64 = 128 * 1024;
 const MAX_CATALOG_BYTES: usize = 2 * 1024 * 1024;
+pub(crate) const MAX_CATALOG_OBJECT_BYTES: usize = PREAMBLE_BYTES + MAX_CATALOG_BYTES;
 const MAX_CATALOG_SHARDS: usize = 32_768;
+const PLACES_CATALOG_CACHE_MAX_ENTRIES: usize = 1;
 const MAX_QUADKEY_LEVEL: usize = 15;
 const PARTITION_SCHEME: &str = "world-quadkey-v1";
 pub(crate) const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v3";
 const LEGACY_TOKENIZER_VERSION: &str = "nfkd-latin-fold-cjk-bigram-v2";
+
+thread_local! {
+    /// Prepared immutable catalog objects, LRU-last. Routing indexes can be
+    /// large at planet scale, so keep only the live roll-forward generation;
+    /// an in-flight request keeps its own `Rc` alive during replacement.
+    static PLACES_CATALOG_CACHE: RefCell<Vec<(String, Rc<PreparedPlacesCatalog>)>> =
+        const { RefCell::new(Vec::new()) };
+}
 
 fn supported_tokenizer(value: &str) -> bool {
     matches!(value, TOKENIZER_VERSION | LEGACY_TOKENIZER_VERSION)
@@ -451,6 +463,61 @@ impl PlacesCatalog {
     }
 }
 
+struct PreparedPlacesCatalog {
+    catalog: PlacesCatalog,
+    spatial_routes: HashMap<String, usize>,
+}
+
+impl PreparedPlacesCatalog {
+    fn new(catalog: PlacesCatalog) -> Self {
+        let spatial_routes = if catalog.schema_version == 2 {
+            catalog
+                .shards
+                .iter()
+                .enumerate()
+                .map(|(index, shard)| {
+                    (
+                        shard.cell.clone().expect("validated spatial shard cell"),
+                        index,
+                    )
+                })
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        Self {
+            catalog,
+            spatial_routes,
+        }
+    }
+
+    fn route_point(&self, longitude: f64, latitude: f64) -> Option<&PlacesCatalogShard> {
+        if self.catalog.schema_version != 2 {
+            return self.catalog.route_point(longitude, latitude);
+        }
+        if !longitude.is_finite() || !latitude.is_finite() {
+            return None;
+        }
+        let coverage = self.catalog.coverage.as_ref()?;
+        if longitude < coverage[0]
+            || longitude > coverage[2]
+            || latitude < coverage[1]
+            || latitude > coverage[3]
+        {
+            return None;
+        }
+        let partition = self.catalog.partition.as_ref()?;
+        let point_cell = point_quadkey(longitude, latitude, partition.maximum_level)?;
+        (partition.minimum_level..=partition.maximum_level)
+            .rev()
+            .find_map(|length| {
+                self.spatial_routes
+                    .get(&point_cell[..length])
+                    .map(|index| &self.catalog.shards[*index])
+            })
+    }
+}
+
 fn valid_bbox(bbox: &[f64; 4]) -> bool {
     let [xmin, ymin, xmax, ymax] = *bbox;
     bbox.iter().all(|value| value.is_finite())
@@ -517,10 +584,14 @@ fn quadkey_bbox(cell: &str) -> Option<[f64; 4]> {
     ])
 }
 
-#[derive(Debug, Serialize)]
 pub(crate) struct PlacesCatalogLookup {
-    pub catalog: PlacesCatalog,
-    pub read_metrics: RangeReadMetrics,
+    catalog: Rc<PreparedPlacesCatalog>,
+}
+
+impl PlacesCatalogLookup {
+    pub(crate) fn route_point(&self, longitude: f64, latitude: f64) -> Option<&PlacesCatalogShard> {
+        self.catalog.route_point(longitude, latitude)
+    }
 }
 
 #[derive(Debug, Serialize)]
@@ -923,6 +994,22 @@ impl ShardLoader {
         &self,
         object_key: &str,
     ) -> Result<PlacesCatalogLookup> {
+        let cached = PLACES_CATALOG_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            cache
+                .iter()
+                .position(|(cached_key, _)| cached_key == object_key)
+                .map(|position| {
+                    let entry = cache.remove(position);
+                    let catalog = Rc::clone(&entry.1);
+                    cache.push(entry);
+                    catalog
+                })
+        });
+        if let Some(catalog) = cached {
+            return Ok(PlacesCatalogLookup { catalog });
+        }
+
         let mut reader = RangeReader::new(self, object_key);
         let preamble = reader
             .range(0, PREAMBLE_BYTES as u64)
@@ -949,10 +1036,17 @@ impl ShardLoader {
                 "Unsupported Places catalog contract".into(),
             ));
         }
-        Ok(PlacesCatalogLookup {
-            catalog,
-            read_metrics: reader.metrics(),
-        })
+        let catalog = Rc::new(PreparedPlacesCatalog::new(catalog));
+        PLACES_CATALOG_CACHE.with(|cache| {
+            let mut cache = cache.borrow_mut();
+            if !cache.iter().any(|(cached_key, _)| cached_key == object_key) {
+                cache.push((object_key.to_string(), Rc::clone(&catalog)));
+                while cache.len() > PLACES_CATALOG_CACHE_MAX_ENTRIES {
+                    cache.remove(0);
+                }
+            }
+        });
+        Ok(PlacesCatalogLookup { catalog })
     }
 
     pub(crate) async fn lookup_places_head(
@@ -1492,6 +1586,32 @@ mod tests {
             Some(point_cell.as_str())
         );
         assert!(catalog.route_point(0.0, -80.0).is_none());
+    }
+
+    #[test]
+    fn prepared_spatial_catalog_routes_by_prefix_index() {
+        let point_cell = point_quadkey(-71.0, 42.0, 8).unwrap();
+        let leaf = point_cell[..6].to_string();
+        let catalog = PlacesCatalog {
+            schema_version: 2,
+            tokenizer_version: TOKENIZER_VERSION.into(),
+            coverage: Some([-180.0, -90.0, 180.0, 90.0]),
+            partition: Some(PlacesPartition {
+                scheme: PARTITION_SCHEME.into(),
+                minimum_level: 4,
+                maximum_level: 8,
+                split_row_cap: 1_500_000,
+                split_cells: vec![point_cell[..4].into(), point_cell[..5].into()],
+            }),
+            shards: vec![spatial_shard(&leaf)],
+        };
+        assert!(catalog.supported());
+        let prepared = PreparedPlacesCatalog::new(catalog);
+        assert_eq!(
+            prepared.route_point(-71.0, 42.0).unwrap().cell.as_deref(),
+            Some(leaf.as_str())
+        );
+        assert!(prepared.route_point(10.0, -80.0).is_none());
     }
 
     #[test]

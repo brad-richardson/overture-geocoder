@@ -14,7 +14,9 @@ import bisect
 import hashlib
 import heapq
 import json
+import math
 import os
+import re
 import resource
 import shutil
 import struct
@@ -37,6 +39,18 @@ MAX_FRAGMENTS = 1024
 MAX_LOOKUP_CANDIDATES = 10_000
 MAX_LOOKUP_SCAN_BYTES = 8 * 1024 * 1024
 SPIKE_PARTITION_ID = "bounded-single-partition"
+STRICT_COUNTRY_RE = re.compile(r"[a-z0-9]{2,3}")
+STRICT_REJECTION_PRECEDENCE = (
+    "missing_street_or_number",
+    "invalid_geometry",
+    "blank_country",
+    "invalid_country",
+    "missing_uuid",
+    "invalid_uuid",
+    "invalid_source_locator",
+    "record_too_large",
+    "invalid_record",
+)
 
 
 def canonical_json(value: Any) -> bytes:
@@ -113,14 +127,19 @@ def point_coordinates(value: Any) -> tuple[float, float] | None:
     if not isinstance(value, (bytes, bytearray, memoryview)):
         return None
     payload = bytes(value)
-    if len(payload) < 21 or payload[0] not in (0, 1):
+    if len(payload) != 21 or payload[0] not in (0, 1):
         return None
     endian = "<" if payload[0] == 1 else ">"
-    geometry_type = struct.unpack_from(f"{endian}I", payload, 1)[0] & 0xFF
+    geometry_type = struct.unpack_from(f"{endian}I", payload, 1)[0]
     if geometry_type != 1:
         return None
     lon, lat = struct.unpack_from(f"{endian}dd", payload, 5)
-    if not (-180 <= lon <= 180 and -90 <= lat <= 90):
+    if not (
+        math.isfinite(lon)
+        and math.isfinite(lat)
+        and -180 <= lon <= 180
+        and -90 <= lat <= 90
+    ):
         return None
     return lon, lat
 
@@ -320,6 +339,125 @@ def batch_records(
     return encoded, rejected
 
 
+def strict_batch_records(
+    batch: Any,
+    *,
+    source_limits: list[tuple[int, int]] | None = None,
+) -> tuple[list[tuple[tuple[str, ...], bytes]], dict[str, int]]:
+    """Encode production map rows with exclusive, deterministic rejection reasons.
+
+    This is intentionally separate from :func:`batch_records`: the experiment
+    fixtures predate the global mapper's country and UUID admission contract.
+    A malformed source row is accounted for here instead of aborting the whole
+    map task. Schema/provenance failures remain task-fatal because they affect
+    every row rather than one feature.
+    """
+
+    columns = {name: batch.column(name).to_pylist() for name in batch.schema.names}
+    encoded: list[tuple[tuple[str, ...], bytes]] = []
+    rejected = {reason: 0 for reason in STRICT_REJECTION_PRECEDENCE}
+
+    def text(value: Any) -> str:
+        return "" if value is None else str(value)
+
+    for index in range(batch.num_rows):
+        reason: str | None = None
+        try:
+            street = text(columns["street"][index])
+            number = text(columns["number"][index])
+            if not normalize(street) or not normalize(number):
+                reason = "missing_street_or_number"
+
+            point = None
+            if reason is None:
+                point = point_coordinates(columns["geometry"][index])
+                if point is None:
+                    reason = "invalid_geometry"
+
+            country = ""
+            if reason is None:
+                country = text(columns["country"][index])
+                normalized_country = normalize(country)
+                if not normalized_country:
+                    reason = "blank_country"
+                elif STRICT_COUNTRY_RE.fullmatch(normalized_country) is None:
+                    reason = "invalid_country"
+
+            feature_id = ""
+            if reason is None:
+                feature_id = text(columns["id"][index]).strip()
+                if not feature_id:
+                    reason = "missing_uuid"
+                else:
+                    try:
+                        feature_id = str(uuid.UUID(feature_id))
+                    except (ValueError, AttributeError, TypeError):
+                        reason = "invalid_uuid"
+
+            locators: tuple[int, int, int] | None = None
+            if reason is None:
+                raw_locators = (
+                    columns["source_object_index"][index],
+                    columns["source_row_group"][index],
+                    columns["source_row_index"][index],
+                )
+                if any(type(value) is not int or value < 0 for value in raw_locators):
+                    reason = "invalid_source_locator"
+                else:
+                    locators = raw_locators
+                    if source_limits is not None:
+                        object_index, row_group, row_index = locators
+                        if object_index >= len(source_limits):
+                            reason = "invalid_source_locator"
+                        else:
+                            source_records, source_row_groups = source_limits[
+                                object_index
+                            ]
+                            if (
+                                row_group >= source_row_groups
+                                or row_index >= source_records
+                            ):
+                                reason = "invalid_source_locator"
+
+            if reason is None:
+                assert point is not None and locators is not None
+                record = {
+                    "id": feature_id,
+                    "street": street,
+                    "number": number,
+                    "unit": text(columns["unit"][index]),
+                    "postcode": text(columns["postcode"][index]),
+                    "postal_city": text(columns["postal_city"][index]),
+                    "country": country,
+                    "address_levels": address_level_values(
+                        columns["address_levels"][index]
+                    ),
+                    "lon": point[0],
+                    "lat": point[1],
+                    "source_object_index": locators[0],
+                    "source_row_group": locators[1],
+                    "source_row_index": locators[2],
+                }
+                payload = encode_record(record)
+                if len(payload) > MAX_RECORD_BYTES:
+                    reason = "record_too_large"
+                else:
+                    encoded.append((record_key(record), payload))
+        except (AttributeError, KeyError, TypeError, UnicodeError, ValueError):
+            # All expected row-local conversion/encoding failures share the
+            # final precedence bucket. Task-wide schema validation happens in
+            # the global mapper before any batch reaches this function.
+            reason = reason or "invalid_record"
+
+        if reason is not None:
+            rejected[reason] += 1
+
+    encoded.sort(key=lambda item: item[0])
+    if batch.num_rows != len(encoded) + sum(rejected.values()):
+        raise ValueError("strict address batch accounting does not reconcile")
+    return encoded, rejected
+
+
 def build_fragments(
     input_path: Path,
     fragment_dir: Path,
@@ -405,6 +543,7 @@ def build_fragments(
 class FragmentReader:
     def __init__(self, path: Path):
         self.path = path
+        self.size = path.stat().st_size
         self.file = self.path.open("rb")
         self.header = read_envelope(self.file, FRAGMENT_MAGIC)
         if self.header.get("format") != FORMAT_VERSION:
@@ -423,7 +562,7 @@ class FragmentReader:
         record_length = struct.unpack("<I", length)[0]
         if record_length > MAX_RECORD_BYTES:
             raise ValueError("fragment record exceeds hard byte cap")
-        remaining = self.path.stat().st_size - self.file.tell()
+        remaining = self.size - self.file.tell()
         if record_length > remaining:
             raise ValueError("fragment record extends beyond file")
         payload = self.file.read(record_length)

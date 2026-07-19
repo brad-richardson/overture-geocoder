@@ -5,7 +5,9 @@ use std::collections::HashMap;
 use std::rc::Rc;
 
 use bytes::Bytes;
+use futures::StreamExt;
 use geocoder_core::Database;
+use sha2::{Digest, Sha256};
 use worker::*;
 
 use crate::address_pages::{
@@ -55,11 +57,21 @@ const NEGATIVE_CACHE_TTL: u64 = 30; // 30 seconds - avoids hammering R2 for miss
 // Isolate-level (in-memory) cache limits. Workers isolates persist across
 // requests; keeping deserialized shard databases in memory lets warm
 // requests skip the Cache API round trip and the SQLite deserialize copy.
-const DB_CACHE_MAX_BYTES: usize = 64 * 1024 * 1024;
+const DB_CACHE_MAX_BYTES: usize = 48 * 1024 * 1024;
 const DB_CACHE_MAX_ENTRIES: usize = 4;
 // Catalog/collection JSON memo TTL. Short: this bounds how stale the
 // version pointer can be within one isolate.
 pub(crate) const TEXT_MEMO_TTL_MS: u64 = 60_000;
+const TEXT_MEMO_MAX_ENTRIES: usize = 64;
+// Isolate-retained memory budget (Cloudflare's standard isolate limit is 128
+// MiB): byte-backed long-lived caches admit at most 48 MiB of SQLite plus 4
+// MiB of text. V2 parsed caches retain one generation, with address bounded to
+// an 8 MiB wire document / 4,096 canonical routes and Places to a 2 MiB wire
+// catalog. Even budgeting 2x their wire caps for parsed structure overhead,
+// that is 72 MiB retained, leaving 56 MiB for the largest 16 MiB Places
+// posting plan, response shaping, and runtime overhead. Oversize DBs and parsed
+// address raw text are explicitly not retained.
+const TEXT_MEMO_MAX_BYTES: usize = 4 * 1024 * 1024;
 
 thread_local! {
     /// Deserialized shard databases keyed by versioned R2 key (immutable
@@ -72,6 +84,52 @@ thread_local! {
 }
 
 impl ShardLoader {
+    /// Stream an immutable object through SHA-256 without retaining its body.
+    /// Used only during cold v2 release admission for identities explicitly
+    /// pinned by the release manifest.
+    pub(crate) async fn immutable_object_identity(
+        &self,
+        key: &str,
+        max_bytes: u64,
+    ) -> Result<(u64, String)> {
+        let object = self
+            .bucket
+            .get(key)
+            .execute()
+            .await?
+            .ok_or_else(|| not_found(key))?;
+        let declared_size = object.size();
+        if declared_size == 0 || declared_size > max_bytes {
+            return Err(Error::RustError(format!(
+                "Immutable object {key} is outside its identity-stream size cap"
+            )));
+        }
+        let body = object
+            .body()
+            .ok_or_else(|| Error::RustError(format!("Immutable object {key} has no body")))?;
+        let mut stream = body.stream()?;
+        let mut actual_size = 0_u64;
+        let mut hasher = Sha256::new();
+        while let Some(chunk) = stream.next().await {
+            let chunk = chunk?;
+            actual_size = actual_size
+                .checked_add(chunk.len() as u64)
+                .ok_or_else(|| Error::RustError("Immutable object size overflow".into()))?;
+            if actual_size > max_bytes {
+                return Err(Error::RustError(format!(
+                    "Immutable object {key} streamed beyond its identity cap"
+                )));
+            }
+            hasher.update(&chunk);
+        }
+        if actual_size != declared_size {
+            return Err(Error::RustError(format!(
+                "Immutable object {key} streamed size differs from R2 metadata"
+            )));
+        }
+        Ok((actual_size, format!("{:x}", hasher.finalize())))
+    }
+
     /// Write bytes to the edge cache, off the critical path via `waitUntil`
     /// when an execution context is available (best effort either way;
     /// inline await otherwise). Takes `Bytes` so the caller only pays a
@@ -404,13 +462,70 @@ impl ShardLoader {
         let text = self.cached_get_text(key, ttl).await?;
         TEXT_MEMO.with(|memo| {
             let mut memo = memo.borrow_mut();
-            // Bound the memo: drop expired entries when it grows.
-            if memo.len() > 64 {
-                memo.retain(|_, (_, expires)| *expires > now);
+            let incoming_bytes = text.as_ref().map_or(0, String::len);
+            if incoming_bytes <= TEXT_MEMO_MAX_BYTES {
+                bound_text_memo(&mut memo, key, now, incoming_bytes);
+                memo.insert(key.to_string(), (text.clone(), now + TEXT_MEMO_TTL_MS));
             }
-            memo.insert(key.to_string(), (text.clone(), now + TEXT_MEMO_TTL_MS));
         });
         Ok(text)
+    }
+
+    /// Fetch a UTF-8 control document without ever materializing an object
+    /// larger than `max_bytes`. This is the safe path for mutable discovery
+    /// roots and large family routing manifests: the `max + 1` R2 range proves
+    /// EOF before the body is admitted to the edge or isolate cache.
+    pub(crate) async fn memoized_get_bounded_text(
+        &self,
+        key: &str,
+        max_bytes: usize,
+        ttl: u64,
+    ) -> Result<Option<String>> {
+        let now = Date::now().as_millis();
+        let memoized = TEXT_MEMO.with(|memo| {
+            memo.borrow()
+                .get(key)
+                .filter(|(_, expires)| *expires > now)
+                .map(|(text, _)| text.clone())
+        });
+        if let Some(text) = memoized {
+            if text.as_ref().is_some_and(|value| value.len() > max_bytes) {
+                return Err(Error::RustError(format!(
+                    "Control document {key} exceeds its hard cap"
+                )));
+            }
+            return Ok(text);
+        }
+
+        let text = match self
+            .cached_bounded_prefix_read_measured(key, max_bytes, ttl)
+            .await?
+        {
+            Some(read) => Some(
+                std::str::from_utf8(&read.bytes)
+                    .map_err(|error| Error::RustError(format!("Invalid UTF-8: {error}")))?
+                    .to_owned(),
+            ),
+            None => None,
+        };
+        TEXT_MEMO.with(|memo| {
+            let mut memo = memo.borrow_mut();
+            let incoming_bytes = text.as_ref().map_or(0, String::len);
+            if incoming_bytes <= TEXT_MEMO_MAX_BYTES {
+                bound_text_memo(&mut memo, key, now, incoming_bytes);
+                memo.insert(key.to_string(), (text.clone(), now + TEXT_MEMO_TTL_MS));
+            }
+        });
+        Ok(text)
+    }
+
+    /// Drop one isolate-level text immediately after a caller has converted it
+    /// into a bounded parsed representation. Large address routing documents
+    /// must not remain retained alongside that representation.
+    pub(crate) fn forget_memoized_text(&self, key: &str) {
+        TEXT_MEMO.with(|memo| {
+            forget_text_memo(&mut memo.borrow_mut(), key);
+        });
     }
 
     /// Fetch text from R2 with caching.
@@ -530,7 +645,7 @@ impl ShardLoader {
             // A concurrent request that missed at the same time may have
             // inserted this key while we awaited the fetch; a duplicate
             // entry would double-count against the byte budget.
-            if !cache.iter().any(|(k, _, _)| k == shard_key) {
+            if db_cacheable(size) && !cache.iter().any(|(k, _, _)| k == shard_key) {
                 cache.push((shard_key.to_string(), Rc::clone(&db), size));
                 // Evict from the LRU end; always keep the entry just inserted.
                 while cache.len() > 1
@@ -547,9 +662,53 @@ impl ShardLoader {
     }
 }
 
+fn db_cacheable(size: usize) -> bool {
+    size <= DB_CACHE_MAX_BYTES
+}
+
+fn bound_text_memo(
+    memo: &mut HashMap<String, (Option<String>, u64)>,
+    incoming_key: &str,
+    now: u64,
+    incoming_bytes: usize,
+) {
+    memo.retain(|_, (_, expires)| *expires > now);
+    // The caller inserts the incoming value immediately afterward. Remove a
+    // previous value for that key so replacement with a larger body is also
+    // charged against the byte budget.
+    memo.remove(incoming_key);
+    while memo.len() >= TEXT_MEMO_MAX_ENTRIES
+        || memo
+            .values()
+            .map(|(text, _)| text.as_ref().map_or(0, String::len))
+            .sum::<usize>()
+            .saturating_add(incoming_bytes)
+            > TEXT_MEMO_MAX_BYTES
+    {
+        if let Some(oldest) = memo
+            .iter()
+            .min_by_key(|(_, (_, expires))| *expires)
+            .map(|(key, _)| key.clone())
+        {
+            memo.remove(&oldest);
+        } else {
+            break;
+        }
+    }
+}
+
+fn forget_text_memo(memo: &mut HashMap<String, (Option<String>, u64)>, key: &str) {
+    memo.remove(key);
+}
+
 #[cfg(test)]
 mod address_prefix_tests {
-    use super::validate_at_most_prefix_length;
+    use std::collections::HashMap;
+
+    use super::{
+        bound_text_memo, db_cacheable, forget_text_memo, validate_at_most_prefix_length,
+        DB_CACHE_MAX_BYTES, TEXT_MEMO_MAX_BYTES, TEXT_MEMO_MAX_ENTRIES,
+    };
 
     #[test]
     fn at_most_prefix_accepts_short_eof_and_exact_cap() {
@@ -561,5 +720,59 @@ mod address_prefix_tests {
     fn at_most_prefix_rejects_overflow_and_zero_cap() {
         assert!(validate_at_most_prefix_length(4097, 4096).is_err());
         assert!(validate_at_most_prefix_length(0, 0).is_err());
+    }
+
+    #[test]
+    fn text_memo_is_strictly_bounded_after_expiry_cleanup() {
+        let mut memo = (0..TEXT_MEMO_MAX_ENTRIES)
+            .map(|index| {
+                (
+                    format!("key-{index}"),
+                    (Some(String::new()), index as u64 + 10),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        bound_text_memo(&mut memo, "incoming", 0, 0);
+        assert_eq!(memo.len(), TEXT_MEMO_MAX_ENTRIES - 1);
+        assert!(!memo.contains_key("key-0"));
+
+        memo.insert("incoming".into(), (None, 100));
+        bound_text_memo(&mut memo, "incoming", 50, 0);
+        memo.insert("incoming".into(), (None, 100));
+        assert!(memo.len() <= TEXT_MEMO_MAX_ENTRIES);
+    }
+
+    #[test]
+    fn maximum_text_replacement_evicts_every_other_retained_body() {
+        let mut memo = HashMap::from([
+            ("incoming".into(), (Some("old".into()), 30)),
+            ("oldest".into(), (Some("a".repeat(1024)), 10)),
+            ("newer".into(), (Some("b".repeat(1024)), 20)),
+        ]);
+        bound_text_memo(&mut memo, "incoming", 0, TEXT_MEMO_MAX_BYTES);
+        memo.insert(
+            "incoming".into(),
+            (Some("x".repeat(TEXT_MEMO_MAX_BYTES)), 100),
+        );
+        assert_eq!(memo.len(), 1);
+        assert_eq!(
+            memo.values()
+                .map(|(text, _)| text.as_ref().map_or(0, String::len))
+                .sum::<usize>(),
+            TEXT_MEMO_MAX_BYTES
+        );
+    }
+
+    #[test]
+    fn parsed_document_can_evict_its_raw_text_immediately() {
+        let mut memo = HashMap::from([("address.json".into(), (Some("raw".into()), 100))]);
+        forget_text_memo(&mut memo, "address.json");
+        assert!(memo.is_empty());
+    }
+
+    #[test]
+    fn oversize_database_is_not_admitted_to_the_isolate_cache() {
+        assert!(db_cacheable(DB_CACHE_MAX_BYTES));
+        assert!(!db_cacheable(DB_CACHE_MAX_BYTES + 1));
     }
 }

@@ -251,7 +251,7 @@ def plan_partitions(
 
 
 def validate_plan(
-    plan: dict[str, Any], *, expected_maximum_hash_bits: int | None = None
+    plan: dict[str, Any], *, maximum_hash_bits_at_most: int | None = None
 ) -> list[dict[str, Any]]:
     """Validate a complete plan, including leaf ancestry and hash coverage."""
     contract = plan.get("partition")
@@ -275,8 +275,8 @@ def validate_plan(
         not 1 <= maximum_hash_bits <= MAXIMUM_SUPPORTED_HASH_BITS
         or row_cap < 1
         or (
-            expected_maximum_hash_bits is not None
-            and maximum_hash_bits != expected_maximum_hash_bits
+            maximum_hash_bits_at_most is not None
+            and maximum_hash_bits > maximum_hash_bits_at_most
         )
     ):
         raise ValueError("address partition plan limits are incompatible")
@@ -359,7 +359,7 @@ def build_plan(
     sticky_countries: set[str] = set()
     if previous is not None:
         validate_plan(
-            previous, expected_maximum_hash_bits=maximum_hash_bits
+            previous, maximum_hash_bits_at_most=maximum_hash_bits
         )
         sticky = previous["partition"]["split_ids"]
         sticky_countries = {item["country"] for item in previous["partitions"]}

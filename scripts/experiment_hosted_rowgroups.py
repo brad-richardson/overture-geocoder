@@ -9,12 +9,20 @@ import io
 import json
 import resource
 import shutil
+import sys
 import time
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+if str(SCRIPT_DIR) not in sys.path:
+    sys.path.insert(0, str(SCRIPT_DIR))
+
+import inventory_address_rowgroups as address_inventory  # noqa: E402
 
 
 BUCKET = "overturemaps-us-west-2"
@@ -183,6 +191,63 @@ def sha256_file(path: Path) -> str:
     return hasher.hexdigest()
 
 
+def schema_fingerprint(inventory: dict[str, Any]) -> str | None:
+    """Validate a new-style inventory schema contract when one is present.
+
+    Historical measurement reports predate the contract and remain usable by
+    the legacy experiment. The global-v2 mapper separately requires this value,
+    so a dispatch inventory cannot silently take that compatibility path.
+    """
+    contract = inventory.get("schema_contract")
+    if contract is None:
+        return None
+    if not isinstance(contract, dict) or set(contract) != {
+        "version",
+        "fields",
+        "fingerprint_sha256",
+    }:
+        raise ValueError("inventory schema contract fields are invalid")
+    expected = contract["fingerprint_sha256"]
+    payload = {"version": contract["version"], "fields": contract["fields"]}
+    actual = hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
+    ).hexdigest()
+    if not isinstance(expected, str) or actual != expected:
+        raise ValueError("inventory schema fingerprint differs from its contract")
+    return expected
+
+
+def canonical_inventory_task(
+    inventory: dict[str, Any], *, release: str, task_index: int | None
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    identity = address_inventory.validate_canonical_inventory(inventory)
+    if inventory.get("release") != release:
+        raise ValueError("inventory release differs from requested release")
+    tasks = identity["tasks"]
+    if task_index is None or not 0 <= task_index < len(tasks):
+        raise ValueError("inventory task index is outside the plan")
+    task = tasks[task_index]
+    if task.get("index") != task_index:
+        raise ValueError("inventory task index differs from its plan position")
+    return identity, task
+
+
+def exact_task_metadata(
+    identity: dict[str, Any], task: dict[str, Any]
+) -> dict[bytes, bytes]:
+    return {
+        address_inventory.INVENTORY_METADATA_KEY: identity["inventory_sha256"].encode(),
+        address_inventory.TASK_INDEX_METADATA_KEY: str(task["index"]).encode(),
+        address_inventory.TASK_DIGEST_METADATA_KEY: task["task_digest_sha256"].encode(),
+        address_inventory.TASK_SOURCE_DIGEST_METADATA_KEY: task[
+            "source_digest_sha256"
+        ].encode(),
+        address_inventory.EXECUTION_BUCKET_METADATA_KEY: task[
+            "execution_bucket"
+        ].encode(),
+    }
+
+
 def peak_rss_bytes() -> int:
     # Linux reports KiB; macOS reports bytes. The hosted experiment runs Linux.
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -210,16 +275,21 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
     sources: dict[int, dict[str, Any]] = {}
     identities_before: dict[int, dict[str, Any]] = {}
     inventory_task: dict[str, Any] | None = None
+    source_schema_fingerprint: str | None = None
+    address_inventory_digest: str | None = None
+    address_task_digest: str | None = None
+    address_task_source_digest: str | None = None
+    address_execution_bucket: str | None = None
     if args.inventory_report is not None:
         inventory = json.loads(args.inventory_report.read_text())
-        if inventory.get("schema") != "overture-address-rowgroup-inventory-v1":
-            raise ValueError("unsupported address row-group inventory schema")
-        if inventory.get("release") != args.release:
-            raise ValueError("inventory release differs from requested release")
-        tasks = inventory.get("plan", {}).get("tasks", [])
-        if args.task_index is None or not 0 <= args.task_index < len(tasks):
-            raise ValueError("inventory task index is outside the plan")
-        inventory_task = tasks[args.task_index]
+        inventory_identity, inventory_task = canonical_inventory_task(
+            inventory, release=args.release, task_index=args.task_index
+        )
+        source_schema_fingerprint = inventory_identity["schema_fingerprint_sha256"]
+        address_inventory_digest = inventory_identity["inventory_sha256"]
+        address_task_digest = inventory_task["task_digest_sha256"]
+        address_task_source_digest = inventory_task["source_digest_sha256"]
+        address_execution_bucket = inventory_task["execution_bucket"]
         source_inventory = inventory["source_inventory"]
         inventory_objects = source_inventory["objects"]
         object_indexes = {
@@ -342,6 +412,10 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         source_inventory, sort_keys=True, separators=(",", ":")
     ).encode()
     source_inventory_digest = hashlib.sha256(source_inventory_json).hexdigest()
+    if args.inventory_report is not None and source_inventory_digest != (
+        inventory_identity["source_inventory_sha256"]
+    ):
+        raise ValueError("inventory source digest changed after validation")
 
     selected_groups = []
     for selection in selections:
@@ -424,6 +498,14 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         b"overture.family": args.family.encode(),
         b"overture.source_inventory_json": source_inventory_json,
     }
+    if source_schema_fingerprint is not None:
+        artifact_metadata[b"overture.schema_fingerprint_sha256"] = (
+            source_schema_fingerprint.encode()
+        )
+    if inventory_task is not None:
+        artifact_metadata.update(
+            exact_task_metadata(inventory_identity, inventory_task)
+        )
     projected = projected.replace_schema_metadata(artifact_metadata)
     network_after_projection = network_received_bytes()
 
@@ -460,6 +542,19 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
         raise ValueError("output metadata does not bind the source inventory")
     if output_metadata.get(b"overture.source_inventory_json") != source_inventory_json:
         raise ValueError("output metadata does not preserve the source inventory")
+    if (
+        source_schema_fingerprint is not None
+        and output_metadata.get(b"overture.schema_fingerprint_sha256")
+        != source_schema_fingerprint.encode()
+    ):
+        raise ValueError("output metadata does not bind the source schema fingerprint")
+    if inventory_task is not None:
+        expected_task_metadata = exact_task_metadata(inventory_identity, inventory_task)
+        if any(
+            output_metadata.get(key) != value
+            for key, value in expected_task_metadata.items()
+        ):
+            raise ValueError("output metadata does not bind the exact inventory task")
 
     hydration_started = time.monotonic()
     sample_indexes = sorted({0, projected.num_rows // 2, projected.num_rows - 1})
@@ -559,6 +654,12 @@ def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
             "row_groups": verification.metadata.num_row_groups,
             "columns": verification.schema_arrow.names,
             "source_inventory_sha256": source_inventory_digest,
+            "schema_fingerprint_sha256": source_schema_fingerprint,
+            "address_inventory_sha256": address_inventory_digest,
+            "address_task_index": args.task_index,
+            "address_task_digest_sha256": address_task_digest,
+            "address_task_source_digest_sha256": address_task_source_digest,
+            "address_execution_bucket": address_execution_bucket,
         },
         "verification": {
             "pre_post_source_identity_match": True,

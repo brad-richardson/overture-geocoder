@@ -1,6 +1,7 @@
 # Global v2 Places + address build readiness
 
-Status: one-way contracts resolved; data-plane executor not yet dispatch-ready.
+Status: frozen request and strict map primitives implemented; fan-in executor
+not yet dispatch-ready.
 No global shard build or catalog publication has been started.
 
 ## Decisions now fixed
@@ -24,6 +25,33 @@ These values are emitted and revalidated by
 `scripts/global_v2_build_request.py`. The manual
 `prepare-global-v2-build.yml` workflow can freeze an exact request at a merged
 producer commit, but intentionally has no cloud credentials or data-plane job.
+Its inputs include the exact reusable core manifest, unpublished slice,
+canonical inventory/schema digests, and nullable predecessor-family digests;
+it reproduces the request byte-for-byte before retaining it.
+
+## Implemented map boundary
+
+- The address footer inventory fingerprints the required Arrow paths, types,
+  and nullability and carries that fingerprint through the bounded row-group
+  projection. The strict mapper uses exclusive named rejections, reconciles
+  every input row, measures maximum exact-key fanout, and emits bounded
+  content-addressed fragments owned by country and maximum-resolution hash
+  bucket.
+- The Places inventory pins the exact public S3 listing, per-object ETag/size,
+  required nested Arrow schema, row groups, and a deterministic map-task plan.
+  The strict mapper rejects invalid IDs, geometry, coordinates, names, and
+  status without synthetic IDs or coordinate coercion, then emits bounded
+  content-addressed fragments owned by maximum-level world quadkey.
+- Map-task identities are provenance only. Neither mapper turns a task or
+  fragment number into a serving-shard name, so task sizing can change without
+  changing permanent ownership.
+- Family publication streams large local files and remote readback hashes one
+  object at a time; it no longer retains the whole family fleet in memory.
+- The Worker prepares and caches bounded address/Places routing indexes. Global
+  address selection is a country lookup plus range binary search, and located
+  Places routing probes at most 15 quadkey prefixes. Cold v2 admission requires
+  the immutable completion manifests, exact entrypoint sizes, and Places head;
+  uploaded fragments alone remain undiscoverable and unservable.
 
 ## Why the existing global planner is not the executor
 
@@ -54,13 +82,14 @@ global skew, global head relevance, or end-to-end planet duration.
 
 ## Next implementation slice
 
-Implement the two-stage global data plane behind the frozen request:
+Complete the fan-in data plane behind the frozen request:
 
-- current-release Places and address inventory;
-- exact maximum-level count/fragments with per-task reconciliation;
 - stable plan derivation with no prior split history for the first v2 build;
 - bounded reducers that emit the existing `.pcsh`, `.aidx`, and `.adat`
-  formats;
+  formats, enforce reducer fan-in limits, and compact map fragments when needed;
+- a pinned executor image (including the PyArrow/Parquet writer version),
+  recorded in completion provenance so cross-host retries remain
+  byte-reproducible;
 - a bounded global `head.phrp` producer;
 - remote manifest verification and v2 Worker smoke tests against the
   unpublished slice.

@@ -283,6 +283,63 @@ def test_previous_catalog_retains_split_ownership(tmp_path):
     ]["split_cells"]
 
 
+def test_previous_catalog_allows_maximum_level_growth_and_tokenizer_rotation(tmp_path):
+    fixture = _fixture(tmp_path, 80)
+    first = _build(
+        fixture,
+        tmp_path / "first",
+        row_cap=20,
+        minimum_level=2,
+        maximum_level=8,
+        build_head=False,
+    )
+    catalog_path = tmp_path / "first" / "catalog.pcat"
+    payload = _catalog_payload(catalog_path)
+    payload["tokenizer_version"] = "future-tokenizer-v4"
+    _write_catalog(catalog_path, payload)
+
+    second = _build(
+        fixture,
+        tmp_path / "second",
+        row_cap=1_000,
+        minimum_level=2,
+        maximum_level=10,
+        previous_catalog=catalog_path,
+        build_head=False,
+    )
+
+    assert [item["cell"] for item in second["shards"]] == [
+        item["cell"] for item in first["shards"]
+    ]
+    assert second["catalog"]["partition"]["maximum_level"] == 10
+    assert second["catalog"]["partition"]["split_cells"] == first["catalog"][
+        "partition"
+    ]["split_cells"]
+
+
+def test_previous_catalog_rejects_maximum_level_decrease(tmp_path):
+    fixture = _fixture(tmp_path, 40)
+    _build(
+        fixture,
+        tmp_path / "first",
+        row_cap=1_000,
+        minimum_level=2,
+        maximum_level=8,
+        build_head=False,
+    )
+
+    with pytest.raises(ValueError, match="incompatible partition contract"):
+        _build(
+            fixture,
+            tmp_path / "second",
+            row_cap=1_000,
+            minimum_level=2,
+            maximum_level=7,
+            previous_catalog=tmp_path / "first" / "catalog.pcat",
+            build_head=False,
+        )
+
+
 def test_previous_catalog_rejects_leaf_without_split_ancestry(tmp_path):
     fixture = _fixture(tmp_path, 40)
     first = _build(

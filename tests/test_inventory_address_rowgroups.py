@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 from pathlib import Path
@@ -12,6 +13,33 @@ SPEC = importlib.util.spec_from_file_location("inventory_address_rowgroups", SCR
 assert SPEC and SPEC.loader
 inventory = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(inventory)
+
+
+def resign_inventory(report: dict) -> dict:
+    result = copy.deepcopy(report)
+    for index, task in enumerate(result["plan"]["tasks"]):
+        task["index"] = index
+        task["execution_bucket"] = inventory.address_execution_bucket(index)
+        task["source_digest_sha256"] = inventory.sha256_value(
+            {
+                "version": inventory.SOURCE_SELECTION_VERSION,
+                "ranges": task["ranges"],
+            }
+        )
+        task["task_digest_sha256"] = inventory.sha256_value(
+            {
+                "version": inventory.TASK_IDENTITY_VERSION,
+                "task": {
+                    key: value
+                    for key, value in task.items()
+                    if key != "task_digest_sha256"
+                },
+            }
+        )
+    result["inventory_sha256"] = inventory.sha256_value(
+        inventory.inventory_identity_payload(result)
+    )
+    return result
 
 
 def test_parse_listing_page_supports_pagination_and_identity():
@@ -91,6 +119,26 @@ def spatial_source(uri: str, groups: list[dict]) -> dict:
 
 # A US-Northeast-shaped query box: (xmin, ymin, xmax, ymax).
 NE_BOX = (-80.5, 38.0, -66.9, 47.5)
+
+
+def required_address_table(pa, row_count: int, *, bbox=None):
+    address_level_type = pa.list_(pa.struct([pa.field("value", pa.string())]))
+    columns = {
+        "id": pa.array([f"id-{index}" for index in range(row_count)]),
+        "street": pa.array(["Main Street"] * row_count),
+        "number": pa.array([str(index) for index in range(row_count)]),
+        "unit": pa.array([""] * row_count),
+        "postcode": pa.array(["02180"] * row_count),
+        "postal_city": pa.array(["Stoneham"] * row_count),
+        "address_levels": pa.array(
+            [[{"value": "MA"}]] * row_count, type=address_level_type
+        ),
+        "country": pa.array(["US"] * row_count),
+        "geometry": pa.array([b"point"] * row_count, type=pa.binary()),
+    }
+    if bbox is not None:
+        columns["bbox"] = bbox
+    return pa.table(columns)
 
 
 def test_group_bbox_intersects_inside_outside_straddle_and_missing():
@@ -273,13 +321,7 @@ def test_inventory_object_records_bbox_extent_and_missing_stats(tmp_path):
         ],
         names=["xmin", "xmax", "ymin", "ymax"],
     )
-    table = pa.table(
-        {
-            "id": pa.array(["a", "b"]),
-            "country": pa.array(["US", "US"]),
-            "bbox": bbox_array,
-        }
-    )
+    table = required_address_table(pa, 2, bbox=bbox_array)
     pq.write_table(table, with_bbox)
     record = inventory.inventory_object(
         {"uri": f"s3://{with_bbox}", "etag": "e", "bytes": with_bbox.stat().st_size},
@@ -296,9 +338,7 @@ def test_inventory_object_records_bbox_extent_and_missing_stats(tmp_path):
     # A parquet with no bbox column: statistics are absent, so the group is
     # recorded as null and treated as conservatively intersecting.
     without_bbox = tmp_path / "without_bbox.parquet"
-    pq.write_table(
-        pa.table({"id": pa.array(["a"]), "country": pa.array(["US"])}), without_bbox
-    )
+    pq.write_table(required_address_table(pa, 1), without_bbox)
     record = inventory.inventory_object(
         {
             "uri": f"s3://{without_bbox}",
@@ -314,6 +354,122 @@ def test_inventory_object_records_bbox_extent_and_missing_stats(tmp_path):
     assert group["bbox_ymax_max"] is None
     assert group["bbox_stats_complete"] is False
     assert inventory.group_bbox_intersects(group, NE_BOX)
+
+
+def test_address_schema_contract_fingerprints_required_types_and_nullability():
+    pa = pytest.importorskip("pyarrow")
+    table = required_address_table(pa, 2)
+
+    contract = inventory.schema_contract_from_arrow(table.schema)
+
+    assert contract["version"] == inventory.SCHEMA_CONTRACT_VERSION
+    assert contract["fingerprint_sha256"] == inventory.sha256_value(
+        {"version": contract["version"], "fields": contract["fields"]}
+    )
+    assert {field["path"] for field in contract["fields"]} == set(
+        inventory.REQUIRED_FIELD_TYPES
+    )
+    wrong = table.set_column(
+        table.schema.get_field_index("country"), "country", pa.array([1, 2])
+    )
+    with pytest.raises(ValueError, match="schema type differs for country"):
+        inventory.schema_contract_from_arrow(wrong.schema)
+
+
+def test_canonical_rebuild_rejects_rehashed_duplicate_omission_gate_and_cap(
+    tmp_path,
+):
+    pa = pytest.importorskip("pyarrow")
+    pafs = pytest.importorskip("pyarrow.fs")
+    import pyarrow.parquet as pq
+
+    source_path = tmp_path / "addresses.parquet"
+    pq.write_table(required_address_table(pa, 2), source_path)
+    source = inventory.inventory_object(
+        {
+            "uri": f"s3://{source_path}",
+            "etag": "etag",
+            "bytes": source_path.stat().st_size,
+        },
+        pafs.LocalFileSystem(),
+    )
+    source["uri"] = (
+        "s3://overturemaps-us-west-2/release/2026-06-17.0/"
+        "theme=addresses/type=address/part-00000.parquet"
+    )
+
+    plan = inventory.plan_contiguous_ranges(
+        [source],
+        target_rows=100,
+        max_selected_uncompressed_bytes=1_000_000,
+        max_groups=10,
+        max_tasks=10,
+    )
+    report = inventory.build_report("2026-06-17.0", [source], plan)
+
+    assert report["source_inventory"]["schema_version"] == (
+        inventory.SCHEMA_CONTRACT_VERSION
+    )
+    assert report["source_inventory_sha256"] == inventory.sha256_value(
+        report["source_inventory"]
+    )
+    assert (
+        report["schema_contract"]["fingerprint_sha256"]
+        == source["schema_contract"]["fingerprint_sha256"]
+    )
+    assert report["inventory_sha256"] == inventory.sha256_value(
+        inventory.inventory_identity_payload(report)
+    )
+    identity = inventory.validate_canonical_inventory(report)
+    task = report["plan"]["tasks"][0]
+    assert identity["inventory_sha256"] == report["inventory_sha256"]
+    assert task["execution_bucket"] == "address-map-task-000"
+    assert len(task["source_digest_sha256"]) == 64
+    assert len(task["task_digest_sha256"]) == 64
+
+    repeated = inventory.build_report("2026-06-17.0", [source], plan)
+    assert repeated["inventory_sha256"] == report["inventory_sha256"]
+    forged = json.loads(json.dumps(report))
+    forged["plan"]["tasks"][0]["rows"] += 1
+    with pytest.raises(ValueError, match="task digest differs"):
+        inventory.validate_canonical_inventory(forged)
+
+    duplicate = copy.deepcopy(report)
+    task = duplicate["plan"]["tasks"][0]
+    task["ranges"].append(copy.deepcopy(task["ranges"][0]))
+    task["rows"] *= 2
+    duplicate = resign_inventory(duplicate)
+    with pytest.raises(ValueError, match="deterministic footer contents"):
+        inventory.validate_canonical_inventory(duplicate)
+
+    omission = copy.deepcopy(report)
+    omission["plan"]["tasks"][0]["ranges"] = []
+    omission["plan"]["tasks"][0]["rows"] = 0
+    omission = resign_inventory(omission)
+    with pytest.raises(ValueError, match="deterministic footer contents"):
+        inventory.validate_canonical_inventory(omission)
+
+    unsafe_gate = copy.deepcopy(report)
+    unsafe_gate["plan"]["gates"]["max_tasks"] = 129
+    unsafe_gate = resign_inventory(unsafe_gate)
+    with pytest.raises(ValueError, match="task gates"):
+        inventory.validate_canonical_inventory(unsafe_gate)
+
+    unsafe_count = copy.deepcopy(report)
+    unsafe_count["plan"]["tasks"] = [
+        copy.deepcopy(unsafe_count["plan"]["tasks"][0]) for _ in range(129)
+    ]
+    unsafe_count["plan"]["task_count"] = 129
+    unsafe_count["plan"]["safe_at_configured_task_count"] = False
+    unsafe_count = resign_inventory(unsafe_count)
+    with pytest.raises(ValueError, match="task count"):
+        inventory.validate_canonical_inventory(unsafe_count)
+
+    wrong_totals = copy.deepcopy(report)
+    wrong_totals["totals"]["records"] += 1
+    wrong_totals = resign_inventory(wrong_totals)
+    with pytest.raises(ValueError, match="deterministic footer contents"):
+        inventory.validate_canonical_inventory(wrong_totals)
 
 
 def test_contiguous_plan_splits_on_rows_bytes_and_group_count():

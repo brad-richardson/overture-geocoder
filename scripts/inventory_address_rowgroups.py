@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import concurrent.futures
+import hashlib
 import json
 import math
 import statistics
@@ -45,6 +46,15 @@ REGION = "us-west-2"
 SCHEMA = "overture-address-rowgroup-inventory-v1"
 PLAN_SCHEMA = "overture-address-rowgroup-plan-v1"
 SOURCE_INVENTORY_SCHEMA = "overture-global-source-inventory-v1"
+SCHEMA_CONTRACT_VERSION = "overture-address-required-schema-v1"
+INVENTORY_IDENTITY_VERSION = "overture-address-inventory-identity-v1"
+TASK_IDENTITY_VERSION = "overture-address-rowgroup-task-identity-v1"
+SOURCE_SELECTION_VERSION = "overture-address-rowgroup-source-selection-v1"
+INVENTORY_METADATA_KEY = b"overture.address_inventory_sha256"
+TASK_INDEX_METADATA_KEY = b"overture.address_task_index"
+TASK_DIGEST_METADATA_KEY = b"overture.address_task_digest_sha256"
+TASK_SOURCE_DIGEST_METADATA_KEY = b"overture.address_task_source_digest_sha256"
+EXECUTION_BUCKET_METADATA_KEY = b"overture.address_execution_bucket"
 SELECTED_COLUMN_ROOTS = {
     "id",
     "street",
@@ -56,10 +66,453 @@ SELECTED_COLUMN_ROOTS = {
     "country",
     "geometry",
 }
+REQUIRED_FIELD_TYPES: dict[str, str] = {
+    "address_levels": "list<struct>",
+    "address_levels[].value": "string",
+    "country": "string",
+    "geometry": "binary",
+    "id": "string",
+    "number": "string",
+    "postal_city": "string",
+    "postcode": "string",
+    "street": "string",
+    "unit": "string",
+}
 
 
 def canonical_json(value: Any) -> str:
     return json.dumps(value, sort_keys=True, separators=(",", ":"))
+
+
+def sha256_value(value: Any) -> str:
+    return hashlib.sha256(canonical_json(value).encode()).hexdigest()
+
+
+def address_execution_bucket(task_index: int) -> str:
+    if type(task_index) is not int or task_index < 0:
+        raise ValueError("address task index must be a non-negative integer")
+    return f"address-map-task-{task_index:03d}"
+
+
+def plan_with_task_digests(plan: dict[str, Any]) -> dict[str, Any]:
+    """Return a canonical plan whose exact task/range identities are hashed."""
+
+    if not isinstance(plan, dict) or not isinstance(plan.get("tasks"), list):
+        raise ValueError("address row-group plan must contain tasks")
+    result = json.loads(canonical_json(plan))
+    for expected_index, task in enumerate(result["tasks"]):
+        if (
+            not isinstance(task, dict)
+            or task.get("index") != expected_index
+            or not isinstance(task.get("ranges"), list)
+            or not task["ranges"]
+            or "source_digest_sha256" in task
+            or "task_digest_sha256" in task
+        ):
+            raise ValueError("address plan task identity is invalid")
+        source_identity = {
+            "version": SOURCE_SELECTION_VERSION,
+            "ranges": task["ranges"],
+        }
+        task["source_digest_sha256"] = sha256_value(source_identity)
+        task["execution_bucket"] = address_execution_bucket(expected_index)
+        task["task_digest_sha256"] = sha256_value(
+            {
+                "version": TASK_IDENTITY_VERSION,
+                "task": {
+                    key: value
+                    for key, value in task.items()
+                    if key != "task_digest_sha256"
+                },
+            }
+        )
+    return result
+
+
+def inventory_identity_payload(report: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "version": INVENTORY_IDENTITY_VERSION,
+        "source_inventory": report.get("source_inventory"),
+        "schema_contract": report.get("schema_contract"),
+        "objects": report.get("objects"),
+        "plan": report.get("plan"),
+    }
+
+
+def validate_footer_facts(
+    release: str,
+    objects: Any,
+    schema_contract: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Validate the immutable per-object/row-group facts used to rebuild tasks."""
+
+    if not isinstance(objects, list) or not objects:
+        raise ValueError("address footer facts must contain source objects")
+    approved_prefix = f"s3://{BUCKET}/release/{release}/theme=addresses/type=address/"
+    expected_object_fields = {
+        "uri",
+        "etag",
+        "bytes",
+        "records",
+        "row_groups",
+        "selected_compressed_bytes",
+        "selected_uncompressed_bytes",
+        "schema_contract",
+        "groups",
+    }
+    expected_group_fields = {
+        "index",
+        "rows",
+        "all_compressed_bytes",
+        "all_uncompressed_bytes",
+        "selected_compressed_bytes",
+        "selected_uncompressed_bytes",
+        "country_min",
+        "country_max",
+        "exact_country",
+        "bbox_xmin_min",
+        "bbox_xmax_max",
+        "bbox_ymin_min",
+        "bbox_ymax_max",
+        "bbox_stats_complete",
+    }
+    previous_uri: str | None = None
+    for source in objects:
+        if not isinstance(source, dict) or set(source) != expected_object_fields:
+            raise ValueError("address footer object fields are invalid")
+        uri = source["uri"]
+        relative = uri.removeprefix(approved_prefix) if isinstance(uri, str) else ""
+        if (
+            not relative
+            or relative == uri
+            or not relative.endswith(".parquet")
+            or any(part in {"", ".", ".."} for part in relative.split("/"))
+            or "?" in relative
+            or "#" in relative
+            or (previous_uri is not None and uri <= previous_uri)
+            or not isinstance(source["etag"], str)
+            or not source["etag"]
+            or any(
+                type(source[field]) is not int or source[field] <= 0
+                for field in ("bytes", "records", "row_groups")
+            )
+            or source["schema_contract"] != schema_contract
+            or not isinstance(source["groups"], list)
+            or len(source["groups"]) != source["row_groups"]
+        ):
+            raise ValueError("address footer object identity is invalid")
+        compressed = uncompressed = rows = 0
+        for expected_index, group in enumerate(source["groups"]):
+            numeric_extent = (
+                (
+                    group.get("bbox_xmin_min"),
+                    group.get("bbox_xmax_max"),
+                    group.get("bbox_ymin_min"),
+                    group.get("bbox_ymax_max"),
+                )
+                if isinstance(group, dict)
+                else ()
+            )
+            if (
+                not isinstance(group, dict)
+                or set(group) != expected_group_fields
+                or group.get("index") != expected_index
+                or any(
+                    type(group.get(field)) is not int or group[field] <= 0
+                    for field in ("rows", "all_uncompressed_bytes")
+                )
+                or any(
+                    type(group.get(field)) is not int or group[field] < 0
+                    for field in (
+                        "all_compressed_bytes",
+                        "selected_compressed_bytes",
+                        "selected_uncompressed_bytes",
+                    )
+                )
+                or group["selected_compressed_bytes"] > group["all_compressed_bytes"]
+                or group["selected_uncompressed_bytes"]
+                > group["all_uncompressed_bytes"]
+                or any(
+                    value is not None
+                    and (
+                        not isinstance(value, (int, float)) or not math.isfinite(value)
+                    )
+                    for value in numeric_extent
+                )
+                or type(group.get("bbox_stats_complete")) is not bool
+                or group["bbox_stats_complete"]
+                != all(value is not None for value in numeric_extent)
+                or any(
+                    value is not None and not isinstance(value, str)
+                    for value in (
+                        group.get("country_min"),
+                        group.get("country_max"),
+                        group.get("exact_country"),
+                    )
+                )
+                or group.get("exact_country")
+                != (
+                    group.get("country_min")
+                    if group.get("country_min") is not None
+                    and group.get("country_min") == group.get("country_max")
+                    else None
+                )
+            ):
+                raise ValueError("address row-group footer facts are invalid")
+            rows += group["rows"]
+            compressed += group["selected_compressed_bytes"]
+            uncompressed += group["selected_uncompressed_bytes"]
+        if (
+            rows != source["records"]
+            or compressed != source["selected_compressed_bytes"]
+            or uncompressed != source["selected_uncompressed_bytes"]
+        ):
+            raise ValueError("address footer object totals do not reconcile")
+        previous_uri = uri
+    return objects
+
+
+def validate_canonical_inventory(report: dict[str, Any]) -> dict[str, Any]:
+    """Fail closed unless a global address inventory is exactly self-bound."""
+
+    if not isinstance(report, dict) or report.get("schema") != SCHEMA:
+        raise ValueError("unsupported address row-group inventory schema")
+    source_inventory = report.get("source_inventory")
+    if not isinstance(source_inventory, dict):
+        raise ValueError("address inventory omits its source inventory")
+    source_digest = report.get("source_inventory_sha256")
+    if not isinstance(source_digest, str) or source_digest != sha256_value(
+        source_inventory
+    ):
+        raise ValueError("address source inventory digest differs")
+    contract = report.get("schema_contract")
+    if (
+        not isinstance(contract, dict)
+        or canonical_schema_contract(contract.get("fields")) != contract
+    ):
+        raise ValueError("address schema contract fingerprint differs")
+    plan = report.get("plan")
+    if not isinstance(plan, dict) or not isinstance(plan.get("tasks"), list):
+        raise ValueError("address inventory omits its deterministic plan")
+    gates = plan.get("gates")
+    if (
+        not isinstance(gates, dict)
+        or set(gates)
+        != {
+            "target_rows",
+            "max_selected_uncompressed_bytes",
+            "max_groups",
+            "max_tasks",
+        }
+        or any(type(value) is not int or value <= 0 for value in gates.values())
+        or gates["max_tasks"] > 128
+    ):
+        raise ValueError("address inventory task gates are invalid")
+    if (
+        plan.get("safe_at_configured_task_count") is not True
+        or plan.get("task_count") != len(plan["tasks"])
+        or plan["task_count"] > gates["max_tasks"]
+        or plan["task_count"] > 128
+    ):
+        raise ValueError("address inventory task count exceeds its safe cap")
+    inventory_objects = source_inventory.get("objects")
+    if not isinstance(inventory_objects, list) or not inventory_objects:
+        raise ValueError("address source inventory has no objects")
+    for source in inventory_objects:
+        if (
+            not isinstance(source, dict)
+            or not isinstance(source.get("uri"), str)
+            or not isinstance(source.get("etag"), str)
+            or any(
+                type(source.get(field)) is not int or source[field] <= 0
+                for field in ("bytes", "records", "row_groups")
+            )
+        ):
+            raise ValueError("address source inventory object identity is invalid")
+    objects_by_uri = {
+        item.get("uri"): item for item in inventory_objects if isinstance(item, dict)
+    }
+    if len(objects_by_uri) != len(inventory_objects) or None in objects_by_uri:
+        raise ValueError("address source inventory object identity is invalid")
+    for expected_index, task in enumerate(plan["tasks"]):
+        if not isinstance(task, dict):
+            raise ValueError("address inventory task must be an object")
+        stored_task_digest = task.get("task_digest_sha256")
+        stored_source_digest = task.get("source_digest_sha256")
+        expected_source_digest = sha256_value(
+            {"version": SOURCE_SELECTION_VERSION, "ranges": task.get("ranges")}
+        )
+        expected_task_digest = sha256_value(
+            {
+                "version": TASK_IDENTITY_VERSION,
+                "task": {
+                    **{
+                        key: value
+                        for key, value in task.items()
+                        if key != "task_digest_sha256"
+                    }
+                },
+            }
+        )
+        if (
+            task.get("index") != expected_index
+            or task.get("execution_bucket") != address_execution_bucket(expected_index)
+            or stored_source_digest != expected_source_digest
+            or stored_task_digest != expected_task_digest
+        ):
+            raise ValueError("address inventory task digest differs")
+        for selected_range in task.get("ranges", []):
+            if not isinstance(selected_range, dict):
+                raise ValueError("address inventory task range must be an object")
+            source = objects_by_uri.get(selected_range.get("uri"))
+            if (
+                source is None
+                or selected_range.get("etag") != source.get("etag")
+                or selected_range.get("source_bytes") != source.get("bytes")
+                or selected_range.get("source_records") != source.get("records")
+                or selected_range.get("source_row_groups") != source.get("row_groups")
+                or type(selected_range.get("first_row_group")) is not int
+                or type(selected_range.get("last_row_group")) is not int
+                or not 0
+                <= selected_range["first_row_group"]
+                <= selected_range["last_row_group"]
+                < source.get("row_groups", -1)
+                or selected_range.get("row_groups")
+                != selected_range["last_row_group"]
+                - selected_range["first_row_group"]
+                + 1
+                or type(selected_range.get("rows")) is not int
+                or selected_range["rows"] <= 0
+            ):
+                raise ValueError("address task range differs from source inventory")
+        if task.get("rows") != sum(
+            selected_range["rows"] for selected_range in task.get("ranges", [])
+        ):
+            raise ValueError("address task rows do not reconcile with its ranges")
+    inventory_digest = report.get("inventory_sha256")
+    if not isinstance(inventory_digest, str) or inventory_digest != sha256_value(
+        inventory_identity_payload(report)
+    ):
+        raise ValueError("address inventory self-digest differs")
+    footer_objects = report.get("objects")
+    if not isinstance(report.get("release"), str):
+        raise ValueError("address inventory release/plan gates are invalid")
+    try:
+        rebuilt_plan = plan_contiguous_ranges(
+            footer_objects,
+            target_rows=gates["target_rows"],
+            max_selected_uncompressed_bytes=gates["max_selected_uncompressed_bytes"],
+            max_groups=gates["max_groups"],
+            max_tasks=gates["max_tasks"],
+        )
+        rebuilt = build_report(report["release"], footer_objects, rebuilt_plan)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise ValueError(
+            "address inventory deterministic contents are invalid"
+        ) from exc
+    if rebuilt != report:
+        raise ValueError("address inventory differs from deterministic footer contents")
+    return {
+        "inventory_sha256": inventory_digest,
+        "source_inventory_sha256": source_digest,
+        "schema_fingerprint_sha256": contract["fingerprint_sha256"],
+        "tasks": plan["tasks"],
+    }
+
+
+def _canonical_arrow_type(data_type: Any) -> str:
+    import pyarrow as pa
+
+    if pa.types.is_string(data_type):
+        return "string"
+    if pa.types.is_binary(data_type):
+        return "binary"
+    if pa.types.is_struct(data_type):
+        return "struct"
+    if pa.types.is_list(data_type) and pa.types.is_struct(data_type.value_type):
+        return "list<struct>"
+    return str(data_type)
+
+
+def _arrow_field_at_path(schema: Any, path: str) -> Any:
+    import pyarrow as pa
+
+    parts = path.split(".")
+    first = parts.pop(0)
+    unwrap_list = first.endswith("[]")
+    name = first[:-2] if unwrap_list else first
+    field = schema.field(name)
+    data_type = field.type
+    if unwrap_list:
+        if not pa.types.is_list(data_type):
+            raise ValueError(f"required address field is not a list: {name}")
+        data_type = data_type.value_type
+    for part in parts:
+        unwrap_list = part.endswith("[]")
+        name = part[:-2] if unwrap_list else part
+        if not pa.types.is_struct(data_type):
+            raise ValueError(f"required address parent is not a struct: {path}")
+        field = data_type.field(name)
+        data_type = field.type
+        if unwrap_list:
+            if not pa.types.is_list(data_type):
+                raise ValueError(f"required address field is not a list: {path}")
+            data_type = data_type.value_type
+    return field
+
+
+def canonical_schema_contract(fields: Any) -> dict[str, Any]:
+    supplied: dict[str, dict[str, Any]] = {}
+    if not isinstance(fields, list):
+        raise ValueError("address schema contract fields must be a list")
+    for raw in fields:
+        if not isinstance(raw, dict) or set(raw) != {"path", "type", "nullable"}:
+            raise ValueError("address schema field descriptor is invalid")
+        path = raw["path"]
+        if (
+            not isinstance(path, str)
+            or path in supplied
+            or raw["type"] != REQUIRED_FIELD_TYPES.get(path)
+            or type(raw["nullable"]) is not bool
+        ):
+            raise ValueError("required address schema fields differ")
+        supplied[path] = dict(raw)
+    if set(supplied) != set(REQUIRED_FIELD_TYPES):
+        raise ValueError("required address schema fields differ")
+    fingerprint_input = {
+        "version": SCHEMA_CONTRACT_VERSION,
+        "fields": [supplied[path] for path in sorted(supplied)],
+    }
+    return {
+        **fingerprint_input,
+        "fingerprint_sha256": sha256_value(fingerprint_input),
+    }
+
+
+def schema_contract_from_arrow(schema: Any) -> dict[str, Any]:
+    """Fingerprint only source fields whose bytes affect address serving."""
+    descriptors = []
+    for path, expected_type in sorted(REQUIRED_FIELD_TYPES.items()):
+        try:
+            field = (
+                schema.field(path)
+                if "." not in path
+                else _arrow_field_at_path(schema, path)
+            )
+        except (KeyError, ValueError) as exc:
+            raise ValueError(
+                f"required address schema field is missing: {path}"
+            ) from exc
+        actual_type = _canonical_arrow_type(field.type)
+        if actual_type != expected_type:
+            raise ValueError(
+                f"required address schema type differs for {path}: "
+                f"expected {expected_type}, got {actual_type}"
+            )
+        descriptors.append(
+            {"path": path, "type": actual_type, "nullable": bool(field.nullable)}
+        )
+    return canonical_schema_contract(descriptors)
 
 
 def listing_url(prefix: str, continuation_token: str | None = None) -> str:
@@ -132,6 +585,7 @@ def inventory_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
     path = source["uri"].removeprefix("s3://")
     parquet = pq.ParquetFile(path, filesystem=filesystem)
     metadata = parquet.metadata
+    schema_contract = schema_contract_from_arrow(parquet.schema_arrow)
     groups = []
     for group_index in range(metadata.num_row_groups):
         group = metadata.row_group(group_index)
@@ -185,7 +639,9 @@ def inventory_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
     if sum(group["rows"] for group in groups) != metadata.num_rows:
         raise ValueError(f"row-group counts do not reconcile for {source['uri']}")
     return {
-        **source,
+        "uri": source["uri"],
+        "etag": source["etag"],
+        "bytes": source["bytes"],
         "records": metadata.num_rows,
         "row_groups": metadata.num_row_groups,
         "selected_compressed_bytes": sum(
@@ -194,6 +650,7 @@ def inventory_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
         "selected_uncompressed_bytes": sum(
             group["selected_uncompressed_bytes"] for group in groups
         ),
+        "schema_contract": schema_contract,
         "groups": groups,
     }
 
@@ -258,6 +715,8 @@ def plan_contiguous_ranges(
         <= 0
     ):
         raise ValueError("row-group planning gates must be positive")
+    if max_tasks > 128:
+        raise ValueError("address map task count cannot exceed 128")
     tasks: list[dict[str, Any]] = []
     pending_ranges: list[dict[str, Any]] = []
     pending_rows = pending_compressed = pending_uncompressed = pending_groups = 0
@@ -331,6 +790,11 @@ def plan_contiguous_ranges(
                     {
                         "uri": source["uri"],
                         "etag": source["etag"],
+                        "source_bytes": source.get("bytes"),
+                        "source_records": source.get("records"),
+                        "source_row_groups": source.get(
+                            "row_groups", len(source["groups"])
+                        ),
                         "first_row_group": group["index"],
                         "last_row_group": group["index"],
                         "row_groups": 1,
@@ -420,6 +884,43 @@ def build_report(
     objects: list[dict[str, Any]],
     plan: dict[str, Any],
 ) -> dict[str, Any]:
+    if not objects:
+        raise ValueError("address inventory must contain at least one object")
+    schema_contract = objects[0].get("schema_contract")
+    if not isinstance(schema_contract, dict):
+        raise ValueError("address inventory object is missing its schema contract")
+    if any(source.get("schema_contract") != schema_contract for source in objects):
+        raise ValueError("required address schema differs across source objects")
+    if canonical_schema_contract(schema_contract.get("fields")) != schema_contract:
+        raise ValueError("address schema contract fingerprint differs")
+    validate_footer_facts(release, objects, schema_contract)
+    if "bbox" in plan:
+        raise ValueError("global address inventory cannot use a bbox-scoped plan")
+    gates = plan.get("gates") if isinstance(plan, dict) else None
+    if not isinstance(gates, dict) or set(gates) != {
+        "target_rows",
+        "max_selected_uncompressed_bytes",
+        "max_groups",
+        "max_tasks",
+    }:
+        raise ValueError("address map plan gates are invalid")
+    rebuilt_plan = plan_contiguous_ranges(
+        objects,
+        target_rows=gates["target_rows"],
+        max_selected_uncompressed_bytes=gates["max_selected_uncompressed_bytes"],
+        max_groups=gates["max_groups"],
+        max_tasks=gates["max_tasks"],
+    )
+    if rebuilt_plan != plan:
+        raise ValueError("address map plan differs from deterministic footer packing")
+    if (
+        not plan.get("safe_at_configured_task_count")
+        or plan.get("task_count") != len(plan.get("tasks", []))
+        or plan["task_count"] > gates["max_tasks"]
+        or plan["task_count"] > 128
+    ):
+        raise ValueError("address map plan exceeds its configured task cap")
+    plan = plan_with_task_digests(plan)
     groups = [group for source in objects for group in source["groups"]]
     exact_countries: Counter[str] = Counter()
     exact_country_rows: Counter[str] = Counter()
@@ -433,7 +934,7 @@ def build_report(
         "family": "addresses",
         "theme": "addresses",
         "type": "address",
-        "schema_version": release,
+        "schema_version": SCHEMA_CONTRACT_VERSION,
         "discovery": {
             "kind": "overture-s3-listing",
             "source": (
@@ -448,11 +949,14 @@ def build_report(
             for source in objects
         ],
     }
-    return {
+    source_inventory_sha256 = sha256_value(source_inventory)
+    report = {
         "schema": SCHEMA,
         "release": release,
         "selected_column_roots": sorted(SELECTED_COLUMN_ROOTS),
         "source_inventory": source_inventory,
+        "source_inventory_sha256": source_inventory_sha256,
+        "schema_contract": schema_contract,
         "totals": {
             "objects": len(objects),
             "source_bytes": sum(source["bytes"] for source in objects),
@@ -491,6 +995,8 @@ def build_report(
             "the plan proves deterministic range sizes, not hosted execution or output-shard skew",
         ],
     }
+    report["inventory_sha256"] = sha256_value(inventory_identity_payload(report))
+    return report
 
 
 def format_bytes(value: int) -> str:
