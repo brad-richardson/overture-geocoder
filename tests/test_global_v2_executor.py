@@ -142,21 +142,67 @@ def test_execute_rerun_requires_fresh_dispatch_with_explicit_prior_minutes():
         executor.validate_dispatch_attempt("execute", 2)
 
 
-def test_read_only_core_inspection_freezes_manifest_identity(tmp_path, monkeypatch):
-    manifest = {
-        "families": {
-            "forward": {"shard_count": 262},
-            "reverse": {"shard_count": 253},
-            "id": {"shard_count": 4096},
-        }
+def realistic_legacy_release_manifest() -> dict:
+    forward = {"href": "./shards/AA.db", "size_bytes": 11, "sha256": "a" * 64}
+    reverse = {"href": "./reverse/AA.db", "size_bytes": 12, "sha256": "b" * 64}
+    router = {"href": "./router.db", "size_bytes": 13, "sha256": "c" * 64}
+    dictionary = {
+        "href": f"./id-locator-dictionary-{'d' * 64}.json",
+        "size_bytes": 14,
+        "sha256": "d" * 64,
     }
+    identifiers = [
+        {
+            "href": f"./id-index/{prefix:03x}.parquet",
+            "size_bytes": 1,
+            "sha256": "e" * 64,
+        }
+        for prefix in range(16**3)
+    ]
+    verified = [
+        {"href": "./collection.json", "size_bytes": 21},
+        {"href": "./reverse-collection.json", "size_bytes": 22},
+        {"href": "./id-collection.json", "size_bytes": 23},
+        *[
+            {"href": item["href"], "size_bytes": item["size_bytes"]}
+            for item in [forward, reverse, router, dictionary, *identifiers]
+        ],
+    ]
+    return {
+        "schema_version": 1,
+        "version": "2026-07-18.0",
+        "overture_release": RELEASE,
+        "generated_at": "2026-07-19T12:00:00+00:00",
+        "families": {
+            "forward": {
+                "collection": "./collection.json",
+                "shard_count": 1,
+                "objects": [forward],
+                "router": router,
+            },
+            "reverse": {
+                "collection": "./reverse-collection.json",
+                "shard_count": 1,
+                "objects": [reverse],
+            },
+            "id": {
+                "collection": "./id-collection.json",
+                "format_version": 3,
+                "shard_count": 4096,
+                "total_size_bytes": 4096,
+                "objects": identifiers,
+                "integrity": "fixture",
+                "locator_dictionary": dictionary,
+            },
+        },
+        "verified_version_objects": verified,
+    }
+
+
+def test_read_only_core_inspection_and_request_validation_share_actual_schema(tmp_path):
+    manifest = realistic_legacy_release_manifest()
     path = tmp_path / "release-manifest.json"
     path.write_bytes(executor.canonical_json(manifest))
-    monkeypatch.setattr(
-        executor.v2_release_manifest,
-        "_validate_legacy_release",
-        lambda value, release: {"version": "2026-07-18.0"},
-    )
 
     evidence = executor.inspect_legacy_core(
         path,
@@ -167,6 +213,22 @@ def test_read_only_core_inspection_freezes_manifest_identity(tmp_path, monkeypat
     assert evidence["manifest_key"] == "2026-07-18.0/release-manifest.json"
     assert evidence["read_only"] is True
     assert evidence["id_shards"] == 4096
+    assert evidence["forward_shards"] == 1
+    assert evidence["reverse_shards"] == 1
+
+    request = build_request()
+    request["legacy_core"]["manifest_sha256"] = executor.sha256_file(path)
+    validated = executor.validate_legacy_core(path, request)
+    assert validated == {
+        "version": "2026-07-18.0",
+        "overture_release": RELEASE,
+        "manifest_key": "2026-07-18.0/release-manifest.json",
+        "manifest_sha256": executor.sha256_file(path),
+        "forward_shards": 1,
+        "reverse_shards": 1,
+        "id_shards": 4096,
+        "reused_not_rebuilt": True,
+    }
 
 
 def test_runtime_fingerprint_is_exact_and_stable():

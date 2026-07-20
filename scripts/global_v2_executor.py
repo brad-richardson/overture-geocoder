@@ -890,19 +890,19 @@ def validate_legacy_core(path: Path, request: dict[str, Any]) -> dict[str, Any]:
     actual_sha256 = sha256_file(path)
     if actual_sha256 != expected["manifest_sha256"]:
         raise ValueError("legacy core manifest SHA-256 differs from retained request")
-    manifest = v2_release_manifest._validate_legacy_release(  # noqa: SLF001
-        read_json(path), request["overture_release"]
+    inspected = inspect_legacy_core(
+        path,
+        expected_version=expected["version"],
+        expected_overture_release=request["overture_release"],
     )
-    if manifest["version"] != expected["version"]:
-        raise ValueError("legacy core version differs from retained request")
     return {
-        "version": manifest["version"],
-        "overture_release": request["overture_release"],
+        "version": inspected["version"],
+        "overture_release": inspected["overture_release"],
         "manifest_key": expected["manifest_key"],
         "manifest_sha256": actual_sha256,
-        "forward_shards": manifest["families"]["forward"]["shard_count"],
-        "reverse_shards": manifest["families"]["reverse"]["shard_count"],
-        "id_shards": manifest["families"]["id"]["shard_count"],
+        "forward_shards": inspected["forward_shards"],
+        "reverse_shards": inspected["reverse_shards"],
+        "id_shards": inspected["id_shards"],
         "reused_not_rebuilt": True,
     }
 
