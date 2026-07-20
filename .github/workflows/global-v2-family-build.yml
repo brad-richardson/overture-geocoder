@@ -533,7 +533,18 @@ jobs:
       estimated_total_runner_minutes: ${{ steps.matrix.outputs.estimated_total_runner_minutes }}
       estimated_total_cost_usd: ${{ steps.matrix.outputs.estimated_total_cost_usd }}
     steps:
-      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+      - name: Check out the trusted bounded-prefetch transport
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Retain only the trusted transport outside the producer checkout
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = '${{ github.sha }}'
+          install -m 0555 scripts/bounded_fragment_prefetch.py "$RUNNER_TEMP/bounded_fragment_prefetch.py"
+      - name: Check out the request-pinned producer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
         with:
           ref: ${{ fromJSON(inputs.request_json).producer_commit }}
           persist-credentials: false
@@ -600,18 +611,41 @@ jobs:
           jq -n --slurpfile a inventory/addresses.json --slurpfile p inventory/places.json \
             '[$a[0].plan.tasks[]|{family:"addresses",task_id:("addresses-map-"+("000"+(.index|tostring))[-3:]),index:.index}] + [$p[0].map_plan.tasks[]|{family:"places",task_id:("places-map-"+("000"+(.index|tostring))[-3:]),index:.index}]' \
             > control/expected-map.json
-          python scripts/global_v2_hosted.py complete-phase --contract control/contract.json \
-            --runtime control/runtime.json --phase map --expected-tasks control/expected-map.json \
-            --output-dir map-inputs/markers --output control/map-phase-wrapper.json
-          jq '.completion' control/map-phase-wrapper.json > control/map-phase.json
           python scripts/global_v2_hosted.py restore-map-planner-inputs \
             --contract control/contract.json --runtime control/runtime.json \
             --expected-tasks control/expected-map.json --output-root map-inputs \
             --output control/restored-map.json
+          jq '.phase.completion' control/restored-map.json > control/map-phase.json
           PREFIX="$(jq -r '.namespace.immutable_root+"/map/addresses/objects"' control/contract.json)"
-          FETCH="$(jq -cn --arg py "$(command -v python)" --arg script "$PWD/scripts/r2_fragment_fetch.py" \
+          RAW_FETCH="$(jq -cn --arg py "$(command -v python)" --arg script "$PWD/scripts/r2_fragment_fetch.py" \
             --arg bucket "$R2_BUCKET" --arg prefix "$PREFIX" --arg endpoint "$R2_ENDPOINT" \
             '[$py,$script,"--bucket",$bucket,"--prefix",$prefix,"--object-key","{object_key}","--output","{output}","--endpoint-url",$endpoint]')"
+          jq -s '[.[]|.fragments[]|{object_key,bytes}]' \
+            map-inputs/addresses/task-*/fragment-manifest.json \
+            > control/address-prefetch-manifest.json
+          PREFETCH_SOCKET="$RUNNER_TEMP/address-prefetch-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}.sock"
+          PREFETCH_CACHE="$RUNNER_TEMP/address-prefetch-cache-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          python "$RUNNER_TEMP/bounded_fragment_prefetch.py" serve \
+            --manifest control/address-prefetch-manifest.json \
+            --socket "$PREFETCH_SOCKET" --cache-dir "$PREFETCH_CACHE" \
+            --fetch-command-json "$RAW_FETCH" --workers 16 \
+            --max-cache-bytes 2000000000 &
+          PREFETCH_PID=$!
+          cleanup_prefetch() {
+            kill "$PREFETCH_PID" 2>/dev/null || true
+            wait "$PREFETCH_PID" 2>/dev/null || true
+          }
+          trap cleanup_prefetch EXIT
+          for _ in $(seq 1 60); do
+            test -S "$PREFETCH_SOCKET" && break
+            kill -0 "$PREFETCH_PID" 2>/dev/null || exit 1
+            sleep 1
+          done
+          test -S "$PREFETCH_SOCKET"
+          FETCH="$(jq -cn --arg py "$(command -v python)" \
+            --arg script "$RUNNER_TEMP/bounded_fragment_prefetch.py" \
+            --arg socket "$PREFETCH_SOCKET" \
+            '[$py,$script,"fetch","--socket",$socket,"--object-key","{object_key}","--output","{output}"]')"
           # Geocoder build suffixes are zero-based, while address plan sequences
           # are intentionally positive and one-based.
           BUILD_NUMBER="$(jq -r '.geocoder_build|split(".")[1]|tonumber+1' control/request.json)"
@@ -622,6 +656,9 @@ jobs:
             --plan-output-root plans --map-completion control/map-phase.json \
             --build-number "$BUILD_NUMBER" --address-fragment-fetch-command-json "$FETCH" \
             --output control/aggregate-result.json
+          wait "$PREFETCH_PID"
+          trap - EXIT
+          rmdir "$PREFETCH_CACHE"
       - name: Expose the exact reducer matrix
         id: matrix
         run: |
