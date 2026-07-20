@@ -139,9 +139,13 @@ class _CountDatabase:
         )
 
     def observe_scratch(self) -> int:
-        current = self.scratch_bytes()
+        physical = self.scratch_bytes()
+        database_file_bytes = self.path.stat().st_size
         pages = self.connection.execute("PRAGMA page_count").fetchone()[0]
         database_bytes = pages * self.page_size
+        current = physical - database_file_bytes + max(
+            database_file_bytes, database_bytes
+        )
         self.peak_scratch_bytes = max(self.peak_scratch_bytes, current)
         self.peak_database_pages = max(self.peak_database_pages, pages)
         self.peak_database_bytes = max(self.peak_database_bytes, database_bytes)

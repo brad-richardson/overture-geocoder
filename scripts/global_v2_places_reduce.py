@@ -247,9 +247,9 @@ class _LeafStore:
         self.connection.execute("PRAGMA synchronous=OFF")
         self.connection.execute("PRAGMA temp_store=FILE")
         self.connection.execute("PRAGMA cache_size=-65536")
-        page_size = self.connection.execute("PRAGMA page_size").fetchone()[0]
+        self.page_size = self.connection.execute("PRAGMA page_size").fetchone()[0]
         self.connection.execute(
-            f"PRAGMA max_page_count={REDUCE_MAX_SCRATCH_BYTES // page_size}"
+            f"PRAGMA max_page_count={REDUCE_MAX_SCRATCH_BYTES // self.page_size}"
         )
         self.connection.execute(
             """
@@ -280,7 +280,14 @@ class _LeafStore:
         )
 
     def observe_scratch(self) -> int:
-        current = self.scratch_bytes()
+        physical = self.scratch_bytes()
+        database_file_bytes = self.path.stat().st_size
+        database_bytes = (
+            self.connection.execute("PRAGMA page_count").fetchone()[0] * self.page_size
+        )
+        current = physical - database_file_bytes + max(
+            database_file_bytes, database_bytes
+        )
         self.peak_scratch_bytes = max(self.peak_scratch_bytes, current)
         if current > REDUCE_MAX_SCRATCH_BYTES:
             raise ValueError(
