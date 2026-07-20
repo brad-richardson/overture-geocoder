@@ -35,6 +35,7 @@ def test_workflow_requires_prepare_only_and_reproduces_request():
     value = text()
 
     assert 'test "$CONFIRMATION" = PREPARE_ONLY' in value
+    assert "--reduce-job-limit 82" in value
     assert value.count("global_v2_build_request.py build") == 2
     assert value.count("global_v2_build_request.py validate") == 1
     assert "cmp build-request/request.json build-request/request-repeat.json" in value
