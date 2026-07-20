@@ -612,7 +612,9 @@ jobs:
           FETCH="$(jq -cn --arg py "$(command -v python)" --arg script "$PWD/scripts/r2_fragment_fetch.py" \
             --arg bucket "$R2_BUCKET" --arg prefix "$PREFIX" --arg endpoint "$R2_ENDPOINT" \
             '[$py,$script,"--bucket",$bucket,"--prefix",$prefix,"--object-key","{object_key}","--output","{output}","--endpoint-url",$endpoint]')"
-          BUILD_NUMBER="$(jq -r '.geocoder_build|split(".")[1]' control/request.json)"
+          # Geocoder build suffixes are zero-based, while address plan sequences
+          # are intentionally positive and one-based.
+          BUILD_NUMBER="$(jq -r '.geocoder_build|split(".")[1]|tonumber+1' control/request.json)"
           python scripts/global_v2_hosted.py build-publish-plans \
             --contract control/contract.json --runtime control/runtime.json \
             --request control/request.json --address-inventory inventory/addresses.json \
