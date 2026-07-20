@@ -231,6 +231,71 @@ def test_read_only_core_inspection_and_request_validation_share_actual_schema(tm
     }
 
 
+def genuine_address_inventory() -> dict:
+    schema = executor.address_inventory.canonical_schema_contract(
+        [
+            {"path": path, "type": field_type, "nullable": True}
+            for path, field_type in executor.address_inventory.REQUIRED_FIELD_TYPES.items()
+        ]
+    )
+    group = {
+        "index": 0,
+        "rows": 2,
+        "all_compressed_bytes": 100,
+        "all_uncompressed_bytes": 200,
+        "selected_compressed_bytes": 80,
+        "selected_uncompressed_bytes": 160,
+        "country_min": "US",
+        "country_max": "US",
+        "exact_country": "US",
+        "bbox_xmin_min": -71.1,
+        "bbox_xmax_max": -71.0,
+        "bbox_ymin_min": 42.4,
+        "bbox_ymax_max": 42.5,
+        "bbox_stats_complete": True,
+    }
+    source = {
+        "uri": (
+            f"s3://{executor.address_inventory.BUCKET}/release/{RELEASE}/"
+            "theme=addresses/type=address/part-00000.parquet"
+        ),
+        "etag": "fixture-etag",
+        "bytes": 1_000,
+        "records": 2,
+        "row_groups": 1,
+        "selected_compressed_bytes": 80,
+        "selected_uncompressed_bytes": 160,
+        "schema_contract": schema,
+        "groups": [group],
+    }
+    plan = executor.address_inventory.plan_contiguous_ranges(
+        [source],
+        target_rows=100,
+        max_selected_uncompressed_bytes=1_000_000,
+        max_groups=10,
+        max_tasks=8,
+    )
+    return executor.address_inventory.build_report(RELEASE, [source], plan)
+
+
+def test_address_inventory_validator_accepts_genuine_digested_build_report():
+    report = genuine_address_inventory()
+    assert "task_digest_sha256" in report["plan"]["tasks"][0]
+    request = build_request()
+    source = request["families"]["addresses"]["source"]
+    source["inventory_sha256"] = report["inventory_sha256"]
+    source["schema_fingerprint_sha256"] = report["schema_contract"][
+        "fingerprint_sha256"
+    ]
+
+    assert executor.validate_address_inventory(report, request) == report
+
+    forged = copy.deepcopy(report)
+    forged["plan"]["tasks"][0]["task_digest_sha256"] = "f" * 64
+    with pytest.raises(ValueError, match="task digest differs"):
+        executor.validate_address_inventory(forged, request)
+
+
 def test_runtime_fingerprint_is_exact_and_stable():
     value = runtime()
     assert executor.validate_runtime(value) == value
