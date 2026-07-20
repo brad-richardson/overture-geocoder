@@ -1279,6 +1279,25 @@ def test_full_execution_budget_is_cumulative_and_gates_every_phase():
         executor.execution_budget(constrained, map_jobs=216, reduce_jobs=12)
 
 
+def test_prepared_per_family_reduce_cap_fits_current_global_budget():
+    contract = build_contract()
+    combined_reduce_jobs = (
+        build_request()["execution"]["reduce_job_limit"] * 2
+    )
+
+    value = executor.execution_budget(
+        contract, map_jobs=216, reduce_jobs=combined_reduce_jobs
+    )
+
+    assert combined_reduce_jobs == 164
+    assert value["estimated_total_runner_minutes"] == 49_860
+    assert value["estimated_total_cost_usd"] == 997.20
+    with pytest.raises(ValueError, match="cost/runtime gate"):
+        executor.execution_budget(
+            contract, map_jobs=216, reduce_jobs=combined_reduce_jobs + 1
+        )
+
+
 def _family_manifest(family: str, artifacts: list[dict]) -> dict:
     versions = (
         {

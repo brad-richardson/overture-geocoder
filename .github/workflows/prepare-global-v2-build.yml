@@ -151,6 +151,7 @@ jobs:
             --places-schema-fingerprint-sha256 "$PLACES_SCHEMA_FINGERPRINT_SHA256"
             --places-lineage-generation "$PLACES_LINEAGE_GENERATION"
             --producer-commit "$GITHUB_SHA"
+            --reduce-job-limit 82
           )
           if [[ "$(jq -r .sha256 <<<"$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST")" != null ]]; then
             REQUEST_ARGS+=(

@@ -115,7 +115,8 @@ def test_request_locks_complete_family_only_contract_without_dispatch():
     assert "families/places/head.phrp" in places["required_artifacts"]
 
     assert value["execution"]["source_task_limit"] == 128
-    assert value["execution"]["reduce_job_limit"] == 256
+    assert value["execution"]["reduce_job_limit"] == 82
+    assert value["execution"]["reduce_job_limit"] * 2 == 164
     assert value["execution"]["compute_tasks_are_not_shard_ids"] is True
     assert value["execution"]["state"] == "prepared-not-dispatched"
 

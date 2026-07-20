@@ -43,7 +43,10 @@ WORLD = (-180.0, -90.0, 180.0, 90.0)
 HEAD_RANKING = "quantized-confidence-stable-serving-order-v1"
 HEAD_PREFIX_POLICY = "normalized-token-prefix-lengths-v1"
 DEFAULT_SOURCE_TASK_LIMIT = 128
-DEFAULT_REDUCE_JOB_LIMIT = 256
+# The hosted executor applies this cap independently to addresses and Places.
+# Keep the prepared two-family total within both the 256-job matrix limit and
+# the retained 50,000-minute budget for the current 216-task global map plan.
+DEFAULT_REDUCE_JOB_LIMIT = 82
 
 
 def canonical_json(value: Any) -> bytes:
