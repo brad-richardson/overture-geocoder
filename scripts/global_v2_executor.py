@@ -851,20 +851,11 @@ def build_control_phase_completion(
 
 
 def validate_address_inventory(value: Any, request: dict[str, Any]) -> dict[str, Any]:
-    if not isinstance(value, dict):
-        raise ValueError("address inventory must be an object")
-    # Rebuild from the recorded immutable footer facts and planning gates.
-    rebuilt = address_inventory.build_report(
-        value.get("release"), value.get("objects", []), value.get("plan", {})
-    )
-    if rebuilt != value:
-        raise ValueError("address inventory differs from deterministic footer facts")
+    identity = address_inventory.validate_canonical_inventory(value)
     expected = request["families"]["addresses"]["source"]
-    if value["inventory_sha256"] != expected["inventory_sha256"]:
+    if identity["inventory_sha256"] != expected["inventory_sha256"]:
         raise ValueError("address inventory digest differs from retained request")
-    if value["schema_contract"]["fingerprint_sha256"] != expected[
-        "schema_fingerprint_sha256"
-    ]:
+    if identity["schema_fingerprint_sha256"] != expected["schema_fingerprint_sha256"]:
         raise ValueError("address schema fingerprint differs from retained request")
     if value["release"] != request["overture_release"]:
         raise ValueError("address inventory release differs from retained request")
