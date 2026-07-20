@@ -81,6 +81,10 @@ def test_workflow_uses_real_resumable_boundaries_and_dynamic_matrices():
     assert "needs: [preflight, aggregate-plan, finalize-slice]" in value
     assert "estimated_total_runner_minutes" in value
     assert "Combined reducer tasks" in value
+    assert (
+        "'.geocoder_build|split(\".\")[1]|tonumber+1' control/request.json"
+        in value
+    )
 
 
 def test_actions_disk_and_preview_dependencies_are_exactly_pinned():
