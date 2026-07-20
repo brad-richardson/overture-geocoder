@@ -213,14 +213,19 @@ jobs:
             local id="$1"
             local output="$2"
             local code
-            for attempt in 1 2 3 4 5; do
+            # A newly deployed workers.dev route can take longer than the old
+            # ~25-second window to become reachable (Cloudflare 1042/1104).
+            # Keep the retry bounded and fail closed after about two minutes.
+            for attempt in $(seq 1 12); do
               code=$(curl -sS --max-time 30 -o "$output" -w '%{http_code}' \
                 "${PREVIEW_URL}/id/${id}" || true)
               if [ "$code" = "200" ]; then
                 return 0
               fi
               echo "Attempt ${attempt}: /id/${id} returned ${code}: $(cat "$output" 2>/dev/null || true)"
-              sleep 5
+              if [ "$attempt" -lt 12 ]; then
+                sleep 10
+              fi
             done
             return 1
           }

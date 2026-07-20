@@ -251,6 +251,7 @@ def build_artifact(
         physical_order = posting_layout
     else:
         physical_order = token_order
+    items: list[tuple[int, tuple[int, int]]] | None = None
     for token in physical_order:
         items = sorted(exact[token].items())
         encoded = encode_posting_items(items)
@@ -265,6 +266,7 @@ def build_artifact(
 
     lexicon = bytearray()
     blocks = []
+    group: list[tuple[str, int, int, int]] | None = None
     for first in range(0, len(entries), block_entries):
         group = entries[first : first + block_entries]
         block_start = len(lexicon)
@@ -288,6 +290,12 @@ def build_artifact(
                 "entries": len(group),
             }
         )
+    token_count = len(entries)
+    # The inverted map and its per-token item list dominate writer memory and
+    # are no longer needed after postings/lexicon encoding. Release them before
+    # materializing the record side of the artifact so the two large phases do
+    # not overlap at their peaks.
+    del exact, entries, physical_order, token_order, items, group
 
     records = bytearray()
     # The records blob is laid out in global serving-rank order (-qconf, doc) —
@@ -310,7 +318,9 @@ def build_artifact(
             raise ValueError("record section exceeds 32-bit offset format")
         record_slots[doc_id] = RECORD_INDEX.pack(len(records), len(encoded))
         records += encoded
+    del rank_layout
     record_index = bytearray(b"".join(record_slots))
+    del record_slots
 
     projection_variants = {
         "locator_only": {
@@ -335,17 +345,18 @@ def build_artifact(
                 encode_projection_fields(place, variant["fields"])
             )
 
+    record_bytes = len(records)
     components = {
-        "lexicon": bytes(lexicon),
-        "postings": bytes(postings),
-        "record_index": bytes(record_index),
-        "records": bytes(records),
+        "lexicon": lexicon,
+        "postings": postings,
+        "record_index": record_index,
+        "records": records,
     }
     directory = {
         "schema_version": 1,
         "tokenizer_version": TOKENIZER_VERSION,
         "record_count": len(ordered),
-        "token_count": len(entries),
+        "token_count": token_count,
         "cell_degrees": cell_degrees,
         "field_bits": FIELD_BITS,
         "lexicon_blocks": blocks,
@@ -381,7 +392,7 @@ def build_artifact(
             dst.write(data)
     elapsed = time.perf_counter() - started
     size = output.stat().st_size
-    fixed_without_records = size - len(records)
+    fixed_without_records = size - record_bytes
     for variant in projection_variants.values():
         variant["artifact_bytes_if_substituted"] = (
             fixed_without_records + variant["records_bytes"]
@@ -395,7 +406,7 @@ def build_artifact(
     return ordered, {
         "build_seconds": elapsed,
         "places": len(ordered),
-        "tokens": len(entries),
+        "tokens": token_count,
         "artifact_bytes": size,
         "bytes_per_place": size / len(ordered),
         "objects": 1,

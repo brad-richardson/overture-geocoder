@@ -66,6 +66,8 @@ class ObjectInfo:
 class ObjectStore(Protocol):
     def head(self, key: str) -> ObjectInfo | None: ...
 
+    def list_prefix(self, prefix: str) -> list[str]: ...
+
     def upload(self, source: Path, key: str, sha256: str) -> None:
         """Create ``key`` atomically, raising FileExistsError if it exists."""
         ...
@@ -92,6 +94,15 @@ class FilesystemStore:
         metadata = path.with_name(f"{path.name}.metadata.json")
         payload = json.loads(metadata.read_text()) if metadata.exists() else {}
         return ObjectInfo(path.stat().st_size, payload.get(SHA_METADATA_KEY))
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        return sorted(
+            path.relative_to(self.root).as_posix()
+            for path in self.root.rglob("*")
+            if path.is_file()
+            and not path.name.endswith(".metadata.json")
+            and path.relative_to(self.root).as_posix().startswith(prefix)
+        )
 
     def upload(self, source: Path, key: str, sha256: str) -> None:
         destination = self._path(key)
@@ -172,6 +183,56 @@ class S3Store:
         payload = json.loads(result.stdout)
         metadata = payload.get("Metadata") or {}
         return ObjectInfo(int(payload["ContentLength"]), metadata.get(SHA_METADATA_KEY))
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        if not isinstance(prefix, str) or not prefix or prefix.startswith("/"):
+            raise ValueError("R2 list prefix must be a non-empty relative key prefix")
+        keys: list[str] = []
+        seen_keys: set[str] = set()
+        seen_tokens: set[str] = set()
+        continuation: str | None = None
+        while True:
+            arguments = [
+                "list-objects-v2",
+                "--bucket",
+                self.bucket,
+                "--prefix",
+                prefix,
+                "--max-keys",
+                "1000",
+                "--output",
+                "json",
+                "--no-paginate",
+            ]
+            if continuation is not None:
+                arguments.extend(["--continuation-token", continuation])
+            result = self._run(arguments, capture=True)
+            try:
+                payload = json.loads(result.stdout)
+            except json.JSONDecodeError as exc:
+                raise ValueError("R2 list page is not JSON") from exc
+            contents = payload.get("Contents", [])
+            truncated = payload.get("IsTruncated")
+            if not isinstance(contents, list) or type(truncated) is not bool:
+                raise ValueError("R2 list page has invalid contents/truncation fields")
+            for item in contents:
+                key = item.get("Key") if isinstance(item, dict) else None
+                if not isinstance(key, str) or not key.startswith(prefix):
+                    raise ValueError("R2 list result escaped its requested prefix")
+                if key in seen_keys:
+                    raise ValueError("R2 paginated listing contains a duplicate key")
+                seen_keys.add(key)
+                keys.append(key)
+            token = payload.get("NextContinuationToken")
+            if not truncated:
+                if token not in (None, ""):
+                    raise ValueError("R2 terminal list page unexpectedly has a token")
+                break
+            if not isinstance(token, str) or not token or token in seen_tokens:
+                raise ValueError("R2 truncated list page has no fresh continuation token")
+            seen_tokens.add(token)
+            continuation = token
+        return sorted(keys)
 
     def upload(self, source: Path, key: str, sha256: str) -> None:
         command = [

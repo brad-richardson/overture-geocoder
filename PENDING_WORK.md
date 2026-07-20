@@ -1,10 +1,481 @@
-# Pending Work — 2026-07-17
+# Pending Work — 2026-07-19
 
 This is the active roadmap. Completed PR history is intentionally omitted unless
 its result constrains the next decision. The implementation baseline is
-`699696c` (`main` after #98); the current remote evidence is recorded in
-`benchmarks/2026-07-17-remote-address-places-r2-evidence.md`, updated by the
-2026-07-16 first end-to-end dispatch of both measurement workflows.
+`775ad21` (`main` after #125). The older 2026-07-17 sequencing and evidence log
+remain below for provenance; this handoff supersedes their stale NEXT labels.
+
+## Executor implementation complete — 2026-07-19
+
+The bounded global-v2 family executor is implementation- and review-complete
+on `agent/global-v2-executor`. No planet build, production catalog write, R2
+data write, Worker deployment, or authentication flow has been started from
+this branch.
+
+- The address and Places map/reduce/head paths are disk-bounded, stream remote
+  fragments one at a time, validate exact completion sets and remote SHA/byte
+  evidence, preserve permanent sticky lineage, and perform one final streaming
+  whole-slice verification.
+- The hosted workflow uses exact typed execution confirmation, create-only
+  immutable writes, serialized family matrices under one concurrency cap,
+  resumable phase markers, step-scoped secrets, an isolated preview Worker,
+  signed family-specific smoke queries, and verified preview cleanup. Execute
+  mode rejects GitHub reruns; recovery is a fresh dispatch with cumulative
+  prior runner minutes and a renewed confirmation binding every budget input.
+- The read-only core preflight validates the exact reusable unpromoted core
+  `2026-07-18.0` before its manifest identity can enter the canonical request.
+  The executor never writes `v2/catalog.json` or `v2/releases/*`.
+- Final validation is green: 1,045 Python tests; Rust formatting, clippy, 103
+  core tests, 13 integration tests, 115 Worker tests, one doctest, and the wasm
+  check; changed-file Ruff; actionlint; and `git diff --check`.
+- Independent whole-diff and Worker/publication reviews found no remaining
+  dispatch blocker. Cross-root v1/v2 retention remains a hard
+  **before-publication** task; do not run exceptional cleanup against the
+  retained `2026-07-18.0` core while the unpublished family build exists.
+
+Next: land this implementation through the PR/review/green-CI/merge loop. After
+merge, dispatch only the credentialed read-only core preflight and request
+preparation/dry-run evidence. Present the exact request hash, versions, task and
+reducer matrices, concurrency, runner-minute/cost caps, and storage/verification
+plan for operator sign-off. Do **not** dispatch execute mode before that sign-off.
+
+## Paused executor handoff — 2026-07-19
+
+Work paused at the operator's request before quota exhaustion. No global build,
+R2 write, Worker deployment, authentication flow, or v2 catalog publication was
+started. The worktree is intentionally dirty on
+`agent/global-v2-executor` (tracking `origin/main`); none of the executor work
+below is committed or pushed yet.
+
+### Merged foundation
+
+- PR #125, `Prepare bounded global v2 family build`, merged green as
+  `775ad21ced3aed565432404ff2c70f97364834bb`. It closed the pre-executor
+  trust/scaling gaps: exact retained request lineage; canonical Places/address
+  inventories; bounded mappers; strict address WKB and task identity; fragment,
+  spill, Worker memory/cache, and readiness caps; streaming family finalization;
+  and direct Worker SHA/byte verification of `head.phrp`.
+- The foundation PR's seven CI jobs passed. Its one CI correction replaced 12
+  `workflow_dispatch` inputs (GitHub permits at most 10) with one validated
+  `family_inputs_json` input.
+
+### Canonical planet preflight evidence
+
+Read-only canonical inventories passed locally with CPython 3.11.14,
+PyArrow 25.0.0, NumPy 2.3.5, and
+`.github/requirements-hosted-rowgroup.txt` for Overture `2026-06-17.0`:
+
+- Addresses: inventory SHA
+  `6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e`,
+  source-inventory SHA
+  `aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37`,
+  schema fingerprint
+  `05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0`,
+  473,576,753 rows, 32 objects, 8,704 row groups, and 127 bounded map tasks.
+  The largest task has 3,999,690 rows and about 296.8 MB selected uncompressed
+  bytes. Total selected compressed input is about 16.7 GB.
+- Places: inventory SHA
+  `b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff`,
+  schema fingerprint
+  `49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a`,
+  75,642,289 rows, 16 objects, 5,120 row groups, and 89 bounded map tasks.
+  The largest task has 999,805 rows (median 987,454).
+- Both matrices fit the retained 128-source-task family cap. No shard creation
+  was dispatched.
+
+### Reusable legacy core
+
+- Successful dry-run Actions run `29624600543` built and remotely finalized
+  immutable, unpromoted legacy core `2026-07-18.0` from the same Overture
+  release `2026-06-17.0` at checkout
+  `db97c0bc7b0c1d515e26bf24b98e666caea12e21`. It verified 262 forward shards,
+  253 reverse shards, and all 4,096 ID shards; promotion was deliberately
+  skipped.
+- The exact SHA of `2026-07-18.0/release-manifest.json` was not present in the
+  Actions log and the unpromoted prefix is not publicly readable. The eventual
+  credentialed **read-only** workflow preflight must download it from R2,
+  validate version/release/completeness, compute its SHA-256, and freeze that
+  identity in the retained request. Do not authenticate interactively or infer
+  the digest.
+
+### Local executor implementation (uncommitted)
+
+- Address plan/reducer modules now validate the exact 127-task completion set,
+  stream remote fragments one at a time through an argv-only fetch adapter,
+  derive stable sticky partitions, assign replaceable reduce jobs, build the
+  existing `.aidx`/`.adat` format, and finalize the Worker collection plus exact
+  global duplicate fanout. Predecessor validation permits maximum-hash-bit
+  growth and row-cap retuning while forbidding bit-depth decreases and retaining
+  sticky split IDs.
+- Address reduce jobs were changed from heaviest-leaf scattering to balanced
+  contiguous `(country, hash_start)` ranges. In the regression fixture, a broad
+  fragment spanning 16 leaves is referenced by at most two adjacent jobs rather
+  than up to 16 jobs, avoiding planet-scale remote download amplification.
+- Places plan/reducer/head modules implement exact map fan-in, sticky
+  `world-quadkey-v1` planning, replaceable reduce jobs, streaming remote fragment
+  reads, existing PCSH/PCAT output, and a bounded two-pass global PHRP head.
+  Predecessor work was being relaxed so maximum level can grow, row caps can be
+  retuned, and tokenizer rotation does not discard geometric split history.
+- `global_v2_executor.py` and `finalize_rebuild.py` contain retained-request,
+  runtime, cost/coverage, exact task/phase completion, immutable slice publish,
+  and remote-verification primitives. The first draft's roughly four full-fleet
+  readbacks were identified as a scaling bug; keep per-upload readback plus one
+  final whole-slice verification, followed only by exact key listing and marker
+  verification.
+- The Worker and `v2_release_manifest.py` locally support an isolated preview
+  catalog only at `smoketest-v2/<safe-run-id>/catalog.json`, only with
+  `ENVIRONMENT=smoke|preview`. Its release manifest is a sibling preview object,
+  preview history is forbidden, and no object is written under `v2/releases/`
+  or `v2/catalog.json`.
+- New/modified executor files include
+  `scripts/global_v2_{address_plan,address_reduce,places_plan,places_reduce,places_head,executor}.py`,
+  `scripts/r2_fragment_fetch.py`, `scripts/finalize_rebuild.py`, the Worker v2
+  preview changes, and their focused tests. `PENDING_WORK.md` also contained
+  pre-existing local edits; stage files explicitly when resuming.
+
+### Exact paused validation state
+
+- Latest focused run: 50 passed, 4 failed across address executor, Places
+  executor, control-plane executor, R2 fetch, and v2 release-manifest tests.
+- Two failures are the same Places issue: `execute_reduce_job`'s new peak
+  scratch/workspace evidence does not yet satisfy `validate_reduce_report`.
+  Align producer and validator, retaining hard scratch/workspace caps.
+- Two failures are the same R2 key issue: `safe_key` must reject empty and dot
+  path components (`a//b`, `a/./b`) in addition to absolute paths, `..`, and
+  shell metacharacters.
+- The manual dispatch workflow, preview Worker deploy/query/cleanup wiring,
+  read-only legacy-core SHA preflight, and tests for that workflow were not yet
+  added. Therefore this branch is **not dispatch-ready** and should not be
+  pushed as a PR until those are complete and reviewed.
+
+### Resume order and parallel ownership
+
+These lanes can resume in parallel; only the final review/PR depends on all
+three:
+
+Global-v2 execution resume is always a **fresh `workflow_dispatch`**, never
+GitHub's **Re-run jobs** action. Execute mode accepts only
+`github.run_attempt == 1`. For a resume, retain the exact request, enter the
+cumulative minutes spent by every earlier attempt as `prior_runner_minutes`,
+and regenerate the typed confirmation: it binds the request and mode plus
+`max_parallel`, `max_total_runner_minutes`, `max_estimated_cost_usd`, and
+`prior_runner_minutes`. This prevents a rerun from silently reusing a zero
+prior-minute budget.
+
+1. **Places lane:** fix the two scratch-evidence tests; finish and test relaxed
+   predecessor compatibility (maximum-level growth, row-cap and tokenizer
+   changes; reject depth decrease/scheme/min-level drift); retain exact remote
+   SHA/byte checks and peak disk evidence.
+2. **Orchestration lane:** fix `safe_key`; finish a main-only, typed-confirmation
+   workflow with resumable phases, create-only R2 writes, exact completion
+   matrices, pinned Python/PyArrow dependencies, a pre-job free-disk gate, and
+   isolated preview Worker smoke/cleanup. Record GitHub runner image provenance,
+   but do not make staged `ImageVersion` rollout nondeterministically break one
+   matrix unless that non-resumability is explicit. If reusing
+   `jlumbroso/free-disk-space`, pin commit
+   `54081f138730dfa15788a46383842cd2f914a1be`, never `@main`.
+3. **Address lane:** finish the bounded bucket-count refactor and rerun locality,
+   predecessor, reducer, duplicate-fanout, replay, and remote-streaming tests.
+4. Run the full Python/Rust/wasm/actionlint/Ruff/diff-check suite, then perform an
+   independent whole-diff review focused on permanent lineage, remote exact-set
+   verification, hosted disk/time limits, create-only semantics, and zero
+   production catalog writes.
+5. Use the standard PR loop: explicitly exclude unrelated local pending-work
+   edits from the implementation commit as appropriate, push, open the PR,
+   address review, require green CI, and merge.
+6. After merge, run only the credentialed read-only preflight needed to obtain
+   the core manifest SHA and build the exact canonical request. Present the
+   request hash, slice/build versions, 127+89 map matrices, reducer counts,
+   concurrency, runner-minute/cost caps, and expected storage/verification work
+   for operator sign-off. **Do not dispatch the planet build before that explicit
+   sign-off.**
+
+## Current handoff (2026-07-19)
+
+### Completed today
+
+- USA-scale evidence closed green against real Overture `2026-06-17.0` data:
+  18,014,140 full-CONUS Places rows produced 13 deterministic serving shards
+  and a verified 2,079,901,541-byte family; all 33 US-dominant address tasks
+  reconciled 130,996,768 input rows to 128,285,220 retained rows and
+  16,830,144,071 fragment bytes. The combined 18,910,045,612-byte signal passed
+  the 40 GB gate. The address scope is deliberately an upper bound, not an
+  exact row-filtered US export, and the result was non-promoting.
+- Atomic v2 release/catalog composition merged in #120. A v2 release binds one
+  exact legacy divisions/ID core plus optional same-Overture-release family
+  manifests. Public responses carry both `overture_release` and
+  `geocoder_build`; `v2/catalog.json` is separate from the historical v1 root.
+- Stable Places ownership merged in #121: `world-quadkey-v1`, level 6-12,
+  1.5M-row split cap, stable `q-{quadkey}` identities, and sticky split history.
+  Historical ordinal shards remain readable but are not the v2 layout.
+- Stable address ownership and strict serving artifacts merged in #122:
+  `country-fnv1a-high-bits-v1`, one-million-row split cap, complete normalized
+  eight-field key ownership, sticky splits, explicit empty ranges, and separate
+  `.aidx`/`.adat` Worker objects.
+- Unified v2 Worker API merged in #123 and deployed successfully:
+  `/v2/forward`, `/v2/reverse`, and `/v2/features/:gers_id`. The former
+  `/address`, `/__address-page-spike`, and `/__places-page-spike` routes and
+  their isolated smoke deployments were removed. There is no batch endpoint.
+  The first address capability is structured exact forward; reverse currently
+  serves divisions; Places supports bounded routed or global-head forward.
+- Global-build contract preparation merged in #124. The deterministic request
+  records families-only scope, reuses the legacy divisions/ID core, keeps
+  compute-task numbering separate from permanent shard identity, requires a
+  global Places `head.phrp`, and makes publication a separate explicit step.
+  The preparation workflow has no cloud credentials or data-plane action. It is
+  a baseline contract, not yet a complete executable request: it still needs to
+  pin the exact core identity, slice namespace, inventories/schema fingerprints,
+  predecessor lineage, and global-head policy.
+- Full local validation passed (861 Python tests plus Rust fmt/clippy/tests and
+  actionlint), both PR CI suites were green, the final main-head Worker deploy
+  and post-deploy verification passed, and the isolated v3 ID smoke queried
+  current and historical IDs then cleaned up its Worker/R2 state.
+- No global Places/address shard build was dispatched and no v2 catalog was
+  published. Live v2 routes correctly fail closed with structured 503
+  `release_unavailable` until that happens.
+
+### Product and storage decisions currently in force
+
+1. Build Places and addresses as a new families-only slice; do not rebuild or
+   reshard divisions for v2. The v2 release references the verified historical
+   core cryptographically, but retention is not safe until v1 cleanup also
+   protects every core/slice prefix reachable from the v2 catalog.
+2. Serving partitions are data contracts; map/reduce job assignments are
+   replaceable execution details and must never appear as shard identities.
+3. Places forward cannot be advertised unless both `catalog.pcat` and the
+   global `head.phrp` occur in the hashed family artifact set.
+4. Address structured lookup preserves every duplicate/ambiguous exact-key
+   candidate up to the explicit 512-result safety cap. Free-text address search
+   and address/POI reverse need separate later indexes.
+5. Public `poi` is canonical; `place` remains an input alias. The API borrows a
+   standard forward/reverse/features shape but does not claim wire compatibility
+   with Mapbox, TomTom, or Nominatim.
+6. A build first creates an unpublished immutable slice. Constructing and
+   swapping `v2/catalog.json` is a later reviewable operation, not a side effect
+   of the data build.
+
+### Next: first global v2 family build
+
+The foundations are resolved, but several public/lineage decisions and the
+global data-plane executor are not dispatch-ready. The existing
+`global_build_manifest.py` numbered reduce partitions predate stable family
+ownership and must not be treated as serving shard IDs.
+
+#### Must close before dispatching the global build
+
+1. Pin the exact legacy core version and manifest SHA, its matching Overture
+   release, and the immutable `slice-*` source prefix in the request. The first
+   family build cannot select an arbitrary newer Overture release while also
+   reusing core: v2 composition intentionally requires all families and core to
+   share one Overture release.
+2. Freeze canonical source inventories and real schema fingerprints (required
+   columns and types), not a release string labelled `schema_version`.
+3. Make rejection accounting total and named. Addresses must reject/reconcile
+   blank or invalid country and invalid UUID values before stable planning.
+   Places must reject/reconcile invalid/missing GERS IDs, geometry/coordinates,
+   names, and status; production code must never synthesize `__row_N` IDs or
+   coerce missing coordinates to `(0,0)`.
+4. Publish `families/addresses/partition-plan.json` as a hashed durable artifact.
+   Stamp an explicit null predecessor family-manifest digest on build 1 and
+   require the exact latest compatible predecessor thereafter. Bind the same
+   predecessor identity for Places even though `catalog.pcat` already carries
+   its sticky split cells.
+5. Freeze the global-head admission/ranking version and its minimum-candidate,
+   famous-cap, result-cap, and predecessor/provenance settings in the request
+   and head directory.
+6. Implement bounded map tasks that emit reconciled, content-addressed maximum-
+   level spatial/hash fragments, then aggregate exact retained counts and derive
+   stable Places and address serving partition plans.
+7. Assign those stable partitions to at most 256 replaceable reduce jobs; build
+   the existing `.pcsh`, `.aidx`, and `.adat` formats and the global Places
+   head without coupling object names to runner topology.
+8. Verify every remote object size/hash and family total, finalize an
+   unpublished families-only slice, and smoke `/v2/forward` through the real
+   Worker using an isolated preview Worker/bucket or a new guarded v2 preview
+   catalog mechanism. No v2 catalog override exists today.
+9. Inspect global completeness, rejection accounting, skew, head relevance,
+   bytes, build time, range-read caps, and cleanup evidence. Only then construct
+   a v2 release/catalog candidate. Promotion remains a separate human decision.
+
+#### Must close before first publication
+
+1. Implement v2 publication and recovery: create-only uploads plus readback for
+   the slice manifest and `v2/releases/{build}/release.json`; backup and
+   `If-Match` compare-and-swap for `v2/catalog.json`; exact readback, live smoke,
+   CAS rollback, and crash recovery. Candidate generation alone is not a
+   publisher, and unguarded `aws s3 cp` is not acceptable for the mutable root.
+2. Disable version-prefix deletion until retention walks both catalog roots and
+   transitively protects every core and family slice referenced by every live or
+   rollback v2 release. Wait out both catalog caches before object deletion.
+3. Decide `/v2/features/:gers_id` semantics before discovery. It currently
+   returns bbox/locator metadata, not hydrated Overture geometry/properties;
+   emits a non-GeoJSON bbox object instead of `[xmin,ymin,xmax,ymax]`; and can
+   silently degrade locator failure to a bbox-only 200. Either rename it to an
+   ID/locator surface or explicitly version the partial/full-feature contract,
+   then make locator status and historical-ID semantics unambiguous.
+4. Expose `X-Geocoder-Build` and `X-Overture-Release` through CORS, not only
+   `X-Data-Version`.
+5. Carry explicit runtime artifact identities for both Places `catalog.pcat`
+   and `head.phrp` in the v2 release instead of deriving the head as an
+   unrepresented sibling key.
+6. Define the v2 rollback/retention depth in the publisher. The Worker accepts
+   at most 64 catalog releases; candidate construction currently has no cap.
+7. Prove exact retained-row-to-leaf coverage, measure global address duplicate
+   fanout against the 512 response cap, and review global-head/boundary recall
+   evidence before the human catalog-swap decision.
+
+### Additional findings — independent contract review of #120–#124 (2026-07-19)
+
+A second read-only review confirmed the lists above and adds the following.
+Items 1–3 must close before the first global build dispatch because they are
+baked into permanent split lineage; the rest before first publication.
+
+Frozen-parameter sign-offs (before dispatch):
+
+1. Places `maximum_level` is frozen at 12 by a lineage *equality* check
+   (`build_places_region_shards.py:293`), and a level-12 cell over the 1.5M cap
+   aborts planning with no escape hatch (`places_partition.py:150-154`) even
+   though the format supports level 15. Before the first build freezes this,
+   either count the densest global level-12 cells against the cap on
+   `2026-06-17.0`, or relax lineage to allow `maximum_level` to grow.
+2. Address `maximum_hash_bits` is likewise frozen by lineage equality
+   (`address_partition.py:277-282, 361-362`), so the current *default* of 16
+   silently becomes the permanent per-country split ceiling. Pin it as a
+   deliberate value or allow growth. Related cliff: any single exact key with
+   more than 1M duplicate rows shares one full hash, can never split, and
+   hard-fails the build with no post-publish tuning knob.
+3. Places lineage requires exact `tokenizer_version` equality
+   (`build_places_region_shards.py:288`) although splits depend only on row
+   counts and geometry, and the Worker itself reads a legacy tokenizer. As
+   written, any tokenizer rotation discards split history. Relax before the
+   first history exists.
+
+Client-visible surface (before publication, in addition to the features fix
+above):
+
+4. Split `capability_unavailable` into distinct codes for 503 temporary
+   (family/index absent — retry later) and 400 structural (free-text address,
+   reverse poi/address — do not retry); clients cannot branch on it today.
+5. Decide and set `Cache-Control` for every v2 response including errors —
+   `versioned_response` and `json_error` currently set none, so intermediaries
+   may cache across a catalog flip or cache the pre-publish 503 through the
+   publish itself.
+6. Remove or gate `properties.source` (`source_object_index`/`source_row_group`
+   /`source_row_index`, `v2.rs:794-798`) — undocumented internal parquet
+   coordinates in structured-address responses; reconsider `filename`/
+   `overture_path` as permanent public feature fields.
+7. Make `metadata` deterministic and stable: `metadata.types` serializes from a
+   `HashSet` (nondeterministic order), and the degraded places-unavailable path
+   drops `types`/`proximity` entirely.
+8. Document the full error taxonomy (`capability_unavailable`,
+   `candidate_overflow`, `invalid_request`, 413/404 statuses) and every
+   response field (`ambiguous`, `coverage`, `address_levels`, `source`) in
+   `docs/api-v2.md` before the surface freezes; also validate
+   `overture_release` format in the release manifest/catalog (today only
+   `_require_string`, vs `RELEASE_RE` in the build request).
+9. Pick one address normalization version string before it appears in public
+   responses: v2 renamed `nfc-uniws-asciilower-1` to
+   `nfc-uniws-collapse-ascii-lower-1` with zero behavior change
+   (`address.rs:39-40`), spending the version signal on cosmetics.
+10. Reverse currently promises "zero or one feature" (`docs/api-v2.md`); drop
+    the wording or scope it to divisions now, before POI/address reverse breaks
+    the cardinality and homogeneous-props shape.
+11. `relevance` is incommensurable across families (divisions `importance/2`
+    vs POI `confidence`) yet is the merged sort key and a public field; at
+    minimum document per-type semantics before clients depend on it.
+12. Strengthening publication item 5: the `head.phrp` requirement is enforced
+    only in `build_release_manifest` (`v2_release_manifest.py:467`), not in
+    `validate_release_manifest` or `verify_release_sources` — catalog admission
+    re-proves sources precisely because it distrusts self-digests, yet would
+    admit a hand-authored release advertising Places forward without a head.
+    Enforce the dependency in the verify path, not only the constructor.
+
+Rollback semantics — DECIDED 2026-07-19 (owner): **roll-forward-only.**
+Reverting a bad `latest` means publishing a strictly newer `geocoder_build`
+that repeats the prior known-good composition; there is no active/rollback
+pointer in `CATALOG_SCHEMA`, and the builder's monotonicity check
+(`v2_release_manifest.py:822-823`) plus the Worker's monotonic-descending
+validation stay as-is. Publication item 1's "CAS rollback" must therefore be
+implemented as roll-forward re-publication, not backup restoration — the
+backup exists for crash recovery of an interrupted swap, not for reinstating
+an older `latest`. Rationale: the v2 client surface is tiny pre-adoption and a
+brief blip during roll-forward is acceptable.
+
+Core reuse and storage audit (2026-07-19, follow-up question):
+
+- Divisions and ID shards are preserved as-is. The v2 release binds the legacy
+  core at its existing v1 prefix — `{legacy_version}/collection.json`,
+  `reverse-collection.json`, `id-collection.json`, `router.db`, and the exact
+  `id-index/{000..fff}.parquet` set (`v2_release_manifest.py:189-197,
+  572-580`) — and the Worker serves v2 through `release.core_version()` via
+  the same loader path and objects as v1. Nothing rebuilds, reshards, or
+  copies the core; `v2/` holds only small JSON metadata.
+- No shard type is ever written to two locations. Family artifacts are
+  referenced in place under their slice prefix (entrypoint keys are rewritten
+  to `{source_version}/…`, never copied), and the ID index exists exactly once
+  per core version.
+- The one real duplicate-storage vector is **cross-root version skew, not
+  copying**: v1 rebuilds a full new core (including 4,096 ID parquets)
+  monthly, and v1 retention keeps only the newest `--keep` versions
+  (`prune_catalog.py`). Because a v2 release must share one Overture release
+  across core and families, v2 cannot adopt a newer monthly core without
+  rebuilding the families from that same Overture release. So either (a)
+  families are rebuilt each month and both roots converge on one core
+  generation, or (b) v2 pins an aging core that retention must protect after
+  it falls out of v1's keep window — roughly one extra full core generation of
+  R2 storage per month of lag. Bounded and acceptable short-term, but the
+  publisher/retention design (publication item 2) should surface this skew
+  explicitly, and the exact per-generation core byte size should be measured
+  once from an R2 listing to price the lag.
+
+Reviewed and judged sound as decided: sticky-splits-never-merge, tunable row
+caps with frozen split history, `q-{cell}`/`a-{country}-h-{bits}` identities,
+direct `{object_key, bytes, sha256}` entrypoint identity, hash collisions made
+harmless by exact-key in-page matching, the 512-cap/413 no-truncation
+semantics, no batch endpoint, `poi`/`place` aliasing, and structured-address
+dispatch leaving a compatible door open for free-text later. Non-blocking
+notes: v2 address shard selection linearly scans all items/empty ranges plus
+two more country scans per request (`address.rs:496-521`) — fine regionally, a
+serving-scalability smell at global collection sizes; and the in-memory Places
+ingestion path maps missing coordinates to `(0,0)` while the streaming path
+raises — the streaming path is the global-build path, and dispatch item 3
+already requires rejecting coerced coordinates outright.
+
+### One-way-door checklist for adversarial review before the first publish
+
+- `/v2/features/:gers_id` is confirmed to need a product decision and GeoJSON/
+  degradation fix before clients adopt the path;
+- whether the v2 release manifest carries enough direct identity for every
+  runtime dependency (especially `head.phrp`) rather than relying on a derived
+  sibling key plus the bound family manifest;
+- first-build split-history semantics and how a later build proves it loaded the
+  immediately preceding compatible Places catalog/address plan;
+- permanent R2 namespace/object naming, cache immutability, content replacement
+  protection, rollback reachability, and retention across both v1 and v2 roots;
+- source completeness and rejection accounting for globally unlocated Places,
+  malformed coordinates, missing address country/street/number, duplicates,
+  synthetic country codes, and Overture schema drift;
+- whether address normalization/tokenization/format version fields and Places
+  tokenizer/partition versions are sufficient to prevent cross-runtime or
+  cross-release mixing;
+- whether global-head admission/ranking and one-shard located routing create
+  product promises or recall seams that would be expensive to undo after
+  publication; and
+- promotion, rollback, degraded-family behavior, and client-visible semantics
+  when one optional family is absent, corrupt, or temporarily unreadable.
+
+The cross-boundary one-shard Places recall seam, better ranking/head tuning,
+free-text/fuzzy/reverse expansion, and worker isolation remain safe deferrals:
+they can change behind a later geocoder build without changing shard ownership.
+
+### Deliberate non-blocking deferrals
+
+- free-text address parsing/search, reverse addresses, reverse POIs, fuzzy or
+  semantic search, tail-complete global POI enumeration, and batch requests;
+- worker-isolation refinements beyond the shared strict range-reader; and
+- cleanup of historical prose below that refers to the removed experimental
+  routes. Those sections are retained as an evidence record, not current API
+  documentation.
 
 ## Sequencing (2026-07-17)
 

@@ -34,6 +34,10 @@ BUILD_RE = re.compile(r"\d{4}-\d{2}-\d{2}\.\d+")
 SLICE_RE = re.compile(r"slice-\d{4}-\d{2}-\d{2}\.\d+")
 KEY_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
+PRODUCTION_CATALOG_KEY = "v2/catalog.json"
+PREVIEW_CATALOG_RE = re.compile(
+    r"smoketest-v2/[A-Za-z0-9_-]{1,128}/catalog\.json"
+)
 FAMILY_OPERATIONS = {
     "addresses": {"forward", "reverse", "structured_forward"},
     "places": {"forward", "reverse"},
@@ -777,12 +781,28 @@ def verify_release_sources(
     return validated
 
 
-def _catalog_entry(release: dict[str, Any], manifest_sha256: str) -> dict[str, Any]:
+def release_manifest_key_for_catalog(catalog_key: str, geocoder_build: str) -> str:
+    """Return the only release-manifest key allowed for one catalog root."""
+
+    geocoder_build = _require_build(geocoder_build)
+    catalog_key = _require_safe_key(catalog_key, "v2 catalog key")
+    if catalog_key == PRODUCTION_CATALOG_KEY:
+        return f"v2/releases/{geocoder_build}/release.json"
+    if PREVIEW_CATALOG_RE.fullmatch(catalog_key):
+        return f"{catalog_key.rsplit('/', 1)[0]}/release.json"
+    raise ValueError(
+        "v2 catalog key must be production or a guarded smoketest-v2 run catalog"
+    )
+
+
+def _catalog_entry(
+    release: dict[str, Any], manifest_sha256: str, *, catalog_key: str
+) -> dict[str, Any]:
     build = release["geocoder_build"]
     return {
         "geocoder_build": build,
         "overture_release": release["overture_release"],
-        "manifest_key": f"v2/releases/{build}/release.json",
+        "manifest_key": release_manifest_key_for_catalog(catalog_key, build),
         "manifest_sha256": _require_sha256(
             manifest_sha256, "v2 release manifest SHA-256"
         ),
@@ -801,6 +821,7 @@ def build_catalog(
     before: Any | None = None,
     initialize: bool = False,
     generated_at: str | None = None,
+    catalog_key: str = PRODUCTION_CATALOG_KEY,
 ) -> dict[str, Any]:
     # Catalog construction is the discovery-root boundary. A self-consistent
     # release digest is insufficient here: re-prove every reference against
@@ -813,15 +834,22 @@ def build_catalog(
         family_source_manifests=family_source_manifests,
     )
     generated_at = _require_string(generated_at or _now(), "generated_at")
+    release_manifest_key_for_catalog(catalog_key, release["geocoder_build"])
+    preview = catalog_key != PRODUCTION_CATALOG_KEY
     previous: list[dict[str, Any]] = []
     if (before is None) == (not initialize):
         raise ValueError("catalog build requires exactly one of before or initialize")
     if before is not None:
-        previous = validate_catalog(before)["releases"]
+        if preview:
+            raise ValueError("a preview v2 catalog cannot preserve release history")
+        previous = validate_catalog(before, catalog_key=catalog_key)["releases"]
         latest = previous[0]["geocoder_build"]
         if version_sort_key(release["geocoder_build"]) <= version_sort_key(latest):
             raise ValueError("new geocoder_build must be newer than catalog latest")
-    entries = [_catalog_entry(release, release_manifest_sha256), *previous]
+    entries = [
+        _catalog_entry(release, release_manifest_sha256, catalog_key=catalog_key),
+        *previous,
+    ]
     catalog = {
         "schema": CATALOG_SCHEMA,
         "generated_at": generated_at,
@@ -832,7 +860,9 @@ def build_catalog(
     return catalog
 
 
-def validate_catalog(catalog: Any) -> dict[str, Any]:
+def validate_catalog(
+    catalog: Any, *, catalog_key: str = PRODUCTION_CATALOG_KEY
+) -> dict[str, Any]:
     if not isinstance(catalog, dict) or catalog.get("schema") != CATALOG_SCHEMA:
         raise ValueError(f"v2 catalog schema must be {CATALOG_SCHEMA}")
     _require_exact_fields(
@@ -846,6 +876,8 @@ def validate_catalog(catalog: Any) -> dict[str, Any]:
     entries = catalog["releases"]
     if not isinstance(entries, list) or not entries:
         raise ValueError("v2 catalog requires at least one release")
+    if catalog_key != PRODUCTION_CATALOG_KEY and len(entries) != 1:
+        raise ValueError("a preview v2 catalog must contain exactly one release")
     builds: list[str] = []
     for entry in entries:
         if not isinstance(entry, dict):
@@ -863,7 +895,7 @@ def validate_catalog(catalog: Any) -> dict[str, Any]:
         )
         build = _require_build(entry["geocoder_build"])
         _require_string(entry["overture_release"], "catalog Overture release")
-        expected_key = f"v2/releases/{build}/release.json"
+        expected_key = release_manifest_key_for_catalog(catalog_key, build)
         if _require_safe_key(entry["manifest_key"], "v2 release manifest key") != expected_key:
             raise ValueError("v2 release manifest key differs from geocoder_build")
         _require_sha256(entry["manifest_sha256"], "v2 release manifest SHA-256")
@@ -924,10 +956,14 @@ def main() -> None:
     catalog_mode.add_argument("--before", type=Path)
     catalog_mode.add_argument("--initialize", action="store_true")
     catalog.add_argument("--generated-at")
+    catalog.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
     catalog.add_argument("--output", type=Path, required=True)
 
     validate_catalog_parser = commands.add_parser("validate-catalog")
     validate_catalog_parser.add_argument("--catalog", type=Path, required=True)
+    validate_catalog_parser.add_argument(
+        "--catalog-key", default=PRODUCTION_CATALOG_KEY
+    )
 
     args = parser.parse_args()
     if args.command == "release":
@@ -1023,10 +1059,11 @@ def main() -> None:
             before=_read_json(args.before) if args.before else None,
             initialize=args.initialize,
             generated_at=args.generated_at,
+            catalog_key=args.catalog_key,
         )
         gbm.write_json(args.output, result)
     else:
-        result = validate_catalog(_read_json(args.catalog))
+        result = validate_catalog(_read_json(args.catalog), catalog_key=args.catalog_key)
         print(json.dumps({"status": "ok", "catalog_digest": result["catalog_digest"]}))
 
 

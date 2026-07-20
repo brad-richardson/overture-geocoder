@@ -376,6 +376,7 @@ def build_catalog(
     maximum_level: int,
     row_cap: int,
     split_cells: list[str],
+    lineage_generation: int | None = None,
 ) -> dict[str, Any]:
     payload = {
         "schema_version": 2,
@@ -390,6 +391,10 @@ def build_catalog(
         },
         "shards": routes,
     }
+    if lineage_generation is not None:
+        if type(lineage_generation) is not int or lineage_generation < 1:
+            raise ValueError("Places lineage generation must be a positive integer")
+        payload["partition"]["lineage_generation"] = lineage_generation
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":")).encode()
     output.write_bytes(CATALOG_PREAMBLE.pack(CATALOG_MAGIC, len(encoded)) + encoded)
     return {

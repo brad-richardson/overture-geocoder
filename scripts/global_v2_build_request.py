@@ -30,7 +30,7 @@ import places_partition  # noqa: E402
 import v2_release_manifest  # noqa: E402
 
 
-SCHEMA = "overture-global-v2-build-request-v2"
+SCHEMA = "overture-global-v2-build-request-v3"
 RELEASE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+")
 COMMIT_RE = re.compile(r"[0-9a-f]{40}")
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
@@ -80,6 +80,48 @@ def _require_optional_sha256(value: Any, field: str) -> str | None:
     return _require_sha256(value, field)
 
 
+def _predecessor_identity(
+    family: str, *, object_key: str | None, size_bytes: int | None, sha256: str | None
+) -> dict[str, Any]:
+    values = (object_key, size_bytes, sha256)
+    if all(value is None for value in values):
+        return {"object_key": None, "bytes": None, "sha256": None}
+    if any(value is None for value in values):
+        raise ValueError(f"{family} predecessor key/bytes/SHA must be all-null or all-set")
+    key = _require_safe_key(object_key, f"{family} predecessor object key")
+    parts = key.split("/")
+    if (
+        len(parts) != 4
+        or not (RELEASE_RE.fullmatch(parts[0]) or v2_release_manifest.SLICE_RE.fullmatch(parts[0]))
+        or parts[1:] != ["families", family, "family-manifest.json"]
+    ):
+        raise ValueError(f"{family} predecessor must be its canonical family-manifest key")
+    return {
+        "object_key": key,
+        "bytes": _require_int(size_bytes, f"{family} predecessor bytes", minimum=1, maximum=2**63 - 1),
+        "sha256": _require_sha256(sha256, f"{family} predecessor SHA-256"),
+    }
+
+
+def _require_lineage_generation(
+    family: str, generation: Any, predecessor: dict[str, Any]
+) -> int:
+    generation = _require_int(
+        generation,
+        f"{family}_lineage_generation",
+        minimum=1,
+        maximum=2**63 - 1,
+    )
+    has_predecessor = predecessor["sha256"] is not None
+    if generation == 1 and has_predecessor:
+        raise ValueError(f"{family} lineage generation 1 requires a null predecessor")
+    if generation > 1 and not has_predecessor:
+        raise ValueError(
+            f"{family} lineage generation {generation} requires an exact predecessor"
+        )
+    return generation
+
+
 def _require_safe_key(value: Any, field: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"{field} is required")
@@ -117,10 +159,16 @@ def build_request(
     addresses_inventory_sha256: str,
     addresses_schema_fingerprint_sha256: str,
     addresses_predecessor_family_manifest_sha256: str | None,
+    addresses_lineage_generation: int,
     places_inventory_sha256: str,
     places_schema_fingerprint_sha256: str,
     places_predecessor_family_manifest_sha256: str | None,
+    places_lineage_generation: int,
     producer_commit: str,
+    addresses_predecessor_family_manifest_key: str | None = None,
+    addresses_predecessor_family_manifest_bytes: int | None = None,
+    places_predecessor_family_manifest_key: str | None = None,
+    places_predecessor_family_manifest_bytes: int | None = None,
     address_maximum_hash_bits: int = address_partition.DEFAULT_MAXIMUM_HASH_BITS,
     address_split_row_cap: int = address_partition.DEFAULT_SHARD_ROW_CAP,
     places_minimum_level: int = places_partition.DEFAULT_MINIMUM_LEVEL,
@@ -172,6 +220,22 @@ def build_request(
     places_predecessor_family_manifest_sha256 = _require_optional_sha256(
         places_predecessor_family_manifest_sha256,
         "places_predecessor_family_manifest_sha256",
+    )
+    addresses_predecessor = _predecessor_identity(
+        "addresses", object_key=addresses_predecessor_family_manifest_key,
+        size_bytes=addresses_predecessor_family_manifest_bytes,
+        sha256=addresses_predecessor_family_manifest_sha256,
+    )
+    places_predecessor = _predecessor_identity(
+        "places", object_key=places_predecessor_family_manifest_key,
+        size_bytes=places_predecessor_family_manifest_bytes,
+        sha256=places_predecessor_family_manifest_sha256,
+    )
+    addresses_lineage_generation = _require_lineage_generation(
+        "addresses", addresses_lineage_generation, addresses_predecessor
+    )
+    places_lineage_generation = _require_lineage_generation(
+        "places", places_lineage_generation, places_predecessor
     )
     if not isinstance(producer_commit, str) or not COMMIT_RE.fullmatch(producer_commit):
         raise ValueError("producer_commit must be a full lowercase Git commit SHA")
@@ -262,7 +326,9 @@ def build_request(
                 "predecessor_family_manifest_sha256": (
                     addresses_predecessor_family_manifest_sha256
                 ),
+                "predecessor_family_manifest": addresses_predecessor,
                 "partition": {
+                    "lineage_generation": addresses_lineage_generation,
                     "scheme": address_partition.PARTITION_SCHEME,
                     "maximum_hash_bits": address_maximum_hash_bits,
                     "split_row_cap": address_split_row_cap,
@@ -288,7 +354,9 @@ def build_request(
                 "predecessor_family_manifest_sha256": (
                     places_predecessor_family_manifest_sha256
                 ),
+                "predecessor_family_manifest": places_predecessor,
                 "partition": {
+                    "lineage_generation": places_lineage_generation,
                     "scheme": places_partition.PARTITION_SCHEME,
                     "minimum_level": places_minimum_level,
                     "maximum_level": places_maximum_level,
@@ -313,7 +381,8 @@ def build_request(
                     "provenance": {
                         "predecessor_family_manifest_sha256": (
                             places_predecessor_family_manifest_sha256
-                        )
+                        ),
+                        "predecessor_family_manifest": places_predecessor,
                     },
                 },
                 "operations": ["forward"],
@@ -367,6 +436,14 @@ def validate_request(value: Any) -> dict[str, Any]:
         places_value.get("global_head"), "families.places.global_head"
     )
     execution = _require_object(value.get("execution"), "execution")
+    address_predecessor = _require_object(
+        addresses.get("predecessor_family_manifest"),
+        "families.addresses.predecessor_family_manifest",
+    )
+    places_predecessor = _require_object(
+        places_value.get("predecessor_family_manifest"),
+        "families.places.predecessor_family_manifest",
+    )
 
     expected = build_request(
         overture_release=value.get("overture_release"),
@@ -383,11 +460,17 @@ def validate_request(value: Any) -> dict[str, Any]:
         addresses_predecessor_family_manifest_sha256=addresses.get(
             "predecessor_family_manifest_sha256"
         ),
+        addresses_predecessor_family_manifest_key=address_predecessor.get("object_key"),
+        addresses_predecessor_family_manifest_bytes=address_predecessor.get("bytes"),
+        addresses_lineage_generation=address_partition_value.get("lineage_generation"),
         places_inventory_sha256=places_source.get("inventory_sha256"),
         places_schema_fingerprint_sha256=places_source.get("schema_fingerprint_sha256"),
         places_predecessor_family_manifest_sha256=places_value.get(
             "predecessor_family_manifest_sha256"
         ),
+        places_predecessor_family_manifest_key=places_predecessor.get("object_key"),
+        places_predecessor_family_manifest_bytes=places_predecessor.get("bytes"),
+        places_lineage_generation=places_partition_value.get("lineage_generation"),
         producer_commit=value.get("producer_commit"),
         address_maximum_hash_bits=address_partition_value.get("maximum_hash_bits"),
         address_split_row_cap=address_partition_value.get("split_row_cap"),
@@ -415,9 +498,15 @@ def _add_build_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--addresses-inventory-sha256", required=True)
     parser.add_argument("--addresses-schema-fingerprint-sha256", required=True)
     parser.add_argument("--addresses-predecessor-family-manifest-sha256")
+    parser.add_argument("--addresses-predecessor-family-manifest-key")
+    parser.add_argument("--addresses-predecessor-family-manifest-bytes", type=int)
+    parser.add_argument("--addresses-lineage-generation", type=int, required=True)
     parser.add_argument("--places-inventory-sha256", required=True)
     parser.add_argument("--places-schema-fingerprint-sha256", required=True)
     parser.add_argument("--places-predecessor-family-manifest-sha256")
+    parser.add_argument("--places-predecessor-family-manifest-key")
+    parser.add_argument("--places-predecessor-family-manifest-bytes", type=int)
+    parser.add_argument("--places-lineage-generation", type=int, required=True)
     parser.add_argument("--producer-commit", required=True)
     parser.add_argument(
         "--address-maximum-hash-bits",

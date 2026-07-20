@@ -666,6 +666,47 @@ def test_catalog_validation_detects_key_and_digest_tampering():
         v2.validate_catalog(bad_digest)
 
 
+def test_preview_catalog_is_single_release_and_uses_isolated_sibling_manifest():
+    release = release_manifest()
+    preview_key = "smoketest-v2/run-29705861699-1/catalog.json"
+    catalog = v2.build_catalog(
+        release_manifest=release,
+        release_manifest_sha256=payload_sha(release),
+        **catalog_sources(),
+        initialize=True,
+        catalog_key=preview_key,
+    )
+
+    assert catalog["releases"][0]["manifest_key"] == (
+        "smoketest-v2/run-29705861699-1/release.json"
+    )
+    assert v2.validate_catalog(catalog, catalog_key=preview_key) == catalog
+    with pytest.raises(ValueError, match="differs from geocoder_build"):
+        v2.validate_catalog(catalog)
+
+    with pytest.raises(ValueError, match="cannot preserve release history"):
+        v2.build_catalog(
+            release_manifest=release_manifest("2026-07-19.2"),
+            release_manifest_sha256=payload_sha(release_manifest("2026-07-19.2")),
+            **catalog_sources(),
+            before=catalog,
+            catalog_key=preview_key,
+        )
+    for bad_key in (
+        "smoketest-v2/catalog.json",
+        "smoketest-v2/../catalog.json",
+        "smoketest-v2/run.with-dot/catalog.json",
+    ):
+        with pytest.raises(ValueError, match="v2 catalog key"):
+            v2.build_catalog(
+                release_manifest=release,
+                release_manifest_sha256=payload_sha(release),
+                **catalog_sources(),
+                initialize=True,
+                catalog_key=bad_key,
+            )
+
+
 def test_catalog_requires_explicit_initialization_or_history():
     release = release_manifest()
     with pytest.raises(ValueError, match="exactly one"):
