@@ -27,7 +27,7 @@ on:
         required: true
         type: string
       family_inputs_json:
-        description: Exact addresses/places inventory, schema, and predecessor digests as JSON.
+        description: Exact addresses/places inventory, schema, and predecessor key/bytes/SHA triples as JSON.
         required: true
         type: string
       confirmation:
@@ -86,14 +86,26 @@ jobs:
               type == "object" and
               (keys == [
                 "inventory_sha256",
-                "predecessor_family_manifest_sha256",
+                "lineage_generation",
+                "predecessor_family_manifest",
                 "schema_fingerprint_sha256"
               ]) and
+              ((.lineage_generation | type) == "number") and
+              (.lineage_generation >= 1) and
+              (.lineage_generation == (.lineage_generation | floor)) and
               (.inventory_sha256 | type == "string") and
               (.schema_fingerprint_sha256 | type == "string") and
               (
-                .predecessor_family_manifest_sha256 == null or
-                (.predecessor_family_manifest_sha256 | type == "string")
+                (.predecessor_family_manifest | type == "object") and
+                (.predecessor_family_manifest | keys == ["bytes", "object_key", "sha256"]) and
+                (
+                  ([.predecessor_family_manifest[]] | all(. == null)) or
+                  (
+                    (.predecessor_family_manifest.object_key | type == "string") and
+                    (.predecessor_family_manifest.bytes | type == "number") and
+                    (.predecessor_family_manifest.sha256 | type == "string")
+                  )
+                )
               )
             )
           ' build-request/family-inputs.json > /dev/null
@@ -103,9 +115,12 @@ jobs:
           ADDRESSES_SCHEMA_FINGERPRINT_SHA256="$(
             jq -r '.addresses.schema_fingerprint_sha256' build-request/family-inputs.json
           )"
-          ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256="$(
-            jq -r '.addresses.predecessor_family_manifest_sha256 // ""' \
+          ADDRESSES_PREDECESSOR_FAMILY_MANIFEST="$(
+            jq -c '.addresses.predecessor_family_manifest' \
               build-request/family-inputs.json
+          )"
+          ADDRESSES_LINEAGE_GENERATION="$(
+            jq -r '.addresses.lineage_generation' build-request/family-inputs.json
           )"
           PLACES_INVENTORY_SHA256="$(
             jq -r '.places.inventory_sha256' build-request/family-inputs.json
@@ -113,9 +128,12 @@ jobs:
           PLACES_SCHEMA_FINGERPRINT_SHA256="$(
             jq -r '.places.schema_fingerprint_sha256' build-request/family-inputs.json
           )"
-          PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256="$(
-            jq -r '.places.predecessor_family_manifest_sha256 // ""' \
+          PLACES_PREDECESSOR_FAMILY_MANIFEST="$(
+            jq -c '.places.predecessor_family_manifest' \
               build-request/family-inputs.json
+          )"
+          PLACES_LINEAGE_GENERATION="$(
+            jq -r '.places.lineage_generation' build-request/family-inputs.json
           )"
           LEGACY_CORE_MANIFEST_KEY="$LEGACY_CORE_VERSION/release-manifest.json"
           REQUEST_ARGS=(
@@ -128,20 +146,30 @@ jobs:
             --legacy-core-manifest-sha256 "$LEGACY_CORE_MANIFEST_SHA256"
             --addresses-inventory-sha256 "$ADDRESSES_INVENTORY_SHA256"
             --addresses-schema-fingerprint-sha256 "$ADDRESSES_SCHEMA_FINGERPRINT_SHA256"
+            --addresses-lineage-generation "$ADDRESSES_LINEAGE_GENERATION"
             --places-inventory-sha256 "$PLACES_INVENTORY_SHA256"
             --places-schema-fingerprint-sha256 "$PLACES_SCHEMA_FINGERPRINT_SHA256"
+            --places-lineage-generation "$PLACES_LINEAGE_GENERATION"
             --producer-commit "$GITHUB_SHA"
           )
-          if [[ -n "$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256" ]]; then
+          if [[ "$(jq -r .sha256 <<<"$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST")" != null ]]; then
             REQUEST_ARGS+=(
+              --addresses-predecessor-family-manifest-key
+              "$(jq -r .object_key <<<"$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST")"
+              --addresses-predecessor-family-manifest-bytes
+              "$(jq -r .bytes <<<"$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST")"
               --addresses-predecessor-family-manifest-sha256
-              "$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST_SHA256"
+              "$(jq -r .sha256 <<<"$ADDRESSES_PREDECESSOR_FAMILY_MANIFEST")"
             )
           fi
-          if [[ -n "$PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256" ]]; then
+          if [[ "$(jq -r .sha256 <<<"$PLACES_PREDECESSOR_FAMILY_MANIFEST")" != null ]]; then
             REQUEST_ARGS+=(
+              --places-predecessor-family-manifest-key
+              "$(jq -r .object_key <<<"$PLACES_PREDECESSOR_FAMILY_MANIFEST")"
+              --places-predecessor-family-manifest-bytes
+              "$(jq -r .bytes <<<"$PLACES_PREDECESSOR_FAMILY_MANIFEST")"
               --places-predecessor-family-manifest-sha256
-              "$PLACES_PREDECESSOR_FAMILY_MANIFEST_SHA256"
+              "$(jq -r .sha256 <<<"$PLACES_PREDECESSOR_FAMILY_MANIFEST")"
             )
           fi
           python scripts/global_v2_build_request.py build \
@@ -165,7 +193,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Retain the exact request for the executor
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: global-v2-build-request-${{ github.run_id }}-${{ github.run_attempt }}
           path: build-request/

@@ -21,6 +21,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // strings, GERS IDs, IP-derived location, and explicit coordinates out of
     // request logs.
     let endpoint = request_endpoint(req.url()?.path());
+    let preview_isolated = is_preview_environment(&env);
 
     // Handle CORS preflight requests
     if req.method() == Method::Options {
@@ -60,6 +61,15 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
     }
 
+    if preview_isolated && !preview_path_allowed(req.url()?.path()) {
+        let mut response = Response::error("Not found", 404)?;
+        response
+            .headers_mut()
+            .set("Access-Control-Allow-Origin", "*")?;
+        add_timing(&mut response, endpoint, started_at)?;
+        return Ok(response);
+    }
+
     // Context rides along as router data so handlers can schedule
     // background cache writes via waitUntil.
     let router = Router::with_data(std::rc::Rc::new(ctx))
@@ -70,17 +80,24 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
         .get_async("/v2/reverse", v2::handle_reverse)
         .get_async("/v2/features/:gers_id", v2::handle_feature);
 
-    let result = router
-        .get_async("/health", handlers::handle_health)
-        .get("/", |_, _| {
-            Response::ok(concat!(
-                r#"{"name":"overture-geocoder","version":""#,
-                env!("CARGO_PKG_VERSION"),
-                r#"","endpoints":["/search","/reverse","/id/:id","/v2/forward","/v2/reverse","/v2/features/:gers_id"]}"#,
-            ))
-        })
-        .run(req, env)
-        .await;
+    let result = if preview_isolated {
+        router
+            .get_async("/health", v2::handle_preview_health)
+            .run(req, env)
+            .await
+    } else {
+        router
+            .get_async("/health", handlers::handle_health)
+            .get("/", |_, _| {
+                Response::ok(concat!(
+                    r#"{"name":"overture-geocoder","version":""#,
+                    env!("CARGO_PKG_VERSION"),
+                    r#"","endpoints":["/search","/reverse","/id/:id","/v2/forward","/v2/reverse","/v2/features/:gers_id"]}"#,
+                ))
+            })
+            .run(req, env)
+            .await
+    };
 
     // Handler errors become 500s here (rather than via `?`) so browser
     // clients still get the CORS header instead of an opaque CORS failure.
@@ -114,6 +131,16 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     }
 
     Ok(response)
+}
+
+fn is_preview_environment(env: &Env) -> bool {
+    env.var("ENVIRONMENT")
+        .ok()
+        .is_some_and(|value| matches!(value.to_string().as_str(), "preview" | "smoke"))
+}
+
+fn preview_path_allowed(path: &str) -> bool {
+    matches!(path, "/health" | "/v2/forward" | "/v2/reverse") || path.starts_with("/v2/features/")
 }
 
 /// Return a fixed, privacy-safe endpoint label for request timing logs.
@@ -173,7 +200,7 @@ fn preflight_response() -> Result<Response> {
 
 #[cfg(test)]
 mod tests {
-    use super::{format_server_timing, request_endpoint};
+    use super::{format_server_timing, preview_path_allowed, request_endpoint};
 
     #[test]
     fn classifies_known_endpoints_without_retaining_path_parameters() {
@@ -189,5 +216,15 @@ mod tests {
     #[test]
     fn formats_standard_total_duration_metric() {
         assert_eq!(format_server_timing(12.34), "total;dur=12.3");
+    }
+
+    #[test]
+    fn preview_exposes_only_candidate_health_and_required_v2_routes() {
+        for path in ["/health", "/v2/forward", "/v2/reverse", "/v2/features/id"] {
+            assert!(preview_path_allowed(path));
+        }
+        for path in ["/", "/search", "/reverse", "/id/id", "/id", "/unexpected"] {
+            assert!(!preview_path_allowed(path));
+        }
     }
 }

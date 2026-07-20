@@ -180,6 +180,40 @@ pub(crate) fn resolve_catalog_key(
     Ok(key.to_string())
 }
 
+/// Resolve the unified v2 catalog without allowing a production redirect.
+///
+/// A global-build preview needs one isolated catalog per workflow run. The
+/// middle component is dynamic but deliberately narrow and flat; arbitrary
+/// prefixes and traversal remain impossible.
+pub(crate) fn resolve_v2_catalog_key(
+    environment: Option<&str>,
+    override_key: Option<&str>,
+) -> std::result::Result<String, String> {
+    let Some(key) = override_key else {
+        return Ok("v2/catalog.json".to_string());
+    };
+    if !matches!(environment, Some("smoke" | "preview")) {
+        return Err(
+            "V2_CATALOG_KEY_OVERRIDE is allowed only in smoke or preview environments".to_string(),
+        );
+    }
+    let parts = key.split('/').collect::<Vec<_>>();
+    let valid_run = parts.get(1).is_some_and(|run| {
+        !run.is_empty()
+            && run.len() <= 128
+            && run
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    });
+    if parts.len() != 3 || parts[0] != "smoketest-v2" || !valid_run || parts[2] != "catalog.json" {
+        return Err(
+            "V2_CATALOG_KEY_OVERRIDE must match smoketest-v2/<safe-run-id>/catalog.json"
+                .to_string(),
+        );
+    }
+    Ok(key.to_string())
+}
+
 impl ShardLoader {
     /// Health check: verify catalog, latest version, and that required
     /// versioned assets exist. Response shape stays {"status":"ok","version":...}.
@@ -470,6 +504,36 @@ mod tests {
         );
         assert!(resolve_catalog_key(Some("smoke"), Some("catalog.json")).is_err());
         assert!(resolve_catalog_key(Some("smoke"), Some("smoketest-id/../catalog.json")).is_err());
+    }
+
+    #[test]
+    fn v2_catalog_override_is_run_scoped_and_preview_only() {
+        assert_eq!(
+            resolve_v2_catalog_key(Some("production"), None).unwrap(),
+            "v2/catalog.json"
+        );
+        assert_eq!(
+            resolve_v2_catalog_key(
+                Some("preview"),
+                Some("smoketest-v2/run-29705861699-1/catalog.json")
+            )
+            .unwrap(),
+            "smoketest-v2/run-29705861699-1/catalog.json"
+        );
+        assert!(resolve_v2_catalog_key(
+            Some("production"),
+            Some("smoketest-v2/run-1/catalog.json")
+        )
+        .is_err());
+        for key in [
+            "v2/catalog.json",
+            "smoketest-v2/catalog.json",
+            "smoketest-v2/../catalog.json",
+            "smoketest-v2/run/child/catalog.json",
+            "smoketest-v2/run.with-dot/catalog.json",
+        ] {
+            assert!(resolve_v2_catalog_key(Some("smoke"), Some(key)).is_err());
+        }
     }
 
     #[test]

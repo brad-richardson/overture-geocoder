@@ -5,6 +5,7 @@ use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
 use geocoder_core::{GeocoderQuery, LocationBias};
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -48,7 +49,7 @@ const DIVISION_TYPES: &[&str] = &[
 thread_local! {
     /// Short-lived mutable discovery pointer, aligned with the text memo TTL.
     /// Warm requests therefore skip both catalog/release parsing and R2 HEADs.
-    static V2_LIVE_RELEASE: RefCell<Option<(Rc<V2Release>, u64)>> =
+    static V2_LIVE_RELEASE: RefCell<Option<(String, Rc<V2Release>, u64)>> =
         const { RefCell::new(None) };
     /// Fully validated and readiness-probed immutable v2 release.
     /// Caching here removes repeat JSON parsing and, importantly, keeps the
@@ -178,6 +179,66 @@ fn valid_sha256(value: &str) -> bool {
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
 }
 
+/// Reject strings whose Python and serde_json encodings can differ before
+/// reproducing the producer's canonical digest. Current control documents use
+/// printable ASCII identifiers and timestamps; failing closed here keeps the
+/// cross-language hash contract exact instead of silently accepting a second
+/// canonicalization for Unicode or control characters.
+fn printable_ascii_document(value: &Value) -> bool {
+    match value {
+        Value::String(value) => value
+            .chars()
+            .all(|character| character.is_ascii() && !character.is_ascii_control()),
+        Value::Array(values) => values.iter().all(printable_ascii_document),
+        Value::Object(values) => values.iter().all(|(key, value)| {
+            key.chars()
+                .all(|character| character.is_ascii() && !character.is_ascii_control())
+                && printable_ascii_document(value)
+        }),
+        Value::Null | Value::Bool(_) | Value::Number(_) => true,
+    }
+}
+
+/// Reproduce `global_build_manifest.digest`: sorted, compact JSON plus one
+/// trailing newline. serde_json's default Map is key-sorted in this workspace
+/// (`preserve_order` is not enabled), matching Python's `sort_keys=True`.
+fn canonical_control_digest(value: &Value) -> std::result::Result<String, String> {
+    if !printable_ascii_document(value) {
+        return Err("v2 control documents must contain only printable ASCII strings".into());
+    }
+    let mut canonical = serde_json::to_vec(value)
+        .map_err(|error| format!("Failed to canonicalize v2 control document: {error}"))?;
+    canonical.push(b'\n');
+    Ok(format!("{:x}", Sha256::digest(&canonical)))
+}
+
+fn parse_verified_control_document<T: DeserializeOwned>(
+    text: &str,
+    digest_field: &str,
+    label: &str,
+) -> std::result::Result<T, String> {
+    let mut value: Value =
+        serde_json::from_str(text).map_err(|error| format!("Invalid {label}: {error}"))?;
+    let expected = value
+        .as_object_mut()
+        .ok_or_else(|| format!("Invalid {label}: expected a JSON object"))?
+        .remove(digest_field)
+        .and_then(|value| value.as_str().map(str::to_owned))
+        .filter(|value| valid_sha256(value))
+        .ok_or_else(|| format!("Invalid {label}: {digest_field} is not a SHA-256 digest"))?;
+    let actual = canonical_control_digest(&value)?;
+    if actual != expected {
+        return Err(format!(
+            "Invalid {label}: {digest_field} differs from its contents"
+        ));
+    }
+    value
+        .as_object_mut()
+        .expect("control document object was checked above")
+        .insert(digest_field.to_string(), Value::String(expected));
+    serde_json::from_value(value).map_err(|error| format!("Invalid {label}: {error}"))
+}
+
 fn safe_key(value: &str) -> bool {
     !value.is_empty()
         && !value.starts_with('/')
@@ -224,12 +285,33 @@ fn valid_coverage(value: &Value) -> bool {
     })
 }
 
-fn validate_catalog(catalog: &V2Catalog) -> std::result::Result<&CatalogEntry, String> {
+fn release_manifest_key_for_catalog(catalog_key: &str, build: &str) -> Option<String> {
+    if catalog_key == "v2/catalog.json" {
+        return Some(format!("v2/releases/{build}/release.json"));
+    }
+    let parts = catalog_key.split('/').collect::<Vec<_>>();
+    let valid_run = parts.get(1).is_some_and(|run| {
+        !run.is_empty()
+            && run.len() <= 128
+            && run
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+    });
+    (parts.len() == 3 && parts[0] == "smoketest-v2" && valid_run && parts[2] == "catalog.json")
+        .then(|| format!("smoketest-v2/{}/release.json", parts[1]))
+}
+
+fn validate_catalog<'a>(
+    catalog: &'a V2Catalog,
+    catalog_key: &str,
+) -> std::result::Result<&'a CatalogEntry, String> {
+    let preview = catalog_key != "v2/catalog.json";
     if catalog.schema != CATALOG_SCHEMA
         || !valid_build(&catalog.latest)
         || !valid_sha256(&catalog.catalog_digest)
         || catalog.releases.is_empty()
         || catalog.releases.len() > MAX_CATALOG_RELEASES
+        || (preview && catalog.releases.len() != 1)
         || catalog.releases[0].geocoder_build != catalog.latest
     {
         return Err("unsupported v2 catalog contract".into());
@@ -242,7 +324,8 @@ fn validate_catalog(catalog: &V2Catalog) -> std::result::Result<&CatalogEntry, S
         if previous.is_some_and(|old| old <= key)
             || !builds.insert(entry.geocoder_build.as_str())
             || entry.overture_release.is_empty()
-            || entry.manifest_key != format!("v2/releases/{}/release.json", entry.geocoder_build)
+            || release_manifest_key_for_catalog(catalog_key, &entry.geocoder_build)
+                .is_none_or(|expected| entry.manifest_key != expected)
             || !safe_key(&entry.manifest_key)
             || !valid_sha256(&entry.manifest_sha256)
             || !valid_sha256(&entry.release_digest)
@@ -572,24 +655,25 @@ impl ShardLoader {
 
     pub(crate) async fn load_v2_release(&self) -> Result<Rc<V2Release>> {
         let now = Date::now().as_millis();
+        let catalog_key = self.v2_catalog_key().to_string();
         if let Some(release) = V2_LIVE_RELEASE.with(|cached| {
             cached
                 .borrow()
                 .as_ref()
-                .filter(|(_, expires)| *expires > now)
-                .map(|(release, _)| Rc::clone(release))
+                .filter(|(key, _, expires)| key == &catalog_key && *expires > now)
+                .map(|(_, release, _)| Rc::clone(release))
         }) {
             return Ok(release);
         }
 
-        let catalog_key = "v2/catalog.json";
         let catalog_text = self
-            .memoized_get_bounded_text(catalog_key, MAX_V2_CATALOG_BYTES, CATALOG_CACHE_TTL)
+            .memoized_get_bounded_text(&catalog_key, MAX_V2_CATALOG_BYTES, CATALOG_CACHE_TTL)
             .await?
-            .ok_or_else(|| crate::stac::not_found(catalog_key))?;
-        let catalog: V2Catalog = serde_json::from_str(&catalog_text)
-            .map_err(|error| Error::RustError(format!("Invalid {catalog_key}: {error}")))?;
-        let entry = validate_catalog(&catalog).map_err(Error::RustError)?;
+            .ok_or_else(|| crate::stac::not_found(&catalog_key))?;
+        let catalog: V2Catalog =
+            parse_verified_control_document(&catalog_text, "catalog_digest", &catalog_key)
+                .map_err(Error::RustError)?;
+        let entry = validate_catalog(&catalog, &catalog_key).map_err(Error::RustError)?;
         let cache_key = format!("{}#{}", entry.manifest_key, entry.manifest_sha256);
         let cached = V2_RELEASE_CACHE.with(|cache| {
             let mut cache = cache.borrow_mut();
@@ -605,8 +689,11 @@ impl ShardLoader {
         });
         if let Some(release) = cached {
             V2_LIVE_RELEASE.with(|cached| {
-                *cached.borrow_mut() =
-                    Some((Rc::clone(&release), now.saturating_add(TEXT_MEMO_TTL_MS)));
+                *cached.borrow_mut() = Some((
+                    catalog_key.clone(),
+                    Rc::clone(&release),
+                    now.saturating_add(TEXT_MEMO_TTL_MS),
+                ));
             });
             return Ok(release);
         }
@@ -625,9 +712,9 @@ impl ShardLoader {
                 "v2 release manifest SHA-256 differs from catalog".into(),
             ));
         }
-        let release: V2Release = serde_json::from_str(&manifest_text).map_err(|error| {
-            Error::RustError(format!("Invalid {}: {error}", entry.manifest_key))
-        })?;
+        let release: V2Release =
+            parse_verified_control_document(&manifest_text, "release_digest", &entry.manifest_key)
+                .map_err(Error::RustError)?;
         validate_release(&release, entry).map_err(Error::RustError)?;
         self.verify_v2_release_readiness(&release).await?;
         let release = Rc::new(release);
@@ -641,8 +728,11 @@ impl ShardLoader {
             }
         });
         V2_LIVE_RELEASE.with(|cached| {
-            *cached.borrow_mut() =
-                Some((Rc::clone(&release), now.saturating_add(TEXT_MEMO_TTL_MS)));
+            *cached.borrow_mut() = Some((
+                catalog_key,
+                Rc::clone(&release),
+                now.saturating_add(TEXT_MEMO_TTL_MS),
+            ));
         });
         Ok(release)
     }
@@ -665,6 +755,53 @@ async fn load_available_release(loader: &ShardLoader) -> Result<ReleaseAvailabil
         }
         Err(error) => Err(error),
     }
+}
+
+pub async fn handle_preview_health(
+    _req: Request,
+    ctx: RouteContext<std::rc::Rc<Context>>,
+) -> Result<Response> {
+    let expected_build = ctx
+        .env
+        .var("EXPECTED_GEOCODER_BUILD")
+        .map_err(|_| Error::RustError("preview health requires EXPECTED_GEOCODER_BUILD".into()))?
+        .to_string();
+    let expected_release = ctx
+        .env
+        .var("EXPECTED_OVERTURE_RELEASE")
+        .map_err(|_| Error::RustError("preview health requires EXPECTED_OVERTURE_RELEASE".into()))?
+        .to_string();
+    let expected_catalog = ctx
+        .env
+        .var("EXPECTED_V2_CATALOG_KEY")
+        .map_err(|_| Error::RustError("preview health requires EXPECTED_V2_CATALOG_KEY".into()))?
+        .to_string();
+    let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
+    let release = match load_available_release(&loader).await? {
+        ReleaseAvailability::Ready(release) => release,
+        ReleaseAvailability::Unavailable(response) => return Ok(response),
+    };
+    if release.geocoder_build != expected_build
+        || release.overture_release != expected_release
+        || loader.v2_catalog_key() != expected_catalog
+    {
+        return json_error(
+            "candidate_identity_mismatch",
+            "preview candidate identity differs from the expected build",
+            503,
+        );
+    }
+    let mut response = Response::from_json(&json!({
+        "status": "ok",
+        "geocoder_build": release.geocoder_build,
+        "overture_release": release.overture_release,
+        "catalog_key": loader.v2_catalog_key(),
+        "candidate_isolated": true,
+    }))?;
+    response
+        .headers_mut()
+        .set("Content-Type", "application/json; charset=utf-8")?;
+    Ok(response)
 }
 
 fn json_error(code: &str, message: &str, status: u16) -> Result<Response> {
@@ -1324,9 +1461,10 @@ mod tests {
         }
     }
 
-    fn release() -> V2Release {
-        serde_json::from_value(json!({
+    fn release_value() -> Value {
+        json!({
             "schema": RELEASE_SCHEMA,
+            "generated_at": "2026-07-19T00:00:00+00:00",
             "geocoder_build": "2026-07-19.1",
             "overture_release": "2026-06-17.0",
             "data_version": {
@@ -1406,19 +1544,126 @@ mod tests {
                 "structured_forward": ["addresses"]
             },
             "release_digest": sha()
-        }))
-        .unwrap()
+        })
+    }
+
+    fn release() -> V2Release {
+        serde_json::from_value(release_value()).unwrap()
+    }
+
+    fn sign_control_document(mut value: Value, digest_field: &str) -> String {
+        value.as_object_mut().unwrap().remove(digest_field);
+        let digest = canonical_control_digest(&value).unwrap();
+        value
+            .as_object_mut()
+            .unwrap()
+            .insert(digest_field.to_string(), Value::String(digest));
+        serde_json::to_string(&value).unwrap()
+    }
+
+    #[test]
+    fn control_digest_matches_python_sorted_compact_ascii_json() {
+        let value = json!({
+            "z": {"items": 3, "enabled": true},
+            "message": "quote=\" slash=/ backslash=\\",
+            "a": [-180.0, -90.0, 180.0, 90.0]
+        });
+        assert_eq!(
+            canonical_control_digest(&value).unwrap(),
+            "3a5f3ccbf3cf28c644ab6831fed34365ef23faadb54dcf74529a39a30b03075b"
+        );
+    }
+
+    #[test]
+    fn raw_control_digest_gate_accepts_current_release_and_catalog_shapes() {
+        let release_text = sign_control_document(release_value(), "release_digest");
+        let parsed_release: V2Release =
+            parse_verified_control_document(&release_text, "release_digest", "release fixture")
+                .unwrap();
+
+        let release_sha = format!("{:x}", Sha256::digest(release_text.as_bytes()));
+        let catalog_value = json!({
+            "schema": CATALOG_SCHEMA,
+            "generated_at": "2026-07-19T00:00:00+00:00",
+            "latest": "2026-07-19.1",
+            "releases": [{
+                "geocoder_build": "2026-07-19.1",
+                "overture_release": "2026-06-17.0",
+                "manifest_key": "v2/releases/2026-07-19.1/release.json",
+                "manifest_sha256": release_sha,
+                "release_digest": parsed_release.release_digest,
+            }],
+            "catalog_digest": sha(),
+        });
+        let catalog_text = sign_control_document(catalog_value, "catalog_digest");
+        let parsed_catalog: V2Catalog =
+            parse_verified_control_document(&catalog_text, "catalog_digest", "catalog fixture")
+                .unwrap();
+        let entry = validate_catalog(&parsed_catalog, "v2/catalog.json").unwrap();
+        validate_release(&parsed_release, entry).unwrap();
+    }
+
+    #[test]
+    fn raw_control_digest_gate_rejects_tampering_random_digest_and_non_ascii() {
+        let signed = sign_control_document(release_value(), "release_digest");
+        let mut tampered: Value = serde_json::from_str(&signed).unwrap();
+        tampered["legacy_core"]["entrypoints"]["forward"] =
+            Value::String("2026-07-18.0/changed.json".into());
+        assert!(parse_verified_control_document::<V2Release>(
+            &serde_json::to_string(&tampered).unwrap(),
+            "release_digest",
+            "tampered release",
+        )
+        .unwrap_err()
+        .contains("differs from its contents"));
+
+        let mut random = release_value();
+        random["release_digest"] = Value::String("f".repeat(64));
+        assert!(parse_verified_control_document::<V2Release>(
+            &serde_json::to_string(&random).unwrap(),
+            "release_digest",
+            "random release",
+        )
+        .unwrap_err()
+        .contains("differs from its contents"));
+
+        let mut non_ascii = release_value();
+        non_ascii["families"]["places"]["coverage"]["name"] = Value::String("wörld".into());
+        non_ascii["release_digest"] = Value::String("f".repeat(64));
+        assert!(parse_verified_control_document::<V2Release>(
+            &serde_json::to_string(&non_ascii).unwrap(),
+            "release_digest",
+            "non-ASCII release",
+        )
+        .unwrap_err()
+        .contains("printable ASCII"));
     }
 
     #[test]
     fn catalog_validation_pins_latest_and_canonical_manifest_path() {
         assert_eq!(
-            validate_catalog(&catalog()).unwrap().geocoder_build,
+            validate_catalog(&catalog(), "v2/catalog.json")
+                .unwrap()
+                .geocoder_build,
             "2026-07-19.1"
         );
         let mut bad = catalog();
         bad.releases[0].manifest_key = "../release.json".into();
-        assert!(validate_catalog(&bad).is_err());
+        assert!(validate_catalog(&bad, "v2/catalog.json").is_err());
+
+        let mut preview = catalog();
+        preview.releases[0].manifest_key = "smoketest-v2/run-29705861699-1/release.json".into();
+        assert!(validate_catalog(&preview, "smoketest-v2/run-29705861699-1/catalog.json").is_ok());
+        assert!(validate_catalog(&preview, "v2/catalog.json").is_err());
+
+        preview.releases.push(CatalogEntry {
+            geocoder_build: "2026-07-19.0".into(),
+            overture_release: "2026-06-17.0".into(),
+            manifest_key: "smoketest-v2/run-29705861699-1/release.json".into(),
+            manifest_sha256: sha(),
+            release_digest: sha(),
+        });
+        assert!(validate_catalog(&preview, "smoketest-v2/run-29705861699-1/catalog.json").is_err());
     }
 
     #[test]

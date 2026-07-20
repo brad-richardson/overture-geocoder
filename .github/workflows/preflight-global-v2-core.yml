@@ -1,0 +1,98 @@
+name: Preflight global v2 legacy core (read only)
+
+on:
+  workflow_dispatch:
+    inputs:
+      legacy_core_version:
+        description: Immutable unpromoted legacy core version (YYYY-MM-DD.N).
+        required: true
+        type: string
+      overture_release:
+        description: Exact Overture release expected in the legacy manifest.
+        required: true
+        type: string
+      confirmation:
+        description: Type READ_ONLY_LEGACY_CORE::<version> exactly.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preflight-global-v2-core-${{ inputs.legacy_core_version }}
+  cancel-in-progress: false
+
+jobs:
+  inspect:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      LEGACY_CORE_VERSION: ${{ inputs.legacy_core_version }}
+      OVERTURE_RELEASE: ${{ inputs.overture_release }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Require main and exact read-only confirmation
+        run: |
+          set -euo pipefail
+          expected="READ_ONLY_LEGACY_CORE::${LEGACY_CORE_VERSION}"
+          if [ "$CONFIRMATION" != "$expected" ]; then
+            echo "::error::Typed confirmation differs; expected ${expected}"
+            exit 1
+          fi
+          if ! [[ "$LEGACY_CORE_VERSION" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::legacy_core_version must use YYYY-MM-DD.N"
+            exit 1
+          fi
+          if ! [[ "$OVERTURE_RELEASE" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$ ]]; then
+            echo "::error::overture_release must use YYYY-MM-DD.N"
+            exit 1
+          fi
+
+      - name: Download exactly one legacy manifest from R2
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/global-v2-core-preflight
+          aws s3api get-object \
+            --bucket geocoder-shards \
+            --key "${LEGACY_CORE_VERSION}/release-manifest.json" \
+            /tmp/global-v2-core-preflight/release-manifest.json \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto \
+            --no-cli-pager >/dev/null
+
+      - name: Validate completeness and freeze SHA-256 evidence
+        run: |
+          set -euo pipefail
+          python3 scripts/global_v2_executor.py inspect-legacy-core \
+            --manifest /tmp/global-v2-core-preflight/release-manifest.json \
+            --expected-version "$LEGACY_CORE_VERSION" \
+            --expected-overture-release "$OVERTURE_RELEASE" \
+            --output /tmp/global-v2-core-preflight/evidence.json
+          jq -e '
+            .read_only == true
+            and .forward_shards > 0
+            and .reverse_shards > 0
+            and .id_shards == 4096
+            and (.manifest_sha256 | test("^[0-9a-f]{64}$"))
+          ' /tmp/global-v2-core-preflight/evidence.json >/dev/null
+          jq . /tmp/global-v2-core-preflight/evidence.json >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Retain read-only core identity
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: global-v2-core-preflight-${{ github.run_id }}-${{ github.run_attempt }}
+          path: /tmp/global-v2-core-preflight/evidence.json
+          if-no-files-found: error
+          retention-days: 90

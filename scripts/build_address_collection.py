@@ -51,6 +51,22 @@ def parse_artifacts(values: list[str]) -> dict[str, tuple[Path, Path]]:
 def build_collection(
     plan: dict[str, Any], artifacts: dict[str, tuple[Path, Path]]
 ) -> dict[str, Any]:
+    identities = {}
+    for identifier, (index_path, data_path) in artifacts.items():
+        if not index_path.is_file() or not data_path.is_file():
+            raise ValueError(f"address artifact paths do not exist: {identifier}")
+        identities[identifier] = {
+            "index_bytes": index_path.stat().st_size,
+            "index_sha256": sha256_file(index_path),
+            "data_bytes": data_path.stat().st_size,
+            "data_sha256": sha256_file(data_path),
+        }
+    return build_collection_from_identities(plan, identities)
+
+
+def build_collection_from_identities(
+    plan: dict[str, Any], artifacts: dict[str, dict[str, Any]]
+) -> dict[str, Any]:
     partitions = validate_plan(plan)
     expected = {item["id"] for item in partitions if item["rows"]}
     if set(artifacts) != expected:
@@ -74,21 +90,32 @@ def build_collection(
         if not partition["rows"]:
             empty_ranges.append({"id": identity, **route})
             continue
-        index_path, data_path = artifacts[identity]
-        if not index_path.is_file() or not data_path.is_file():
-            raise ValueError(f"address artifact paths do not exist: {identity}")
-        index_bytes = index_path.stat().st_size
-        data_bytes = data_path.stat().st_size
-        if index_bytes < 1 or data_bytes < 1:
+        artifact = artifacts[identity]
+        index_bytes = artifact.get("index_bytes")
+        data_bytes = artifact.get("data_bytes")
+        index_sha256 = artifact.get("index_sha256")
+        data_sha256 = artifact.get("data_sha256")
+        if (
+            type(index_bytes) is not int
+            or index_bytes < 1
+            or type(data_bytes) is not int
+            or data_bytes < 1
+            or not isinstance(index_sha256, str)
+            or len(index_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in index_sha256)
+            or not isinstance(data_sha256, str)
+            or len(data_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in data_sha256)
+        ):
             raise ValueError(f"address artifacts must be non-empty: {identity}")
         items[identity] = {
             **route,
             "index_href": f"families/addresses/shards/{identity}.aidx",
             "data_href": f"families/addresses/shards/{identity}.adat",
             "index_bytes": index_bytes,
-            "index_sha256": sha256_file(index_path),
+            "index_sha256": index_sha256,
             "data_bytes": data_bytes,
-            "data_sha256": sha256_file(data_path),
+            "data_sha256": data_sha256,
         }
     contract = plan["partition"]
     return {

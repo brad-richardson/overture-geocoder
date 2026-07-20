@@ -112,6 +112,75 @@ def test_s3_upload_maps_precondition_failure_to_race(tmp_path, monkeypatch):
         )
 
 
+def test_s3_list_prefix_paginates_and_sorts_exact_keys(monkeypatch):
+    calls = []
+    pages = [
+        {
+            "IsTruncated": True,
+            "Contents": [{"Key": "prefix/b"}],
+            "NextContinuationToken": "next-token",
+        },
+        {
+            "IsTruncated": False,
+            "Contents": [{"Key": "prefix/a"}],
+        },
+    ]
+
+    def run(command, **kwargs):
+        calls.append(command)
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(pages.pop(0)), stderr=""
+        )
+
+    monkeypatch.setattr(shuffle.subprocess, "run", run)
+    store = shuffle.S3Store("bucket", "https://example.invalid")
+    assert store.list_prefix("prefix/") == ["prefix/a", "prefix/b"]
+    assert "--continuation-token" not in calls[0]
+    assert calls[1][calls[1].index("--continuation-token") + 1] == "next-token"
+    assert all("--no-paginate" in command for command in calls)
+
+
+@pytest.mark.parametrize(
+    ("pages", "message"),
+    [
+        (
+            [{"IsTruncated": False, "Contents": [{"Key": "elsewhere/key"}]}],
+            "escaped",
+        ),
+        (
+            [
+                {
+                    "IsTruncated": True,
+                    "Contents": [{"Key": "prefix/a"}],
+                    "NextContinuationToken": "again",
+                },
+                {
+                    "IsTruncated": False,
+                    "Contents": [{"Key": "prefix/a"}],
+                },
+            ],
+            "duplicate",
+        ),
+        (
+            [{"IsTruncated": True, "Contents": [{"Key": "prefix/a"}]}],
+            "continuation token",
+        ),
+    ],
+)
+def test_s3_list_prefix_rejects_stray_duplicate_and_missing_token(
+    pages, message, monkeypatch
+):
+    remaining = list(pages)
+
+    def run(command, **kwargs):
+        return subprocess.CompletedProcess(
+            command, 0, stdout=json.dumps(remaining.pop(0)), stderr=""
+        )
+
+    monkeypatch.setattr(shuffle.subprocess, "run", run)
+    with pytest.raises(ValueError, match=message):
+        shuffle.S3Store("bucket", "https://example.invalid").list_prefix("prefix/")
+
 def test_stale_local_download_is_replaced_only_after_remote_verification(tmp_path):
     source = tmp_path / "source.bin"
     source.write_bytes(b"remote truth")

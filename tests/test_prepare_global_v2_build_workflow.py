@@ -39,6 +39,7 @@ def test_workflow_requires_prepare_only_and_reproduces_request():
     assert value.count("global_v2_build_request.py validate") == 1
     assert "cmp build-request/request.json build-request/request-repeat.json" in value
     assert "No Overture object was read" in value
+    assert "actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a" in value
 
 
 def test_workflow_freezes_source_core_slice_and_predecessor_inputs():
@@ -60,4 +61,11 @@ def test_workflow_freezes_source_core_slice_and_predecessor_inputs():
     assert "--legacy-core-overture-release \"$OVERTURE_RELEASE\"" in value
     assert "--legacy-core-manifest-key \"$LEGACY_CORE_MANIFEST_KEY\"" in value
     assert "--addresses-predecessor-family-manifest-sha256" in value
+    assert "--addresses-lineage-generation" in value
+    assert "--addresses-predecessor-family-manifest-key" in value
+    assert "--addresses-predecessor-family-manifest-bytes" in value
     assert "--places-predecessor-family-manifest-sha256" in value
+    assert "--places-lineage-generation" in value
+    assert "--places-predecessor-family-manifest-key" in value
+    assert "--places-predecessor-family-manifest-bytes" in value
+    assert '"predecessor_family_manifest"' in value

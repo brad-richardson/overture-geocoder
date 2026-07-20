@@ -40,6 +40,9 @@ pub struct ShardLoader {
     /// explicitly smoke-scoped override lets preview Workers exercise an
     /// isolated fixed-prefix catalog without making it discoverable live.
     catalog_key: String,
+    /// Unified v2 catalog object. Production is fixed at `v2/catalog.json`;
+    /// preview Workers may use one guarded, run-scoped smoke catalog.
+    v2_catalog_key: String,
     /// Execution context for background cache writes via waitUntil.
     /// When absent, cache writes happen inline (slower, but correct).
     ctx: Option<Rc<Context>>,
@@ -57,10 +60,18 @@ impl ShardLoader {
         let catalog_key =
             catalog::resolve_catalog_key(environment.as_deref(), override_key.as_deref())
                 .map_err(Error::RustError)?;
+        let v2_override_key = env
+            .var("V2_CATALOG_KEY_OVERRIDE")
+            .ok()
+            .map(|value| value.to_string());
+        let v2_catalog_key =
+            catalog::resolve_v2_catalog_key(environment.as_deref(), v2_override_key.as_deref())
+                .map_err(Error::RustError)?;
         Ok(Self {
             bucket,
             cache,
             catalog_key,
+            v2_catalog_key,
             ctx: None,
         })
     }
@@ -71,5 +82,9 @@ impl ShardLoader {
         let mut loader = Self::new(env)?;
         loader.ctx = Some(ctx);
         Ok(loader)
+    }
+
+    pub(crate) fn v2_catalog_key(&self) -> &str {
+        &self.v2_catalog_key
     }
 }
