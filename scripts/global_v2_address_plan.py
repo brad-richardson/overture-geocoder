@@ -60,10 +60,7 @@ REDUCE_PLAN_SCHEMA = "overture-global-v2-address-reduce-plan-v1"
 REDUCE_JOB_KIND = "address-reduce-job-v1"
 PARTITION_LINEAGE_SCHEMA = "overture-global-v2-address-partition-lineage-v1"
 RUNTIME_CONTRACT_SCHEMA = "overture-address-serving-runtime-v1"
-SEMANTIC_BINDING_SCHEMA = "overture-address-semantic-multiset-binding-v1"
-SEMANTIC_BINDING_DOMAIN_A = b"overture-address-semantic-record-v1\x00"
-SEMANTIC_BINDING_DOMAIN_B = b"overture-address-semantic-record-v1\x01"
-SEMANTIC_MODULUS = 1 << 256
+SEMANTIC_BINDING_SCHEMA = address_map.SEMANTIC_BINDING_SCHEMA
 MAX_JSON_BYTES = 64 * 1024 * 1024
 MAX_MAP_TASKS = 128
 MAX_REDUCE_JOBS = 256
@@ -76,69 +73,86 @@ DEFAULT_MAX_PAGE_ROWS = 10_000
 DEFAULT_BUCKET_DB_CACHE_KIB = 64 * 1024
 MAX_BUCKET_DB_CACHE_KIB = 256 * 1024
 REJECTION_KEYS = tuple(STRICT_REJECTION_PRECEDENCE)
+DUCKDB_RUNTIME_EVIDENCE_SCHEMA = "overture-duckdb-runtime-evidence-v1"
+DUCKDB_STAGE_CONFIGURATION = {
+    "address-summary-aggregation-v1": {
+        "threads": 2,
+        "memory_limit": "512MiB",
+        "max_temp_directory_size": "8GiB",
+        "preserve_insertion_order": False,
+    }
+}
 
 
-class SemanticAccumulator:
-    """Order-independent, multiplicity-preserving binding of canonical records.
-
-    Fan-in and reducers see records in different deterministic orders. Two
-    independently domain-separated 256-bit modular sums let either side combine
-    fragment/leaf results without sorting or buffering planet-scale payloads.
-    Every summand hashes a length-framed canonical full-record encoding.
-    """
-
-    def __init__(self) -> None:
-        self.records = 0
-        self.accumulator_a = 0
-        self.accumulator_b = 0
-
-    def add(self, payload: bytes) -> None:
-        frame = len(payload).to_bytes(8, "big") + payload
-        self.accumulator_a = (
-            self.accumulator_a
-            + int.from_bytes(hashlib.sha256(SEMANTIC_BINDING_DOMAIN_A + frame).digest())
-        ) % SEMANTIC_MODULUS
-        self.accumulator_b = (
-            self.accumulator_b
-            + int.from_bytes(hashlib.sha256(SEMANTIC_BINDING_DOMAIN_B + frame).digest())
-        ) % SEMANTIC_MODULUS
-        self.records += 1
-
-    def combine(self, binding: dict[str, Any]) -> None:
-        validate_semantic_binding(binding)
-        self.records += binding["records"]
-        self.accumulator_a = (
-            self.accumulator_a + int(binding["accumulator_a"], 16)
-        ) % SEMANTIC_MODULUS
-        self.accumulator_b = (
-            self.accumulator_b + int(binding["accumulator_b"], 16)
-        ) % SEMANTIC_MODULUS
-
-    def finish(self) -> dict[str, Any]:
-        return {
-            "schema": SEMANTIC_BINDING_SCHEMA,
-            "records": self.records,
-            "accumulator_a": f"{self.accumulator_a:064x}",
-            "accumulator_b": f"{self.accumulator_b:064x}",
-        }
+SemanticAccumulator = address_map.SemanticAccumulator
+validate_semantic_binding = address_map.validate_semantic_binding
 
 
-def validate_semantic_binding(
-    binding: Any, *, expected_records: int | None = None
+def configure_duckdb_stage(
+    database: Any, *, stage: str, temp_directory: Path
 ) -> dict[str, Any]:
+    """Apply and report the effective bounded settings for one DuckDB stage."""
+
+    requested = DUCKDB_STAGE_CONFIGURATION.get(stage)
+    if requested is None:
+        raise ValueError("unknown address DuckDB stage")
+    spill_directory = temp_directory / f"duckdb-{stage}"
+    spill_directory.mkdir(parents=True, exist_ok=True)
+
+    def quoted(value: str) -> str:
+        return "'" + value.replace("'", "''") + "'"
+
+    database.execute(f"SET threads={requested['threads']}")
+    database.execute(f"SET memory_limit={quoted(requested['memory_limit'])}")
+    database.execute(f"SET temp_directory={quoted(str(spill_directory))}")
+    database.execute(
+        "SET max_temp_directory_size="
+        f"{quoted(requested['max_temp_directory_size'])}"
+    )
+    database.execute(
+        "SET preserve_insertion_order="
+        + ("true" if requested["preserve_insertion_order"] else "false")
+    )
+    names = (
+        "threads",
+        "memory_limit",
+        "temp_directory",
+        "max_temp_directory_size",
+        "preserve_insertion_order",
+    )
+    effective = dict(
+        database.execute(
+            "SELECT name, value FROM duckdb_settings() "
+            f"WHERE name IN ({','.join(quoted(name) for name in names)}) "
+            "ORDER BY name"
+        ).fetchall()
+    )
     if (
-        not isinstance(binding, dict)
-        or set(binding) != {"schema", "records", "accumulator_a", "accumulator_b"}
-        or binding.get("schema") != SEMANTIC_BINDING_SCHEMA
-        or type(binding.get("records")) is not int
-        or binding["records"] < 0
+        set(effective) != set(names)
+        or effective["threads"] != str(requested["threads"])
+        or effective["temp_directory"] != str(spill_directory)
+        or effective["preserve_insertion_order"] != "false"
     ):
-        raise ValueError("address semantic binding is invalid")
-    require_sha256(binding.get("accumulator_a"), "semantic accumulator A")
-    require_sha256(binding.get("accumulator_b"), "semantic accumulator B")
-    if expected_records is not None and binding["records"] != expected_records:
-        raise ValueError("address semantic binding record count differs")
-    return binding
+        raise ValueError("effective DuckDB settings differ from bounded request")
+    return {
+        "schema": DUCKDB_RUNTIME_EVIDENCE_SCHEMA,
+        "stage": stage,
+        "engine": "duckdb",
+        "version": database.execute("SELECT version()").fetchone()[0],
+        "requested": {
+            **requested,
+            "temp_directory": f"task-local/{stage}",
+        },
+        "effective": {
+            **{
+                name: value
+                for name, value in effective.items()
+                if name != "temp_directory"
+            },
+            "temp_directory": f"task-local/{stage}",
+            "temp_directory_matches_requested": True,
+        },
+    }
 
 
 def combine_semantic_bindings(
@@ -591,7 +605,9 @@ def _validate_map_task(
     inventory: dict[str, Any],
     task: dict[str, Any],
     maximum_hash_bits: int,
-) -> tuple[dict[str, Any], dict[str, Any], list[dict[str, Any]]]:
+) -> tuple[
+    dict[str, Any], dict[str, Any], list[dict[str, Any]], dict[str, Any], list[dict[str, Any]]
+]:
     completion = load_json(completion_path)
     task_identity = _expected_task_identity(inventory["inventory_sha256"], task)
     execution = {
@@ -607,6 +623,7 @@ def _validate_map_task(
         or completion.get("overture_release") != inventory["release"]
         or completion.get("normalization_version") != NORMALIZATION_VERSION
         or completion.get("wire_encoding") != address_map.WIRE_ENCODING
+        or completion.get("duplicate_id_policy") != address_map.DUPLICATE_ID_POLICY
         or completion.get("execution") != execution
         or completion.get("address_task_identity") != task_identity
         or not isinstance(source, dict)
@@ -629,7 +646,7 @@ def _validate_map_task(
     ):
         raise ValueError("address map maximum hash level differs")
     accounting = _validate_accounting(completion.get("accounting"))
-    _validate_counts(completion, maximum_hash_bits)
+    declared_counts = _validate_counts(completion, maximum_hash_bits)
     fanout = completion.get("exact_lookup_fanout")
     if (
         not isinstance(fanout, dict)
@@ -675,7 +692,7 @@ def _validate_map_task(
         "maximum_hash_bits": maximum_hash_bits,
         "is_serving_shard_id": False,
     }
-    fragments = manifest.get("fragments")
+    fragments = manifest.get("data_packs")
     if (
         manifest.get("schema") != address_map.FRAGMENT_MANIFEST_SCHEMA
         or manifest.get("overture_release") != inventory["release"]
@@ -688,6 +705,7 @@ def _validate_map_task(
         or manifest.get("address_task_identity") != task_identity
         or manifest.get("intermediate_ownership") != ownership_contract
         or not isinstance(fragments, list)
+        or manifest.get("fragments") != fragments
         or len(fragments) != manifest_identity.get("records")
     ):
         raise ValueError("address map fragment manifest differs from completion")
@@ -702,6 +720,7 @@ def _validate_map_task(
             fragment.get("relative_path"), "address fragment path"
         )
         ownership = fragment.get("intermediate_ownership")
+        row_groups = fragment.get("row_groups")
         if (
             type(size) is not int
             or size <= 0
@@ -716,9 +735,61 @@ def _validate_map_task(
                 maximum_hash_bits,
             )
             or fragment.get("object_key")
-            != f"map/address-fragments/{relative.relative_to('fragments').as_posix()}"
+            != f"map/address-data-packs/{relative.relative_to('data-packs').as_posix()}"
+            or not isinstance(row_groups, list)
+            or not row_groups
         ):
             raise ValueError("address map fragment manifest entry is invalid")
+        row_group_records = 0
+        previous_row_group_end: int | None = None
+        for row_group_index, row_group in enumerate(row_groups):
+            group_ownership = (
+                row_group.get("intermediate_ownership")
+                if isinstance(row_group, dict)
+                else None
+            )
+            if (
+                not isinstance(row_group, dict)
+                or row_group.get("index") != row_group_index
+                or type(row_group.get("records")) is not int
+                or row_group["records"] <= 0
+                or type(row_group.get("compressed_column_bytes")) is not int
+                or row_group["compressed_column_bytes"] <= 0
+                or not isinstance(group_ownership, dict)
+                or group_ownership
+                != address_map.intermediate_ownership(
+                    group_ownership.get("country"),
+                    group_ownership.get("minimum_bucket"),
+                    group_ownership.get("maximum_bucket"),
+                    maximum_hash_bits,
+                )
+                or group_ownership["country"] != ownership["country"]
+                or group_ownership["minimum_bucket"] < ownership["minimum_bucket"]
+                or group_ownership["maximum_bucket"] > ownership["maximum_bucket"]
+                or (
+                    previous_row_group_end is not None
+                    and group_ownership["minimum_bucket"] < previous_row_group_end
+                )
+                or row_group.get("integrity")
+                != {
+                    "kind": "canonical-row-multiset-binding-v1",
+                    "order_verified_by_consumer": True,
+                }
+            ):
+                raise ValueError("address data-pack row-group proof is invalid")
+            validate_semantic_binding(
+                row_group.get("semantic_binding"),
+                expected_records=row_group["records"],
+            )
+            row_group_records += row_group["records"]
+            previous_row_group_end = group_ownership["maximum_bucket"]
+        if row_group_records != records:
+            raise ValueError("address data-pack row-group records do not reconcile")
+        layout_binding = address_map.validate_parquet_layout_binding(
+            fragment.get("parquet_layout_binding"),
+            expected_records=records,
+            expected_row_groups=len(row_groups),
+        )
         object_key = fragment.get("object_key")
         if not isinstance(object_key, str) or not object_key:
             raise ValueError("address map fragment object key is invalid")
@@ -731,6 +802,8 @@ def _validate_map_task(
                 "sha256": digest,
                 "bytes": size,
                 "records": records,
+                "row_groups": row_groups,
+                "parquet_layout_binding": layout_binding,
                 "intermediate_ownership": ownership,
                 "address_task_identity": task_identity,
             }
@@ -746,23 +819,74 @@ def _validate_map_task(
     if (
         totals != expected_totals
         or completion.get("fragment_totals") != expected_totals
+        or completion.get("data_packs")
+        != {
+            "schema": address_map.FRAGMENT_MANIFEST_SCHEMA,
+            "objects": fragments,
+            "totals": expected_totals,
+        }
         or total_records != accounting["retained_rows"]
     ):
         raise ValueError("address map fragment totals do not reconcile")
-    return completion, manifest_identity, normalized
+
+    summary_identity = completion.get("summary")
+    if (
+        not isinstance(summary_identity, dict)
+        or manifest.get("summary") != summary_identity
+        or summary_identity.get("schema") != address_map.SUMMARY_SCHEMA
+        or summary_identity.get("object_key")
+        != f"map/address-summaries/sha256/{summary_identity.get('sha256')}.parquet"
+    ):
+        raise ValueError("address map completion omits its exact semantic summary")
+    summary_relative = safe_relative_path(
+        summary_identity.get("relative_path"), "address summary path"
+    )
+    summary_path = map_root / summary_relative
+    expected_summary_header = {
+        "schema": address_map.SUMMARY_SCHEMA,
+        "overture_release": inventory["release"],
+        "source_inventory_sha256": inventory["source_inventory_sha256"],
+        "schema_fingerprint_sha256": inventory["schema_contract"][
+            "fingerprint_sha256"
+        ],
+        "address_task_identity": task_identity,
+        "maximum_hash_bits": maximum_hash_bits,
+        "entries": summary_identity.get("entries"),
+        "records": accounting["retained_rows"],
+        "semantic_binding_schema": SEMANTIC_BINDING_SCHEMA,
+    }
+    _, summary_rows = address_map.read_semantic_summary(
+        summary_path,
+        expected_identity=summary_identity,
+        expected_header=expected_summary_header,
+    )
+    summary_counts = [
+        {
+            "country": item["country"],
+            "bucket": item["bucket"],
+            "rows": item["records"],
+        }
+        for item in summary_rows
+    ]
+    if summary_counts != declared_counts:
+        raise ValueError("address semantic summary differs from declared bucket counts")
+    summary_descriptor = {
+        **summary_identity,
+        "source_path": summary_path,
+        "address_task_identity": task_identity,
+        "expected_header": expected_summary_header,
+    }
+    return completion, manifest_identity, normalized, summary_descriptor, summary_rows
 
 
-def _scan_exact_counts(
-    fragments: list[dict[str, Any]],
+def _combine_summary_bindings(
+    summaries: Iterable[dict[str, Any]],
     *,
-    output_root: Path,
-    inventory: dict[str, Any],
-    maximum_hash_bits: int,
-    fetch_command: list[str] | None,
-    connection: sqlite3.Connection,
     leaves: list[dict[str, Any]],
+    maximum_hash_bits: int,
 ) -> tuple[int, dict[str, dict[str, Any]]]:
-    rows = 0
+    """Derive stable-leaf bindings using only compact task summaries."""
+
     accumulators = {leaf["id"]: SemanticAccumulator() for leaf in leaves}
     routes: dict[str, tuple[list[int], list[dict[str, Any]]]] = {}
     for country in sorted({leaf["country"] for leaf in leaves}):
@@ -774,117 +898,78 @@ def _scan_exact_counts(
             [leaf["hash_start"] for leaf in country_leaves],
             country_leaves,
         )
-    with tempfile.TemporaryDirectory(
-        prefix=".address-fragment-slot-", dir=output_root
-    ) as name:
-        slot = Path(name)
-        for fragment in fragments:
-            path, remove_after = materialized_fragment(
-                fragment, slot, fetch_command=fetch_command
-            )
-            try:
-                if (
-                    not path.is_file()
-                    or path.stat().st_size != fragment["bytes"]
-                    or sha256_file(path) != fragment["sha256"]
-                ):
-                    raise ValueError("address fragment changed during fan-in")
-                ownership = fragment["intermediate_ownership"]
-                reader = address_map.CountryFragmentReader(
-                    path, maximum_hash_bits=maximum_hash_bits
-                )
-                observed_rows = 0
-                observed_minimum: int | None = None
-                observed_maximum: int | None = None
-                try:
-                    header = reader.header
-                    if (
-                        header.get("records") != fragment["records"]
-                        or header.get("source_inventory_sha256")
-                        != inventory["source_inventory_sha256"]
-                        or header.get("schema_fingerprint_sha256")
-                        != inventory["schema_contract"]["fingerprint_sha256"]
-                        or header.get("address_task_identity")
-                        != fragment["address_task_identity"]
-                        or header.get("intermediate_ownership") != ownership
-                        or header.get("wire_encoding") != address_map.WIRE_ENCODING
-                    ):
-                        raise ValueError(
-                            "address fragment header differs from fan-in manifest"
-                        )
-                    while True:
-                        item = reader.next()
-                        if item is None:
-                            break
-                        key, payload = item
-                        country, bucket = address_map.record_ownership(
-                            key, maximum_hash_bits
-                        )
-                        if (
-                            country != ownership["country"]
-                            or not ownership["minimum_bucket"]
-                            <= bucket
-                            <= ownership["maximum_bucket"]
-                        ):
-                            raise ValueError(
-                                "address record differs from fragment ownership"
-                            )
-                        updated = connection.execute(
-                            "UPDATE counts SET observed=observed+1 "
-                            "WHERE country=? AND bucket=? AND observed < expected",
-                            (country, bucket),
-                        )
-                        if updated.rowcount != 1:
-                            raise ValueError(
-                                "address fragment scan exceeds declared bucket counts"
-                            )
-                        starts, country_leaves = routes[country]
-                        hashed = address_map.record_hash(key[:8])
-                        route_index = bisect.bisect_right(starts, hashed) - 1
-                        if route_index < 0:
-                            raise ValueError(
-                                "address semantic record has no stable leaf"
-                            )
-                        leaf = country_leaves[route_index]
-                        if hashed > leaf["hash_end"]:
-                            raise ValueError(
-                                "address semantic record crosses stable leaves"
-                            )
-                        accumulators[leaf["id"]].add(
-                            canonical_semantic_payload(payload, key)
-                        )
-                        rows += 1
-                        observed_rows += 1
-                        observed_minimum = (
-                            bucket
-                            if observed_minimum is None
-                            else min(observed_minimum, bucket)
-                        )
-                        observed_maximum = (
-                            bucket
-                            if observed_maximum is None
-                            else max(observed_maximum, bucket)
-                        )
-                finally:
-                    reader.close()
-                if (
-                    observed_rows != fragment["records"]
-                    or observed_minimum != ownership["minimum_bucket"]
-                    or observed_maximum != ownership["maximum_bucket"]
-                ):
-                    raise ValueError("address fragment exact range does not reconcile")
-            finally:
-                if remove_after:
-                    path.unlink(missing_ok=True)
-    mismatch = connection.execute(
-        "SELECT country, bucket FROM counts WHERE expected != observed LIMIT 1"
-    ).fetchone()
-    if mismatch is not None:
-        raise ValueError("address fragment scan differs from declared bucket counts")
-    bindings = {leaf["id"]: accumulators[leaf["id"]].finish() for leaf in leaves}
+    rows = 0
+    for summary in summaries:
+        _, summary_rows = address_map.read_semantic_summary(
+            summary["source_path"],
+            expected_identity=summary,
+            expected_header=summary["expected_header"],
+        )
+        for item in summary_rows:
+            starts, country_leaves = routes[item["country"]]
+            bucket_start = item["bucket"] << (64 - maximum_hash_bits)
+            route_index = bisect.bisect_right(starts, bucket_start) - 1
+            if route_index < 0:
+                raise ValueError("address summary bucket has no stable leaf")
+            leaf = country_leaves[route_index]
+            bucket_end = ((item["bucket"] + 1) << (64 - maximum_hash_bits)) - 1
+            if bucket_end > leaf["hash_end"]:
+                raise ValueError("address summary bucket crosses stable leaves")
+            accumulators[leaf["id"]].combine(item["semantic_binding"])
+            rows += item["records"]
+    bindings = {identifier: value.finish() for identifier, value in accumulators.items()}
     for leaf in leaves:
         validate_semantic_binding(bindings[leaf["id"]], expected_records=leaf["rows"])
     return rows, bindings
+
+
+def _aggregate_summary_counts_duckdb(
+    summaries: Iterable[dict[str, Any]],
+    connection: sqlite3.Connection,
+    *,
+    temp_directory: Path,
+) -> dict[str, Any]:
+    """Use bounded DuckDB execution for the planet-wide typed aggregation."""
+
+    import duckdb
+
+    paths = [str(item["source_path"]) for item in summaries]
+    if not paths:
+        raise ValueError("address summary aggregation has no task inputs")
+    database = duckdb.connect(str(temp_directory / "summary-aggregation.duckdb"))
+    try:
+        runtime = configure_duckdb_stage(
+            database,
+            stage="address-summary-aggregation-v1",
+            temp_directory=temp_directory,
+        )
+        database.read_parquet(paths).create_view("address_task_summaries")
+        reader = database.execute(
+            "SELECT country, maximum_bucket, SUM(records)::UBIGINT AS records "
+            "FROM address_task_summaries GROUP BY country, maximum_bucket "
+            "ORDER BY country, maximum_bucket"
+        ).to_arrow_reader(65_536)
+        entries = rows = 0
+        for batch in reader:
+            values = [
+                (item["country"], item["maximum_bucket"], item["records"])
+                for item in batch.to_pylist()
+            ]
+            connection.executemany(
+                "INSERT INTO counts(country, bucket, expected) VALUES (?, ?, ?)",
+                values,
+            )
+            entries += len(values)
+            rows += sum(item[2] for item in values)
+    finally:
+        database.close()
+    return {
+        **runtime,
+        "package_version": duckdb.__version__,
+        "stream_batch_rows": 65_536,
+        "entries": entries,
+        "records": rows,
+    }
 
 
 def _predecessor_manifest_identity(value: Any) -> dict[str, Any]:
@@ -1060,16 +1145,25 @@ def _assign_jobs(
         remaining_rows -= assigned_rows
     jobs = []
     for index, assigned in enumerate(assignments):
-        input_indexes = [
-            item["index"]
-            for item in inputs
-            if any(
-                item["intermediate_ownership"]["country"] == leaf["country"]
-                and item["intermediate_ownership"]["hash_start"] <= leaf["hash_end"]
-                and item["intermediate_ownership"]["hash_end"] >= leaf["hash_start"]
-                for leaf in assigned
-            )
-        ]
+        input_row_groups = []
+        for item in inputs:
+            selected = [
+                row_group["index"]
+                for row_group in item["row_groups"]
+                if any(
+                    row_group["intermediate_ownership"]["country"] == leaf["country"]
+                    and row_group["intermediate_ownership"]["hash_start"]
+                    <= leaf["hash_end"]
+                    and row_group["intermediate_ownership"]["hash_end"]
+                    >= leaf["hash_start"]
+                    for leaf in assigned
+                )
+            ]
+            if selected:
+                input_row_groups.append(
+                    {"input_index": item["index"], "row_group_indexes": selected}
+                )
+        input_indexes = [item["input_index"] for item in input_row_groups]
         jobs.append(
             {
                 "index": index,
@@ -1078,6 +1172,7 @@ def _assign_jobs(
                 "is_serving_shard_id": False,
                 "partition_ids": [leaf["id"] for leaf in assigned],
                 "input_indexes": input_indexes,
+                "input_row_groups": input_row_groups,
                 "expected_rows": sum(leaf["rows"] for leaf in assigned),
                 "expected_semantic_binding": combine_semantic_bindings(
                     [leaf["semantic_binding"] for leaf in assigned],
@@ -1085,8 +1180,11 @@ def _assign_jobs(
                 ),
             }
         )
-    references: Counter[int] = Counter(
-        input_index for job in jobs for input_index in job["input_indexes"]
+    references: Counter[tuple[int, int]] = Counter(
+        (assignment["input_index"], row_group_index)
+        for job in jobs
+        for assignment in job["input_row_groups"]
+        for row_group_index in assignment["row_group_indexes"]
     )
     if references and max(references.values()) > MAX_FRAGMENT_JOB_REFERENCES:
         if job_count == 1:
@@ -1167,6 +1265,7 @@ def build_fanin_plan(
     manifest_digests: set[str] = set()
     fragment_digests: set[str] = set()
     fragments: list[dict[str, Any]] = []
+    summaries: list[dict[str, Any]] = []
     aggregate_rejections: Counter[str] = Counter()
     input_rows = retained_rows = rejected_rows = 0
     for completion_path, map_root in supplied:
@@ -1190,7 +1289,13 @@ def build_fanin_plan(
             task=tasks[task_index],
             maximum_hash_bits=maximum_hash_bits,
         )
-        completion, manifest_identity, task_fragments = validated
+        (
+            completion,
+            manifest_identity,
+            task_fragments,
+            summary_descriptor,
+            _summary_rows,
+        ) = validated
         manifest_digest = manifest_identity["sha256"]
         if manifest_digest in manifest_digests:
             raise ValueError("address fragment manifest was replayed")
@@ -1202,20 +1307,19 @@ def build_fanin_plan(
         if len(fragments) + len(task_fragments) > max_source_fragments:
             raise ValueError("address source fragment count exceeds its hard cap")
         fragments.extend(task_fragments)
+        summaries.append(summary_descriptor)
         accounting = completion["accounting"]
         input_rows += accounting["input_rows"]
         retained_rows += accounting["retained_rows"]
         rejected_rows += accounting["rejected_rows"]
         aggregate_rejections.update(accounting["rejections"])
-        for item in completion["partition_counts"]["counts"]:
-            connection.execute(
-                "INSERT INTO counts(country, bucket, expected) VALUES (?, ?, ?) "
-                "ON CONFLICT(country, bucket) DO UPDATE "
-                "SET expected=expected+excluded.expected",
-                (item["country"], item["bucket"], item["rows"]),
-            )
         by_index[task_index] = {
             "fragment_manifest": manifest_identity,
+            "summary": {
+                key: value
+                for key, value in summary_descriptor.items()
+                if key not in {"source_path", "expected_header", "address_task_identity"}
+            },
             "maximum_candidates": completion["exact_lookup_fanout"][
                 "maximum_candidates"
             ],
@@ -1227,6 +1331,13 @@ def build_fanin_plan(
     ):
         raise ValueError("global address map accounting does not reconcile")
 
+    duckdb_aggregation = _aggregate_summary_counts_duckdb(
+        summaries,
+        connection,
+        temp_directory=Path(bucket_temp.name),
+    )
+    if duckdb_aggregation["records"] != retained_rows:
+        raise ValueError("DuckDB address summary aggregation does not reconcile")
     connection.commit()
     partition_plan = build_partition_plan_from_counts(
         connection,
@@ -1236,18 +1347,14 @@ def build_fanin_plan(
         previous=previous_plan,
     )
     leaves = validate_partition_plan(partition_plan)
-    scanned_rows, semantic_bindings = _scan_exact_counts(
-        fragments,
-        output_root=output_root,
-        inventory=inventory,
-        maximum_hash_bits=maximum_hash_bits,
-        fetch_command=fragment_fetch_command,
-        connection=connection,
+    scanned_rows, semantic_bindings = _combine_summary_bindings(
+        summaries,
         leaves=leaves,
+        maximum_hash_bits=maximum_hash_bits,
     )
     connection.commit()
     if scanned_rows != retained_rows:
-        raise ValueError("global fragment scan differs from exact map bucket counts")
+        raise ValueError("global summary aggregation differs from exact map counts")
     for leaf in partition_plan["partitions"]:
         leaf["semantic_binding"] = semantic_bindings[leaf["id"]]
 
@@ -1274,7 +1381,7 @@ def build_fanin_plan(
                 )
             relative = (
                 Path("families/addresses/reduce-inputs/sha256")
-                / f"{fragment['sha256']}.bin"
+                / f"{fragment['sha256']}.parquet"
             )
             _copy_content_addressed(
                 fragment["source_path"],
@@ -1284,10 +1391,13 @@ def build_fanin_plan(
             )
         item = {
             "index": index,
+            "format": address_map.WIRE_ENCODING,
             "object_key": fragment["object_key"],
             "sha256": fragment["sha256"],
             "bytes": fragment["bytes"],
             "records": fragment["records"],
+            "row_groups": fragment["row_groups"],
+            "parquet_layout_binding": fragment["parquet_layout_binding"],
             "source_task_index": fragment["source_task_index"],
             "source_fragment_index": fragment["source_fragment_index"],
             "address_task_identity": fragment["address_task_identity"],
@@ -1322,7 +1432,13 @@ def build_fanin_plan(
                     "fingerprint_sha256"
                 ],
                 "map_completion_set_sha256": value_sha256(
-                    [by_index[index]["fragment_manifest"] for index in sorted(by_index)]
+                    [
+                        {
+                            "data_pack_manifest": by_index[index]["fragment_manifest"],
+                            "summary": by_index[index]["summary"],
+                        }
+                        for index in sorted(by_index)
+                    ]
                 ),
             },
             "accounting": {
@@ -1387,16 +1503,32 @@ def build_fanin_plan(
             "jobs": len(jobs),
             "nonempty_partitions": sum(leaf["rows"] > 0 for leaf in leaves),
             "expected_rows": sum(job["expected_rows"] for job in jobs),
-            "input_references": sum(len(job["input_indexes"]) for job in jobs),
-            "input_reference_bytes": sum(
-                staged_inputs[index]["bytes"]
+            "input_references": sum(
+                len(assignment["row_group_indexes"])
                 for job in jobs
-                for index in job["input_indexes"]
+                for assignment in job["input_row_groups"]
             ),
-            "maximum_job_inputs": max(len(job["input_indexes"]) for job in jobs),
+            "input_reference_bytes": sum(
+                staged_inputs[assignment["input_index"]]["row_groups"][row_group_index][
+                    "compressed_column_bytes"
+                ]
+                for job in jobs
+                for assignment in job["input_row_groups"]
+                for row_group_index in assignment["row_group_indexes"]
+            ),
+            "maximum_job_inputs": max(
+                sum(
+                    len(assignment["row_group_indexes"])
+                    for assignment in job["input_row_groups"]
+                )
+                for job in jobs
+            ),
             "maximum_fragment_job_references": max(
                 Counter(
-                    input_index for job in jobs for input_index in job["input_indexes"]
+                    (assignment["input_index"], row_group_index)
+                    for job in jobs
+                    for assignment in job["input_row_groups"]
+                    for row_group_index in assignment["row_group_indexes"]
                 ).values(),
                 default=0,
             ),
@@ -1430,7 +1562,9 @@ def build_fanin_plan(
         "runtime": {
             "serving_runtime_contract": runtime,
             "bucket_aggregation": {
-                "kind": "disk-backed-exact-maximum-bucket-count-v1",
+                "kind": "typed-parquet-summary-only-v1",
+                "payload_data_packs_opened": 0,
+                "engine": duckdb_aggregation,
                 "sqlite_runtime_version": sqlite3.sqlite_version,
                 "cache_kib_at_most": bucket_db_cache_kib,
             },

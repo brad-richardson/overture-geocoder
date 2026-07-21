@@ -56,7 +56,9 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install duckdb pytest pyyaml h3==4.3.1 shapely==2.1.2
+          python -m pip install --only-binary=:all: --require-hashes \
+            -r .github/requirements-hosted-rowgroup.txt
+          pip install pytest pyyaml h3==4.3.1 shapely==2.1.2
       - name: Run pipeline tests
         run: pytest tests/ -v
 

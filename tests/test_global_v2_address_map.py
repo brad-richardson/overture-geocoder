@@ -5,6 +5,7 @@ import importlib.util
 import json
 import struct
 import uuid
+from collections import defaultdict
 from pathlib import Path
 
 import pytest
@@ -248,10 +249,15 @@ def test_strict_map_reconciles_exclusive_rejections_counts_and_fanout(tmp_path):
     assert manifest["totals"]["records"] == 3
     assert manifest["totals"]["fragments"] == 3
     seen_owners = set()
+    observed_bindings = defaultdict(address_map.SemanticAccumulator)
     for fragment in manifest["fragments"]:
         content = output_dir / fragment["relative_path"]
+        assert content.suffix == ".parquet"
         assert content.stat().st_size == fragment["bytes"]
         assert address_map.sha256_file(content) == fragment["sha256"]
+        assert pq.ParquetFile(content).schema_arrow.remove_metadata().equals(
+            address_map.shuffle_schema()
+        )
         reader = address_map.CountryFragmentReader(content, maximum_hash_bits=4)
         try:
             assert reader.header["execution_bucket_is_serving_shard_id"] is False
@@ -273,12 +279,30 @@ def test_strict_map_reconciles_exclusive_rejections_counts_and_fanout(tmp_path):
                 == owner["maximum_bucket"]
             )
             seen_owners.add((owner["country"], owner["minimum_bucket"]))
+            observed_bindings[(owner["country"], owner["minimum_bucket"])].add(
+                item[1]
+            )
             assert reader.next() is None
         finally:
             reader.close()
     assert seen_owners == {
         ("us", duplicate_bucket),
         ("us", different_bucket),
+    }
+    summary_path = output_dir / report["summary"]["relative_path"]
+    header, summaries = address_map.read_semantic_summary(
+        summary_path, expected_identity=report["summary"]
+    )
+    assert header["records"] == 3
+    assert pq.ParquetFile(summary_path).schema_arrow.remove_metadata().equals(
+        address_map.summary_schema()
+    )
+    assert {
+        (item["country"], item["bucket"]): item["semantic_binding"]
+        for item in summaries
+    } == {
+        identity: accumulator.finish()
+        for identity, accumulator in observed_bindings.items()
     }
 
 
@@ -326,6 +350,215 @@ def test_spill_merge_compacts_one_owner_across_scan_batches(tmp_path):
     assert report["fragment_totals"]["fragments"] == 1
     assert report["fragment_totals"]["records"] == 5
     assert report["exact_lookup_fanout"]["maximum_candidates"] == 5
+
+
+def test_typed_pack_row_groups_have_independent_semantic_integrity(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(address_map, "PARQUET_ROW_GROUP_ROWS", 2)
+    source_path = tmp_path / "projected.parquet"
+    write_projected(
+        source_path,
+        [
+            row(str(uuid.UUID(int=index + 1)), source_row_index=index)
+            for index in range(5)
+        ],
+    )
+    report = address_map.build_map(
+        source_path,
+        tmp_path / "map",
+        tmp_path / "done.json",
+        execution_bucket=EXECUTION_BUCKET,
+        expected_release=RELEASE,
+        expected_schema_fingerprint_sha256=SCHEMA_FINGERPRINT,
+        expected_inventory_sha256=INVENTORY_DIGEST,
+        expected_task_index=TASK_INDEX,
+        expected_task_digest_sha256=TASK_DIGEST,
+        expected_task_source_digest_sha256=TASK_SOURCE_DIGEST,
+        maximum_hash_bits=4,
+        scan_batch_rows=2,
+        max_fragment_rows=100,
+        max_fragment_bytes=100_000,
+        max_rows=100,
+    )
+    manifest = json.loads(
+        (tmp_path / "map" / report["fragment_manifest"]["relative_path"]).read_text()
+    )
+    pack = manifest["data_packs"][0]
+    assert [item["records"] for item in pack["row_groups"]] == [2, 2, 1]
+    assert all(
+        item["integrity"]["kind"] == "canonical-row-multiset-binding-v1"
+        for item in pack["row_groups"]
+    )
+    reader = address_map.CountryFragmentReader(
+        tmp_path / "map" / pack["relative_path"],
+        maximum_hash_bits=4,
+        row_groups=[1],
+    )
+    try:
+        assert sum(reader.next() is not None for _ in range(3)) == 2
+        assert reader.semantic_binding() == pack["row_groups"][1][
+            "semantic_binding"
+        ]
+    finally:
+        reader.close()
+
+
+def test_typed_shuffle_preserves_duplicate_source_rows_with_the_same_id(tmp_path):
+    feature_id = str(uuid.UUID(int=99))
+    source_path = tmp_path / "projected.parquet"
+    write_projected(
+        source_path,
+        [
+            row(feature_id, source_row_index=0),
+            row(feature_id, source_row_index=1),
+        ],
+    )
+    output_dir = tmp_path / "map"
+    completion_path = tmp_path / "done.json"
+
+    report = build(source_path, output_dir, completion_path)
+
+    assert report["duplicate_id_policy"] == address_map.DUPLICATE_ID_POLICY
+    assert report["accounting"]["retained_rows"] == 2
+    manifest = json.loads(
+        (output_dir / report["fragment_manifest"]["relative_path"]).read_text()
+    )
+    observed = []
+    for pack in manifest["data_packs"]:
+        reader = address_map.CountryFragmentReader(
+            output_dir / pack["relative_path"], maximum_hash_bits=4
+        )
+        try:
+            while (item := reader.next()) is not None:
+                observed.append(address_map.decode_record(item[1]))
+        finally:
+            reader.close()
+    assert [item["id"] for item in observed] == [feature_id, feature_id]
+    assert sorted(item["source_row_index"] for item in observed) == [0, 1]
+
+
+def test_duplicate_total_order_is_independent_of_spill_topology(tmp_path):
+    feature_id = str(uuid.UUID(int=101))
+    source_path = tmp_path / "projected.parquet"
+    write_projected(
+        source_path,
+        [row(feature_id, source_row_index=index) for index in (3, 1, 2, 0)],
+    )
+    identities = []
+    observed_orders = []
+    for scan_batch_rows in (1, 3):
+        output_dir = tmp_path / f"map-{scan_batch_rows}"
+        report = address_map.build_map(
+            source_path,
+            output_dir,
+            output_dir / "completion.json",
+            execution_bucket=EXECUTION_BUCKET,
+            expected_release=RELEASE,
+            expected_schema_fingerprint_sha256=SCHEMA_FINGERPRINT,
+            expected_inventory_sha256=INVENTORY_DIGEST,
+            expected_task_index=TASK_INDEX,
+            expected_task_digest_sha256=TASK_DIGEST,
+            expected_task_source_digest_sha256=TASK_SOURCE_DIGEST,
+            maximum_hash_bits=4,
+            scan_batch_rows=scan_batch_rows,
+            max_fragment_rows=100,
+            max_fragment_bytes=100_000,
+            max_rows=100,
+        )
+        manifest = json.loads(
+            (output_dir / report["fragment_manifest"]["relative_path"]).read_text()
+        )
+        assert len(manifest["data_packs"]) == 1
+        pack = manifest["data_packs"][0]
+        identities.append((pack["sha256"], pack["parquet_layout_binding"]))
+        reader = address_map.CountryFragmentReader(
+            output_dir / pack["relative_path"], maximum_hash_bits=4
+        )
+        order = []
+        try:
+            while (item := reader.next()) is not None:
+                order.append(address_map.decode_record(item[1])["source_row_index"])
+        finally:
+            reader.close()
+        observed_orders.append(order)
+    assert identities[0] == identities[1]
+    assert observed_orders == [[0, 1, 2, 3], [0, 1, 2, 3]]
+
+
+def test_pack_reader_rejects_reversed_duplicate_source_topology(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(address_map, "PARQUET_ROW_GROUP_ROWS", 64_000)
+    feature_id = str(uuid.UUID(int=102))
+    payloads = [
+        address_map.encode_record(
+            {
+                **row(feature_id, source_row_index=index),
+                "lon": -71.0,
+                "lat": 42.0,
+                "address_levels": ["MA", "Stoneham"],
+            }
+        )
+        for index in range(3)
+    ]
+    records = [(address_map.decode_record(payload)["key"], payload) for payload in payloads]
+    owner = address_map.record_ownership(records[0][0], 4)
+    identity = address_map.write_content_fragment(
+        tmp_path,
+        records,
+        source_inventory_sha256="a" * 64,
+        schema_fingerprint_sha256="b" * 64,
+        release=RELEASE,
+        execution_bucket=EXECUTION_BUCKET,
+        task_identity={
+            "inventory_sha256": INVENTORY_DIGEST,
+            "task_index": TASK_INDEX,
+            "task_digest_sha256": TASK_DIGEST,
+            "task_source_digest_sha256": TASK_SOURCE_DIGEST,
+            "execution_bucket": EXECUTION_BUCKET,
+        },
+        ownership=address_map.intermediate_ownership(
+            owner[0], owner[1], owner[1], 4
+        ),
+        index=0,
+        max_fragment_bytes=100_000,
+    )
+    original = tmp_path / identity["relative_path"]
+    reversed_path = tmp_path / "reversed.parquet"
+    table = pq.ParquetFile(original).read()
+    pq.write_table(table.take(pa.array([2, 1, 0])), reversed_path, row_group_size=3)
+    reader = address_map.CountryFragmentReader(reversed_path, maximum_hash_bits=4)
+    try:
+        assert reader.next() is not None
+        with pytest.raises(ValueError, match="not bucket/key sorted"):
+            reader.next()
+    finally:
+        reader.close()
+
+
+def test_all_rejected_map_emits_zero_row_summary_without_data_packs(tmp_path):
+    source_path = tmp_path / "projected.parquet"
+    write_projected(
+        source_path,
+        [
+            row(None, street="", source_row_index=0),
+            row("not-a-uuid", source_row_index=1),
+        ],
+    )
+    output_dir = tmp_path / "map"
+    report = build(source_path, output_dir, tmp_path / "done.json")
+
+    assert report["accounting"]["retained_rows"] == 0
+    assert report["accounting"]["rejected_rows"] == 2
+    assert report["fragment_totals"] == {"fragments": 0, "bytes": 0, "records": 0}
+    assert report["summary"]["entries"] == 0
+    assert report["summary"]["records"] == 0
+    assert report["exact_lookup_fanout"] == {
+        "scope": "execution_bucket",
+        "maximum_candidates": 0,
+        "normalized_lookup_key": None,
+    }
 
 
 def test_many_unique_buckets_have_bounded_country_fragments_and_exact_counts(
