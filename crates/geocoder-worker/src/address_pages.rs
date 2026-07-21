@@ -547,6 +547,19 @@ mod tests {
         assert_eq!(records[1].number, "11");
     }
 
+    #[test]
+    #[ignore = "readiness workflow supplies a freshly generated Python artifact"]
+    fn readiness_decodes_dynamic_python_address_fixture() {
+        let path = std::env::var("GLOBAL_V2_READINESS_ADDRESS_FIXTURE")
+            .expect("readiness address fixture path");
+        let bytes = std::fs::read(path).expect("read readiness address fixture");
+        let records = decode_useful_page(&bytes).expect("decode readiness address fixture");
+        println!(
+            "GLOBAL_V2_READINESS_JSON={}",
+            serde_json::to_string(&records).expect("serialize readiness address records")
+        );
+    }
+
     mod fixture {
         /// Record count baked into `tests/fixtures/pages/*` by the generator
         /// `tests/generate_page_fixtures.py`; kept in sync via the Python

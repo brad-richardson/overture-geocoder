@@ -541,7 +541,7 @@ def build_fragments(
 
 
 class FragmentReader:
-    def __init__(self, path: Path):
+    def __init__(self, path: Path, *, ordering_key=None):
         self.path = path
         self.size = path.stat().st_size
         self.file = self.path.open("rb")
@@ -549,7 +549,8 @@ class FragmentReader:
         if self.header.get("format") != FORMAT_VERSION:
             raise ValueError("unsupported fragment format")
         self.read_count = 0
-        self.previous: tuple[str, ...] | None = None
+        self.ordering_key = ordering_key
+        self.previous = None
 
     def next(self) -> tuple[tuple[str, ...], bytes] | None:
         length = self.file.read(4)
@@ -569,9 +570,10 @@ class FragmentReader:
         if len(payload) != record_length:
             raise ValueError("truncated fragment record")
         key = decode_record(payload)["key"]
-        if self.previous is not None and key < self.previous:
+        order = key if self.ordering_key is None else self.ordering_key(key, payload)
+        if self.previous is not None and order < self.previous:
             raise ValueError("fragment is not sorted")
-        self.previous = key
+        self.previous = order
         self.read_count += 1
         return key, payload
 

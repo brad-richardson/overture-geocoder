@@ -26,6 +26,7 @@ import global_v2_address_plan as address_plan  # noqa: E402
 import global_v2_address_reduce as address_reduce  # noqa: E402
 import inventory_address_rowgroups as inventory  # noqa: E402
 import experiment_address_compression as address_compression  # noqa: E402
+import r2_fragment_fetch  # noqa: E402
 from address_partition import address_key_hash  # noqa: E402
 from experiment_address_compression import indexed_lookup  # noqa: E402
 
@@ -141,7 +142,13 @@ def write_projected(path: Path, report: dict, task: dict, rows: list[dict]) -> N
     pq.write_table(table, path)
 
 
-def map_matrix(tmp_path: Path, report: dict, *, maximum_hash_bits: int = 4):
+def map_matrix(
+    tmp_path: Path,
+    report: dict,
+    *,
+    maximum_hash_bits: int = 4,
+    max_fragment_rows: int = 1,
+):
     ten_key = (
         "us",
         "ma",
@@ -193,7 +200,7 @@ def map_matrix(tmp_path: Path, report: dict, *, maximum_hash_bits: int = 4):
             expected_task_source_digest_sha256=task["source_digest_sha256"],
             maximum_hash_bits=maximum_hash_bits,
             scan_batch_rows=1,
-            max_fragment_rows=1,
+            max_fragment_rows=max_fragment_rows,
             max_fragment_bytes=100_000,
             max_rows=10,
         )
@@ -265,6 +272,60 @@ def semantic_binding(payload: bytes) -> dict:
     accumulator = address_plan.SemanticAccumulator()
     accumulator.add(payload)
     return accumulator.finish()
+
+
+def duplicate_payload(source_row_index: int) -> tuple[tuple[str, ...], bytes]:
+    payload = address_reduce.encode_record(
+        {
+            "id": str(uuid.UUID(int=777)),
+            "lon": -71.0,
+            "lat": 42.0,
+            "source_object_index": 0,
+            "source_row_group": 0,
+            "source_row_index": source_row_index,
+            "country": "US",
+            "postal_city": "Stoneham",
+            "postcode": "02180",
+            "street": "Main Street",
+            "number": "10",
+            "unit": "",
+            "address_levels": ["MA", "Stoneham"],
+        }
+    )
+    return address_reduce.decode_record(payload)["key"], payload
+
+
+def test_reducer_external_merge_orders_duplicate_ids_by_source_topology(tmp_path):
+    source_digest = "a" * 64
+    spill_manifests = []
+    for index, locators in enumerate(((3, 1), (2, 0))):
+        path = tmp_path / f"spill-{index}.bin"
+        spill_manifests.append(
+            address_reduce._write_spill(  # noqa: SLF001
+                path,
+                [duplicate_payload(locator) for locator in locators],
+                source_inventory_sha256=source_digest,
+                fragment_index=index,
+                maximum_hash_bits=4,
+            )
+        )
+    merged = address_reduce._merge_spills(  # noqa: SLF001
+        spill_manifests,
+        tmp_path / "merged.bin",
+        source_inventory_sha256=source_digest,
+        fragment_index=0,
+        maximum_hash_bits=4,
+    )
+    reader = address_reduce.FragmentReader(Path(merged["path"]))
+    observed = []
+    try:
+        while (item := reader.next()) is not None:
+            observed.append(
+                address_reduce.decode_record(item[1])["source_row_index"]
+            )
+    finally:
+        reader.close()
+    assert observed == [0, 1, 2, 3]
 
 
 @pytest.fixture
@@ -342,6 +403,7 @@ def test_fanin_plan_validates_exact_matrix_counts_and_stable_jobs(executor_fixtu
     assert reduce["jobs"][0]["is_serving_shard_id"] is False
     assert reduce["jobs"][0]["id"] not in reduce["jobs"][0]["partition_ids"]
     assert len(reduce["inputs"]) == 4
+    assert all(item["format"] == address_map.WIRE_ENCODING for item in reduce["inputs"])
     assert all(item["object_key"] for item in reduce["inputs"])
     assert all((output / item["relative_path"]).is_file() for item in reduce["inputs"])
 
@@ -367,6 +429,18 @@ def test_reduce_compacts_bounded_spills_and_finalizes_worker_artifacts(
     )
 
     assert completion["accounting"]["output_rows"] == 4
+    assert completion["construction"]["kind"] == (
+        "direct-serving-from-external-sort-v1"
+    )
+    assert completion["construction"]["semantic_intermediate"] is None
+    routing = completion["construction"]["row_group_routing"]
+    assert routing["selected"] == routing["available_in_referenced_packs"] == 4
+    assert routing["selected_compressed_column_bytes"] > 0
+    assert routing["remote_whole_pack_fetches"] == 0
+    assert routing["partial_read_integrity"] == (
+        "canonical-row-multiset-binding-v1"
+    )
+    assert not list(output.rglob("*.ared"))
     assert completion["accounting"]["maximum_candidate_fanout"] == 3
     assert completion["accounting"]["peak_temporary_workspace_bytes"] > 0
     assert completion["partition_lineage"] == {
@@ -902,6 +976,24 @@ def test_remote_reduce_streams_one_content_addressed_fragment_at_a_time(tmp_path
         )
 
 
+def test_whole_pack_fetch_strips_selective_only_adapter_arguments():
+    command = [
+        "fetch",
+        "--object-key", "{object_key}",
+        "--output", "{output}",
+        "--row-groups", "{row_groups}",
+        "--expected-bytes", "{expected_bytes}",
+        "--expected-sha256", "{expected_sha256}",
+        "--proof", "{proof}",
+    ]
+
+    assert address_reduce._whole_object_fetch_command(command) == [  # noqa: SLF001
+        "fetch",
+        "--object-key", "{object_key}",
+        "--output", "{output}",
+    ]
+
+
 def test_finalize_fetches_and_deletes_one_verified_serving_pair_at_a_time(
     executor_fixture, tmp_path
 ):
@@ -1013,6 +1105,16 @@ def test_reduce_jobs_are_contiguous_balanced_and_limit_fragment_amplification():
                 "hash_start": leaf["hash_start"],
                 "hash_end": leaf["hash_end"],
             },
+            "row_groups": [
+                {
+                    "index": 0,
+                    "intermediate_ownership": {
+                        "country": "us",
+                        "hash_start": leaf["hash_start"],
+                        "hash_end": leaf["hash_end"],
+                    },
+                }
+            ],
         }
         for index, leaf in enumerate(leaves)
     ]
@@ -1025,6 +1127,16 @@ def test_reduce_jobs_are_contiguous_balanced_and_limit_fragment_amplification():
                 "hash_start": leaves[200]["hash_start"],
                 "hash_end": leaves[215]["hash_end"],
             },
+            "row_groups": [
+                {
+                    "index": 0,
+                    "intermediate_ownership": {
+                        "country": "us",
+                        "hash_start": leaves[200]["hash_start"],
+                        "hash_end": leaves[215]["hash_end"],
+                    },
+                }
+            ],
         }
     )
 
@@ -1117,7 +1229,7 @@ def test_disk_backed_bucket_planning_preserves_sticky_splits_and_hard_caps(
         )
 
 
-def test_fanin_streams_remote_fragments_one_at_a_time_with_exact_identity(tmp_path):
+def test_fanin_reads_only_typed_summaries_and_never_fetches_remote_data_packs(tmp_path):
     report = canonical_inventory(tmp_path)
     matrix = map_matrix(tmp_path, report)
     remote = tmp_path / "remote"
@@ -1159,34 +1271,135 @@ def test_fanin_streams_remote_fragments_one_at_a_time_with_exact_identity(tmp_pa
         ],
         bucket_db_cache_kib=1,
     )
-    assert fanin["runtime"]["bucket_aggregation"] == {
-        "kind": "disk-backed-exact-maximum-bucket-count-v1",
-        "sqlite_runtime_version": sqlite3.sqlite_version,
-        "cache_kib_at_most": 1,
+    aggregation = fanin["runtime"]["bucket_aggregation"]
+    assert aggregation["kind"] == "typed-parquet-summary-only-v1"
+    assert aggregation["payload_data_packs_opened"] == 0
+    assert aggregation["sqlite_runtime_version"] == sqlite3.sqlite_version
+    assert aggregation["cache_kib_at_most"] == 1
+    duckdb_runtime = aggregation["engine"]
+    assert duckdb_runtime["schema"] == address_plan.DUCKDB_RUNTIME_EVIDENCE_SCHEMA
+    assert duckdb_runtime["stage"] == "address-summary-aggregation-v1"
+    assert duckdb_runtime["engine"] == "duckdb"
+    assert duckdb_runtime["version"].startswith("v")
+    assert duckdb_runtime["requested"] == {
+        "threads": 2,
+        "memory_limit": "512MiB",
+        "max_temp_directory_size": "8GiB",
+        "preserve_insertion_order": False,
+        "temp_directory": duckdb_runtime["effective"]["temp_directory"],
     }
+    assert duckdb_runtime["effective"] == {
+        "max_temp_directory_size": "8.0 GiB",
+        "memory_limit": "512.0 MiB",
+        "preserve_insertion_order": "false",
+        "temp_directory": duckdb_runtime["requested"]["temp_directory"],
+        "temp_directory_matches_requested": True,
+        "threads": "2",
+    }
+    assert duckdb_runtime["stream_batch_rows"] == 65_536
+    assert duckdb_runtime["entries"] == 2
+    assert duckdb_runtime["records"] == 4
     reduce = json.loads((output / "families/addresses/reduce-plan.json").read_text())
     assert all("relative_path" not in item for item in reduce["inputs"])
     assert not list(output.glob(".address-fragment-slot-*"))
 
-    corrupted = Path(next(iter(object_paths.values())))
-    corrupted.write_bytes(corrupted.read_bytes() + b"corrupt")
-    with pytest.raises(ValueError, match="changed during fan-in"):
+    corrupted_pack = Path(next(iter(object_paths.values())))
+    corrupted_pack.write_bytes(corrupted_pack.read_bytes() + b"corrupt")
+    address_plan.build_fanin_plan(
+        report,
+        matrix,
+        tmp_path / "payload-remains-unopened",
+        build_number=1,
+        maximum_hash_bits=4,
+        row_cap=3,
+        max_reduce_jobs=1,
+        stage_local_fragments=False,
+        fragment_fetch_command=[
+            sys.executable,
+            str(fetcher),
+            str(mapping),
+            "{object_key}",
+            "{output}",
+        ],
+    )
+
+    first_completion, first_root = matrix[0]
+    summary = json.loads(first_completion.read_text())["summary"]
+    summary_path = first_root / summary["relative_path"]
+    summary_path.write_bytes(summary_path.read_bytes() + b"corrupt")
+    with pytest.raises(ValueError, match="summary identity"):
         address_plan.build_fanin_plan(
             report,
             matrix,
-            tmp_path / "corrupt-remote-fanin",
+            tmp_path / "corrupt-summary-fanin",
             build_number=1,
             maximum_hash_bits=4,
             row_cap=3,
             max_reduce_jobs=1,
             stage_local_fragments=False,
-            fragment_fetch_command=[
-                sys.executable,
-                str(fetcher),
-                str(mapping),
-                "{object_key}",
-                "{output}",
-            ],
+        )
+
+
+def test_reducer_rejects_rehashed_semantic_summary_substitution(tmp_path):
+    report = canonical_inventory(tmp_path)
+    matrix = map_matrix(tmp_path, report)
+    completion_path, root = matrix[0]
+    completion = json.loads(completion_path.read_text())
+    old_summary = completion["summary"]
+    old_summary_path = root / old_summary["relative_path"]
+    parquet = pq.ParquetFile(old_summary_path)
+    rows = parquet.read().to_pylist()
+    mutated = bytearray(rows[0]["semantic_sum_a"])
+    mutated[0] ^= 1
+    rows[0]["semantic_sum_a"] = bytes(mutated)
+    temporary = root / "mutated-summary.parquet"
+    pq.write_table(pa.Table.from_pylist(rows, schema=parquet.schema_arrow), temporary)
+    digest = address_plan.sha256_file(temporary)
+    relative = Path("summaries") / "sha256" / f"{digest}.parquet"
+    target = root / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    temporary.replace(target)
+    summary = {
+        **old_summary,
+        "relative_path": relative.as_posix(),
+        "object_key": f"map/address-summaries/sha256/{digest}.parquet",
+        "sha256": digest,
+        "bytes": target.stat().st_size,
+    }
+    completion["summary"] = summary
+    manifest_path = root / completion["fragment_manifest"]["relative_path"]
+    manifest = json.loads(manifest_path.read_text())
+    manifest["summary"] = summary
+    manifest_path.write_bytes(address_plan.json_payload(manifest))
+    completion["fragment_manifest"]["bytes"] = manifest_path.stat().st_size
+    completion["fragment_manifest"]["sha256"] = address_plan.sha256_file(
+        manifest_path
+    )
+    completion_path.write_bytes(address_plan.json_payload(completion))
+
+    output = tmp_path / "mutated-summary-plan"
+    address_plan.build_fanin_plan(
+        report,
+        matrix,
+        output,
+        build_number=1,
+        maximum_hash_bits=4,
+        row_cap=3,
+        max_reduce_jobs=1,
+    )
+    with pytest.raises(ValueError, match="semantic content differs"):
+        address_reduce.run_job(
+            output / "families/addresses/partition-plan.json",
+            output / "families/addresses/reduce-plan.json",
+            job_id="address-reduce-job-000",
+            input_root=output,
+            output_root=output,
+            sort_buffer_rows=2,
+            sort_buffer_bytes=4096,
+            max_open_files=5,
+            max_workspace_bytes=100_000_000,
+            max_artifact_bytes=20_000_000,
+            max_shard_bytes=20_000_000,
         )
 
 
@@ -1223,3 +1436,167 @@ def test_fanin_enforces_bucket_cache_and_source_fragment_hard_caps(tmp_path):
             row_cap=3,
             max_source_fragments=address_plan.MAX_SOURCE_FRAGMENTS + 1,
         )
+
+
+def test_remote_selective_row_groups_fail_closed_without_range_adapter(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(address_map, "PARQUET_ROW_GROUP_ROWS", 1)
+    report = canonical_inventory(tmp_path)
+    matrix = map_matrix(tmp_path, report, max_fragment_rows=100)
+    output = tmp_path / "selective-plan"
+    address_plan.build_fanin_plan(
+        report,
+        matrix,
+        output,
+        build_number=1,
+        maximum_hash_bits=4,
+        row_cap=3,
+        max_reduce_jobs=2,
+        stage_local_fragments=False,
+    )
+    reduce = json.loads((output / "families/addresses/reduce-plan.json").read_text())
+    selective = next(
+        job
+        for job in reduce["jobs"]
+        if any(
+            len(assignment["row_group_indexes"])
+            < len(reduce["inputs"][assignment["input_index"]]["row_groups"])
+            for assignment in job["input_row_groups"]
+        )
+    )
+    with pytest.raises(ValueError, match="byte-range fetch adapter"):
+        address_reduce.run_job(
+            output / "families/addresses/partition-plan.json",
+            output / "families/addresses/reduce-plan.json",
+            job_id=selective["id"],
+            input_root=tmp_path / "missing-inputs",
+            output_root=tmp_path / "selective-reduce",
+            fragment_fetch_command=["fetch", "{object_key}", "{output}"],
+            sort_buffer_rows=2,
+            sort_buffer_bytes=4096,
+            max_open_files=5,
+            max_workspace_bytes=100_000_000,
+            max_artifact_bytes=20_000_000,
+            max_shard_bytes=20_000_000,
+        )
+
+
+@pytest.mark.parametrize("tamper_proof", [False, True])
+def test_remote_selective_row_groups_validate_projection_proof_and_content(
+    tmp_path, monkeypatch, tamper_proof
+):
+    monkeypatch.setattr(address_map, "PARQUET_ROW_GROUP_ROWS", 1)
+    report = canonical_inventory(tmp_path)
+    matrix = map_matrix(tmp_path, report, max_fragment_rows=100)
+    output = tmp_path / "selective-plan"
+    address_plan.build_fanin_plan(
+        report,
+        matrix,
+        output,
+        build_number=1,
+        maximum_hash_bits=4,
+        row_cap=3,
+        max_reduce_jobs=2,
+        stage_local_fragments=False,
+    )
+    reduce = json.loads((output / "families/addresses/reduce-plan.json").read_text())
+    selective = next(
+        job
+        for job in reduce["jobs"]
+        if any(
+            len(assignment["row_group_indexes"])
+            < len(reduce["inputs"][assignment["input_index"]]["row_groups"])
+            for assignment in job["input_row_groups"]
+        )
+    )
+    bucket = "geocoder-shards"
+    prefix = "test/immutable/map/addresses/objects"
+    remote_root = tmp_path / "remote"
+    for completion_path, map_root in matrix:
+        completion = json.loads(completion_path.read_text())
+        manifest = json.loads(
+            (map_root / completion["fragment_manifest"]["relative_path"]).read_text()
+        )
+        for pack in manifest["data_packs"]:
+            destination = (
+                remote_root
+                / bucket
+                / r2_fragment_fetch.safe_key(prefix, pack["object_key"])
+            )
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(map_root / pack["relative_path"], destination)
+    filesystem = pafs.SubTreeFileSystem(str(remote_root), pafs.LocalFileSystem())
+
+    def run_selective(argv, *, check):
+        assert check is True
+
+        def argument(name):
+            return argv[argv.index(name) + 1]
+
+        proof = r2_fragment_fetch.materialize_selected_row_groups(
+            bucket=bucket,
+            prefix=prefix,
+            object_key=argument("--object-key"),
+            output=Path(argument("--output")),
+            proof=Path(argument("--proof")),
+            endpoint_url="https://example.invalid",
+            row_groups=json.loads(argument("--row-groups")),
+            expected_bytes=int(argument("--expected-bytes")),
+            expected_sha256=argument("--expected-sha256"),
+            filesystem=filesystem,
+            remote_identity={
+                "bytes": int(argument("--expected-bytes")),
+                "sha256": argument("--expected-sha256"),
+            },
+        )
+        if tamper_proof:
+            proof["materialized_row_groups"][0]["original_index"] += 1
+            Path(argument("--proof")).write_bytes(address_plan.json_payload(proof))
+
+    monkeypatch.setattr(address_reduce.subprocess, "run", run_selective)
+    command = [
+        "selective-fetch",
+        "--bucket",
+        bucket,
+        "--prefix",
+        prefix,
+        "--object-key",
+        "{object_key}",
+        "--output",
+        "{output}",
+        "--row-groups",
+        "{row_groups}",
+        "--expected-bytes",
+        "{expected_bytes}",
+        "--expected-sha256",
+        "{expected_sha256}",
+        "--proof",
+        "{proof}",
+    ]
+    arguments = (
+        output / "families/addresses/partition-plan.json",
+        output / "families/addresses/reduce-plan.json",
+    )
+    keywords = {
+        "job_id": selective["id"],
+        "input_root": tmp_path / "missing-inputs",
+        "output_root": tmp_path / "selective-reduce",
+        "fragment_fetch_command": command,
+        "sort_buffer_rows": 2,
+        "sort_buffer_bytes": 4096,
+        "max_open_files": 5,
+        "max_workspace_bytes": 100_000_000,
+        "max_artifact_bytes": 20_000_000,
+        "max_shard_bytes": 20_000_000,
+    }
+    if tamper_proof:
+        with pytest.raises(ValueError, match="proof differs"):
+            address_reduce.run_job(*arguments, **keywords)
+        return
+
+    completion = address_reduce.run_job(*arguments, **keywords)
+    routing = completion["construction"]["row_group_routing"]
+    assert routing["remote_selective_pack_fetches"] > 0
+    assert routing["remote_whole_pack_fetches"] == 0
+    assert routing["selected"] < routing["available_in_referenced_packs"]
