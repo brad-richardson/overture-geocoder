@@ -94,10 +94,10 @@ from places_partition import (  # noqa: E402
 )
 
 
-PLAN_SCHEMA = "overture-global-v2-places-executor-plan-v2"
+PLAN_SCHEMA = "overture-global-v2-places-executor-plan-v3"
 FINAL_REPORT_SCHEMA = "overture-global-v2-places-final-report-v1"
 ARTIFACT_LISTING_SCHEMA = "overture-global-v2-intermediate-listing-v1"
-PLAN_VERSION = "2"
+PLAN_VERSION = "3"
 HEAD_ADMISSION_VERSION = "head-admission-budgeted-v2"
 HEAD_DUPLICATE_GERS_POLICY = "pcsh-preserve-phrp-best-source-occurrence-v1"
 HEAD_MAX_ENTRIES_BYTES = 2_000_000_000
@@ -326,6 +326,7 @@ class _CountStore:
         return current
 
     def evidence(self) -> dict[str, Any]:
+        """Return run-local resource observations for diagnostics only."""
         self.observe_scratch()
         return {
             "kind": "duckdb-typed-external-fanin-v1",
@@ -343,6 +344,24 @@ class _CountStore:
                 PLAN_MAX_FAMOUS_CANDIDATES_IN_MEMORY
             ),
             "peak_famous_candidates_in_memory": self.peak_famous_candidates,
+            "group_aggregation": "typed-ordered-external-stream-v1",
+            "maximum_execution_groups_in_memory": MAX_EXECUTION_GROUPS_IN_MEMORY,
+            "ordered_scan": "duckdb-order-by-cell-v1",
+        }
+
+    def deterministic_contract(self) -> dict[str, Any]:
+        """Return only stable planner implementation and hard-limit fields."""
+        return {
+            "kind": "duckdb-typed-external-fanin-v1",
+            "engine": "duckdb",
+            "engine_version": self.duckdb_version,
+            "maximum_memory_bytes": PLAN_DUCKDB_MEMORY_LIMIT_BYTES,
+            "maximum_scratch_bytes": PLAN_MAX_SCRATCH_BYTES,
+            "maximum_batch_rows": PLAN_AGGREGATION_BATCH_ROWS,
+            "registered_arrow_batches": True,
+            "maximum_famous_candidates_in_memory": (
+                PLAN_MAX_FAMOUS_CANDIDATES_IN_MEMORY
+            ),
             "group_aggregation": "typed-ordered-external-stream-v1",
             "maximum_execution_groups_in_memory": MAX_EXECUTION_GROUPS_IN_MEMORY,
             "ordered_scan": "duckdb-order-by-cell-v1",
@@ -1795,7 +1814,10 @@ def build_places_plan(
                         default=0,
                     ),
                 },
-                "count_aggregation": count_store.evidence(),
+                # Immutable plan identity must not include observed database,
+                # scratch, or batch peaks. Those measurements are run-local
+                # diagnostics even when the logical plan is byte-identical.
+                "count_aggregation": count_store.deterministic_contract(),
             },
             "partition": {
                 "scheme": PARTITION_SCHEME,
@@ -2047,24 +2069,15 @@ def validate_places_plan(value: Any) -> dict[str, Any]:
             "engine_version",
             "maximum_memory_bytes",
             "maximum_scratch_bytes",
-            "peak_database_bytes",
-            "peak_scratch_bytes",
             "maximum_batch_rows",
-            "peak_batch_rows",
-            "arrow_append_batches",
             "registered_arrow_batches",
             "maximum_famous_candidates_in_memory",
-            "peak_famous_candidates_in_memory",
             "group_aggregation",
             "maximum_execution_groups_in_memory",
             "ordered_scan",
         },
         "Places count aggregation evidence",
     )
-    peak_database_bytes = count_aggregation.get("peak_database_bytes")
-    peak_scratch = count_aggregation.get("peak_scratch_bytes")
-    peak_batch_rows = count_aggregation.get("peak_batch_rows")
-    peak_famous = count_aggregation.get("peak_famous_candidates_in_memory")
     if (
         count_aggregation.get("kind") != "duckdb-typed-external-fanin-v1"
         or count_aggregation.get("engine") != "duckdb"
@@ -2072,21 +2085,11 @@ def validate_places_plan(value: Any) -> dict[str, Any]:
         or count_aggregation.get("maximum_memory_bytes")
         != PLAN_DUCKDB_MEMORY_LIMIT_BYTES
         or count_aggregation.get("maximum_scratch_bytes") != PLAN_MAX_SCRATCH_BYTES
-        or type(peak_database_bytes) is not int
-        or not 0 <= peak_database_bytes <= PLAN_MAX_SCRATCH_BYTES
-        or type(peak_scratch) is not int
-        or not peak_database_bytes <= peak_scratch <= PLAN_MAX_SCRATCH_BYTES
         or count_aggregation.get("maximum_batch_rows")
         != PLAN_AGGREGATION_BATCH_ROWS
-        or type(peak_batch_rows) is not int
-        or not 0 <= peak_batch_rows <= PLAN_AGGREGATION_BATCH_ROWS
-        or type(count_aggregation.get("arrow_append_batches")) is not int
-        or count_aggregation["arrow_append_batches"] < 0
         or count_aggregation.get("registered_arrow_batches") is not True
         or count_aggregation.get("maximum_famous_candidates_in_memory")
         != PLAN_MAX_FAMOUS_CANDIDATES_IN_MEMORY
-        or type(peak_famous) is not int
-        or not 0 <= peak_famous <= PLAN_MAX_FAMOUS_CANDIDATES_IN_MEMORY
         or count_aggregation.get("group_aggregation")
         != "typed-ordered-external-stream-v1"
         or count_aggregation.get("maximum_execution_groups_in_memory")

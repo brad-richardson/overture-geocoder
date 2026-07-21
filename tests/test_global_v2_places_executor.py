@@ -375,13 +375,11 @@ def test_fanin_plan_is_exact_sticky_bounded_and_deterministic(built):
     assert aggregation["kind"] == "duckdb-typed-external-fanin-v1"
     assert aggregation["engine"] == "duckdb"
     assert aggregation["maximum_memory_bytes"] == places_plan.PLAN_DUCKDB_MEMORY_LIMIT_BYTES
-    assert aggregation["peak_scratch_bytes"] >= aggregation["peak_database_bytes"]
-    assert aggregation["peak_batch_rows"] <= aggregation["maximum_batch_rows"]
     assert aggregation["registered_arrow_batches"] is True
-    assert aggregation["arrow_append_batches"] > 0
     assert aggregation["group_aggregation"] == "typed-ordered-external-stream-v1"
     assert aggregation["maximum_execution_groups_in_memory"] == 256
     assert aggregation["ordered_scan"] == "duckdb-order-by-cell-v1"
+    assert not any(key.startswith("peak_") for key in aggregation)
     assert all(
         job["execution_identity_is_serving_identity"] is False
         for job in plan["reduce_jobs"]
@@ -405,6 +403,22 @@ def test_fanin_plan_is_exact_sticky_bounded_and_deterministic(built):
         scratch_dir=built["tmp_path"] / "scratch-repeat",
     )
     assert repeated == plan
+
+
+def test_plan_identity_excludes_run_local_resource_observations(built, monkeypatch):
+    def reject_resource_observations(_store):
+        raise AssertionError("immutable plan consulted run-local resource observations")
+
+    monkeypatch.setattr(places_plan._CountStore, "evidence", reject_resource_observations)
+    repeated = build_places_plan(
+        built["request"],
+        copy.deepcopy(built["inventory"]),
+        built["reports"],
+        artifact_root=built["artifact_root"],
+        artifact_listing=copy.deepcopy(built["listing"]),
+        scratch_dir=built["tmp_path"] / "scratch-with-different-observations",
+    )
+    assert repeated == built["plan"]
 
 
 def test_all_rejected_map_completion_restores_through_planner(tmp_path):
@@ -1168,7 +1182,7 @@ def test_serialized_plan_reenforces_reduce_caps(
 
 def test_plan_rejects_tampered_count_aggregation_evidence(built):
     tampered = copy.deepcopy(built["plan"])
-    tampered["map_fan_in"]["count_aggregation"]["peak_database_bytes"] = (
+    tampered["map_fan_in"]["count_aggregation"]["maximum_scratch_bytes"] = (
         places_plan.PLAN_MAX_SCRATCH_BYTES + 1
     )
     tampered["plan_sha256"] = digest_value(
