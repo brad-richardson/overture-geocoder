@@ -1,5 +1,25 @@
 # Pending Work — 2026-07-19
 
+## Change and review protocol — 2026-07-21
+
+Keep implementation changes small and independently reviewable:
+
+- One primary concern per pull request. Do not combine a production change,
+  generalized evidence framework, and unrelated cleanup in one PR.
+- Run one adversarial review pass before publication. Fix only blockers involving
+  correctness, security, data loss/corruption, an unusable production path, or
+  required CI. Record non-blocking improvements for a later small PR; do not
+  start another review/fix loop.
+- Do not broaden a requested readiness check into a new framework or additional
+  architecture without explicit operator approval.
+- Require focused local validation and green PR CI, then merge. A review finding
+  that materially expands the agreed scope stops the PR instead of expanding it.
+- Keep unfinished experiments and evidence harnesses local and out of production
+  PRs until they form their own complete, bounded change.
+
+The current global-v2 v3 work must therefore land as separate address, Places,
+orchestration, and readiness slices rather than as the accumulated worktree.
+
 This is the active roadmap. Completed PR history is intentionally omitted unless
 its result constrains the next decision. The implementation baseline is
 `775ad21` (`main` after #125). The older 2026-07-17 sequencing and evidence log

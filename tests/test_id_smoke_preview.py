@@ -26,6 +26,18 @@ def test_preview_catalog_is_fixed_and_isolated():
         preview.build_preview_catalog("2026-07-12.0")
 
 
+def test_id_smoke_worker_and_workflow_bind_the_fixed_isolated_id_surface():
+    root = Path(__file__).parent.parent
+    config = (root / "crates/geocoder-worker/wrangler.id-smoke.toml").read_text()
+    workflow = (root / ".github/workflows/smoketest-r2-id.yml").read_text()
+
+    assert 'ENVIRONMENT = "smoke"' in config
+    assert 'CATALOG_KEY_OVERRIDE = "smoketest-id/catalog.json"' in config
+    assert 'SMOKE_VERSION: smoketest-id' in workflow
+    assert '"${PREVIEW_URL}/id/${id}"' in workflow
+    assert "V2_CATALOG_KEY_OVERRIDE" not in config
+
+
 def test_glob_sources_fetches_non_iterable_duckdb_result_rows():
     class Result:
         def fetchall(self):
