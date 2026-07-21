@@ -805,6 +805,14 @@ def run_reduce_task(
             "path": str(output_root / item["object"]),
             "object_key": f"{request['slice_version']}/families/places/{item['object']}",
         } for item in report["shards"]]
+        candidate = report["head_candidates"]
+        specs.append({
+            "path": str(output_root / candidate["object_key"]),
+            "object_key": (
+                f"{contract['namespace']['immutable_root']}/reduce/places/"
+                f"{candidate['object_key']}"
+            ),
+        })
         accounting = report["accounting"]
         counters = {
             "input_records": accounting["input_fragment_records"],
@@ -830,9 +838,10 @@ def validate_phase_marker(value: Any, contract: dict[str, Any], phase: str) -> d
 
 
 def run_head_task(
+    store: r2_verified_store.ObjectStore,
     contract: dict[str, Any], runtime: dict[str, Any], *, request: dict[str, Any],
     places_plan_path: Path, reduce_completion: dict[str, Any], work_root: Path,
-    consumed_runner_minutes: int,
+    reduce_marker_dir: Path, consumed_runner_minutes: int,
 ) -> tuple[Path, list[dict[str, str]], dict[str, int], str]:
     executor.phase_budget(
         contract, phase="head", jobs=1,
@@ -841,13 +850,40 @@ def run_head_task(
     executor.validate_runtime_for_contract(runtime, contract)
     validate_phase_marker(reduce_completion, contract, "reduce")
     plan_value = executor.read_json(places_plan_path)
+    candidate_prefix = f"{contract['namespace']['immutable_root']}/reduce/places"
+    reduce_reports = []
+    places_markers = [
+        executor.validate_task_completion(executor.read_json(path), contract, runtime)
+        for path in sorted(reduce_marker_dir.glob("places-*.json"))
+    ]
+    if [marker["index"] for marker in places_markers] != list(
+        range(len(plan_value["reduce_jobs"]))
+    ):
+        raise ValueError("Places head requires every reducer checkpoint")
+    for marker in places_markers:
+        report_path = work_root / "reduce-reports" / f"{marker['index']:03d}.json"
+        identity = marker["producer_report"]
+        r2_verified_store.verified_download(
+            store, identity["object_key"], report_path,
+            expected_bytes=identity["bytes"], expected_sha256=identity["sha256"],
+        )
+        report = executor.read_json(report_path)
+        expected_candidate_key = (
+            f"{candidate_prefix}/{report['head_candidates']['object_key']}"
+        )
+        matches = [
+            item for item in marker["artifacts"]
+            if item["object_key"] == expected_candidate_key
+        ]
+        if len(matches) != 1:
+            raise ValueError("Places reducer checkpoint omits exact head candidates")
+        reduce_reports.append(report)
     output = work_root / "output/head.phrp"
     report = places_head.build_global_head(
-        request, plan_value, artifact_root=work_root / "unused-inputs",
+        request, plan_value, reduce_reports=reduce_reports,
+        artifact_root=work_root / "reduce-inputs",
         scratch_dir=work_root / "scratch", output=output,
-        fragment_fetch_command=fragment_fetch_command(
-            f"{contract['namespace']['immutable_root']}/map/places/objects"
-        ),
+        fragment_fetch_command=fragment_fetch_command(candidate_prefix),
     )
     report = places_head.validate_head_report(report, request, plan_value)
     report_path = work_root / "head-report.json"
@@ -1373,6 +1409,7 @@ def main() -> None:
     run_reduce.add_argument("--address-partition-plan", type=Path, required=True)
     run_reduce.add_argument("--address-reduce-plan", type=Path, required=True)
     run_head.add_argument("--reduce-completion", type=Path, required=True)
+    run_head.add_argument("--reduce-marker-dir", type=Path, required=True)
     final_inputs.add_argument("--contract", type=Path, required=True)
     final_inputs.add_argument("--runtime", type=Path, required=True)
     final_inputs.add_argument("--expected-reduce-tasks", type=Path, required=True)
@@ -1500,14 +1537,16 @@ def main() -> None:
             executor.read_json(args.contract), executor.read_json(args.runtime),
             executor.read_json(args.request),
         )
+        store = _store()
         report, specs, counters, task_id = run_head_task(
-            contract, runtime, request=request_value, places_plan_path=args.places_plan,
+            store, contract, runtime, request=request_value,
+            places_plan_path=args.places_plan,
             reduce_completion=executor.read_json(args.reduce_completion),
-            work_root=args.work_root,
+            work_root=args.work_root, reduce_marker_dir=args.reduce_marker_dir,
             consumed_runner_minutes=args.consumed_runner_minutes,
         )
         value = publish_task(
-            _store(), contract, runtime, phase="head", family="places",
+            store, contract, runtime, phase="head", family="places",
             task_id=task_id, index=0, producer_report_path=report,
             producer_report_key=f"{contract['namespace']['immutable_root']}/head/places/report.json",
             outputs=specs, counters=counters,
