@@ -373,6 +373,7 @@ jobs:
           python scripts/global_v2_hosted.py admit-task \
             --contract control/contract.json --runtime control/runtime.json \
             --phase map --family addresses --task-id "$TASK_ID" --index "$INDEX" \
+            --marker-only \
             --output control/task-admission.json
           echo "completed=$(jq -r '.completed' control/task-admission.json)" >> "$GITHUB_OUTPUT"
       - name: Project and map the exact address task
@@ -494,6 +495,7 @@ jobs:
           python scripts/global_v2_hosted.py admit-task \
             --contract control/contract.json --runtime control/runtime.json \
             --phase map --family places --task-id "$TASK_ID" --index "$INDEX" \
+            --marker-only \
             --output control/task-admission.json
           echo "completed=$(jq -r '.completed' control/task-admission.json)" >> "$GITHUB_OUTPUT"
       - name: Map the exact Places task
@@ -745,6 +747,7 @@ jobs:
             --contract control/contract.json --runtime control/runtime.json \
             --phase reduce --family '${{ matrix.family }}' \
             --task-id '${{ matrix.task_id }}' --index '${{ matrix.index }}' \
+            --marker-only \
             --output control/task-admission.json
           if [ "$(jq -r '.completed' control/task-admission.json)" = true ]; then
             echo "Exact reduce task already completed; skipping recomputation."
@@ -822,6 +825,7 @@ jobs:
           python scripts/global_v2_hosted.py admit-task \
             --contract control/contract.json --runtime control/runtime.json \
             --phase head --family places --task-id places-head-000 --index 0 \
+            --marker-only \
             --output control/task-admission.json
           if [ "$(jq -r '.completed' control/task-admission.json)" = true ]; then
             echo "Exact head task already completed; skipping recomputation."
