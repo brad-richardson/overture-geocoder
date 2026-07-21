@@ -23,11 +23,15 @@ from global_v2_places_inventory import (  # noqa: E402
 )
 from global_v2_places_map import (  # noqa: E402
     EXECUTION_GROUP_LEVEL,
+    MAP_SUMMARY_FAMOUS_CAP,
     REJECTION_PRECEDENCE,
+    SUMMARY_ARTIFACT_SCHEMA,
+    read_map_summary,
     read_maximum_level_counts,
     run_map_task,
 )
 from places_partition import quadkey_bbox  # noqa: E402
+import global_v2_places_map as places_map  # noqa: E402
 
 
 RELEASE = "2026-06-18.0"
@@ -86,10 +90,15 @@ def inventory_for_rows(rows):
     )
 
 
-def fake_writer(rows, path, metadata):
+def fake_writer(batches, path, metadata):
     lines = [canonical_json_bytes({"metadata": metadata})]
-    lines.extend(canonical_json_bytes(row) for row in rows)
+    records = 0
+    for batch in batches:
+        rows = batch.to_pylist()
+        records += len(rows)
+        lines.extend(canonical_json_bytes(row) for row in rows)
     path.write_bytes(b"\n".join(lines) + b"\n")
+    return records
 
 
 def reader_for(rows):
@@ -175,27 +184,19 @@ def test_map_is_strict_reconciled_cell_fetchable_bounded_and_content_addressed(
     assert report["execution"]["fragment_grouping_is_final_shard_identity"] is False
     assert report["execution"]["execution_group_level"] == EXECUTION_GROUP_LEVEL
     fragments = report["fragments"]["objects"]
-    assert len(fragments) == 3
-    groups = [fragment["execution_group"] for fragment in fragments]
-    assert sorted({group: groups.count(group) for group in groups}.values()) == [1, 2]
-    assert all(
-        f"group={item['execution_group']}" in item["object_key"] for item in fragments
+    assert len(fragments) == 1
+    assert fragments[0]["execution_groups"] == sorted(
+        {row_group["execution_group"] for row_group in fragments[0]["row_groups"]}
     )
-    assert all(item["records"] <= 2 for item in fragments)
+    assert all(item["records"] <= 2 for item in fragments[0]["row_groups"])
     for item in fragments:
         path = output / item["object_key"]
         assert path.stat().st_size == item["bytes"]
         assert path.name == item["sha256"] + ".parquet"
         decoded = [json.loads(line) for line in path.read_text().splitlines()]
         fragment_rows = decoded[1:]
-        assert {row["execution_group"] for row in fragment_rows} == {
-            item["execution_group"]
-        }
-        assert all(
-            item["minimum_maximum_level_cell"]
-            <= row["partition_cell"]
-            <= item["maximum_maximum_level_cell"]
-            for row in fragment_rows
+        assert {row["execution_group"] for row in fragment_rows} == set(
+            item["execution_groups"]
         )
         sort_keys = [
             (
@@ -211,8 +212,8 @@ def test_map_is_strict_reconciled_cell_fetchable_bounded_and_content_addressed(
         ]
         assert sort_keys == sorted(sort_keys)
 
-    count_path = output / report["counts"]["object_key"]
-    counts = list(read_maximum_level_counts(count_path))
+    summary_path = output / report["summary"]["object_key"]
+    counts = list(read_maximum_level_counts(summary_path))
     assert counts == sorted(counts)
     assert sum(count for _, count in counts) == 4
 
@@ -260,48 +261,365 @@ def test_adversarial_sparse_max_cells_have_at_most_256_execution_fragments(tmp_p
     assert report["accounting"]["input_records"] == 4096
     assert report["accounting"]["retained_records"] == 4096
     assert report["accounting"]["rejected_records"] == 0
-    assert report["counts"]["cells"] == 4096
-    assert report["counts"]["records"] == 4096
-    counts = list(read_maximum_level_counts(tmp_path / report["counts"]["object_key"]))
+    assert report["summary"]["cells"] == 4096
+    assert report["summary"]["records"] == 4096
+    counts = list(
+        read_maximum_level_counts(tmp_path / report["summary"]["object_key"])
+    )
     assert len(counts) == 4096
     assert sum(records for _, records in counts) == 4096
     assert report["execution"]["execution_group_count"] == 256
-    assert report["fragments"]["count"] == 256
+    assert report["fragments"]["count"] == 1
     assert report["fragments"]["records"] == 4096
-    assert all(
-        item["minimum_maximum_level_cell"].startswith(item["execution_group"])
-        and item["maximum_maximum_level_cell"].startswith(item["execution_group"])
-        and item["maximum_level_cells"] == 16
-        for item in report["fragments"]["objects"]
-    )
-    assert {item["execution_group"] for item in report["fragments"]["objects"]} == {
+    pack = report["fragments"]["objects"][0]
+    assert len(pack["row_groups"]) == 256
+    assert {item["execution_group"] for item in pack["row_groups"]} == {
         "".join(digits)
         for digits in itertools.product("0123", repeat=EXECUTION_GROUP_LEVEL)
     }
 
 
-def test_map_splits_fragments_to_enforce_actual_byte_cap(tmp_path):
+def test_diffuse_100k_shape_coalesces_into_one_coarse_tail_pack(tmp_path):
+    count = 100_001
+    groups = ["".join(digits) for digits in itertools.product("0123", repeat=4)]
+    centers = []
+    for group in groups:
+        xmin, ymin, xmax, ymax = quadkey_bbox(group + "00")
+        centers.append(((xmin + xmax) / 2, (ymin + ymax) / 2))
+
+    def diffuse_reader(_source, _row_range):
+        for index in range(count):
+            longitude, latitude = centers[index % len(centers)]
+            yield 0, index, valid_row(
+                str(uuid.UUID(int=index + 1)),
+                longitude=longitude,
+                latitude=latitude,
+            )
+
+    report = run_map_task(
+        inventory_for_rows(range(count)),
+        task_index=0,
+        output_dir=tmp_path,
+        batch_reader=diffuse_reader,
+        fragment_writer=fake_writer,
+    )
+
+    assert report["fragments"]["count"] == 1
+    pack = report["fragments"]["objects"][0]
+    assert pack["records"] == count
+    assert len(pack["execution_groups"]) == 256
+    assert pack["row_group_count"] >= 256
+    assert report["execution"]["packs"]["ordered_queries"] == 1
+    assert report["execution"]["packs"]["sort_extent_queries"] == 0
+
+
+def test_map_fails_closed_when_one_streamed_pack_exceeds_actual_byte_cap(tmp_path):
     rows = [valid_row(str(uuid.UUID(int=identifier))) for identifier in range(1, 5)]
 
-    def padded_writer(fragment_rows, path, _metadata):
-        identities = canonical_json_bytes([row["gers_id"] for row in fragment_rows])
-        path.write_bytes(identities + b"x" * (100 + len(fragment_rows) * 100))
+    def padded_writer(batches, path, _metadata):
+        identifiers = []
+        for batch in batches:
+            identifiers.extend(batch.column("gers_id").to_pylist())
+        identities = canonical_json_bytes(identifiers)
+        path.write_bytes(identities + b"x" * (100 + len(identifiers) * 100))
+        return len(identifiers)
+
+    with pytest.raises(ValueError, match="physical pack exceeds"):
+        run_map_task(
+            inventory_for_rows(rows),
+            task_index=0,
+            output_dir=tmp_path,
+            batch_reader=reader_for(rows),
+            fragment_writer=padded_writer,
+            fragment_rows=100,
+            max_fragment_bytes=300,
+            max_task_fragments=4,
+        )
+
+
+def test_map_summary_census_is_disk_backed_streamed_and_famous_bounded(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(places_map, "MAP_CENSUS_BATCH_ROWS", 128)
+    rows = [
+        valid_row(str(uuid.UUID(int=identifier)), confidence=1.0)
+        for identifier in range(1, MAP_SUMMARY_FAMOUS_CAP + 1)
+    ]
+    excluded = valid_row(
+        str(uuid.UUID(int=MAP_SUMMARY_FAMOUS_CAP + 1)), confidence=0.0
+    )
+    rows.append(excluded)
 
     report = run_map_task(
         inventory_for_rows(rows),
         task_index=0,
         output_dir=tmp_path,
         batch_reader=reader_for(rows),
-        fragment_writer=padded_writer,
-        fragment_rows=100,
-        max_fragment_bytes=300,
-        max_task_fragments=4,
+        fragment_writer=fake_writer,
     )
 
-    assert report["fragments"]["count"] == 4
-    assert report["fragments"]["records"] == 4
-    assert all(item["bytes"] <= 300 for item in report["fragments"]["objects"])
-    assert len({item["object_key"] for item in report["fragments"]["objects"]}) == 4
+    summary = report["summary"]
+    assert summary["famous_candidate_cap"] == MAP_SUMMARY_FAMOUS_CAP
+    assert summary["famous_candidates"] == MAP_SUMMARY_FAMOUS_CAP
+    values = list(read_map_summary(tmp_path / summary["object_key"]))
+    kinds = [value["kind"] for value in values]
+    assert kinds.count("famous") == MAP_SUMMARY_FAMOUS_CAP
+    assert str(uuid.UUID(int=MAP_SUMMARY_FAMOUS_CAP + 1)) not in {
+        value["gers_id"] for value in values if value["kind"] == "famous"
+    }
+
+    import pyarrow.parquet as pq
+
+    parquet = pq.ParquetFile(tmp_path / summary["object_key"])
+    metadata = {
+        key.decode(): value.decode()
+        for key, value in (parquet.schema_arrow.metadata or {}).items()
+    }
+    assert metadata["artifact_schema"] == SUMMARY_ARTIFACT_SCHEMA
+    assert int(metadata["famous_candidate_cap"]) == MAP_SUMMARY_FAMOUS_CAP
+    assert int(metadata["summary_rows"]) == parquet.metadata.num_rows == len(values)
+    assert int(metadata["cell_rows"]) == summary["cells"]
+    assert int(metadata["cell_records"]) == summary["records"]
+    assert int(metadata["exact_rows"]) == summary["exact_keys"]
+    assert int(metadata["prefix_rows"]) == summary["prefix_keys"]
+    assert int(metadata["famous_rows"]) == summary["famous_candidates"]
+    assert int(metadata["key_bytes"]) == summary["key_bytes"]
+    census = report["execution"]["census"]
+    assert census["kind"] == "duckdb-typed-bounded-task-census-v1"
+    assert census["engine_version"] == "1.5.1"
+    assert census["maximum_batch_rows"] >= census["peak_pending_count_rows"]
+    assert census["maximum_batch_rows"] >= census["peak_pending_famous_rows"]
+    assert census["famous_candidate_cap"] == MAP_SUMMARY_FAMOUS_CAP
+    assert census["famous_candidate_identity"] == "gers_id"
+    assert census["famous_deduplicate_before_cap"] is True
+    workspace = report["execution"]["workspace"]
+    assert workspace["kind"] == "combined-map-workspace-hard-cap-v1"
+    assert workspace["peak_bytes"] <= workspace["maximum_bytes"]
+    assert sum(workspace["peak_components"].values()) == workspace["peak_bytes"]
+    assert workspace["component_peak_bytes"]["census_database_bytes"] > 0
+    assert workspace["component_peak_bytes"]["sort_database_bytes"] > 0
+    assert workspace["component_peak_bytes"]["staged_output_bytes"] > 0
+    assert workspace["observations"] > 3
+    sort = report["execution"]["sort"]
+    assert sort["kind"] == "duckdb-arrow-batch-external-sort-v1"
+    assert sort["registered_arrow_batches"] is True
+    assert sort["python_sorted_runs"] is False
+    assert sort["python_heap_merge"] is False
+    assert sort["threads"] == 1
+    assert sort["preserve_insertion_order"] is False
+    assert sort["peak_pending_rows"] <= sort["maximum_batch_rows"]
+    packs = report["execution"]["packs"]
+    assert packs["writer"] == "single-duckdb-order-group-aligned-row-groups-v2"
+    assert packs["maximum_batch_rows"] == places_map.MAP_OUTPUT_BATCH_ROWS
+    assert packs["python_pack_rows_materialized"] is False
+
+
+def test_map_famous_deduplicates_gers_best_occurrence_before_cap(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(places_map, "MAP_SUMMARY_FAMOUS_CAP", 3)
+    monkeypatch.setattr(places_map, "MAP_CENSUS_BATCH_ROWS", 2)
+    duplicate_id = str(uuid.UUID(int=1))
+    rows = [
+        valid_row(duplicate_id, confidence=confidence)
+        for confidence in (0.91, 0.92, 0.93, 0.99, 0.95, 0.94)
+    ]
+    rows.extend(
+        [
+            valid_row(str(uuid.UUID(int=2)), confidence=0.2),
+            valid_row(str(uuid.UUID(int=3)), confidence=0.1),
+        ]
+    )
+
+    report = run_map_task(
+        inventory_for_rows(rows),
+        task_index=0,
+        output_dir=tmp_path,
+        batch_reader=reader_for(rows),
+        fragment_writer=fake_writer,
+    )
+
+    famous = [
+        row
+        for row in read_map_summary(tmp_path / report["summary"]["object_key"])
+        if row["kind"] == "famous"
+    ]
+    assert [row["gers_id"] for row in famous] == [
+        duplicate_id,
+        str(uuid.UUID(int=2)),
+        str(uuid.UUID(int=3)),
+    ]
+    assert famous[0]["confidence"] == 0.99
+    assert famous[0]["source_row_index"] == 3
+    assert report["summary"]["famous_candidates"] == 3
+    assert report["execution"]["census"]["famous_deduplicate_before_cap"] is True
+
+
+def test_map_enforces_combined_workspace_hard_cap(tmp_path):
+    rows = [valid_row(str(uuid.UUID(int=1)))]
+    with pytest.raises(ValueError, match="hard combined workspace cap"):
+        run_map_task(
+            inventory_for_rows(rows),
+            task_index=0,
+            output_dir=tmp_path,
+            batch_reader=reader_for(rows),
+            fragment_writer=fake_writer,
+            max_workspace_bytes=1,
+        )
+
+
+def test_duckdb_record_batch_packs_match_fixture_writer_logical_rows(tmp_path):
+    rows = [
+        valid_row(str(uuid.UUID(int=index)), longitude=-120 + index, latitude=30 + index)
+        for index in range(1, 7)
+    ]
+    inventory = inventory_for_rows(rows)
+    parquet_report = run_map_task(
+        inventory,
+        task_index=0,
+        output_dir=tmp_path / "parquet",
+        batch_reader=reader_for(rows),
+        fragment_rows=2,
+    )
+    fixture_report = run_map_task(
+        inventory,
+        task_index=0,
+        output_dir=tmp_path / "fixture",
+        batch_reader=reader_for(rows),
+        fragment_writer=fake_writer,
+        fragment_rows=2,
+    )
+    import pyarrow.parquet as pq
+
+    parquet_rows = [
+        row
+        for fragment in parquet_report["fragments"]["objects"]
+        for row in pq.read_table(
+            tmp_path / "parquet" / fragment["object_key"]
+        ).to_pylist()
+    ]
+    for pack in parquet_report["fragments"]["objects"]:
+        parquet = pq.ParquetFile(tmp_path / "parquet" / pack["object_key"])
+        assert parquet.metadata.num_row_groups == pack["row_group_count"]
+        for row_group in pack["row_groups"]:
+            physical_rows = parquet.read_row_group(row_group["index"]).to_pylist()
+            assert {row["execution_group"] for row in physical_rows} == {
+                row_group["execution_group"]
+            }
+            assert len(physical_rows) == row_group["records"]
+            assert row_group["semantic_sha256"]
+            assert row_group["ownership_layout_sha256"]
+    fixture_rows = [
+        json.loads(line)
+        for fragment in fixture_report["fragments"]["objects"]
+        for line in (
+            tmp_path / "fixture" / fragment["object_key"]
+        ).read_text().splitlines()[1:]
+    ]
+    def key(row):
+        return (
+            row["partition_cell"], row["partition_key"],
+            -round(row["confidence"] * 255), row["gers_id"], row["source_uri"],
+            row["source_row_group"], row["source_row_index"],
+        )
+    assert sorted(parquet_rows, key=key) == sorted(fixture_rows, key=key)
+    assert parquet_report["execution"]["packs"]["python_pack_rows_materialized"] is False
+
+
+def test_duckdb_sort_ingests_registered_bounded_arrow_batches(tmp_path):
+    workspace = places_map._WorkspaceBudget(tmp_path / "sort", 100_000_000)
+    store = places_map._IntermediateRowStore(
+        tmp_path / "sort", workspace=workspace, run_rows=2
+    )
+    try:
+        for index in range(5):
+            row, reason = places_map.project_row(
+                valid_row(str(uuid.UUID(int=index + 1))),
+                maximum_level=12,
+                source_uri="s3://fixture/places.parquet",
+                row_group=0,
+                row_index=index,
+            )
+            assert reason is None
+            store.add(row)
+        store.finish()
+        evidence = store.evidence()
+        assert evidence["insert_batches"] == 3
+        assert evidence["peak_pending_rows"] == 2
+        assert evidence["registered_arrow_batches"] is True
+        assert not hasattr(store, "runs")
+    finally:
+        store.close()
+
+
+def test_map_pack_target_keeps_one_execution_group_row_group_intact(tmp_path):
+    first_cell = "000000000000"
+    second_cell = "000000000001"
+
+    def center(cell):
+        xmin, ymin, xmax, ymax = quadkey_bbox(cell)
+        return (xmin + xmax) / 2, (ymin + ymax) / 2
+
+    first_lon, first_lat = center(first_cell)
+    second_lon, second_lat = center(second_cell)
+    rows = [
+        valid_row(str(uuid.UUID(int=1)), longitude=first_lon, latitude=first_lat),
+        valid_row(str(uuid.UUID(int=2)), longitude=first_lon, latitude=first_lat),
+        valid_row(str(uuid.UUID(int=3)), longitude=second_lon, latitude=second_lat),
+    ]
+    report = run_map_task(
+        inventory_for_rows(rows),
+        task_index=0,
+        output_dir=tmp_path,
+        batch_reader=reader_for(rows),
+        fragment_writer=fake_writer,
+        target_fragment_input_bytes=1,
+        max_fragment_input_bytes=1_000_000,
+        max_fragment_bytes=1_000_000,
+    )
+
+    fragments = report["fragments"]["objects"]
+    assert [fragment["records"] for fragment in fragments] == [3]
+    assert fragments[0]["row_groups"][0]["minimum_maximum_level_cell"] == first_cell
+    assert fragments[0]["row_groups"][0]["maximum_maximum_level_cell"] == second_cell
+    packs = report["execution"]["packs"]
+    assert packs == {
+        "kind": "task-wide-order-coarse-pack-v2",
+        "writer": "single-duckdb-order-group-aligned-row-groups-v2",
+        "maximum_batch_rows": places_map.MAP_OUTPUT_BATCH_ROWS,
+        "python_pack_rows_materialized": False,
+        "ordinary_boundary": "execution-group-or-bounded-row-group",
+        "physical_pack_target_bytes": 1,
+        "row_group_boundary": "execution-group",
+        "maximum_row_group_input_bytes": 1_000_000,
+        "packs_may_span_execution_groups": True,
+        "ordered_queries": 1,
+        "sort_extent_queries": 0,
+        "target_output_bytes": 1,
+        "hard_row_group_input_bytes": 1_000_000,
+        "hard_output_bytes": 1_000_000,
+        "cell_boundary_flushes": 0,
+        "hot_cell_hard_splits": 0,
+        "output_cap_splits": 0,
+    }
+
+
+def test_highly_compressible_logical_input_does_not_force_undersized_pack_close():
+    logical_bytes = 0
+    physical_bytes = 0
+    closes = 0
+    # Simulate twenty 32 MiB row groups compressing 16:1. Logical input crosses
+    # the former 512 MiB aggregate limit while the physical pack remains a tail.
+    for _ in range(20):
+        logical_bytes += places_map.MAX_PACK_ROW_GROUP_INPUT_BYTES
+        physical_bytes += places_map.MAX_PACK_ROW_GROUP_INPUT_BYTES // 16
+        closes += places_map._physical_pack_target_reached(  # noqa: SLF001
+            physical_bytes=physical_bytes,
+            target_bytes=places_map.DEFAULT_TARGET_FRAGMENT_INPUT_BYTES,
+        )
+    assert logical_bytes > places_map.DEFAULT_MAX_FRAGMENT_INPUT_BYTES
+    assert physical_bytes < places_map.DEFAULT_TARGET_FRAGMENT_INPUT_BYTES // 2
+    assert closes == 0
 
 
 def test_map_enforces_hard_per_task_fragment_cap(tmp_path):
@@ -313,15 +631,33 @@ def test_map_enforces_hard_per_task_fragment_cap(tmp_path):
             latitude=40.0,
         ),
     ]
-    with pytest.raises(ValueError, match="hard content-fragment count cap"):
+    with pytest.raises(ValueError, match="hard content-pack count cap"):
         run_map_task(
             inventory_for_rows(rows),
             task_index=0,
             output_dir=tmp_path,
             batch_reader=reader_for(rows),
             fragment_writer=fake_writer,
+            target_fragment_input_bytes=1,
             max_task_fragments=1,
         )
+
+
+def test_map_accepts_exact_fragment_cap_when_final_pack_reaches_target(tmp_path):
+    rows = [valid_row("00000000-0000-0000-0000-000000000001")]
+
+    report = run_map_task(
+        inventory_for_rows(rows),
+        task_index=0,
+        output_dir=tmp_path,
+        batch_reader=reader_for(rows),
+        fragment_writer=fake_writer,
+        target_fragment_input_bytes=1,
+        max_task_fragments=1,
+    )
+
+    assert report["fragments"]["count"] == 1
+    assert report["fragments"]["records"] == 1
 
 
 def test_map_rejects_reader_that_does_not_reconcile_inventory_range(tmp_path):

@@ -848,6 +848,7 @@ jobs:
             --contract control/contract.json --runtime control/runtime.json \
             --request control/request.json --places-plan plans/places-plan.json \
             --reduce-completion control/reduce-phase.json --work-root head-work \
+            --reduce-marker-dir control/reduce-markers \
             --consumed-runner-minutes "$(( ${{ inputs.prior_runner_minutes }} + 120 + ${{ needs.preflight.outputs.map_task_count }} * 90 + 180 + ${{ needs.aggregate-plan.outputs.reduce_task_count }} * 180))" \
             --output control/head-result.json
           printf '%s\n' '[{"family":"places","task_id":"places-head-000","index":0}]' > control/expected-head.json

@@ -887,17 +887,47 @@ def test_hosted_address_reduce_derives_serving_outputs_and_uses_safe_fetch(tmp_p
 def test_hosted_head_requires_reduce_completion_and_derives_head(tmp_path, monkeypatch):
     contract, runtime_value, request = build_contract(), runtime(), build_request()
     plan = tmp_path / "places-plan.json"
-    plan.write_bytes(b"{}\n")
-    unsigned = {
-        "schema": executor.PHASE_COMPLETION_SCHEMA,
-        "request_sha256": contract["request"]["sha256"],
-        "phase": "reduce",
-    }
-    reduce_completion = {
-        **unsigned, "completion_sha256": executor.sha256_bytes(executor.canonical_json(unsigned))
-    }
+    plan.write_bytes(executor.canonical_json({"reduce_jobs": [{"index": 0}]}))
+    serving = tmp_path / "q-0.pcsh"
+    candidate = tmp_path / "candidate.parquet"
+    producer_report = tmp_path / "reduce-report.json"
+    serving.write_bytes(b"serving")
+    candidate.write_bytes(b"candidate")
+    producer_report.write_bytes(executor.canonical_json({
+        "head_candidates": {"object_key": "head-candidates/sha256/c.parquet"},
+    }))
+    store = r2_verified_store.FilesystemStore(tmp_path / "store")
+    root = contract["namespace"]["immutable_root"]
+    hosted.publish_task(
+        store, contract, runtime_value, phase="reduce", family="places",
+        task_id="places-reduce-000", index=0,
+        producer_report_path=producer_report,
+        producer_report_key=f"{root}/reduce/places/reports/000.json",
+        outputs=[
+            {"path": str(serving), "object_key": f"{SLICE}/families/places/q-0.pcsh"},
+            {
+                "path": str(candidate),
+                "object_key": f"{root}/reduce/places/head-candidates/sha256/c.parquet",
+            },
+        ],
+        counters={
+            "input_records": 1, "retained_records": 1,
+            "rejected_records": 0, "output_records": 1,
+        },
+    )
+    phase = hosted.restore_exact_phase(
+        store, contract, runtime_value, phase="reduce",
+        expected_tasks=[{
+            "family": "places", "task_id": "places-reduce-000", "index": 0,
+        }],
+        output_dir=tmp_path / "reduce-markers",
+    )
+    reduce_completion = phase["completion"]
+    observed = {}
 
     def build_head(*args, **kwargs):
+        observed["reports"] = kwargs["reduce_reports"]
+        observed["fetch"] = kwargs["fragment_fetch_command"]
         kwargs["output"].parent.mkdir(parents=True, exist_ok=True)
         kwargs["output"].write_bytes(b"head")
         return {"accounting": {"retained_records": 9}}
@@ -906,13 +936,20 @@ def test_hosted_head_requires_reduce_completion_and_derives_head(tmp_path, monke
     monkeypatch.setattr(hosted.places_head, "validate_head_report", lambda value, *args: value)
     monkeypatch.setenv("R2_ENDPOINT", "https://example.invalid")
     report, specs, counters, task_id = hosted.run_head_task(
-        contract, runtime_value, request=request, places_plan_path=plan,
+        store, contract, runtime_value, request=request, places_plan_path=plan,
         reduce_completion=reduce_completion, work_root=tmp_path / "head",
+        reduce_marker_dir=tmp_path / "reduce-markers",
         consumed_runner_minutes=0,
     )
     assert report.is_file() and task_id == "places-head-000"
     assert specs[0]["object_key"] == f"{SLICE}/families/places/head.phrp"
     assert counters["retained_records"] == 9
+    assert observed["reports"] == [{
+        "head_candidates": {"object_key": "head-candidates/sha256/c.parquet"},
+    }]
+    assert observed["fetch"][observed["fetch"].index("--prefix") + 1].endswith(
+        "/immutable/reduce/places"
+    )
 
 
 def test_hosted_places_reduce_validates_report_and_streams_plan_fragments(tmp_path, monkeypatch):
@@ -928,9 +965,15 @@ def test_hosted_places_reduce_validates_report_and_streams_plan_fragments(tmp_pa
         output = kwargs["output_dir"] / "q-0.pcsh"
         output.parent.mkdir(parents=True, exist_ok=True)
         output.write_bytes(b"shard")
+        candidate = kwargs["output_dir"] / "head-candidates/sha256/c.parquet"
+        candidate.parent.mkdir(parents=True, exist_ok=True)
+        candidate.write_bytes(b"candidate")
         return {
             "accounting": {"input_fragment_records": 7, "output_records": 7},
             "shards": [{"object": "q-0.pcsh"}],
+            "head_candidates": {
+                "object_key": "head-candidates/sha256/c.parquet",
+            },
         }
 
     monkeypatch.setattr(hosted.places_reduce, "execute_reduce_job", execute)
@@ -944,6 +987,9 @@ def test_hosted_places_reduce_validates_report_and_streams_plan_fragments(tmp_pa
     )
     assert report.is_file() and task_id == "places-reduce-000"
     assert specs[0]["object_key"] == f"{SLICE}/families/places/q-0.pcsh"
+    assert specs[1]["object_key"].endswith(
+        "/immutable/reduce/places/head-candidates/sha256/c.parquet"
+    )
     assert counters["input_records"] == 7
     assert observed["fetch"][1].endswith("r2_fragment_fetch.py")
 
