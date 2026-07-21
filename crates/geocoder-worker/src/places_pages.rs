@@ -2070,4 +2070,51 @@ mod tests {
         assert_eq!(results[0].id, "fixture-00");
         assert_eq!(results[9].id, "fixture-09");
     }
+
+    #[test]
+    #[ignore = "readiness workflow supplies freshly generated Python artifacts"]
+    fn readiness_queries_dynamic_python_places_fixtures() {
+        let shard_path =
+            std::env::var("GLOBAL_V2_READINESS_PLACES_SHARD").expect("readiness Places shard path");
+        let head_path =
+            std::env::var("GLOBAL_V2_READINESS_PLACES_HEAD").expect("readiness Places head path");
+        let shard = std::fs::read(shard_path).expect("read readiness Places shard");
+        let (directory, matches) = split_fixture_matches(&shard, "shared");
+        let postings = fixture_component(&shard, component(&directory, "postings").unwrap());
+        let wants: Vec<ByteRange> = matches
+            .iter()
+            .map(|entry| ByteRange {
+                offset: entry.posting_offset,
+                length: entry.posting_length,
+            })
+            .collect();
+        let plan = geocoder_core::pages::coalesce_ranges(&wants, 0, MAX_POSTING_BYTES).unwrap();
+        let chunks = plan_slices(postings, &wants, &plan);
+        let docs = union_masked(&matches, &chunks).unwrap();
+        let shard_ids = split_fixture_ids(&shard, &directory, &docs);
+
+        let head = std::fs::read(head_path).expect("read readiness Places head");
+        let directory_length = u32::from_le_bytes(head[8..12].try_into().unwrap()) as usize;
+        let head_directory: HeadDirectory =
+            serde_json::from_slice(&head[12..12 + directory_length]).unwrap();
+        let key_index = head_component(&head_directory, "key_index").unwrap();
+        let index_start = usize::try_from(key_index.offset).unwrap();
+        let index_length = usize::try_from(key_index.length).unwrap();
+        let (offset, length) =
+            find_head_entry(&head[index_start..index_start + index_length], "e:shared")
+                .unwrap()
+                .unwrap();
+        let entries = head_component(&head_directory, "entries").unwrap();
+        let start = usize::try_from(entries.offset + offset).unwrap();
+        let results =
+            decode_head_entry(&head[start..start + usize::try_from(length).unwrap()]).unwrap();
+        let head_ids: Vec<&str> = results.iter().map(|place| place.id.as_str()).collect();
+        println!(
+            "GLOBAL_V2_READINESS_JSON={}",
+            serde_json::json!({
+                "head_ids": head_ids,
+                "shard_first_id": shard_ids.first().expect("Places shard result"),
+            })
+        );
+    }
 }

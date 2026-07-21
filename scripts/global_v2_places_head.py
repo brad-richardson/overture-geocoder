@@ -75,11 +75,14 @@ from global_v2_places_reduce import (  # noqa: E402
 )
 
 
-HEAD_REPORT_SCHEMA = "overture-global-v2-places-head-report-v1"
-HEAD_VERSION = "1"
+HEAD_REPORT_SCHEMA = "overture-global-v2-places-head-report-v2"
+HEAD_VERSION = "2"
 MAX_HEAD_SCRATCH_BYTES = 12_000_000_000
 MAX_HEAD_COUNT_BATCH_KEYS = 200_000
 MAX_HEAD_CANDIDATE_SLOTS = READER_MAX_HEAD_KEYS * 10
+MAX_HEAD_RETAINED_CANDIDATE_BYTES = 2_000_000_000
+HEAD_CANDIDATE_READ_BATCH_ROWS = 128
+MAX_HEAD_CANDIDATE_READ_BATCH_BYTES = 128_000_000
 HEAD_MAX_OPEN_FRAGMENT_FILES = 1
 MAX_HEAD_ENTRIES_BYTES = 2_000_000_000
 MAX_HEAD_COUNT_BATCH_STRING_BYTES = 64_000_000
@@ -325,15 +328,45 @@ def _push_candidate(
     sort_key: tuple[Any, ...],
     projection: bytes,
     limit: int,
-) -> None:
+) -> int:
     values = candidates.setdefault(key, [])
     item = (sort_key, projection)
+    item_bytes = _retained_candidate_bytes(key, sort_key, projection)
+    duplicate_index = next(
+        (
+            index
+            for index, (existing_sort_key, _) in enumerate(values)
+            if existing_sort_key[3] == sort_key[3]
+        ),
+        None,
+    )
+    if duplicate_index is not None:
+        if sort_key < values[duplicate_index][0]:
+            previous = values[duplicate_index]
+            values[duplicate_index] = item
+            return item_bytes - _retained_candidate_bytes(key, *previous)
+        return 0
     if len(values) < limit:
         values.append(item)
-        return
+        return item_bytes
     worst_index = max(range(len(values)), key=lambda index: values[index][0])
     if sort_key < values[worst_index][0]:
+        previous = values[worst_index]
         values[worst_index] = item
+        return item_bytes - _retained_candidate_bytes(key, *previous)
+    return 0
+
+
+def _retained_candidate_bytes(
+    key: str, sort_key: tuple[Any, ...], projection: bytes
+) -> int:
+    return (
+        len(key.encode("utf-8"))
+        + len(sort_key[3].encode("utf-8"))
+        + len(sort_key[4].encode("utf-8"))
+        + len(projection)
+        + 40
+    )
 
 
 def _trim_famous(
@@ -380,6 +413,8 @@ def _write_head_object(
     entries_path = Path(entries_name)
     key_entries: list[tuple[str, int, int]] = []
     entry_sizes: list[int] = []
+    emitted_candidate_slots = 0
+    dropped_candidate_slots = 0
     family_key_counts = dict.fromkeys(HEAD_KEY_FAMILIES, 0)
     family_entry_bytes = dict.fromkeys(HEAD_KEY_FAMILIES, 0)
     cursor = 0
@@ -387,10 +422,24 @@ def _write_head_object(
         with entries_path.open("wb") as entries_target:
             for key in sorted(candidates):
                 ordered = sorted(candidates[key], key=lambda item: item[0])
-                entry = b"".join(
+                encoded_candidates = [
                     encode_varint(len(projection)) + projection
                     for _, projection in ordered
-                )
+                ]
+                admitted_parts: list[bytes] = []
+                entry_bytes = 0
+                for encoded in encoded_candidates:
+                    if entry_bytes + len(encoded) > READER_MAX_HEAD_ENTRY_BYTES:
+                        break
+                    admitted_parts.append(encoded)
+                    entry_bytes += len(encoded)
+                if not admitted_parts:
+                    raise ValueError(
+                        "Places global head top candidate exceeds the Worker entry cap"
+                    )
+                entry = b"".join(admitted_parts)
+                emitted_candidate_slots += len(admitted_parts)
+                dropped_candidate_slots += len(encoded_candidates) - len(admitted_parts)
                 if len(key.encode("utf-8")) > READER_MAX_KEY_BYTES:
                     raise ValueError("Places global head key exceeds the Worker cap")
                 if len(entry) > READER_MAX_HEAD_ENTRY_BYTES:
@@ -478,6 +527,8 @@ def _write_head_object(
             "key_counts_by_family": family_key_counts,
             "entry_bytes_by_family": family_entry_bytes,
             "entry_size_distribution": distribution,
+            "candidate_slots_emitted": emitted_candidate_slots,
+            "candidate_slots_dropped_for_entry_cap": dropped_candidate_slots,
             "_peak_workspace_bytes": peak_workspace_bytes,
         }
     finally:
@@ -485,6 +536,225 @@ def _write_head_object(
 
 
 def build_global_head(
+    request_value: Any,
+    plan_value: Any,
+    *,
+    reduce_reports: list[Any],
+    artifact_root: Path,
+    scratch_dir: Path,
+    output: Path,
+    fragment_fetch_command: list[str] | None = None,
+) -> dict[str, Any]:
+    """Merge reducer-local bounded candidates; never reopen map fragments."""
+
+    if output.name != "head.phrp":
+        raise ValueError("Places global head output must be named head.phrp")
+    fragment_fetch_command = validate_fetch_command(fragment_fetch_command)
+    request = global_v2_build_request.validate_request(request_value)
+    plan = validate_places_plan(plan_value)
+    if request_sha256(request) != plan["request"]["sha256"]:
+        raise ValueError("Places head request differs from the executor plan")
+    from global_v2_places_reduce import (  # noqa: PLC0415
+        HEAD_CANDIDATE_SCHEMA,
+        validate_reduce_report,
+    )
+
+    normalized = [validate_reduce_report(report, plan) for report in reduce_reports]
+    if [report["job_index"] for report in sorted(normalized, key=lambda item: item["job_index"])] != list(
+        range(len(plan["reduce_jobs"]))
+    ):
+        raise ValueError("Places head reducer report set is incomplete")
+    normalized.sort(key=lambda item: item["job_index"])
+    admission = plan["head_admission"]
+    admitted = {item["key"] for item in admission["keys"]}
+    candidates: dict[str, list[tuple[tuple[Any, ...], bytes]]] = {}
+    active_bytes = 0
+    peak_materialized = 0
+    fetched = fetched_bytes = 0
+
+    def observe(size: int) -> None:
+        nonlocal active_bytes, peak_materialized
+        active_bytes = size
+        peak_materialized = max(peak_materialized, size)
+        if size > MAX_HEAD_SCRATCH_BYTES:
+            raise ValueError("Places head candidate materialization exceeded scratch cap")
+
+    materializer = _ArtifactMaterializer(
+        artifact_root=artifact_root,
+        scratch_dir=scratch_dir / "candidates",
+        fetch_command=fragment_fetch_command,
+        observe_workspace=observe,
+    )
+    candidate_rows = 0
+    peak_candidate_read_batch_bytes = 0
+    retained_candidate_bytes = 0
+    peak_retained_candidate_bytes = 0
+    for report in normalized:
+        artifact = report["head_candidates"]
+        with materializer.path(artifact) as path:
+            try:
+                import pyarrow.parquet as pq
+            except ImportError as exc:  # pragma: no cover
+                raise RuntimeError("Places head candidate merge requires pyarrow") from exc
+            parquet = pq.ParquetFile(path)
+            metadata = {
+                key.decode(): value.decode()
+                for key, value in (parquet.schema_arrow.metadata or {}).items()
+            }
+            if metadata != {
+                "artifact_schema": HEAD_CANDIDATE_SCHEMA,
+                "plan_sha256": plan["plan_sha256"],
+                "head_admission_sha256": admission["artifact"]["sha256"],
+                "job_index": str(report["job_index"]),
+            }:
+                raise ValueError("Places head candidate provenance is invalid")
+            actual_rows = 0
+            for batch in parquet.iter_batches(
+                batch_size=HEAD_CANDIDATE_READ_BATCH_ROWS, use_threads=False
+            ):
+                peak_candidate_read_batch_bytes = max(
+                    peak_candidate_read_batch_bytes, batch.nbytes
+                )
+                if batch.nbytes > MAX_HEAD_CANDIDATE_READ_BATCH_BYTES:
+                    raise ValueError("Places head candidate read batch exceeded its cap")
+                for row in batch.to_pylist():
+                    key = row["key"]
+                    if key not in admitted:
+                        raise ValueError("Places reducer emitted an unadmitted head key")
+                    sort_key = (
+                        row["rank"], row["partition_key"], row["rank"],
+                        row["gers_id"], row["source_uri"],
+                        row["source_row_group"], row["source_row_index"],
+                    )
+                    retained_candidate_bytes += _push_candidate(
+                        candidates, key, sort_key, row["projection"],
+                        request["families"]["places"]["global_head"]["result_cap"],
+                    )
+                    peak_retained_candidate_bytes = max(
+                        peak_retained_candidate_bytes, retained_candidate_bytes
+                    )
+                    if retained_candidate_bytes > MAX_HEAD_RETAINED_CANDIDATE_BYTES:
+                        raise ValueError(
+                            "Places head retained candidate bytes exceeded their cap"
+                        )
+                    actual_rows += 1
+                    candidate_rows += 1
+            if actual_rows != artifact["candidates"]:
+                raise ValueError("Places head candidate row count differs from reducer report")
+    fetched = materializer.fetched_fragments
+    fetched_bytes = materializer.fetched_bytes
+    missing = sorted(admitted - set(candidates))
+    if missing:
+        raise ValueError(f"Places admitted head keys have no reducer candidates: {missing[:3]}")
+    smoke_key = next((key for key in sorted(candidates) if key.startswith("e:")), None)
+    if smoke_key is None:
+        raise ValueError("Places global head has no deterministic exact smoke key")
+    smoke_projection = sorted(candidates[smoke_key], key=lambda item: item[0])[0][1]
+    smoke_place = decode_record(smoke_projection)
+    policy = request["families"]["places"]["global_head"]
+    object_report = _write_head_object(
+        candidates,
+        output,
+        famous_cap=policy["famous_cap"],
+        existing_scratch_bytes=active_bytes,
+        durable_provenance={
+            "request_sha256": plan["request"]["sha256"],
+            "plan_sha256": plan["plan_sha256"],
+            "head_policy_sha256": digest_value(policy),
+            "lineage_generation": plan["partition"]["lineage_generation"],
+            "predecessor_family_manifest_sha256": plan["partition"][
+                "predecessor_family_manifest_sha256"
+            ],
+            "predecessor_family_manifest": plan["partition"][
+                "predecessor_family_manifest"
+            ],
+        },
+    )
+    peak_object_workspace = object_report.pop("_peak_workspace_bytes")
+    artifact_sha256, artifact_bytes = sha256_file(output)
+    without_digest = {
+        "schema": HEAD_REPORT_SCHEMA,
+        "version": HEAD_VERSION,
+        "plan_sha256": plan["plan_sha256"],
+        "request_sha256": plan["request"]["sha256"],
+        "status": "complete",
+        "policy": policy,
+        "lineage_generation": plan["partition"]["lineage_generation"],
+        "predecessor_family_manifest_sha256": plan["partition"][
+            "predecessor_family_manifest_sha256"
+        ],
+        "predecessor_family_manifest": plan["partition"]["predecessor_family_manifest"],
+        "runtime": {
+            "required_python_version": REQUIRED_PYTHON_VERSION,
+            "required_pyarrow_version": REQUIRED_PYARROW_VERSION,
+            "actual_python_version": platform.python_version(),
+            "candidate_reader": "pyarrow-parquet-reducer-candidates-v1",
+            "head_writer_module_sha256": _module_sha256("global_v2_places_head.py"),
+            "tokenizer_module_sha256": _module_sha256("experiment_places_compact_index.py"),
+        },
+        "candidate_materialization": {
+            "adapter": "local-or-no-shell-argv-v1",
+            "remote_fetch_enabled": fragment_fetch_command is not None,
+            "fetch_passes": 1,
+            "candidate_artifacts": len(normalized),
+            "fetched_artifacts": fetched,
+            "fetched_bytes": fetched_bytes,
+            "peak_materialized_artifact_bytes": peak_materialized,
+            "maximum_read_batch_rows": HEAD_CANDIDATE_READ_BATCH_ROWS,
+            "maximum_read_batch_bytes": MAX_HEAD_CANDIDATE_READ_BATCH_BYTES,
+            "peak_read_batch_bytes": peak_candidate_read_batch_bytes,
+            "map_fragments_opened": 0,
+            "identity_verification": "exact-reducer-report-bytes-and-sha256",
+        },
+        "bounds": {
+            "map_passes": 0,
+            "maximum_scratch_bytes": MAX_HEAD_SCRATCH_BYTES,
+            "maximum_candidate_slots": MAX_HEAD_CANDIDATE_SLOTS,
+            "maximum_retained_candidate_bytes": MAX_HEAD_RETAINED_CANDIDATE_BYTES,
+            "admitted_key_cap": READER_MAX_HEAD_KEYS,
+            "admitted_index_byte_cap": READER_MAX_HEAD_INDEX_BYTES,
+            "result_cap": policy["result_cap"],
+        },
+        "usage": {
+            "candidate_rows": candidate_rows,
+            "merged_candidate_slots": sum(map(len, candidates.values())),
+            "emitted_candidate_slots": object_report["candidate_slots_emitted"],
+            "entry_cap_dropped_candidate_slots": object_report[
+                "candidate_slots_dropped_for_entry_cap"
+            ],
+            "retained_candidate_bytes": retained_candidate_bytes,
+            "peak_retained_candidate_bytes": peak_retained_candidate_bytes,
+            "peak_workspace_bytes": max(peak_materialized, peak_object_workspace),
+        },
+        "accounting": {
+            "retained_records": plan["totals"]["retained_records"],
+            "reduce_reports": len(normalized),
+            "candidate_artifacts": len(normalized),
+            "admitted_keys": len(admitted),
+            "emitted_keys": object_report["key_count"],
+            "candidate_slots": sum(map(len, candidates.values())),
+            "emitted_candidate_slots": object_report["candidate_slots_emitted"],
+            "entry_cap_dropped_candidate_slots": object_report[
+                "candidate_slots_dropped_for_entry_cap"
+            ],
+            "map_fragment_reads": 0,
+        },
+        "object": object_report,
+        "artifact": {
+            "object": output.name, "bytes": artifact_bytes,
+            "sha256": artifact_sha256, "format": MAGIC.decode(),
+        },
+        "smoke_sample": {
+            "query": smoke_key.removeprefix("e:"),
+            "expected_id": smoke_place["id"],
+            "types": ["poi"],
+            "source": "built-global-head-exact-key",
+        },
+    }
+    return {**without_digest, "report_sha256": digest_value(without_digest)}
+
+
+def _legacy_build_global_head(
     request_value: Any,
     plan_value: Any,
     *,
@@ -903,7 +1173,7 @@ def validate_head_report(
             "predecessor_family_manifest_sha256",
             "predecessor_family_manifest",
             "runtime",
-            "fragment_materialization",
+            "candidate_materialization",
             "bounds",
             "usage",
             "accounting",
@@ -955,8 +1225,7 @@ def validate_head_report(
         or runtime.get("required_pyarrow_version") != REQUIRED_PYARROW_VERSION
         or not isinstance(runtime.get("actual_python_version"), str)
         or not runtime["actual_python_version"]
-        or not isinstance(runtime.get("fragment_reader"), dict)
-        or not runtime["fragment_reader"]
+        or runtime.get("candidate_reader") != "pyarrow-parquet-reducer-candidates-v1"
         or not isinstance(runtime.get("head_writer_module_sha256"), str)
         or not isinstance(runtime.get("tokenizer_module_sha256"), str)
     ):
@@ -966,121 +1235,122 @@ def validate_head_report(
     )
     require_sha256(runtime["tokenizer_module_sha256"], "Places tokenizer module sha256")
     materialization = require_exact(
-        report["fragment_materialization"],
+        report["candidate_materialization"],
         {
             "adapter",
             "remote_fetch_enabled",
             "fetch_passes",
-            "fetched_fragments",
+            "candidate_artifacts",
+            "fetched_artifacts",
             "fetched_bytes",
-            "maximum_simultaneously_materialized_fragments",
-            "peak_materialized_fragment_bytes",
+            "peak_materialized_artifact_bytes",
+            "maximum_read_batch_rows",
+            "maximum_read_batch_bytes",
+            "peak_read_batch_bytes",
+            "map_fragments_opened",
             "identity_verification",
         },
-        "Places head fragment materialization",
+        "Places head candidate materialization",
     )
-    fetched_fragments = require_int(
-        materialization["fetched_fragments"], "Places head fetched fragments"
+    fetched_artifacts = require_int(
+        materialization["fetched_artifacts"], "Places head fetched candidate artifacts"
     )
     fetched_bytes = require_int(
         materialization["fetched_bytes"], "Places head fetched bytes"
     )
     peak_materialized = require_int(
-        materialization["peak_materialized_fragment_bytes"],
-        "Places head peak materialized fragment bytes",
+        materialization["peak_materialized_artifact_bytes"],
+        "Places head peak materialized candidate bytes",
     )
-    planned_fragments = [
-        fragment for job in plan["reduce_jobs"] for fragment in job["input_fragments"]
-    ]
+    peak_read_batch = require_int(
+        materialization["peak_read_batch_bytes"],
+        "Places head peak candidate read batch bytes",
+    )
+    candidate_artifacts = require_int(
+        materialization["candidate_artifacts"], "Places head candidate artifacts"
+    )
     if (
         materialization["adapter"] != "local-or-no-shell-argv-v1"
         or type(materialization["remote_fetch_enabled"]) is not bool
-        or materialization["fetch_passes"] != 2
-        or materialization["maximum_simultaneously_materialized_fragments"] != 1
-        or materialization["identity_verification"] != "exact-plan-bytes-and-sha256"
+        or materialization["fetch_passes"] != 1
+        or candidate_artifacts != len(plan["reduce_jobs"])
+        or materialization["map_fragments_opened"] != 0
+        or materialization["maximum_read_batch_rows"] != HEAD_CANDIDATE_READ_BATCH_ROWS
+        or materialization["maximum_read_batch_bytes"]
+        != MAX_HEAD_CANDIDATE_READ_BATCH_BYTES
+        or not 0 <= peak_read_batch <= MAX_HEAD_CANDIDATE_READ_BATCH_BYTES
+        or materialization["identity_verification"]
+        != "exact-reducer-report-bytes-and-sha256"
         or (
             materialization["remote_fetch_enabled"]
             and (
-                fetched_fragments != len(planned_fragments) * 2
-                or fetched_bytes != sum(item["bytes"] for item in planned_fragments) * 2
-                or peak_materialized != max(item["bytes"] for item in planned_fragments)
+                fetched_artifacts != candidate_artifacts
+                or fetched_bytes <= 0
+                or peak_materialized <= 0
             )
         )
         or (
             not materialization["remote_fetch_enabled"]
-            and (fetched_fragments != 0 or fetched_bytes != 0 or peak_materialized != 0)
+            and (fetched_artifacts != 0 or fetched_bytes != 0 or peak_materialized != 0)
         )
     ):
-        raise ValueError("Places head fragment materialization evidence is invalid")
+        raise ValueError("Places head candidate materialization evidence is invalid")
     bounds = report["bounds"]
     if bounds != {
-        "passes": 2,
-        "maximum_open_fragment_files": HEAD_MAX_OPEN_FRAGMENT_FILES,
+        "map_passes": 0,
         "maximum_scratch_bytes": MAX_HEAD_SCRATCH_BYTES,
-        "maximum_count_batch_keys": MAX_HEAD_COUNT_BATCH_KEYS,
-        "maximum_count_batch_string_bytes": MAX_HEAD_COUNT_BATCH_STRING_BYTES,
-        "maximum_famous_serialized_bytes": MAX_HEAD_FAMOUS_SERIALIZED_BYTES,
-        "maximum_admitted_key_bytes": MAX_HEAD_ADMITTED_KEY_BYTES,
         "maximum_candidate_slots": MAX_HEAD_CANDIDATE_SLOTS,
+        "maximum_retained_candidate_bytes": MAX_HEAD_RETAINED_CANDIDATE_BYTES,
         "admitted_key_cap": READER_MAX_HEAD_KEYS,
+        "admitted_index_byte_cap": READER_MAX_HEAD_INDEX_BYTES,
         "result_cap": request["families"]["places"]["global_head"]["result_cap"],
     }:
         raise ValueError("Places head bounds differ from the implemented contract")
     usage = report["usage"]
     if (
         not isinstance(usage, dict)
-        or set(usage)
-        != {
-            "peak_scratch_bytes",
-            "sqlite_page_size",
-            "sqlite_maximum_page_count",
-            "peak_sqlite_page_count",
-            "peak_sqlite_database_bytes",
-            "peak_count_batch_string_bytes",
-            "peak_famous_serialized_bytes",
-            "admitted_key_bytes",
-            "peak_workspace_bytes",
+        or set(usage) != {
+            "candidate_rows", "merged_candidate_slots", "retained_candidate_bytes",
+            "emitted_candidate_slots", "entry_cap_dropped_candidate_slots",
+            "peak_retained_candidate_bytes", "peak_workspace_bytes",
         }
-        or type(usage["peak_scratch_bytes"]) is not int
-        or not 0 <= usage["peak_scratch_bytes"] <= MAX_HEAD_SCRATCH_BYTES
+        or type(usage["candidate_rows"]) is not int
+        or usage["candidate_rows"] < 0
+        or type(usage["merged_candidate_slots"]) is not int
+        or not 0 <= usage["merged_candidate_slots"] <= MAX_HEAD_CANDIDATE_SLOTS
+        or type(usage["emitted_candidate_slots"]) is not int
+        or type(usage["entry_cap_dropped_candidate_slots"]) is not int
+        or usage["emitted_candidate_slots"] < len(plan["head_admission"]["keys"])
+        or usage["entry_cap_dropped_candidate_slots"] < 0
+        or usage["emitted_candidate_slots"]
+        + usage["entry_cap_dropped_candidate_slots"]
+        != usage["merged_candidate_slots"]
+        or type(usage["retained_candidate_bytes"]) is not int
+        or type(usage["peak_retained_candidate_bytes"]) is not int
+        or not 0 <= usage["retained_candidate_bytes"]
+        <= usage["peak_retained_candidate_bytes"]
+        <= MAX_HEAD_RETAINED_CANDIDATE_BYTES
         or type(usage["peak_workspace_bytes"]) is not int
-        or not usage["peak_scratch_bytes"]
-        <= usage["peak_workspace_bytes"]
-        <= MAX_HEAD_SCRATCH_BYTES
-        or type(usage["sqlite_page_size"]) is not int
-        or usage["sqlite_page_size"] < 512
-        or type(usage["sqlite_maximum_page_count"]) is not int
-        or usage["sqlite_maximum_page_count"]
-        > MAX_HEAD_SCRATCH_BYTES // usage["sqlite_page_size"]
-        or type(usage["peak_sqlite_page_count"]) is not int
-        or not 0
-        <= usage["peak_sqlite_page_count"]
-        <= usage["sqlite_maximum_page_count"]
-        or type(usage["peak_sqlite_database_bytes"]) is not int
-        or usage["peak_sqlite_database_bytes"]
-        != usage["peak_sqlite_page_count"] * usage["sqlite_page_size"]
-        or usage["peak_sqlite_database_bytes"] > MAX_HEAD_SCRATCH_BYTES
-        or type(usage["peak_count_batch_string_bytes"]) is not int
-        or not 0
-        <= usage["peak_count_batch_string_bytes"]
-        <= MAX_HEAD_COUNT_BATCH_STRING_BYTES
-        or type(usage["peak_famous_serialized_bytes"]) is not int
-        or not 0
-        <= usage["peak_famous_serialized_bytes"]
-        <= MAX_HEAD_FAMOUS_SERIALIZED_BYTES
-        or type(usage["admitted_key_bytes"]) is not int
-        or not 0 <= usage["admitted_key_bytes"] <= MAX_HEAD_ADMITTED_KEY_BYTES
+        or not 0 <= usage["peak_workspace_bytes"] <= MAX_HEAD_SCRATCH_BYTES
     ):
         raise ValueError("Places head observed disk usage is invalid")
     accounting = report["accounting"]
     retained = plan["totals"]["retained_records"]
     if (
         accounting.get("retained_records") != retained
-        or accounting.get("first_pass_records") != retained
-        or accounting.get("second_pass_records") != retained
-        or accounting.get("source_fragments") != plan["totals"]["input_fragments"]
+        or accounting.get("reduce_reports") != len(plan["reduce_jobs"])
+        or accounting.get("candidate_artifacts") != len(plan["reduce_jobs"])
+        or accounting.get("admitted_keys") != len(plan["head_admission"]["keys"])
+        or accounting.get("map_fragment_reads") != 0
         or accounting.get("candidate_slots", MAX_HEAD_CANDIDATE_SLOTS + 1)
         > MAX_HEAD_CANDIDATE_SLOTS
+        or accounting.get("emitted_candidate_slots")
+        != report["object"].get("candidate_slots_emitted")
+        or accounting.get("entry_cap_dropped_candidate_slots")
+        != report["object"].get("candidate_slots_dropped_for_entry_cap")
+        or accounting.get("emitted_candidate_slots", -1)
+        + accounting.get("entry_cap_dropped_candidate_slots", -1)
+        != accounting.get("candidate_slots")
         or accounting.get("emitted_keys") != report["object"].get("key_count")
     ):
         raise ValueError("Places head accounting does not reconcile")
@@ -1101,15 +1371,21 @@ def main() -> None:
     parser.add_argument("--request", type=Path, required=True)
     parser.add_argument("--plan", type=Path, required=True)
     parser.add_argument("--artifacts-root", type=Path, required=True)
+    parser.add_argument("--reduce-reports-dir", type=Path, required=True)
     parser.add_argument("--fragment-fetch-command-json")
     parser.add_argument("--scratch-dir", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args()
+    reduce_reports = [
+        json.loads(path.read_text())
+        for path in sorted(args.reduce_reports_dir.glob("*.json"))
+    ]
     report = build_global_head(
         json.loads(args.request.read_text()),
         json.loads(args.plan.read_text()),
         artifact_root=args.artifacts_root,
+        reduce_reports=reduce_reports,
         scratch_dir=args.scratch_dir,
         output=args.output,
         fragment_fetch_command=parse_fetch_command(args.fragment_fetch_command_json),

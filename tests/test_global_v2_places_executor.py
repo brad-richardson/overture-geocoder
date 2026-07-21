@@ -19,6 +19,8 @@ import build_places_region_shards as places_builder  # noqa: E402
 import global_v2_places_head as places_head  # noqa: E402
 import global_v2_places_plan as places_plan  # noqa: E402
 import global_v2_places_reduce as places_reduce  # noqa: E402
+from experiment_places_compact_index import place_from_row  # noqa: E402
+from experiment_places_compact_shard import build_artifact  # noqa: E402
 from experiment_places_head_repack import RepackHead  # noqa: E402
 from global_v2_places_head import (  # noqa: E402
     build_global_head,
@@ -31,7 +33,7 @@ from global_v2_places_inventory import (  # noqa: E402
     canonical_json_bytes,
     canonical_schema_contract,
 )
-from global_v2_places_map import run_map_task  # noqa: E402
+from global_v2_places_map import project_row, run_map_task  # noqa: E402
 from global_v2_places_plan import (  # noqa: E402
     ARTIFACT_LISTING_SCHEMA,
     _assign_reduce_jobs,
@@ -153,16 +155,32 @@ def build_request(inventory, **overrides):
     return global_v2_build_request.build_request(**values)
 
 
-def fake_fragment_writer(rows, path, metadata):
+def fake_fragment_writer(batches, path, metadata):
     lines = [canonical_json_bytes({"metadata": metadata})]
-    lines.extend(canonical_json_bytes(row) for row in rows)
+    records = 0
+    for batch in batches:
+        rows = batch.to_pylist()
+        records += len(rows)
+        lines.extend(canonical_json_bytes(row) for row in rows)
     path.write_bytes(b"\n".join(lines) + b"\n")
+    return records
 
 
-def json_fragment_reader(_fragment, path):
+def json_fragment_reader(fragment, path):
+    ownership = [
+        fragment["row_groups"][index] for index in fragment["selected_row_groups"]
+    ]
     lines = path.read_text().splitlines()
     for line in lines[1:]:
-        yield json.loads(line)
+        row = json.loads(line)
+        if any(
+            item["execution_group"] == row["execution_group"]
+            and item["minimum_maximum_level_cell"]
+            <= row["partition_cell"]
+            <= item["maximum_maximum_level_cell"]
+            for item in ownership
+        ):
+            yield row
 
 
 def predecessor_catalog(
@@ -258,11 +276,10 @@ def completed_outputs(built, name):
     head_report = build_global_head(
         built["request"],
         built["plan"],
-        artifact_root=built["artifact_root"],
+        reduce_reports=reduce_reports,
+        artifact_root=family_dir,
         scratch_dir=built["tmp_path"] / f"{name}-head",
         output=family_dir / "head.phrp",
-        fragment_reader=json_fragment_reader,
-        runtime_provenance={"reader": "json", "writer": "fixture"},
     )
     return family_dir, reduce_reports, head_report
 
@@ -290,7 +307,7 @@ def build_map_outputs(tmp_path, inventory, groups):
     ]
     objects = []
     for report in reports:
-        count = report["counts"]
+        count = report["summary"]
         objects.append(
             {
                 "object_key": count["object_key"],
@@ -348,22 +365,23 @@ def test_fanin_plan_is_exact_sticky_bounded_and_deterministic(built):
         "split_cells": 4,
         "execution_groups": 4,
         "reduce_jobs": 2,
-        "input_fragments": 8,
+        "input_fragments": 2,
     }
     assert plan["map_fan_in"]["input_records"] == 8
     assert plan["map_fan_in"]["retained_records"] == 8
     assert plan["map_fan_in"]["rejected_records"] == 0
     aggregation = plan["map_fan_in"]["count_aggregation"]
     assert aggregation["maximum_scratch_bytes"] == places_plan.PLAN_MAX_SCRATCH_BYTES
-    assert aggregation["peak_sqlite_database_bytes"] == (
-        aggregation["peak_sqlite_page_count"] * aggregation["sqlite_page_size"]
-    )
-    assert (
-        aggregation["peak_scratch_bytes"] >= aggregation["peak_sqlite_database_bytes"]
-    )
-    assert aggregation["group_aggregation"] == "indexed-cell-stream-v1"
+    assert aggregation["kind"] == "duckdb-typed-external-fanin-v1"
+    assert aggregation["engine"] == "duckdb"
+    assert aggregation["maximum_memory_bytes"] == places_plan.PLAN_DUCKDB_MEMORY_LIMIT_BYTES
+    assert aggregation["peak_scratch_bytes"] >= aggregation["peak_database_bytes"]
+    assert aggregation["peak_batch_rows"] <= aggregation["maximum_batch_rows"]
+    assert aggregation["registered_arrow_batches"] is True
+    assert aggregation["arrow_append_batches"] > 0
+    assert aggregation["group_aggregation"] == "typed-ordered-external-stream-v1"
     assert aggregation["maximum_execution_groups_in_memory"] == 256
-    assert aggregation["ordered_scan_uses_temporary_btree"] is False
+    assert aggregation["ordered_scan"] == "duckdb-order-by-cell-v1"
     assert all(
         job["execution_identity_is_serving_identity"] is False
         for job in plan["reduce_jobs"]
@@ -387,6 +405,36 @@ def test_fanin_plan_is_exact_sticky_bounded_and_deterministic(built):
         scratch_dir=built["tmp_path"] / "scratch-repeat",
     )
     assert repeated == plan
+
+
+def test_all_rejected_map_completion_restores_through_planner(tmp_path):
+    groups = fixture_rows()
+    for row in groups[1]:
+        row["names"]["primary"] = " "
+    inventory = inventory_for_groups(groups)
+    request = build_request(inventory)
+    artifact_root, reports, listing = build_map_outputs(tmp_path, inventory, groups)
+
+    assert reports[1]["accounting"]["retained_records"] == 0
+    assert reports[1]["fragments"] == {
+        "count": 0,
+        "records": 0,
+        "bytes": 0,
+        "manifest_sha256": digest_value([]),
+        "objects": [],
+    }
+    plan = build_places_plan(
+        request,
+        inventory,
+        reports,
+        artifact_root=artifact_root,
+        artifact_listing=listing,
+        scratch_dir=tmp_path / "all-rejected-plan",
+    )
+    assert validate_places_plan(plan) is plan
+    assert plan["map_fan_in"]["input_records"] == 8
+    assert plan["map_fan_in"]["retained_records"] == 4
+    assert plan["map_fan_in"]["rejected_records"] == 4
 
 
 def test_fanin_rejects_missing_duplicate_and_remote_listing_replay(built):
@@ -420,6 +468,56 @@ def test_fanin_rejects_missing_duplicate_and_remote_listing_replay(built):
             artifact_root=built["artifact_root"],
             artifact_listing=listing,
             scratch_dir=built["tmp_path"] / "scratch-listing",
+        )
+
+
+def test_plan_rejects_task_famous_cap_below_requested_global_cap(
+    built, monkeypatch
+):
+    monkeypatch.setattr(places_plan, "MAP_SUMMARY_FAMOUS_CAP", 1)
+    with pytest.raises(ValueError, match="below the requested global cap"):
+        build_places_plan(
+            built["request"],
+            built["inventory"],
+            built["reports"],
+            artifact_root=built["artifact_root"],
+            artifact_listing=built["listing"],
+            scratch_dir=built["tmp_path"] / "scratch-famous-cap",
+        )
+
+
+def test_planner_allows_famous_pending_peak_above_cap_but_below_batch(built):
+    reports = copy.deepcopy(built["reports"])
+    reports[0]["execution"]["census"]["peak_pending_famous_rows"] = (
+        places_plan.MAP_SUMMARY_FAMOUS_CAP + 1
+    )
+    reports[0]["report_sha256"] = digest_value(
+        {key: value for key, value in reports[0].items() if key != "report_sha256"}
+    )
+    plan = build_places_plan(
+        built["request"],
+        built["inventory"],
+        reports,
+        artifact_root=built["artifact_root"],
+        artifact_listing=built["listing"],
+        scratch_dir=built["tmp_path"] / "scratch-famous-pending-valid",
+    )
+    assert validate_places_plan(plan) is plan
+
+    reports[0]["execution"]["census"]["peak_pending_famous_rows"] = (
+        places_plan.MAP_CENSUS_BATCH_ROWS + 1
+    )
+    reports[0]["report_sha256"] = digest_value(
+        {key: value for key, value in reports[0].items() if key != "report_sha256"}
+    )
+    with pytest.raises(ValueError, match="observed bound exceeds"):
+        build_places_plan(
+            built["request"],
+            built["inventory"],
+            reports,
+            artifact_root=built["artifact_root"],
+            artifact_listing=built["listing"],
+            scratch_dir=built["tmp_path"] / "scratch-famous-pending-invalid",
         )
 
 
@@ -467,6 +565,51 @@ def test_skewed_execution_groups_assign_whole_groups_not_shard_ids():
     )
 
 
+def test_diffuse_coarse_packs_charge_selected_work_not_repeated_whole_objects():
+    groups = {}
+    for group_index in range(256):
+        group = "".join(
+            str((group_index >> shift) & 3) for shift in (6, 4, 2, 0)
+        )
+        fragments = []
+        for map_index in range(128):
+            fragments.append(
+                {
+                    "object_key": f"fragments/sha256/pack-{map_index}.parquet",
+                    "sha256": f"{map_index + 1:064x}",
+                    "bytes": 256_000_000,
+                    "footer_bytes": 64_000,
+                    "row_group_count": 256,
+                    "map_index": map_index,
+                    "pack_index": 0,
+                    "selected_row_groups": [group_index],
+                    "selected_execution_groups": [group],
+                    "records": 1,
+                    "selected_compressed_bytes": 1_000_000,
+                    "selected_uncompressed_bytes": 2_000_000,
+                }
+            )
+        groups[group] = {
+            "records": 128,
+            "leaves": [{"cell": group + "00", "rows": 128}],
+            "fragments": fragments,
+        }
+
+    jobs = _assign_reduce_jobs(
+        groups=groups,
+        reduce_job_limit=82,
+        request_digest="1" * 64,
+        inventory_sha256="2" * 64,
+        completion_set_sha256="3" * 64,
+    )
+
+    assert len(jobs) == 82
+    assert max(job["input_bytes"] for job in jobs) < 1_000_000_000
+    assert max(job["selected_uncompressed_bytes"] for job in jobs) <= 1_024_000_000
+    assert max(job["maximum_materialized_bytes"] for job in jobs) == 256_000_000
+    assert max(job["input_fragment_count"] for job in jobs) == 128
+
+
 def test_reduce_head_and_finalize_reconcile_to_worker_artifacts(built):
     family_dir = built["tmp_path"] / "family"
     reduce_reports = []
@@ -488,7 +631,26 @@ def test_reduce_head_and_finalize_reconcile_to_worker_artifacts(built):
         assert report["compaction"]["writer_materialization"]["peak_leaf_rows"] == 1
         assert (
             report["compaction"]["writer_materialization"]["kind"]
-            == "single-place-list-required-by-pcsh-writer-v1"
+            == "duckdb-typed-external-streaming-pcsh-writer-v2"
+        )
+        assert report["compaction"]["maximum_active_leaf_partitions"] == 1
+        assert report["compaction"]["registered_arrow_batches"] is True
+        assert report["compaction"]["arrow_append_batches"] > 0
+        assert report["compaction"]["peak_active_leaf_partitions"] == 1
+        assert report["head_candidates"]["writer"]["full_table_materialized"] is False
+        assert (
+            report["compaction"]["writer_materialization"][
+                "registered_arrow_batches"
+            ]
+            is True
+        )
+        assert (
+            report["compaction"]["writer_materialization"]["arrow_append_batches"]
+            > 0
+        )
+        assert (
+            report["head_candidates"]["writer"]["peak_batch_rows"]
+            <= places_plan.HEAD_CANDIDATE_WRITE_BATCH_ROWS
         )
         excessive = copy.deepcopy(report)
         excessive["compaction"]["peak_workspace_bytes"] = (
@@ -508,26 +670,34 @@ def test_reduce_head_and_finalize_reconcile_to_worker_artifacts(built):
         for shard in report["shards"]
     )
 
+
     head_report = build_global_head(
         built["request"],
         built["plan"],
-        artifact_root=built["artifact_root"],
+        reduce_reports=reduce_reports,
+        artifact_root=family_dir,
         scratch_dir=built["tmp_path"] / "scratch-head",
         output=family_dir / "head.phrp",
-        fragment_reader=json_fragment_reader,
-        runtime_provenance={"reader": "hermetic-json-v1", "writer": "fixture"},
     )
     assert (
         validate_head_report(head_report, built["request"], built["plan"])
         is head_report
     )
-    assert head_report["accounting"]["first_pass_records"] == 8
-    assert head_report["accounting"]["second_pass_records"] == 8
+    assert head_report["accounting"]["map_fragment_reads"] == 0
+    assert head_report["accounting"]["candidate_artifacts"] == len(reduce_reports)
     assert (
-        head_report["usage"]["peak_sqlite_database_bytes"]
-        <= head_report["usage"]["peak_scratch_bytes"]
+        head_report["usage"]["retained_candidate_bytes"]
+        <= head_report["usage"]["peak_retained_candidate_bytes"]
+        <= places_head.MAX_HEAD_RETAINED_CANDIDATE_BYTES
+    )
+    assert (
+        head_report["candidate_materialization"]["peak_read_batch_bytes"]
+        <= places_head.MAX_HEAD_CANDIDATE_READ_BATCH_BYTES
     )
     head = RepackHead(family_dir / "head.phrp")
+    assert list(head.load_resident_index()) == [
+        item["key"] for item in built["plan"]["head_admission"]["keys"]
+    ]
     assert head.directory["provenance"] == {
         "request_sha256": built["plan"]["request"]["sha256"],
         "plan_sha256": built["plan"]["plan_sha256"],
@@ -582,14 +752,191 @@ def test_reduce_head_and_finalize_reconcile_to_worker_artifacts(built):
     second_head = build_global_head(
         built["request"],
         built["plan"],
-        artifact_root=built["artifact_root"],
+        reduce_reports=reduce_reports,
+        artifact_root=family_dir,
         scratch_dir=built["tmp_path"] / "scratch-head-repeat",
         output=repeated_head_path,
-        fragment_reader=json_fragment_reader,
-        runtime_provenance={"reader": "hermetic-json-v1", "writer": "fixture"},
     )
     assert second_head["artifact"] == head_report["artifact"]
     assert repeated_head_path.read_bytes() == (family_dir / "head.phrp").read_bytes()
+
+
+def test_duckdb_streaming_pcsh_is_byte_identical_across_boundaries(
+    tmp_path, monkeypatch
+):
+    normalized = []
+    for index, confidence in enumerate((0.9, 0.5, 0.9), start=1):
+        row, reason = project_row(
+            row_for_cell(index, "000000000000", confidence),
+            maximum_level=12,
+            source_uri="s3://fixture/places.parquet",
+            row_group=0,
+            row_index=index - 1,
+        )
+        assert reason is None
+        row["primary_name"] = "東京 咖啡 " + " ".join(
+            f"token{token}" for token in range(270)
+        )
+        normalized.append(row)
+    duplicate = {**normalized[0], "source_uri": "s3://fixture/duplicate.parquet"}
+    normalized.append(duplicate)
+    normalized.sort(
+        key=lambda row: (
+            row["partition_cell"],
+            row["partition_key"],
+            -round(row["confidence"] * 255),
+            row["gers_id"],
+            row["source_uri"],
+            row["source_row_group"],
+            row["source_row_index"],
+        )
+    )
+    expected = tmp_path / "expected.pcsh"
+    actual = tmp_path / "actual.pcsh"
+    build_artifact(
+        [place_from_row(row, index + 1) for index, row in enumerate(normalized)],
+        expected,
+        block_entries=2,
+        preserve_input_order=True,
+    )
+    monkeypatch.setattr(places_reduce, "REDUCE_MAX_BUFFER_ROWS", 1)
+    evidence = places_reduce._build_streaming_artifact(
+        iter(normalized),
+        actual,
+        scratch_dir=tmp_path / "pcsh-scratch",
+        on_place=lambda _row, _place: None,
+        block_entries=2,
+    )
+    assert actual.read_bytes() == expected.read_bytes()
+    assert evidence["peak_pending_postings"] <= places_plan.REDUCE_MAX_BUFFER_ROWS * 4
+    assert evidence["peak_pending_projections"] <= places_plan.REDUCE_MAX_BUFFER_ROWS
+
+
+def test_duckdb_leaf_store_is_typed_without_json_payload(tmp_path):
+    store = places_reduce._LeafStore(tmp_path / "typed-leaf-store")
+    try:
+        columns = {
+            row[1]: row[2]
+            for row in store.connection.execute("PRAGMA table_info('rows')").fetchall()
+        }
+        assert "payload" not in columns
+        assert columns["partition_key"] == "UBIGINT"
+        assert columns["confidence"] == "DOUBLE"
+        assert columns["source_row_index"] == "BIGINT"
+        assert store.duckdb_version
+    finally:
+        store.close()
+
+
+def test_duckdb_runtime_version_is_enforced_at_constructor(tmp_path, monkeypatch):
+    import duckdb
+
+    monkeypatch.setattr(duckdb, "__version__", "0.0.0")
+    with pytest.raises(RuntimeError, match="requires DuckDB 1.5.1"):
+        places_plan._CountStore(tmp_path / "wrong-plan-duckdb")
+    with pytest.raises(RuntimeError, match="requires DuckDB 1.5.1"):
+        places_reduce._LeafStore(tmp_path / "wrong-reduce-duckdb")
+
+
+def test_unmatched_place_does_not_apply_head_entry_cap(monkeypatch):
+    matcher = places_reduce._AdmittedHeadMatcher(
+        {"head_admission": {"keys": [{"key": "e:admitted"}]}}
+    )
+    row = {
+        "confidence": 1.0,
+        "partition_key": 0,
+        "gers_id": str(uuid.UUID(int=1)),
+        "source_uri": "source",
+        "source_row_group": 0,
+        "source_row_index": 0,
+    }
+    place = place_from_row(
+        {
+            "gers_id": row["gers_id"],
+            "primary_name": "unmatched " + "x" * 200_000,
+            "confidence": 1.0,
+        },
+        1,
+    )
+    monkeypatch.setattr(
+        places_reduce,
+        "encode_record",
+        lambda _place: (_ for _ in ()).throw(AssertionError("must not encode")),
+    )
+    candidates = {}
+    matcher.add(candidates, row, place)
+    assert candidates == {}
+
+
+def test_duplicate_gers_candidates_preserve_pcsh_but_dedupe_phrp_topk():
+    first = (-255, 1, -255, "same-gers", "a", 0, 0)
+    later = (-200, 2, -200, "same-gers", "b", 0, 1)
+    reducer_candidates = {}
+    assert places_reduce._push_candidate(
+        reducer_candidates, "e:test", later, b"later"
+    ) == len(b"later")
+    assert places_reduce._push_candidate(
+        reducer_candidates, "e:test", first, b"first"
+    ) == 0
+    assert reducer_candidates["e:test"] == [(first, b"first")]
+
+    head_candidates = {}
+    retained = places_head._push_candidate(
+        head_candidates, "e:test", later, b"later", 10
+    )
+    retained += places_head._push_candidate(
+        head_candidates, "e:test", first, b"first", 10
+    )
+    assert head_candidates["e:test"] == [(first, b"first")]
+    assert retained == places_head._retained_candidate_bytes(
+        "e:test", first, b"first"
+    )
+    for rank in range(20):
+        sort_key = (-rank, rank, -rank, f"gers-{rank}", "source", 0, rank)
+        places_head._push_candidate(
+            head_candidates, "e:boundary", sort_key, bytes((rank,)), 10
+        )
+    assert len(head_candidates["e:boundary"]) == 10
+    assert sorted(item[0][1] for item in head_candidates["e:boundary"]) == list(
+        range(10, 20)
+    )
+
+
+def test_head_candidate_parquet_writer_flushes_bounded_batches(tmp_path):
+    candidate_count = places_plan.HEAD_CANDIDATE_WRITE_BATCH_ROWS + 1
+    candidates = {
+        f"e:key-{index:05d}": [
+            ((-255, index, -255, f"id-{index}", "source", 0, index), b"x")
+        ]
+        for index in range(candidate_count)
+    }
+    artifact = places_reduce._write_head_candidates(
+        candidates,
+        output_dir=tmp_path,
+        job_index=0,
+        plan_sha256="1" * 64,
+        admission_sha256="2" * 64,
+        maximum_candidates=candidate_count,
+        candidate_projection_bytes=candidate_count,
+        peak_candidate_projection_bytes=candidate_count,
+    )
+    assert artifact["candidates"] == candidate_count
+    writer = artifact["writer"]
+    assert writer["kind"] == "pyarrow-parquet-writer-batches-v1"
+    assert writer["maximum_batch_rows"] == places_plan.HEAD_CANDIDATE_WRITE_BATCH_ROWS
+    assert writer["peak_batch_rows"] == places_plan.HEAD_CANDIDATE_WRITE_BATCH_ROWS
+    assert writer["maximum_batch_bytes"] == places_plan.HEAD_CANDIDATE_WRITE_BATCH_BYTES
+    assert writer["maximum_row_bytes"] == places_plan.HEAD_CANDIDATE_MAX_ROW_BYTES
+    assert writer["peak_batch_bytes"] <= writer["maximum_batch_bytes"]
+    assert (
+        writer["maximum_projection_bytes"]
+        == places_reduce.MAX_HEAD_SINGLE_PROJECTION_BYTES
+    )
+    assert writer["peak_projection_bytes"] == 1
+    assert writer["full_table_materialized"] is False
+    import pyarrow.parquet as pq
+
+    assert pq.ParquetFile(tmp_path / artifact["object_key"]).metadata.num_row_groups == 2
 
 
 def test_exact_predecessor_is_required_after_build_one(built):
@@ -609,11 +956,10 @@ def test_exact_predecessor_is_required_after_build_one(built):
     head_report = build_global_head(
         built["request"],
         built["plan"],
-        artifact_root=built["artifact_root"],
+        reduce_reports=reduce_reports,
+        artifact_root=family_dir,
         scratch_dir=built["tmp_path"] / "pred-head",
         output=family_dir / "head.phrp",
-        fragment_reader=json_fragment_reader,
-        runtime_provenance={"reader": "json", "writer": "fixture"},
     )
     _, manifest = finalize_places_family(
         built["request"],
@@ -782,16 +1128,29 @@ def test_predecessor_manifest_requires_exact_pinned_object_sha(built):
 @pytest.mark.parametrize(
     ("constant", "limit_field", "new_limit"),
     [
-        ("MAX_INPUT_FRAGMENTS_PER_REDUCE_JOB", "max_input_fragments_per_reduce_job", 3),
+        ("MAX_INPUT_FRAGMENTS_PER_REDUCE_JOB", "max_input_fragments_per_reduce_job", 0),
         ("MAX_INPUT_BYTES_PER_REDUCE_JOB", "max_input_bytes_per_reduce_job", 1),
+        (
+            "MAX_SELECTED_UNCOMPRESSED_BYTES_PER_REDUCE_JOB",
+            "max_selected_uncompressed_bytes_per_reduce_job",
+            1,
+        ),
+        (
+            "MAX_SIMULTANEOUS_MATERIALIZED_BYTES",
+            "max_simultaneous_materialized_bytes",
+            1,
+        ),
         ("MAX_RETAINED_ROWS_PER_REDUCE_JOB", "max_retained_rows_per_reduce_job", 3),
         (
             "MAX_RAW_FRAGMENTS_PER_EXECUTION_GROUP",
             "max_raw_fragments_per_execution_group",
-            1,
+            0,
         ),
     ],
-    ids=["fragment-count", "input-bytes", "retained-rows", "group-fanin"],
+    ids=[
+        "fragment-count", "input-bytes", "uncompressed-bytes",
+        "simultaneous-materialization", "retained-rows", "group-fanin",
+    ],
 )
 def test_serialized_plan_reenforces_reduce_caps(
     built, monkeypatch, constant, limit_field, new_limit
@@ -809,7 +1168,9 @@ def test_serialized_plan_reenforces_reduce_caps(
 
 def test_plan_rejects_tampered_count_aggregation_evidence(built):
     tampered = copy.deepcopy(built["plan"])
-    tampered["map_fan_in"]["count_aggregation"]["peak_sqlite_page_count"] += 1
+    tampered["map_fan_in"]["count_aggregation"]["peak_database_bytes"] = (
+        places_plan.PLAN_MAX_SCRATCH_BYTES + 1
+    )
     tampered["plan_sha256"] = digest_value(
         {key: value for key, value in tampered.items() if key != "plan_sha256"}
     )
@@ -817,18 +1178,18 @@ def test_plan_rejects_tampered_count_aggregation_evidence(built):
         validate_places_plan(tampered)
 
 
-def test_planner_count_store_enforces_sqlite_scratch_cap(tmp_path, monkeypatch):
+def test_planner_count_store_enforces_duckdb_scratch_cap(tmp_path, monkeypatch):
     monkeypatch.setattr(places_plan, "PLAN_MAX_SCRATCH_BYTES", 64 * 1024)
     store = places_plan._CountStore(tmp_path / "planner-count-cap")
     try:
-        values = [(f"{index:012x}".replace("a", "0"), 1) for index in range(20_000)]
+        values = [(f"{index:012x}".replace("a", "0"), 1) for index in range(10_000)]
         with pytest.raises(ValueError, match="hard scratch cap"):
             store._add(values)
     finally:
         store.close()
 
 
-def test_planner_group_totals_stream_index_without_temp_btree(tmp_path):
+def test_planner_group_totals_stream_typed_external_order(tmp_path):
     store = places_plan._CountStore(tmp_path / "planner-group-stream")
     try:
         store._add(
@@ -842,13 +1203,13 @@ def test_planner_group_totals_stream_index_without_temp_btree(tmp_path):
         store.finish()
         plan_details = store.ordered_query_plan()
         assert plan_details
-        assert all("TEMP B-TREE" not in detail.upper() for detail in plan_details)
-        assert store.ordered_query_uses_temporary_btree() is False
+        assert any("ORDER_BY" in detail for detail in plan_details)
         assert store.group_totals() == {"0000": 5, "1230": 5, "3333": 7}
         evidence = store.evidence()
-        assert evidence["group_aggregation"] == "indexed-cell-stream-v1"
+        assert evidence["group_aggregation"] == "typed-ordered-external-stream-v1"
         assert evidence["maximum_execution_groups_in_memory"] == 4**4
-        assert evidence["ordered_scan_uses_temporary_btree"] is False
+        assert evidence["maximum_memory_bytes"] == places_plan.PLAN_DUCKDB_MEMORY_LIMIT_BYTES
+        assert evidence["peak_batch_rows"] <= places_plan.PLAN_AGGREGATION_BATCH_ROWS
         assert evidence["peak_scratch_bytes"] <= places_plan.PLAN_MAX_SCRATCH_BYTES
     finally:
         store.close()
@@ -883,6 +1244,18 @@ def test_reduce_store_observes_staged_bytes_during_flush(tmp_path, monkeypatch):
             "partition_key": 1,
             "confidence": 0.5,
             "gers_id": "a" * 36,
+            "primary_name": "Place",
+            "alt_names": "",
+            "brand_name": "",
+            "category_primary": "",
+            "basic_category": "",
+            "locality": "",
+            "region": "",
+            "country": "",
+            "lat": 0.0,
+            "lon": 0.0,
+            "operating_status": "open",
+            "execution_group": "0000",
             "source_uri": "s" * 200_000,
             "source_row_group": 0,
             "source_row_index": 0,
@@ -914,14 +1287,17 @@ def test_reduce_streams_remote_fragments_one_at_a_time_and_unlinks(built, monkey
 
     def fake_fetch(argv, check):
         assert check is True
-        object_key, output = argv[1:]
+        object_key, output = argv[1:3]
         assert all(not path.exists() for path in observed_outputs)
         output_path = Path(output)
         assert not output_path.exists()
         output_path.write_bytes((built["artifact_root"] / object_key).read_bytes())
+        if "--proof" in argv:
+            Path(argv[argv.index("--proof") + 1]).write_text("{}")
         observed_outputs.append(output_path)
 
     monkeypatch.setattr(places_reduce.subprocess, "run", fake_fetch)
+    monkeypatch.setattr(places_reduce, "_validate_selective_proof", lambda *_: None)
     report = execute_reduce_job(
         built["plan"],
         job_index=job["index"],
@@ -936,7 +1312,9 @@ def test_reduce_streams_remote_fragments_one_at_a_time_and_unlinks(built, monkey
     assert validate_reduce_report(report, built["plan"]) is report
     materialization = report["compaction"]["fragment_materialization"]
     assert materialization["fetched_fragments"] == len(job["input_fragments"])
-    assert materialization["fetched_bytes"] == job["input_bytes"]
+    assert materialization["fetched_bytes"] == sum(
+        item["bytes"] for item in job["input_fragments"]
+    )
     assert materialization["maximum_simultaneously_materialized_fragments"] == 1
     assert materialization["peak_materialized_fragment_bytes"] == max(
         item["bytes"] for item in job["input_fragments"]
@@ -957,7 +1335,7 @@ def test_materialization_validators_reject_fabricated_remote_zero_evidence(built
         validate_reduce_report(reduce_report, built["plan"])
 
     fabricated_head = copy.deepcopy(head_report)
-    fabricated_head["fragment_materialization"]["remote_fetch_enabled"] = True
+    fabricated_head["candidate_materialization"]["remote_fetch_enabled"] = True
     fabricated_head["report_sha256"] = digest_value(
         {key: value for key, value in fabricated_head.items() if key != "report_sha256"}
     )
@@ -1031,45 +1409,108 @@ def test_head_count_database_observes_staged_bytes_during_growth(tmp_path):
         counts.close()
 
 
-def test_head_rejects_oversized_first_pass_token_strings(built, monkeypatch):
-    monkeypatch.setattr(
-        places_head,
-        "place_terms",
-        lambda _place: {"x" * (places_head.READER_MAX_KEY_BYTES + 1)},
+def test_head_admission_proves_key_and_encoded_index_caps(built):
+    admission = built["plan"]["head_admission"]
+    assert (
+        admission["duplicate_gers_policy"]
+        == places_plan.HEAD_DUPLICATE_GERS_POLICY
     )
-    with pytest.raises(ValueError, match="exact token.*key-byte cap"):
-        build_global_head(
-            built["request"],
-            built["plan"],
-            artifact_root=built["artifact_root"],
-            scratch_dir=built["tmp_path"] / "huge-token-scratch",
-            output=built["tmp_path"] / "huge-token" / "head.phrp",
-            fragment_reader=json_fragment_reader,
-            runtime_provenance={"reader": "json", "writer": "fixture"},
+    assert admission["proof"]["key_count"] <= places_head.READER_MAX_HEAD_KEYS
+    assert (
+        admission["proof"]["encoded_index_upper_bound_bytes"]
+        <= places_head.READER_MAX_HEAD_INDEX_BYTES
+    )
+    assert admission["artifact"]["object_key"] == "head-admission.json"
+    assert admission["proof"]["encoded_index_upper_bound_bytes"] == len(
+        places_head.encode_key_index(
+            [
+                (
+                    item["key"],
+                    places_plan.HEAD_MAX_ENTRIES_BYTES,
+                    places_head.READER_MAX_HEAD_ENTRY_BYTES,
+                )
+                for item in admission["keys"]
+            ]
         )
+    )
+
+    tampered = copy.deepcopy(built["plan"])
+    tampered["head_admission"]["proof"]["encoded_index_upper_bound_bytes"] -= 1
+    document = {
+        key: value
+        for key, value in tampered["head_admission"].items()
+        if key != "artifact"
+    }
+    encoded = canonical_json_bytes(document) + b"\n"
+    tampered["head_admission"]["artifact"]["bytes"] = len(encoded)
+    tampered["head_admission"]["artifact"]["sha256"] = hashlib.sha256(encoded).hexdigest()
+    tampered["plan_sha256"] = digest_value(
+        {key: value for key, value in tampered.items() if key != "plan_sha256"}
+    )
+    with pytest.raises(ValueError, match="cap proof"):
+        validate_places_plan(tampered)
 
 
-@pytest.mark.parametrize(
-    ("constant", "message"),
-    [
-        ("MAX_HEAD_COUNT_BATCH_STRING_BYTES", "count batch.*string-byte cap"),
-        ("MAX_HEAD_FAMOUS_SERIALIZED_BYTES", "famous set.*serialized-byte cap"),
-    ],
-)
-def test_head_first_pass_enforces_explicit_string_byte_caps(
-    built, monkeypatch, constant, message
-):
-    monkeypatch.setattr(places_head, constant, 1)
-    with pytest.raises(ValueError, match=message):
-        build_global_head(
-            built["request"],
-            built["plan"],
-            artifact_root=built["artifact_root"],
-            scratch_dir=built["tmp_path"] / f"{constant}-scratch",
-            output=built["tmp_path"] / constant / "head.phrp",
-            fragment_reader=json_fragment_reader,
-            runtime_provenance={"reader": "json", "writer": "fixture"},
+def test_global_famous_cap_dedupes_gers_before_concentrated_topk(built):
+    store = places_plan._CountStore(built["tmp_path"] / "famous-global-dedupe")
+    try:
+        rows = []
+        for index, (identifier, confidence, name) in enumerate(
+            (
+                (1, 0.99, "best"),
+                (1, 0.98, "duplicateeviction"),
+                (2, 0.97, "second"),
+            )
+        ):
+            row, reason = project_row(
+                row_for_cell(identifier, "000000000000", confidence),
+                maximum_level=12,
+                source_uri=f"s3://fixture/{index}.parquet",
+                row_group=0,
+                row_index=index,
+            )
+            assert reason is None
+            row["primary_name"] = name
+            rows.append(row)
+        store.famous_rows = rows
+        admission = places_plan._build_head_admission(
+            store,
+            {**built["request"]["families"]["places"]["global_head"], "famous_cap": 2},
+            output=built["tmp_path"] / "famous-global-admission.json",
         )
+        keys = {item["key"] for item in admission["keys"]}
+        assert "e:best" in keys
+        assert "e:second" in keys
+        assert "e:duplicateeviction" not in keys
+    finally:
+        store.close()
+
+
+def test_ci_pins_places_duckdb_runtime():
+    workflow = (Path(__file__).resolve().parents[1] / ".github/workflows/ci.yml").read_text()
+    assert "requirements-hosted-rowgroup.txt" in workflow
+
+
+def test_head_object_keeps_ranked_prefix_that_fits_entry_cap(tmp_path):
+    projection = b"x" * 70_000
+    report = places_head._write_head_object(
+        {
+            "e:test": [
+                ((rank,), projection)
+                for rank in range(10)
+            ]
+        },
+        tmp_path / "bounded-head.phrp",
+        famous_cap=0,
+        existing_scratch_bytes=0,
+        durable_provenance={},
+    )
+
+    assert report["candidate_slots_emitted"] == 1
+    assert report["candidate_slots_dropped_for_entry_cap"] == 9
+    assert report["entry_size_distribution"]["max"] <= (
+        places_head.READER_MAX_HEAD_ENTRY_BYTES
+    )
 
 
 def test_head_object_preflight_rejects_workspace_crossing(tmp_path, monkeypatch):
@@ -1086,9 +1527,10 @@ def test_head_object_preflight_rejects_workspace_crossing(tmp_path, monkeypatch)
     assert not output.exists()
 
 
-def test_head_streams_remote_fragments_one_at_a_time_for_both_passes(
+def test_head_streams_remote_candidate_artifacts_once_without_map_fragments(
     built, monkeypatch
 ):
+    family_dir, reduce_reports, _ = completed_outputs(built, "remote-candidates-source")
     observed_outputs = []
 
     def fake_fetch(argv, check):
@@ -1096,32 +1538,27 @@ def test_head_streams_remote_fragments_one_at_a_time_for_both_passes(
         object_key, output = argv[1:]
         assert all(not path.exists() for path in observed_outputs)
         output_path = Path(output)
-        output_path.write_bytes((built["artifact_root"] / object_key).read_bytes())
+        output_path.write_bytes((family_dir / object_key).read_bytes())
         observed_outputs.append(output_path)
 
     monkeypatch.setattr(places_head.subprocess, "run", fake_fetch)
     report = build_global_head(
         built["request"],
         built["plan"],
+        reduce_reports=reduce_reports,
         artifact_root=built["tmp_path"] / "empty-head-remote-root",
         scratch_dir=built["tmp_path"] / "remote-head-scratch",
         output=built["tmp_path"] / "remote-head" / "head.phrp",
         fragment_fetch_command=["fixture-fetch", "{object_key}", "{output}"],
-        fragment_reader=json_fragment_reader,
-        runtime_provenance={"reader": "json", "writer": "fixture"},
     )
 
     assert validate_head_report(report, built["request"], built["plan"]) is report
-    materialization = report["fragment_materialization"]
+    materialization = report["candidate_materialization"]
     assert (
-        materialization["fetched_fragments"]
-        == 2 * built["plan"]["totals"]["input_fragments"]
+        materialization["fetched_artifacts"]
+        == len(built["plan"]["reduce_jobs"])
     )
-    assert (
-        materialization["fetched_bytes"]
-        == 2 * built["plan"]["map_fan_in"]["fragment_bytes"]
-    )
-    assert materialization["maximum_simultaneously_materialized_fragments"] == 1
+    assert materialization["map_fragments_opened"] == 0
     assert all(not path.exists() for path in observed_outputs)
 
 
