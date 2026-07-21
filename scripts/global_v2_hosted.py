@@ -97,6 +97,7 @@ def admit_existing_task(
     family: str,
     task_id: str,
     index: int,
+    verify_artifacts: bool = True,
 ) -> dict[str, Any]:
     """Admit an exact completed task across attempts without rerunning it."""
     marker_key = task_marker_key(contract, phase, family, index)
@@ -118,14 +119,18 @@ def admit_existing_task(
     }
     if any(completion[field] != value for field, value in expected.items()):
         raise ValueError("existing task completion belongs to another planned task")
-    for identity in [completion["producer_report"], *completion["artifacts"]]:
-        _verify_remote_artifact(store, identity)
+    if verify_artifacts:
+        for identity in [completion["producer_report"], *completion["artifacts"]]:
+            _verify_remote_artifact(store, identity)
     return {
         "completed": True,
         "marker_key": marker_key,
         "completion": completion,
         "embedded_runtime_admitted": True,
-        "artifacts_verified": True,
+        "artifacts_verified": verify_artifacts,
+        "verification_mode": (
+            "marker-and-artifact-heads" if verify_artifacts else "marker-only"
+        ),
     }
 
 
@@ -1347,6 +1352,7 @@ def main() -> None:
     admit.add_argument("--family", choices=("addresses", "places"), required=True)
     admit.add_argument("--task-id", required=True)
     admit.add_argument("--index", type=int, required=True)
+    admit.add_argument("--marker-only", action="store_true")
     admit.add_argument("--output", type=Path, required=True)
     publish.add_argument("--phase", choices=("map", "reduce", "head"), required=True)
     publish.add_argument("--family", choices=("addresses", "places"), required=True)
@@ -1594,6 +1600,7 @@ def main() -> None:
             value = admit_existing_task(
                 _store(), contract, runtime, phase=args.phase, family=args.family,
                 task_id=args.task_id, index=args.index,
+                verify_artifacts=not args.marker_only,
             )
         elif args.command == "publish-task":
             value = publish_task(

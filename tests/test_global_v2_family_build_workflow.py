@@ -75,6 +75,7 @@ def test_workflow_uses_real_resumable_boundaries_and_dynamic_matrices():
     assert "resume only with a fresh dispatch, never Re-run jobs" in value
     assert "MAX_TOTAL_RUNNER_MINUTES" in value or "budget limits" in value
     assert "admit-task" in value
+    assert value.count("--marker-only") == 4
     assert "needs: [preflight, address-map]" in value
     assert "  finalize-slice:" in value
     assert "  worker-smoke:" in value

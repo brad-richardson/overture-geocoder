@@ -499,6 +499,15 @@ def test_hosted_task_uploads_complete_set_then_marker_and_restores_exact_phase(t
 
 
 def test_resume_admits_embedded_runtime_and_rejects_corrupt_artifact(tmp_path):
+    class CountingStore(r2_verified_store.FilesystemStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.head_keys = []
+
+        def head(self, key):
+            self.head_keys.append(key)
+            return super().head(key)
+
     contract = build_contract()
     first_runtime = runtime("20260713.1.0")
     later_runtime = runtime("20260720.1.0")
@@ -506,7 +515,7 @@ def test_resume_admits_embedded_runtime_and_rejects_corrupt_artifact(tmp_path):
     report, fragment = tmp_path / "report", tmp_path / "fragment"
     report.write_bytes(b"report")
     fragment.write_bytes(b"fragment")
-    store = r2_verified_store.FilesystemStore(tmp_path / "r2")
+    store = CountingStore(tmp_path / "r2")
     hosted.publish_task(
         store, contract, first_runtime, phase="map", family="places",
         task_id="places-map-000", index=0, producer_report_path=report,
@@ -544,6 +553,16 @@ def test_resume_admits_embedded_runtime_and_rejects_corrupt_artifact(tmp_path):
     fragment_key = f"{root}/map/places/fragment.bin"
     stored_fragment = store._path(fragment_key)  # noqa: SLF001
     stored_fragment.write_bytes(b"corrupted")
+    store.head_keys.clear()
+    marker_only = hosted.admit_existing_task(
+        store, contract, later_runtime, phase="map", family="places",
+        task_id="places-map-000", index=0, verify_artifacts=False,
+    )
+    assert marker_only["completed"] is True
+    assert marker_only["artifacts_verified"] is False
+    assert marker_only["verification_mode"] == "marker-only"
+    assert f"{root}/map/places/report.json" not in store.head_keys
+    assert fragment_key not in store.head_keys
     with pytest.raises(ValueError, match="artifact identity differs"):
         hosted.admit_existing_task(
             store, contract, later_runtime, phase="map", family="places",
