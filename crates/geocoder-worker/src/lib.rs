@@ -22,6 +22,10 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
     // request logs.
     let endpoint = request_endpoint(req.url()?.path());
     let preview_isolated = is_preview_environment(&env);
+    let preview_catalog_override = env
+        .var("CATALOG_KEY_OVERRIDE")
+        .ok()
+        .map(|value| value.to_string());
 
     // Handle CORS preflight requests
     if req.method() == Method::Options {
@@ -61,7 +65,9 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
         }
     }
 
-    if preview_isolated && !preview_path_allowed(req.url()?.path()) {
+    if preview_isolated
+        && !preview_path_allowed(req.url()?.path(), preview_catalog_override.as_deref())
+    {
         let mut response = Response::error("Not found", 404)?;
         response
             .headers_mut()
@@ -139,8 +145,22 @@ fn is_preview_environment(env: &Env) -> bool {
         .is_some_and(|value| matches!(value.to_string().as_str(), "preview" | "smoke"))
 }
 
-fn preview_path_allowed(path: &str) -> bool {
+fn preview_path_allowed(path: &str, catalog_override: Option<&str>) -> bool {
+    if catalog_override == Some("smoketest-id/catalog.json") {
+        return path.strip_prefix("/id/").is_some_and(uuid_path_segment);
+    }
     matches!(path, "/health" | "/v2/forward" | "/v2/reverse") || path.starts_with("/v2/features/")
+}
+
+fn uuid_path_segment(value: &str) -> bool {
+    value.len() == 36
+        && value.bytes().enumerate().all(|(index, byte)| {
+            if matches!(index, 8 | 13 | 18 | 23) {
+                byte == b'-'
+            } else {
+                byte.is_ascii_hexdigit()
+            }
+        })
 }
 
 /// Return a fixed, privacy-safe endpoint label for request timing logs.
@@ -219,12 +239,57 @@ mod tests {
     }
 
     #[test]
-    fn preview_exposes_only_candidate_health_and_required_v2_routes() {
+    fn v2_preview_exposes_only_candidate_health_and_required_v2_routes() {
         for path in ["/health", "/v2/forward", "/v2/reverse", "/v2/features/id"] {
-            assert!(preview_path_allowed(path));
+            assert!(preview_path_allowed(path, None));
         }
         for path in ["/", "/search", "/reverse", "/id/id", "/id", "/unexpected"] {
-            assert!(!preview_path_allowed(path));
+            assert!(!preview_path_allowed(path, None));
+        }
+    }
+
+    #[test]
+    fn id_smoke_preview_exposes_only_nonempty_legacy_id_route() {
+        for path in [
+            "/id/00000000-0000-4000-8000-000000000000",
+            "/id/ABCDEF00-0000-4000-8000-000000000000",
+        ] {
+            assert!(preview_path_allowed(
+                path,
+                Some("smoketest-id/catalog.json")
+            ));
+        }
+        for path in [
+            "/",
+            "/health",
+            "/search",
+            "/reverse",
+            "/id",
+            "/id/",
+            "/id/id",
+            "/id/foo/bar",
+            "/id//",
+            "/id/00000000-0000-4000-8000-000000000000/extra",
+            "/id/00000000-0000-4000-8000-00000000000%2F",
+            "/v2/forward",
+            "/v2/reverse",
+            "/v2/features/id",
+            "/unexpected",
+        ] {
+            assert!(!preview_path_allowed(
+                path,
+                Some("smoketest-id/catalog.json")
+            ));
+        }
+        for catalog_override in [
+            "smoketest-shards/catalog.json",
+            "smoketest-id/catalog.json/extra",
+            "prefix/smoketest-id/catalog.json",
+        ] {
+            assert!(!preview_path_allowed(
+                "/id/00000000-0000-4000-8000-000000000000",
+                Some(catalog_override)
+            ));
         }
     }
 }
