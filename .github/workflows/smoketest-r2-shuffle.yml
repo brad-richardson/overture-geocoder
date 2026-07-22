@@ -5,7 +5,10 @@ on:
     branches: [main]
     paths:
       - 'scripts/r2_verified_store.py'
+      - 'scripts/r2_fragment_fetch.py'
+      - 'scripts/global_v2_address_map.py'
       - 'tests/test_r2_verified_store.py'
+      - 'tests/test_r2_fragment_fetch.py'
       - 'tests/test_r2_shuffle_workflow.py'
       - '.github/workflows/smoketest-r2-shuffle.yml'
   workflow_dispatch:
@@ -30,6 +33,14 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install the exact hosted row-group toolchain
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
       - name: Build deterministic map fragments and manifests
         run: |
           set -euo pipefail
@@ -37,6 +48,66 @@ jobs:
           for index in 0 1 2 3; do
             printf 'map-fragment-%s\n' "$index" > "/tmp/r2-shuffle/source/fragment-${index}.bin"
           done
+          python - <<'PY'
+          import sys
+          from pathlib import Path
+
+          import pyarrow as pa
+          import pyarrow.parquet as pq
+
+          sys.path.insert(0, "scripts")
+          import global_v2_address_map as address_map
+
+          group_rows = 10_000
+          output = Path("/tmp/r2-shuffle/source/address-pack.parquet")
+          schema = address_map.shuffle_schema()
+          metadata = {
+              address_map.PARQUET_HEADER_METADATA_KEY: address_map.canonical_json({
+                  "schema": "r2-selective-rehearsal-address-pack-v1",
+                  "records": 4 * group_rows,
+                  "overture_release": "rehearsal",
+                  "source_inventory_sha256": "a" * 64,
+                  "schema_fingerprint_sha256": "b" * 64,
+                  "address_task_identity": "c" * 64,
+                  "fragment_index": 0,
+              })
+          }
+          with pq.ParquetWriter(
+              output, schema.with_metadata(metadata), compression="zstd", version="2.6"
+          ) as writer:
+              for group in range(4):
+                  row_ids = range(group * group_rows + 1, (group + 1) * group_rows + 1)
+                  row_ids = list(row_ids)
+                  values = {
+                      "country": ["US"] * group_rows,
+                      "maximum_bucket": [0] * group_rows,
+                      "route_hash": row_ids,
+                      "normalized_key_0": ["US"] * group_rows,
+                      "normalized_key_1": ["02139"] * group_rows,
+                      "normalized_key_2": ["Cambridge"] * group_rows,
+                      "normalized_key_3": ["Main Street"] * group_rows,
+                      "normalized_key_4": [str(value) for value in row_ids],
+                      "normalized_key_5": [""] * group_rows,
+                      "normalized_key_6": [""] * group_rows,
+                      "normalized_key_7": [""] * group_rows,
+                      "feature_id": [bytes.fromhex(f"{value:032x}") for value in row_ids],
+                      "longitude_e7": [-711000000] * group_rows,
+                      "latitude_e7": [423700000] * group_rows,
+                      "display_country": ["US"] * group_rows,
+                      "postal_city": ["Cambridge"] * group_rows,
+                      "postcode": ["02139"] * group_rows,
+                      "street": ["Main Street"] * group_rows,
+                      "number": [str(value) for value in row_ids],
+                      "unit": [""] * group_rows,
+                      "address_levels": [["MA", "Cambridge"]] * group_rows,
+                      "source_object_index": [0] * group_rows,
+                      "source_row_group": [group] * group_rows,
+                      "source_row_index": list(range(group_rows)),
+                  }
+                  writer.write_table(
+                      pa.Table.from_pydict(values, schema=schema), row_group_size=group_rows
+                  )
+          PY
           python scripts/r2_verified_store.py build-manifest \
             --prefix "$SHUFFLE_PREFIX" \
             --output /tmp/r2-shuffle/partial.json \
@@ -44,7 +115,8 @@ jobs:
           python scripts/r2_verified_store.py build-manifest \
             --prefix "$SHUFFLE_PREFIX" \
             --output /tmp/r2-shuffle/full.json \
-            /tmp/r2-shuffle/source/fragment-*.bin
+            /tmp/r2-shuffle/source/fragment-*.bin \
+            /tmp/r2-shuffle/source/address-pack.parquet
 
       - name: Upload partial completion, then resume the full shuffle twice
         env:
@@ -67,8 +139,120 @@ jobs:
             --prefix "$SHUFFLE_PREFIX" --manifest /tmp/r2-shuffle/full.json \
             --report /tmp/r2-shuffle/resumed-upload.json
           jq -e '
-            [.artifacts[].status] == ["existing_verified", "existing_verified", "existing_verified", "existing_verified"]
+            (.artifacts | length) == 5 and
+            all(.artifacts[]; .status == "existing_verified")
           ' /tmp/r2-shuffle/resumed-upload.json
+
+      - name: Select noncontiguous Parquet row groups through real R2 ranges
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+          AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          export R2_ENDPOINT="https://${CLOUDFLARE_ACCOUNT_ID}.r2.cloudflarestorage.com"
+          export PACK_KEY
+          export PACK_BYTES
+          export PACK_SHA256
+          PACK_KEY=$(jq -r '.artifacts[] | select(.path | endswith("address-pack.parquet")) | .key' /tmp/r2-shuffle/full.json)
+          PACK_BYTES=$(jq -r '.artifacts[] | select(.path | endswith("address-pack.parquet")) | .bytes' /tmp/r2-shuffle/full.json)
+          PACK_SHA256=$(jq -r '.artifacts[] | select(.path | endswith("address-pack.parquet")) | .sha256' /tmp/r2-shuffle/full.json)
+          export PACK_OBJECT_KEY="${PACK_KEY#"${SHUFFLE_PREFIX}/"}"
+          python - <<'PY'
+          import io
+          import json
+          import os
+          import sys
+          from pathlib import Path
+
+          import pyarrow as pa
+          import pyarrow.fs as pafs
+          import pyarrow.parquet as pq
+
+          sys.path.insert(0, "scripts")
+          import r2_fragment_fetch
+
+          class ObservedFile(io.RawIOBase):
+              def __init__(self, source, reads):
+                  self.source = source
+                  self.reads = reads
+
+              def readable(self):
+                  return True
+
+              def seekable(self):
+                  return True
+
+              def tell(self):
+                  return self.source.tell()
+
+              def seek(self, offset, whence=io.SEEK_SET):
+                  return self.source.seek(offset, whence)
+
+              def read(self, size=-1):
+                  offset = self.source.tell()
+                  payload = self.source.read(size)
+                  self.reads.append((offset, len(payload)))
+                  return payload
+
+              def close(self):
+                  self.source.close()
+                  super().close()
+
+          class ObservedFilesystem:
+              def __init__(self, base):
+                  self.base = base
+                  self.reads = []
+
+              def get_file_info(self, path):
+                  return self.base.get_file_info(path)
+
+              def open_input_file(self, path):
+                  return pa.PythonFile(ObservedFile(self.base.open_input_file(path), self.reads), mode="r")
+
+          expected_bytes = int(os.environ["PACK_BYTES"])
+          filesystem = ObservedFilesystem(
+              pafs.S3FileSystem(region="auto", endpoint_override=os.environ["R2_ENDPOINT"])
+          )
+          proof = r2_fragment_fetch.materialize_selected_row_groups(
+              bucket="geocoder-shards",
+              prefix=os.environ["SHUFFLE_PREFIX"],
+              object_key=os.environ["PACK_OBJECT_KEY"],
+              output=Path("/tmp/r2-shuffle/selected.parquet"),
+              proof=Path("/tmp/r2-shuffle/selective-proof.json"),
+              endpoint_url=os.environ["R2_ENDPOINT"],
+              row_groups=[1, 3],
+              expected_bytes=expected_bytes,
+              expected_sha256=os.environ["PACK_SHA256"],
+              filesystem=filesystem,
+          )
+          reads = filesystem.reads
+          full_object_reads = sum(
+              offset == 0 and length >= expected_bytes for offset, length in reads
+          )
+          selected = pq.ParquetFile("/tmp/r2-shuffle/selected.parquet")
+          if not reads or full_object_reads:
+              raise ValueError("selective fetch did not remain random-access")
+          if selected.metadata.num_row_groups != 2 or selected.metadata.num_rows != 20_000:
+              raise ValueError("selective fetch materialized the wrong row groups")
+          if proof["selected_original_row_groups"] != [1, 3]:
+              raise ValueError("selective proof differs from the requested row groups")
+          metrics = {
+              "schema": "overture-r2-selective-rehearsal-v1",
+              "object_bytes": expected_bytes,
+              "observed_file_reads": len(reads),
+              "observed_file_read_bytes": sum(length for _, length in reads),
+              "full_object_reads": full_object_reads,
+              "selected_original_row_groups": [1, 3],
+              "materialized_records": selected.metadata.num_rows,
+          }
+          Path("/tmp/r2-shuffle/selective-metrics.json").write_bytes(
+              r2_fragment_fetch.canonical_json(metrics)
+          )
+          print(json.dumps(metrics, sort_keys=True))
+          PY
 
       - name: Restore from empty and stale local state
         env:
@@ -103,6 +287,7 @@ jobs:
             echo '```json'
             test -f /tmp/r2-shuffle/resumed-upload.json && cat /tmp/r2-shuffle/resumed-upload.json
             test -f /tmp/r2-shuffle/stale-restore.json && cat /tmp/r2-shuffle/stale-restore.json
+            test -f /tmp/r2-shuffle/selective-metrics.json && cat /tmp/r2-shuffle/selective-metrics.json
             echo '```'
             echo
             echo "Run-unique, non-promoting prefix: ${SHUFFLE_PREFIX}"
