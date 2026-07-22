@@ -659,38 +659,65 @@ def test_inventory_phase_uploads_both_inventories_then_signed_marker(tmp_path, m
 
 def test_hosted_address_map_boundary_derives_outputs_from_validated_report(tmp_path, monkeypatch):
     manifest = tmp_path / "fragment-manifest.json"
-    fragment = tmp_path / "fragment.bin"
+    summary = tmp_path / "summaries/sha256/s.parquet"
+    fragment = tmp_path / "data-packs/fragment.parquet"
+    summary.parent.mkdir(parents=True)
+    fragment.parent.mkdir(parents=True)
     manifest.write_bytes(b"manifest")
+    summary.write_bytes(b"summary")
     fragment.write_bytes(b"fragment")
-    completion = {"accounting": {"input_rows": 10, "retained_rows": 8, "rejected_rows": 2}}
+    completion = {
+        "accounting": {"input_rows": 10, "retained_rows": 8, "rejected_rows": 2},
+        "summary": {
+            "relative_path": "summaries/sha256/s.parquet",
+            "object_key": "map/address-summaries/sha256/s.parquet",
+        },
+    }
     monkeypatch.setattr(hosted.address_plan, "_validate_map_task", lambda *args, **kwargs: (
         completion, {"relative_path": manifest.name},
-        [{"source_path": fragment, "object_key": "map/address-fragments/x.bin"}],
+        [{"source_path": fragment, "object_key": "map/address-data-packs/x.parquet"}],
+        {}, [],
     ))
     specs, counters = hosted.address_map_boundary(
         {}, {"index": 3}, tmp_path / "report.json", tmp_path,
         maximum_hash_bits=12, remote_object_prefix="staging/global-v2/x/immutable/map/addresses",
     )
-    assert [item["path"] for item in specs] == [str(manifest), str(fragment)]
-    assert specs[1]["object_key"].endswith("/objects/map/address-fragments/x.bin")
+    assert [item["path"] for item in specs] == [
+        str(manifest), str(summary), str(fragment)
+    ]
+    assert specs[1]["object_key"].endswith(
+        "/objects/map/address-summaries/sha256/s.parquet"
+    )
+    assert specs[2]["object_key"].endswith(
+        "/objects/map/address-data-packs/x.parquet"
+    )
     assert counters == {"input_records": 10, "retained_records": 8, "rejected_records": 2, "output_records": 8}
 
 
 def test_hosted_places_map_boundary_uses_family_validator(tmp_path, monkeypatch):
-    counts = tmp_path / "counts/x.gz"
-    fragment = tmp_path / "fragments/x.parquet"
-    counts.parent.mkdir()
+    summary = tmp_path / "summaries/x.parquet"
+    fragment = tmp_path / "packs/x.parquet"
+    summary.parent.mkdir()
     fragment.parent.mkdir()
-    counts.write_bytes(b"counts")
+    summary.write_bytes(b"summary")
     fragment.write_bytes(b"fragment")
     report = {
         "accounting": {"input_records": 5, "retained_records": 4, "rejected_records": 1},
-        "counts": {"object_key": "counts/x.gz", "bytes": 6, "sha256": "a" * 64},
-        "fragments": {"objects": [{"object_key": "fragments/x.parquet", "bytes": 8, "sha256": "b" * 64}]},
+        "summary": {"object_key": "summaries/x.parquet", "bytes": 7, "sha256": "a" * 64},
+        "fragments": {"objects": [{"object_key": "packs/x.parquet", "bytes": 8, "sha256": "b" * 64}]},
     }
     report_path = tmp_path / "report.json"
     report_path.write_text(executor.canonical_json(report).decode())
     observed = {}
+
+    class CountStore:
+        def __init__(self, _scratch):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(hosted.places_plan, "_CountStore", CountStore)
     monkeypatch.setattr(hosted.places_plan, "_validate_map_report", lambda raw, **kwargs: observed.setdefault("raw", raw))
     specs, counters = hosted.places_map_boundary(
         {}, {}, {}, report_path, tmp_path,
@@ -698,11 +725,11 @@ def test_hosted_places_map_boundary_uses_family_validator(tmp_path, monkeypatch)
         scratch_dir=tmp_path / "scratch",
     )
     assert observed["raw"] == report
-    assert [item["path"] for item in specs] == [str(counts), str(fragment)]
+    assert [item["path"] for item in specs] == [str(summary), str(fragment)]
     assert counters["output_records"] == 4
 
 
-def test_restore_map_planner_inputs_fetches_only_report_and_places_counts(tmp_path):
+def test_restore_map_planner_inputs_fetches_only_report_and_places_summary(tmp_path):
     class Store(r2_verified_store.FilesystemStore):
         def list_prefix(self, prefix):
             return sorted(
@@ -713,9 +740,20 @@ def test_restore_map_planner_inputs_fetches_only_report_and_places_counts(tmp_pa
 
     contract, runtime_value = build_contract(), runtime()
     prefix = f"{contract['namespace']['immutable_root']}/map/places"
-    report, counts, fragment = (tmp_path / name for name in ("report", "counts", "fragment"))
-    report.write_bytes(b"report")
-    counts.write_bytes(b"counts")
+    report, summary, fragment = (tmp_path / name for name in ("report", "summary", "fragment"))
+    report.write_bytes(executor.canonical_json({
+        "summary": {
+            "object_key": "summaries/x.parquet",
+            "bytes": 7,
+            "sha256": executor.sha256_bytes(b"summary"),
+        },
+        "fragments": {"objects": [{
+            "object_key": "packs/x.parquet",
+            "bytes": 8,
+            "sha256": executor.sha256_bytes(b"fragment"),
+        }]},
+    }))
+    summary.write_bytes(b"summary")
     fragment.write_bytes(b"fragment")
     store = Store(tmp_path / "store")
     hosted.publish_task(
@@ -723,8 +761,8 @@ def test_restore_map_planner_inputs_fetches_only_report_and_places_counts(tmp_pa
         task_id="places-map-000", index=0, producer_report_path=report,
         producer_report_key=f"{prefix}/reports/000.json",
         outputs=[
-            {"path": str(counts), "object_key": f"{prefix}/objects/counts/x.gz"},
-            {"path": str(fragment), "object_key": f"{prefix}/objects/fragments/x.parquet"},
+            {"path": str(summary), "object_key": f"{prefix}/objects/summaries/x.parquet"},
+            {"path": str(fragment), "object_key": f"{prefix}/objects/packs/x.parquet"},
         ],
         counters={"input_records": 1, "retained_records": 1, "rejected_records": 0, "output_records": 1},
     )
@@ -733,10 +771,12 @@ def test_restore_map_planner_inputs_fetches_only_report_and_places_counts(tmp_pa
         expected_tasks=[{"family": "places", "task_id": "places-map-000", "index": 0}],
         output_root=tmp_path / "planner",
     )
-    assert Path(restored["tasks"][0]["report"]).read_bytes() == b"report"
-    assert Path(restored["tasks"][0]["planner_artifact"]).read_bytes() == b"counts"
-    assert not (tmp_path / "planner/places/artifacts/fragments/x.parquet").exists()
-    stray = store.root / f"{prefix}/objects/fragments/stray.parquet"
+    assert executor.read_json(Path(restored["tasks"][0]["report"]))[
+        "summary"
+    ]["object_key"] == "summaries/x.parquet"
+    assert Path(restored["tasks"][0]["planner_artifact"]).read_bytes() == b"summary"
+    assert not (tmp_path / "planner/places/artifacts/packs/x.parquet").exists()
+    stray = store.root / f"{prefix}/objects/packs/stray.parquet"
     stray.parent.mkdir(parents=True, exist_ok=True)
     stray.write_bytes(b"stray")
     with pytest.raises(ValueError, match="map output set differs"):
@@ -745,6 +785,74 @@ def test_restore_map_planner_inputs_fetches_only_report_and_places_counts(tmp_pa
             expected_tasks=[{"family": "places", "task_id": "places-map-000", "index": 0}],
             output_root=tmp_path / "planner-retry",
         )
+
+
+def test_restore_map_planner_inputs_fetches_address_manifest_and_summary(tmp_path):
+    contract, runtime_value = build_contract(), runtime()
+    prefix = f"{contract['namespace']['immutable_root']}/map/addresses"
+    report = tmp_path / "report.json"
+    manifest = tmp_path / "fragment-manifest.json"
+    summary = tmp_path / "summary.parquet"
+    pack = tmp_path / "pack.parquet"
+    manifest.write_bytes(b"manifest")
+    summary.write_bytes(b"summary")
+    pack.write_bytes(b"pack")
+    report.write_bytes(executor.canonical_json({
+        "fragment_manifest": {
+            "relative_path": "fragment-manifest.json",
+            "bytes": manifest.stat().st_size,
+            "sha256": executor.sha256_file(manifest),
+        },
+        "summary": {
+            "relative_path": "summaries/sha256/s.parquet",
+            "object_key": "map/address-summaries/sha256/s.parquet",
+            "bytes": summary.stat().st_size,
+            "sha256": executor.sha256_file(summary),
+        },
+        "data_packs": {"objects": [{
+            "object_key": "map/address-data-packs/sha256/p.parquet",
+            "bytes": pack.stat().st_size,
+            "sha256": executor.sha256_file(pack),
+        }]},
+    }))
+    store = r2_verified_store.FilesystemStore(tmp_path / "store")
+    hosted.publish_task(
+        store, contract, runtime_value, phase="map", family="addresses",
+        task_id="addresses-map-000", index=0, producer_report_path=report,
+        producer_report_key=f"{prefix}/reports/000.json",
+        outputs=[
+            {"path": str(manifest), "object_key": f"{prefix}/manifests/000.json"},
+            {
+                "path": str(summary),
+                "object_key": (
+                    f"{prefix}/objects/map/address-summaries/sha256/s.parquet"
+                ),
+            },
+            {
+                "path": str(pack),
+                "object_key": (
+                    f"{prefix}/objects/map/address-data-packs/sha256/p.parquet"
+                ),
+            },
+        ],
+        counters={
+            "input_records": 1, "retained_records": 1,
+            "rejected_records": 0, "output_records": 1,
+        },
+    )
+
+    restored = hosted.restore_map_planner_inputs(
+        store, contract, runtime_value,
+        expected_tasks=[{
+            "family": "addresses", "task_id": "addresses-map-000", "index": 0,
+        }],
+        output_root=tmp_path / "planner",
+    )
+
+    task_root = tmp_path / "planner/addresses/task-000"
+    assert (task_root / "fragment-manifest.json").read_bytes() == b"manifest"
+    assert Path(restored["tasks"][0]["planner_artifact"]).read_bytes() == b"summary"
+    assert not (task_root / "data-packs/sha256/p.parquet").exists()
 
 
 def test_aggregate_plan_boundary_requires_exact_predecessor_alias():
@@ -901,6 +1009,10 @@ def test_hosted_address_reduce_derives_serving_outputs_and_uses_safe_fetch(tmp_p
     assert counters["output_records"] == 5
     assert observed["fetch"][1].endswith("r2_fragment_fetch.py")
     assert observed["fetch"].count("{output}") == 1
+    for placeholder in (
+        "{row_groups}", "{expected_bytes}", "{expected_sha256}", "{proof}"
+    ):
+        assert observed["fetch"].count(placeholder) == 1
 
 
 def test_hosted_head_requires_reduce_completion_and_derives_head(tmp_path, monkeypatch):
@@ -1031,12 +1143,23 @@ def test_finalization_fanin_restores_only_exact_reports_and_heads_serving_set(tm
         report, serving = tmp_path / f"{name}-report", tmp_path / name
         report.write_bytes(name.encode())
         serving.write_bytes((name + "-serving").encode())
+        outputs = [{"path": str(serving), "object_key": serving_key}]
+        if phase == "reduce":
+            candidate = tmp_path / "head-candidates.parquet"
+            candidate.write_bytes(b"candidate")
+            outputs.append({
+                "path": str(candidate),
+                "object_key": (
+                    f"{contract['namespace']['immutable_root']}/reduce/places/"
+                    "head-candidates/sha256/c.parquet"
+                ),
+            })
         hosted.publish_task(
             store, contract, runtime_value, phase=phase, family="places",
             task_id=f"places-{name}-000", index=0,
             producer_report_path=report,
             producer_report_key=f"{contract['namespace']['immutable_root']}/{phase}/places/report.json",
-            outputs=[{"path": str(serving), "object_key": serving_key}],
+            outputs=outputs,
             counters={"input_records": 1, "retained_records": 1, "rejected_records": 0, "output_records": 1},
         )
     result = hosted.restore_finalization_reports(
@@ -1046,6 +1169,10 @@ def test_finalization_fanin_restores_only_exact_reports_and_heads_serving_set(tm
         output_root=tmp_path / "final-inputs",
     )
     assert len(result["reports"]) == 2
+    assert set(result["serving"]) == {
+        f"{SLICE}/families/places/q-0.pcsh",
+        f"{SLICE}/families/places/head.phrp",
+    }
     assert not (tmp_path / "final-inputs/families/places/q-0.pcsh").exists()
 
 

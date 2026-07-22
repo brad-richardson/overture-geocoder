@@ -88,25 +88,16 @@ def test_workflow_uses_real_resumable_boundaries_and_dynamic_matrices():
     )
 
 
-def test_aggregate_uses_trusted_bounded_prefetch_with_pinned_planner():
+def test_aggregate_uses_summary_only_planning_without_shuffle_prefetch():
     value = text()
     aggregate = value[value.index("  aggregate-plan:") : value.index("  reduce:")]
     assert aggregate.count("restore-map-planner-inputs") == 1
     assert "complete-phase" not in aggregate
     assert "jq '.phase.completion' control/restored-map.json" in aggregate
-    assert aggregate.index("ref: ${{ github.sha }}") < aggregate.index(
-        "ref: ${{ fromJSON(inputs.request_json).producer_commit }}"
-    )
-    assert (
-        'install -m 0555 scripts/bounded_fragment_prefetch.py '
-        '"$RUNNER_TEMP/bounded_fragment_prefetch.py"'
-    ) in aggregate
-    assert '"$RUNNER_TEMP/bounded_fragment_prefetch.py" serve' in aggregate
-    assert '--arg script "$RUNNER_TEMP/bounded_fragment_prefetch.py"' in aggregate
-    assert '--arg socket "$PREFETCH_SOCKET"' in aggregate
-    assert "--workers 16" in aggregate
-    assert "--max-cache-bytes 2000000000" in aggregate
-    assert "--address-fragment-fetch-command-json \"$FETCH\"" in aggregate
+    assert "summary-only plans" in aggregate
+    assert "bounded_fragment_prefetch.py" not in aggregate
+    assert ".fragments[]" not in aggregate
+    assert "--address-fragment-fetch-command-json" not in aggregate
     assert "scripts/global_v2_hosted.py build-publish-plans" in aggregate
 
 

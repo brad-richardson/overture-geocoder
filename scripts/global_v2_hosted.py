@@ -384,7 +384,13 @@ def address_map_boundary(
     output_root: Path, *, maximum_hash_bits: int, remote_object_prefix: str,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
     """Validate an address map task and derive its complete immutable outputs."""
-    completion, manifest_identity, fragments = address_plan._validate_map_task(  # noqa: SLF001
+    (
+        completion,
+        manifest_identity,
+        fragments,
+        _summary_descriptor,
+        _summary_rows,
+    ) = address_plan._validate_map_task(  # noqa: SLF001
         report_path, output_root, inventory=inventory, task=task,
         maximum_hash_bits=maximum_hash_bits,
     )
@@ -392,6 +398,11 @@ def address_map_boundary(
         "path": str(output_root / manifest_identity["relative_path"]),
         "object_key": f"{remote_object_prefix}/manifests/{task['index']:03d}.json",
     }]
+    summary = completion["summary"]
+    specs.append({
+        "path": str(output_root / summary["relative_path"]),
+        "object_key": f"{remote_object_prefix}/objects/{summary['object_key']}",
+    })
     specs.extend({
         "path": str(fragment["source_path"]),
         "object_key": f"{remote_object_prefix}/objects/{fragment['object_key']}",
@@ -410,16 +421,16 @@ def places_map_boundary(
     report_path: Path, output_root: Path, *, remote_object_prefix: str,
     scratch_dir: Path,
 ) -> tuple[list[dict[str, str]], dict[str, int]]:
-    """Validate a Places map task and derive count plus fragment outputs."""
+    """Validate a Places map task and derive summary plus shuffle outputs."""
     report = executor.read_json(report_path)
-    counts = report.get("counts") if isinstance(report, dict) else None
+    summary = report.get("summary") if isinstance(report, dict) else None
     fragments = report.get("fragments") if isinstance(report, dict) else None
-    if not isinstance(counts, dict) or not isinstance(fragments, dict):
-        raise ValueError("Places map report omits count/fragment outputs")
+    if not isinstance(summary, dict) or not isinstance(fragments, dict):
+        raise ValueError("Places map report omits summary/shuffle outputs")
     objects = fragments.get("objects")
     if not isinstance(objects, list):
         raise ValueError("Places map report fragment objects must be an array")
-    listing_items = [counts, *objects]
+    listing_items = [summary, *objects]
     listing = {
         item["object_key"]: (item["bytes"], item["sha256"])
         for item in listing_items
@@ -484,23 +495,74 @@ def restore_map_planner_inputs(
             store, contract, object_key=marker["producer_report"]["object_key"],
             destination=report,
         )
-        artifacts = marker["artifacts"]
+        report_value = executor.read_json(report)
+        artifacts = {
+            item["object_key"]: (item["bytes"], item["sha256"])
+            for item in marker["artifacts"]
+        }
+        remote_prefix = (
+            f"{contract['namespace']['immutable_root']}/map/{family}"
+        )
         if family == "addresses":
-            selected = [item for item in artifacts if "/manifests/" in item["object_key"]]
-            if len(selected) != 1 or not any(
-                "/objects/map/address-fragments/" in item["object_key"] for item in artifacts
+            manifest = report_value.get("fragment_manifest")
+            summary = report_value.get("summary")
+            packs = report_value.get("data_packs", {}).get("objects")
+            if (
+                not isinstance(manifest, dict)
+                or not isinstance(summary, dict)
+                or not isinstance(packs, list)
             ):
-                raise ValueError("address map marker output set is incomplete")
-            destination = output_root / family / f"task-{index:03d}" / "fragment-manifest.json"
+                raise ValueError("address map report omits typed outputs")
+            manifest_key = f"{remote_prefix}/manifests/{index:03d}.json"
+            summary_key = f"{remote_prefix}/objects/{summary['object_key']}"
+            expected = {
+                manifest_key: (manifest["bytes"], manifest["sha256"]),
+                summary_key: (summary["bytes"], summary["sha256"]),
+                **{
+                    f"{remote_prefix}/objects/{item['object_key']}": (
+                        item["bytes"], item["sha256"]
+                    )
+                    for item in packs
+                },
+            }
+            if artifacts != expected:
+                raise ValueError("address map marker typed output set differs")
+            task_root = output_root / family / f"task-{index:03d}"
+            manifest_destination = task_root / "fragment-manifest.json"
+            r2_verified_store.verified_download(
+                store, manifest_key, manifest_destination,
+                expected_bytes=manifest["bytes"],
+                expected_sha256=manifest["sha256"],
+            )
+            destination = task_root / address_plan.safe_relative_path(
+                summary["relative_path"], "address summary path"
+            )
+            identity = {
+                "object_key": summary_key,
+                "bytes": summary["bytes"],
+                "sha256": summary["sha256"],
+            }
         else:
-            selected = [item for item in artifacts if "/objects/counts/" in item["object_key"]]
-            if len(selected) != 1 or not any(
-                "/objects/fragments/" in item["object_key"] for item in artifacts
-            ):
-                raise ValueError("Places map marker output set is incomplete")
-            logical = selected[0]["object_key"].split("/objects/", 1)[1]
-            destination = output_root / family / "artifacts" / logical
-        identity = selected[0]
+            summary = report_value.get("summary")
+            packs = report_value.get("fragments", {}).get("objects")
+            if not isinstance(summary, dict) or not isinstance(packs, list):
+                raise ValueError("Places map report omits typed outputs")
+            expected = {
+                f"{remote_prefix}/objects/{item['object_key']}": (
+                    item["bytes"], item["sha256"]
+                )
+                for item in [summary, *packs]
+            }
+            if artifacts != expected:
+                raise ValueError("Places map marker typed output set differs")
+            destination = (
+                output_root / family / "artifacts" / summary["object_key"]
+            )
+            identity = {
+                "object_key": f"{remote_prefix}/objects/{summary['object_key']}",
+                "bytes": summary["bytes"],
+                "sha256": summary["sha256"],
+            }
         r2_verified_store.verified_download(
             store, identity["object_key"], destination,
             expected_bytes=identity["bytes"], expected_sha256=identity["sha256"],
@@ -601,7 +663,7 @@ def restore_predecessor_plan_artifacts(
 def build_aggregate_plans(
     request: dict[str, Any], address_inventory: dict[str, Any],
     places_inventory: dict[str, Any], *, restored_root: Path, output_root: Path,
-    build_number: int, address_fragment_fetch_command: list[str],
+    build_number: int, address_fragment_fetch_command: list[str] | None,
     predecessor_manifests: dict[str, Path | None] | None = None,
     predecessor_planning_artifacts: dict[str, Path | None] | None = None,
 ) -> tuple[Path, Path, list[dict[str, str]]]:
@@ -609,9 +671,10 @@ def build_aggregate_plans(
     require_build1_lineage(request)
     predecessor_manifests = predecessor_manifests or {"addresses": None, "places": None}
     predecessor_planning_artifacts = predecessor_planning_artifacts or {"addresses": None, "places": None}
-    address_fragment_fetch_command = address_plan.parse_fetch_command(
-        json.dumps(address_fragment_fetch_command)
-    )
+    if address_fragment_fetch_command is not None:
+        address_fragment_fetch_command = address_plan.parse_fetch_command(
+            json.dumps(address_fragment_fetch_command)
+        )
     address_tasks = address_inventory["plan"]["tasks"]
     address_inputs = [
         (
@@ -643,7 +706,7 @@ def build_aggregate_plans(
     listing_objects = []
     for path in sorted(places_reports.glob("*.json")):
         report = executor.read_json(path)
-        for item in [report["counts"], *report["fragments"]["objects"]]:
+        for item in [report["summary"], *report["fragments"]["objects"]]:
             listing_objects.append({
                 "object_key": item["object_key"], "bytes": item["bytes"],
                 "sha256": item["sha256"],
@@ -748,16 +811,26 @@ def restore_reducer_plans(
     }
 
 
-def fragment_fetch_command(prefix: str) -> list[str]:
+def fragment_fetch_command(
+    prefix: str, *, selective_row_groups: bool = False
+) -> list[str]:
     endpoint = executor.os.environ.get("R2_ENDPOINT")
     if not endpoint:
         raise ValueError("R2_ENDPOINT is required for hosted fragment fetch")
-    return [
+    command = [
         sys.executable, str(SCRIPT_DIR / "r2_fragment_fetch.py"),
         "--bucket", executor.os.environ.get("R2_BUCKET", "geocoder-shards"),
         "--prefix", prefix, "--object-key", "{object_key}",
         "--output", "{output}", "--endpoint-url", endpoint,
     ]
+    if selective_row_groups:
+        command.extend([
+            "--row-groups", "{row_groups}",
+            "--expected-bytes", "{expected_bytes}",
+            "--expected-sha256", "{expected_sha256}",
+            "--proof", "{proof}",
+        ])
+    return command
 
 
 def run_reduce_task(
@@ -772,7 +845,9 @@ def run_reduce_task(
     )
     executor.validate_runtime_for_contract(runtime, contract)
     fetch_prefix = f"{contract['namespace']['immutable_root']}/map/{family}/objects"
-    fetch = fragment_fetch_command(fetch_prefix)
+    fetch = fragment_fetch_command(
+        fetch_prefix, selective_row_groups=family == "addresses"
+    )
     output_root, scratch = work_root / "output", work_root / "scratch"
     if family == "addresses":
         reduce_value = executor.read_json(address_plan_path)
@@ -923,17 +998,28 @@ def restore_finalization_reports(
             executor.validate_task_completion(executor.read_json(path), contract, runtime)
             for path in sorted(directory.glob("*.json"))
         )
+    slice_prefix = contract["namespace"]["slice_root"]
+    candidate_prefix = (
+        f"{contract['namespace']['immutable_root']}/reduce/places/head-candidates/"
+    )
     expected_serving: dict[str, tuple[int, str]] = {}
     restored_reports = []
     for marker in markers:
         for artifact in marker["artifacts"]:
             key = artifact["object_key"]
             identity = (artifact["bytes"], artifact["sha256"])
-            if key in expected_serving:
-                raise ValueError("reduce/head serving output key is duplicated")
-            expected_serving[key] = identity
             if store.head(key) != r2_verified_store.ObjectInfo(*identity):
-                raise ValueError(f"remote serving output identity differs: {key}")
+                raise ValueError(f"remote reduce/head output identity differs: {key}")
+            if key.startswith(slice_prefix):
+                if key in expected_serving:
+                    raise ValueError("reduce/head serving output key is duplicated")
+                expected_serving[key] = identity
+            elif not (
+                marker["phase"] == "reduce"
+                and marker["family"] == "places"
+                and key.startswith(candidate_prefix)
+            ):
+                raise ValueError("reduce/head output escaped its allowed namespace")
         destination = (
             output_root / marker["phase"] / "reports"
             / f"{marker['family']}-{marker['index']:03d}.json"
@@ -947,7 +1033,6 @@ def restore_finalization_reports(
             "phase": marker["phase"], "family": marker["family"],
             "index": marker["index"], "path": str(destination),
         })
-    slice_prefix = contract["namespace"]["slice_root"]
     actual = set(store.list_prefix(slice_prefix))
     if actual != set(expected_serving):
         # A retry may begin after either or both family manifests were
@@ -1399,7 +1484,7 @@ def main() -> None:
     aggregate.add_argument("--plan-output-root", type=Path, required=True)
     aggregate.add_argument("--map-completion", type=Path, required=True)
     aggregate.add_argument("--build-number", type=int, required=True)
-    aggregate.add_argument("--address-fragment-fetch-command-json", required=True)
+    aggregate.add_argument("--address-fragment-fetch-command-json")
     restore_plans.add_argument("--output-root", type=Path, required=True)
     for command in (run_reduce, run_head):
         command.add_argument("--contract", type=Path, required=True)
@@ -1502,7 +1587,11 @@ def main() -> None:
             request_value, executor.read_json(args.address_inventory),
             executor.read_json(args.places_inventory), restored_root=args.restored_map_root,
             output_root=args.plan_output_root, build_number=args.build_number,
-            address_fragment_fetch_command=json.loads(args.address_fragment_fetch_command_json),
+            address_fragment_fetch_command=(
+                None
+                if args.address_fragment_fetch_command_json is None
+                else json.loads(args.address_fragment_fetch_command_json)
+            ),
             predecessor_manifests=predecessor_manifests,
             predecessor_planning_artifacts=predecessor_artifacts,
         )
