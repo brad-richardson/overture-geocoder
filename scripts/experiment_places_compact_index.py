@@ -39,7 +39,7 @@ PREAMBLE = struct.Struct("<8sI")
 FIELDS = ("name", "brand", "category", "context")
 FIELD_IDS = {name: number for number, name in enumerate(FIELDS)}
 FIELD_WEIGHTS = {"name": 8, "brand": 6, "category": 3, "context": 1}
-TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v3"
+TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v4"
 
 
 def _is_cjk(character: str) -> bool:

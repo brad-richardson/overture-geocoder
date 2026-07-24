@@ -1,0 +1,214 @@
+{
+  "schema": "places-tokenizer-v4-golden-fixture",
+  "tokenizer_version": "nfkd-lower-stripmark-cjk-bigram-v4",
+  "description": "Deterministic golden corpus for the tokenizer-v4 contract. Covers the Unicode classes that previously diverged between the Rust transform and the Python baseline: Greek Final_Sigma words (class 1), C0-control-prefixed names (class 2), non-decomposing Other_Alphabetic enclosed symbols (class 3), math-styled letters and mixed CJK. Expected tokens and semantic digests are asserted against BOTH the Rust tokenizer and the Python baseline.",
+  "token_vectors": [
+    {
+      "name": "final_sigma_words",
+      "class": 1,
+      "input": "ΝΕΟΣ ΚΟΣΜΟΣ",
+      "expected": [
+        "κοσμοσ",
+        "νεοσ"
+      ]
+    },
+    {
+      "name": "final_sigma_terminal",
+      "class": 1,
+      "input": "xevoΣ",
+      "expected": [
+        "xevoσ"
+      ]
+    },
+    {
+      "name": "c0_control_prefix",
+      "class": 2,
+      "input": "\u001dNUNU Shop",
+      "expected": [
+        "nunu",
+        "shop"
+      ]
+    },
+    {
+      "name": "enclosed_symbols",
+      "class": 3,
+      "input": "DepEd 🅛🅘🅑🅡🅐🅡🅨",
+      "expected": [
+        "deped",
+        "🅛🅘🅑🅡🅐🅡🅨"
+      ]
+    },
+    {
+      "name": "math_styled",
+      "class": 0,
+      "input": "𝓓𝓮𝓹𝓔𝓭",
+      "expected": [
+        "deped"
+      ]
+    },
+    {
+      "name": "mixed_cjk",
+      "class": 0,
+      "input": "東京カフェ",
+      "expected": [
+        "カフ",
+        "フェ",
+        "京カ",
+        "東京",
+        "東京カフェ"
+      ]
+    }
+  ],
+  "rows": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "primary_name": "ΝΕΟΣ ΚΟΣΜΟΣ",
+      "common_names": [
+        "Neos Kosmos"
+      ],
+      "brand_name": "",
+      "category": "neighborhood",
+      "locality": "Αθήνα",
+      "region": "Attica",
+      "country": "GR",
+      "confidence": 0.8,
+      "operating_status": "open",
+      "point": [
+        23.7,
+        37.9
+      ],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 0
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "primary_name": "\u001dNUNU Shop",
+      "common_names": [],
+      "brand_name": "",
+      "category": "shop",
+      "locality": "Vĩnh Long",
+      "region": "",
+      "country": "VN",
+      "confidence": 0.5,
+      "operating_status": "open",
+      "point": [
+        105.9,
+        10.2
+      ],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 1
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000003",
+      "primary_name": "𝓓𝓮𝓹𝓔𝓭 - Roxas 🅛🅘🅑🅡🅐🅡🅨",
+      "common_names": [],
+      "brand_name": "",
+      "category": "school",
+      "locality": "Roxas",
+      "region": "",
+      "country": "PH",
+      "confidence": 0.9,
+      "operating_status": "open",
+      "point": [
+        122.7,
+        11.6
+      ],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 2
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000004",
+      "primary_name": "東京カフェ",
+      "common_names": [
+        "Tokyo Cafe"
+      ],
+      "brand_name": "",
+      "category": "cafe",
+      "locality": "東京",
+      "region": "",
+      "country": "JP",
+      "confidence": 0.7,
+      "operating_status": "open",
+      "point": [
+        139.7,
+        35.7
+      ],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 3
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000005",
+      "primary_name": "xevoΣ",
+      "common_names": [],
+      "brand_name": "xevoΣ",
+      "category": "brand",
+      "locality": "Osaka",
+      "region": "",
+      "country": "JP",
+      "confidence": 0.6,
+      "operating_status": "open",
+      "point": [
+        135.5,
+        34.7
+      ],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 4
+    }
+  ],
+  "expected": {
+    "input_features": 5,
+    "admitted_features": 5,
+    "multilingual_features": 2,
+    "cjk_features": 1,
+    "emitted_term_rows": 30,
+    "semantic_sum_a": "b01555008067a8a956101629084bf02d3e60d8dfbc8005958ff87829d914d86c",
+    "semantic_sum_b": "0392f7ae39e9147aa5d77744a2d0fa51f77b8701046c55c9dea4087f2ed8debd",
+    "per_feature_tokens": {
+      "00000000-0000-0000-0000-000000000001": [
+        "attica",
+        "gr",
+        "kosmos",
+        "neighborhood",
+        "neos",
+        "αθηνα",
+        "κοσμοσ",
+        "νεοσ"
+      ],
+      "00000000-0000-0000-0000-000000000002": [
+        "long",
+        "nunu",
+        "shop",
+        "vinh",
+        "vn"
+      ],
+      "00000000-0000-0000-0000-000000000003": [
+        "deped",
+        "ph",
+        "roxas",
+        "school",
+        "🅛🅘🅑🅡🅐🅡🅨"
+      ],
+      "00000000-0000-0000-0000-000000000004": [
+        "cafe",
+        "jp",
+        "tokyo",
+        "カフ",
+        "フェ",
+        "京カ",
+        "東京",
+        "東京カフェ"
+      ],
+      "00000000-0000-0000-0000-000000000005": [
+        "brand",
+        "jp",
+        "osaka",
+        "xevoσ"
+      ]
+    }
+  }
+}

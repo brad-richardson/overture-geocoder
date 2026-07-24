@@ -263,6 +263,52 @@ fn index_hash(key: &[u8]) -> u64 {
     u64::from_be_bytes(digest.finalize()[..8].try_into().unwrap())
 }
 
+/// Shard id owning a head `token` under a `shard_bits`-wide top-hash prefix.
+///
+/// The global head is split into `1 << shard_bits` hash shards (a per-build
+/// manifest value; 4096 / 12 bits at planet scale) keyed by the top bits of the
+/// token's existing index hash — the first three hex nibbles when
+/// `shard_bits == 12`, mirroring the production 4096-shard UUID-prefix ID index.
+/// A live serving path resolves a token to this id, then range-reads (or
+/// fetch-and-caches under the 1-hour shard TTL) exactly that one shard object
+/// before decoding it as an ordinary head artifact.
+pub(crate) fn head_shard_id(token: &str, shard_bits: u32) -> u32 {
+    debug_assert!((1..=24).contains(&shard_bits));
+    (index_hash(token.as_bytes()) >> (64 - shard_bits)) as u32
+}
+
+/// Decode one already-fetched head shard and answer a token query against it.
+///
+/// `shard_bytes` is the whole shard object (the ~2.7 MB planet-sized head shard
+/// the caller obtained for `head_shard_id(token, shard_bits)`). Beyond the
+/// ordinary head decode + lookup this fails closed if the shard's own bytes
+/// disagree with the manifest assignment, so a mis-routed fetch can never serve
+/// another shard's answer.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn lookup_head_shard(
+    shard_bytes: &[u8],
+    shard_id: u32,
+    shard_bits: u32,
+    token: &str,
+    maximum_bytes: usize,
+    maximum_records: usize,
+    maximum_entry_bytes: usize,
+    maximum_candidates: usize,
+    result_cap: usize,
+) -> Result<Vec<PlacesV1Record>> {
+    if head_shard_id(token, shard_bits) != shard_id {
+        return Err("Places v1 head token does not belong to this shard".to_string());
+    }
+    let artifact = PlacesV1Artifact::parse(
+        shard_bytes,
+        PlacesV1Mode::Head,
+        maximum_bytes,
+        maximum_records,
+        maximum_entry_bytes,
+    )?;
+    artifact.lookup(token, None, maximum_candidates, result_cap)
+}
+
 fn decode_entry(data: &[u8], mode: PlacesV1Mode) -> Result<(PlacesV1Record, [u8; 16])> {
     let mut position = 0;
     let token = read_text(data, &mut position)?;
@@ -367,7 +413,7 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{index_hash, PlacesV1Artifact, PlacesV1Mode};
+    use super::{head_shard_id, index_hash, lookup_head_shard, PlacesV1Artifact, PlacesV1Mode};
 
     fn text(output: &mut Vec<u8>, value: &str) {
         output.extend_from_slice(&(value.len() as u16).to_le_bytes());
@@ -471,6 +517,74 @@ mod tests {
         let parsed = PlacesV1Artifact::parse(&head, PlacesV1Mode::Head, 4096, 2, 1024).unwrap();
         assert_eq!(parsed.lookup("cafe", None, 1, 1).unwrap().len(), 1);
         assert!(parsed.lookup("cafe", Some("8080"), 1, 1).is_err());
+    }
+
+    #[test]
+    fn head_shard_id_matches_top_index_hash_bits() {
+        for token in ["cafe", "tokyo tower", "restaurant", "東京", "a"] {
+            let hash = index_hash(token.as_bytes());
+            assert_eq!(head_shard_id(token, 12), (hash >> 52) as u32);
+            assert!(head_shard_id(token, 12) < 4096);
+            assert_eq!(head_shard_id(token, 4), (hash >> 60) as u32);
+        }
+    }
+
+    #[test]
+    fn resolves_token_through_its_head_shard() {
+        // Build a distinct single-entry head artifact per shard, then serve each
+        // token only from the shard its index hash addresses.
+        let shard_bits = 4;
+        let tokens = ["cafe", "town", "restaurant", "museum", "park", "bakery"];
+        let mut by_shard: std::collections::BTreeMap<u32, Vec<(&str, Vec<u8>)>> =
+            std::collections::BTreeMap::new();
+        for (rank, token) in tokens.iter().enumerate() {
+            let shard = head_shard_id(token, shard_bits);
+            by_shard
+                .entry(shard)
+                .or_default()
+                .push((token, entry(token, None, 255 - rank as u8, 1, 0)));
+        }
+        for (shard_id, mut entries) in by_shard {
+            // Head payload order is by (token, …); sort so parse accepts it.
+            entries.sort_by(|left, right| left.0.cmp(right.0));
+            let bytes = artifact(
+                PlacesV1Mode::Head,
+                &entries.iter().map(|(_, e)| e.clone()).collect::<Vec<_>>(),
+            );
+            for (token, _) in &entries {
+                let hits = lookup_head_shard(
+                    &bytes,
+                    shard_id,
+                    shard_bits,
+                    token,
+                    64 * 1024,
+                    100,
+                    1024,
+                    10,
+                    5,
+                )
+                .unwrap();
+                assert_eq!(hits.len(), 1);
+                assert_eq!(&hits[0].token, token);
+                // A token routed to the wrong shard fails closed rather than
+                // silently missing.
+                let wrong = (shard_id + 1) % (1 << shard_bits);
+                if head_shard_id(token, shard_bits) != wrong {
+                    assert!(lookup_head_shard(
+                        &bytes,
+                        wrong,
+                        shard_bits,
+                        token,
+                        64 * 1024,
+                        100,
+                        1024,
+                        10,
+                        5
+                    )
+                    .is_err());
+                }
+            }
+        }
     }
 
     #[test]

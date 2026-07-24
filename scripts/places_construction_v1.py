@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import importlib.util
 import json
 import sys
@@ -10,6 +11,23 @@ import tempfile
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
+
+# Serving index-hash domain, identical to the Rust encoder/verifier/Worker. The
+# global head is split into `1 << shard_bits` shards keyed by the top bits of a
+# token's index hash (12 bits => 4096 shards => first three hex nibbles),
+# mirroring the production UUID-prefix ID index.
+INDEX_DOMAIN = b"overture-places-serving-index-v1\0"
+DEFAULT_HEAD_SHARD_BITS = 12
+
+
+def index_hash(key: bytes) -> int:
+    return int.from_bytes(hashlib.sha256(INDEX_DOMAIN + key).digest()[:8], "big")
+
+
+def head_shard_of(token: str, shard_bits: int) -> int:
+    if not 1 <= shard_bits <= 24:
+        raise ValueError("head shard bits out of range")
+    return index_hash(token.encode("utf-8")) >> (64 - shard_bits)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -1111,5 +1129,241 @@ def build_global_head_from_markers(
             ),
             "head_object": store.put_content(head, "serve/places-v1/head", ".plhd"),
             "encode_evidence": encode,
+            "verify_evidence": verify,
+        }
+
+
+def _head_merge_stage(
+    connection: Any, inputs: list[Path], output: Path, result_cap: int
+) -> None:
+    """One associative top-`result_cap`-per-token merge over a bounded fan-in.
+
+    `top_n(A ∪ B) = top_n(top_n(A) ∪ top_n(B))`, so folding candidates through
+    bounded stages produces the same rows as one global pass, order independent.
+    """
+    connection.execute(
+        f"COPY (SELECT * FROM read_parquet([{_sql_paths(inputs)}]) QUALIFY "
+        f"row_number() OVER (PARTITION BY token ORDER BY confidence_rank DESC, "
+        f"feature_id, source_object_index, source_row_group, source_row_index)"
+        f"<={result_cap} ORDER BY {HEAD_ORDER}) TO '{output}' (FORMAT PARQUET, "
+        f"COMPRESSION ZSTD, COMPRESSION_LEVEL 6, PARQUET_VERSION V2, PRESERVE_ORDER true)"
+    )
+
+
+def _tree_merge_head_candidates(
+    connection: Any,
+    candidate_paths: list[Path],
+    workspace: Path,
+    result_cap: int,
+    fan_in: int,
+) -> Path:
+    """Reduce per-task head candidates to one merged parquet via log-depth stages."""
+    if fan_in < 2:
+        raise ValueError("head tree-merge fan-in must be at least 2")
+    stage = 0
+    current = list(candidate_paths)
+    while len(current) > 1:
+        outputs: list[Path] = []
+        for group in range(0, len(current), fan_in):
+            chunk = current[group : group + fan_in]
+            merged = workspace / f"merge-s{stage}-g{group // fan_in:04d}.parquet"
+            _head_merge_stage(connection, chunk, merged, result_cap)
+            outputs.append(merged)
+        current = outputs
+        stage += 1
+    if not current:
+        raise ValueError("head tree-merge received no candidates")
+    return current[0]
+
+
+def build_sharded_global_head_from_markers(
+    *,
+    markers: list[dict[str, Any]],
+    store: A.LocalObjectStore,
+    scratch_root: Path,
+    encoder_binary: Path,
+    verifier_binary: Path,
+    limits: Limits,
+    shard_bits: int = DEFAULT_HEAD_SHARD_BITS,
+) -> dict[str, Any]:
+    """Tree-merge bounded per-task candidates into a hash-sharded global head.
+
+    Per-task head candidates are folded associatively to one merged head, then
+    partitioned into `1 << shard_bits` shards by the top bits of each token's
+    index hash (the same hash the encoder/Worker use). Each non-empty shard is
+    encoded as an independent PLHD head artifact (per-shard entry counts stay far
+    under MAX_INDEX_ENTRIES, which remains a fail-closed guard per shard) and the
+    whole set is bound by a manifest the sharded verifier reconciles.
+    """
+    import duckdb
+
+    if not 1 <= shard_bits <= 24:
+        raise ValueError("head shard bits out of range")
+    if not markers or len(markers) > limits.max_fan_in_tasks:
+        raise ValueError("Places head task fan-in exceeds cap")
+    task_ids = [marker["task_id"] for marker in markers]
+    if len(task_ids) != len(set(task_ids)):
+        raise ValueError("Places head contains duplicate map tasks")
+    candidates = [marker["head_candidates"] for marker in markers]
+    if any(item["result_cap"] != limits.head_result_cap for item in candidates):
+        raise ValueError("Places task head cap differs")
+    input_rows = sum(item["records"] for item in candidates)
+    if input_rows > limits.max_head_candidate_rows:
+        raise ValueError("Places merged head candidates exceed row cap")
+    shard_count = 1 << shard_bits
+    candidate_paths = [store.path(item["object"]["key"]) for item in candidates]
+    scratch_root.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryDirectory(
+        prefix="places-head-sharded-", dir=scratch_root
+    ) as name:
+        workspace = Path(name)
+        connection = duckdb.connect(str(workspace / "head.duckdb"))
+        connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
+        connection.execute(f"SET threads={limits.duckdb_threads}")
+        connection.execute(f"SET temp_directory='{workspace}'")
+        connection.create_function(
+            "head_shard",
+            lambda token: head_shard_of(token, shard_bits),
+            ["VARCHAR"],
+            "BIGINT",
+        )
+        merged = _tree_merge_head_candidates(
+            connection,
+            candidate_paths,
+            workspace,
+            limits.head_result_cap,
+            limits.max_fan_in_tasks,
+        )
+        total_records, total_index_entries = connection.execute(
+            f"SELECT count(*), count(DISTINCT token) FROM read_parquet('{merged}')"
+        ).fetchone()
+        shard_dir = workspace / "shards"
+        # PARTITION_BY encodes the shard in the path and omits it from the data
+        # files, so each shard parquet carries only the serving columns.
+        connection.execute(
+            f"COPY (SELECT *, head_shard(token) AS __shard FROM read_parquet('{merged}')) "
+            f"TO '{shard_dir}' (FORMAT PARQUET, PARTITION_BY (__shard), COMPRESSION ZSTD, "
+            f"COMPRESSION_LEVEL 6, PARQUET_VERSION V2)"
+        )
+        shard_entries: list[dict[str, Any]] = []
+        sum_a = 0
+        sum_b = 0
+        summed_records = 0
+        summed_index_entries = 0
+        for shard_path in sorted(shard_dir.glob("__shard=*")):
+            shard_id = int(shard_path.name.split("=", 1)[1])
+            if not 0 <= shard_id < shard_count:
+                raise ValueError("head shard id out of range")
+            files = sorted(shard_path.glob("*.parquet"))
+            if not files:
+                continue
+            ordered = workspace / f"shard-{shard_id:06d}.arrow"
+            A.write_arrow_query(
+                connection,
+                f"SELECT * FROM read_parquet([{_sql_paths(files)}]) ORDER BY {HEAD_ORDER}",
+                ordered,
+                65_536,
+            )
+            artifact = workspace / f"shard-{shard_id:06d}.plhd"
+            sidecar = workspace / f"shard-{shard_id:06d}.digest.json"
+            A.run_bounded(
+                [
+                    str(encoder_binary),
+                    "--input",
+                    str(ordered),
+                    "--output",
+                    str(artifact),
+                    "--mode",
+                    "head",
+                    "--digest-out",
+                    str(sidecar),
+                ],
+                scratch_roots=[workspace],
+                limits=A.Limits(
+                    max_rss_bytes=limits.max_rss_bytes,
+                    max_scratch_bytes=limits.max_scratch_bytes,
+                    wall_seconds=limits.wall_seconds,
+                ),
+            )
+            if artifact.stat().st_size > limits.max_output_bytes:
+                raise ValueError("Places head shard exceeds output cap")
+            digest = json.loads(sidecar.read_text())
+            stored = store.put_content(artifact, "serve/places-v1/head", ".plhd")
+            shard_entries.append(
+                {
+                    "shard_id": shard_id,
+                    "path": str(store.path(stored["key"])),
+                    "key": stored["key"],
+                    "bytes": artifact.stat().st_size,
+                    "records": digest["records"],
+                    "index_entries": digest["index_entries"],
+                    "head_sum_a": digest["head_sum_a"],
+                    "head_sum_b": digest["head_sum_b"],
+                }
+            )
+            sum_a = (sum_a + int(digest["head_sum_a"], 16)) % A.UINT256
+            sum_b = (sum_b + int(digest["head_sum_b"], 16)) % A.UINT256
+            summed_records += digest["records"]
+            summed_index_entries += digest["index_entries"]
+            ordered.unlink()
+        connection.close()
+        if summed_records != total_records or summed_index_entries != total_index_entries:
+            raise ValueError("Places head sharding dropped or duplicated rows")
+        input_binding = A.combine_bindings([marker["binding"] for marker in markers])
+        manifest = {
+            "schema": "overture-places-global-head-sharded-v1",
+            "shard_count": shard_count,
+            "shard_bits": shard_bits,
+            "result_cap": limits.head_result_cap,
+            "task_ids": sorted(task_ids),
+            "input_candidate_rows": input_rows,
+            "total_records": total_records,
+            "total_index_entries": total_index_entries,
+            "head_sum_a": f"{sum_a:064x}",
+            "head_sum_b": f"{sum_b:064x}",
+            "input_binding": input_binding,
+            "shards": [
+                {key: entry[key] for key in entry if key != "key"}
+                for entry in shard_entries
+            ],
+        }
+        manifest_path = workspace / "head-manifest.json"
+        manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
+        verify = A.run_bounded(
+            [
+                str(verifier_binary),
+                "--mode",
+                "head-sharded",
+                "--manifest",
+                str(manifest_path),
+            ],
+            scratch_roots=[workspace],
+            limits=A.Limits(
+                max_rss_bytes=limits.max_rss_bytes,
+                max_scratch_bytes=limits.max_scratch_bytes,
+                wall_seconds=limits.wall_seconds,
+            ),
+        )
+        manifest_object = store.put_content(
+            manifest_path, "serve/places-v1/head-manifest", ".json"
+        )
+        return {
+            "schema": "overture-places-global-head-sharded-v1",
+            "shard_count": shard_count,
+            "shard_bits": shard_bits,
+            "result_cap": limits.head_result_cap,
+            "task_ids": sorted(task_ids),
+            "input_candidate_rows": input_rows,
+            "total_records": total_records,
+            "total_index_entries": total_index_entries,
+            "populated_shards": len(shard_entries),
+            "head_sum_a": f"{sum_a:064x}",
+            "head_sum_b": f"{sum_b:064x}",
+            "input_binding": input_binding,
+            "manifest_object": manifest_object,
+            "shard_objects": [
+                {"shard_id": entry["shard_id"], "key": entry["key"]}
+                for entry in shard_entries
+            ],
             "verify_evidence": verify,
         }

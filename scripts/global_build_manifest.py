@@ -42,12 +42,12 @@ BBOX_SCOPES = {"row_group_approximate", "exact"}
 #   places  format    : scripts/experiment_places_compact_shard.py MAGIC
 #                       b"PCSH0001" (directory schema_version 1).
 #           tokenizer : scripts/experiment_places_compact_index.py
-#                       TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v3".
+#                       TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v4".
 #   address format    : scripts/experiment_address_reduce.py FORMAT_VERSION = 2.
 #           normalize : that module's normalize() — NFC, Unicode-whitespace
 #                       collapse, ASCII-only lowercasing (the first format).
 PLACES_FORMAT_VERSION = "PCSH0001"
-PLACES_TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v3"
+PLACES_TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v4"
 ADDRESS_FORMAT_VERSION = "address-reduce-2"
 ADDRESS_NORMALIZATION_VERSION = "nfc-uniws-collapse-ascii-lower-1"
 
