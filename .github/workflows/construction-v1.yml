@@ -1,25 +1,33 @@
 name: Construction v1 planet build
 
 # Hosted map/reduce/head/finalize for the isolated construction-v1 Address +
-# Places contract. This workflow creates only an immutable, NON-PROMOTING slice
-# under a request-derived namespace. It never writes either production catalog,
-# never writes production release history, and never promotes. Promotion is a
-# separate operator-reviewed decision.
+# Places contract. It creates only an immutable, NON-PROMOTING slice under a
+# request-derived namespace: it never writes either production catalog, never
+# writes production release history, and never promotes.
 #
-# The very first job is a secret-free fail-closed admission gate:
-# scripts/construction_v1_control.py admit-dispatch independently regenerates the
-# canonical request from the submitted request bytes and rejects any changed
-# byte, hash, typed confirmation, readiness result, or run attempt other than 1.
-# A stale or mismatched request SHA therefore fails in that first job before any
-# credential is touched.
+# The first job is a secret-free fail-closed admission gate
+# (construction_v1_control.py admit-dispatch): it regenerates the canonical
+# request from the submitted bytes and rejects any changed byte, hash, typed
+# confirmation, readiness result, or run attempt other than 1, then derives the
+# deterministic contract.json / runtime.json every later job consumes. A stale
+# or mismatched request SHA fails here before any credential is touched.
+#
+# The execute data plane is the construction-v1-native adapter
+# (construction_v1_hosted.py) driving the vectorized Address/Places producers
+# against one content-addressed store that flows job -> job as an artifact. The
+# exact execute command sequence is proven end-to-end with no network in
+# tests/test_construction_v1_hosted.py.
 #
 # dry-run  -> planning + admission + a bounded sample of map tasks, no R2 writes.
 # execute  -> the real non-promoting slice with create-only R2 writes and a
 #             completion marker written last.
 #
-# Resume is always a FRESH workflow_dispatch (never GitHub "Re-run failed jobs"):
-# supply resume_from with the prior run id and an updated, limit-bound
-# confirmation. run_attempt must be 1; the admission gate rejects any re-run.
+# Runner-minute ledger: every phase appends its actual elapsed minutes to a
+# ledger artifact, and each fan-in re-sums prior + spent + next and FAILS CLOSED
+# before provisioning the next matrix. Resume is a fresh dispatch (never Re-run
+# failed jobs): supply resume_from with the prior run id; the admission job
+# downloads the prior ledger read-only and refuses to start if its consumed
+# total does not match PRIOR_RUNNER_MINUTES bound into the confirmation.
 on:
   workflow_dispatch:
     inputs:
@@ -34,7 +42,7 @@ on:
         type: choice
         options: [dry-run, execute]
       confirmation:
-        description: The FULL typed EXECUTE_CONSTRUCTION_V1::<request-sha>::MODE=execute::MAX_PARALLEL=..::MAX_TOTAL_RUNNER_MINUTES=..::PRIOR_RUNNER_MINUTES=..::MAX_COST_USD=.. string emitted by construction_v1_control.py.
+        description: The FULL typed EXECUTE_CONSTRUCTION_V1::<request-sha>::MODE=execute::MAX_PARALLEL=..::MAX_TOTAL_RUNNER_MINUTES=..::PRIOR_RUNNER_MINUTES=..::MAX_COST_USD=.. string from construction_v1_control.py.
         required: true
         type: string
       request_json:
@@ -42,16 +50,16 @@ on:
         required: true
         type: string
       resume_from:
-        description: Optional prior run identifier for fresh-dispatch resume accounting; leave blank for a first attempt.
+        description: Optional prior run id for fresh-dispatch resume; its ledger's consumed total must equal PRIOR_RUNNER_MINUTES in the confirmation.
         required: false
         default: ""
         type: string
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
-  # One in-flight run per (request, family). Never cancel an in-progress slice.
   group: construction-v1-${{ inputs.family }}-${{ inputs.confirmation }}
   cancel-in-progress: false
 
@@ -62,13 +70,19 @@ env:
   R2_BUCKET: geocoder-shards
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  # Honest per-phase upper-bound runner-minute estimates used for the fail-closed
+  # ledger gate (match construction_v1_control CAPS map/reduce wall minutes).
+  MAP_PHASE_ESTIMATE_MINUTES: "60"
+  REDUCE_PHASE_ESTIMATE_MINUTES: "90"
+  HEAD_PHASE_ESTIMATE_MINUTES: "90"
+  FINALIZE_PHASE_ESTIMATE_MINUTES: "120"
 
 jobs:
   admit:
-    name: Fail-closed admission and map matrix (no secrets)
+    name: Fail-closed admission, contract, and resume ledger (no cloud secrets)
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 25
     outputs:
       request_sha256: ${{ steps.gate.outputs.request_sha256 }}
       family_key: ${{ steps.gate.outputs.family_key }}
@@ -86,30 +100,24 @@ jobs:
         with:
           persist-credentials: false
           fetch-depth: 0
-
       - name: Set up exact Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11.14"
-
       - name: Install hash-pinned admission dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
 
-      - name: Regenerate the canonical request and enforce the typed confirmation
+      - name: Regenerate the canonical request, enforce the confirmation, derive the contract
         id: gate
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
           REQUEST_JSON: ${{ inputs.request_json }}
           FAMILY: ${{ inputs.family }}
-          RESUME_FROM: ${{ inputs.resume_from }}
         run: |
           set -euo pipefail
           mkdir -p control
           printf '%s\n' "$REQUEST_JSON" > control/request.json
 
-          # Parse the durable limits out of the typed confirmation. The gate
-          # below still re-derives and byte-compares the whole confirmation, so
-          # this parse is only used to expose the numbers to later jobs.
           case "$CONFIRMATION" in
             EXECUTE_CONSTRUCTION_V1::*) : ;;
             *) echo "confirmation is not an EXECUTE_CONSTRUCTION_V1 string" >&2; exit 1 ;;
@@ -123,16 +131,14 @@ jobs:
           if [ "$MAX_PARALLEL" -lt 1 ] || [ "$MAX_PARALLEL" -gt 8 ]; then
             echo "MAX_PARALLEL must be 1..8" >&2; exit 1
           fi
-
           case "$FAMILY" in
             address) FAMILY_KEY=addresses ;;
             places)  FAMILY_KEY=places ;;
             *) echo "unknown family $FAMILY" >&2; exit 1 ;;
           esac
 
-          # Fail-closed admission: regenerates the request from its bytes,
-          # rejects any changed byte/hash/confirmation/readiness, requires
-          # run_attempt == 1, and writes both family map matrices to matrices.env.
+          # Fail-closed admission (regenerates the request, rejects any drift or
+          # run_attempt != 1) and emits both family map matrices.
           python scripts/construction_v1_control.py admit-dispatch \
             --request control/request.json \
             --request-sha256 "$REQUEST_SHA256" \
@@ -140,7 +146,12 @@ jobs:
             --run-attempt '${{ github.run_attempt }}' \
             --github-output control/matrices.env
 
-          # Select this run's family matrix and a bounded dry-run sample (<=3).
+          # Deterministic contract + runtime every later job consumes.
+          python scripts/construction_v1_hosted.py derive-contract \
+            --request control/request.json \
+            --output control/contract.json --runtime control/runtime.json \
+            --strict-versions
+
           MAP_MATRIX="$(sed -n "s/^${FAMILY_KEY}_matrix=//p" control/matrices.env)"
           test -n "$MAP_MATRIX"
           MAP_COUNT="$(jq '.include | length' <<<"$MAP_MATRIX")"
@@ -149,7 +160,6 @@ jobs:
             exit 1
           fi
           SAMPLE_MATRIX="$(jq -c '{include: (.include[0:3])}' <<<"$MAP_MATRIX")"
-
           PRODUCER="$(jq -er '.producer_commit' control/request.json)"
 
           {
@@ -165,46 +175,67 @@ jobs:
             echo "map_task_count=$MAP_COUNT"
           } >> "$GITHUB_OUTPUT"
 
+      - name: Carry the prior run ledger forward or fail closed (resume only)
+        if: inputs.resume_from != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_FROM: ${{ inputs.resume_from }}
+          PRIOR: ${{ steps.gate.outputs.prior_runner_minutes }}
+        run: |
+          set -euo pipefail
+          case "$RESUME_FROM" in ''|*[!0-9]*) echo "resume_from must be a prior run id" >&2; exit 1 ;; esac
+          mkdir -p resume
+          ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts" \
+            --jq '.artifacts[] | select(.name | startswith("construction-v1-ledger-")) | .archive_download_url' | head -1)"
+          if [ -z "$ART_URL" ]; then
+            echo "resume failed closed: no construction-v1-ledger artifact on run ${RESUME_FROM}" >&2
+            exit 1
+          fi
+          gh api "$ART_URL" > resume/ledger.zip
+          (cd resume && unzip -o ledger.zip >/dev/null)
+          PRIOR_CONSUMED="$(jq -r '(.prior_runner_minutes // 0) + ([.phases[].runner_minutes] | add // 0)' resume/ledger.json)"
+          echo "Prior run ${RESUME_FROM} consumed ${PRIOR_CONSUMED} runner minutes; confirmation binds PRIOR=${PRIOR}."
+          if [ "$PRIOR_CONSUMED" != "$PRIOR" ]; then
+            echo "resume failed closed: prior ledger consumed ${PRIOR_CONSUMED} != confirmation PRIOR_RUNNER_MINUTES ${PRIOR}" >&2
+            echo "Re-run prepare with --prior-runner-minutes ${PRIOR_CONSUMED} and dispatch the new confirmation." >&2
+            exit 1
+          fi
+
+      - name: Seed the run ledger (genesis or resumed prior)
+        run: |
+          set -euo pipefail
+          jq -n \
+            --arg run '${{ github.run_id }}-${{ github.run_attempt }}' \
+            --arg resume '${{ inputs.resume_from }}' \
+            --arg request '${{ steps.gate.outputs.request_sha256 }}' \
+            --arg family '${{ steps.gate.outputs.family_key }}' \
+            --argjson cap '${{ steps.gate.outputs.max_total_runner_minutes }}' \
+            --argjson prior '${{ steps.gate.outputs.prior_runner_minutes }}' \
+            '{schema:"construction-v1-run-ledger-v1",run:$run,resume_from:$resume,request_sha256:$request,family:$family,max_total_runner_minutes:$cap,prior_runner_minutes:$prior,phases:[{phase:"admission",runner_minutes:0}]}' \
+            > control/ledger.json
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger control/ledger.json --next-phase-minutes "$MAP_PHASE_ESTIMATE_MINUTES"
           {
             echo "## Construction v1 admission"
             echo
-            echo "- Family: \`$FAMILY_KEY\`"
-            echo "- Mode: \`${{ inputs.mode }}\`"
-            echo "- Request SHA-256: \`$REQUEST_SHA256\`"
-            echo "- Map tasks: $MAP_COUNT (dry-run sample: $(jq '.include | length' <<<"$SAMPLE_MATRIX"))"
-            echo "- Max concurrency: $MAX_PARALLEL"
-            echo "- Retained runner-minute cap: $MAX_TOTAL"
-            echo "- Prior runner minutes (confirmation-bound): $PRIOR"
-            echo "- Conservative cost cap: \$$MAX_COST"
-            echo "- Resume-from: \`${RESUME_FROM:-<none>}\`"
-            echo "- Run attempt: ${{ github.run_attempt }} (admission requires 1; resume is a fresh dispatch)"
-            echo "- Production catalog writes: forbidden; slice is non-promoting"
+            echo "- Family: \`${{ steps.gate.outputs.family_key }}\` | Mode: \`${{ inputs.mode }}\`"
+            echo "- Request SHA-256: \`${{ steps.gate.outputs.request_sha256 }}\`"
+            echo "- Map tasks: ${{ steps.gate.outputs.map_task_count }} | Max concurrency: ${{ steps.gate.outputs.max_parallel }}"
+            echo "- Retained runner-minute cap: ${{ steps.gate.outputs.max_total_runner_minutes }} | Prior (confirmation-bound): ${{ steps.gate.outputs.prior_runner_minutes }}"
+            echo "- Resume-from: \`${{ inputs.resume_from }}\` | Run attempt: ${{ github.run_attempt }} (admission requires 1)"
+            echo "- Slice: non-promoting; production catalog writes forbidden"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Seed the run ledger (genesis + retained prior minutes)
-        run: |
-          set -euo pipefail
-          mkdir -p control
-          jq -n \
-            --arg phase admission \
-            --arg family '${{ steps.gate.outputs.family_key }}' \
-            --arg request '${{ steps.gate.outputs.request_sha256 }}' \
-            --argjson prior '${{ steps.gate.outputs.prior_runner_minutes }}' \
-            --argjson cap '${{ steps.gate.outputs.max_total_runner_minutes }}' \
-            --arg resume '${{ inputs.resume_from }}' \
-            --arg run '${{ github.run_id }}-${{ github.run_attempt }}' \
-            '{schema:"construction-v1-run-ledger-v1",run:$run,resume_from:$resume,request_sha256:$request,family:$family,max_total_runner_minutes:$cap,prior_runner_minutes:$prior,phases:[{phase:$phase,runner_minutes:0,note:"secret-free admission gate"}]}' \
-            > control/ledger.json
-          cat control/ledger.json
-
-      - name: Retain admission ledger
+      - name: Publish the control artifact (request, contract, runtime, ledger)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: construction-v1-admission-${{ steps.gate.outputs.request_sha256 }}-${{ github.run_attempt }}
+          name: cv1-control
           if-no-files-found: error
           retention-days: 30
           path: |
             control/request.json
+            control/contract.json
+            control/runtime.json
             control/ledger.json
 
   map:
@@ -228,32 +259,21 @@ jobs:
           python-version: "3.11.14"
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Download the control artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-control
+          path: control
 
       - name: Re-run the fail-closed admission gate on this runner (no secrets)
         env:
           CONFIRMATION: ${{ inputs.confirmation }}
-          REQUEST_JSON: ${{ inputs.request_json }}
         run: |
           set -euo pipefail
-          mkdir -p control work/output work/scratch
-          printf '%s\n' "$REQUEST_JSON" > control/request.json
           python scripts/construction_v1_control.py admit-dispatch \
             --request control/request.json \
             --request-sha256 '${{ needs.admit.outputs.request_sha256 }}' \
-            --confirmation "$CONFIRMATION" \
-            --run-attempt '${{ github.run_attempt }}'
-
-      - name: Free disk before bounded map work (execute mode only)
-        if: inputs.mode == 'execute'
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
-        with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          docker-images: true
-          swap-storage: false
+            --confirmation "$CONFIRMATION" --run-attempt '${{ github.run_attempt }}'
 
       - name: Bounded planning sample for one map task (dry-run, no R2 writes)
         if: inputs.mode != 'execute'
@@ -269,94 +289,17 @@ jobs:
             addresses) INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json ;;
             places)    INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json ;;
           esac
-          # Read-only: re-derive the exact task descriptor (rows, selected bytes,
-          # ranges, digests) that execute mode would hydrate. No S3 fetch, no R2.
-          TASK="$(jq -c --arg id "$TASK_ID" \
-            'def tasks: (.map_plan.tasks // .plan.tasks // (.checks.canonical_inventory_identity.tasks)); [tasks[]] | .[] | select(("'"$FAMILY_KEY"'"|sub("es$";"")) as $_ | true)' \
-            "$INVENTORY" 2>/dev/null || echo '{}')"
-          ROWS="$(jq -r --argjson i "$TASK_INDEX" 'def tasks: (.map_plan.tasks // .plan.tasks // .checks.canonical_inventory_identity.tasks); (tasks[$i] | (.rows // .expected_input_records)) // "unknown"' "$INVENTORY" 2>/dev/null || echo unknown)"
-          BYTES="$(jq -r --argjson i "$TASK_INDEX" 'def tasks: (.map_plan.tasks // .plan.tasks // .checks.canonical_inventory_identity.tasks); (tasks[$i].selected_uncompressed_bytes) // "unknown"' "$INVENTORY" 2>/dev/null || echo unknown)"
+          ROWS="$(jq -r --argjson i "$TASK_INDEX" 'def t: (.map_plan.tasks // .plan.tasks // .checks.canonical_inventory_identity.tasks); (t[$i] | (.rows // .expected_input_records)) // "unknown"' "$INVENTORY" 2>/dev/null || echo unknown)"
+          BYTES="$(jq -r --argjson i "$TASK_INDEX" 'def t: (.map_plan.tasks // .plan.tasks // .checks.canonical_inventory_identity.tasks); (t[$i].selected_uncompressed_bytes) // "unknown"' "$INVENTORY" 2>/dev/null || echo unknown)"
           ELAPSED=$(( SECONDS - START ))
           echo "TASK END   $TASK_ID planned_rows=$ROWS selected_uncompressed_bytes=$BYTES elapsed=${ELAPSED}s r2_writes=0"
           {
             echo "### dry-run map sample: \`$TASK_ID\`"
-            echo "- Planned input rows: $ROWS"
-            echo "- Selected uncompressed bytes: $BYTES"
-            echo "- Elapsed: ${ELAPSED}s"
-            echo "- R2 writes: 0 (planning-only sample)"
+            echo "- Planned input rows: $ROWS | Selected uncompressed bytes: $BYTES | Elapsed: ${ELAPSED}s | R2 writes: 0"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Admit, map, and publish one task create-only with marker last (execute)
+      - name: Free disk before bounded map work (execute mode only)
         if: inputs.mode == 'execute'
-        env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-          TASK_ID: ${{ matrix.task_id }}
-          TASK_INDEX: ${{ matrix.task_index }}
-          FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
-          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          set -euo pipefail
-          test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
-          START=$SECONDS
-          echo "TASK BEGIN $TASK_ID (family=$FAMILY_KEY index=$TASK_INDEX mode=execute)"
-          # Admit an already-completed marker before recomputing so a fresh
-          # resume dispatch loses at most the one interrupted logical subtask.
-          python scripts/global_v2_hosted.py admit-task \
-            --contract control/contract.json --runtime control/runtime.json \
-            --phase map --family "$FAMILY_KEY" --task-id "$TASK_ID" --index "$TASK_INDEX" \
-            --marker-only --output control/task-admission.json
-          if [ "$(jq -r '.completed' control/task-admission.json)" = true ]; then
-            echo "TASK END   $TASK_ID already-completed=true elapsed=$(( SECONDS - START ))s"
-            exit 0
-          fi
-          # Vectorized map producer -> local packs + proofs, then create-only
-          # upload under the content-addressed namespace with the marker last.
-          python scripts/global_v2_hosted.py publish-map \
-            --contract control/contract.json --runtime control/runtime.json \
-            --request control/request.json --family "$FAMILY_KEY" \
-            --task-index "$TASK_INDEX" --producer-report work/completion.json \
-            --producer-output-root work/output --scratch-dir work/scratch \
-            --output work/published.json
-          ROWS="$(jq -r '.output_records // .records // "unknown"' work/published.json 2>/dev/null || echo unknown)"
-          BYTES="$(jq -r '.output_bytes // "unknown"' work/published.json 2>/dev/null || echo unknown)"
-          ELAPSED=$(( SECONDS - START ))
-          echo "TASK END   $TASK_ID output_records=$ROWS output_bytes=$BYTES elapsed=${ELAPSED}s marker_written_last=true"
-          {
-            echo "### map task \`$TASK_ID\`"
-            echo "- Output records: $ROWS"
-            echo "- Output bytes: $BYTES"
-            echo "- Elapsed: ${ELAPSED}s"
-            echo "- Create-only marker written last: yes"
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  reduce:
-    name: ${{ matrix.family }} reduce ${{ matrix.index }}
-    needs: [admit, map]
-    if: inputs.mode == 'execute'
-    runs-on: ubuntu-24.04
-    timeout-minutes: 330
-    strategy:
-      fail-fast: false
-      max-parallel: ${{ fromJSON(needs.admit.outputs.max_parallel) }}
-      matrix:
-        include:
-          - family: ${{ needs.admit.outputs.family_key }}
-            index: 0
-    steps:
-      - name: Check out the request-pinned producer
-        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
-        with:
-          ref: ${{ needs.admit.outputs.producer_commit }}
-          persist-credentials: false
-      - name: Set up exact Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: "3.11.14"
-      - name: Install hash-pinned hosted dependencies
-        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
-      - name: Free disk before the selective reducer
         uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
         with:
           tool-cache: false
@@ -366,49 +309,226 @@ jobs:
           large-packages: false
           docker-images: true
           swap-storage: false
-      - name: Restore exact plans and run one budgeted reducer create-only
+
+      - name: Build the pinned construction binaries (execute mode only)
+        if: inputs.mode == 'execute'
+        run: cargo build -p geocoder-construction --bins --release
+
+      - name: Admit, project, map, and publish one task create-only (execute)
+        if: inputs.mode == 'execute'
         env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-          REQUEST_JSON: ${{ inputs.request_json }}
-          FAMILY: ${{ matrix.family }}
-          INDEX: ${{ matrix.index }}
-          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
+          TASK_ID: ${{ matrix.task_id }}
+          TASK_INDEX: ${{ matrix.task_index }}
+        run: |
+          set -euo pipefail
+          test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
+          START=$SECONDS
+          mkdir -p store markers work/scratch phase
+          echo "TASK BEGIN $TASK_ID (family=$FAMILY_KEY index=$TASK_INDEX mode=execute)"
+          # Ledger gate: prior + this map estimate must fit under the cap.
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger control/ledger.json --next-phase-minutes "$MAP_PHASE_ESTIMATE_MINUTES"
+          # Skip recomputation if a marker for this task already exists.
+          python scripts/construction_v1_hosted.py admit-task \
+            --store-root store --family "$FAMILY_KEY" --phase map --task-id "$TASK_ID" \
+            --output phase/admit.json >/dev/null
+          COMPLETED="$(jq -r '.completed' phase/admit.json)"
+          if [ "$COMPLETED" = true ]; then
+            echo "TASK END   $TASK_ID already-completed=true elapsed=$(( SECONDS - START ))s"
+          else
+            BINDIR="crates/target/release"
+            case "$FAMILY_KEY" in
+              addresses) TRANSFORM="$BINDIR/address-transform-v1"; PROOF="$BINDIR/address-proof-directory";
+                         INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json ;;
+              places)    TRANSFORM="$BINDIR/places-transform-v1"; PROOF="$BINDIR/places-proof-directory";
+                         INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json ;;
+            esac
+            RELEASE="$(jq -r '.release' control/request.json)"
+            # Project the exact inventory-assigned row groups from S3 (read-only).
+            /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
+              --release "$RELEASE" --family "$FAMILY_KEY" --inventory-report "$INVENTORY" \
+              --task-index "$TASK_INDEX" --output work/projected.parquet \
+              --json-out work/projection.json --target-rowgroup-uncompressed-bytes 400000000 \
+              --max-rows 4000000 --max-groups 72 --max-output-bytes 500000000
+            ROWS="$(jq -r '.records // .rows // 0' work/projection.json 2>/dev/null || echo 0)"
+            printf '{"objects":[{"records":%s,"row_groups":1}]}\n' "$ROWS" > work/source-limits.json
+            /usr/bin/time -v python scripts/construction_v1_hosted.py run-map \
+              --contract control/contract.json --store-root store --family "$FAMILY_KEY" \
+              --task-id "$TASK_ID" --input work/projected.parquet \
+              --source-limits work/source-limits.json --transform-binary "$TRANSFORM" \
+              --proof-binary "$PROOF" --scratch-dir work/scratch \
+              --marker-out "markers/${TASK_INDEX}.json" --output phase/map.json
+            OUT_ROWS="$(jq -r '.records' phase/map.json)"
+            echo "TASK END   $TASK_ID output_records=$OUT_ROWS elapsed=$(( SECONDS - START ))s marker_written_last=true"
+          fi
+          ELAPSED_MIN=$(( (SECONDS - START + 59) / 60 ))
+          jq -n --arg phase "map-${TASK_INDEX}" --argjson m "$ELAPSED_MIN" \
+            '{phase:$phase,runner_minutes:$m}' > "phase/ledger-fragment-${TASK_INDEX}.json"
+
+      - name: Publish this map task's store fragment, marker, and ledger fragment
+        if: inputs.mode == 'execute'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-map-${{ matrix.task_index }}
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            store
+            markers
+            phase/ledger-fragment-${{ matrix.task_index }}.json
+
+  plan:
+    name: Exact map fan-in and stable reducer plan
+    needs: [admit, map]
+    if: inputs.mode == 'execute'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    outputs:
+      reduce_matrix: ${{ steps.plan.outputs.reduce_matrix }}
+      reduce_count: ${{ steps.plan.outputs.reduce_count }}
+    steps:
+      - name: Check out the request-pinned producer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.admit.outputs.producer_commit }}
+          persist-credentials: false
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Download control and every map fragment (merged store)
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: cv1-map-*
+          path: mapdl
+          merge-multiple: true
+      - name: Download the control artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-control
+          path: control
+      - name: Fan in map minutes, gate the ledger, and build the reducer plan
+        id: plan
+        env:
+          FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
+        run: |
+          set -euo pipefail
+          # Fold every map job's actual minutes into the ledger, then FAIL CLOSED
+          # before provisioning the reduce matrix if the total would exceed cap.
+          for FRAG in mapdl/phase/ledger-fragment-*.json; do
+            [ -f "$FRAG" ] || continue
+            PH="$(jq -r '.phase' "$FRAG")"; MN="$(jq -r '.runner_minutes' "$FRAG")"
+            python scripts/construction_v1_hosted.py ledger-append \
+              --ledger control/ledger.json --phase "$PH" --minutes "$MN"
+          done
+          PART_ESTIMATE=$(( REDUCE_PHASE_ESTIMATE_MINUTES + HEAD_PHASE_ESTIMATE_MINUTES + FINALIZE_PHASE_ESTIMATE_MINUTES ))
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger control/ledger.json --next-phase-minutes "$PART_ESTIMATE" \
+            --output control/plan-ledger-check.json
+          mkdir -p plan-scratch plan
+          python scripts/construction_v1_hosted.py plan-reduce \
+            --contract control/contract.json --store-root mapdl/store --family "$FAMILY_KEY" \
+            --markers-dir mapdl/markers --scratch-dir plan-scratch \
+            --output plan/plan.json --matrix-out plan/reduce-matrix.json
+          MATRIX="$(jq -c '.' plan/reduce-matrix.json)"
+          COUNT="$(jq '.include | length' <<<"$MATRIX")"
+          if [ "$COUNT" -gt 256 ]; then echo "reduce matrix exceeds 256 cap" >&2; exit 1; fi
+          {
+            echo "reduce_matrix=$MATRIX"
+            echo "reduce_count=$COUNT"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "## Reducer plan"
+            echo "- Reduce partitions: $COUNT (matrix cap 256)"
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Publish the plan, merged store, and updated ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-plan
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            plan
+            mapdl/store
+            mapdl/markers
+            control/ledger.json
+
+  reduce:
+    name: ${{ needs.admit.outputs.family_key }} reduce ${{ matrix.partition_index }}
+    needs: [admit, plan]
+    if: inputs.mode == 'execute'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(needs.admit.outputs.max_parallel) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.reduce_matrix) }}
+    steps:
+      - name: Check out the request-pinned producer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.admit.outputs.producer_commit }}
+          persist-credentials: false
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Download the plan and merged store
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-plan
+          path: cv1
+      - name: Build the pinned construction binaries
+        run: cargo build -p geocoder-construction --bins --release
+      - name: Run one selective reducer create-only
+        env:
+          FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
+          PARTITION_INDEX: ${{ matrix.partition_index }}
         run: |
           set -euo pipefail
           test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 30000000
           START=$SECONDS
-          mkdir -p control plans work
-          printf '%s\n' "$REQUEST_JSON" > control/request.json
-          # Re-run the fail-closed admission gate before touching credentials.
-          python scripts/construction_v1_control.py admit-dispatch \
-            --request control/request.json \
-            --request-sha256 '${{ needs.admit.outputs.request_sha256 }}' \
-            --confirmation "$CONFIRMATION" --run-attempt '${{ github.run_attempt }}'
-          echo "REDUCE BEGIN $FAMILY index=$INDEX"
-          python scripts/global_v2_hosted.py admit-task \
-            --contract control/contract.json --runtime control/runtime.json \
-            --phase reduce --family "$FAMILY" --task-id "$FAMILY-reduce-000" \
-            --index "$INDEX" --marker-only --output control/task-admission.json
-          if [ "$(jq -r '.completed' control/task-admission.json)" = true ]; then
-            echo "REDUCE END $FAMILY index=$INDEX already-completed=true elapsed=$(( SECONDS - START ))s"
-            exit 0
-          fi
-          python scripts/global_v2_hosted.py restore-reducer-plans \
-            --contract control/contract.json --runtime control/runtime.json \
-            --output-root plans \
-            --output-prefix "$(jq -r '.namespaces.immutable_root+"/aggregate-plan"' control/request.json)" \
-            --output control/restored-plans.json
-          python scripts/global_v2_hosted.py run-publish-reduce \
-            --contract control/contract.json --runtime control/runtime.json \
-            --request control/request.json --family "$FAMILY" --index "$INDEX" \
-            --work-root work --output control/reduce-result.json
-          echo "REDUCE END $FAMILY index=$INDEX elapsed=$(( SECONDS - START ))s marker_written_last=true"
+          mkdir -p reductions reduce-scratch phase
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger cv1/control/ledger.json --next-phase-minutes "$REDUCE_PHASE_ESTIMATE_MINUTES"
+          echo "REDUCE BEGIN $FAMILY_KEY partition=$PARTITION_INDEX"
+          BINDIR="crates/target/release"
+          case "$FAMILY_KEY" in
+            addresses) PROOF="$BINDIR/address-proof-directory"; ENC="$BINDIR/address-serving-encode-v1"; VER="$BINDIR/address-serving-verify-v1" ;;
+            places)    PROOF=""; ENC="$BINDIR/places-serving-encode-v1"; VER="$BINDIR/places-serving-verify-v1" ;;
+          esac
+          /usr/bin/time -v python scripts/construction_v1_hosted.py run-reduce \
+            --contract cv1/control/contract.json --store-root cv1/mapdl/store --family "$FAMILY_KEY" \
+            --plan cv1/plan/plan.json --markers-dir cv1/mapdl/markers \
+            --partition-index "$PARTITION_INDEX" --proof-binary "$PROOF" \
+            --encoder-binary "$ENC" --verifier-binary "$VER" --scratch-dir reduce-scratch \
+            --output "reductions/$(printf '%04d' "$PARTITION_INDEX").json"
+          echo "REDUCE END $FAMILY_KEY partition=$PARTITION_INDEX elapsed=$(( SECONDS - START ))s marker_written_last=true"
+          ELAPSED_MIN=$(( (SECONDS - START + 59) / 60 ))
+          jq -n --arg phase "reduce-${PARTITION_INDEX}" --argjson m "$ELAPSED_MIN" \
+            '{phase:$phase,runner_minutes:$m}' > "phase/ledger-fragment-${PARTITION_INDEX}.json"
+      - name: Publish this reducer's store fragment, reduction, and ledger fragment
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-reduce-${{ matrix.partition_index }}
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            cv1/mapdl/store
+            reductions
+            phase/ledger-fragment-${{ matrix.partition_index }}.json
 
   head:
-    name: Selective reduce fan-in and global Places head
-    needs: [admit, reduce]
+    name: Global Places head (execute)
+    needs: [admit, plan, reduce]
     if: inputs.mode == 'execute'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
@@ -424,44 +544,55 @@ jobs:
           python-version: "3.11.14"
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
-      - name: Build and publish the global head create-only (Places), marker last
-        if: needs.admit.outputs.family_key == 'places'
+      - name: Download plan/store and every reduce fragment
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: cv1-reduce-*
+          path: cv1
+          merge-multiple: true
+      - name: Download the plan artifact (plan.json, markers, ledger)
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-plan
+          path: cv1plan
+      - name: Build the global Places head (address is a no-op)
         env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-          REQUEST_JSON: ${{ inputs.request_json }}
-          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
         run: |
           set -euo pipefail
-          START=$SECONDS
-          mkdir -p control plans head-work
-          printf '%s\n' "$REQUEST_JSON" > control/request.json
-          python scripts/construction_v1_control.py admit-dispatch \
-            --request control/request.json \
-            --request-sha256 '${{ needs.admit.outputs.request_sha256 }}' \
-            --confirmation "$CONFIRMATION" --run-attempt '${{ github.run_attempt }}'
-          echo "HEAD BEGIN places-head-000"
-          python scripts/global_v2_hosted.py admit-task \
-            --contract control/contract.json --runtime control/runtime.json \
-            --phase head --family places --task-id places-head-000 --index 0 \
-            --marker-only --output control/task-admission.json
-          if [ "$(jq -r '.completed' control/task-admission.json)" = true ]; then
-            echo "HEAD END already-completed=true elapsed=$(( SECONDS - START ))s"
-            exit 0
+          mkdir -p head head-scratch
+          if [ "$FAMILY_KEY" = places ]; then
+            cargo build -p geocoder-construction --bins --release
+            python scripts/construction_v1_hosted.py ledger-check \
+              --ledger cv1plan/control/ledger.json --next-phase-minutes "$HEAD_PHASE_ESTIMATE_MINUTES"
+            BINDIR="crates/target/release"
+            python scripts/construction_v1_hosted.py run-head \
+              --contract cv1plan/control/contract.json --store-root cv1/cv1/mapdl/store \
+              --family places --markers-dir cv1plan/mapdl/markers \
+              --encoder-binary "$BINDIR/places-serving-encode-v1" \
+              --verifier-binary "$BINDIR/places-serving-verify-v1" \
+              --scratch-dir head-scratch --shard-bits 4 --output head/head.json
+            echo "HEAD END places shards=$(jq -r '.shard_count' head/head.json) marker_written_last=true"
+          else
+            python scripts/construction_v1_hosted.py run-head \
+              --contract cv1plan/control/contract.json --store-root cv1/cv1/mapdl/store \
+              --family addresses --markers-dir cv1plan/mapdl/markers --output head/head.json
+            echo "Address family has no global head phase."
           fi
-          python scripts/global_v2_hosted.py run-publish-head \
-            --contract control/contract.json --runtime control/runtime.json \
-            --request control/request.json --places-plan plans/places-plan.json \
-            --work-root head-work --output control/head-result.json
-          echo "HEAD END places-head-000 elapsed=$(( SECONDS - START ))s marker_written_last=true"
-      - name: No global head for the address family
-        if: needs.admit.outputs.family_key != 'places'
-        run: echo "Address family has no global head phase; nothing to build."
+      - name: Publish the head result and merged store
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-head
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: |
+            head
+            cv1/cv1/mapdl/store
 
   finalize:
-    name: Finalize the non-promoting slice with the marker written last
-    needs: [admit, map, reduce, head]
+    name: Finalize the non-promoting slice, create-only to R2, marker last
+    needs: [admit, plan, reduce, head]
     if: inputs.mode == 'execute'
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -477,46 +608,79 @@ jobs:
           python-version: "3.11.14"
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
-      - name: Free disk before streaming finalization
-        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+      - name: Download all reduce fragments
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
-          tool-cache: false
-          android: true
-          dotnet: true
-          haskell: true
-          large-packages: false
-          docker-images: true
-          swap-storage: false
-      - name: Finalize, verify the whole slice once, and write the marker last
+          pattern: cv1-reduce-*
+          path: red
+          merge-multiple: true
+      - name: Download the head artifact (merged store + head)
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-head
+          path: headdl
+      - name: Download the plan artifact
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-plan
+          path: cv1plan
+      - name: Fan in reduce minutes, gate, finalize locally, verify the whole slice once
         env:
-          CONFIRMATION: ${{ inputs.confirmation }}
-          REQUEST_JSON: ${{ inputs.request_json }}
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
+        run: |
+          set -euo pipefail
+          for FRAG in red/phase/ledger-fragment-*.json; do
+            [ -f "$FRAG" ] || continue
+            PH="$(jq -r '.phase' "$FRAG")"; MN="$(jq -r '.runner_minutes' "$FRAG")"
+            python scripts/construction_v1_hosted.py ledger-append \
+              --ledger cv1plan/control/ledger.json --phase "$PH" --minutes "$MN"
+          done
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger cv1plan/control/ledger.json --next-phase-minutes "$FINALIZE_PHASE_ESTIMATE_MINUTES"
+          mkdir -p final-work staging
+          HEAD_ARG=""
+          if [ "$FAMILY_KEY" = places ]; then HEAD_ARG="--head headdl/head/head.json"; fi
+          # Content-addressed stores merge safely: head's store superset already
+          # contains map + reduce objects.
+          python scripts/construction_v1_hosted.py finalize \
+            --contract cv1plan/control/contract.json --store-root headdl/cv1/cv1/mapdl/store \
+            --family "$FAMILY_KEY" --plan cv1plan/plan/plan.json --reductions-dir red/reductions \
+            $HEAD_ARG --remote-root staging --work-root final-work --output final-work/result.json
+          echo "FINALIZE local staging complete: $(jq -c '{objects,reconciles,marker_key}' final-work/result.json)"
+      - name: Mirror the exact staged slice to R2 create-only, marker written last
+        env:
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 30000000
-          START=$SECONDS
-          mkdir -p control plans final-work preview
-          printf '%s\n' "$REQUEST_JSON" > control/request.json
-          python scripts/construction_v1_control.py admit-dispatch \
-            --request control/request.json \
-            --request-sha256 '${{ needs.admit.outputs.request_sha256 }}' \
-            --confirmation "$CONFIRMATION" --run-attempt '${{ github.run_attempt }}'
-          echo "FINALIZE BEGIN family=$FAMILY_KEY"
-          # Stream final family encoders to local artifacts, then create-only
-          # publish the family manifest and slice manifest. The completion
-          # marker is written last (construction_v1_remote create-only contract:
-          # create-only objects, per-upload HEAD verification, marker last, one
-          # exact-prefix listing + one streaming read per final object).
-          python scripts/global_v2_hosted.py finalize-publish-families \
-            --contract control/contract.json --request control/request.json \
-            --family "$FAMILY_KEY" --work-root final-work \
-            --output control/family-results.json
-          ELAPSED=$(( SECONDS - START ))
-          echo "FINALIZE END family=$FAMILY_KEY elapsed=${ELAPSED}s"
+          MARKER_KEY="$(jq -r '.marker_key' final-work/result.json)"
+          # Upload every non-marker object create-only (If-None-Match '*'),
+          # HEAD-verify, then the completion marker LAST.
+          find staging -type f ! -path "staging/${MARKER_KEY}" | sort | while read -r FILE; do
+            KEY="${FILE#staging/}"
+            aws s3api put-object --bucket "$R2_BUCKET" --key "$KEY" --body "$FILE" \
+              --if-none-match '*' --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null \
+              || aws s3api head-object --bucket "$R2_BUCKET" --key "$KEY" \
+                   --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
+            aws s3api head-object --bucket "$R2_BUCKET" --key "$KEY" \
+              --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
+          done
+          aws s3api put-object --bucket "$R2_BUCKET" --key "$MARKER_KEY" \
+            --body "staging/${MARKER_KEY}" --if-none-match '*' \
+            --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null \
+            || aws s3api head-object --bucket "$R2_BUCKET" --key "$MARKER_KEY" \
+                 --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
+          aws s3api head-object --bucket "$R2_BUCKET" --key "$MARKER_KEY" \
+            --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
+          echo "R2 create-only mirror complete; marker written last: $MARKER_KEY"
+      - name: Publish the final ledger for future resume accounting
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: construction-v1-ledger-${{ github.run_id }}
+          if-no-files-found: error
+          retention-days: 90
+          path: cv1plan/control/ledger.json
       - name: Final run summary (diagnosable from the Actions UI)
         if: always()
         env:
@@ -525,14 +689,10 @@ jobs:
           {
             echo "## Construction v1 run result"
             echo
-            echo "- Family: \`$FAMILY_KEY\`"
-            echo "- Request SHA-256: \`${{ needs.admit.outputs.request_sha256 }}\`"
-            echo "- Map tasks: ${{ needs.admit.outputs.map_task_count }}"
-            echo "- Max concurrency: ${{ needs.admit.outputs.max_parallel }}"
-            echo "- Retained runner-minute cap: ${{ needs.admit.outputs.max_total_runner_minutes }}"
-            echo "- Prior retained runner minutes: ${{ needs.admit.outputs.prior_runner_minutes }}"
-            echo "- Conservative cost cap: \$${{ needs.admit.outputs.max_cost_usd }}"
-            echo "- Slice: immutable, NON-PROMOTING (no catalog or release-history write)"
-            echo "- Completion marker: create-only, written last"
+            echo "- Family: \`$FAMILY_KEY\` | Request: \`${{ needs.admit.outputs.request_sha256 }}\`"
+            echo "- Map tasks: ${{ needs.admit.outputs.map_task_count }} | Reduce partitions: ${{ needs.plan.outputs.reduce_count }}"
+            echo "- Max concurrency: ${{ needs.admit.outputs.max_parallel }} | Cap: ${{ needs.admit.outputs.max_total_runner_minutes }} runner-min | Prior: ${{ needs.admit.outputs.prior_runner_minutes }}"
+            echo "- Consumed runner minutes (ledger): $(jq -r '(.prior_runner_minutes // 0) + ([.phases[].runner_minutes] | add // 0)' cv1plan/control/ledger.json 2>/dev/null || echo unavailable)"
+            echo "- Slice: immutable, NON-PROMOTING; completion marker create-only and written last"
             echo "- Resume rule: fresh workflow_dispatch only; never Re-run failed jobs"
           } >> "$GITHUB_STEP_SUMMARY"
