@@ -344,3 +344,38 @@ The one thing A needs before committing to it: **calibrate reduce cost against
 rows.** That is unmeasurable until a reduce phase completes, which needs the R2
 staging work (§6 step 2) anyway. So the honest sequence is R2 staging first,
 one completed reduce at the current caps, then set the cap from real timings.
+
+## Appendix status: A and C are implemented
+
+Both landed together on 2026-07-24, because they fix **different caps** and
+neither subsumes the other:
+
+- **A** (raise `term_rows` 1M -> 2M, `distinct_tokens` 200k -> 400k) fixes the
+  observed `a1d5` breach, which is a *distinct-token* breach. C cannot help
+  there: a combiner caps rows per token, it does not reduce how many distinct
+  tokens a cell has.
+- **C** (map-side top-256 combiner) fixes the *row-cap floor*. A only moves that
+  floor from 1.35x to 2.69x; C removes it, taking the largest indivisible
+  `(cell, token)` group from 742,392 rows to **1,078** (0.11% of the cap).
+
+C also happens to de-risk A: the reduce-cost concern behind sequencing them was
+that a 2M row cap might push a reduce batch toward its 330-minute timeout, and C
+removes 46.3% of the rows that cost would have been paid on.
+
+### What C does not fix
+
+**The transport wall is still absolute.** The combiner takes the store from
+63.5 GB to roughly 34 GB, which still does not fit a runner (the reduce guard
+requires 30 GB free) and is still ~4.4 TB across 128 reduce downloads. R2
+staging (§6 step 2) remains mandatory before any planet attempt.
+
+### The committed plan is now stale by construction
+
+`scripts/places_partition_plan_v1.json` was generated against the old caps
+(1M/200k) and pre-combiner data. It is currently **inert** -- map-side partition
+assignment (§6 step 3) is not implemented, so nothing reads it -- but it MUST be
+regenerated from a post-combiner map run before step 3 lands. It was
+deliberately not regenerated now: the saved local packs do not retain the
+ordering columns the combiner needs (`confidence_rank`, `feature_id`,
+`source_*`), so any plan produced from them would be an approximation, and an
+approximate committed plan defeats the point of `--check` reproducibility.

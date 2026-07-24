@@ -132,9 +132,28 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # each planning read while keeping the number of INSERT batches small.
         "max_fan_in_tasks": 128,
         "max_fan_in_packs": 256,
-        "partition_term_rows": 1_000_000,
+        # Raised from 1,000,000 / 200,000 after the 2026-07-22.0 growth test
+        # (docs/plans/2026-07-24-growth-test-and-path-to-planet.md, appendix A).
+        # Two independent reasons, one per cap:
+        #
+        #   term_rows      A hash prefix cannot split a SINGLE token, so the
+        #                  largest (cell, token) pair is a hard floor no depth
+        #                  can lower -- measured at 742,392 rows for
+        #                  ('b2e3','jp'), 74.2% of the old cap. 2,000,000 takes
+        #                  that margin from 1.35x to 2.69x.
+        #   distinct_tokens  Cell a1d5 breached the old 200,000 cap outright at
+        #                  201,568 after five weeks of drift.
+        #
+        # The byte cap stays: at the worst observed 178 bytes/row, 2,000,000
+        # rows is 356 MB against 512 MiB. 3,000,000 (534 MB) would exceed it, so
+        # 2,000,000 is the largest row cap this byte cap admits.
+        #
+        # Raising these REDUCES partition count (17,863 -> 16,978 on the new
+        # release) because fewer partitions are forced to subdivide; the budget
+        # floor is the 16,633 populated cells, not the splits.
+        "partition_term_rows": 2_000_000,
         "partition_estimated_bytes": 512 * 1024**2,
-        "partition_distinct_tokens": 200_000,
+        "partition_distinct_tokens": 400_000,
     },
 }
 

@@ -298,6 +298,7 @@ def map_task(
     failpoint: str | None = None,
 ) -> dict[str, Any]:
     import duckdb
+    import pyarrow as pa
     import pyarrow.parquet as pq
 
     limits.validate()
@@ -411,6 +412,65 @@ def map_task(
         if head_candidate_rows > limits.max_head_candidate_rows:
             connection.close()
             raise ValueError("Places task head candidates exceed row cap")
+        # Combiner. reduce_partition only ever serves the top
+        # `maximum_serving_candidates` rows per (partition_cell, token); every
+        # row below that rank is carried across the whole pipeline and then
+        # discarded. Applying the same top-N here is EXACT, not lossy: top-N
+        # under a TOTAL order is decomposable, so a per-task top-N followed by
+        # the reducer's global top-N over the union yields the same rows as a
+        # single global top-N. (Any row in the global top-N has at most N-1 rows
+        # ahead of it globally, hence at most N-1 within its own task.)
+        #
+        # This runs AFTER head_candidates so the head phase is provably
+        # untouched -- head_result_cap (10) <= maximum_serving_candidates (256)
+        # would make it safe either way, but ordering it here removes the
+        # coupling entirely.
+        #
+        # Measured on release 2026-07-22.0: 533,964,455 -> 286,494,538 term rows
+        # (46.3% removed), and the largest indivisible (cell, token) group falls
+        # from 742,392 rows to 1,078 -- which is what dissolves the hard floor
+        # that no subdivision depth could lower.
+        combine_rank = (
+            "row_number() OVER (PARTITION BY partition_cell, token ORDER BY "
+            "confidence_rank DESC, feature_id, source_object_index, "
+            "source_row_group, source_row_index)"
+        )
+
+        def binding_of(sql: str) -> dict[str, Any]:
+            reader = connection.execute(sql).fetch_record_batch(MAX_IPC_BATCH_ROWS)
+            total = A.zero_binding()
+            for batch in reader:
+                total = A.combine_bindings(
+                    [total, binding_for_table(pa.Table.from_batches([batch]))]
+                )
+            return total
+
+        connection.execute(
+            f"CREATE TABLE ranked AS SELECT *, {combine_rank} AS combine_rank FROM terms"
+        )
+        connection.execute("DROP TABLE terms")
+        # The discarded set is proven, not assumed: its binding plus the packs'
+        # binding must reconstruct the transform's binding exactly. That is the
+        # same selected/discarded additivity the reducer already enforces per
+        # row group, so nothing is taken on trust because rows were dropped.
+        discarded_binding = binding_of(
+            "SELECT * EXCLUDE(combine_rank) FROM ranked WHERE combine_rank > "
+            f"{limits.maximum_serving_candidates}"
+        )
+        connection.execute(
+            "CREATE TABLE terms AS SELECT * EXCLUDE(combine_rank) FROM ranked "
+            f"WHERE combine_rank <= {limits.maximum_serving_candidates}"
+        )
+        connection.execute("DROP TABLE ranked")
+        connection.execute("CHECKPOINT")
+        combined_rows = connection.execute("SELECT count(*) FROM terms").fetchone()[0]
+        combiner = {
+            "schema": "overture-places-map-combiner-v1",
+            "serving_candidate_cap": limits.maximum_serving_candidates,
+            "input_rows": transform["emitted_term_rows"],
+            "retained_rows": combined_rows,
+            "discarded": discarded_binding,
+        }
         packs = []
         with A.StageWatchdog(
             [workspace],
@@ -515,12 +575,19 @@ def map_task(
         if failpoint in {"after_objects", "before_marker"}:
             raise RuntimeError(f"injected Places interruption: {failpoint}")
         binding = A.combine_bindings([pack["directory"]["binding"] for pack in packs])
+        if binding["records"] != combined_rows:
+            raise ValueError("Places map binding differs from the combined term set")
+        # The packs no longer carry every transformed row, so the map no longer
+        # asserts packs == transform. It asserts the strictly stronger
+        # additivity: what was kept plus what was proven discarded reconstructs
+        # the transform's binding exactly, over both digest lanes.
+        reconstructed = A.combine_bindings([binding, discarded_binding])
         if (
-            binding["records"] != transform["emitted_term_rows"]
-            or binding["semantic_sum_a"] != transform["semantic_sum_a"]
-            or binding["semantic_sum_b"] != transform["semantic_sum_b"]
+            reconstructed["records"] != transform["emitted_term_rows"]
+            or reconstructed["semantic_sum_a"] != transform["semantic_sum_a"]
+            or reconstructed["semantic_sum_b"] != transform["semantic_sum_b"]
         ):
-            raise ValueError("Places map binding differs from transform")
+            raise ValueError("Places map kept+discarded differs from transform")
         marker = {
             "schema": MARKER_SCHEMA,
             "binding_schema": A.BINDING_SCHEMA,
@@ -542,6 +609,7 @@ def map_task(
             "construction_evidence": construction_evidence,
             "packs": packs,
             "head_candidates": head_candidates,
+            "combiner": combiner,
             "binding": binding,
         }
         store.write_marker_last(marker_key(task_id), marker)

@@ -20,6 +20,23 @@ SPEC.loader.exec_module(GEN)
 COMMITTED = ROOT / "scripts/places_partition_plan_v1.json"
 
 
+def test_generator_caps_match_the_caps_the_hosted_build_enforces():
+    # A plan generated against looser caps than the build enforces would place
+    # partitions the reducer then rejects; tighter, and the offline generator
+    # silently over-subdivides. Neither is caught anywhere else, because the
+    # generator runs on a different machine from the build.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import construction_v1_hosted as HOSTED
+
+    places = HOSTED.HOSTED_LIMITS["places"]
+    assert GEN.DEFAULT_CAPS["term_rows"] == places["partition_term_rows"]
+    assert GEN.DEFAULT_CAPS["distinct_tokens"] == places["partition_distinct_tokens"]
+    assert (
+        GEN.DEFAULT_CAPS["estimated_uncompressed_bytes"]
+        == places["partition_estimated_bytes"]
+    )
+
+
 def plan_with(partitions):
     return {"schema": "x", "partitions": partitions}
 
