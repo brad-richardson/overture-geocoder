@@ -11,11 +11,53 @@ import resource
 import shutil
 import sys
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
+
+
+# P1-3: bounded exponential backoff for the read-only S3 HEAD/LIST calls. A
+# transient 5xx, URLError, or socket timeout is retried up to RETRY_ATTEMPTS
+# times (1s, 2s, 4s, 8s, 16s) and then fails closed -- it never silently
+# proceeds as if the object were absent or unchanged.
+RETRY_ATTEMPTS = 5
+RETRY_BASE_SECONDS = 1.0
+
+
+def urlopen_with_retry(
+    request: urllib.request.Request,
+    *,
+    timeout: float,
+    attempts: int = RETRY_ATTEMPTS,
+    base_seconds: float = RETRY_BASE_SECONDS,
+    sleep: Any = time.sleep,
+    opener: Any = urllib.request.urlopen,
+) -> tuple[bytes, dict[str, str]]:
+    """Open ``request`` with retries, returning ``(body_bytes, headers)``.
+
+    Retries on HTTP 5xx, URLError, and timeouts; a 4xx (e.g. 404) fails closed
+    immediately because it is a definitive answer, not a transient fault.
+    """
+    last_error: Exception | None = None
+    for attempt in range(attempts):
+        try:
+            with opener(request, timeout=timeout) as response:
+                headers = dict(response.headers.items())
+                return response.read(), headers
+        except urllib.error.HTTPError as error:
+            if error.code < 500:
+                raise
+            last_error = error
+        except (urllib.error.URLError, TimeoutError, OSError) as error:
+            last_error = error
+        if attempt + 1 < attempts:
+            sleep(base_seconds * (2**attempt))
+    raise RuntimeError(
+        f"S3 request failed after {attempts} attempts: {last_error}"
+    ) from last_error
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -72,12 +114,12 @@ def head_identity(key: str) -> dict[str, Any]:
         method="HEAD",
         headers={"User-Agent": "overture-geocoder-spike/1"},
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        return {
-            "etag": response.headers["ETag"].strip('"'),
-            "bytes": int(response.headers["Content-Length"]),
-            "version_id": response.headers.get("x-amz-version-id"),
-        }
+    _body, headers = urlopen_with_retry(request, timeout=30)
+    return {
+        "etag": headers["ETag"].strip('"'),
+        "bytes": int(headers["Content-Length"]),
+        "version_id": headers.get("x-amz-version-id"),
+    }
 
 
 def parse_network_received(payload: str) -> int:
@@ -132,8 +174,8 @@ def discover_object(
     request = urllib.request.Request(
         list_url(prefix, max_keys), headers={"User-Agent": "overture-geocoder-spike/1"}
     )
-    with urllib.request.urlopen(request, timeout=30) as response:
-        objects = parse_listing(response.read())
+    body, _headers = urlopen_with_retry(request, timeout=30)
+    objects = parse_listing(body)
     eligible = [item for item in objects if item["bytes"] <= max_object_bytes]
     eligible = [
         item
@@ -252,6 +294,46 @@ def peak_rss_bytes() -> int:
     # Linux reports KiB; macOS reports bytes. The hosted experiment runs Linux.
     value = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     return value * 1024 if value < 10_000_000 else value
+
+
+def validate_only(args: argparse.Namespace) -> dict[str, Any]:
+    """P1-1: parse the inventory, validate the task shape, and print the ranges
+    this task WOULD read -- with no S3 access at all. Makes a dry-run honestly
+    exercise the real projection argument + inventory-schema path cheaply."""
+    if args.inventory_report is None or args.task_index is None:
+        raise SystemExit("--validate-only requires --inventory-report and --task-index")
+    inventory = json.loads(args.inventory_report.read_text())
+    identity, task = canonical_inventory_task(
+        inventory, release=args.release, task_index=args.task_index
+    )
+    would_read = [
+        {
+            "uri": selected_range["uri"],
+            "first_row_group": selected_range["first_row_group"],
+            "last_row_group": selected_range["last_row_group"],
+            "row_groups": selected_range["row_groups"],
+        }
+        for selected_range in task["ranges"]
+    ]
+    if task["rows"] > args.max_rows or len(would_read) == 0:
+        raise SystemExit("planned task exceeds the configured row cap or is empty")
+    if task["selected_uncompressed_bytes"] > args.target_rowgroup_uncompressed_bytes:
+        raise SystemExit("planned task exceeds the configured selected-column byte cap")
+    result = {
+        "schema": "overture-hosted-rowgroup-validate-only-v1",
+        "release": args.release,
+        "family": args.family,
+        "task_index": args.task_index,
+        "inventory_sha256": identity["inventory_sha256"],
+        "planned_rows": task["rows"],
+        "planned_selected_uncompressed_bytes": task["selected_uncompressed_bytes"],
+        "would_read_ranges": would_read,
+        "s3_accessed": False,
+    }
+    if args.json_out is not None:
+        args.json_out.parent.mkdir(parents=True, exist_ok=True)
+        args.json_out.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
 
 
 def run_experiment(args: argparse.Namespace) -> dict[str, Any]:
@@ -718,8 +800,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--release", required=True)
     parser.add_argument("--family", choices=sorted(FAMILY_PATHS), default="addresses")
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--json-out", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--json-out", type=Path)
+    parser.add_argument("--validate-only", action="store_true",
+                        help="Parse+validate the inventory task and print the ranges it would read; no S3.")
     parser.add_argument("--inventory-report", type=Path)
     parser.add_argument("--task-index", type=int)
     parser.add_argument("--list-max-keys", type=int, default=100)
@@ -733,6 +817,11 @@ def main() -> None:
     args = parser.parse_args()
     if (args.inventory_report is None) != (args.task_index is None):
         parser.error("--inventory-report and --task-index must be supplied together")
+    if args.validate_only:
+        print(json.dumps(validate_only(args), sort_keys=True))
+        return
+    if args.output is None or args.json_out is None:
+        parser.error("--output and --json-out are required unless --validate-only")
     print(json.dumps(run_experiment(args), sort_keys=True))
 
 
