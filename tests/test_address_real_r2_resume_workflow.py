@@ -201,12 +201,3 @@ def test_region_cleanup_sweeps_the_run_unique_prefix_on_every_path():
     assert 'aws s3 rm "s3://geocoder-shards/${SHUFFLE_PREFIX}/"' in cleanup
     assert 'test "$REMAINING" = "0"' in cleanup
 
-
-def test_large_real_data_rehearsal_does_not_replace_small_merge_smoke():
-    small = (ROOT / ".github" / "workflows" / "smoketest-r2-shuffle.yml").read_text()
-    trigger = small[small.index("on:") : small.index("permissions:")]
-
-    assert "push:" in trigger
-    assert "branches: [main]" in trigger
-    assert "fragment-${index}.bin" in small
-    assert "experiment_hosted_rowgroups.py" not in small

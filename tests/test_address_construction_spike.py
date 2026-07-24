@@ -210,7 +210,7 @@ def test_legacy_reference_uses_bounded_row_batches(tmp_path):
 
     sys.path.insert(0, str(ROOT / "scripts"))
     try:
-        import global_v2_address_map as address_map
+        import pack_schemas_v1 as pack_schemas
         from experiment_address_reduce import strict_batch_records
     finally:
         sys.path.pop(0)
@@ -221,12 +221,12 @@ def test_legacy_reference_uses_bounded_row_batches(tmp_path):
             records.extend(batch_records)
     records.sort(key=lambda item: (item[0], item[1]))
     rows = [
-        address_map._payload_to_shuffle_row(payload, maximum_hash_bits=16)
+        pack_schemas.payload_to_shuffle_row(payload, maximum_hash_bits=16)
         for _, payload in records
     ]
     expected = tmp_path / "legacy-in-memory.parquet"
     pq.write_table(
-        pa.Table.from_pylist(rows, schema=address_map.shuffle_schema()),
+        pa.Table.from_pylist(rows, schema=pack_schemas.shuffle_schema()),
         expected,
         compression="zstd",
         compression_level=6,
