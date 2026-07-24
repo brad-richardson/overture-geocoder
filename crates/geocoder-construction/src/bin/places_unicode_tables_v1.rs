@@ -33,7 +33,7 @@ use serde::Serialize;
 /// Unicode version the tokenizer contract pins. The exported tables are the
 /// source of truth for the word class and lowercase map, but NFKD and combining
 /// marks come from `unicode-normalization`, so both sides must agree on one
-/// version. `assert_pinned_unicode_version` fails closed if the crate moves.
+/// version. The compile-time assert below fails closed if the crate moves.
 const UNICODE_VERSION: &str = "17.0.0";
 
 /// Fail the build if `unicode-normalization` moves off the pinned version, so

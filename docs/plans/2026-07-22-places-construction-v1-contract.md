@@ -20,7 +20,7 @@ and adds CJK bigrams. Field masks are name `1`, brand `2`, category `4`, context
 
 ### Pinned tokenizer semantics (`nfkd-lower-stripmark-cjk-bigram-v4`)
 
-The tokenizer is pinned to Rust standard-library semantics at **Unicode 16.0**,
+The tokenizer is pinned to Rust standard-library semantics at **Unicode 17.0**,
 as implemented by `places-transform-v1` and mirrored in the Worker query
 tokenizer. In order: trim leading/trailing Unicode `White_Space` only (Rust
 `str::trim`, so the C0 separators U+001C..U+001F are *kept*, unlike CPython
