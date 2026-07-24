@@ -1,0 +1,123 @@
+{
+  "schema": "overture-address-construction-independent-fixture-v1",
+  "notes": [
+    "Expected values are literal review data; the fixture loader must not call the Rust transform or legacy Python mapper to derive them.",
+    "The two admitted rows intentionally share an exact lookup key while preserving UUID and source multiplicity."
+  ],
+  "rows": [
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "street": "  MAIN\u00a0Street ",
+      "number": "10",
+      "unit": " Apt  2 ",
+      "postcode": " 02180 ",
+      "postal_city": "Stoneham",
+      "address_levels": ["MA", "Stoneham"],
+      "country": "US",
+      "point": [-71.0, 42.0],
+      "source_object_index": 0,
+      "source_row_group": 2,
+      "source_row_index": 1
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "street": "main street",
+      "number": "10",
+      "unit": "apt 2",
+      "postcode": "02180",
+      "postal_city": "Stoneham",
+      "address_levels": ["ma", "stoneham"],
+      "country": "us",
+      "point": [-71.0, 42.0],
+      "source_object_index": 0,
+      "source_row_group": 2,
+      "source_row_index": 0
+    },
+    {
+      "id": null,
+      "street": " ",
+      "number": "",
+      "country": "",
+      "geometry_hex": "00"
+    },
+    {
+      "id": null,
+      "street": "Main",
+      "number": "1",
+      "country": "",
+      "geometry_hex": "00"
+    },
+    {
+      "id": null,
+      "street": "Main",
+      "number": "1",
+      "country": " \t",
+      "point": [-71.0, 42.0]
+    },
+    {
+      "id": null,
+      "street": "Main",
+      "number": "1",
+      "country": "United States",
+      "point": [-71.0, 42.0]
+    },
+    {
+      "id": null,
+      "street": "Main",
+      "number": "1",
+      "country": "US",
+      "point": [-71.0, 42.0]
+    },
+    {
+      "id": "not-a-uuid",
+      "street": "Main",
+      "number": "1",
+      "country": "US",
+      "point": [-71.0, 42.0]
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000009",
+      "street": "Main",
+      "number": "1",
+      "country": "US",
+      "point": [-71.0, 42.0],
+      "source_object_index": 1,
+      "source_row_index": 0
+    }
+  ],
+  "expected": {
+    "input_rows": 9,
+    "admitted_rows": 2,
+    "rejections_by_precedence": {
+      "missing_street_or_number": 1,
+      "invalid_geometry": 1,
+      "blank_country": 1,
+      "invalid_country": 1,
+      "missing_uuid": 1,
+      "invalid_uuid": 1,
+      "invalid_source_locator": 1,
+      "record_too_large": 0,
+      "invalid_record": 0
+    },
+    "normalized_lookup_key": [
+      "us",
+      "ma",
+      "stoneham",
+      "stoneham",
+      "02180",
+      "main street",
+      "10",
+      "apt 2"
+    ],
+    "route_hash": 10827096435147457437,
+    "maximum_bucket": 38465,
+    "ordered_feature_ids_hex": [
+      "00000000000000000000000000000001",
+      "00000000000000000000000000000002"
+    ],
+    "ordered_source_row_indexes": [0, 1],
+    "display_streets_in_input_order": ["  MAIN\u00a0Street ", "main street"],
+    "semantic_sum_a": "d71877e2b0df1d91b9a66d778553b2b9484cd811ac211c41da109348f76de499",
+    "semantic_sum_b": "d4e94d6c1ba5f92047034868915a35f33dea12bd3efd5494cc4a4f9000a936aa"
+  }
+}

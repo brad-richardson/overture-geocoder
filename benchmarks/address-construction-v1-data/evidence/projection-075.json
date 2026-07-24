@@ -1,0 +1,416 @@
+{
+  "family": "addresses",
+  "limits": {
+    "max_groups": 72,
+    "max_object_bytes": 900000000,
+    "max_output_bytes": 500000000,
+    "max_rows": 4000000,
+    "target_rowgroup_uncompressed_bytes": 400000000
+  },
+  "output": {
+    "address_execution_bucket": "address-map-task-075",
+    "address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "address_task_digest_sha256": "438fe0e066338b411143eb06b071a90ea1e8343c58841edc92bba6f2c7f0e1af",
+    "address_task_index": 75,
+    "address_task_source_digest_sha256": "3b6f02172455af8adc6ba4da6cd0683ee6c52dac13213cb6dc48b627b4e5c09e",
+    "bytes": 156446757,
+    "columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry",
+      "source_object_index",
+      "source_row_group",
+      "source_row_index"
+    ],
+    "path": "benchmarks/address-construction-v1-data/projected/task-075.parquet",
+    "row_groups": 32,
+    "rows": 3984658,
+    "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "sha256": "22968574e814df88755ab473ade902b5f7abd339ed05c0c60df039b5cc91abad",
+    "source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "pyarrow_version": "25.0.0",
+  "release": "2026-06-17.0",
+  "resources": {
+    "disk_free_after": 33351610368,
+    "disk_free_before": 33619259392,
+    "elapsed_seconds": 37.67894770798739,
+    "hydration_network_received_bytes_upper_bound": null,
+    "hydration_verification_seconds": 1.3441225420101546,
+    "initial_network_received_bytes_upper_bound": null,
+    "metadata_seconds": 1.39836579101393,
+    "network_measurement_scope": "unavailable outside Linux /proc",
+    "peak_rss_bytes": 1284096000,
+    "projection_seconds": 0.8076881240704097,
+    "read_and_decode_seconds": 30.180738707946148,
+    "total_network_received_bytes_upper_bound": null,
+    "write_seconds": 3.5064154170104302
+  },
+  "sampling": {
+    "artifact_source_scope": "global inventory with explicit source-object locators",
+    "object_policy": "complete-inventory byte-balanced task",
+    "representative": true,
+    "row_group_policy": "inventory task 75 with contiguous per-object ranges"
+  },
+  "schema": "overture-hosted-rowgroup-spike-v2",
+  "selection": {
+    "estimated_selected_compressed_bytes": 149161136,
+    "projected_columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry"
+    ],
+    "row_group_count": 70,
+    "row_groups": [
+      {
+        "row_group": 21,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 22,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 23,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 24,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 25,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 26,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 27,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 28,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 29,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 30,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 31,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 32,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 33,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 34,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 35,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 36,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 37,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 38,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 39,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 40,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 41,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 42,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 43,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 44,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 45,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 46,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 47,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 48,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 49,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 50,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 51,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 52,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 53,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 54,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 55,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 56,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 57,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 58,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 59,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 60,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 61,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 62,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 63,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 64,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 65,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 66,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 67,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 68,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 69,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 70,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 71,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 72,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 73,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 74,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 75,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 76,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 77,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 78,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 79,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 80,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 81,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 82,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 83,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 84,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 85,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 86,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 87,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 88,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 89,
+        "source_object_index": 20
+      },
+      {
+        "row_group": 90,
+        "source_object_index": 20
+      }
+    ],
+    "rowgroup_uncompressed_bytes": 410259490,
+    "rows": 3984658,
+    "selected_uncompressed_bytes": 286322569
+  },
+  "sources": [
+    {
+      "bytes": 782456353,
+      "etag": "13efb3f827132d7c57fd85594de3879e-12",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet",
+      "parquet_row_groups": 256,
+      "parquet_rows": 14753388,
+      "records": 14753388,
+      "row_groups": 256,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 20,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet",
+      "version_id": null
+    }
+  ],
+  "verification": {
+    "artifact_source_metadata_match": true,
+    "hydrated_sample_count": 3,
+    "hydrated_samples": [
+      {
+        "output_row": 0,
+        "source_object_index": 20,
+        "source_row_group": 21,
+        "source_row_index": 0
+      },
+      {
+        "output_row": 1992329,
+        "source_object_index": 20,
+        "source_row_group": 55,
+        "source_row_index": 4726
+      },
+      {
+        "output_row": 3984657,
+        "source_object_index": 20,
+        "source_row_group": 90,
+        "source_row_index": 45054
+      }
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
+}

@@ -1,0 +1,67 @@
+{
+  "schema": "overture-address-construction-v1-evidence-spec-v1",
+  "frozen_at": "2026-07-22",
+  "release": "2026-06-17.0",
+  "inventory": {
+    "path": "benchmarks/address-rowgroup-inventory-report.json",
+    "file_sha256": "7c198331b96cc168235dfccac1b0f6919eadaad996db5fc176fac5cca93e7771",
+    "required_schema": "overture-address-rowgroup-inventory-v1",
+    "required_binding_fields": [
+      "inventory_sha256",
+      "source_inventory_sha256",
+      "schema_contract",
+      "plan.tasks[].execution_bucket",
+      "plan.tasks[].source_digest_sha256",
+      "plan.tasks[].task_digest_sha256",
+      "plan.tasks[].ranges[].source_bytes",
+      "plan.tasks[].ranges[].source_records",
+      "plan.tasks[].ranges[].source_row_groups"
+    ]
+  },
+  "runtime": {
+    "python": "3.12.12",
+    "duckdb": "1.5.1",
+    "numpy": "2.3.5",
+    "pyarrow": "25.0.0"
+  },
+  "fixed_roles": {
+    "representative": {"task_index": 10, "reason": "US mid-distribution task"},
+    "near_cap": {"task_index": 48, "reason": "maximum selected compressed bytes in the pinned plan"},
+    "worst_observed_retention_skew": {"task_index": 3, "reason": "minimum retention in the pinned stratified sweep"}
+  },
+  "census_selected_roles": {
+    "maximum_bucket_heavy": {
+      "candidate_task_indexes": [3, 8, 10, 16, 48, 75, 84, 85, 105, 117, 121, 126],
+      "metric": "maximum rows sharing (country, maximum_bucket)",
+      "selection": "descending metric then ascending task_index"
+    },
+    "duplicate_heavy": {
+      "candidate_task_indexes": [3, 8, 10, 16, 48, 75, 84, 85, 105, 117, 121, 126],
+      "metric": "maximum exact normalized-key multiplicity",
+      "selection": "descending metric then ascending task_index"
+    }
+  },
+  "acceptance_gates": {
+    "candidate_vs_frozen_python_baseline_speedup_min": 2.0,
+    "deterministic_runs_per_input": 2,
+    "resource_headroom_min_fraction": 0.25,
+    "input_rows_hard_cap": 4100000,
+    "selected_compressed_bytes_hard_cap": 160000000,
+    "selected_uncompressed_bytes_hard_cap": 350000000,
+    "row_groups_hard_cap": 72,
+    "process_group_rss_hard_cap_bytes": 4294967296,
+    "scratch_and_output_hard_cap_bytes": 17179869184,
+    "map_output_hard_cap_bytes": 2147483648,
+    "construction_wall_hard_cap_seconds": 900,
+    "arrow_handoff_wall_fraction_max": 0.25,
+    "minimum_logical_tasks": 2,
+    "minimum_packs": 3,
+    "minimum_parquet_row_groups": 3,
+    "minimum_genesis_partitions": 2,
+    "required_overlap_reconciliation": true,
+    "required_process_group_termination": true,
+    "required_resume_before_hydration": true,
+    "required_interruption_phases": ["local_write", "immutable_publish", "before_marker"]
+  },
+  "relaxation_policy": "none; changes require a new evidence-spec schema/version and invalidate earlier evidence"
+}

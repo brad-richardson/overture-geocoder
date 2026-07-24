@@ -1,0 +1,18 @@
+{
+  "schema": "overture-places-construction-v1-scale-evidence-v1",
+  "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+  "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
+  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+  "candidate_universe": [15, 5, 13, 1, 76, 55, 85, 73, 71, 86, 74, 87],
+  "census": [],
+  "roles": {},
+  "task_runs": {},
+  "rehearsal": {
+    "blocked_before_census": true,
+    "blocker": "public read escalation rejected before task 15 because the session usage/approval limit was exhausted",
+    "source_columns_observed": false,
+    "candidate_metrics_observed": false,
+    "remote_writes": false
+  }
+}

@@ -1,0 +1,442 @@
+{
+  "family": "addresses",
+  "limits": {
+    "max_groups": 72,
+    "max_object_bytes": 900000000,
+    "max_output_bytes": 500000000,
+    "max_rows": 4000000,
+    "target_rowgroup_uncompressed_bytes": 400000000
+  },
+  "output": {
+    "address_execution_bucket": "address-map-task-085",
+    "address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "address_task_digest_sha256": "a5533c3dffe9ce3d03951a72cd39372bfc97db83d281029f34092dfb749ba1dd",
+    "address_task_index": 85,
+    "address_task_source_digest_sha256": "0355bf129b1def9b165b80cd0ee3a44e319ba9fa5d480db7f3209b019d992aec",
+    "bytes": 153903356,
+    "columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry",
+      "source_object_index",
+      "source_row_group",
+      "source_row_index"
+    ],
+    "path": "benchmarks/address-construction-v1-data/projected/task-085.parquet",
+    "row_groups": 32,
+    "rows": 3979330,
+    "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "sha256": "224c7361c3d66433d9a4285f46e5500ea5055358ac21f52526240f441ea035b0",
+    "source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "pyarrow_version": "25.0.0",
+  "release": "2026-06-17.0",
+  "resources": {
+    "disk_free_after": 34099879936,
+    "disk_free_before": 34265948160,
+    "elapsed_seconds": 35.69831970799714,
+    "hydration_network_received_bytes_upper_bound": null,
+    "hydration_verification_seconds": 0.9116859159548767,
+    "initial_network_received_bytes_upper_bound": null,
+    "metadata_seconds": 1.9443777079577558,
+    "network_measurement_scope": "unavailable outside Linux /proc",
+    "peak_rss_bytes": 1387462656,
+    "projection_seconds": 0.7324740480980836,
+    "read_and_decode_seconds": 28.516531495552044,
+    "total_network_received_bytes_upper_bound": null,
+    "write_seconds": 2.8959322080481797
+  },
+  "sampling": {
+    "artifact_source_scope": "global inventory with explicit source-object locators",
+    "object_policy": "complete-inventory byte-balanced task",
+    "representative": true,
+    "row_group_policy": "inventory task 85 with contiguous per-object ranges"
+  },
+  "schema": "overture-hosted-rowgroup-spike-v2",
+  "selection": {
+    "estimated_selected_compressed_bytes": 146403609,
+    "projected_columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry"
+    ],
+    "row_group_count": 70,
+    "row_groups": [
+      {
+        "row_group": 194,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 195,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 196,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 197,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 198,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 199,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 200,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 201,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 202,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 203,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 204,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 205,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 206,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 207,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 208,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 209,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 210,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 211,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 212,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 213,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 214,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 215,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 216,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 217,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 218,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 219,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 220,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 221,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 222,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 223,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 224,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 225,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 226,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 227,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 228,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 229,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 230,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 231,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 232,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 233,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 234,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 235,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 236,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 237,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 238,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 239,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 240,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 241,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 242,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 243,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 244,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 245,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 246,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 247,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 248,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 249,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 250,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 251,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 252,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 253,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 254,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 255,
+        "source_object_index": 22
+      },
+      {
+        "row_group": 0,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 1,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 2,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 3,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 4,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 5,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 6,
+        "source_object_index": 23
+      },
+      {
+        "row_group": 7,
+        "source_object_index": 23
+      }
+    ],
+    "rowgroup_uncompressed_bytes": 403865363,
+    "rows": 3979330,
+    "selected_uncompressed_bytes": 285695717
+  },
+  "sources": [
+    {
+      "bytes": 738365287,
+      "etag": "b75f70fe8ac57d6851372449a20f8e14-12",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00022-75707434-f579-58c3-abba-af1d52d582b5-c000.zstd.parquet",
+      "parquet_row_groups": 256,
+      "parquet_rows": 14857510,
+      "records": 14857510,
+      "row_groups": 256,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 22,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00022-75707434-f579-58c3-abba-af1d52d582b5-c000.zstd.parquet",
+      "version_id": null
+    },
+    {
+      "bytes": 737506515,
+      "etag": "e4c8c821cf0cfb9ab4d3580f896c7228-11",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet",
+      "parquet_row_groups": 256,
+      "parquet_rows": 14851476,
+      "records": 14851476,
+      "row_groups": 256,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 23,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet",
+      "version_id": null
+    }
+  ],
+  "verification": {
+    "artifact_source_metadata_match": true,
+    "hydrated_sample_count": 3,
+    "hydrated_samples": [
+      {
+        "output_row": 0,
+        "source_object_index": 22,
+        "source_row_group": 194,
+        "source_row_index": 0
+      },
+      {
+        "output_row": 1989665,
+        "source_object_index": 22,
+        "source_row_group": 228,
+        "source_row_index": 21602
+      },
+      {
+        "output_row": 3979329,
+        "source_object_index": 23,
+        "source_row_group": 7,
+        "source_row_index": 66627
+      }
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
+}

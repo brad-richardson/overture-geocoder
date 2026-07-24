@@ -1,0 +1,29 @@
+{
+  "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "ready": false,
+  "reasons": [
+    "census task set is missing or extra",
+    "role set/order differs",
+    "roles are not distinct",
+    "logical task coverage is low",
+    "pack coverage is low",
+    "row-group coverage is low",
+    "partition coverage is low",
+    "selective amplification exceeds cap",
+    "exact reconciliation is absent",
+    "overlap reconciliation is absent",
+    "adaptive subdivision is absent",
+    "multi-task fan-in is absent",
+    "routed artifacts are unverified",
+    "head artifact is unverified",
+    "Worker routed query evidence is absent",
+    "Worker head query evidence is absent",
+    "resume-before-projection evidence is absent",
+    "interruption phase set differs",
+    "head result cap differs",
+    "Worker index probe cap differs"
+  ],
+  "scale_evidence_sha256": "9043241ac6ff332605ea11709269a9fe582612e65cfdc328a1b52b57d613f23f",
+  "schema": "overture-places-construction-v1-readiness-v1"
+}

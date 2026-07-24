@@ -1,0 +1,45 @@
+{
+  "schema": "overture-address-construction-v1-isolated-construction-failure-v1",
+  "evidence_spec_sha256": "130207f3debde346cc9c1178e5038e2257e883ccd46c5826d1a5ae22c2583af9",
+  "inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+  "all_gates_passed": false,
+  "task_index": 10,
+  "task_digest_sha256": "9b2c6d1b8d7d3adef3fbe670972cbece795d8899ea68d415b887718fe6aa8874",
+  "outer_orchestrator_peak_rss_bytes": 811433984,
+  "first_construction": {
+    "pid": 21604,
+    "process_group_id": 21604,
+    "started_rss_bytes": 25231360,
+    "peak_rss_bytes": 3053748224,
+    "ended_rss_bytes": 3023585280,
+    "peak_scratch_bytes": 924287416,
+    "wall_seconds": 10.81068579107523,
+    "scratch_bytes_after_close": 0,
+    "exited_before_next_run": true
+  },
+  "second_construction": {
+    "pid": 21614,
+    "process_group_id": 21614,
+    "started_rss_bytes": 25182208,
+    "peak_rss_bytes": 3261284352,
+    "ended_rss_bytes": 3099475968,
+    "peak_scratch_bytes": 920879544,
+    "wall_seconds": 11.666634000022896,
+    "scratch_bytes_after_close": 0,
+    "exited_before_next_run": true
+  },
+  "determinism": {
+    "logical_report": true,
+    "transformed_ipc_sha256": true,
+    "pack_sha256": true,
+    "summary_sha256": true
+  },
+  "failed_gate": {
+    "name": "resource_headroom_min_fraction",
+    "acceptance_ceiling_bytes": 3221225472,
+    "observed_headroom_fraction": 0.24067306518554688,
+    "observed_excess_over_acceptance_ceiling_bytes": 40058880,
+    "attribution": "fresh isolated DuckDB construction with full transformed Arrow read_all materialization"
+  },
+  "disposition": "stop immediately before tasks 16 and 48"
+}
