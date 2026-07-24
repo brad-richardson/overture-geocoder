@@ -1,0 +1,434 @@
+{
+  "family": "addresses",
+  "limits": {
+    "max_groups": 72,
+    "max_object_bytes": 900000000,
+    "max_output_bytes": 500000000,
+    "max_rows": 4000000,
+    "target_rowgroup_uncompressed_bytes": 400000000
+  },
+  "output": {
+    "address_execution_bucket": "address-map-task-003",
+    "address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "address_task_digest_sha256": "95e231b7ef5eaad4ff39e72301a12c4fe889f52c3b188363dcb6af473b04b88d",
+    "address_task_index": 3,
+    "address_task_source_digest_sha256": "6e3f10f3018df0b57dab141f7432136da1b02c9fd0cc69b8e8b0328e0d71c238",
+    "bytes": 153296452,
+    "columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry",
+      "source_object_index",
+      "source_row_group",
+      "source_row_index"
+    ],
+    "path": "benchmarks/address-construction-v1-data/projected/task-003.parquet",
+    "row_groups": 32,
+    "rows": 3998978,
+    "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "sha256": "48ba272d3c4359cf5dea6e4239dc2127e58f00a7a8c1935f3a058172ede4bfef",
+    "source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "pyarrow_version": "25.0.0",
+  "release": "2026-06-17.0",
+  "resources": {
+    "disk_free_after": 33959215104,
+    "disk_free_before": 34188996608,
+    "elapsed_seconds": 37.670717625005636,
+    "hydration_network_received_bytes_upper_bound": null,
+    "hydration_verification_seconds": 2.7257044579600915,
+    "initial_network_received_bytes_upper_bound": null,
+    "metadata_seconds": 2.005062750016805,
+    "network_measurement_scope": "unavailable outside Linux /proc",
+    "peak_rss_bytes": 1208107008,
+    "projection_seconds": 0.3190924168447964,
+    "read_and_decode_seconds": 30.78426437592134,
+    "total_network_received_bytes_upper_bound": null,
+    "write_seconds": 1.1955885000061244
+  },
+  "sampling": {
+    "artifact_source_scope": "global inventory with explicit source-object locators",
+    "object_policy": "complete-inventory byte-balanced task",
+    "representative": true,
+    "row_group_policy": "inventory task 3 with contiguous per-object ranges"
+  },
+  "schema": "overture-hosted-rowgroup-spike-v2",
+  "selection": {
+    "estimated_selected_compressed_bytes": 145461327,
+    "projected_columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry"
+    ],
+    "row_group_count": 68,
+    "row_groups": [
+      {
+        "row_group": 206,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 207,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 208,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 209,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 210,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 211,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 212,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 213,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 214,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 215,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 216,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 217,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 218,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 219,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 220,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 221,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 222,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 223,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 224,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 225,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 226,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 227,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 228,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 229,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 230,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 231,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 232,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 233,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 234,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 235,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 236,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 237,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 238,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 239,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 240,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 241,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 242,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 243,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 244,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 245,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 246,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 247,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 248,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 249,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 250,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 251,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 252,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 253,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 254,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 255,
+        "source_object_index": 0
+      },
+      {
+        "row_group": 0,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 1,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 2,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 3,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 4,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 5,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 6,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 7,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 8,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 9,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 10,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 11,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 12,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 13,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 14,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 15,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 16,
+        "source_object_index": 1
+      },
+      {
+        "row_group": 17,
+        "source_object_index": 1
+      }
+    ],
+    "rowgroup_uncompressed_bytes": 368005778,
+    "rows": 3998978,
+    "selected_uncompressed_bytes": 284895303
+  },
+  "sources": [
+    {
+      "bytes": 657344776,
+      "etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet",
+      "parquet_row_groups": 256,
+      "parquet_rows": 14789737,
+      "records": 14789737,
+      "row_groups": 256,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 0,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet",
+      "version_id": null
+    },
+    {
+      "bytes": 687269386,
+      "etag": "e32ac432ae89bbaa60149f44c9cae902-11",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet",
+      "parquet_row_groups": 256,
+      "parquet_rows": 14763966,
+      "records": 14763966,
+      "row_groups": 256,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 1,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet",
+      "version_id": null
+    }
+  ],
+  "verification": {
+    "artifact_source_metadata_match": true,
+    "hydrated_sample_count": 3,
+    "hydrated_samples": [
+      {
+        "output_row": 0,
+        "source_object_index": 0,
+        "source_row_group": 206,
+        "source_row_index": 0
+      },
+      {
+        "output_row": 1999489,
+        "source_object_index": 0,
+        "source_row_group": 240,
+        "source_row_index": 43487
+      },
+      {
+        "output_row": 3998977,
+        "source_object_index": 1,
+        "source_row_group": 17,
+        "source_row_index": 60687
+      }
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
+}

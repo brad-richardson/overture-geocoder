@@ -1,0 +1,424 @@
+{
+  "family": "addresses",
+  "limits": {
+    "max_groups": 72,
+    "max_object_bytes": 900000000,
+    "max_output_bytes": 500000000,
+    "max_rows": 4000000,
+    "target_rowgroup_uncompressed_bytes": 400000000
+  },
+  "output": {
+    "address_execution_bucket": "address-map-task-121",
+    "address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "address_task_digest_sha256": "ef075ab3726a2cf1eec84bb176f39135b2d3d1bb009d62f9048c481777f8c1c1",
+    "address_task_index": 121,
+    "address_task_source_digest_sha256": "4455460471f1b383606ccde25d4c1381ae7b68b708d4d7962f253a91c00ff49d",
+    "bytes": 56874519,
+    "columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry",
+      "source_object_index",
+      "source_row_group",
+      "source_row_index"
+    ],
+    "path": "benchmarks/address-construction-v1-data/projected/task-121.parquet",
+    "row_groups": 17,
+    "rows": 2074682,
+    "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "sha256": "8dfb79539802c3af23b00dec317e2e4f501489f386581b56404ae96cb8dad1e9",
+    "source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "pyarrow_version": "25.0.0",
+  "release": "2026-06-17.0",
+  "resources": {
+    "disk_free_after": 32765784064,
+    "disk_free_before": 32823963648,
+    "elapsed_seconds": 19.639624333009124,
+    "hydration_network_received_bytes_upper_bound": null,
+    "hydration_verification_seconds": 0.8898254169616848,
+    "initial_network_received_bytes_upper_bound": null,
+    "metadata_seconds": 1.5300484159961343,
+    "network_measurement_scope": "unavailable outside Linux /proc",
+    "peak_rss_bytes": 876412928,
+    "projection_seconds": 0.1772370776743628,
+    "read_and_decode_seconds": 16.207892914360855,
+    "total_network_received_bytes_upper_bound": null,
+    "write_seconds": 0.5439847079687752
+  },
+  "sampling": {
+    "artifact_source_scope": "global inventory with explicit source-object locators",
+    "object_policy": "complete-inventory byte-balanced task",
+    "representative": true,
+    "row_group_policy": "inventory task 121 with contiguous per-object ranges"
+  },
+  "schema": "overture-hosted-rowgroup-spike-v2",
+  "selection": {
+    "estimated_selected_compressed_bytes": 53867895,
+    "projected_columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry"
+    ],
+    "row_group_count": 72,
+    "row_groups": [
+      {
+        "row_group": 147,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 148,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 149,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 150,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 151,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 152,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 153,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 154,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 155,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 156,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 157,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 158,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 159,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 160,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 161,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 162,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 163,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 164,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 165,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 166,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 167,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 168,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 169,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 170,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 171,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 172,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 173,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 174,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 175,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 176,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 177,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 178,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 179,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 180,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 181,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 182,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 183,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 184,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 185,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 186,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 187,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 188,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 189,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 190,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 191,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 192,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 193,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 194,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 195,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 196,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 197,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 198,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 199,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 200,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 201,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 202,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 203,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 204,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 205,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 206,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 207,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 208,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 209,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 210,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 211,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 212,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 213,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 214,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 215,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 216,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 217,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 218,
+        "source_object_index": 31
+      }
+    ],
+    "rowgroup_uncompressed_bytes": 119122714,
+    "rows": 2074682,
+    "selected_uncompressed_bytes": 104744581
+  },
+  "sources": [
+    {
+      "bytes": 450982050,
+      "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet",
+      "parquet_row_groups": 512,
+      "parquet_rows": 14598169,
+      "records": 14598169,
+      "row_groups": 512,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 31,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet",
+      "version_id": null
+    }
+  ],
+  "verification": {
+    "artifact_source_metadata_match": true,
+    "hydrated_sample_count": 3,
+    "hydrated_samples": [
+      {
+        "output_row": 0,
+        "source_object_index": 31,
+        "source_row_group": 147,
+        "source_row_index": 0
+      },
+      {
+        "output_row": 1037341,
+        "source_object_index": 31,
+        "source_row_group": 183,
+        "source_row_index": 4211
+      },
+      {
+        "output_row": 2074681,
+        "source_object_index": 31,
+        "source_row_group": 218,
+        "source_row_index": 18186
+      }
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 6.806079916015733,
+    "peak_rss_bytes": 1528676352,
+    "peak_scratch_and_output_bytes": 1355356238,
+    "wall_seconds": 6.084840166964568
+  },
+  "hydration": {
+    "batches": 62,
+    "ipc_bytes": 668667752,
+    "rows": 3998978,
+    "seconds": 0.8496958749601617
+  },
+  "identity": {
+    "overture.address_execution_bucket": "address-map-task-003",
+    "overture.address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "overture.address_task_digest_sha256": "95e231b7ef5eaad4ff39e72301a12c4fe889f52c3b188363dcb6af473b04b88d",
+    "overture.address_task_index": "3",
+    "overture.address_task_source_digest_sha256": "6e3f10f3018df0b57dab141f7432136da1b02c9fd0cc69b8e8b0328e0d71c238",
+    "overture.schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "overture.source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "input": {
+    "bytes": 153296452,
+    "rows": 3998978,
+    "sha256": "48ba272d3c4359cf5dea6e4239dc2127e58f00a7a8c1935f3a058172ede4bfef"
+  },
+  "maximum_bucket_group": {
+    "country": "mx",
+    "maximum_bucket": 21388,
+    "records": 264
+  },
+  "maximum_exact_normalized_key": {
+    "normalized_key": [
+      "mx",
+      "jalisco",
+      "el salto",
+      "",
+      "45694",
+      "privada ninguno",
+      "* sn",
+      ""
+    ],
+    "records": 252
+  },
+  "schema": "overture-address-construction-transformed-census-v1",
+  "transform": {
+    "admitted_rows": 1611322,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 18.490831917,
+    "input_rows": 3998978,
+    "maximum_hash_bits": 16,
+    "normalization_version": "nfc-uniws-collapse-ascii-lower-v1",
+    "rejected_rows": 2387656,
+    "rejections_by_precedence": {
+      "blank_country": 0,
+      "invalid_country": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_street_or_number": 2387656,
+      "missing_uuid": 0,
+      "record_too_large": 0
+    },
+    "schema": "overture-address-rust-transform-report-v1",
+    "semantic_sum_a": "e0009770a444b2fb4a40a703ca21850eda38bc1a105866db34cb5c6a9339e9d1",
+    "semantic_sum_b": "763637e757f42d38cafe67f868eead5116bd8e70ff06ea372934d0d9207a3323",
+    "transform_version": "address-rust-arrow-transform-v1"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 331235328,
+    "peak_scratch_bytes": 1159958472,
+    "wall_seconds": 18.526746333984192
+  }
+}

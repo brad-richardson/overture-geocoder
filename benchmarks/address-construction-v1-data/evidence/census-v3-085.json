@@ -1,0 +1,76 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 8.209109249990433,
+    "peak_rss_bytes": 2240004096,
+    "peak_scratch_and_output_bytes": 2088093074,
+    "wall_seconds": 7.918236333061941
+  },
+  "hydration": {
+    "batches": 61,
+    "ipc_bytes": 575179392,
+    "rows": 3979330,
+    "seconds": 0.5849321250570938
+  },
+  "identity": {
+    "overture.address_execution_bucket": "address-map-task-085",
+    "overture.address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "overture.address_task_digest_sha256": "a5533c3dffe9ce3d03951a72cd39372bfc97db83d281029f34092dfb749ba1dd",
+    "overture.address_task_index": "85",
+    "overture.address_task_source_digest_sha256": "0355bf129b1def9b165b80cd0ee3a44e319ba9fa5d480db7f3209b019d992aec",
+    "overture.schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "overture.source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "input": {
+    "bytes": 153903356,
+    "rows": 3979330,
+    "sha256": "224c7361c3d66433d9a4285f46e5500ea5055358ac21f52526240f441ea035b0"
+  },
+  "maximum_bucket_group": {
+    "country": "de",
+    "maximum_bucket": 33542,
+    "records": 88
+  },
+  "maximum_exact_normalized_key": {
+    "normalized_key": [
+      "fr",
+      "rosheim",
+      "rosheim",
+      "",
+      "67560",
+      "rue de l'ecole",
+      "21",
+      ""
+    ],
+    "records": 11
+  },
+  "schema": "overture-address-construction-transformed-census-v1",
+  "transform": {
+    "admitted_rows": 3977190,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 14.1826765,
+    "input_rows": 3979330,
+    "maximum_hash_bits": 16,
+    "normalization_version": "nfc-uniws-collapse-ascii-lower-v1",
+    "rejected_rows": 2140,
+    "rejections_by_precedence": {
+      "blank_country": 0,
+      "invalid_country": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_street_or_number": 2140,
+      "missing_uuid": 0,
+      "record_too_large": 0
+    },
+    "schema": "overture-address-rust-transform-report-v1",
+    "semantic_sum_a": "becad19b70dc9794fbc9cd0ed163e895b45438ed4a2365b5e83eef9e5c64780c",
+    "semantic_sum_b": "60eca9ca0f28dc87349063f2f8f834c9f4c167ffc247677c521ad9ca2b276055",
+    "transform_version": "address-rust-arrow-transform-v1"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 1124384768,
+    "peak_scratch_bytes": 1606307096,
+    "wall_seconds": 14.21342949999962
+  }
+}

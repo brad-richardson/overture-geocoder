@@ -1,0 +1,156 @@
+{
+  "family": "addresses",
+  "limits": {
+    "max_groups": 72,
+    "max_object_bytes": 900000000,
+    "max_output_bytes": 500000000,
+    "max_rows": 4000000,
+    "target_rowgroup_uncompressed_bytes": 400000000
+  },
+  "output": {
+    "address_execution_bucket": "address-map-task-126",
+    "address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "address_task_digest_sha256": "313e4086be855f762093e9883e2fa5f3cc005e4fb48260ae227219711e66855e",
+    "address_task_index": 126,
+    "address_task_source_digest_sha256": "7fa27dc5dfffcd6109212141ecbe5c6c68edce26278cf3e91a9fa808a97a1cbe",
+    "bytes": 4967458,
+    "columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry",
+      "source_object_index",
+      "source_row_group",
+      "source_row_index"
+    ],
+    "path": "benchmarks/address-construction-v1-data/projected/task-126.parquet",
+    "row_groups": 2,
+    "rows": 154296,
+    "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "sha256": "4dd148c958a3b1cb3d8f685ccca40a41d483d68263201b007f5dfd4f43f8f5e5",
+    "source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "pyarrow_version": "25.0.0",
+  "release": "2026-06-17.0",
+  "resources": {
+    "disk_free_after": 32760815616,
+    "disk_free_before": 32765771776,
+    "elapsed_seconds": 3.7253825000370853,
+    "hydration_network_received_bytes_upper_bound": null,
+    "hydration_verification_seconds": 0.5928141660406254,
+    "initial_network_received_bytes_upper_bound": null,
+    "metadata_seconds": 1.3402022079681046,
+    "network_measurement_scope": "unavailable outside Linux /proc",
+    "peak_rss_bytes": 223969280,
+    "projection_seconds": 0.01445691694971174,
+    "read_and_decode_seconds": 1.4497820429387502,
+    "total_network_received_bytes_upper_bound": null,
+    "write_seconds": 0.04631729196989909
+  },
+  "sampling": {
+    "artifact_source_scope": "global inventory with explicit source-object locators",
+    "object_policy": "complete-inventory byte-balanced task",
+    "representative": true,
+    "row_group_policy": "inventory task 126 with contiguous per-object ranges"
+  },
+  "schema": "overture-hosted-rowgroup-spike-v2",
+  "selection": {
+    "estimated_selected_compressed_bytes": 4635815,
+    "projected_columns": [
+      "id",
+      "street",
+      "number",
+      "unit",
+      "postcode",
+      "postal_city",
+      "address_levels",
+      "country",
+      "geometry"
+    ],
+    "row_group_count": 5,
+    "row_groups": [
+      {
+        "row_group": 507,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 508,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 509,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 510,
+        "source_object_index": 31
+      },
+      {
+        "row_group": 511,
+        "source_object_index": 31
+      }
+    ],
+    "rowgroup_uncompressed_bytes": 11470286,
+    "rows": 154296,
+    "selected_uncompressed_bytes": 9087576
+  },
+  "sources": [
+    {
+      "bytes": 450982050,
+      "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+      "key": "release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet",
+      "parquet_row_groups": 512,
+      "parquet_rows": 14598169,
+      "records": 14598169,
+      "row_groups": 512,
+      "schema_columns": [
+        "id",
+        "street",
+        "number",
+        "unit",
+        "postcode",
+        "postal_city",
+        "address_levels",
+        "country",
+        "geometry",
+        "sources",
+        "version",
+        "bbox"
+      ],
+      "source_object_index": 31,
+      "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet",
+      "version_id": null
+    }
+  ],
+  "verification": {
+    "artifact_source_metadata_match": true,
+    "hydrated_sample_count": 3,
+    "hydrated_samples": [
+      {
+        "output_row": 0,
+        "source_object_index": 31,
+        "source_row_group": 507,
+        "source_row_index": 0
+      },
+      {
+        "output_row": 77148,
+        "source_object_index": 31,
+        "source_row_group": 509,
+        "source_row_index": 6388
+      },
+      {
+        "output_row": 154295,
+        "source_object_index": 31,
+        "source_row_group": 511,
+        "source_row_index": 33700
+      }
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
+}

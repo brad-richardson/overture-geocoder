@@ -660,6 +660,90 @@ def restore_predecessor_plan_artifacts(
     return restored
 
 
+# --- Phase-boundary fingerprint checks -------------------------------------
+#
+# The recurring defect in this pipeline is interface drift: a producer phase's
+# stored/normalized artifact shape diverges from the raw shape the next phase
+# reads, and the mismatch only surfaces as a KeyError or type error minutes
+# into a multi-task job (e.g. #127 KeyError 'families', #128 digested plan fed
+# to the raw builder, #138 stale contract expectations). Each consumer verifies
+# a compact structural fingerprint -- the artifact's own schema tag plus the
+# required top-level keys and their types -- in the first seconds of the job and
+# fails closed, naming both phases and expected-vs-observed. These are
+# deliberately small, per-boundary asserts, not a general validation framework.
+
+
+def _assert_boundary_shape(
+    observed: Any, *, producer: str, consumer: str, schema: str,
+    required: dict[str, type | tuple[type, ...]], label: str,
+) -> None:
+    where = f"{producer} -> {consumer} boundary ({label})"
+    if not isinstance(observed, dict):
+        raise ValueError(
+            f"{where}: expected a JSON object, observed {type(observed).__name__}"
+        )
+    observed_schema = observed.get("schema")
+    if observed_schema != schema:
+        raise ValueError(
+            f"{where}: expected schema {schema!r}, observed {observed_schema!r}"
+        )
+    for key, types in required.items():
+        if key not in observed:
+            raise ValueError(f"{where}: missing required key {key!r}")
+        if not isinstance(observed[key], types):
+            expected_name = (
+                types.__name__ if isinstance(types, type)
+                else "/".join(item.__name__ for item in types)
+            )
+            raise ValueError(
+                f"{where}: key {key!r} expected {expected_name}, "
+                f"observed {type(observed[key]).__name__}"
+            )
+
+
+def assert_map_report_boundary(report: Any) -> None:
+    """map -> aggregate-plan: the fan-in planner reads these Places map reports raw."""
+    _assert_boundary_shape(
+        report, producer="map", consumer="aggregate-plan",
+        schema=places_plan.MAP_REPORT_SCHEMA,
+        required={"summary": dict, "fragments": dict}, label="places map report",
+    )
+
+
+def assert_reduce_plan_boundary(plan: Any, *, family: str) -> None:
+    """aggregate-plan -> reduce: each reducer reads its stable plan."""
+    if family == "addresses":
+        _assert_boundary_shape(
+            plan, producer="aggregate-plan", consumer="reduce",
+            schema=address_plan.REDUCE_PLAN_SCHEMA,
+            required={"jobs": list}, label="address reduce plan",
+        )
+    else:
+        _assert_boundary_shape(
+            plan, producer="aggregate-plan", consumer="reduce",
+            schema=places_plan.PLAN_SCHEMA,
+            required={"reduce_jobs": list}, label="places executor plan",
+        )
+
+
+def assert_reduce_report_boundary(report: Any) -> None:
+    """reduce -> head: the head builder fans in Places reduce reports."""
+    _assert_boundary_shape(
+        report, producer="reduce", consumer="head",
+        schema=places_reduce.REDUCE_REPORT_SCHEMA,
+        required={"head_candidates": dict}, label="places reduce report",
+    )
+
+
+def assert_head_report_boundary(report: Any) -> None:
+    """head -> finalize: the family finalizer binds the global Places head."""
+    _assert_boundary_shape(
+        report, producer="head", consumer="finalize",
+        schema=places_head.HEAD_REPORT_SCHEMA,
+        required={"object": dict, "artifact": dict}, label="places head report",
+    )
+
+
 def build_aggregate_plans(
     request: dict[str, Any], address_inventory: dict[str, Any],
     places_inventory: dict[str, Any], *, restored_root: Path, output_root: Path,
@@ -706,6 +790,7 @@ def build_aggregate_plans(
     listing_objects = []
     for path in sorted(places_reports.glob("*.json")):
         report = executor.read_json(path)
+        assert_map_report_boundary(report)
         for item in [report["summary"], *report["fragments"]["objects"]]:
             listing_objects.append({
                 "object_key": item["object_key"], "bytes": item["bytes"],
@@ -851,6 +936,7 @@ def run_reduce_task(
     output_root, scratch = work_root / "output", work_root / "scratch"
     if family == "addresses":
         reduce_value = executor.read_json(address_plan_path)
+        assert_reduce_plan_boundary(reduce_value, family="addresses")
         if not 0 <= index < len(reduce_value["jobs"]):
             raise ValueError("address reducer index outside exact matrix")
         job = reduce_value["jobs"][index]
@@ -873,6 +959,7 @@ def run_reduce_task(
         task_id = job["id"]
     else:
         plan_value = executor.read_json(places_plan_path)
+        assert_reduce_plan_boundary(plan_value, family="places")
         report = places_reduce.execute_reduce_job(
             plan_value, job_index=index, artifact_root=work_root / "unused-inputs",
             scratch_dir=scratch, output_dir=output_root,
@@ -948,6 +1035,7 @@ def run_head_task(
             expected_bytes=identity["bytes"], expected_sha256=identity["sha256"],
         )
         report = executor.read_json(report_path)
+        assert_reduce_report_boundary(report)
         expected_candidate_key = (
             f"{candidate_prefix}/{report['head_candidates']['object_key']}"
         )
@@ -1110,6 +1198,7 @@ def finalize_publish_families(
     head_matches = [executor.read_json(Path(item["path"])) for item in reports if item["phase"] == "head" and item["family"] == "places"]
     if len(head_matches) != 1:
         raise ValueError("finalization requires exactly one Places head report")
+    assert_head_report_boundary(head_matches[0])
     fetch = fragment_fetch_command(request["slice_version"])
     address_root = work_root / "addresses"
     address_completion = address_reduce.finalize(

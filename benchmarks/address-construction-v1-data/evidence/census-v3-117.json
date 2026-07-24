@@ -1,0 +1,76 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 6.881280625006184,
+    "peak_rss_bytes": 2078097408,
+    "peak_scratch_and_output_bytes": 2152355304,
+    "wall_seconds": 6.63234737503808
+  },
+  "hydration": {
+    "batches": 61,
+    "ipc_bytes": 607422248,
+    "rows": 3972966,
+    "seconds": 0.43558279098942876
+  },
+  "identity": {
+    "overture.address_execution_bucket": "address-map-task-117",
+    "overture.address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "overture.address_task_digest_sha256": "ce70884fe9e2a6733bcc8b9665392da15d921c1405b59b7e0089554102d19abf",
+    "overture.address_task_index": "117",
+    "overture.address_task_source_digest_sha256": "5b58a6aa35aa9d67c4563f48f3e8c884ca3da9c52340472ec646a2eaceb920ea",
+    "overture.schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "overture.source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "input": {
+    "bytes": 119860694,
+    "rows": 3972966,
+    "sha256": "53b73b4cb26a039e8705cf7345ccb1fcba0ec1de68bd1f13c86322ed4c35283a"
+  },
+  "maximum_bucket_group": {
+    "country": "fi",
+    "maximum_bucket": 20757,
+    "records": 246
+  },
+  "maximum_exact_normalized_key": {
+    "normalized_key": [
+      "fi",
+      "vantaa",
+      "vantaa",
+      "",
+      "01730",
+      "rajasillantie",
+      "11",
+      ""
+    ],
+    "records": 243
+  },
+  "schema": "overture-address-construction-transformed-census-v1",
+  "transform": {
+    "admitted_rows": 3951970,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 13.574678417,
+    "input_rows": 3972966,
+    "maximum_hash_bits": 16,
+    "normalization_version": "nfc-uniws-collapse-ascii-lower-v1",
+    "rejected_rows": 20996,
+    "rejections_by_precedence": {
+      "blank_country": 0,
+      "invalid_country": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_street_or_number": 20996,
+      "missing_uuid": 0,
+      "record_too_large": 0
+    },
+    "schema": "overture-address-rust-transform-report-v1",
+    "semantic_sum_a": "f82899a97896d070244b7df44d399054f4dfe15c3736977fa19c340b0d18ed7c",
+    "semantic_sum_b": "018bf8c9ea951f9affbfcba34f3dbbd2ca38952e0eeac9c450d960995ffb0a1b",
+    "transform_version": "address-rust-arrow-transform-v1"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 1171619840,
+    "peak_scratch_bytes": 1686298116,
+    "wall_seconds": 13.606775082997046
+  }
+}

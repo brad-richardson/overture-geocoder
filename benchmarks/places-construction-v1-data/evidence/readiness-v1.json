@@ -1,0 +1,26 @@
+{
+  "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "ready": false,
+  "reasons": [
+    "duplicate coverage is absent",
+    "task 76 baseline/candidate binding differs",
+    "task 76 baseline/candidate binding differs",
+    "task 73 baseline/candidate binding differs",
+    "task 73 baseline/candidate binding differs",
+    "task 87 baseline/candidate binding differs",
+    "task 87 baseline/candidate binding differs",
+    "task 86 baseline/candidate binding differs",
+    "task 86 baseline/candidate binding differs",
+    "task 85 baseline/candidate binding differs",
+    "task 85 baseline/candidate binding differs",
+    "task 85 speedup gate failed",
+    "task 1 baseline/candidate binding differs",
+    "task 1 baseline/candidate binding differs",
+    "task 1 speedup gate failed",
+    "head artifact is unverified",
+    "Worker head query evidence is absent"
+  ],
+  "scale_evidence_sha256": "7c046bd7276dea18ed9c394d4f33a6990add60757556595bd4a8a6d402f24e19",
+  "schema": "overture-places-construction-v1-readiness-v1"
+}

@@ -1,0 +1,50 @@
+[package]
+name = "geocoder-construction"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish = false
+default-run = "address-transform-v1"
+
+[[bin]]
+name = "address-transform-v1"
+path = "src/main.rs"
+
+[[bin]]
+name = "address-proof-directory"
+path = "src/bin/address_proof_directory.rs"
+
+[[bin]]
+name = "address-serving-encode-v1"
+path = "src/bin/address_serving_encode_v1.rs"
+
+[[bin]]
+name = "address-serving-verify-v1"
+path = "src/bin/address_serving_verify_v1.rs"
+
+[[bin]]
+name = "places-transform-v1"
+path = "src/bin/places_transform_v1.rs"
+
+[[bin]]
+name = "places-proof-directory"
+path = "src/bin/places_proof_directory.rs"
+
+[[bin]]
+name = "places-serving-encode-v1"
+path = "src/bin/places_serving_encode_v1.rs"
+
+[[bin]]
+name = "places-serving-verify-v1"
+path = "src/bin/places_serving_verify_v1.rs"
+
+[dependencies]
+anyhow = { workspace = true }
+arrow-array = "54.3.1"
+arrow-ipc = "54.3.1"
+arrow-schema = "54.3.1"
+serde = { workspace = true }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+unicode-normalization = "0.1"
+uuid = "1.18"

@@ -1,0 +1,25 @@
+{
+  "schema": "overture-address-construction-v1-candidate-admission-failure-v1",
+  "evidence_spec_sha256": "47bdfc92727725628d4082b7e9a1f8a46959e0f417a16048322909081aba96ec",
+  "inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+  "task_index": 126,
+  "task_digest_sha256": "313e4086be855f762093e9883e2fa5f3cc005e4fb48260ae227219711e66855e",
+  "projected_input_sha256": "4dd148c958a3b1cb3d8f685ccca40a41d483d68263201b007f5dfd4f43f8f5e5",
+  "projected_input_rows": 154296,
+  "projected_locator_types": {
+    "source_object_index": "int32",
+    "source_row_group": "int32",
+    "source_row_index": "int32"
+  },
+  "candidate_required_locator_types": {
+    "source_object_index": "uint32",
+    "source_row_group": "uint32",
+    "source_row_index": "uint64"
+  },
+  "candidate_binary_sha256": "d98b0b4626658c4600a6a048c4eb0d5b3650310502378f7efff106224538de58",
+  "command": "PYTHONPATH=/Users/bradrichardson/.pyenv/versions/3.12.12/lib/python3.12/site-packages .venv/bin/python scripts/spike_address_construction.py --input benchmarks/address-construction-v1-data/projected/task-126.parquet --binary crates/target/release/address-transform-v1 --output-dir benchmarks/address-construction-v1-data/evidence/spike-task-126 --memory-limit 2GB --threads 2",
+  "result": "failed_before_candidate_observation",
+  "error": "input column source_object_index has the wrong Arrow type",
+  "gate": "exact projected-input/candidate schema compatibility",
+  "disposition": "stop; do not insert an adapter or mutate a frozen contract after observation"
+}

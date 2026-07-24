@@ -1,0 +1,168 @@
+{
+  "schema": "hand-authored-places-construction-v1-fixture",
+  "rows": [
+    {
+      "id": "00000000-0000-0000-0000-000000000001",
+      "primary_name": "Café 東京",
+      "common_names": ["Cafe Tokyo", "カフェ 東京"],
+      "brand_name": "Golden_Gate",
+      "category": "coffee_shop",
+      "locality": "Montréal",
+      "region": "QC",
+      "country": "CA",
+      "confidence": 0.8,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 0
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "primary_name": "Library",
+      "common_names": [],
+      "brand_name": "",
+      "category": "public_library",
+      "locality": "Stoneham",
+      "region": "MA",
+      "country": "US",
+      "confidence": 0.5,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 1
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000002",
+      "primary_name": "Library",
+      "common_names": [],
+      "brand_name": "",
+      "category": "public_library",
+      "locality": "Stoneham",
+      "region": "MA",
+      "country": "US",
+      "confidence": 0.5,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 2
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000004",
+      "primary_name": "",
+      "confidence": 0.9,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 3
+    },
+    {
+      "id": "not-a-uuid",
+      "primary_name": "Bad ID",
+      "confidence": 0.9,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 4
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000006",
+      "primary_name": "Closed",
+      "confidence": 0.9,
+      "operating_status": "permanently_closed",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 5
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000007",
+      "primary_name": "Bad Geometry",
+      "confidence": 0.9,
+      "operating_status": "open",
+      "geometry_hex": "01010000000000000000000000",
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 6
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000008",
+      "primary_name": "Bad Confidence",
+      "confidence": 1.5,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": 0,
+      "source_row_group": 0,
+      "source_row_index": 7
+    },
+    {
+      "id": "00000000-0000-0000-0000-000000000009",
+      "primary_name": "Bad Locator",
+      "confidence": 0.7,
+      "operating_status": "open",
+      "point": [0.0, 0.0],
+      "source_object_index": -1,
+      "source_row_group": 0,
+      "source_row_index": 8
+    }
+  ],
+  "expected": {
+    "input_features": 9,
+    "admitted_features": 3,
+    "emitted_term_rows": 21,
+    "rejections_by_precedence": {
+      "missing_primary_name": 1,
+      "invalid_uuid": 1,
+      "permanently_closed": 1,
+      "invalid_geometry": 1,
+      "invalid_confidence": 1,
+      "invalid_source_locator": 1,
+      "record_too_large": 0,
+      "invalid_record": 0
+    },
+    "shared_route": {
+      "execution_group": "80",
+      "partition_cell": "8080",
+      "partition_key": 32896
+    },
+    "first_feature": {
+      "confidence_rank": 204,
+      "terms": {
+        "ca": 8,
+        "cafe": 1,
+        "coffee_shop": 4,
+        "golden_gate": 2,
+        "montreal": 8,
+        "qc": 8,
+        "tokyo": 1,
+        "カフェ": 1,
+        "カフ": 1,
+        "フェ": 1,
+        "東京": 1
+      }
+    },
+    "duplicate_feature": {
+      "confidence_rank": 128,
+      "copies": 2,
+      "terms": {
+        "library": 1,
+        "ma": 8,
+        "public_library": 4,
+        "stoneham": 8,
+        "us": 8
+      },
+      "ordered_source_row_indexes": [1, 2]
+    },
+    "head": {
+      "cafe": ["00000000-0000-0000-0000-000000000001"],
+      "library": [
+        "00000000-0000-0000-0000-000000000002",
+        "00000000-0000-0000-0000-000000000002"
+      ]
+    }
+  }
+}

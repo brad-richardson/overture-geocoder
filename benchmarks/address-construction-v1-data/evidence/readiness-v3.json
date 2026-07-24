@@ -1,0 +1,4348 @@
+{
+  "blockers": [
+    "one or more frozen scale gates did not pass"
+  ],
+  "checks": {
+    "canonical_inventory_identity": {
+      "inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+      "schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+      "source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37",
+      "tasks": [
+        {
+          "exact_country_rows": {
+            "MX": 3931798
+          },
+          "execution_bucket": "address-map-task-000",
+          "index": 0,
+          "mixed_or_unknown_country_rows": 49055,
+          "ranges": [
+            {
+              "etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+              "first_row_group": 0,
+              "last_row_group": 66,
+              "row_groups": 67,
+              "rows": 3980853,
+              "selected_compressed_bytes": 145046945,
+              "selected_uncompressed_bytes": 284208506,
+              "source_bytes": 657344776,
+              "source_records": 14789737,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3980853,
+          "selected_compressed_bytes": 145046945,
+          "selected_uncompressed_bytes": 284208506,
+          "source_digest_sha256": "1dc779816f7a147846ac23dd59dd131b1627ef4a50faa40cf28efa01c6fc0a81",
+          "source_objects": 1,
+          "task_digest_sha256": "0b9ef7c50a1974bd16704fd6d8ef67243b79945e179d7fde08b6e92b5a5a66cb"
+        },
+        {
+          "exact_country_rows": {
+            "CO": 458968,
+            "MX": 3488738
+          },
+          "execution_bucket": "address-map-task-001",
+          "index": 1,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+              "first_row_group": 67,
+              "last_row_group": 135,
+              "row_groups": 69,
+              "rows": 3947706,
+              "selected_compressed_bytes": 141780935,
+              "selected_uncompressed_bytes": 285955035,
+              "source_bytes": 657344776,
+              "source_records": 14789737,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3947706,
+          "selected_compressed_bytes": 141780935,
+          "selected_uncompressed_bytes": 285955035,
+          "source_digest_sha256": "afcecb3c635fe6c4f37094ae2685b028717677e17957391e2d60c31c0e74e307",
+          "source_objects": 1,
+          "task_digest_sha256": "91e0cc1790412c08ea9ab522367ea4bcc656510464b31164b8325ac0b6d821ee"
+        },
+        {
+          "exact_country_rows": {
+            "CO": 2629491,
+            "MX": 1306283
+          },
+          "execution_bucket": "address-map-task-002",
+          "index": 2,
+          "mixed_or_unknown_country_rows": 60471,
+          "ranges": [
+            {
+              "etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+              "first_row_group": 136,
+              "last_row_group": 205,
+              "row_groups": 70,
+              "rows": 3996245,
+              "selected_compressed_bytes": 127595781,
+              "selected_uncompressed_bytes": 295009401,
+              "source_bytes": 657344776,
+              "source_records": 14789737,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3996245,
+          "selected_compressed_bytes": 127595781,
+          "selected_uncompressed_bytes": 295009401,
+          "source_digest_sha256": "960216bb445bae7171695b2d85e08ddbdd72fdbc8aca2e8931a38d25cffc1d84",
+          "source_objects": 1,
+          "task_digest_sha256": "469e7044cf738a7146f0e6c52e7ce25fa2c5cac021f20f6679a47605185aeb27"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 3998978
+          },
+          "execution_bucket": "address-map-task-003",
+          "index": 3,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "1ca05e7afe3b5c0e29425862e5935d36-10",
+              "first_row_group": 206,
+              "last_row_group": 255,
+              "row_groups": 50,
+              "rows": 2864933,
+              "selected_compressed_bytes": 103770008,
+              "selected_uncompressed_bytes": 203397556,
+              "source_bytes": 657344776,
+              "source_records": 14789737,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00000-e78a9a6c-8464-5808-95f2-4af2fd924380-c000.zstd.parquet"
+            },
+            {
+              "etag": "e32ac432ae89bbaa60149f44c9cae902-11",
+              "first_row_group": 0,
+              "last_row_group": 17,
+              "row_groups": 18,
+              "rows": 1134045,
+              "selected_compressed_bytes": 41691319,
+              "selected_uncompressed_bytes": 81497747,
+              "source_bytes": 687269386,
+              "source_records": 14763966,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3998978,
+          "selected_compressed_bytes": 145461327,
+          "selected_uncompressed_bytes": 284895303,
+          "source_digest_sha256": "6e3f10f3018df0b57dab141f7432136da1b02c9fd0cc69b8e8b0328e0d71c238",
+          "source_objects": 2,
+          "task_digest_sha256": "95e231b7ef5eaad4ff39e72301a12c4fe889f52c3b188363dcb6af473b04b88d"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 3983735
+          },
+          "execution_bucket": "address-map-task-004",
+          "index": 4,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "e32ac432ae89bbaa60149f44c9cae902-11",
+              "first_row_group": 18,
+              "last_row_group": 87,
+              "row_groups": 70,
+              "rows": 3983735,
+              "selected_compressed_bytes": 146117614,
+              "selected_uncompressed_bytes": 284827478,
+              "source_bytes": 687269386,
+              "source_records": 14763966,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3983735,
+          "selected_compressed_bytes": 146117614,
+          "selected_uncompressed_bytes": 284827478,
+          "source_digest_sha256": "a39228b63152c195d06c5ad48b88678070601a0837596748a0b4a90d2449fd02",
+          "source_objects": 1,
+          "task_digest_sha256": "827455845257a33986e4ff2643273d115c0407b774a75a7a104c72e9166e48cd"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 3980708
+          },
+          "execution_bucket": "address-map-task-005",
+          "index": 5,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "e32ac432ae89bbaa60149f44c9cae902-11",
+              "first_row_group": 88,
+              "last_row_group": 156,
+              "row_groups": 69,
+              "rows": 3980708,
+              "selected_compressed_bytes": 145294895,
+              "selected_uncompressed_bytes": 283546355,
+              "source_bytes": 687269386,
+              "source_records": 14763966,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3980708,
+          "selected_compressed_bytes": 145294895,
+          "selected_uncompressed_bytes": 283546355,
+          "source_digest_sha256": "b1d152a2089c8344e8be67cfa253fd806c180747d989b9afe798911ff655502c",
+          "source_objects": 1,
+          "task_digest_sha256": "1a4e16e097abf71ec3a707224a05c7a9ca5c7d1b98db539b22650bd3cdd4b54d"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 3968334
+          },
+          "execution_bucket": "address-map-task-006",
+          "index": 6,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "e32ac432ae89bbaa60149f44c9cae902-11",
+              "first_row_group": 157,
+              "last_row_group": 225,
+              "row_groups": 69,
+              "rows": 3968334,
+              "selected_compressed_bytes": 145633953,
+              "selected_uncompressed_bytes": 283616901,
+              "source_bytes": 687269386,
+              "source_records": 14763966,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3968334,
+          "selected_compressed_bytes": 145633953,
+          "selected_uncompressed_bytes": 283616901,
+          "source_digest_sha256": "ed1fa4d28f5ccb0412c174150f22af96da65457a1cc69e68f45f8df403bf8462",
+          "source_objects": 1,
+          "task_digest_sha256": "16b1feb9c4515e47850b577b02e05d4fedb94d9d275394b631fc8ec6af822861"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 3107926,
+            "US": 464897
+          },
+          "execution_bucket": "address-map-task-007",
+          "index": 7,
+          "mixed_or_unknown_country_rows": 389575,
+          "ranges": [
+            {
+              "etag": "e32ac432ae89bbaa60149f44c9cae902-11",
+              "first_row_group": 226,
+              "last_row_group": 255,
+              "row_groups": 30,
+              "rows": 1697144,
+              "selected_compressed_bytes": 59595575,
+              "selected_uncompressed_bytes": 116290152,
+              "source_bytes": 687269386,
+              "source_records": 14763966,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00001-9cb49075-500a-52d8-8a08-604ebe98aa79-c000.zstd.parquet"
+            },
+            {
+              "etag": "3b2f3d6474fc41bffd284eaad1fb88ee-11",
+              "first_row_group": 0,
+              "last_row_group": 40,
+              "row_groups": 41,
+              "rows": 2265254,
+              "selected_compressed_bytes": 82990653,
+              "selected_uncompressed_bytes": 161612335,
+              "source_bytes": 717047412,
+              "source_records": 14770602,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00002-ae826818-9a02-56a1-9b39-3e9d29a91f74-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 71,
+          "rows": 3962398,
+          "selected_compressed_bytes": 142586228,
+          "selected_uncompressed_bytes": 277902487,
+          "source_digest_sha256": "e9cc0818cc13ef68f3341d1dca40e984d2ea913c49966ba728628adefbbcd588",
+          "source_objects": 2,
+          "task_digest_sha256": "4bde372295bb0fa2c48ae1dd23be7d049b4b411a519d2a31b5a4829503e374c4"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 781293,
+            "US": 1196549
+          },
+          "execution_bucket": "address-map-task-008",
+          "index": 8,
+          "mixed_or_unknown_country_rows": 1995101,
+          "ranges": [
+            {
+              "etag": "3b2f3d6474fc41bffd284eaad1fb88ee-11",
+              "first_row_group": 41,
+              "last_row_group": 107,
+              "row_groups": 67,
+              "rows": 3972943,
+              "selected_compressed_bytes": 147137882,
+              "selected_uncompressed_bytes": 287443572,
+              "source_bytes": 717047412,
+              "source_records": 14770602,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00002-ae826818-9a02-56a1-9b39-3e9d29a91f74-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3972943,
+          "selected_compressed_bytes": 147137882,
+          "selected_uncompressed_bytes": 287443572,
+          "source_digest_sha256": "e42c10acfd1cd9e6e3561e6f5dd8a88acf1a3f3d3fbeafdabfee86c025bfa75c",
+          "source_objects": 1,
+          "task_digest_sha256": "3e1bd9d6f369f58285285a31f8ec7f39f6bcf9471a7366f3b9e8c186717118a8"
+        },
+        {
+          "exact_country_rows": {
+            "MX": 291038,
+            "US": 3108100
+          },
+          "execution_bucket": "address-map-task-009",
+          "index": 9,
+          "mixed_or_unknown_country_rows": 581324,
+          "ranges": [
+            {
+              "etag": "3b2f3d6474fc41bffd284eaad1fb88ee-11",
+              "first_row_group": 108,
+              "last_row_group": 174,
+              "row_groups": 67,
+              "rows": 3980462,
+              "selected_compressed_bytes": 149870570,
+              "selected_uncompressed_bytes": 291589290,
+              "source_bytes": 717047412,
+              "source_records": 14770602,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00002-ae826818-9a02-56a1-9b39-3e9d29a91f74-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3980462,
+          "selected_compressed_bytes": 149870570,
+          "selected_uncompressed_bytes": 291589290,
+          "source_digest_sha256": "9be96bd28fbaef080e04c757eafafa0f5a619303114e7a92d28aea0fcafd82d6",
+          "source_objects": 1,
+          "task_digest_sha256": "18196fa0daecc62a254c8ca8ab43cf0fcca948d0142e346a947bd7ba2c59f93e"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3957670
+          },
+          "execution_bucket": "address-map-task-010",
+          "index": 10,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "3b2f3d6474fc41bffd284eaad1fb88ee-11",
+              "first_row_group": 175,
+              "last_row_group": 244,
+              "row_groups": 70,
+              "rows": 3957670,
+              "selected_compressed_bytes": 149936072,
+              "selected_uncompressed_bytes": 291256182,
+              "source_bytes": 717047412,
+              "source_records": 14770602,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00002-ae826818-9a02-56a1-9b39-3e9d29a91f74-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3957670,
+          "selected_compressed_bytes": 149936072,
+          "selected_uncompressed_bytes": 291256182,
+          "source_digest_sha256": "655a46516a48688efabcdc8be47256686f6d515724eaf678dd65ea8daf2e9b7c",
+          "source_objects": 1,
+          "task_digest_sha256": "9b2c6d1b8d7d3adef3fbe670972cbece795d8899ea68d415b887718fe6aa8874"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3976855
+          },
+          "execution_bucket": "address-map-task-011",
+          "index": 11,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "3b2f3d6474fc41bffd284eaad1fb88ee-11",
+              "first_row_group": 245,
+              "last_row_group": 255,
+              "row_groups": 11,
+              "rows": 594273,
+              "selected_compressed_bytes": 22402723,
+              "selected_uncompressed_bytes": 43662639,
+              "source_bytes": 717047412,
+              "source_records": 14770602,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00002-ae826818-9a02-56a1-9b39-3e9d29a91f74-c000.zstd.parquet"
+            },
+            {
+              "etag": "4007f598b1ca117d3c60eb87d4e73577-11",
+              "first_row_group": 0,
+              "last_row_group": 56,
+              "row_groups": 57,
+              "rows": 3382582,
+              "selected_compressed_bytes": 125844594,
+              "selected_uncompressed_bytes": 246292029,
+              "source_bytes": 709748926,
+              "source_records": 14801525,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00003-82dbcbf0-ee70-56c8-9a3e-561db7d1de1d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3976855,
+          "selected_compressed_bytes": 148247317,
+          "selected_uncompressed_bytes": 289954668,
+          "source_digest_sha256": "c538375a2efeb0ebbb5135c5f544f868e237a638ef58d896fe0a09f25be7a6f5",
+          "source_objects": 2,
+          "task_digest_sha256": "88651de85dcb1732397af4abf07607bd05359302e19a390749389cc0f86b8baa"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3948219
+          },
+          "execution_bucket": "address-map-task-012",
+          "index": 12,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "4007f598b1ca117d3c60eb87d4e73577-11",
+              "first_row_group": 57,
+              "last_row_group": 125,
+              "row_groups": 69,
+              "rows": 3948219,
+              "selected_compressed_bytes": 149753640,
+              "selected_uncompressed_bytes": 291688416,
+              "source_bytes": 709748926,
+              "source_records": 14801525,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00003-82dbcbf0-ee70-56c8-9a3e-561db7d1de1d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3948219,
+          "selected_compressed_bytes": 149753640,
+          "selected_uncompressed_bytes": 291688416,
+          "source_digest_sha256": "b07fde5857a3610155f5e67be4777f93121f0f13e9fd59c3f9a6ed76ed7c5435",
+          "source_objects": 1,
+          "task_digest_sha256": "75180b5f4a79e42291b9c05c15a9076a12fab6c2a7dccc73cf8d7372b68eaeaa"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3965894
+          },
+          "execution_bucket": "address-map-task-013",
+          "index": 13,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "4007f598b1ca117d3c60eb87d4e73577-11",
+              "first_row_group": 126,
+              "last_row_group": 195,
+              "row_groups": 70,
+              "rows": 3965894,
+              "selected_compressed_bytes": 141608828,
+              "selected_uncompressed_bytes": 275313146,
+              "source_bytes": 709748926,
+              "source_records": 14801525,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00003-82dbcbf0-ee70-56c8-9a3e-561db7d1de1d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3965894,
+          "selected_compressed_bytes": 141608828,
+          "selected_uncompressed_bytes": 275313146,
+          "source_digest_sha256": "75632d3639824854fc062f2bf9ba117c23ed49630f3c112cbe89004956c52d12",
+          "source_objects": 1,
+          "task_digest_sha256": "72c84b775e35f6f2a020e8d27a5041fb493058292dc5fd8e04bd32bc49d628cb"
+        },
+        {
+          "exact_country_rows": {
+            "CL": 479173,
+            "US": 3504830
+          },
+          "execution_bucket": "address-map-task-014",
+          "index": 14,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "4007f598b1ca117d3c60eb87d4e73577-11",
+              "first_row_group": 196,
+              "last_row_group": 255,
+              "row_groups": 60,
+              "rows": 3504830,
+              "selected_compressed_bytes": 129536333,
+              "selected_uncompressed_bytes": 253251989,
+              "source_bytes": 709748926,
+              "source_records": 14801525,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00003-82dbcbf0-ee70-56c8-9a3e-561db7d1de1d-c000.zstd.parquet"
+            },
+            {
+              "etag": "0ea68df0cfb5f79cc7d2ad16ef626dd6-11",
+              "first_row_group": 0,
+              "last_row_group": 7,
+              "row_groups": 8,
+              "rows": 479173,
+              "selected_compressed_bytes": 17382072,
+              "selected_uncompressed_bytes": 34644613,
+              "source_bytes": 704571289,
+              "source_records": 14988981,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00004-333e449b-27b6-526c-8c5b-325d6bc61881-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3984003,
+          "selected_compressed_bytes": 146918405,
+          "selected_uncompressed_bytes": 287896602,
+          "source_digest_sha256": "1bede980cb4e0d420a3a840d68f072144d84fecde53f3592b6498d3c47621478",
+          "source_objects": 2,
+          "task_digest_sha256": "a8c61faa0b423035edc629e80cea3f37cf16920afc244115aad656735f3e2e08"
+        },
+        {
+          "exact_country_rows": {
+            "CL": 2749742,
+            "UY": 559713
+          },
+          "execution_bucket": "address-map-task-015",
+          "index": 15,
+          "mixed_or_unknown_country_rows": 673117,
+          "ranges": [
+            {
+              "etag": "0ea68df0cfb5f79cc7d2ad16ef626dd6-11",
+              "first_row_group": 8,
+              "last_row_group": 76,
+              "row_groups": 69,
+              "rows": 3982572,
+              "selected_compressed_bytes": 143861215,
+              "selected_uncompressed_bytes": 287497528,
+              "source_bytes": 704571289,
+              "source_records": 14988981,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00004-333e449b-27b6-526c-8c5b-325d6bc61881-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3982572,
+          "selected_compressed_bytes": 143861215,
+          "selected_uncompressed_bytes": 287497528,
+          "source_digest_sha256": "f1405fab47548d1b82453302bfe833a85d9ce5abd3efbf4326e93b5a48fb0f48",
+          "source_objects": 1,
+          "task_digest_sha256": "c9900677a10ea0e6b6b7486e3728288591d42e3850cced99ad9a6568eee4a39f"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3094406,
+            "CL": 240483,
+            "UY": 45600
+          },
+          "execution_bucket": "address-map-task-016",
+          "index": 16,
+          "mixed_or_unknown_country_rows": 553112,
+          "ranges": [
+            {
+              "etag": "0ea68df0cfb5f79cc7d2ad16ef626dd6-11",
+              "first_row_group": 77,
+              "last_row_group": 144,
+              "row_groups": 68,
+              "rows": 3933601,
+              "selected_compressed_bytes": 141880900,
+              "selected_uncompressed_bytes": 287692259,
+              "source_bytes": 704571289,
+              "source_records": 14988981,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00004-333e449b-27b6-526c-8c5b-325d6bc61881-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3933601,
+          "selected_compressed_bytes": 141880900,
+          "selected_uncompressed_bytes": 287692259,
+          "source_digest_sha256": "1512dfa23f882e1640c5ebb34747b9a5c625546a0ad281089e1196b989f5ad4d",
+          "source_objects": 1,
+          "task_digest_sha256": "b22347c7fb89b35c0aa6fbef5518a0b8829f3d514dd47837efc9f57ad6552eda"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3959148
+          },
+          "execution_bucket": "address-map-task-017",
+          "index": 17,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "0ea68df0cfb5f79cc7d2ad16ef626dd6-11",
+              "first_row_group": 145,
+              "last_row_group": 209,
+              "row_groups": 65,
+              "rows": 3959148,
+              "selected_compressed_bytes": 142152243,
+              "selected_uncompressed_bytes": 289465689,
+              "source_bytes": 704571289,
+              "source_records": 14988981,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00004-333e449b-27b6-526c-8c5b-325d6bc61881-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 65,
+          "rows": 3959148,
+          "selected_compressed_bytes": 142152243,
+          "selected_uncompressed_bytes": 289465689,
+          "source_digest_sha256": "894c423f5fb34578c7da976688e90a639c023cbd9626196a895263d0ffe93054",
+          "source_objects": 1,
+          "task_digest_sha256": "3c6e4799e2b9ada7d26806eb69916561fa94d478b07a3f6dbcb51777124af984"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3848064
+          },
+          "execution_bucket": "address-map-task-018",
+          "index": 18,
+          "mixed_or_unknown_country_rows": 109503,
+          "ranges": [
+            {
+              "etag": "0ea68df0cfb5f79cc7d2ad16ef626dd6-11",
+              "first_row_group": 210,
+              "last_row_group": 255,
+              "row_groups": 46,
+              "rows": 2634487,
+              "selected_compressed_bytes": 93897455,
+              "selected_uncompressed_bytes": 192729874,
+              "source_bytes": 704571289,
+              "source_records": 14988981,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00004-333e449b-27b6-526c-8c5b-325d6bc61881-c000.zstd.parquet"
+            },
+            {
+              "etag": "82f5a31ad0db17750674c23a5fb216dc-10",
+              "first_row_group": 0,
+              "last_row_group": 22,
+              "row_groups": 23,
+              "rows": 1323080,
+              "selected_compressed_bytes": 48057039,
+              "selected_uncompressed_bytes": 97398642,
+              "source_bytes": 663172311,
+              "source_records": 14820883,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00005-9ccb3e1a-3b0a-597d-9610-e2e3e82ac3f2-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3957567,
+          "selected_compressed_bytes": 141954494,
+          "selected_uncompressed_bytes": 290128516,
+          "source_digest_sha256": "0a0d3edae0d56bc19401b84def694e6ec4177cf3df50da0adb913840012f3187",
+          "source_objects": 2,
+          "task_digest_sha256": "6888e7cc036bf803fcd0f65f59ecc4bd6ed618e9a4b55c677bb95a53d8753da8"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3860039
+          },
+          "execution_bucket": "address-map-task-019",
+          "index": 19,
+          "mixed_or_unknown_country_rows": 126539,
+          "ranges": [
+            {
+              "etag": "82f5a31ad0db17750674c23a5fb216dc-10",
+              "first_row_group": 23,
+              "last_row_group": 92,
+              "row_groups": 70,
+              "rows": 3986578,
+              "selected_compressed_bytes": 141951525,
+              "selected_uncompressed_bytes": 292882928,
+              "source_bytes": 663172311,
+              "source_records": 14820883,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00005-9ccb3e1a-3b0a-597d-9610-e2e3e82ac3f2-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3986578,
+          "selected_compressed_bytes": 141951525,
+          "selected_uncompressed_bytes": 292882928,
+          "source_digest_sha256": "ef4668620d619fa3130ff6d93d9c794e0a7b4c27b3ed7dcee86341f2bf7c4691",
+          "source_objects": 1,
+          "task_digest_sha256": "493a0c41059e4ac4a5d9e9e9162f8d0b759cc7ac3850456a7f748ea789c4e72e"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3964971
+          },
+          "execution_bucket": "address-map-task-020",
+          "index": 20,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "82f5a31ad0db17750674c23a5fb216dc-10",
+              "first_row_group": 93,
+              "last_row_group": 162,
+              "row_groups": 70,
+              "rows": 3964971,
+              "selected_compressed_bytes": 136858332,
+              "selected_uncompressed_bytes": 288731527,
+              "source_bytes": 663172311,
+              "source_records": 14820883,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00005-9ccb3e1a-3b0a-597d-9610-e2e3e82ac3f2-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3964971,
+          "selected_compressed_bytes": 136858332,
+          "selected_uncompressed_bytes": 288731527,
+          "source_digest_sha256": "d1e0e6f07bafdd8293b809b94526aa324bc8c136a9bffa09517ed20cf6821f63",
+          "source_objects": 1,
+          "task_digest_sha256": "ce0cf9fd6ead4ca2a4479ffd28dad65e72cea95c2e6e85c5ad2c54a06411be6b"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3948430
+          },
+          "execution_bucket": "address-map-task-021",
+          "index": 21,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "82f5a31ad0db17750674c23a5fb216dc-10",
+              "first_row_group": 163,
+              "last_row_group": 229,
+              "row_groups": 67,
+              "rows": 3948430,
+              "selected_compressed_bytes": 134130235,
+              "selected_uncompressed_bytes": 286404715,
+              "source_bytes": 663172311,
+              "source_records": 14820883,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00005-9ccb3e1a-3b0a-597d-9610-e2e3e82ac3f2-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3948430,
+          "selected_compressed_bytes": 134130235,
+          "selected_uncompressed_bytes": 286404715,
+          "source_digest_sha256": "aa59cd020691ddf6b2f18169a66e16965c682d7413f4e5ba67b1858498e2d444",
+          "source_objects": 1,
+          "task_digest_sha256": "1ee967313d7af9d1201955e9bcf1d0bb3cef96900c2d4a994f4f9ab971ddcd7b"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3701959
+          },
+          "execution_bucket": "address-map-task-022",
+          "index": 22,
+          "mixed_or_unknown_country_rows": 286197,
+          "ranges": [
+            {
+              "etag": "82f5a31ad0db17750674c23a5fb216dc-10",
+              "first_row_group": 230,
+              "last_row_group": 255,
+              "row_groups": 26,
+              "rows": 1597824,
+              "selected_compressed_bytes": 55508033,
+              "selected_uncompressed_bytes": 116414369,
+              "source_bytes": 663172311,
+              "source_records": 14820883,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00005-9ccb3e1a-3b0a-597d-9610-e2e3e82ac3f2-c000.zstd.parquet"
+            },
+            {
+              "etag": "1e9f398c52b0f339af89d1a5969362d4-11",
+              "first_row_group": 0,
+              "last_row_group": 42,
+              "row_groups": 43,
+              "rows": 2390332,
+              "selected_compressed_bytes": 86375128,
+              "selected_uncompressed_bytes": 176436619,
+              "source_bytes": 700890341,
+              "source_records": 14895069,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00006-21e6362f-d2a4-5c62-84c7-419809de0db6-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3988156,
+          "selected_compressed_bytes": 141883161,
+          "selected_uncompressed_bytes": 292850988,
+          "source_digest_sha256": "4c1b30414e9c566be866415ffe648816828cfe31fb29fd215237134bb8032a8c",
+          "source_objects": 2,
+          "task_digest_sha256": "1ae7d07413e7d75d9beefa66b58cc7df87ff8896f43ab42e080b1ac3ea1041c5"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3721774
+          },
+          "execution_bucket": "address-map-task-023",
+          "index": 23,
+          "mixed_or_unknown_country_rows": 217227,
+          "ranges": [
+            {
+              "etag": "1e9f398c52b0f339af89d1a5969362d4-11",
+              "first_row_group": 43,
+              "last_row_group": 108,
+              "row_groups": 66,
+              "rows": 3939001,
+              "selected_compressed_bytes": 141694467,
+              "selected_uncompressed_bytes": 290629854,
+              "source_bytes": 700890341,
+              "source_records": 14895069,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00006-21e6362f-d2a4-5c62-84c7-419809de0db6-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 66,
+          "rows": 3939001,
+          "selected_compressed_bytes": 141694467,
+          "selected_uncompressed_bytes": 290629854,
+          "source_digest_sha256": "ace1c86069b8621c809c6bd23a39d1a6662d41137bb28d3a1b6d60e8953172b6",
+          "source_objects": 1,
+          "task_digest_sha256": "dfba42a42126f81f0f00381c8bd19c951e065fe4669524d32faef692c99b7fa4"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3945581
+          },
+          "execution_bucket": "address-map-task-024",
+          "index": 24,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "1e9f398c52b0f339af89d1a5969362d4-11",
+              "first_row_group": 109,
+              "last_row_group": 175,
+              "row_groups": 67,
+              "rows": 3945581,
+              "selected_compressed_bytes": 139724436,
+              "selected_uncompressed_bytes": 289428591,
+              "source_bytes": 700890341,
+              "source_records": 14895069,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00006-21e6362f-d2a4-5c62-84c7-419809de0db6-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3945581,
+          "selected_compressed_bytes": 139724436,
+          "selected_uncompressed_bytes": 289428591,
+          "source_digest_sha256": "851d567a66e4d87c8da05695dff4a546324fde959d3c78a3f040f5729fef4a83",
+          "source_objects": 1,
+          "task_digest_sha256": "e03d097040d5e4c0ee6e4f7a3a7fb93ba3e261699ec151ba097b45e90aa8937f"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3970486
+          },
+          "execution_bucket": "address-map-task-025",
+          "index": 25,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "1e9f398c52b0f339af89d1a5969362d4-11",
+              "first_row_group": 176,
+              "last_row_group": 243,
+              "row_groups": 68,
+              "rows": 3970486,
+              "selected_compressed_bytes": 141519047,
+              "selected_uncompressed_bytes": 292569316,
+              "source_bytes": 700890341,
+              "source_records": 14895069,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00006-21e6362f-d2a4-5c62-84c7-419809de0db6-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3970486,
+          "selected_compressed_bytes": 141519047,
+          "selected_uncompressed_bytes": 292569316,
+          "source_digest_sha256": "82a6998dfe1807843a5bee7265d986d770fb649b2741475d5762b8c92f79e47b",
+          "source_objects": 1,
+          "task_digest_sha256": "d952ee69eeb38a917c2b98d21a572cf0810ffb29d3b3074cf24d1f66f4909efc"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 2560609,
+            "CO": 1158996
+          },
+          "execution_bucket": "address-map-task-026",
+          "index": 26,
+          "mixed_or_unknown_country_rows": 235301,
+          "ranges": [
+            {
+              "etag": "1e9f398c52b0f339af89d1a5969362d4-11",
+              "first_row_group": 244,
+              "last_row_group": 255,
+              "row_groups": 12,
+              "rows": 649669,
+              "selected_compressed_bytes": 23608201,
+              "selected_uncompressed_bytes": 48162872,
+              "source_bytes": 700890341,
+              "source_records": 14895069,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00006-21e6362f-d2a4-5c62-84c7-419809de0db6-c000.zstd.parquet"
+            },
+            {
+              "etag": "9f7070c2b956c5d77cc508c61e293624-11",
+              "first_row_group": 0,
+              "last_row_group": 55,
+              "row_groups": 56,
+              "rows": 3305237,
+              "selected_compressed_bytes": 110920065,
+              "selected_uncompressed_bytes": 242946449,
+              "source_bytes": 671604748,
+              "source_records": 14841973,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00007-48c93275-7ae0-5ac1-922e-55e6362aaa4b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3954906,
+          "selected_compressed_bytes": 134528266,
+          "selected_uncompressed_bytes": 291109321,
+          "source_digest_sha256": "348286c69a7aed16141d26d75585f70a6dbb7b9b8f077ed7c8fb0fa6fe47ad55",
+          "source_objects": 2,
+          "task_digest_sha256": "cd78226a6f5f3fa65235ec9c3bc3c9a287ebdd674992fb6f9fb93220faa4da4a"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 485027,
+            "CO": 3269271,
+            "FR": 46734
+          },
+          "execution_bucket": "address-map-task-027",
+          "index": 27,
+          "mixed_or_unknown_country_rows": 145761,
+          "ranges": [
+            {
+              "etag": "9f7070c2b956c5d77cc508c61e293624-11",
+              "first_row_group": 56,
+              "last_row_group": 123,
+              "row_groups": 68,
+              "rows": 3946793,
+              "selected_compressed_bytes": 119448993,
+              "selected_uncompressed_bytes": 292806566,
+              "source_bytes": 671604748,
+              "source_records": 14841973,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00007-48c93275-7ae0-5ac1-922e-55e6362aaa4b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3946793,
+          "selected_compressed_bytes": 119448993,
+          "selected_uncompressed_bytes": 292806566,
+          "source_digest_sha256": "c7b373be46d7cb3965bebfb7558c78ea0358f1de49e7cf67e35fb7365f309885",
+          "source_objects": 1,
+          "task_digest_sha256": "3bac7026b5a2b888d700b603f06d887607d915f51e25c4f1f13df7a320cf3bf6"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3745557,
+            "FR": 192120
+          },
+          "execution_bucket": "address-map-task-028",
+          "index": 28,
+          "mixed_or_unknown_country_rows": 61869,
+          "ranges": [
+            {
+              "etag": "9f7070c2b956c5d77cc508c61e293624-11",
+              "first_row_group": 124,
+              "last_row_group": 192,
+              "row_groups": 69,
+              "rows": 3999546,
+              "selected_compressed_bytes": 146210861,
+              "selected_uncompressed_bytes": 292816313,
+              "source_bytes": 671604748,
+              "source_records": 14841973,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00007-48c93275-7ae0-5ac1-922e-55e6362aaa4b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3999546,
+          "selected_compressed_bytes": 146210861,
+          "selected_uncompressed_bytes": 292816313,
+          "source_digest_sha256": "1d09782efa9d9da3fa83e0d847d5b0e2206007b1138b998c68f451b08e3e20c3",
+          "source_objects": 1,
+          "task_digest_sha256": "d81de1c634d39edc684686d9ec483dd30db280be7a236ab7edc5d60603a5a671"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3470952,
+            "FR": 54678,
+            "US": 402498
+          },
+          "execution_bucket": "address-map-task-029",
+          "index": 29,
+          "mixed_or_unknown_country_rows": 64767,
+          "ranges": [
+            {
+              "etag": "9f7070c2b956c5d77cc508c61e293624-11",
+              "first_row_group": 193,
+              "last_row_group": 255,
+              "row_groups": 63,
+              "rows": 3590397,
+              "selected_compressed_bytes": 129409469,
+              "selected_uncompressed_bytes": 259421429,
+              "source_bytes": 671604748,
+              "source_records": 14841973,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00007-48c93275-7ae0-5ac1-922e-55e6362aaa4b-c000.zstd.parquet"
+            },
+            {
+              "etag": "98641a13c6a1952478aeb06f4f3e3767-11",
+              "first_row_group": 0,
+              "last_row_group": 6,
+              "row_groups": 7,
+              "rows": 402498,
+              "selected_compressed_bytes": 14652482,
+              "selected_uncompressed_bytes": 29716733,
+              "source_bytes": 674047738,
+              "source_records": 14784099,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00008-293db9dd-140d-5835-9b0d-c41428b95382-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3992895,
+          "selected_compressed_bytes": 144061951,
+          "selected_uncompressed_bytes": 289138162,
+          "source_digest_sha256": "e3f4ed4eec1c379467c0172b7c6440c6d45ecba8b75d64b7ea9ff440f511a978",
+          "source_objects": 2,
+          "task_digest_sha256": "fedfdb10b86f72900bb0e41abc23c8bdad1e973d1c04ec892e405262a8b8fc57"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 287902,
+            "US": 3398688
+          },
+          "execution_bucket": "address-map-task-030",
+          "index": 30,
+          "mixed_or_unknown_country_rows": 275764,
+          "ranges": [
+            {
+              "etag": "98641a13c6a1952478aeb06f4f3e3767-11",
+              "first_row_group": 7,
+              "last_row_group": 75,
+              "row_groups": 69,
+              "rows": 3962354,
+              "selected_compressed_bytes": 139238520,
+              "selected_uncompressed_bytes": 282112291,
+              "source_bytes": 674047738,
+              "source_records": 14784099,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00008-293db9dd-140d-5835-9b0d-c41428b95382-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3962354,
+          "selected_compressed_bytes": 139238520,
+          "selected_uncompressed_bytes": 282112291,
+          "source_digest_sha256": "1782189d7b36163dc8f76e30479dbe653fa120d8a914342cf8000b3ac13876e0",
+          "source_objects": 1,
+          "task_digest_sha256": "5c46377083b8eebf0f4d43065921e9cd15fad02fc62b7c3f66de27dc08120d11"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 1180528,
+            "US": 2269143
+          },
+          "execution_bucket": "address-map-task-031",
+          "index": 31,
+          "mixed_or_unknown_country_rows": 530120,
+          "ranges": [
+            {
+              "etag": "98641a13c6a1952478aeb06f4f3e3767-11",
+              "first_row_group": 76,
+              "last_row_group": 145,
+              "row_groups": 70,
+              "rows": 3979791,
+              "selected_compressed_bytes": 138139152,
+              "selected_uncompressed_bytes": 270577595,
+              "source_bytes": 674047738,
+              "source_records": 14784099,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00008-293db9dd-140d-5835-9b0d-c41428b95382-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3979791,
+          "selected_compressed_bytes": 138139152,
+          "selected_uncompressed_bytes": 270577595,
+          "source_digest_sha256": "ce1daeec3e90314698f69e81df784158a35a328fb0369f728fa4976ce97fd868",
+          "source_objects": 1,
+          "task_digest_sha256": "7af551ecead4d5c07270a7d3a5e0226552b4c1af39ed2a1989c7a372f3d73196"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3908756
+          },
+          "execution_bucket": "address-map-task-032",
+          "index": 32,
+          "mixed_or_unknown_country_rows": 48598,
+          "ranges": [
+            {
+              "etag": "98641a13c6a1952478aeb06f4f3e3767-11",
+              "first_row_group": 146,
+              "last_row_group": 214,
+              "row_groups": 69,
+              "rows": 3957354,
+              "selected_compressed_bytes": 148454115,
+              "selected_uncompressed_bytes": 289714428,
+              "source_bytes": 674047738,
+              "source_records": 14784099,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00008-293db9dd-140d-5835-9b0d-c41428b95382-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3957354,
+          "selected_compressed_bytes": 148454115,
+          "selected_uncompressed_bytes": 289714428,
+          "source_digest_sha256": "34922d9ee7d86f4e0095b3f373ef691d1c92e13c1f071b0ca328488bc225e981",
+          "source_objects": 1,
+          "task_digest_sha256": "d3079754aad0aa4cf1f3a623ea1f817e5683177da71a2e48e91d41923f185360"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3529883
+          },
+          "execution_bucket": "address-map-task-033",
+          "index": 33,
+          "mixed_or_unknown_country_rows": 415636,
+          "ranges": [
+            {
+              "etag": "98641a13c6a1952478aeb06f4f3e3767-11",
+              "first_row_group": 215,
+              "last_row_group": 255,
+              "row_groups": 41,
+              "rows": 2482102,
+              "selected_compressed_bytes": 91351839,
+              "selected_uncompressed_bytes": 180363762,
+              "source_bytes": 674047738,
+              "source_records": 14784099,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00008-293db9dd-140d-5835-9b0d-c41428b95382-c000.zstd.parquet"
+            },
+            {
+              "etag": "46e993537300ba9bbdd24825ee153f6d-11",
+              "first_row_group": 0,
+              "last_row_group": 24,
+              "row_groups": 25,
+              "rows": 1463417,
+              "selected_compressed_bytes": 54464728,
+              "selected_uncompressed_bytes": 107025876,
+              "source_bytes": 689648550,
+              "source_records": 14725514,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00009-ed4cbf77-6305-534f-9ddc-d60e0a15ae0f-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 66,
+          "rows": 3945519,
+          "selected_compressed_bytes": 145816567,
+          "selected_uncompressed_bytes": 287389638,
+          "source_digest_sha256": "48dcc57cacbef5f63f3a521f3890d22d94beed5aea81a479231748bc17a63102",
+          "source_objects": 2,
+          "task_digest_sha256": "594ce711a57b99881e62b54d9ffb52e0c67a8b3c5467209de8dcb4eb25ed2c29"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 128514,
+            "US": 3680670
+          },
+          "execution_bucket": "address-map-task-034",
+          "index": 34,
+          "mixed_or_unknown_country_rows": 152994,
+          "ranges": [
+            {
+              "etag": "46e993537300ba9bbdd24825ee153f6d-11",
+              "first_row_group": 25,
+              "last_row_group": 94,
+              "row_groups": 70,
+              "rows": 3962178,
+              "selected_compressed_bytes": 148509347,
+              "selected_uncompressed_bytes": 290865654,
+              "source_bytes": 689648550,
+              "source_records": 14725514,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00009-ed4cbf77-6305-534f-9ddc-d60e0a15ae0f-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3962178,
+          "selected_compressed_bytes": 148509347,
+          "selected_uncompressed_bytes": 290865654,
+          "source_digest_sha256": "b24ffff8e99774e3baf84e29904099aec817ba557ffb35c6f399ab32ba02aafa",
+          "source_objects": 1,
+          "task_digest_sha256": "6b60134fc156f1919d068f741e8f777a84d368fdb383c18a8f20c5c2ccdb15e9"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3726954
+          },
+          "execution_bucket": "address-map-task-035",
+          "index": 35,
+          "mixed_or_unknown_country_rows": 272375,
+          "ranges": [
+            {
+              "etag": "46e993537300ba9bbdd24825ee153f6d-11",
+              "first_row_group": 95,
+              "last_row_group": 163,
+              "row_groups": 69,
+              "rows": 3999329,
+              "selected_compressed_bytes": 150817635,
+              "selected_uncompressed_bytes": 296773842,
+              "source_bytes": 689648550,
+              "source_records": 14725514,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00009-ed4cbf77-6305-534f-9ddc-d60e0a15ae0f-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3999329,
+          "selected_compressed_bytes": 150817635,
+          "selected_uncompressed_bytes": 296773842,
+          "source_digest_sha256": "c234dd006c33a9f68e5d1d5c9afffcd8df89b71342077914aa343f407c1beccb",
+          "source_objects": 1,
+          "task_digest_sha256": "0d935f1383681523a54b91cd8d1a0fe67ecfe1d5ca0b142892a784318a5387e7"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 1060128,
+            "US": 2708173
+          },
+          "execution_bucket": "address-map-task-036",
+          "index": 36,
+          "mixed_or_unknown_country_rows": 227846,
+          "ranges": [
+            {
+              "etag": "46e993537300ba9bbdd24825ee153f6d-11",
+              "first_row_group": 164,
+              "last_row_group": 233,
+              "row_groups": 70,
+              "rows": 3996147,
+              "selected_compressed_bytes": 144592574,
+              "selected_uncompressed_bytes": 283356557,
+              "source_bytes": 689648550,
+              "source_records": 14725514,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00009-ed4cbf77-6305-534f-9ddc-d60e0a15ae0f-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3996147,
+          "selected_compressed_bytes": 144592574,
+          "selected_uncompressed_bytes": 283356557,
+          "source_digest_sha256": "32314ebc5554792c8d613e2a9bdc2ebaba8f275ffc11792d4a0a13cffb4d29fa",
+          "source_objects": 1,
+          "task_digest_sha256": "f7ecda0392e64a902d1befeeed09913e35f79a08d6d9ce33c58d348b53998e48"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 346758,
+            "US": 3399536
+          },
+          "execution_bucket": "address-map-task-037",
+          "index": 37,
+          "mixed_or_unknown_country_rows": 221522,
+          "ranges": [
+            {
+              "etag": "46e993537300ba9bbdd24825ee153f6d-11",
+              "first_row_group": 234,
+              "last_row_group": 255,
+              "row_groups": 22,
+              "rows": 1304443,
+              "selected_compressed_bytes": 47370576,
+              "selected_uncompressed_bytes": 92597408,
+              "source_bytes": 689648550,
+              "source_records": 14725514,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00009-ed4cbf77-6305-534f-9ddc-d60e0a15ae0f-c000.zstd.parquet"
+            },
+            {
+              "etag": "dbd095744fc97f5bbf106ad1c55d72bf-11",
+              "first_row_group": 0,
+              "last_row_group": 45,
+              "row_groups": 46,
+              "rows": 2663373,
+              "selected_compressed_bytes": 100226813,
+              "selected_uncompressed_bytes": 195920510,
+              "source_bytes": 731901617,
+              "source_records": 14658003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00010-ae25345e-6243-5fc7-a4b7-c72317b52731-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3967816,
+          "selected_compressed_bytes": 147597389,
+          "selected_uncompressed_bytes": 288517918,
+          "source_digest_sha256": "1762dd95a7d828b650dc090aa5adf9aff472d535dbc396a36ac8eab09cef2c27",
+          "source_objects": 2,
+          "task_digest_sha256": "b31aee6edf3863ca3471ce46e6224673dac1e3ddb0ebe53aedfd4e425eee0e16"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3962846
+          },
+          "execution_bucket": "address-map-task-038",
+          "index": 38,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "dbd095744fc97f5bbf106ad1c55d72bf-11",
+              "first_row_group": 46,
+              "last_row_group": 115,
+              "row_groups": 70,
+              "rows": 3962846,
+              "selected_compressed_bytes": 151150439,
+              "selected_uncompressed_bytes": 295004765,
+              "source_bytes": 731901617,
+              "source_records": 14658003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00010-ae25345e-6243-5fc7-a4b7-c72317b52731-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3962846,
+          "selected_compressed_bytes": 151150439,
+          "selected_uncompressed_bytes": 295004765,
+          "source_digest_sha256": "7a1ab8415b6c4be851c1e22660865c58ae536bda04941f8ee9d65ab387d5ba92",
+          "source_objects": 1,
+          "task_digest_sha256": "6bfe7592bf839f880d6bc336c49ee0be97ee125bae8c84698eb412769ba3c912"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3934483
+          },
+          "execution_bucket": "address-map-task-039",
+          "index": 39,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "dbd095744fc97f5bbf106ad1c55d72bf-11",
+              "first_row_group": 116,
+              "last_row_group": 183,
+              "row_groups": 68,
+              "rows": 3934483,
+              "selected_compressed_bytes": 148831467,
+              "selected_uncompressed_bytes": 288354307,
+              "source_bytes": 731901617,
+              "source_records": 14658003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00010-ae25345e-6243-5fc7-a4b7-c72317b52731-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3934483,
+          "selected_compressed_bytes": 148831467,
+          "selected_uncompressed_bytes": 288354307,
+          "source_digest_sha256": "f0f3d58cddea0a070232c0cb4525aa2e4d0d0806d45d83385efb7bc8085f09ff",
+          "source_objects": 1,
+          "task_digest_sha256": "8a196d9be4d667b8a985ce5cc67ecfb53b1f52d2b6424cc640d2704768735cf8"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3982719
+          },
+          "execution_bucket": "address-map-task-040",
+          "index": 40,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "dbd095744fc97f5bbf106ad1c55d72bf-11",
+              "first_row_group": 184,
+              "last_row_group": 253,
+              "row_groups": 70,
+              "rows": 3982719,
+              "selected_compressed_bytes": 151930337,
+              "selected_uncompressed_bytes": 294426190,
+              "source_bytes": 731901617,
+              "source_records": 14658003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00010-ae25345e-6243-5fc7-a4b7-c72317b52731-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3982719,
+          "selected_compressed_bytes": 151930337,
+          "selected_uncompressed_bytes": 294426190,
+          "source_digest_sha256": "875a8749d4055c2d478e5c3fe2fc23442181f51ccf2862745be375d78ddc2e4e",
+          "source_objects": 1,
+          "task_digest_sha256": "52be02985b2e75a5858f66438989f586a4b2817f880eb83bed3d46e65e605ba7"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3972744
+          },
+          "execution_bucket": "address-map-task-041",
+          "index": 41,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "dbd095744fc97f5bbf106ad1c55d72bf-11",
+              "first_row_group": 254,
+              "last_row_group": 255,
+              "row_groups": 2,
+              "rows": 114582,
+              "selected_compressed_bytes": 4361897,
+              "selected_uncompressed_bytes": 8528232,
+              "source_bytes": 731901617,
+              "source_records": 14658003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00010-ae25345e-6243-5fc7-a4b7-c72317b52731-c000.zstd.parquet"
+            },
+            {
+              "etag": "1a4ac75956249254447cea041d322392-11",
+              "first_row_group": 0,
+              "last_row_group": 65,
+              "row_groups": 66,
+              "rows": 3858162,
+              "selected_compressed_bytes": 143926963,
+              "selected_uncompressed_bytes": 281768512,
+              "source_bytes": 712860969,
+              "source_records": 14803618,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00011-7e6d3a6f-1ea1-59dd-b876-cbb89cc86ed0-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3972744,
+          "selected_compressed_bytes": 148288860,
+          "selected_uncompressed_bytes": 290296744,
+          "source_digest_sha256": "2ddd6e9270663c67b2827691ea540e5b765f2c4038c55adbe43d933400d46a25",
+          "source_objects": 2,
+          "task_digest_sha256": "03eeabd790dd31d06636b4b03042a15f9b1366ccc492980dc6ed3119433652c2"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 893080,
+            "US": 2581461
+          },
+          "execution_bucket": "address-map-task-042",
+          "index": 42,
+          "mixed_or_unknown_country_rows": 470500,
+          "ranges": [
+            {
+              "etag": "1a4ac75956249254447cea041d322392-11",
+              "first_row_group": 66,
+              "last_row_group": 133,
+              "row_groups": 68,
+              "rows": 3945041,
+              "selected_compressed_bytes": 145368873,
+              "selected_uncompressed_bytes": 284660726,
+              "source_bytes": 712860969,
+              "source_records": 14803618,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00011-7e6d3a6f-1ea1-59dd-b876-cbb89cc86ed0-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3945041,
+          "selected_compressed_bytes": 145368873,
+          "selected_uncompressed_bytes": 284660726,
+          "source_digest_sha256": "24a7e462ad65393582eefa99b9a1ce8e0ef5f215112f2bceb396e5fb57b6304a",
+          "source_objects": 1,
+          "task_digest_sha256": "1257fc840ad463f14c6bf80e01d0a58c456234238d1ad7e7ecc878457cc1ab9b"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3954621
+          },
+          "execution_bucket": "address-map-task-043",
+          "index": 43,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "1a4ac75956249254447cea041d322392-11",
+              "first_row_group": 134,
+              "last_row_group": 200,
+              "row_groups": 67,
+              "rows": 3954621,
+              "selected_compressed_bytes": 147800540,
+              "selected_uncompressed_bytes": 288964155,
+              "source_bytes": 712860969,
+              "source_records": 14803618,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00011-7e6d3a6f-1ea1-59dd-b876-cbb89cc86ed0-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3954621,
+          "selected_compressed_bytes": 147800540,
+          "selected_uncompressed_bytes": 288964155,
+          "source_digest_sha256": "ae2a4f08ecd64b793fee40c4428fa564ea403c8735402f4981cc7e69b0c19ad5",
+          "source_objects": 1,
+          "task_digest_sha256": "376ab2e50418499f8afef69c054dbed7e62aa4cb1fb3697674b121e1da72b41a"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3609471
+          },
+          "execution_bucket": "address-map-task-044",
+          "index": 44,
+          "mixed_or_unknown_country_rows": 367284,
+          "ranges": [
+            {
+              "etag": "1a4ac75956249254447cea041d322392-11",
+              "first_row_group": 201,
+              "last_row_group": 255,
+              "row_groups": 55,
+              "rows": 3045794,
+              "selected_compressed_bytes": 111908010,
+              "selected_uncompressed_bytes": 222539031,
+              "source_bytes": 712860969,
+              "source_records": 14803618,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00011-7e6d3a6f-1ea1-59dd-b876-cbb89cc86ed0-c000.zstd.parquet"
+            },
+            {
+              "etag": "b07751c8d525db6cd0550fc5276c4553-11",
+              "first_row_group": 0,
+              "last_row_group": 15,
+              "row_groups": 16,
+              "rows": 930961,
+              "selected_compressed_bytes": 35525247,
+              "selected_uncompressed_bytes": 68585863,
+              "source_bytes": 729797237,
+              "source_records": 14803556,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00012-bc58214c-f674-5dad-a1dd-fd235692323b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 71,
+          "rows": 3976755,
+          "selected_compressed_bytes": 147433257,
+          "selected_uncompressed_bytes": 291124894,
+          "source_digest_sha256": "790b0efa46d099199ff995166536b5c915f89ac920039bf96e5186864a4ec9a1",
+          "source_objects": 2,
+          "task_digest_sha256": "606600da871ddcc91e7b8fa22cd14a1d8044da259fc39059044aa1ab28257cb0"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3989214
+          },
+          "execution_bucket": "address-map-task-045",
+          "index": 45,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "b07751c8d525db6cd0550fc5276c4553-11",
+              "first_row_group": 16,
+              "last_row_group": 85,
+              "row_groups": 70,
+              "rows": 3989214,
+              "selected_compressed_bytes": 149517887,
+              "selected_uncompressed_bytes": 289282364,
+              "source_bytes": 729797237,
+              "source_records": 14803556,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00012-bc58214c-f674-5dad-a1dd-fd235692323b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3989214,
+          "selected_compressed_bytes": 149517887,
+          "selected_uncompressed_bytes": 289282364,
+          "source_digest_sha256": "5c4b4aafa072c5e02eb6dff7737ce493467f2ffb2fbe9f4546790abec52486b1",
+          "source_objects": 1,
+          "task_digest_sha256": "e3f72e95b62a5f3aaf398e136c9c5ae90e59a4591a48de60246dd313835f9be3"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3976778
+          },
+          "execution_bucket": "address-map-task-046",
+          "index": 46,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "b07751c8d525db6cd0550fc5276c4553-11",
+              "first_row_group": 86,
+              "last_row_group": 155,
+              "row_groups": 70,
+              "rows": 3976778,
+              "selected_compressed_bytes": 150518066,
+              "selected_uncompressed_bytes": 291673435,
+              "source_bytes": 729797237,
+              "source_records": 14803556,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00012-bc58214c-f674-5dad-a1dd-fd235692323b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3976778,
+          "selected_compressed_bytes": 150518066,
+          "selected_uncompressed_bytes": 291673435,
+          "source_digest_sha256": "26fca0e0d09d3c4ae9b84931446007f8a8273af7537660bc4135f151202aa37e",
+          "source_objects": 1,
+          "task_digest_sha256": "8f121c97a4405b9461ac83e8f681b6cbba3da1da08057773cc3d9eeaf7621f16"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3915996
+          },
+          "execution_bucket": "address-map-task-047",
+          "index": 47,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "b07751c8d525db6cd0550fc5276c4553-11",
+              "first_row_group": 156,
+              "last_row_group": 222,
+              "row_groups": 67,
+              "rows": 3915996,
+              "selected_compressed_bytes": 146206453,
+              "selected_uncompressed_bytes": 282588111,
+              "source_bytes": 729797237,
+              "source_records": 14803556,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00012-bc58214c-f674-5dad-a1dd-fd235692323b-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3915996,
+          "selected_compressed_bytes": 146206453,
+          "selected_uncompressed_bytes": 282588111,
+          "source_digest_sha256": "19cb67a44ceee0ea5142332b08eacc600a4dd4c7c46e0011a7c2561986937e20",
+          "source_objects": 1,
+          "task_digest_sha256": "8ef52c2c79f75634b36f6126af54a4e08d38646ff6b7c876ed32897cd1347ece"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3999111
+          },
+          "execution_bucket": "address-map-task-048",
+          "index": 48,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "b07751c8d525db6cd0550fc5276c4553-11",
+              "first_row_group": 223,
+              "last_row_group": 255,
+              "row_groups": 33,
+              "rows": 1990607,
+              "selected_compressed_bytes": 76716683,
+              "selected_uncompressed_bytes": 148094396,
+              "source_bytes": 729797237,
+              "source_records": 14803556,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00012-bc58214c-f674-5dad-a1dd-fd235692323b-c000.zstd.parquet"
+            },
+            {
+              "etag": "7e86d51510627643764329efe5f4ffc4-11",
+              "first_row_group": 0,
+              "last_row_group": 35,
+              "row_groups": 36,
+              "rows": 2008504,
+              "selected_compressed_bytes": 76599488,
+              "selected_uncompressed_bytes": 147688216,
+              "source_bytes": 705931352,
+              "source_records": 14707432,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00013-268b3945-adb2-5c22-b691-3820ced283ca-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3999111,
+          "selected_compressed_bytes": 153316171,
+          "selected_uncompressed_bytes": 295782612,
+          "source_digest_sha256": "061a215d804ae17baa10b998830075d9c37ac0af4a9d2c4291bb027973db0681",
+          "source_objects": 2,
+          "task_digest_sha256": "346b68a9bfb372aa5fffa76a92122db18f76067e6be3b4b0da9f1328204eab51"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3965016
+          },
+          "execution_bucket": "address-map-task-049",
+          "index": 49,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "7e86d51510627643764329efe5f4ffc4-11",
+              "first_row_group": 36,
+              "last_row_group": 104,
+              "row_groups": 69,
+              "rows": 3965016,
+              "selected_compressed_bytes": 149802623,
+              "selected_uncompressed_bytes": 289077144,
+              "source_bytes": 705931352,
+              "source_records": 14707432,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00013-268b3945-adb2-5c22-b691-3820ced283ca-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3965016,
+          "selected_compressed_bytes": 149802623,
+          "selected_uncompressed_bytes": 289077144,
+          "source_digest_sha256": "766f4a7b418bf0b759613d39d37c3f2dea0f5b90e4e322f1257f201fb2bf5a06",
+          "source_objects": 1,
+          "task_digest_sha256": "1d0b1613c5fa17c63695ae843b7d9970764f9d0ccc275af99e79ed81a150118f"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3995307
+          },
+          "execution_bucket": "address-map-task-050",
+          "index": 50,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "7e86d51510627643764329efe5f4ffc4-11",
+              "first_row_group": 105,
+              "last_row_group": 173,
+              "row_groups": 69,
+              "rows": 3995307,
+              "selected_compressed_bytes": 144727755,
+              "selected_uncompressed_bytes": 281038308,
+              "source_bytes": 705931352,
+              "source_records": 14707432,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00013-268b3945-adb2-5c22-b691-3820ced283ca-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3995307,
+          "selected_compressed_bytes": 144727755,
+          "selected_uncompressed_bytes": 281038308,
+          "source_digest_sha256": "8ea647a47dcbdd53bb4324567b85fdcc9c81d4982b75e4df907c90828406b05b",
+          "source_objects": 1,
+          "task_digest_sha256": "3cf6b69efb0c2217abac8f2bfa3e5fb52a0475e73f33adb259524aacd087599a"
+        },
+        {
+          "exact_country_rows": {
+            "US": 3974940
+          },
+          "execution_bucket": "address-map-task-051",
+          "index": 51,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "7e86d51510627643764329efe5f4ffc4-11",
+              "first_row_group": 174,
+              "last_row_group": 242,
+              "row_groups": 69,
+              "rows": 3974940,
+              "selected_compressed_bytes": 148279737,
+              "selected_uncompressed_bytes": 289155519,
+              "source_bytes": 705931352,
+              "source_records": 14707432,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00013-268b3945-adb2-5c22-b691-3820ced283ca-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3974940,
+          "selected_compressed_bytes": 148279737,
+          "selected_uncompressed_bytes": 289155519,
+          "source_digest_sha256": "d5d01af17282f964119c3d397a963cbccb71a8d057740d69428517eacc18cf91",
+          "source_objects": 1,
+          "task_digest_sha256": "a62b52289e4c0025f6baffa0ca1d3f93c908a5c7fb647c99a76e9eb016ef9a43"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 51189,
+            "US": 3663084
+          },
+          "execution_bucket": "address-map-task-052",
+          "index": 52,
+          "mixed_or_unknown_country_rows": 230560,
+          "ranges": [
+            {
+              "etag": "7e86d51510627643764329efe5f4ffc4-11",
+              "first_row_group": 243,
+              "last_row_group": 255,
+              "row_groups": 13,
+              "rows": 763665,
+              "selected_compressed_bytes": 27976987,
+              "selected_uncompressed_bytes": 54649535,
+              "source_bytes": 705931352,
+              "source_records": 14707432,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00013-268b3945-adb2-5c22-b691-3820ced283ca-c000.zstd.parquet"
+            },
+            {
+              "etag": "cb45861f20f5746ebda749b5e021c13b-11",
+              "first_row_group": 0,
+              "last_row_group": 53,
+              "row_groups": 54,
+              "rows": 3181168,
+              "selected_compressed_bytes": 119067879,
+              "selected_uncompressed_bytes": 232853706,
+              "source_bytes": 671339783,
+              "source_records": 14944306,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00014-266f83b5-9815-5f25-a2d0-31c7fb9944ff-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3944833,
+          "selected_compressed_bytes": 147044866,
+          "selected_uncompressed_bytes": 287503241,
+          "source_digest_sha256": "2dbd58d00d2090bf1747ae37a487e8ef17955e03fd47ce409e847b985963d685",
+          "source_objects": 2,
+          "task_digest_sha256": "04d19c4e9316861fbc9071875ab86965191e5046d47174bfc5249f9d03c579fe"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 2751382,
+            "US": 677339
+          },
+          "execution_bucket": "address-map-task-053",
+          "index": 53,
+          "mixed_or_unknown_country_rows": 509390,
+          "ranges": [
+            {
+              "etag": "cb45861f20f5746ebda749b5e021c13b-11",
+              "first_row_group": 54,
+              "last_row_group": 120,
+              "row_groups": 67,
+              "rows": 3938111,
+              "selected_compressed_bytes": 133005996,
+              "selected_uncompressed_bytes": 260527705,
+              "source_bytes": 671339783,
+              "source_records": 14944306,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00014-266f83b5-9815-5f25-a2d0-31c7fb9944ff-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3938111,
+          "selected_compressed_bytes": 133005996,
+          "selected_uncompressed_bytes": 260527705,
+          "source_digest_sha256": "698da9ce45a16f5e1cb36d926e7a0eb508042aa926253e4bc12bcc9042a51dfe",
+          "source_objects": 1,
+          "task_digest_sha256": "904c06e7e43d8aef5f8669e7de5ce4eed90ac03fc4e38cedd9ec84fcdf06a582"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 455158,
+            "US": 3280759
+          },
+          "execution_bucket": "address-map-task-054",
+          "index": 54,
+          "mixed_or_unknown_country_rows": 220736,
+          "ranges": [
+            {
+              "etag": "cb45861f20f5746ebda749b5e021c13b-11",
+              "first_row_group": 121,
+              "last_row_group": 188,
+              "row_groups": 68,
+              "rows": 3956653,
+              "selected_compressed_bytes": 141771698,
+              "selected_uncompressed_bytes": 278326009,
+              "source_bytes": 671339783,
+              "source_records": 14944306,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00014-266f83b5-9815-5f25-a2d0-31c7fb9944ff-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3956653,
+          "selected_compressed_bytes": 141771698,
+          "selected_uncompressed_bytes": 278326009,
+          "source_digest_sha256": "aaaf0802e96f7dd7a021fa8fcbb08ab8172d7492e2a4b0ce227f2188977a1a77",
+          "source_objects": 1,
+          "task_digest_sha256": "1b716dc09f92d76bc1426bfbd9f5aac54f8e724e9dd3fe968a5533e0082250a1"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 2300098,
+            "US": 1174384
+          },
+          "execution_bucket": "address-map-task-055",
+          "index": 55,
+          "mixed_or_unknown_country_rows": 494244,
+          "ranges": [
+            {
+              "etag": "cb45861f20f5746ebda749b5e021c13b-11",
+              "first_row_group": 189,
+              "last_row_group": 255,
+              "row_groups": 67,
+              "rows": 3868374,
+              "selected_compressed_bytes": 134080775,
+              "selected_uncompressed_bytes": 262131584,
+              "source_bytes": 671339783,
+              "source_records": 14944306,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00014-266f83b5-9815-5f25-a2d0-31c7fb9944ff-c000.zstd.parquet"
+            },
+            {
+              "etag": "a197cb386728e84e0f29f5189c6990c8-10",
+              "first_row_group": 0,
+              "last_row_group": 1,
+              "row_groups": 2,
+              "rows": 100352,
+              "selected_compressed_bytes": 3727104,
+              "selected_uncompressed_bytes": 7163164,
+              "source_bytes": 647824523,
+              "source_records": 14846032,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00015-9587da5f-7088-5177-a1a9-7e76fccb7868-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3968726,
+          "selected_compressed_bytes": 137807879,
+          "selected_uncompressed_bytes": 269294748,
+          "source_digest_sha256": "1c861b2c64debed465540431716561d1fc39bd11b06e1ddbba048119fdf8aba9",
+          "source_objects": 2,
+          "task_digest_sha256": "fed206dd6a1d39e85ef0df38a4a09289f0c00d9cbee812c503b627b1511ab83b"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 71929,
+            "US": 3792667
+          },
+          "execution_bucket": "address-map-task-056",
+          "index": 56,
+          "mixed_or_unknown_country_rows": 132010,
+          "ranges": [
+            {
+              "etag": "a197cb386728e84e0f29f5189c6990c8-10",
+              "first_row_group": 2,
+              "last_row_group": 70,
+              "row_groups": 69,
+              "rows": 3996606,
+              "selected_compressed_bytes": 142679801,
+              "selected_uncompressed_bytes": 278901317,
+              "source_bytes": 647824523,
+              "source_records": 14846032,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00015-9587da5f-7088-5177-a1a9-7e76fccb7868-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3996606,
+          "selected_compressed_bytes": 142679801,
+          "selected_uncompressed_bytes": 278901317,
+          "source_digest_sha256": "b77110b4186d73109a77c5dd400e3a14e973c0dbed4a89b1b289593ec30bfab5",
+          "source_objects": 1,
+          "task_digest_sha256": "fec88e9bf470e08b3f4bc6fdd45aff08f749adf4a9c62881931d92982bd89246"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 2709667,
+            "US": 882999
+          },
+          "execution_bucket": "address-map-task-057",
+          "index": 57,
+          "mixed_or_unknown_country_rows": 365621,
+          "ranges": [
+            {
+              "etag": "a197cb386728e84e0f29f5189c6990c8-10",
+              "first_row_group": 71,
+              "last_row_group": 138,
+              "row_groups": 68,
+              "rows": 3958287,
+              "selected_compressed_bytes": 130882192,
+              "selected_uncompressed_bytes": 253160445,
+              "source_bytes": 647824523,
+              "source_records": 14846032,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00015-9587da5f-7088-5177-a1a9-7e76fccb7868-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3958287,
+          "selected_compressed_bytes": 130882192,
+          "selected_uncompressed_bytes": 253160445,
+          "source_digest_sha256": "958a997a1867db60143cabec392940577b4d67c457346a1eb28aa333b1be5b9c",
+          "source_objects": 1,
+          "task_digest_sha256": "3fa9ea27b43a2eb80a1f73d8644808e35ce997c01d2a94db5528bee9063a00b9"
+        },
+        {
+          "exact_country_rows": {
+            "CA": 280641,
+            "US": 3560817
+          },
+          "execution_bucket": "address-map-task-058",
+          "index": 58,
+          "mixed_or_unknown_country_rows": 155113,
+          "ranges": [
+            {
+              "etag": "a197cb386728e84e0f29f5189c6990c8-10",
+              "first_row_group": 139,
+              "last_row_group": 206,
+              "row_groups": 68,
+              "rows": 3996571,
+              "selected_compressed_bytes": 129781994,
+              "selected_uncompressed_bytes": 253698486,
+              "source_bytes": 647824523,
+              "source_records": 14846032,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00015-9587da5f-7088-5177-a1a9-7e76fccb7868-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3996571,
+          "selected_compressed_bytes": 129781994,
+          "selected_uncompressed_bytes": 253698486,
+          "source_digest_sha256": "e38f3e5ee8d328a97377018791503e14d9ab66099644f1394e76145ba2063fc2",
+          "source_objects": 1,
+          "task_digest_sha256": "42709eebcd99e3cfacced4e9665125043d1aa4f7a4ecaa3e049d9b93947352bd"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 1155165,
+            "CA": 1799429,
+            "US": 166865
+          },
+          "execution_bucket": "address-map-task-059",
+          "index": 59,
+          "mixed_or_unknown_country_rows": 827922,
+          "ranges": [
+            {
+              "etag": "a197cb386728e84e0f29f5189c6990c8-10",
+              "first_row_group": 207,
+              "last_row_group": 255,
+              "row_groups": 49,
+              "rows": 2794216,
+              "selected_compressed_bytes": 99392865,
+              "selected_uncompressed_bytes": 193111099,
+              "source_bytes": 647824523,
+              "source_records": 14846032,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00015-9587da5f-7088-5177-a1a9-7e76fccb7868-c000.zstd.parquet"
+            },
+            {
+              "etag": "a42a5f85b8b1cbda5863d5e7e0bcc60e-11",
+              "first_row_group": 0,
+              "last_row_group": 20,
+              "row_groups": 21,
+              "rows": 1155165,
+              "selected_compressed_bytes": 40126497,
+              "selected_uncompressed_bytes": 84066263,
+              "source_bytes": 681423270,
+              "source_records": 14857740,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00016-aa2545e9-abf7-557a-850e-b0d407e8d3d1-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3949381,
+          "selected_compressed_bytes": 139519362,
+          "selected_uncompressed_bytes": 277177362,
+          "source_digest_sha256": "d70e62ff0ba9e1c1aa68d47a367754fd5f61b2b903c1128e2733be41d12b0f10",
+          "source_objects": 2,
+          "task_digest_sha256": "42304d5c4d406adf87202770d8ce5cd31d5a24107d8e8de72a6450a8a7e95068"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3997141
+          },
+          "execution_bucket": "address-map-task-060",
+          "index": 60,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "a42a5f85b8b1cbda5863d5e7e0bcc60e-11",
+              "first_row_group": 21,
+              "last_row_group": 89,
+              "row_groups": 69,
+              "rows": 3997141,
+              "selected_compressed_bytes": 138648528,
+              "selected_uncompressed_bytes": 290874055,
+              "source_bytes": 681423270,
+              "source_records": 14857740,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00016-aa2545e9-abf7-557a-850e-b0d407e8d3d1-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3997141,
+          "selected_compressed_bytes": 138648528,
+          "selected_uncompressed_bytes": 290874055,
+          "source_digest_sha256": "7b4640deb7a3b58bf917ffc9bec860a491fd9bffb8e0a05a1878ac92b7b257ba",
+          "source_objects": 1,
+          "task_digest_sha256": "60bca39ca7f9042ed0853d511a4bf95b68bd5327f9ecc9f39c2054b8fd55e8c7"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3968969
+          },
+          "execution_bucket": "address-map-task-061",
+          "index": 61,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "a42a5f85b8b1cbda5863d5e7e0bcc60e-11",
+              "first_row_group": 90,
+              "last_row_group": 156,
+              "row_groups": 67,
+              "rows": 3968969,
+              "selected_compressed_bytes": 138338585,
+              "selected_uncompressed_bytes": 289581743,
+              "source_bytes": 681423270,
+              "source_records": 14857740,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00016-aa2545e9-abf7-557a-850e-b0d407e8d3d1-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3968969,
+          "selected_compressed_bytes": 138338585,
+          "selected_uncompressed_bytes": 289581743,
+          "source_digest_sha256": "7d8255b20e5845fe961ffbe98b860e6c0172d5f88072fad39ae37bce1240c802",
+          "source_objects": 1,
+          "task_digest_sha256": "cc2e33afd76ee4893da5caa73cf1f36262ae5c4a19fa01a288f59b0e348e4d40"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3962466
+          },
+          "execution_bucket": "address-map-task-062",
+          "index": 62,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "a42a5f85b8b1cbda5863d5e7e0bcc60e-11",
+              "first_row_group": 157,
+              "last_row_group": 225,
+              "row_groups": 69,
+              "rows": 3962466,
+              "selected_compressed_bytes": 140413779,
+              "selected_uncompressed_bytes": 288389809,
+              "source_bytes": 681423270,
+              "source_records": 14857740,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00016-aa2545e9-abf7-557a-850e-b0d407e8d3d1-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3962466,
+          "selected_compressed_bytes": 140413779,
+          "selected_uncompressed_bytes": 288389809,
+          "source_digest_sha256": "1e14829ee802f34cd4d62ee818cdf8775e2179cd21daa8cbc78bd2d2e796c26f",
+          "source_objects": 1,
+          "task_digest_sha256": "2d0e2e1c34b003dccdea0a3b16872e9f1298f1b3ccb43cf576699569fc3c6a8d"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3923070
+          },
+          "execution_bucket": "address-map-task-063",
+          "index": 63,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "a42a5f85b8b1cbda5863d5e7e0bcc60e-11",
+              "first_row_group": 226,
+              "last_row_group": 255,
+              "row_groups": 30,
+              "rows": 1773999,
+              "selected_compressed_bytes": 62480147,
+              "selected_uncompressed_bytes": 129236338,
+              "source_bytes": 681423270,
+              "source_records": 14857740,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00016-aa2545e9-abf7-557a-850e-b0d407e8d3d1-c000.zstd.parquet"
+            },
+            {
+              "etag": "eb46c69c359b36aeabdb8e0f14733bba-11",
+              "first_row_group": 0,
+              "last_row_group": 35,
+              "row_groups": 36,
+              "rows": 2149071,
+              "selected_compressed_bytes": 77701860,
+              "selected_uncompressed_bytes": 156420459,
+              "source_bytes": 718423242,
+              "source_records": 14933536,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00017-65abcaae-7275-554f-a2fd-dce80e660ecc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 66,
+          "rows": 3923070,
+          "selected_compressed_bytes": 140182007,
+          "selected_uncompressed_bytes": 285656797,
+          "source_digest_sha256": "34a07aa18a4c7c9dc871131310bcb0da264840f090384cf394f1c5857fc1a7b2",
+          "source_objects": 2,
+          "task_digest_sha256": "7be631e2d4a4edbfe58e98f9aaab342bbaca0f98f5036ca21f9820b18f209b75"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3973663
+          },
+          "execution_bucket": "address-map-task-064",
+          "index": 64,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "eb46c69c359b36aeabdb8e0f14733bba-11",
+              "first_row_group": 36,
+              "last_row_group": 103,
+              "row_groups": 68,
+              "rows": 3973663,
+              "selected_compressed_bytes": 141313705,
+              "selected_uncompressed_bytes": 288341635,
+              "source_bytes": 718423242,
+              "source_records": 14933536,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00017-65abcaae-7275-554f-a2fd-dce80e660ecc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3973663,
+          "selected_compressed_bytes": 141313705,
+          "selected_uncompressed_bytes": 288341635,
+          "source_digest_sha256": "82a834200e49d587d2d65eeb7beb6d76e09e57c8c10134c02c1adddcea5f1052",
+          "source_objects": 1,
+          "task_digest_sha256": "7ca5b8dfd2a1952042f28514ec0b099c77b04890773b2e3cce1b26b1a91b90a9"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3948436
+          },
+          "execution_bucket": "address-map-task-065",
+          "index": 65,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "eb46c69c359b36aeabdb8e0f14733bba-11",
+              "first_row_group": 104,
+              "last_row_group": 173,
+              "row_groups": 70,
+              "rows": 3948436,
+              "selected_compressed_bytes": 140497101,
+              "selected_uncompressed_bytes": 286309726,
+              "source_bytes": 718423242,
+              "source_records": 14933536,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00017-65abcaae-7275-554f-a2fd-dce80e660ecc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3948436,
+          "selected_compressed_bytes": 140497101,
+          "selected_uncompressed_bytes": 286309726,
+          "source_digest_sha256": "dda29531cb266b5c1a2fc0c13c836301ab6e094a63cd42ed1f8b02ac304495f5",
+          "source_objects": 1,
+          "task_digest_sha256": "ddc3c4b8b9d1c14b3efdbee0d141ef24825f55cdfe3d41c7801ea861b56bd167"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3998340
+          },
+          "execution_bucket": "address-map-task-066",
+          "index": 66,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "eb46c69c359b36aeabdb8e0f14733bba-11",
+              "first_row_group": 174,
+              "last_row_group": 240,
+              "row_groups": 67,
+              "rows": 3998340,
+              "selected_compressed_bytes": 140864197,
+              "selected_uncompressed_bytes": 288858132,
+              "source_bytes": 718423242,
+              "source_records": 14933536,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00017-65abcaae-7275-554f-a2fd-dce80e660ecc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3998340,
+          "selected_compressed_bytes": 140864197,
+          "selected_uncompressed_bytes": 288858132,
+          "source_digest_sha256": "1ea73133a381de5be6b83b5a21b690cb6764568ff84bc5bdf221364806eb5d79",
+          "source_objects": 1,
+          "task_digest_sha256": "937c3de212bbca8fb3957c7a75ead4f3ce2485519b72e5862e179d619a296b96"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3964191
+          },
+          "execution_bucket": "address-map-task-067",
+          "index": 67,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "eb46c69c359b36aeabdb8e0f14733bba-11",
+              "first_row_group": 241,
+              "last_row_group": 255,
+              "row_groups": 15,
+              "rows": 864026,
+              "selected_compressed_bytes": 30215736,
+              "selected_uncompressed_bytes": 62671258,
+              "source_bytes": 718423242,
+              "source_records": 14933536,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00017-65abcaae-7275-554f-a2fd-dce80e660ecc-c000.zstd.parquet"
+            },
+            {
+              "etag": "a2a9cb02e340173e4928d210cd2b52e9-11",
+              "first_row_group": 0,
+              "last_row_group": 53,
+              "row_groups": 54,
+              "rows": 3100165,
+              "selected_compressed_bytes": 112207206,
+              "selected_uncompressed_bytes": 225189225,
+              "source_bytes": 699355346,
+              "source_records": 14856745,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00018-4a279153-be77-5ab5-ac9a-24fa849c2dcc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3964191,
+          "selected_compressed_bytes": 142422942,
+          "selected_uncompressed_bytes": 287860483,
+          "source_digest_sha256": "6a0256ec6a42542dfe77875b2bc02090213102a386ca9e7352612a3b35beaaa9",
+          "source_objects": 2,
+          "task_digest_sha256": "ad1425767a7d3f79f4c7725c3fb5cbe13336ffd6373497b177450f824a5ca35b"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3934888
+          },
+          "execution_bucket": "address-map-task-068",
+          "index": 68,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "a2a9cb02e340173e4928d210cd2b52e9-11",
+              "first_row_group": 54,
+              "last_row_group": 121,
+              "row_groups": 68,
+              "rows": 3934888,
+              "selected_compressed_bytes": 140935482,
+              "selected_uncompressed_bytes": 284523444,
+              "source_bytes": 699355346,
+              "source_records": 14856745,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00018-4a279153-be77-5ab5-ac9a-24fa849c2dcc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3934888,
+          "selected_compressed_bytes": 140935482,
+          "selected_uncompressed_bytes": 284523444,
+          "source_digest_sha256": "ae841632bdfc57a30c2d0940950bf565e633ec9a09192d0e0f535e142778c850",
+          "source_objects": 1,
+          "task_digest_sha256": "f2e073154219dc16bbc0fbc5b311b11e8df378171fd8cd72905b635ce0581f92"
+        },
+        {
+          "exact_country_rows": {
+            "BR": 3773087,
+            "ES": 146160
+          },
+          "execution_bucket": "address-map-task-069",
+          "index": 69,
+          "mixed_or_unknown_country_rows": 60777,
+          "ranges": [
+            {
+              "etag": "a2a9cb02e340173e4928d210cd2b52e9-11",
+              "first_row_group": 122,
+              "last_row_group": 189,
+              "row_groups": 68,
+              "rows": 3980024,
+              "selected_compressed_bytes": 142523940,
+              "selected_uncompressed_bytes": 289335409,
+              "source_bytes": 699355346,
+              "source_records": 14856745,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00018-4a279153-be77-5ab5-ac9a-24fa849c2dcc-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3980024,
+          "selected_compressed_bytes": 142523940,
+          "selected_uncompressed_bytes": 289335409,
+          "source_digest_sha256": "fbed5092d8dff260182d726d4237190f07fd70a0d6f2629a52fc4f1829aac41d",
+          "source_objects": 1,
+          "task_digest_sha256": "46c23e15da5ddfdc47aa60f933703c48964326749245ac56eef6b6d353cf123f"
+        },
+        {
+          "exact_country_rows": {
+            "ES": 341852,
+            "PT": 3264392
+          },
+          "execution_bucket": "address-map-task-070",
+          "index": 70,
+          "mixed_or_unknown_country_rows": 352470,
+          "ranges": [
+            {
+              "etag": "a2a9cb02e340173e4928d210cd2b52e9-11",
+              "first_row_group": 190,
+              "last_row_group": 255,
+              "row_groups": 66,
+              "rows": 3841668,
+              "selected_compressed_bytes": 124487882,
+              "selected_uncompressed_bytes": 237616280,
+              "source_bytes": 699355346,
+              "source_records": 14856745,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00018-4a279153-be77-5ab5-ac9a-24fa849c2dcc-c000.zstd.parquet"
+            },
+            {
+              "etag": "41e38fe81af088c8e468f1ebd1848bad-12",
+              "first_row_group": 0,
+              "last_row_group": 1,
+              "row_groups": 2,
+              "rows": 117046,
+              "selected_compressed_bytes": 3653200,
+              "selected_uncompressed_bytes": 6981969,
+              "source_bytes": 759876210,
+              "source_records": 14899692,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00019-5984b0f2-5fad-5392-9109-1969394fd624-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3958714,
+          "selected_compressed_bytes": 128141082,
+          "selected_uncompressed_bytes": 244598249,
+          "source_digest_sha256": "69f7acb343ebd4fdcc5befbe288c4d8b9ae1d205a4fca21090671a8ad78df516",
+          "source_objects": 2,
+          "task_digest_sha256": "9dbd3238bda6d710a4d1ba0e491cecc685b2eff2d8af77c6d1461838eb5f5a60"
+        },
+        {
+          "exact_country_rows": {
+            "ES": 2852256,
+            "PT": 602076
+          },
+          "execution_bucket": "address-map-task-071",
+          "index": 71,
+          "mixed_or_unknown_country_rows": 544543,
+          "ranges": [
+            {
+              "etag": "41e38fe81af088c8e468f1ebd1848bad-12",
+              "first_row_group": 2,
+              "last_row_group": 69,
+              "row_groups": 68,
+              "rows": 3998875,
+              "selected_compressed_bytes": 146956752,
+              "selected_uncompressed_bytes": 281516533,
+              "source_bytes": 759876210,
+              "source_records": 14899692,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00019-5984b0f2-5fad-5392-9109-1969394fd624-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3998875,
+          "selected_compressed_bytes": 146956752,
+          "selected_uncompressed_bytes": 281516533,
+          "source_digest_sha256": "93d6c9fbfa71925017c3a565711852c0cb071a92b0d0c7e4c8c9e07747373ff6",
+          "source_objects": 1,
+          "task_digest_sha256": "163c37ed3569227a5b5b500762d20601620fe4866159ca8ff014313145fe32b9"
+        },
+        {
+          "exact_country_rows": {
+            "ES": 2434635,
+            "PT": 780164
+          },
+          "execution_bucket": "address-map-task-072",
+          "index": 72,
+          "mixed_or_unknown_country_rows": 782800,
+          "ranges": [
+            {
+              "etag": "41e38fe81af088c8e468f1ebd1848bad-12",
+              "first_row_group": 70,
+              "last_row_group": 139,
+              "row_groups": 70,
+              "rows": 3997599,
+              "selected_compressed_bytes": 147741311,
+              "selected_uncompressed_bytes": 281687329,
+              "source_bytes": 759876210,
+              "source_records": 14899692,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00019-5984b0f2-5fad-5392-9109-1969394fd624-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3997599,
+          "selected_compressed_bytes": 147741311,
+          "selected_uncompressed_bytes": 281687329,
+          "source_digest_sha256": "964b820277ab117fd2e1c0bcc96af0fca4e4c4e4cedfbe08b259c0427d75afb4",
+          "source_objects": 1,
+          "task_digest_sha256": "a40028dab73bb5bc8f02fc4faa762d3afd6b9477ee57819e18b0c86423bf8aeb"
+        },
+        {
+          "exact_country_rows": {
+            "ES": 3671674
+          },
+          "execution_bucket": "address-map-task-073",
+          "index": 73,
+          "mixed_or_unknown_country_rows": 294365,
+          "ranges": [
+            {
+              "etag": "41e38fe81af088c8e468f1ebd1848bad-12",
+              "first_row_group": 140,
+              "last_row_group": 207,
+              "row_groups": 68,
+              "rows": 3966039,
+              "selected_compressed_bytes": 146826889,
+              "selected_uncompressed_bytes": 281418335,
+              "source_bytes": 759876210,
+              "source_records": 14899692,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00019-5984b0f2-5fad-5392-9109-1969394fd624-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3966039,
+          "selected_compressed_bytes": 146826889,
+          "selected_uncompressed_bytes": 281418335,
+          "source_digest_sha256": "5604511dc60db7ebed96b46305c97b369f7d56fcdc70db6762b9c11ec6242d55",
+          "source_objects": 1,
+          "task_digest_sha256": "045d734b231d03c4d0eda96f59826f1c875064d299dcd8672a0fdeb3468edae9"
+        },
+        {
+          "exact_country_rows": {
+            "ES": 3654311,
+            "IT": 127816
+          },
+          "execution_bucket": "address-map-task-074",
+          "index": 74,
+          "mixed_or_unknown_country_rows": 201545,
+          "ranges": [
+            {
+              "etag": "41e38fe81af088c8e468f1ebd1848bad-12",
+              "first_row_group": 208,
+              "last_row_group": 255,
+              "row_groups": 48,
+              "rows": 2820133,
+              "selected_compressed_bytes": 102911559,
+              "selected_uncompressed_bytes": 198846332,
+              "source_bytes": 759876210,
+              "source_records": 14899692,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00019-5984b0f2-5fad-5392-9109-1969394fd624-c000.zstd.parquet"
+            },
+            {
+              "etag": "13efb3f827132d7c57fd85594de3879e-12",
+              "first_row_group": 0,
+              "last_row_group": 20,
+              "row_groups": 21,
+              "rows": 1163539,
+              "selected_compressed_bytes": 43746006,
+              "selected_uncompressed_bytes": 83190008,
+              "source_bytes": 782456353,
+              "source_records": 14753388,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3983672,
+          "selected_compressed_bytes": 146657565,
+          "selected_uncompressed_bytes": 282036340,
+          "source_digest_sha256": "1c7addd2bfef5559a0072bea009c965cc672e87fc59378f6ed1d40a3bb5012f9",
+          "source_objects": 2,
+          "task_digest_sha256": "a70bceb28f5f7f816b13a801a1dc0cd2f2fd1a15ff4701a9aaeeceffe3f1e090"
+        },
+        {
+          "exact_country_rows": {
+            "ES": 1278715,
+            "FR": 2383108
+          },
+          "execution_bucket": "address-map-task-075",
+          "index": 75,
+          "mixed_or_unknown_country_rows": 322835,
+          "ranges": [
+            {
+              "etag": "13efb3f827132d7c57fd85594de3879e-12",
+              "first_row_group": 21,
+              "last_row_group": 90,
+              "row_groups": 70,
+              "rows": 3984658,
+              "selected_compressed_bytes": 149161136,
+              "selected_uncompressed_bytes": 286322569,
+              "source_bytes": 782456353,
+              "source_records": 14753388,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3984658,
+          "selected_compressed_bytes": 149161136,
+          "selected_uncompressed_bytes": 286322569,
+          "source_digest_sha256": "3b6f02172455af8adc6ba4da6cd0683ee6c52dac13213cb6dc48b627b4e5c09e",
+          "source_objects": 1,
+          "task_digest_sha256": "438fe0e066338b411143eb06b071a90ea1e8343c58841edc92bba6f2c7f0e1af"
+        },
+        {
+          "exact_country_rows": {
+            "FR": 3717473
+          },
+          "execution_bucket": "address-map-task-076",
+          "index": 76,
+          "mixed_or_unknown_country_rows": 251706,
+          "ranges": [
+            {
+              "etag": "13efb3f827132d7c57fd85594de3879e-12",
+              "first_row_group": 91,
+              "last_row_group": 159,
+              "row_groups": 69,
+              "rows": 3969179,
+              "selected_compressed_bytes": 150415476,
+              "selected_uncompressed_bytes": 287251087,
+              "source_bytes": 782456353,
+              "source_records": 14753388,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3969179,
+          "selected_compressed_bytes": 150415476,
+          "selected_uncompressed_bytes": 287251087,
+          "source_digest_sha256": "9f6dd4abfcc732068f57af8360f3cfd29a47eb49fbf22f777d5caed034ee8754",
+          "source_objects": 1,
+          "task_digest_sha256": "de33dd6f822c32b91a688216e00d45a32f270a9ac169e24e45393b8e13259fdd"
+        },
+        {
+          "exact_country_rows": {
+            "FR": 3754107
+          },
+          "execution_bucket": "address-map-task-077",
+          "index": 77,
+          "mixed_or_unknown_country_rows": 227751,
+          "ranges": [
+            {
+              "etag": "13efb3f827132d7c57fd85594de3879e-12",
+              "first_row_group": 160,
+              "last_row_group": 226,
+              "row_groups": 67,
+              "rows": 3981858,
+              "selected_compressed_bytes": 150615965,
+              "selected_uncompressed_bytes": 288283866,
+              "source_bytes": 782456353,
+              "source_records": 14753388,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3981858,
+          "selected_compressed_bytes": 150615965,
+          "selected_uncompressed_bytes": 288283866,
+          "source_digest_sha256": "6c8233256e05f9b5554f3d01341042c8c0694ed60dd0712ea398dd9ebc747e26",
+          "source_objects": 1,
+          "task_digest_sha256": "b002b17dddc0848b77eb9b4fb1647aa5e6e2c0a040f588619c0602fd9a7c722a"
+        },
+        {
+          "exact_country_rows": {
+            "FR": 3561867
+          },
+          "execution_bucket": "address-map-task-078",
+          "index": 78,
+          "mixed_or_unknown_country_rows": 388587,
+          "ranges": [
+            {
+              "etag": "13efb3f827132d7c57fd85594de3879e-12",
+              "first_row_group": 227,
+              "last_row_group": 255,
+              "row_groups": 29,
+              "rows": 1654154,
+              "selected_compressed_bytes": 61112166,
+              "selected_uncompressed_bytes": 117715213,
+              "source_bytes": 782456353,
+              "source_records": 14753388,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00020-03ba9a52-f09e-57c6-816b-87dbc6b49bb7-c000.zstd.parquet"
+            },
+            {
+              "etag": "9e8333d9ec65ea5c203ed876ed5ecfb1-11",
+              "first_row_group": 0,
+              "last_row_group": 40,
+              "row_groups": 41,
+              "rows": 2296300,
+              "selected_compressed_bytes": 85373480,
+              "selected_uncompressed_bytes": 164538605,
+              "source_bytes": 685530275,
+              "source_records": 14808593,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00021-8126c0d5-9a08-58af-84c7-d6c2cb4857ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3950454,
+          "selected_compressed_bytes": 146485646,
+          "selected_uncompressed_bytes": 282253818,
+          "source_digest_sha256": "5068b0fd0e892134d308f7a6a79171f3ebfceae17f06ccae72bc9713faaad3a3",
+          "source_objects": 2,
+          "task_digest_sha256": "90a88ebef6126e2c789b05648cc16d67bc33101a9ba47dbd136d6c49357219dc"
+        },
+        {
+          "exact_country_rows": {
+            "BE": 258316,
+            "FR": 2911542
+          },
+          "execution_bucket": "address-map-task-079",
+          "index": 79,
+          "mixed_or_unknown_country_rows": 802600,
+          "ranges": [
+            {
+              "etag": "9e8333d9ec65ea5c203ed876ed5ecfb1-11",
+              "first_row_group": 41,
+              "last_row_group": 110,
+              "row_groups": 70,
+              "rows": 3972458,
+              "selected_compressed_bytes": 143384496,
+              "selected_uncompressed_bytes": 278714213,
+              "source_bytes": 685530275,
+              "source_records": 14808593,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00021-8126c0d5-9a08-58af-84c7-d6c2cb4857ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3972458,
+          "selected_compressed_bytes": 143384496,
+          "selected_uncompressed_bytes": 278714213,
+          "source_digest_sha256": "576568ddf27905d5091a7077d6393bb949c5538c32c8553e9ba57c0eb3befe0d",
+          "source_objects": 1,
+          "task_digest_sha256": "a2dff8a0f6e0b70433b258764206f0cf114c821f683214de7861868840ecfedc"
+        },
+        {
+          "exact_country_rows": {
+            "BE": 1633044,
+            "FR": 1481303,
+            "NL": 65445
+          },
+          "execution_bucket": "address-map-task-080",
+          "index": 80,
+          "mixed_or_unknown_country_rows": 805836,
+          "ranges": [
+            {
+              "etag": "9e8333d9ec65ea5c203ed876ed5ecfb1-11",
+              "first_row_group": 111,
+              "last_row_group": 178,
+              "row_groups": 68,
+              "rows": 3985628,
+              "selected_compressed_bytes": 135547567,
+              "selected_uncompressed_bytes": 269162173,
+              "source_bytes": 685530275,
+              "source_records": 14808593,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00021-8126c0d5-9a08-58af-84c7-d6c2cb4857ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3985628,
+          "selected_compressed_bytes": 135547567,
+          "selected_uncompressed_bytes": 269162173,
+          "source_digest_sha256": "a6f2407bc2bbdc4aa1c2993a776676ad36c3f358552c9faf1490ec992422930a",
+          "source_objects": 1,
+          "task_digest_sha256": "6f3728a6b01cc5c7898f53f8819adbba00ad02bcdbb7f8dc1b0d2aca54e6b09a"
+        },
+        {
+          "exact_country_rows": {
+            "BE": 1691865,
+            "NL": 1786686
+          },
+          "execution_bucket": "address-map-task-081",
+          "index": 81,
+          "mixed_or_unknown_country_rows": 511415,
+          "ranges": [
+            {
+              "etag": "9e8333d9ec65ea5c203ed876ed5ecfb1-11",
+              "first_row_group": 179,
+              "last_row_group": 246,
+              "row_groups": 68,
+              "rows": 3989966,
+              "selected_compressed_bytes": 126992278,
+              "selected_uncompressed_bytes": 252226507,
+              "source_bytes": 685530275,
+              "source_records": 14808593,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00021-8126c0d5-9a08-58af-84c7-d6c2cb4857ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3989966,
+          "selected_compressed_bytes": 126992278,
+          "selected_uncompressed_bytes": 252226507,
+          "source_digest_sha256": "6b0689a4d275004dae04db17f30d5d15301eb271de5f9b0bbd6024fb9a6b37d4",
+          "source_objects": 1,
+          "task_digest_sha256": "60b7bb6f9363eb14612a9770d169f8784c027f12bca6615f011847465d054de2"
+        },
+        {
+          "exact_country_rows": {
+            "FR": 2924651,
+            "NL": 390140
+          },
+          "execution_bucket": "address-map-task-082",
+          "index": 82,
+          "mixed_or_unknown_country_rows": 683157,
+          "ranges": [
+            {
+              "etag": "9e8333d9ec65ea5c203ed876ed5ecfb1-11",
+              "first_row_group": 247,
+              "last_row_group": 255,
+              "row_groups": 9,
+              "rows": 564241,
+              "selected_compressed_bytes": 21097481,
+              "selected_uncompressed_bytes": 40094146,
+              "source_bytes": 685530275,
+              "source_records": 14808593,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00021-8126c0d5-9a08-58af-84c7-d6c2cb4857ee-c000.zstd.parquet"
+            },
+            {
+              "etag": "b75f70fe8ac57d6851372449a20f8e14-12",
+              "first_row_group": 0,
+              "last_row_group": 60,
+              "row_groups": 61,
+              "rows": 3433707,
+              "selected_compressed_bytes": 129554724,
+              "selected_uncompressed_bytes": 248490318,
+              "source_bytes": 738365287,
+              "source_records": 14857510,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00022-75707434-f579-58c3-abba-af1d52d582b5-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3997948,
+          "selected_compressed_bytes": 150652205,
+          "selected_uncompressed_bytes": 288584464,
+          "source_digest_sha256": "577642d47ac55a842fc3f787667683f17532e1f78b951c3a2b74f1764c080b0f",
+          "source_objects": 2,
+          "task_digest_sha256": "a632523fa34235be83fc70e3fba523841ed7e4fb8a78b1de3a8e66be93f52124"
+        },
+        {
+          "exact_country_rows": {
+            "BE": 629506,
+            "CH": 185404,
+            "DE": 351949,
+            "FR": 1297882
+          },
+          "execution_bucket": "address-map-task-083",
+          "index": 83,
+          "mixed_or_unknown_country_rows": 1496501,
+          "ranges": [
+            {
+              "etag": "b75f70fe8ac57d6851372449a20f8e14-12",
+              "first_row_group": 61,
+              "last_row_group": 126,
+              "row_groups": 66,
+              "rows": 3961242,
+              "selected_compressed_bytes": 141957908,
+              "selected_uncompressed_bytes": 277082391,
+              "source_bytes": 738365287,
+              "source_records": 14857510,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00022-75707434-f579-58c3-abba-af1d52d582b5-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 66,
+          "rows": 3961242,
+          "selected_compressed_bytes": 141957908,
+          "selected_uncompressed_bytes": 277082391,
+          "source_digest_sha256": "6aa4007bca91deb47c3fe232464fe4480e738ece9aa613dacfb2b419a21e2265",
+          "source_objects": 1,
+          "task_digest_sha256": "0197898a6d8019bec4cac440060e6c1dcf630b05149c3cd5c8fd07fec63d9ab3"
+        },
+        {
+          "exact_country_rows": {
+            "CH": 1244799,
+            "DE": 70697,
+            "FR": 177179,
+            "IT": 1643888
+          },
+          "execution_bucket": "address-map-task-084",
+          "index": 84,
+          "mixed_or_unknown_country_rows": 836739,
+          "ranges": [
+            {
+              "etag": "b75f70fe8ac57d6851372449a20f8e14-12",
+              "first_row_group": 127,
+              "last_row_group": 193,
+              "row_groups": 67,
+              "rows": 3973302,
+              "selected_compressed_bytes": 134207138,
+              "selected_uncompressed_bytes": 270640957,
+              "source_bytes": 738365287,
+              "source_records": 14857510,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00022-75707434-f579-58c3-abba-af1d52d582b5-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3973302,
+          "selected_compressed_bytes": 134207138,
+          "selected_uncompressed_bytes": 270640957,
+          "source_digest_sha256": "724a56984a60ab6ade9d69daf6b7a8a527a772c18a30e117d052465a895e0932",
+          "source_objects": 1,
+          "task_digest_sha256": "67577109fa8b8a501cec0123bd1596d435eff1c77ac164c8590576fa02c7b2ca"
+        },
+        {
+          "exact_country_rows": {
+            "BE": 357089,
+            "DE": 2203988,
+            "FR": 225915
+          },
+          "execution_bucket": "address-map-task-085",
+          "index": 85,
+          "mixed_or_unknown_country_rows": 1192338,
+          "ranges": [
+            {
+              "etag": "b75f70fe8ac57d6851372449a20f8e14-12",
+              "first_row_group": 194,
+              "last_row_group": 255,
+              "row_groups": 62,
+              "rows": 3489259,
+              "selected_compressed_bytes": 131205305,
+              "selected_uncompressed_bytes": 254135088,
+              "source_bytes": 738365287,
+              "source_records": 14857510,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00022-75707434-f579-58c3-abba-af1d52d582b5-c000.zstd.parquet"
+            },
+            {
+              "etag": "e4c8c821cf0cfb9ab4d3580f896c7228-11",
+              "first_row_group": 0,
+              "last_row_group": 7,
+              "row_groups": 8,
+              "rows": 490071,
+              "selected_compressed_bytes": 15198304,
+              "selected_uncompressed_bytes": 31560629,
+              "source_bytes": 737506515,
+              "source_records": 14851476,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3979330,
+          "selected_compressed_bytes": 146403609,
+          "selected_uncompressed_bytes": 285695717,
+          "source_digest_sha256": "0355bf129b1def9b165b80cd0ee3a44e319ba9fa5d480db7f3209b019d992aec",
+          "source_objects": 2,
+          "task_digest_sha256": "a5533c3dffe9ce3d03951a72cd39372bfc97db83d281029f34092dfb749ba1dd"
+        },
+        {
+          "exact_country_rows": {
+            "BE": 310666,
+            "NL": 2422441
+          },
+          "execution_bucket": "address-map-task-086",
+          "index": 86,
+          "mixed_or_unknown_country_rows": 1226463,
+          "ranges": [
+            {
+              "etag": "e4c8c821cf0cfb9ab4d3580f896c7228-11",
+              "first_row_group": 8,
+              "last_row_group": 76,
+              "row_groups": 69,
+              "rows": 3959570,
+              "selected_compressed_bytes": 143131411,
+              "selected_uncompressed_bytes": 277308546,
+              "source_bytes": 737506515,
+              "source_records": 14851476,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3959570,
+          "selected_compressed_bytes": 143131411,
+          "selected_uncompressed_bytes": 277308546,
+          "source_digest_sha256": "d95ab23fc8091a7d4dbb0021e06f4e8d07a4bfb0fdebcb16246a459ebd853d9d",
+          "source_objects": 1,
+          "task_digest_sha256": "a1f7736cd3cce4a94102cae32c8b66161855bb32b10a2e69449271a19de86504"
+        },
+        {
+          "exact_country_rows": {
+            "DE": 781952,
+            "NL": 2175977,
+            "NO": 359026
+          },
+          "execution_bucket": "address-map-task-087",
+          "index": 87,
+          "mixed_or_unknown_country_rows": 682735,
+          "ranges": [
+            {
+              "etag": "e4c8c821cf0cfb9ab4d3580f896c7228-11",
+              "first_row_group": 77,
+              "last_row_group": 143,
+              "row_groups": 67,
+              "rows": 3999690,
+              "selected_compressed_bytes": 146392468,
+              "selected_uncompressed_bytes": 280438467,
+              "source_bytes": 737506515,
+              "source_records": 14851476,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3999690,
+          "selected_compressed_bytes": 146392468,
+          "selected_uncompressed_bytes": 280438467,
+          "source_digest_sha256": "df3440cbffbc62f75e1590ffb3be6ca15156b28e46af1b9df8622284a448be24",
+          "source_objects": 1,
+          "task_digest_sha256": "9a8a1a4246c07a825bbabd3e01822838b8747b35ede65477e08963c069e43cc7"
+        },
+        {
+          "exact_country_rows": {
+            "DE": 2383855,
+            "NL": 741183,
+            "NO": 44135
+          },
+          "execution_bucket": "address-map-task-088",
+          "index": 88,
+          "mixed_or_unknown_country_rows": 779780,
+          "ranges": [
+            {
+              "etag": "e4c8c821cf0cfb9ab4d3580f896c7228-11",
+              "first_row_group": 144,
+              "last_row_group": 213,
+              "row_groups": 70,
+              "rows": 3948953,
+              "selected_compressed_bytes": 147632310,
+              "selected_uncompressed_bytes": 284146267,
+              "source_bytes": 737506515,
+              "source_records": 14851476,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3948953,
+          "selected_compressed_bytes": 147632310,
+          "selected_uncompressed_bytes": 284146267,
+          "source_digest_sha256": "3142fc7fa1ad70e63737e7710b24f6f966449207a0c35b22652027dd5216fd72",
+          "source_objects": 1,
+          "task_digest_sha256": "f6c5e569e7a1501eca945616b7e5da182e178190ba9ce6da27b014f8a0b86aaa"
+        },
+        {
+          "exact_country_rows": {
+            "DE": 1229094,
+            "DK": 115297,
+            "IT": 1456796,
+            "NL": 258059,
+            "NO": 163818
+          },
+          "execution_bucket": "address-map-task-089",
+          "index": 89,
+          "mixed_or_unknown_country_rows": 770000,
+          "ranges": [
+            {
+              "etag": "e4c8c821cf0cfb9ab4d3580f896c7228-11",
+              "first_row_group": 214,
+              "last_row_group": 255,
+              "row_groups": 42,
+              "rows": 2453192,
+              "selected_compressed_bytes": 90513977,
+              "selected_uncompressed_bytes": 174227605,
+              "source_bytes": 737506515,
+              "source_records": 14851476,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00023-e59cd0ad-9072-558c-95ba-0a59dbd7680d-c000.zstd.parquet"
+            },
+            {
+              "etag": "3b4b90604100ed9c539a35ebb208b479-8",
+              "first_row_group": 0,
+              "last_row_group": 27,
+              "row_groups": 28,
+              "rows": 1539872,
+              "selected_compressed_bytes": 45468068,
+              "selected_uncompressed_bytes": 99832365,
+              "source_bytes": 532801916,
+              "source_records": 14695164,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00024-1b3c2914-b316-5c46-bccb-1bf72af47e76-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3993064,
+          "selected_compressed_bytes": 135982045,
+          "selected_uncompressed_bytes": 274059970,
+          "source_digest_sha256": "ae723b1c9dd52da5abf410718f325cfb688550a0eb3027fcbfd6ce5ce78ff058",
+          "source_objects": 2,
+          "task_digest_sha256": "2a2d8cdbbef91d31d0d847f02523af67f14b2ae86eff1912fe3ff33b0efc1cfe"
+        },
+        {
+          "exact_country_rows": {
+            "IT": 3688427
+          },
+          "execution_bucket": "address-map-task-090",
+          "index": 90,
+          "mixed_or_unknown_country_rows": 284957,
+          "ranges": [
+            {
+              "etag": "3b4b90604100ed9c539a35ebb208b479-8",
+              "first_row_group": 28,
+              "last_row_group": 97,
+              "row_groups": 70,
+              "rows": 3973384,
+              "selected_compressed_bytes": 116622888,
+              "selected_uncompressed_bytes": 255116889,
+              "source_bytes": 532801916,
+              "source_records": 14695164,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00024-1b3c2914-b316-5c46-bccb-1bf72af47e76-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3973384,
+          "selected_compressed_bytes": 116622888,
+          "selected_uncompressed_bytes": 255116889,
+          "source_digest_sha256": "ed0572fcdc942dd566db82cbe1da3ac9c872216c4e838eec465b73851ddae50d",
+          "source_objects": 1,
+          "task_digest_sha256": "9518c64ab98b7cd4e5760cd569e0e1799af592498cc88a049f3230a74fd495ca"
+        },
+        {
+          "exact_country_rows": {
+            "IT": 3953900
+          },
+          "execution_bucket": "address-map-task-091",
+          "index": 91,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "3b4b90604100ed9c539a35ebb208b479-8",
+              "first_row_group": 98,
+              "last_row_group": 165,
+              "row_groups": 68,
+              "rows": 3953900,
+              "selected_compressed_bytes": 112807294,
+              "selected_uncompressed_bytes": 245037881,
+              "source_bytes": 532801916,
+              "source_records": 14695164,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00024-1b3c2914-b316-5c46-bccb-1bf72af47e76-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3953900,
+          "selected_compressed_bytes": 112807294,
+          "selected_uncompressed_bytes": 245037881,
+          "source_digest_sha256": "1bdb3c86fadc151686e4ee8a60a43db3aefd508c646ee6f8e4adcb5dc97f938b",
+          "source_objects": 1,
+          "task_digest_sha256": "16584928b3a942926f79f3fe56b65f60592d62c13100af989e8e3e106d627d0d"
+        },
+        {
+          "exact_country_rows": {
+            "IT": 3855549
+          },
+          "execution_bucket": "address-map-task-092",
+          "index": 92,
+          "mixed_or_unknown_country_rows": 73208,
+          "ranges": [
+            {
+              "etag": "3b4b90604100ed9c539a35ebb208b479-8",
+              "first_row_group": 166,
+              "last_row_group": 233,
+              "row_groups": 68,
+              "rows": 3928757,
+              "selected_compressed_bytes": 109857465,
+              "selected_uncompressed_bytes": 238850082,
+              "source_bytes": 532801916,
+              "source_records": 14695164,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00024-1b3c2914-b316-5c46-bccb-1bf72af47e76-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3928757,
+          "selected_compressed_bytes": 109857465,
+          "selected_uncompressed_bytes": 238850082,
+          "source_digest_sha256": "853105afb167eeb248338f178a14e72ec0ca18d9de37bd7b088832e46dc97f34",
+          "source_objects": 1,
+          "task_digest_sha256": "59e46dfc69e78aca67fc812e072d3367e37e3bcf74599381ff07193d42915c99"
+        },
+        {
+          "exact_country_rows": {
+            "HR": 63110,
+            "IT": 3380817,
+            "RS": 96152
+          },
+          "execution_bucket": "address-map-task-093",
+          "index": 93,
+          "mixed_or_unknown_country_rows": 409627,
+          "ranges": [
+            {
+              "etag": "3b4b90604100ed9c539a35ebb208b479-8",
+              "first_row_group": 234,
+              "last_row_group": 255,
+              "row_groups": 22,
+              "rows": 1299251,
+              "selected_compressed_bytes": 40482452,
+              "selected_uncompressed_bytes": 86868542,
+              "source_bytes": 532801916,
+              "source_records": 14695164,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00024-1b3c2914-b316-5c46-bccb-1bf72af47e76-c000.zstd.parquet"
+            },
+            {
+              "etag": "3cc79f5f74e2569119ca0016cd8cb348-10",
+              "first_row_group": 0,
+              "last_row_group": 45,
+              "row_groups": 46,
+              "rows": 2650455,
+              "selected_compressed_bytes": 80820798,
+              "selected_uncompressed_bytes": 172846320,
+              "source_bytes": 657385985,
+              "source_records": 14705161,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00025-81cf822a-08cd-5c28-8c33-260a85823003-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3949706,
+          "selected_compressed_bytes": 121303250,
+          "selected_uncompressed_bytes": 259714862,
+          "source_digest_sha256": "1fe75502ad7585a72c5acc6929600caa9e9c2b0dad8ff6894fad073205282e77",
+          "source_objects": 2,
+          "task_digest_sha256": "05cc579046771177795b064fb41c31e3f5e8129652c635a536f5b4fda2d13389"
+        },
+        {
+          "exact_country_rows": {
+            "CH": 318671,
+            "IT": 3165368
+          },
+          "execution_bucket": "address-map-task-094",
+          "index": 94,
+          "mixed_or_unknown_country_rows": 506342,
+          "ranges": [
+            {
+              "etag": "3cc79f5f74e2569119ca0016cd8cb348-10",
+              "first_row_group": 46,
+              "last_row_group": 115,
+              "row_groups": 70,
+              "rows": 3990381,
+              "selected_compressed_bytes": 127760846,
+              "selected_uncompressed_bytes": 269493567,
+              "source_bytes": 657385985,
+              "source_records": 14705161,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00025-81cf822a-08cd-5c28-8c33-260a85823003-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3990381,
+          "selected_compressed_bytes": 127760846,
+          "selected_uncompressed_bytes": 269493567,
+          "source_digest_sha256": "87ed5622f8f3847edde62df59c5be13b45b09b3ace739933927f50671f21375d",
+          "source_objects": 1,
+          "task_digest_sha256": "cd05cffc521b3ee7c17a6ad22776a5541c4cb08c8dc210bef44ee37512dcd943"
+        },
+        {
+          "exact_country_rows": {
+            "HR": 379265,
+            "IT": 1499827,
+            "RS": 843172
+          },
+          "execution_bucket": "address-map-task-095",
+          "index": 95,
+          "mixed_or_unknown_country_rows": 1240561,
+          "ranges": [
+            {
+              "etag": "3cc79f5f74e2569119ca0016cd8cb348-10",
+              "first_row_group": 116,
+              "last_row_group": 185,
+              "row_groups": 70,
+              "rows": 3962825,
+              "selected_compressed_bytes": 137209529,
+              "selected_uncompressed_bytes": 274705490,
+              "source_bytes": 657385985,
+              "source_records": 14705161,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00025-81cf822a-08cd-5c28-8c33-260a85823003-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3962825,
+          "selected_compressed_bytes": 137209529,
+          "selected_uncompressed_bytes": 274705490,
+          "source_digest_sha256": "65bf510ec30e05999e0da09bd6c170aa574318c399f934ba93d93823344aea21",
+          "source_objects": 1,
+          "task_digest_sha256": "aa09a8107e1b4c7249a472f3e18838bd82f5d50669aa928bf50a96d54bc9e9a6"
+        },
+        {
+          "exact_country_rows": {
+            "AT": 400347,
+            "HR": 256339,
+            "IT": 1191476,
+            "RS": 496016,
+            "SI": 53355
+          },
+          "execution_bucket": "address-map-task-096",
+          "index": 96,
+          "mixed_or_unknown_country_rows": 1598205,
+          "ranges": [
+            {
+              "etag": "3cc79f5f74e2569119ca0016cd8cb348-10",
+              "first_row_group": 186,
+              "last_row_group": 253,
+              "row_groups": 68,
+              "rows": 3995738,
+              "selected_compressed_bytes": 139757449,
+              "selected_uncompressed_bytes": 278134008,
+              "source_bytes": 657385985,
+              "source_records": 14705161,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00025-81cf822a-08cd-5c28-8c33-260a85823003-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3995738,
+          "selected_compressed_bytes": 139757449,
+          "selected_uncompressed_bytes": 278134008,
+          "source_digest_sha256": "102cd8fcbd74bade239887a9cec0c664e8ce999b5f9d097970df2ea52b23654e",
+          "source_objects": 1,
+          "task_digest_sha256": "6b93faff2691327feccd51994fd94eeead378d64eed6a7ec4947cfd4372993d0"
+        },
+        {
+          "exact_country_rows": {
+            "AT": 574420,
+            "CH": 89454,
+            "CZ": 315782,
+            "DE": 2236649
+          },
+          "execution_bucket": "address-map-task-097",
+          "index": 97,
+          "mixed_or_unknown_country_rows": 741247,
+          "ranges": [
+            {
+              "etag": "3cc79f5f74e2569119ca0016cd8cb348-10",
+              "first_row_group": 254,
+              "last_row_group": 255,
+              "row_groups": 2,
+              "rows": 105762,
+              "selected_compressed_bytes": 3984023,
+              "selected_uncompressed_bytes": 7669662,
+              "source_bytes": 657385985,
+              "source_records": 14705161,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00025-81cf822a-08cd-5c28-8c33-260a85823003-c000.zstd.parquet"
+            },
+            {
+              "etag": "a42e9ff60fb9b8c2a374c3f8b43eae81-12",
+              "first_row_group": 0,
+              "last_row_group": 66,
+              "row_groups": 67,
+              "rows": 3851790,
+              "selected_compressed_bytes": 145154446,
+              "selected_uncompressed_bytes": 280608577,
+              "source_bytes": 771021861,
+              "source_records": 14772249,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00026-e94dd48a-6d96-5b9f-a66c-2ab67fbf04e0-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3957552,
+          "selected_compressed_bytes": 149138469,
+          "selected_uncompressed_bytes": 288278239,
+          "source_digest_sha256": "1082ba1a3d898d5d55f6bbaf84aa4937328484ae6de1ff3cfea599fa3a0cee34",
+          "source_objects": 2,
+          "task_digest_sha256": "f700f9e06103085eb0a8ad9bcf9a6c5aa7bbc4299d56608f2fe21f1bde699802"
+        },
+        {
+          "exact_country_rows": {
+            "AT": 372282,
+            "CZ": 631113,
+            "DE": 2371199
+          },
+          "execution_bucket": "address-map-task-098",
+          "index": 98,
+          "mixed_or_unknown_country_rows": 594273,
+          "ranges": [
+            {
+              "etag": "a42e9ff60fb9b8c2a374c3f8b43eae81-12",
+              "first_row_group": 67,
+              "last_row_group": 134,
+              "row_groups": 68,
+              "rows": 3968867,
+              "selected_compressed_bytes": 148364322,
+              "selected_uncompressed_bytes": 286281661,
+              "source_bytes": 771021861,
+              "source_records": 14772249,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00026-e94dd48a-6d96-5b9f-a66c-2ab67fbf04e0-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3968867,
+          "selected_compressed_bytes": 148364322,
+          "selected_uncompressed_bytes": 286281661,
+          "source_digest_sha256": "3327a1570d51b9dfb087fda27f6d0d97445d8f6bf2dbcc22e9a47a648c8d21f8",
+          "source_objects": 1,
+          "task_digest_sha256": "082d8b387d576ea0068ad74a13a0feb055559e7dba53ea92d486347553387806"
+        },
+        {
+          "exact_country_rows": {
+            "AT": 282405,
+            "CZ": 1086242,
+            "PL": 144812,
+            "SK": 941538
+          },
+          "execution_bucket": "address-map-task-099",
+          "index": 99,
+          "mixed_or_unknown_country_rows": 1498298,
+          "ranges": [
+            {
+              "etag": "a42e9ff60fb9b8c2a374c3f8b43eae81-12",
+              "first_row_group": 135,
+              "last_row_group": 202,
+              "row_groups": 68,
+              "rows": 3953295,
+              "selected_compressed_bytes": 150365229,
+              "selected_uncompressed_bytes": 292116883,
+              "source_bytes": 771021861,
+              "source_records": 14772249,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00026-e94dd48a-6d96-5b9f-a66c-2ab67fbf04e0-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 68,
+          "rows": 3953295,
+          "selected_compressed_bytes": 150365229,
+          "selected_uncompressed_bytes": 292116883,
+          "source_digest_sha256": "1ebfbad16977a58d83bb5090493e6eff7e42b65c6e8765d6e2c132d0aa936312",
+          "source_objects": 1,
+          "task_digest_sha256": "ffd67a9c827532dfae41c17a172bcd9e81b67f96f6b1d2212e02c48c7f9199cc"
+        },
+        {
+          "exact_country_rows": {
+            "CZ": 52270,
+            "DE": 1000110,
+            "PL": 2554200
+          },
+          "execution_bucket": "address-map-task-100",
+          "index": 100,
+          "mixed_or_unknown_country_rows": 391827,
+          "ranges": [
+            {
+              "etag": "a42e9ff60fb9b8c2a374c3f8b43eae81-12",
+              "first_row_group": 203,
+              "last_row_group": 255,
+              "row_groups": 53,
+              "rows": 2998297,
+              "selected_compressed_bytes": 112281895,
+              "selected_uncompressed_bytes": 221209968,
+              "source_bytes": 771021861,
+              "source_records": 14772249,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00026-e94dd48a-6d96-5b9f-a66c-2ab67fbf04e0-c000.zstd.parquet"
+            },
+            {
+              "etag": "e57d3d1b9829f30f7fbe0891fc3801c3-11",
+              "first_row_group": 0,
+              "last_row_group": 16,
+              "row_groups": 17,
+              "rows": 1000110,
+              "selected_compressed_bytes": 37055047,
+              "selected_uncompressed_bytes": 71954667,
+              "source_bytes": 716148704,
+              "source_records": 14667003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00027-ffc960a2-ffc2-5ccc-8a68-9d8b54d5f0bb-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 70,
+          "rows": 3998407,
+          "selected_compressed_bytes": 149336942,
+          "selected_uncompressed_bytes": 293164635,
+          "source_digest_sha256": "26b8903f2096b1eee3d32d11ca8ec4c9625411d0483ae9c34249a8e0504b7bdc",
+          "source_objects": 2,
+          "task_digest_sha256": "a8718f8b268da0388f2ec37ee6ee9207d9d85963d414061bd0b3addbb1773da4"
+        },
+        {
+          "exact_country_rows": {
+            "DE": 2104559,
+            "DK": 1170116,
+            "NO": 129834
+          },
+          "execution_bucket": "address-map-task-101",
+          "index": 101,
+          "mixed_or_unknown_country_rows": 583468,
+          "ranges": [
+            {
+              "etag": "e57d3d1b9829f30f7fbe0891fc3801c3-11",
+              "first_row_group": 17,
+              "last_row_group": 85,
+              "row_groups": 69,
+              "rows": 3987977,
+              "selected_compressed_bytes": 143405987,
+              "selected_uncompressed_bytes": 278703831,
+              "source_bytes": 716148704,
+              "source_records": 14667003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00027-ffc960a2-ffc2-5ccc-8a68-9d8b54d5f0bb-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3987977,
+          "selected_compressed_bytes": 143405987,
+          "selected_uncompressed_bytes": 278703831,
+          "source_digest_sha256": "da5e9a2178bc9cadc4a413bad8eaf428eed7f4ac002a2b273055f31c1dca1e78",
+          "source_objects": 1,
+          "task_digest_sha256": "66261e6f77c4f286efe01642353c6477e0b03966d758c96b10f4f99ef719b63a"
+        },
+        {
+          "exact_country_rows": {
+            "DE": 1163045,
+            "DK": 483400,
+            "NO": 1543363,
+            "PL": 127745
+          },
+          "execution_bucket": "address-map-task-102",
+          "index": 102,
+          "mixed_or_unknown_country_rows": 631555,
+          "ranges": [
+            {
+              "etag": "e57d3d1b9829f30f7fbe0891fc3801c3-11",
+              "first_row_group": 86,
+              "last_row_group": 154,
+              "row_groups": 69,
+              "rows": 3949108,
+              "selected_compressed_bytes": 137440899,
+              "selected_uncompressed_bytes": 264789159,
+              "source_bytes": 716148704,
+              "source_records": 14667003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00027-ffc960a2-ffc2-5ccc-8a68-9d8b54d5f0bb-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3949108,
+          "selected_compressed_bytes": 137440899,
+          "selected_uncompressed_bytes": 264789159,
+          "source_digest_sha256": "1b5a81e2c48ea9b880f78f4bcaec8c06f17e5997838fcfaca525989c7a2f23a8",
+          "source_objects": 1,
+          "task_digest_sha256": "57fd3752fb105a0b0c0aa408d0713acdcc35367b66dd6365d8a0c2255b40659f"
+        },
+        {
+          "exact_country_rows": {
+            "DE": 135144,
+            "DK": 1268470,
+            "NO": 104335,
+            "PL": 1948273
+          },
+          "execution_bucket": "address-map-task-103",
+          "index": 103,
+          "mixed_or_unknown_country_rows": 511932,
+          "ranges": [
+            {
+              "etag": "e57d3d1b9829f30f7fbe0891fc3801c3-11",
+              "first_row_group": 155,
+              "last_row_group": 223,
+              "row_groups": 69,
+              "rows": 3968154,
+              "selected_compressed_bytes": 139519106,
+              "selected_uncompressed_bytes": 273744099,
+              "source_bytes": 716148704,
+              "source_records": 14667003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00027-ffc960a2-ffc2-5ccc-8a68-9d8b54d5f0bb-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3968154,
+          "selected_compressed_bytes": 139519106,
+          "selected_uncompressed_bytes": 273744099,
+          "source_digest_sha256": "4b332eac2d29c51083b6a668b29e67f756e7211b83e1f483a808b187ff4657f2",
+          "source_objects": 1,
+          "task_digest_sha256": "4741e0cf068dfe4bdf13cb93c04f2febb0b905fb0d95376e2c0d33457a17e0fb"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 917090,
+            "DK": 58361,
+            "FR": 224544,
+            "NO": 205177,
+            "PL": 874429
+          },
+          "execution_bucket": "address-map-task-104",
+          "index": 104,
+          "mixed_or_unknown_country_rows": 623687,
+          "ranges": [
+            {
+              "etag": "e57d3d1b9829f30f7fbe0891fc3801c3-11",
+              "first_row_group": 224,
+              "last_row_group": 255,
+              "row_groups": 32,
+              "rows": 1761654,
+              "selected_compressed_bytes": 64538758,
+              "selected_uncompressed_bytes": 126185156,
+              "source_bytes": 716148704,
+              "source_records": 14667003,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00027-ffc960a2-ffc2-5ccc-8a68-9d8b54d5f0bb-c000.zstd.parquet"
+            },
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 0,
+              "last_row_group": 39,
+              "row_groups": 40,
+              "rows": 1141634,
+              "selected_compressed_bytes": 38173290,
+              "selected_uncompressed_bytes": 75239530,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2903288,
+          "selected_compressed_bytes": 102712048,
+          "selected_uncompressed_bytes": 201424686,
+          "source_digest_sha256": "7c408ccf5b49f18cb9219fd3e90b1b8b11dbc13103391dfed79902c8e7108373",
+          "source_objects": 2,
+          "task_digest_sha256": "b2cc45df6ac75ac2373418d9924874b2ec993bc0384fbaabcfd9fca88ff6a049"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 581179,
+            "FR": 176195,
+            "HK": 170044,
+            "SG": 81623,
+            "TW": 846217
+          },
+          "execution_bucket": "address-map-task-105",
+          "index": 105,
+          "mixed_or_unknown_country_rows": 201450,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 40,
+              "last_row_group": 111,
+              "row_groups": 72,
+              "rows": 2056708,
+              "selected_compressed_bytes": 70594250,
+              "selected_uncompressed_bytes": 139919079,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2056708,
+          "selected_compressed_bytes": 70594250,
+          "selected_uncompressed_bytes": 139919079,
+          "source_digest_sha256": "3d2a06749fda51a9bc3053d3b8b54585c9bb63152d7d64427bdefb7b1c7e58e0",
+          "source_objects": 1,
+          "task_digest_sha256": "642ea6c997fc6a0e8d80d3baa159e73a89b77c76bbdb0d2f8c9f1f55a479b00e"
+        },
+        {
+          "exact_country_rows": {
+            "TW": 2107760
+          },
+          "execution_bucket": "address-map-task-106",
+          "index": 106,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 112,
+              "last_row_group": 183,
+              "row_groups": 72,
+              "rows": 2107760,
+              "selected_compressed_bytes": 74958139,
+              "selected_uncompressed_bytes": 147984725,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2107760,
+          "selected_compressed_bytes": 74958139,
+          "selected_uncompressed_bytes": 147984725,
+          "source_digest_sha256": "bd23e27c9ec57bd978f6fa098f24181b800d512e49ae6ab28c61fadf9ce109b4",
+          "source_objects": 1,
+          "task_digest_sha256": "a93688b328ca7bbe67335077b628d140e064753f7a41bf05bc9e012f4f40665c"
+        },
+        {
+          "exact_country_rows": {
+            "TW": 2146926
+          },
+          "execution_bucket": "address-map-task-107",
+          "index": 107,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 184,
+              "last_row_group": 255,
+              "row_groups": 72,
+              "rows": 2146926,
+              "selected_compressed_bytes": 70271863,
+              "selected_uncompressed_bytes": 139811377,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2146926,
+          "selected_compressed_bytes": 70271863,
+          "selected_uncompressed_bytes": 139811377,
+          "source_digest_sha256": "8f5f1f067b69a35acd6db53ef17729535d27ef3075c947265c77ddf50faaeb28",
+          "source_objects": 1,
+          "task_digest_sha256": "71a6216667684b665eb3744477f266e457ba54edc6ccc5ac83e34d96571d6997"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 238213,
+            "TW": 1598101
+          },
+          "execution_bucket": "address-map-task-108",
+          "index": 108,
+          "mixed_or_unknown_country_rows": 219639,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 256,
+              "last_row_group": 327,
+              "row_groups": 72,
+              "rows": 2055953,
+              "selected_compressed_bytes": 62782523,
+              "selected_uncompressed_bytes": 124801135,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2055953,
+          "selected_compressed_bytes": 62782523,
+          "selected_uncompressed_bytes": 124801135,
+          "source_digest_sha256": "6e4e087c025c244d5f7efdde4a41d99977a0e660878ddf329fa8ad7aad9d57bb",
+          "source_objects": 1,
+          "task_digest_sha256": "5c6f254d263a0b855f3785eaed789b9e791abba76c0b6d923e76772e3d38e51b"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 1592951,
+            "TW": 448966
+          },
+          "execution_bucket": "address-map-task-109",
+          "index": 109,
+          "mixed_or_unknown_country_rows": 58288,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 328,
+              "last_row_group": 399,
+              "row_groups": 72,
+              "rows": 2100205,
+              "selected_compressed_bytes": 72959730,
+              "selected_uncompressed_bytes": 141733190,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2100205,
+          "selected_compressed_bytes": 72959730,
+          "selected_uncompressed_bytes": 141733190,
+          "source_digest_sha256": "64a2501d0fa7aa993454cd6a109b1090105c6e764642d68c2c00c15365c15a48",
+          "source_objects": 1,
+          "task_digest_sha256": "63193b1add1cd641afd5df7124d58394030a7a6ea4bd02d7f2a584631d4d4c29"
+        },
+        {
+          "exact_country_rows": {
+            "TW": 2065983
+          },
+          "execution_bucket": "address-map-task-110",
+          "index": 110,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 400,
+              "last_row_group": 471,
+              "row_groups": 72,
+              "rows": 2065983,
+              "selected_compressed_bytes": 55911950,
+              "selected_uncompressed_bytes": 112335768,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2065983,
+          "selected_compressed_bytes": 55911950,
+          "selected_uncompressed_bytes": 112335768,
+          "source_digest_sha256": "95d53034c6fbc7ff4282f8e14446df48ddb60f21c317e64f31a74ef17ae27857",
+          "source_objects": 1,
+          "task_digest_sha256": "e3152b92983ed446e6b374f847d18b8d661252e32912788a7ea78c40c82ecbe6"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 1841112,
+            "JP": 951212,
+            "TW": 185790
+          },
+          "execution_bucket": "address-map-task-111",
+          "index": 111,
+          "mixed_or_unknown_country_rows": 29806,
+          "ranges": [
+            {
+              "etag": "6fcceaaa1d3d476e28f3d83322d67129-9",
+              "first_row_group": 472,
+              "last_row_group": 511,
+              "row_groups": 40,
+              "rows": 1166808,
+              "selected_compressed_bytes": 31716603,
+              "selected_uncompressed_bytes": 62153994,
+              "source_bytes": 583849738,
+              "source_records": 14841977,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00028-e7475393-7f2d-5c47-809b-640b5dd42b38-c000.zstd.parquet"
+            },
+            {
+              "etag": "6dd0b1812d29495138aa072f5d1040d1-10",
+              "first_row_group": 0,
+              "last_row_group": 31,
+              "row_groups": 32,
+              "rows": 1841112,
+              "selected_compressed_bytes": 60029413,
+              "selected_uncompressed_bytes": 118779478,
+              "source_bytes": 626353015,
+              "source_records": 14754962,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00029-f1df2329-3492-5a94-9be6-4f450cd18568-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 3007920,
+          "selected_compressed_bytes": 91746016,
+          "selected_uncompressed_bytes": 180933472,
+          "source_digest_sha256": "74be3681f6b474f5db521eaf5b9c52126dbec518a0803cdff81f483ef5315d44",
+          "source_objects": 2,
+          "task_digest_sha256": "14e628847daa19869b16666585bc9ee3d32c66a23ef328b010030786b9a98d78"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 3976452
+          },
+          "execution_bucket": "address-map-task-112",
+          "index": 112,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "6dd0b1812d29495138aa072f5d1040d1-10",
+              "first_row_group": 32,
+              "last_row_group": 102,
+              "row_groups": 71,
+              "rows": 3976452,
+              "selected_compressed_bytes": 139631025,
+              "selected_uncompressed_bytes": 275428134,
+              "source_bytes": 626353015,
+              "source_records": 14754962,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00029-f1df2329-3492-5a94-9be6-4f450cd18568-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 71,
+          "rows": 3976452,
+          "selected_compressed_bytes": 139631025,
+          "selected_uncompressed_bytes": 275428134,
+          "source_digest_sha256": "6b0034825d65f370c83883d8d0a92dcde93f4d79b7b9a5bd6f02bcbc1acbddd1",
+          "source_objects": 1,
+          "task_digest_sha256": "be0c80eda290e2d2acee0926d4bdeca2e9e2b6f9b56de2c2d1fd5fdc6fc2c710"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 2667316,
+            "NZ": 1227173
+          },
+          "execution_bucket": "address-map-task-113",
+          "index": 113,
+          "mixed_or_unknown_country_rows": 63657,
+          "ranges": [
+            {
+              "etag": "6dd0b1812d29495138aa072f5d1040d1-10",
+              "first_row_group": 103,
+              "last_row_group": 171,
+              "row_groups": 69,
+              "rows": 3958146,
+              "selected_compressed_bytes": 128618669,
+              "selected_uncompressed_bytes": 252668159,
+              "source_bytes": 626353015,
+              "source_records": 14754962,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00029-f1df2329-3492-5a94-9be6-4f450cd18568-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3958146,
+          "selected_compressed_bytes": 128618669,
+          "selected_uncompressed_bytes": 252668159,
+          "source_digest_sha256": "bab5836a01c53bc27ebe608a781e1f978450daa135af21a088862d65c85bde68",
+          "source_objects": 1,
+          "task_digest_sha256": "3be7be309fd7ee931bc7a77471990e06b7e46f156587192bedf7b7305322c366"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 2796706,
+            "NZ": 1180791
+          },
+          "execution_bucket": "address-map-task-114",
+          "index": 114,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "6dd0b1812d29495138aa072f5d1040d1-10",
+              "first_row_group": 172,
+              "last_row_group": 238,
+              "row_groups": 67,
+              "rows": 3977497,
+              "selected_compressed_bytes": 138304602,
+              "selected_uncompressed_bytes": 272044193,
+              "source_bytes": 626353015,
+              "source_records": 14754962,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00029-f1df2329-3492-5a94-9be6-4f450cd18568-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3977497,
+          "selected_compressed_bytes": 138304602,
+          "selected_uncompressed_bytes": 272044193,
+          "source_digest_sha256": "9c975aaf033fd40b2253fc5c1eae1c5480a393e0fb3cd477e8b11c57ea0ecb26",
+          "source_objects": 1,
+          "task_digest_sha256": "fb59b96adba0ef959e5b0e6a7a13e5cbcbd2b3e4e81ba313beca1824be59fbdc"
+        },
+        {
+          "exact_country_rows": {
+            "AU": 951522,
+            "PL": 1414944,
+            "RS": 575360
+          },
+          "execution_bucket": "address-map-task-115",
+          "index": 115,
+          "mixed_or_unknown_country_rows": 1015973,
+          "ranges": [
+            {
+              "etag": "6dd0b1812d29495138aa072f5d1040d1-10",
+              "first_row_group": 239,
+              "last_row_group": 255,
+              "row_groups": 17,
+              "rows": 1001755,
+              "selected_compressed_bytes": 32189388,
+              "selected_uncompressed_bytes": 63330051,
+              "source_bytes": 626353015,
+              "source_records": 14754962,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00029-f1df2329-3492-5a94-9be6-4f450cd18568-c000.zstd.parquet"
+            },
+            {
+              "etag": "768b1ed2d20aec68313ca9499199d073-11",
+              "first_row_group": 0,
+              "last_row_group": 49,
+              "row_groups": 50,
+              "rows": 2956044,
+              "selected_compressed_bytes": 111551795,
+              "selected_uncompressed_bytes": 217230725,
+              "source_bytes": 682313835,
+              "source_records": 14778092,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00030-ea95a758-cd27-5eea-bb78-bcb3c02103ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 67,
+          "rows": 3957799,
+          "selected_compressed_bytes": 143741183,
+          "selected_uncompressed_bytes": 280560776,
+          "source_digest_sha256": "b6e659fa4b400c5bbee6e51e6f38e0f78a7c0d50b3defc08f8e293972820b1a3",
+          "source_objects": 2,
+          "task_digest_sha256": "204f03d0c31a68111dee97389325023b36fb892938c93d9cda3b0322c9222496"
+        },
+        {
+          "exact_country_rows": {
+            "EE": 606431,
+            "FI": 1135366,
+            "LT": 418013,
+            "LV": 54685,
+            "PL": 214532
+          },
+          "execution_bucket": "address-map-task-116",
+          "index": 116,
+          "mixed_or_unknown_country_rows": 1524245,
+          "ranges": [
+            {
+              "etag": "768b1ed2d20aec68313ca9499199d073-11",
+              "first_row_group": 50,
+              "last_row_group": 118,
+              "row_groups": 69,
+              "rows": 3953272,
+              "selected_compressed_bytes": 146682529,
+              "selected_uncompressed_bytes": 281693334,
+              "source_bytes": 682313835,
+              "source_records": 14778092,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00030-ea95a758-cd27-5eea-bb78-bcb3c02103ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3953272,
+          "selected_compressed_bytes": 146682529,
+          "selected_uncompressed_bytes": 281693334,
+          "source_digest_sha256": "3677fd76f3db9ca8c19cd116b7f6f25118d8072bbf94c9e0c7e0c22d9cced443",
+          "source_objects": 1,
+          "task_digest_sha256": "4967ca2c66c76ff6443794fe43e26714a31fb98ceadcbc3e031f8312e6907d47"
+        },
+        {
+          "exact_country_rows": {
+            "EE": 133727,
+            "FI": 116017,
+            "JP": 3461265
+          },
+          "execution_bucket": "address-map-task-117",
+          "index": 117,
+          "mixed_or_unknown_country_rows": 261957,
+          "ranges": [
+            {
+              "etag": "768b1ed2d20aec68313ca9499199d073-11",
+              "first_row_group": 119,
+              "last_row_group": 187,
+              "row_groups": 69,
+              "rows": 3972966,
+              "selected_compressed_bytes": 109560589,
+              "selected_uncompressed_bytes": 214238842,
+              "source_bytes": 682313835,
+              "source_records": 14778092,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00030-ea95a758-cd27-5eea-bb78-bcb3c02103ee-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 69,
+          "rows": 3972966,
+          "selected_compressed_bytes": 109560589,
+          "selected_uncompressed_bytes": 214238842,
+          "source_digest_sha256": "5b58a6aa35aa9d67c4563f48f3e8c884ca3da9c52340472ec646a2eaceb920ea",
+          "source_objects": 1,
+          "task_digest_sha256": "ce70884fe9e2a6733bcc8b9665392da15d921c1405b59b7e0089554102d19abf"
+        },
+        {
+          "exact_country_rows": {
+            "EE": 642446,
+            "FI": 1131786,
+            "JP": 571020,
+            "LT": 214705
+          },
+          "execution_bucket": "address-map-task-118",
+          "index": 118,
+          "mixed_or_unknown_country_rows": 1432833,
+          "ranges": [
+            {
+              "etag": "768b1ed2d20aec68313ca9499199d073-11",
+              "first_row_group": 188,
+              "last_row_group": 255,
+              "row_groups": 68,
+              "rows": 3895810,
+              "selected_compressed_bytes": 139163177,
+              "selected_uncompressed_bytes": 268293947,
+              "source_bytes": 682313835,
+              "source_records": 14778092,
+              "source_row_groups": 256,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00030-ea95a758-cd27-5eea-bb78-bcb3c02103ee-c000.zstd.parquet"
+            },
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 0,
+              "last_row_group": 2,
+              "row_groups": 3,
+              "rows": 96980,
+              "selected_compressed_bytes": 2556949,
+              "selected_uncompressed_bytes": 4975238,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 71,
+          "rows": 3992790,
+          "selected_compressed_bytes": 141720126,
+          "selected_uncompressed_bytes": 273269185,
+          "source_digest_sha256": "ccb23105a6d2a9ecdbd858684192032f9372f0b6790151b423c46ab5166f5180",
+          "source_objects": 2,
+          "task_digest_sha256": "a1a393a2334e2ec9204e7080e4b7afe5a790e1376ed4b864b52d5b849d0413a2"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 1995266
+          },
+          "execution_bucket": "address-map-task-119",
+          "index": 119,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 3,
+              "last_row_group": 74,
+              "row_groups": 72,
+              "rows": 1995266,
+              "selected_compressed_bytes": 54167337,
+              "selected_uncompressed_bytes": 105126646,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 1995266,
+          "selected_compressed_bytes": 54167337,
+          "selected_uncompressed_bytes": 105126646,
+          "source_digest_sha256": "a3f09e4b26f5de04be44dce955f66f27e3f68ffa783929d04c7ef587a3d4ae51",
+          "source_objects": 1,
+          "task_digest_sha256": "744ecb895afdca7bf2c113b9c80321c78ee3301dba5089ca157be23a46a43939"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 2085516
+          },
+          "execution_bucket": "address-map-task-120",
+          "index": 120,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 75,
+              "last_row_group": 146,
+              "row_groups": 72,
+              "rows": 2085516,
+              "selected_compressed_bytes": 53378633,
+              "selected_uncompressed_bytes": 103774425,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2085516,
+          "selected_compressed_bytes": 53378633,
+          "selected_uncompressed_bytes": 103774425,
+          "source_digest_sha256": "2230644191ec416bb153cc26ff86e897f93fb8081efc6024a18ff75b589e55e5",
+          "source_objects": 1,
+          "task_digest_sha256": "8535a357990711f21c55e0d0fe6006dfa2f26800744cf4e71a4858a220b0ab9d"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 2074682
+          },
+          "execution_bucket": "address-map-task-121",
+          "index": 121,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 147,
+              "last_row_group": 218,
+              "row_groups": 72,
+              "rows": 2074682,
+              "selected_compressed_bytes": 53867895,
+              "selected_uncompressed_bytes": 104744581,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2074682,
+          "selected_compressed_bytes": 53867895,
+          "selected_uncompressed_bytes": 104744581,
+          "source_digest_sha256": "4455460471f1b383606ccde25d4c1381ae7b68b708d4d7962f253a91c00ff49d",
+          "source_objects": 1,
+          "task_digest_sha256": "ef075ab3726a2cf1eec84bb176f39135b2d3d1bb009d62f9048c481777f8c1c1"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 2014923
+          },
+          "execution_bucket": "address-map-task-122",
+          "index": 122,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 219,
+              "last_row_group": 290,
+              "row_groups": 72,
+              "rows": 2014923,
+              "selected_compressed_bytes": 57111768,
+              "selected_uncompressed_bytes": 111070428,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2014923,
+          "selected_compressed_bytes": 57111768,
+          "selected_uncompressed_bytes": 111070428,
+          "source_digest_sha256": "55832e2a4b3b681a8c47e6d58414a39a28838d3e89ba345b236a34e93565a02c",
+          "source_objects": 1,
+          "task_digest_sha256": "1d7550da7f84b3f19cd8bc504950a0770dd33e44f707f2b01ba3db5a3bfdb4a6"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 2110445
+          },
+          "execution_bucket": "address-map-task-123",
+          "index": 123,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 291,
+              "last_row_group": 362,
+              "row_groups": 72,
+              "rows": 2110445,
+              "selected_compressed_bytes": 55223019,
+              "selected_uncompressed_bytes": 107550572,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2110445,
+          "selected_compressed_bytes": 55223019,
+          "selected_uncompressed_bytes": 107550572,
+          "source_digest_sha256": "d480903918f17977716a45b8cb882fbd9547d4824a2fba6c8ff7229e47094220",
+          "source_objects": 1,
+          "task_digest_sha256": "5e13d3c42325562d1798d7694051681756327127d1cb7158d4426a0c9f3afb50"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 2002609
+          },
+          "execution_bucket": "address-map-task-124",
+          "index": 124,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 363,
+              "last_row_group": 434,
+              "row_groups": 72,
+              "rows": 2002609,
+              "selected_compressed_bytes": 53027249,
+              "selected_uncompressed_bytes": 103110118,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2002609,
+          "selected_compressed_bytes": 53027249,
+          "selected_uncompressed_bytes": 103110118,
+          "source_digest_sha256": "99131fa866584a5baba5786387fc08dcc9784cd8f814f0d3395577a281b3c846",
+          "source_objects": 1,
+          "task_digest_sha256": "9550de3c0f8f0734959d7c7acba52e641b90ebd9c943a5f12cd35afe157f01a5"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 2063452
+          },
+          "execution_bucket": "address-map-task-125",
+          "index": 125,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 435,
+              "last_row_group": 506,
+              "row_groups": 72,
+              "rows": 2063452,
+              "selected_compressed_bytes": 56660189,
+              "selected_uncompressed_bytes": 109805138,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 72,
+          "rows": 2063452,
+          "selected_compressed_bytes": 56660189,
+          "selected_uncompressed_bytes": 109805138,
+          "source_digest_sha256": "29e8a2a39c0b0e5a818a8830b82c8504692fe65c420ab97016297804d42bc1f6",
+          "source_objects": 1,
+          "task_digest_sha256": "5fbd4dd98141c9fdf34337ba0865e7bc2f23a779868974403446724feaaef16d"
+        },
+        {
+          "exact_country_rows": {
+            "JP": 154296
+          },
+          "execution_bucket": "address-map-task-126",
+          "index": 126,
+          "mixed_or_unknown_country_rows": 0,
+          "ranges": [
+            {
+              "etag": "79ebe356f619f06000c53dfc4f9eada7-7",
+              "first_row_group": 507,
+              "last_row_group": 511,
+              "row_groups": 5,
+              "rows": 154296,
+              "selected_compressed_bytes": 4635815,
+              "selected_uncompressed_bytes": 9087576,
+              "source_bytes": 450982050,
+              "source_records": 14598169,
+              "source_row_groups": 512,
+              "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=addresses/type=address/part-00031-84436af5-69a3-5606-bad1-6436203c8d23-c000.zstd.parquet"
+            }
+          ],
+          "row_groups": 5,
+          "rows": 154296,
+          "selected_compressed_bytes": 4635815,
+          "selected_uncompressed_bytes": 9087576,
+          "source_digest_sha256": "7fa27dc5dfffcd6109212141ecbe5c6c68edce26278cf3e91a9fa808a97a1cbe",
+          "source_objects": 1,
+          "task_digest_sha256": "313e4086be855f762093e9883e2fa5f3cc005e4fb48260ae227219711e66855e"
+        }
+      ]
+    },
+    "evidence_spec_sha256": "130207f3debde346cc9c1178e5038e2257e883ccd46c5826d1a5ae22c2583af9",
+    "inventory_file_sha256": "7b13abc149fee69d4931d04dd4f98ed65336e9685d8f3422c6598aa729f1db19",
+    "runtime": {
+      "duckdb": "1.5.1",
+      "numpy": "2.3.5",
+      "pyarrow": "25.0.0",
+      "python": "3.12.12"
+    },
+    "scale_evidence_sha256": "b040bee69a0e1035d2d2523cf63e464e9078f30167203266f4921b4581b82828"
+  },
+  "ready": false,
+  "schema": "overture-address-construction-v1-readiness-v1"
+}

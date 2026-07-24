@@ -5,8 +5,10 @@
 use worker::*;
 
 mod address;
+mod address_construction_v1;
 mod address_pages;
 mod handlers;
+mod places_construction_v1;
 mod places_pages;
 mod range_reader;
 mod stac;

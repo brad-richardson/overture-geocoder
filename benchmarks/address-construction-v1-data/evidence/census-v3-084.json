@@ -1,0 +1,76 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 7.866021042107604,
+    "peak_rss_bytes": 2496200704,
+    "peak_scratch_and_output_bytes": 2164524440,
+    "wall_seconds": 7.618640666012652
+  },
+  "hydration": {
+    "batches": 61,
+    "ipc_bytes": 607189896,
+    "rows": 3973302,
+    "seconds": 0.5704436659580097
+  },
+  "identity": {
+    "overture.address_execution_bucket": "address-map-task-084",
+    "overture.address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "overture.address_task_digest_sha256": "67577109fa8b8a501cec0123bd1596d435eff1c77ac164c8590576fa02c7b2ca",
+    "overture.address_task_index": "84",
+    "overture.address_task_source_digest_sha256": "724a56984a60ab6ade9d69daf6b7a8a527a772c18a30e117d052465a895e0932",
+    "overture.schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "overture.source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "input": {
+    "bytes": 142900696,
+    "rows": 3973302,
+    "sha256": "cfb988e2d12599e3be9af4a153fd3f2ea467e70b6078ee3ca2d9491c801afdcb"
+  },
+  "maximum_bucket_group": {
+    "country": "it",
+    "maximum_bucket": 37485,
+    "records": 74
+  },
+  "maximum_exact_normalized_key": {
+    "normalized_key": [
+      "ch",
+      "salgesch",
+      "salgesch",
+      "",
+      "3970",
+      "campingweg",
+      "2",
+      ""
+    ],
+    "records": 15
+  },
+  "schema": "overture-address-construction-transformed-census-v1",
+  "transform": {
+    "admitted_rows": 3959316,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 14.947434917,
+    "input_rows": 3973302,
+    "maximum_hash_bits": 16,
+    "normalization_version": "nfc-uniws-collapse-ascii-lower-v1",
+    "rejected_rows": 13986,
+    "rejections_by_precedence": {
+      "blank_country": 0,
+      "invalid_country": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_street_or_number": 13986,
+      "missing_uuid": 0,
+      "record_too_large": 0
+    },
+    "schema": "overture-address-rust-transform-report-v1",
+    "semantic_sum_a": "d82dda210b8ddb1394ef2964248ba74e08be793b6f0e0b108c8ab7b8168a8b4d",
+    "semantic_sum_b": "bd8563c846f052929a3d76a57f88cac1a4f447ded79c697665b85ee08e8b1b33",
+    "transform_version": "address-rust-arrow-transform-v1"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 1114947584,
+    "peak_scratch_bytes": 1686146148,
+    "wall_seconds": 14.978953875019215
+  }
+}

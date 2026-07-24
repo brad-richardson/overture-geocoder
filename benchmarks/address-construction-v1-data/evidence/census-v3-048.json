@@ -1,0 +1,76 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 8.22618512500776,
+    "peak_rss_bytes": 2472017920,
+    "peak_scratch_and_output_bytes": 2225860608,
+    "wall_seconds": 7.940482667007018
+  },
+  "hydration": {
+    "batches": 62,
+    "ipc_bytes": 623470328,
+    "rows": 3999111,
+    "seconds": 0.42252395796822384
+  },
+  "identity": {
+    "overture.address_execution_bucket": "address-map-task-048",
+    "overture.address_inventory_sha256": "6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e",
+    "overture.address_task_digest_sha256": "346b68a9bfb372aa5fffa76a92122db18f76067e6be3b4b0da9f1328204eab51",
+    "overture.address_task_index": "48",
+    "overture.address_task_source_digest_sha256": "061a215d804ae17baa10b998830075d9c37ac0af4a9d2c4291bb027973db0681",
+    "overture.schema_fingerprint_sha256": "05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0",
+    "overture.source_inventory_sha256": "aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37"
+  },
+  "input": {
+    "bytes": 160973155,
+    "rows": 3999111,
+    "sha256": "8b659100682f16c50943024dd1244467a1e23a974d5fc40e6c5220f3dd467bc0"
+  },
+  "maximum_bucket_group": {
+    "country": "us",
+    "maximum_bucket": 15290,
+    "records": 307
+  },
+  "maximum_exact_normalized_key": {
+    "normalized_key": [
+      "us",
+      "oh",
+      "oh",
+      "racine",
+      "45771",
+      "resort road",
+      "44705",
+      ""
+    ],
+    "records": 92
+  },
+  "schema": "overture-address-construction-transformed-census-v1",
+  "transform": {
+    "admitted_rows": 3999106,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 18.754768708,
+    "input_rows": 3999111,
+    "maximum_hash_bits": 16,
+    "normalization_version": "nfc-uniws-collapse-ascii-lower-v1",
+    "rejected_rows": 5,
+    "rejections_by_precedence": {
+      "blank_country": 0,
+      "invalid_country": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_street_or_number": 5,
+      "missing_uuid": 0,
+      "record_too_large": 0
+    },
+    "schema": "overture-address-rust-transform-report-v1",
+    "semantic_sum_a": "56821a6d51f3bbdf2a41566b11a01d802c0ce80f80196f7c1d4a3d469e70964f",
+    "semantic_sum_b": "d5d4b5064811a4e1c4304971cdbac8a5b4d49e71de32cfcd4232dec38f1987cb",
+    "transform_version": "address-rust-arrow-transform-v1"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 1240006656,
+    "peak_scratch_bytes": 1733057356,
+    "wall_seconds": 18.779715417011175
+  }
+}

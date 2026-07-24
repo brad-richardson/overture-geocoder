@@ -4,6 +4,27 @@ Date: 2026-07-22
 
 ## Status and decision
 
+### Planet-first reset (checkpoint 1)
+
+The unshipped Address and Places family outputs are disposable. Request
+`59f326dc2fd0866f54ead2ce0a1b19b5b9955c565cd8ef662d6bf22fc1047a63`, its
+outputs, completion markers, intermediate formats, serving bytes, and partition
+history are abandoned and cannot constrain the replacement. The first accepted
+replacement run will be lineage genesis in a fresh namespace.
+
+The immediate target is one verified, non-promoting planet Address + Places
+slice. Compatibility work, dual-path activation, native range-reader work, and
+permanent lineage machinery are deferred unless measured evidence makes them
+necessary. The initial implementation may retain the bounded PyArrow
+row-group reader as a columnar-only hydration boundary. Python may write its
+Arrow IPC handoff, but it may not construct feature objects or own semantics,
+sorting, grouping, or Parquet output.
+
+The focused checkpoint decision and implementation state are recorded in
+`2026-07-22-address-construction-v1-checkpoint.md`. Its planet-first sequence
+supersedes the older bounded implementation sequence below where they conflict;
+the rest of this document remains design inventory and safety guidance.
+
 This is a local implementation scope. It is not approval to resume the failed
 planet request, publish a family slice, promote a catalog, or change production
 Workers.

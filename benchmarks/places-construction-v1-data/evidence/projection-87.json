@@ -1,0 +1,63 @@
+{
+  "identity": {
+    "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+    "expected_input_records": 980147,
+    "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
+    "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+    "objects": [
+      {
+        "bytes": 643810507,
+        "etag": "a561221b648ed9c93332377640fd4e80-10",
+        "records": 4725559,
+        "row_group_count": 256,
+        "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+        "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00015-0027dc1a-a5a9-54b5-9b90-bb721c5264fd-c000.zstd.parquet"
+      }
+    ],
+    "ranges": [
+      {
+        "etag": "a561221b648ed9c93332377640fd4e80-10",
+        "first_row_group": 154,
+        "last_row_group": 207,
+        "object_index": 15,
+        "row_groups": 54,
+        "rows": 980147,
+        "selected_compressed_bytes": 76395429,
+        "selected_uncompressed_bytes": 152971455,
+        "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00015-0027dc1a-a5a9-54b5-9b90-bb721c5264fd-c000.zstd.parquet"
+      }
+    ],
+    "release": "2026-06-17.0",
+    "row_groups": 54,
+    "schema": "overture-places-construction-v1-physical-arrow-v1",
+    "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+    "selected_compressed_bytes": 76395429,
+    "selected_uncompressed_bytes": 152971455,
+    "task_digest": "dd6f2442e95fcf4619f786d77936ad433866b6d8aa24ed6e773199e23bfd8751",
+    "task_index": 87,
+    "task_source_digest": "47e70855fc02f86d236b01c31c08d4794ea7e6c11d0279f659de7dbafd7902d4"
+  },
+  "input": {
+    "records": 980147,
+    "row_groups": 54,
+    "selected_compressed_bytes": 76395429,
+    "selected_uncompressed_bytes": 152971455
+  },
+  "output": {
+    "bytes": 62640365,
+    "path": "benchmarks/places-construction-v1-data/projected/task-87.parquet",
+    "records": 980147,
+    "row_groups": 54,
+    "sha256": "c2c26b347dfc6dbcbb60fe637b33a5c1c0d52f478ffc66cdbe42ea3b9e0b0d64"
+  },
+  "resources": {
+    "batches": 54,
+    "elapsed_seconds": 22.626220208010636,
+    "maximum_batch_rows": 25486,
+    "peak_rss_bytes": 198459392,
+    "python_feature_rows_materialized": false,
+    "remote_read_bytes": 82287111,
+    "selected_compressed_bytes_planned": 76395429
+  },
+  "schema": "overture-places-construction-v1-projection-report-v1"
+}
