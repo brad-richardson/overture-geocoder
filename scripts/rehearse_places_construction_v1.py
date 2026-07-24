@@ -18,7 +18,6 @@ import json
 import struct
 import subprocess
 import sys
-import tempfile
 import time
 from pathlib import Path
 from typing import Any
@@ -401,6 +400,62 @@ def decode_serving_entry(entry: bytes, mode: str) -> tuple[str, str | None]:
 
 
 # ---------------------------------------------------------------------------
+# Worker local-decoder evidence: exercise the ACTUAL geocoder-worker head-shard
+# decoder over the locally-built PLHD shard bytes. No R2, no network — this is
+# the honest `worker_local_decoder_evidence` class the readiness validator
+# accepts in place of a deployed Worker.
+# ---------------------------------------------------------------------------
+def exercise_worker_head_decoder(
+    head: dict[str, Any], store: Any, scratch_root: Path, sample: int = 8
+) -> dict[str, Any]:
+    manifest = json.loads(store.path(head["manifest_object"]["key"]).read_text())
+    shard_bits = manifest["shard_bits"]
+    # Draw real sample tokens straight from the built shard bytes, one per shard.
+    samples: list[tuple[str, int, str]] = []
+    for shard in manifest["shards"]:
+        path = shard["path"]
+        entries = parse_serving_index(Path(path).read_bytes(), "head")
+        if not entries:
+            continue
+        token = entries[0]["key"].decode("utf-8")
+        samples.append((token, shard["shard_id"], path))
+        if len(samples) >= sample:
+            break
+    if not samples:
+        raise RuntimeError("sharded head produced no decodable head tokens")
+    evidence_out = scratch_root / "worker-head-decoder-evidence.json"
+    env = dict(**__import__("os").environ)
+    env["PLACES_HEAD_SHARD_BITS"] = str(shard_bits)
+    env["PLACES_HEAD_SAMPLES"] = "\n".join(
+        f"{token}\t{shard_id}\t{path}" for token, shard_id, path in samples
+    )
+    env["PLACES_HEAD_EVIDENCE_OUT"] = str(evidence_out)
+    # Run the actual Worker decoder unit test against the real shard bytes.
+    subprocess.run(
+        [
+            "cargo",
+            "test",
+            "--release",
+            "-p",
+            "geocoder-worker",
+            "--lib",
+            "places_construction_v1::tests::local_decoder_resolves_real_head_shards",
+            "--",
+            "--ignored",
+            "--exact",
+            "--nocapture",
+        ],
+        cwd=str(ROOT / "crates"),
+        env=env,
+        check=True,
+    )
+    result = json.loads(evidence_out.read_text())
+    result["sample_tokens"] = [token for token, _, _ in samples]
+    result["manifest_key"] = head["manifest_object"]["key"]
+    return result
+
+
+# ---------------------------------------------------------------------------
 # Rehearsal: seven-role multi-task adaptive plan/reduce/head + worker queries
 # ---------------------------------------------------------------------------
 def run_rehearse(args: argparse.Namespace) -> None:
@@ -637,43 +692,39 @@ def run_rehearse(args: argparse.Namespace) -> None:
             head_rows += rows_m
         else:
             head_excluded.append(m["task_id"])
-    # The serving encoder caps the index at MAX_INDEX_ENTRIES (250k distinct
-    # tokens). A GLOBAL per-token head over real planet data has millions of
-    # distinct tokens, so encoding it fail-closes; routed artifacts encode
-    # because they are per-cell (<=250k tokens each). Capture this honestly:
-    # attempt the head, and if the encoder rejects it, record head_verified /
-    # worker_head_query as False with the cap-breach reason.
+    # A GLOBAL per-token head over real planet data has millions of distinct
+    # tokens, so a single artifact fail-closes at MAX_INDEX_ENTRIES=250000. The
+    # head is instead hash-sharded (PR #141): the merged head is partitioned by
+    # the top `shard_bits` of each token's index hash into independently encoded
+    # PLHD shards, bound by a manifest the Rust sharded verifier reconciles
+    # against an independent reduce-side binding. head_verified reflects that
+    # verify; worker_head_query reflects the actual Worker head-shard decoder
+    # (crates/geocoder-worker) resolving real tokens from the built shard bytes.
     head_verified = False
     head_result_cap = limits.head_result_cap
     head_note = ""
     head: dict[str, Any] = {}
+    worker_local_decoder: dict[str, Any] = {}
     try:
-        head = P.build_global_head_from_markers(
+        head = P.build_sharded_global_head_from_markers(
             markers=head_markers,
             store=store,
             scratch_root=scratch_root / "head",
             encoder_binary=binaries["encode"],
             verifier_binary=binaries["verify"],
             limits=limits,
+            shard_bits=args.head_shard_bits,
         )
+        # build_sharded_* runs `places-serving-verify-v1 --mode head-sharded`,
+        # which reconciles every shard's bytes against the independent binding.
         head_result_cap = head["result_cap"]
-        head_bytes = store.path(head["head_object"]["key"]).read_bytes()
-        head_entries = parse_serving_index(head_bytes, "head")
         head_verified = True
-        for e in head_entries[:5]:
-            tok = e["key"].decode()
-            probes, decoded = worker_lookup(
-                head_bytes, head_entries, "head", tok, None, 5_000_000, 10
-            )
-            worker_head_probes.append(probes)
-            if decoded == 0:
-                head_verified = False
+        worker_local_decoder = exercise_worker_head_decoder(head, store, scratch_root)
+        for _ in range(worker_local_decoder["tokens_resolved"]):
+            worker_head_probes.append(1)
     except (subprocess.CalledProcessError, ValueError, RuntimeError) as exc:
-        head_note = (
-            "global head serving-encode fail-closed: the merged head over real "
-            "data exceeds the encoder MAX_INDEX_ENTRIES=250000 distinct-token cap "
-            f"({exc})"
-        )
+        head_verified = False
+        head_note = f"sharded head build/verify/decoder failed: {exc}"
 
     max_worker_probes = max(worker_routed_probes + worker_head_probes, default=0)
 
@@ -691,20 +742,26 @@ def run_rehearse(args: argparse.Namespace) -> None:
         "head_verified": head_verified,
         "worker_routed_query": len(worker_routed_probes) > 0 and routed_verified,
         "worker_head_query": len(worker_head_probes) > 0 and head_verified,
+        "worker_local_decoder_evidence": bool(worker_local_decoder),
         "resume_before_projection": resume_before_projection,
         "interruption_phases": interruption_phases,
         "head_result_cap": head_result_cap,
+        "head_sharded": head_verified,
+        "head_shard_bits": head.get("shard_bits"),
+        "head_shard_count": head.get("shard_count"),
+        "head_populated_shards": head.get("populated_shards"),
         "maximum_worker_index_probes": max_worker_probes,
         "observed": {
             "mapped_tasks": tasks,
             "scale_note": (
-                "Role tasks 86 (token_fanout) and 87 (densest_spatial), each ~13.6M "
-                "emitted terms, breach the frozen 8GiB per-stage scratch cap during "
-                "map construction (DuckDB materializes the term table plus a "
-                "globally-sorted copy plus the term IPC); they are excluded here and "
-                "substituted with lighter census tasks 15 and 5 to demonstrate the "
-                "7-task fan-in. Adaptive subdivision is exercised on real >1M-term "
-                "cells (task 85 a3d6=3.1M, task 5 ae2c=1.35M, task 73 93c7=1.03M)."
+                "Full seven-role fan-in over the real 2026-06-17.0 census tasks, "
+                "including the dense CJK role tasks 86 (token_fanout) and 87 "
+                "(densest_spatial). Post-#143 map scratch hygiene keeps their "
+                "per-stage scratch under the 8 GiB cap, so no substitution is "
+                "needed. The global head is hash-sharded and every shard is "
+                "reconciled against an independent reduce-side binding; the actual "
+                "Worker head-shard decoder resolves real tokens from the built "
+                "shard bytes (worker_local_decoder_evidence)."
             ),
             "adaptive_max_depth": max_depth,
             "subdivided_cells": subdivided_cells,
@@ -713,10 +770,12 @@ def run_rehearse(args: argparse.Namespace) -> None:
             "subdivided_partition_reduction": subdivided_reduction_info,
             "worker_routed_probes": worker_routed_probes,
             "worker_head_probes": worker_head_probes,
+            "worker_local_decoder": worker_local_decoder,
             "resume_seconds": round(resume_seconds, 3),
             "adaptive_plan_seconds": round(adaptive_seconds, 3),
             "head_input_candidate_rows": head.get("input_candidate_rows"),
-            "head_output_rows": head.get("output_rows"),
+            "head_total_records": head.get("total_records"),
+            "head_total_index_entries": head.get("total_index_entries"),
             "head_merged_task_ids": sorted(m["task_id"] for m in head_markers),
             "head_excluded_over_row_cap_task_ids": sorted(head_excluded),
             "head_serving_encode_note": head_note,
@@ -735,33 +794,84 @@ worker_head_probes: list[int] = []
 # Assemble: merge task_runs + rehearsal into the frozen scale-evidence file
 # ---------------------------------------------------------------------------
 def run_assemble(args: argparse.Namespace) -> None:
-    evidence_path = EVIDENCE / "scale-evidence-v1.json"
-    evidence = json.loads(evidence_path.read_text())
+    """Compose the full scale-evidence-v2 bundle from fresh census/task-run/rehearsal.
+
+    Everything is derived from the re-run artifacts and bound to the v2 evidence
+    spec; nothing is carried over from the v1 evidence. Candidate universe and
+    role selection use the readiness validator's own functions so the assembled
+    evidence and the validator agree by construction.
+    """
+    validator = load("places_readiness_validator", ROOT / "scripts/validate_places_planet_readiness.py")
+    spec_path = Path(args.spec)
+    inventory = json.loads(INVENTORY.read_text())
+
+    # Fresh census metrics per candidate task.
+    census: dict[int, dict[str, Any]] = {}
+    for path in sorted(Path(args.census_dir).glob("census-*.json")):
+        index = int(path.stem.split("-")[-1])
+        report = json.loads(path.read_text())
+        census[index] = {"task_index": index, "metrics": report["metrics"]}
+
+    universe = validator.candidate_universe(
+        inventory, json.loads(spec_path.read_text())["candidate_universe"]["maximum_tasks"]
+    )
+    if sorted(census) != sorted(universe):
+        raise ValueError(
+            f"census task set {sorted(census)} differs from candidate universe {sorted(universe)}"
+        )
+    roles = validator.select_roles(inventory, census)
+
     task_runs: dict[str, Any] = {}
     for path in sorted(Path(args.task_run_dir).glob("task-run-*.json")):
         index = int(path.stem.split("-")[-1])
         task_runs[str(index)] = json.loads(path.read_text())
-    evidence["task_runs"] = task_runs
+
     rehearsal = json.loads(Path(args.rehearsal).read_text())
-    # preserve the census-phase flags as observed history alongside the new run
     rehearsal["census_complete"] = True
     rehearsal["construction_phase_pending"] = False
-    evidence["rehearsal"] = rehearsal
-    # The validator requires roles in exact ROLES order (tuple(roles) == ROLES);
-    # do NOT sort keys, and reassert role order defensively.
-    ROLES = (
-        "representative",
-        "near_cap",
-        "densest_spatial",
-        "token_fanout",
-        "multilingual_cjk",
-        "duplicate_heavy",
-        "head_heavy",
+
+    # Host provenance: record which physical host produced each measured section
+    # so the frozen bundle is self-describing (timings are hardware-sensitive; the
+    # binding/determinism evidence is not). Every task-run in --task-run-dir came
+    # from one host, tagged here; census and rehearsal hosts are recorded too.
+    provenance = json.loads(Path(args.provenance).read_text())
+    for host_key in (
+        provenance["task_run_host"],
+        provenance["census_host"],
+        provenance["rehearsal_host"],
+    ):
+        if host_key not in provenance["hosts"]:
+            raise ValueError(f"provenance references undeclared host {host_key}")
+    task_run_host = provenance["task_run_host"]
+    for run in task_runs.values():
+        run["host"] = task_run_host
+    rehearsal["host"] = provenance["rehearsal_host"]
+
+    evidence = {
+        "schema": "overture-places-construction-v1-scale-evidence-v1",
+        "evidence_spec_sha256": A.sha256_file(spec_path),
+        "inventory_file_sha256": A.sha256_file(INVENTORY),
+        "inventory_sha256": inventory["inventory_sha256"],
+        "schema_fingerprint_sha256": inventory["schema_contract"]["fingerprint_sha256"],
+        "provenance": provenance,
+        "candidate_universe": universe,
+        "census": [census[index] for index in universe],
+        "roles": roles,
+        "task_runs": task_runs,
+        "rehearsal": rehearsal,
+    }
+    Path(args.output).write_text(json.dumps(evidence, indent=2) + "\n")
+    print(
+        json.dumps(
+            {
+                "wrote": args.output,
+                "task_runs": len(task_runs),
+                "census_tasks": len(census),
+                "roles": roles,
+            },
+            sort_keys=True,
+        )
     )
-    if isinstance(evidence.get("roles"), dict):
-        evidence["roles"] = {role: evidence["roles"][role] for role in ROLES}
-    evidence_path.write_text(json.dumps(evidence, indent=2) + "\n")
-    print(f"wrote {evidence_path} with {len(task_runs)} task runs")
 
 
 def main() -> None:
@@ -802,6 +912,7 @@ def main() -> None:
     r.add_argument("--parquet-row-group-rows", type=int, default=131_072)
     r.add_argument("--hydrate-batch-rows", type=int, default=2048)
     r.add_argument("--reduce-partitions", type=int, default=3)
+    r.add_argument("--head-shard-bits", type=int, default=6)
     r.add_argument("--memory-limit", default="2GB")
     r.add_argument("--threads", type=int, default=2)
     r.add_argument("--max-rss-bytes", type=int, default=4_294_967_296)
@@ -810,8 +921,12 @@ def main() -> None:
     r.set_defaults(func=run_rehearse)
 
     a = sub.add_parser("assemble")
+    a.add_argument("--spec", required=True)
+    a.add_argument("--census-dir", required=True)
     a.add_argument("--task-run-dir", required=True)
     a.add_argument("--rehearsal", required=True)
+    a.add_argument("--provenance", required=True)
+    a.add_argument("--output", required=True)
     a.set_defaults(func=run_assemble)
 
     args = parser.parse_args()

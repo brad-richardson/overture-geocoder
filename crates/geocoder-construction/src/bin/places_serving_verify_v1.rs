@@ -7,7 +7,18 @@
 //!     into one global head. Every shard is individually valid, every entry's
 //!     index hash maps to the shard it lives in, and the cross-shard totals
 //!     (records, distinct index entries, and the dual-lane additive head
-//!     digest) reconcile against the manifest's declared binding sums.
+//!     digest) reconcile against an INDEPENDENT reduce-side binding.
+//!
+//! The independent binding closes the disclosed sharded-head verifier MAJOR: a
+//! builder that consistently drops (or duplicates) a token from every shard AND
+//! from its own self-declared shard totals would previously reconcile with
+//! itself and pass. The manifest now carries `merged_head_binding` — the
+//! records/distinct-token count and dual-lane head-entry digest of the merged
+//! head computed by the Python control plane's own re-encoder, an independent
+//! implementation of the head-entry wire format that never sees the shard bytes.
+//! The verifier re-derives the same totals from the shard bytes and reconciles
+//! them against that independent binding, so any per-shard drop by the encoder
+//! breaks reconciliation.
 
 use anyhow::{bail, Context, Result};
 use serde::Deserialize;
@@ -264,7 +275,19 @@ struct Manifest {
     total_index_entries: u64,
     head_sum_a: String,
     head_sum_b: String,
+    /// Independent reduce-side binding: the merged-head records, distinct-token
+    /// count, and dual-lane head-entry digest computed by the control plane's own
+    /// re-encoder over the pre-shard merged head, never from the shard bytes.
+    merged_head_binding: MergedHeadBinding,
     shards: Vec<ShardEntry>,
+}
+
+#[derive(Deserialize)]
+struct MergedHeadBinding {
+    records: u64,
+    index_entries: u64,
+    head_sum_a: String,
+    head_sum_b: String,
 }
 
 #[derive(Deserialize)]
@@ -295,7 +318,7 @@ fn verify_sharded_head(manifest_path: &Path) -> Result<()> {
         File::open(manifest_path).context("open head manifest")?,
     ))
     .context("parse head manifest")?;
-    if manifest.schema != "overture-places-global-head-sharded-v1" {
+    if manifest.schema != "overture-places-global-head-sharded-v2" {
         bail!("unexpected head manifest schema")
     }
     // Shard count is a per-build value, but must be a power of two so the top
@@ -308,6 +331,20 @@ fn verify_sharded_head(manifest_path: &Path) -> Result<()> {
     }
     let declared_sum_a = parse_hex_256(&manifest.head_sum_a)?;
     let declared_sum_b = parse_hex_256(&manifest.head_sum_b)?;
+    // The independent reduce-side binding is the reconciliation target. It is
+    // produced by a different implementation than the shard encoder and never
+    // observes the shard bytes, so it pins the expected token universe.
+    let independent_sum_a = parse_hex_256(&manifest.merged_head_binding.head_sum_a)?;
+    let independent_sum_b = parse_hex_256(&manifest.merged_head_binding.head_sum_b)?;
+    // The manifest's own self-declared totals must at least agree with the
+    // independent binding; a divergence here is a self-inconsistent manifest.
+    if manifest.total_records != manifest.merged_head_binding.records
+        || manifest.total_index_entries != manifest.merged_head_binding.index_entries
+        || declared_sum_a != independent_sum_a
+        || declared_sum_b != independent_sum_b
+    {
+        bail!("sharded head self-declared totals disagree with the independent reduce-side binding")
+    }
 
     let base = manifest_path.parent().unwrap_or_else(|| Path::new("."));
     let mut seen = std::collections::BTreeSet::<u64>::new();
@@ -368,16 +405,21 @@ fn verify_sharded_head(manifest_path: &Path) -> Result<()> {
         add_256(&mut total_sum_a, &verified.head_sum_a);
         add_256(&mut total_sum_b, &verified.head_sum_b);
     }
-    // Cross-shard reconciliation against the declared binding sums. Assignment
-    // correctness plus each shard's own per-token index uniqueness guarantees a
-    // token can appear in at most one shard, so equal totals prove the sharding
-    // is a lossless partition of the un-sharded head.
-    if total_records != manifest.total_records
-        || total_index_entries != manifest.total_index_entries
-        || total_sum_a != declared_sum_a
-        || total_sum_b != declared_sum_b
+    // Cross-shard reconciliation against the INDEPENDENT reduce-side binding.
+    // Assignment correctness plus each shard's own per-token index uniqueness
+    // guarantees a token can appear in at most one shard, so equal totals prove
+    // the sharding is a lossless partition of the merged head. Because the target
+    // sums come from the control plane's own merged-head re-encoder (not the
+    // shard bytes), a shard encoder that consistently drops or duplicates a token
+    // cannot make the re-derived totals match — closing the disclosed MAJOR.
+    if total_records != manifest.merged_head_binding.records
+        || total_index_entries != manifest.merged_head_binding.index_entries
+        || total_sum_a != independent_sum_a
+        || total_sum_b != independent_sum_b
     {
-        bail!("sharded head cross-shard totals do not reconcile with the manifest binding")
+        bail!(
+            "sharded head cross-shard totals do not reconcile with the independent reduce-side binding"
+        )
     }
     Ok(())
 }
@@ -408,7 +450,217 @@ fn main() -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{add_256, index_hash, shard_of};
+    use super::{
+        add_256, head_digest, index_hash, shard_of, verify_sharded_head, HEAD_DIGEST_DOMAIN_A,
+        HEAD_DIGEST_DOMAIN_B,
+    };
+    use std::io::Write;
+
+    fn hex(value: &[u8; 32]) -> String {
+        let mut output = String::new();
+        for byte in value {
+            output.push_str(&format!("{byte:02x}"));
+        }
+        output
+    }
+
+    /// Encode one head serving entry exactly as `places-serving-encode-v1` does,
+    /// so `verify_artifact` accepts it and computes the same dual-lane digest.
+    fn head_entry(token: &str, id: u128, rank: u8) -> Vec<u8> {
+        let mut entry = Vec::new();
+        entry.extend_from_slice(&(token.len() as u16).to_le_bytes());
+        entry.extend_from_slice(token.as_bytes());
+        entry.extend_from_slice(&[1, rank]);
+        entry.extend_from_slice(&id.to_be_bytes());
+        entry.extend_from_slice(&1.5_f64.to_le_bytes());
+        entry.extend_from_slice(&2.5_f64.to_le_bytes());
+        entry.extend_from_slice(&3_u32.to_le_bytes());
+        entry.extend_from_slice(&4_u32.to_le_bytes());
+        entry.extend_from_slice(&5_u64.to_le_bytes());
+        for value in ["Name", "", "cat", "loc", "reg", "US"] {
+            entry.extend_from_slice(&(value.len() as u16).to_le_bytes());
+            entry.extend_from_slice(value.as_bytes());
+        }
+        entry
+    }
+
+    /// Build a valid single-token head shard (one entry per token), returning the
+    /// bytes plus its records/index-entry/digest binding.
+    fn head_shard(tokens: &[&str]) -> (Vec<u8>, u64, u64, [u8; 32], [u8; 32]) {
+        // Payload in (hash,key) order matches how the verifier re-derives it, but
+        // head payload order is by token; single tokens per shard keep it simple.
+        let mut ordered: Vec<&str> = tokens.to_vec();
+        ordered.sort();
+        let mut out = b"PLHD0002".to_vec();
+        out.extend_from_slice(&(ordered.len() as u64).to_le_bytes());
+        out.extend_from_slice(&0_u64.to_le_bytes());
+        out.extend_from_slice(&0_u32.to_le_bytes());
+        out.extend_from_slice(&0_u32.to_le_bytes());
+        let mut index: Vec<(u64, Vec<u8>, u64, u64, u32)> = Vec::new();
+        let mut sum_a = [0_u8; 32];
+        let mut sum_b = [0_u8; 32];
+        for token in ordered.iter() {
+            // rank is fixed at 255 so a token's entry bytes (and therefore its
+            // head digest) are identical whether computed per shard or in the
+            // independent merged binding.
+            let entry = head_entry(token, 1, 255);
+            add_256(&mut sum_a, &head_digest(HEAD_DIGEST_DOMAIN_A, &entry));
+            add_256(&mut sum_b, &head_digest(HEAD_DIGEST_DOMAIN_B, &entry));
+            let key = token.as_bytes().to_vec();
+            let payload_offset = out.len() as u64;
+            out.extend_from_slice(&(entry.len() as u32).to_le_bytes());
+            out.extend_from_slice(&entry);
+            index.push((
+                index_hash(&key),
+                key,
+                payload_offset,
+                4 + entry.len() as u64,
+                1,
+            ));
+        }
+        let index_offset = out.len() as u64;
+        index.sort_by(|l, r| (l.0, &l.1).cmp(&(r.0, &r.1)));
+        out.extend_from_slice(&(index.len() as u32).to_le_bytes());
+        let mut key_offset = 0_u64;
+        for item in &index {
+            out.extend_from_slice(&item.0.to_le_bytes());
+            out.extend_from_slice(&key_offset.to_le_bytes());
+            out.extend_from_slice(&(item.1.len() as u32).to_le_bytes());
+            out.extend_from_slice(&item.4.to_le_bytes());
+            out.extend_from_slice(&item.2.to_le_bytes());
+            out.extend_from_slice(&item.3.to_le_bytes());
+            key_offset += item.1.len() as u64;
+        }
+        for item in &index {
+            out.extend_from_slice(&item.1);
+        }
+        out[16..24].copy_from_slice(&index_offset.to_le_bytes());
+        out[24..28].copy_from_slice(&(index.len() as u32).to_le_bytes());
+        (
+            out,
+            ordered.len() as u64,
+            ordered.len() as u64,
+            sum_a,
+            sum_b,
+        )
+    }
+
+    /// The independent reduce-side binding closes the consistent-drop hole in
+    /// isolation: the manifest's self-declared totals AND the per-shard bytes are
+    /// mutually consistent (so the old self-vs-cross-shard reconciliation, and
+    /// every per-shard check, pass), yet verification still fails because the
+    /// independent merged-head binding — produced without ever seeing the shard
+    /// bytes — still counts the dropped token. Only the new independent
+    /// reconciliation catches it.
+    #[test]
+    fn independent_binding_catches_a_consistently_dropped_token() {
+        let dir = std::env::temp_dir().join(format!("plhd-verify-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let shard_bits = 4_u32;
+        // Two tokens that hash into distinct shards under 4 bits.
+        let all = ["cafe", "town", "museum", "park", "bakery", "market"];
+        use std::collections::BTreeMap;
+        let mut by_shard: BTreeMap<u64, Vec<&str>> = BTreeMap::new();
+        for token in all {
+            by_shard
+                .entry(index_hash(token.as_bytes()) >> (64 - shard_bits))
+                .or_default()
+                .push(token);
+        }
+        // Independent merged-head binding over ALL tokens.
+        let mut whole_a = [0_u8; 32];
+        let mut whole_b = [0_u8; 32];
+        for token in all {
+            let entry = head_entry(token, 1, 255);
+            add_256(&mut whole_a, &head_digest(HEAD_DIGEST_DOMAIN_A, &entry));
+            add_256(&mut whole_b, &head_digest(HEAD_DIGEST_DOMAIN_B, &entry));
+        }
+
+        // The manifest's self-declared totals are ALWAYS derived from the shards
+        // actually written (so they are internally consistent and pass every
+        // pre-existing per-shard and self-vs-cross-shard check). Only the
+        // independent merged binding (`binding_*`) is supplied separately.
+        let write_manifest = |shard_specs: &BTreeMap<u64, Vec<&str>>,
+                              binding_records: u64,
+                              binding_entries: u64,
+                              binding_a: [u8; 32],
+                              binding_b: [u8; 32]|
+         -> std::path::PathBuf {
+            let mut shard_json = Vec::new();
+            let mut total_records = 0_u64;
+            let mut total_entries = 0_u64;
+            let mut total_a = [0_u8; 32];
+            let mut total_b = [0_u8; 32];
+            for (shard_id, tokens) in shard_specs {
+                let (bytes, records, entries, a, b) = head_shard(tokens);
+                let path = dir.join(format!("shard-{shard_id:06}.plhd"));
+                std::fs::File::create(&path)
+                    .unwrap()
+                    .write_all(&bytes)
+                    .unwrap();
+                total_records += records;
+                total_entries += entries;
+                add_256(&mut total_a, &a);
+                add_256(&mut total_b, &b);
+                shard_json.push(format!(
+                    "{{\"shard_id\":{shard_id},\"path\":\"{}\",\"bytes\":{},\"records\":{records},\"index_entries\":{entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\"}}",
+                    path.display(),
+                    bytes.len(),
+                    hex(&a),
+                    hex(&b)
+                ));
+            }
+            // Self-declared totals mirror the written shards exactly.
+            let manifest = format!(
+                "{{\"schema\":\"overture-places-global-head-sharded-v2\",\"shard_count\":{},\"shard_bits\":{shard_bits},\"total_records\":{total_records},\"total_index_entries\":{total_entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\",\"merged_head_binding\":{{\"records\":{binding_records},\"index_entries\":{binding_entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\"}},\"shards\":[{}]}}",
+                1_u64 << shard_bits,
+                hex(&total_a),
+                hex(&total_b),
+                hex(&binding_a),
+                hex(&binding_b),
+                shard_json.join(",")
+            );
+            let path = dir.join("head-manifest.json");
+            std::fs::File::create(&path)
+                .unwrap()
+                .write_all(manifest.as_bytes())
+                .unwrap();
+            path
+        };
+
+        // Honest full manifest: self-declared totals, shards, and the independent
+        // binding all agree.
+        let good = write_manifest(
+            &by_shard,
+            all.len() as u64,
+            all.len() as u64,
+            whole_a,
+            whole_b,
+        );
+        verify_sharded_head(&good).expect("complete sharded head must verify");
+
+        // Consistent drop: "market" is removed from its shard AND the manifest's
+        // self-declared totals shrink to match (so the shards and self-totals stay
+        // mutually consistent). The independent binding still counts all six
+        // tokens, so verification must fail — proving the independent
+        // reconciliation, not the self-consistency check, is what catches it.
+        let mut dropped = by_shard.clone();
+        for tokens in dropped.values_mut() {
+            tokens.retain(|token| *token != "market");
+        }
+        let bad = write_manifest(
+            &dropped,
+            all.len() as u64,
+            all.len() as u64,
+            whole_a,
+            whole_b,
+        );
+        assert!(
+            verify_sharded_head(&bad).is_err(),
+            "a token dropped from every shard must fail the independent binding"
+        );
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     /// Reference top-`n`-per-token merge — the associative/idempotent oracle the
     /// DuckDB control-plane tree-merge implements. Candidates are

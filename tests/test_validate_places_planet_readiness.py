@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).parents[1]
-SPEC_PATH = ROOT / "benchmarks/places-construction-v1-evidence-spec.json"
+SPEC_PATH = ROOT / "benchmarks/places-construction-v1-evidence-spec-v2.json"
 INVENTORY_PATH = ROOT / "benchmarks/places-construction-v1-data/inventory/places.json"
 MODULE_SPEC = importlib.util.spec_from_file_location(
     "validate_places_planet_readiness_test",
@@ -93,8 +93,10 @@ def complete_evidence():
                 "multi_task_fan_in": True,
                 "routed_verified": True,
                 "head_verified": True,
+                "head_sharded": True,
                 "worker_routed_query": True,
                 "worker_head_query": True,
+                "worker_local_decoder_evidence": True,
                 "resume_before_projection": True,
                 "interruption_phases": [
                     "local_write",

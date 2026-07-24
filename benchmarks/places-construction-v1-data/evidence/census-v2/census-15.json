@@ -1,0 +1,101 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 5.2796900840476155,
+    "peak_rss_bytes": 1510834176,
+    "peak_scratch_and_output_bytes": 1458277393,
+    "wall_seconds": 5.238194084027782
+  },
+  "hydration": {
+    "batches": 271,
+    "full_table_read_all": false,
+    "input_records": 553167,
+    "input_row_groups": 64,
+    "maximum_batch_rows": 2048
+  },
+  "identity": {
+    "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+    "expected_input_records": 553167,
+    "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
+    "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+    "objects": [
+      {
+        "bytes": 775230908,
+        "etag": "e20962729cacc7f146943e0a566d5d91-12",
+        "records": 4676627,
+        "row_group_count": 512,
+        "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+        "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00002-85d36905-50d8-5942-afcd-d2023ce6f0f4-c000.zstd.parquet"
+      }
+    ],
+    "ranges": [
+      {
+        "etag": "e20962729cacc7f146943e0a566d5d91-12",
+        "first_row_group": 151,
+        "last_row_group": 214,
+        "object_index": 2,
+        "row_groups": 64,
+        "rows": 553167,
+        "selected_compressed_bytes": 38818535,
+        "selected_uncompressed_bytes": 74471120,
+        "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00002-85d36905-50d8-5942-afcd-d2023ce6f0f4-c000.zstd.parquet"
+      }
+    ],
+    "release": "2026-06-17.0",
+    "row_groups": 64,
+    "schema": "overture-places-construction-v1-physical-arrow-v1",
+    "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+    "selected_compressed_bytes": 38818535,
+    "selected_uncompressed_bytes": 74471120,
+    "task_digest": "c7c257b665ed25be1ab27d6313121cb135d788edd3cb9bff7f02ec9ceb6aace3",
+    "task_index": 15,
+    "task_source_digest": "f7235014aa53617cd329d1fb332b4cbc52188c7813abbb8a99c7bc87ff786274"
+  },
+  "input": {
+    "bytes": 33533505,
+    "rows": 553167,
+    "sha256": "475eddc0dbbfc0a5bf6664625b9252ead0f72faf2b7494cab96941d153b5d794"
+  },
+  "metrics": {
+    "cjk_features": 1044,
+    "duplicate_uuid_rows": 0,
+    "maximum_spatial_cell": "c329",
+    "maximum_spatial_cell_term_rows": 782342,
+    "maximum_token": "us",
+    "maximum_token_rows": 348537,
+    "maximum_uuid_multiplicity": 1,
+    "multilingual_cjk_features": 1044,
+    "multilingual_features": 0,
+    "term_rows_per_admitted_feature": 7.386068017960184
+  },
+  "schema": "overture-places-construction-v1-census-v1",
+  "transform": {
+    "admitted_features": 553001,
+    "cjk_features": 1044,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 11.298098,
+    "emitted_term_rows": 4084503,
+    "input_features": 553167,
+    "multilingual_features": 0,
+    "rejected_features": 166,
+    "rejections_by_precedence": {
+      "invalid_confidence": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_primary_name": 0,
+      "permanently_closed": 166,
+      "record_too_large": 0
+    },
+    "schema": "overture-places-rust-transform-report-v1",
+    "semantic_sum_a": "1a6f6e05b219bf7cf236020a35fb60d055a79cbcf3b3012d65b8a55482963090",
+    "semantic_sum_b": "d98333f5989de955c7f26362ce4dd15f49d41a05e7ca2202a0433c0a36e79048",
+    "tokenizer_version": "nfkd-lower-stripmark-cjk-bigram-v4",
+    "transform_version": "places-rust-arrow-transform-v1"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 300302336,
+    "peak_scratch_bytes": 1043334184,
+    "wall_seconds": 11.3106847909512
+  }
+}
