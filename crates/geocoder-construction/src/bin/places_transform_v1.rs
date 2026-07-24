@@ -25,6 +25,14 @@ use uuid::Uuid;
 
 const MAX_RECORD_BYTES: usize = 1_048_576;
 const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v4";
+
+/// The tokenizer contract pins one Unicode version across both implementations.
+/// NFKD and combining-mark classification come from `unicode-normalization`
+/// while the word class and lowercase map come from `std`, so a crate bump can
+/// move tokenization independently of the toolchain. Fail the build instead.
+const _: () = assert!(
+    unicode_normalization::UNICODE_VERSION.0 == 17 && unicode_normalization::UNICODE_VERSION.1 == 0
+);
 const TRANSFORM_VERSION: &str = "places-rust-arrow-transform-v1";
 const DIGEST_VERSION: &str = "sha256-add-mod-2^256-two-domain-v1";
 const DOMAIN_A: &[u8] = b"overture-places-construction-v1\0";

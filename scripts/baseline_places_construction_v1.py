@@ -23,11 +23,28 @@ import json
 import math
 import struct
 import time
-import unicodedata
 import uuid
 from collections import Counter
 from pathlib import Path
 from typing import Any
+
+# The tokenizer contract pins one Unicode version for both implementations.
+# `unicodedata2` ships the tables as a wheel, so the baseline's NFKD and
+# combining-mark answers come from the pinned version rather than from whichever
+# version the running interpreter happens to embed: CPython 3.11 carries Unicode
+# 14.0 and 3.12 carries 15.0, while Rust `std` and `unicode-normalization` both
+# carry 17.0. Combining marks assigned after 14.0 (Kawi, Nag Mundari, Garay) are
+# `Cn` to the runner's stdlib tables and `Mn` to Rust, so the stdlib baseline
+# would keep marks that Rust strips and diverge on both digest lanes.
+import unicodedata2 as unicodedata
+
+TOKENIZER_UNICODE_VERSION = "17.0.0"
+if unicodedata.unidata_version != TOKENIZER_UNICODE_VERSION:
+    raise RuntimeError(
+        "the tokenizer contract pins Unicode "
+        f"{TOKENIZER_UNICODE_VERSION}, but unicodedata2 provides "
+        f"{unicodedata.unidata_version}"
+    )
 
 
 DOMAIN_A = b"overture-places-construction-v1\0"

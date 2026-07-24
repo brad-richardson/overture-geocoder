@@ -1,6 +1,6 @@
 {
   "schema": "overture-places-unicode-tables-v1",
-  "unicode_version": "16.0.0",
+  "unicode_version": "17.0.0",
   "tokenizer_version": "nfkd-lower-stripmark-cjk-bigram-v4",
   "sigma_fold": [
     962,

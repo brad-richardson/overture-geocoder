@@ -54,7 +54,11 @@ def test_workflow_pins_actions_and_dependency():
     # psutil backs run_bounded's resource accounting on hosted map/reduce jobs
     # (planet attempt 2 died on ModuleNotFoundError without it).
     assert "psutil==7.2.2" in requirements
-    assert requirements.count("--hash=sha256:") == 10
+    # The tokenizer contract pins one Unicode version across both
+    # implementations; unicodedata2 supplies it independently of the
+    # interpreter's own tables (CPython 3.11 embeds 14.0, Rust carries 17.0).
+    assert "unicodedata2==17.0.0" in requirements
+    assert requirements.count("--hash=sha256:") == 12
     # CPython 3.11 manylinux x86_64 + aarch64 wheels used by the hosted
     # rowgroup and ARM Worker workflows.
     assert (

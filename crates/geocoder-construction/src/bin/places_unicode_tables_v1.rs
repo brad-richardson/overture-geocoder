@@ -30,10 +30,17 @@ use std::path::PathBuf;
 use anyhow::{bail, Context, Result};
 use serde::Serialize;
 
-/// Unicode version the current Rust standard-library tables target. Pinned in
-/// the Places construction contract; the exported tables are the source of
-/// truth regardless of this label, but it documents the intended version.
-const UNICODE_VERSION: &str = "16.0.0";
+/// Unicode version the tokenizer contract pins. The exported tables are the
+/// source of truth for the word class and lowercase map, but NFKD and combining
+/// marks come from `unicode-normalization`, so both sides must agree on one
+/// version. `assert_pinned_unicode_version` fails closed if the crate moves.
+const UNICODE_VERSION: &str = "17.0.0";
+
+/// Fail the build if `unicode-normalization` moves off the pinned version, so
+/// the label this exporter stamps into the tables cannot silently go stale.
+const _: () = assert!(
+    unicode_normalization::UNICODE_VERSION.0 == 17 && unicode_normalization::UNICODE_VERSION.1 == 0
+);
 const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v4";
 const SCHEMA: &str = "overture-places-unicode-tables-v1";
 

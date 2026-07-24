@@ -822,3 +822,41 @@ def test_sharded_head_manifest_tamper_fails_closed(
         dropped = json.loads(json.dumps(manifest))
         dropped["shards"] = dropped["shards"][1:]
         assert verify(dropped) != 0
+
+
+def test_baseline_tokenizer_pins_the_contract_unicode_version(baseline_module):
+    assert baseline_module.TOKENIZER_UNICODE_VERSION == "17.0.0"
+    assert baseline_module.unicodedata.unidata_version == "17.0.0"
+
+
+@pytest.mark.parametrize(
+    "codepoint,script",
+    [
+        (0x11F00, "Kawi sign, assigned in Unicode 15.0"),
+        (0x1E4EC, "Nag Mundari mark, assigned in Unicode 15.0"),
+        (0x10D69, "Garay vowel sign, assigned in Unicode 16.0"),
+    ],
+)
+def test_baseline_strips_marks_from_the_pinned_tables(
+    baseline_module, codepoint, script
+):
+    # Combining marks assigned after CPython's embedded tables. The baseline
+    # must classify and strip them from the pinned Unicode 17.0 tables, which is
+    # what the authoritative Rust implementation does.
+    mark = chr(codepoint)
+    assert baseline_module.unicodedata.category(mark).startswith("M"), script
+    assert baseline_module.tokens(f"kova{mark}") == {"kova"}
+
+
+def test_pinned_tables_do_not_follow_the_running_interpreter():
+    # The divergence this pin exists to remove: on any interpreter older than
+    # the pinned version, the stdlib tables disagree about at least one of the
+    # marks above, so a baseline reading them would keep marks Rust strips.
+    import unicodedata as interpreter_tables
+
+    if interpreter_tables.unidata_version == "17.0.0":
+        pytest.skip("interpreter already carries the pinned Unicode version")
+    marks = [chr(0x11F00), chr(0x1E4EC), chr(0x10D69)]
+    assert any(
+        not interpreter_tables.category(mark).startswith("M") for mark in marks
+    )
