@@ -1,0 +1,315 @@
+"""Offline unit proofs for the construction-v1 pre-flight fixes.
+
+No network and no cargo build: these exercise the retry wrapper, the dry-run
+validate-only projection paths, the reduce batching arithmetic + capacity
+prediction, and the fail-closed remote-marker resume skip.
+"""
+
+from __future__ import annotations
+
+import importlib.util
+import io
+import json
+import sys
+import urllib.error
+from pathlib import Path
+
+import pytest
+
+ROOT = Path(__file__).parents[1]
+
+
+def _load(name: str, relative: str):
+    spec = importlib.util.spec_from_file_location(name, ROOT / relative)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+ROWGROUPS = _load("preflight_rowgroups", "scripts/experiment_hosted_rowgroups.py")
+HOSTED = _load("preflight_hosted", "scripts/construction_v1_hosted.py")
+
+ADDRESS_INVENTORY = ROOT / "benchmarks/address-construction-v1-data/inventory/addresses.json"
+PLACES_INVENTORY = ROOT / "benchmarks/places-construction-v1-data/inventory/places.json"
+PLACES_SPEC = ROOT / "benchmarks/places-construction-v1-evidence-spec.json"
+
+
+# --------------------------------------------------------------------------- #
+# P1-3: bounded retry wrapper
+# --------------------------------------------------------------------------- #
+class _FakeResponse:
+    def __init__(self, body: bytes, headers: dict[str, str]):
+        self._body = body
+        self.headers = _FakeHeaders(headers)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def read(self):
+        return self._body
+
+
+class _FakeHeaders:
+    def __init__(self, headers: dict[str, str]):
+        self._headers = headers
+
+    def items(self):
+        return self._headers.items()
+
+
+def _http_error(code: int) -> urllib.error.HTTPError:
+    return urllib.error.HTTPError("https://example/x", code, "boom", {}, io.BytesIO(b""))
+
+
+def test_retry_wrapper_retries_5xx_then_succeeds():
+    calls = {"n": 0}
+    slept: list[float] = []
+
+    def opener(request, timeout):
+        calls["n"] += 1
+        if calls["n"] < 3:
+            raise _http_error(503)
+        return _FakeResponse(b"ok", {"ETag": '"abc"', "Content-Length": "2"})
+
+    body, headers = ROWGROUPS.urlopen_with_retry(
+        object(), timeout=1, sleep=slept.append, opener=opener
+    )
+    assert body == b"ok"
+    assert headers["ETag"] == '"abc"'
+    assert calls["n"] == 3
+    # Exponential backoff: 1s then 2s before the third (successful) attempt.
+    assert slept == [1.0, 2.0]
+
+
+def test_retry_wrapper_does_not_retry_4xx():
+    def opener(request, timeout):
+        raise _http_error(404)
+
+    with pytest.raises(urllib.error.HTTPError):
+        ROWGROUPS.urlopen_with_retry(object(), timeout=1, sleep=lambda _s: None, opener=opener)
+
+
+def test_retry_wrapper_fails_closed_after_exhausting_attempts():
+    def opener(request, timeout):
+        raise urllib.error.URLError("down")
+
+    with pytest.raises(RuntimeError) as excinfo:
+        ROWGROUPS.urlopen_with_retry(
+            object(), timeout=1, attempts=4, sleep=lambda _s: None, opener=opener
+        )
+    assert "after 4 attempts" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------- #
+# P1-1: validate-only projection paths (no S3)
+# --------------------------------------------------------------------------- #
+def test_address_validate_only_reads_no_s3():
+    import argparse
+
+    args = argparse.Namespace(
+        release="2026-06-17.0", family="addresses", inventory_report=ADDRESS_INVENTORY,
+        task_index=0, max_rows=4_000_000, max_groups=72,
+        target_rowgroup_uncompressed_bytes=400_000_000, json_out=None,
+    )
+    result = ROWGROUPS.validate_only(args)
+    assert result["s3_accessed"] is False
+    assert result["planned_rows"] > 0
+    assert result["would_read_ranges"]
+    assert all(r["uri"].startswith("s3://") for r in result["would_read_ranges"])
+
+
+def test_places_validate_only_reads_no_s3():
+    import argparse
+
+    places = _load("preflight_places_projector", "scripts/project_places_construction_v1.py")
+    args = argparse.Namespace(
+        inventory=PLACES_INVENTORY, evidence_spec=PLACES_SPEC, task_index=0,
+        max_rows=4_000_000, max_groups=72,
+        max_selected_compressed_bytes=536_870_912,
+        max_selected_uncompressed_bytes=1_000_000_000, report=None,
+    )
+    result = places.validate_only(args)
+    assert result["s3_accessed"] is False
+    assert result["expected_input_records"] > 0
+    assert result["would_read_ranges"]
+
+
+# --------------------------------------------------------------------------- #
+# source-limits: correct per-object transform bound from the projection report
+# --------------------------------------------------------------------------- #
+def test_source_limits_addresses_are_per_object_upper_bounds(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"sources": [
+        {"source_object_index": 0, "parquet_rows": 4717270, "parquet_row_groups": 256},
+        {"source_object_index": 2, "parquet_rows": 100, "parquet_row_groups": 5},
+    ]}))
+    out = tmp_path / "limits.json"
+    assert HOSTED.main(["source-limits", "--report", str(report),
+                        "--family", "addresses", "--output", str(out)]) == 0
+    objects = json.loads(out.read_text())["objects"]
+    # object_index 0 and 2 present; index 1 gets a positive placeholder.
+    assert objects == [
+        {"records": 4717270, "row_groups": 256},
+        {"records": 1, "row_groups": 1},
+        {"records": 100, "row_groups": 5},
+    ]
+    # No object bound is zero (the transform bails on a zero bound).
+    assert all(o["records"] > 0 and o["row_groups"] > 0 for o in objects)
+
+
+def test_source_limits_places_map_selected_objects_by_index(tmp_path):
+    report = tmp_path / "report.json"
+    report.write_text(json.dumps({"identity": {
+        "ranges": [{"object_index": 0}, {"object_index": 0}],
+        "objects": [{"records": 988713, "row_group_count": 54}],
+    }}))
+    out = tmp_path / "limits.json"
+    assert HOSTED.main(["source-limits", "--report", str(report),
+                        "--family", "places", "--output", str(out)]) == 0
+    objects = json.loads(out.read_text())["objects"]
+    assert objects == [{"records": 988713, "row_groups": 54}]
+
+
+# --------------------------------------------------------------------------- #
+# P0-3: reduce batching arithmetic + capacity prediction
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize(
+    "partitions,job_cap,expected_jobs",
+    [
+        (1, 128, 1),
+        (128, 128, 128),
+        (129, 128, 65),   # batch_size 2 -> ceil(129/2)=65 jobs, all <= cap
+        (474, 128, 119),  # planet addresses: batch_size 4 -> 119 jobs <= 256/128
+        (2421, 128, 128),  # planet places: batch_size 19 -> 128 jobs
+        (300, 256, 150),  # batch_size 2 -> 150 jobs
+    ],
+)
+def test_reduce_batches_never_exceed_the_job_cap(partitions, job_cap, expected_jobs):
+    batch_size, batches = HOSTED._reduce_batches(partitions, job_cap=job_cap)
+    assert len(batches) == expected_jobs
+    assert len(batches) <= job_cap
+    # Contiguous, complete, non-overlapping cover of every partition exactly once.
+    covered = []
+    for batch in batches:
+        covered.extend(range(batch["partition_start"], batch["partition_start"] + batch["partition_count"]))
+    assert covered == list(range(partitions))
+    assert all(batch["partition_count"] <= batch_size for batch in batches)
+
+
+def _contract(tmp_path: Path, max_reducers: int = 128) -> Path:
+    request = tmp_path / "request.json"
+    request.write_text(json.dumps({
+        "schema": "overture-construction-v1-request-v1", "release": "2026-06-17.0",
+        "families": {"addresses": {}, "places": {}},
+        "versions": {"duckdb": "1.5.1", "pyarrow": "25.0.0", "numpy": "2.3.5",
+                     "python": "3.12.12", "rustc": "test"},
+        "caps": {"max_reducers_per_family": max_reducers,
+                 "max_remote_operations": 100000, "max_remote_write_bytes": 1_000_000_000_000},
+        "namespaces": {"immutable_root": "construction-v1/deadbeef",
+                       "slice": "construction-v1/deadbeef/slice/slice-x/",
+                       "markers": "construction-v1/deadbeef/markers/"},
+    }) + "\n")
+    contract = tmp_path / "contract.json"
+    runtime = tmp_path / "runtime.json"
+    assert HOSTED.main(["derive-contract", "--request", str(request),
+                        "--output", str(contract), "--runtime", str(runtime),
+                        "--allow-unpinned-duckdb"]) == 0
+    return contract
+
+
+def _ledger(tmp_path: Path, cap: int, prior: int, spent: int) -> Path:
+    ledger = tmp_path / "ledger.json"
+    ledger.write_text(json.dumps({
+        "schema": "construction-v1-run-ledger-v1", "max_total_runner_minutes": cap,
+        "prior_runner_minutes": prior,
+        "phases": [{"phase": "map", "runner_minutes": spent}],
+    }))
+    return ledger
+
+
+def test_predict_reduce_addresses_needs_batching_but_fits_budget(tmp_path, capsys):
+    contract = _contract(tmp_path)
+    ledger = _ledger(tmp_path, cap=40_000, prior=0, spent=3000)
+    assert HOSTED.main([
+        "predict-reduce", "--contract", str(contract), "--family", "addresses",
+        "--inventory", str(ADDRESS_INVENTORY), "--ledger", str(ledger),
+        "--reduce-minutes-per-job", "90", "--tail-minutes", "210",
+    ]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["predicted_partitions"] >= 474  # exceeds the 256 matrix cap raw
+    assert out["reduce_job_count"] <= 128       # but batches under the cap
+    assert out["within_cap"] is True
+
+
+def test_predict_reduce_fails_closed_when_minutes_exceed_cap(tmp_path):
+    contract = _contract(tmp_path)
+    # A tiny cap the batched reduce projection cannot fit.
+    ledger = _ledger(tmp_path, cap=1000, prior=0, spent=900)
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main([
+            "predict-reduce", "--contract", str(contract), "--family", "places",
+            "--inventory", str(PLACES_INVENTORY), "--ledger", str(ledger),
+            "--reduce-minutes-per-job", "90", "--tail-minutes", "210",
+        ])
+    assert "exceed cap" in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------- #
+# P1-4: fail-closed remote-marker resume skip
+# --------------------------------------------------------------------------- #
+def _admit(tmp_path: Path, store: Path, remote: Path | None, contract: Path):
+    out = tmp_path / "admit.json"
+    argv = ["admit-task", "--store-root", str(store), "--family", "addresses",
+            "--phase", "map", "--task-id", "addresses-map-000", "--output", str(out),
+            "--contract", str(contract)]
+    if remote is not None:
+        argv += ["--remote-root", str(remote)]
+    assert HOSTED.main(argv) == 0
+    return json.loads(out.read_text())
+
+
+def test_admit_task_skips_when_remote_marker_present(tmp_path):
+    contract = _contract(tmp_path)
+    store = tmp_path / "store"
+    remote = tmp_path / "remote"
+    # No local store, no remote marker yet -> not completed (task must run).
+    assert _admit(tmp_path, store, remote, contract)["completed"] is False
+    # Publish the durable create-only marker; a fresh resume dispatch now skips.
+    marker_key = HOSTED.ADDRESS.marker_key("addresses-map-000")
+    marker_path = remote / marker_key
+    marker_path.parent.mkdir(parents=True, exist_ok=True)
+    marker_path.write_text(json.dumps({"completed": True}))
+    result = _admit(tmp_path, store, remote, contract)
+    assert result["completed"] is True
+    assert result["remote_completed"] is True
+    assert result["local_completed"] is False
+
+
+def test_admit_task_absent_remote_marker_is_not_completed(tmp_path):
+    contract = _contract(tmp_path)
+    store = tmp_path / "store"
+    remote = tmp_path / "remote"
+    remote.mkdir()
+    # Definitive absence -> not completed (safe to re-run under create-only).
+    assert _admit(tmp_path, store, remote, contract)["completed"] is False
+
+
+def test_admit_task_remote_head_transport_error_aborts(tmp_path, monkeypatch):
+    contract = _contract(tmp_path)
+    store = tmp_path / "store"
+    remote = tmp_path / "remote"
+    remote.mkdir()
+
+    def boom(self, key):
+        raise OSError("remote HEAD transport failure")
+
+    monkeypatch.setattr(HOSTED.REMOTE.FilesystemRemote, "head", boom)
+    # Fail-closed direction: a transport error ABORTS rather than re-running.
+    with pytest.raises(SystemExit) as excinfo:
+        _admit(tmp_path, store, remote, contract)
+    assert "aborting rather than re-running" in str(excinfo.value)

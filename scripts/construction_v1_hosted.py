@@ -28,6 +28,7 @@ import dataclasses
 import hashlib
 import importlib.util
 import json
+import math
 import platform
 import sys
 from pathlib import Path
@@ -35,6 +36,16 @@ from typing import Any
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# P0-3: the reduce matrix is capped at 256 entries by the workflow, and the
+# admission cost model budgets at most ``max_reducers_per_family`` reducer jobs.
+# When a planet family produces MORE partitions than that (planet addresses are
+# >=474 partitions at the 1M-row cap; planet Places exceeds it too once every
+# spatial cell is enumerated), we do NOT weaken the partition plan -- partition
+# sizing is a pre-genesis contract. Instead each reduce matrix JOB processes a
+# contiguous BATCH of partitions serially, so the job COUNT stays under the cap
+# while per-partition markers and serving outputs are unchanged.
+REDUCE_MATRIX_CAP = 256
 
 
 def _load(name: str, relative: str):
@@ -78,6 +89,23 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         "max_output_bytes": 8 * 1024**3,
         "wall_seconds": 18_000,
         "allow_unpinned_duckdb": False,
+        # P1-2: DuckDB fit for the 16GiB hosted runner. The Places dense-task
+        # scratch measured ~5.6GiB, so 1GB/2-thread defaults (places_construction
+        # _v1.Limits) would spill pathologically; pin the same runner-fit values
+        # the Address family already uses (address_construction_v1.py:517-518).
+        "duckdb_memory_limit": "8GB",
+        "duckdb_threads": 4,
+        # P0-2: the planet Places inventory has 89 map tasks
+        # (benchmarks/places-construction-v1-data/inventory/places.json
+        # map_plan.task_count). adaptive_genesis_plan, the head phase, and the
+        # global-head builder all fan in EVERY map marker at once and fail closed
+        # above max_fan_in_tasks (places_construction_v1.py:628,1060,1202); the
+        # dataclass default is 16, far below 89. 128 admits all 89 with headroom.
+        # max_fan_in_packs is the per-batch DuckDB read stride over the fanned-in
+        # packs (places_construction_v1.py:647), not a total-pack cap; 256 bounds
+        # each planning read while keeping the number of INSERT batches small.
+        "max_fan_in_tasks": 128,
+        "max_fan_in_packs": 256,
         "partition_term_rows": 1_000_000,
         "partition_estimated_bytes": 512 * 1024**2,
         "partition_distinct_tokens": 200_000,
@@ -173,6 +201,30 @@ def cmd_derive_contract(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # admit-task
 # --------------------------------------------------------------------------- #
+def _remote_marker_completed(remote_root: str, key: str, contract: dict[str, Any]) -> bool:
+    """Read-only HEAD of a durable create-only marker in the remote store.
+
+    P1-4 fail-closed direction: a definitively ABSENT marker means "not
+    completed" (the task re-runs, which is safe under create-only writes). Any
+    HEAD transport error ABORTS instead of re-running, so a flaky remote can
+    never silently drop create-only discipline by masquerading as absence.
+    """
+    budget = REMOTE.Budget(
+        max_operations=int(contract.get("caps", {}).get("max_remote_operations", 100_000)),
+        max_write_bytes=0,
+        max_read_bytes=int(contract.get("caps", {}).get("max_remote_write_bytes", 1_000_000_000_000)),
+    )
+    remote = REMOTE.FilesystemRemote(Path(remote_root), budget)
+    try:
+        info = remote.head(key)
+    except Exception as error:  # noqa: BLE001 - abort on any transport failure
+        raise SystemExit(
+            f"remote marker HEAD failed for {key}; aborting rather than re-running "
+            f"to preserve create-only discipline: {error}"
+        )
+    return info is not None
+
+
 def cmd_admit_task(args: argparse.Namespace) -> int:
     store = _store(args.store_root)
     if args.phase == "map":
@@ -183,8 +235,26 @@ def cmd_admit_task(args: argparse.Namespace) -> int:
         key = _head_marker_key()
     else:
         raise SystemExit(f"unknown phase {args.phase}")
-    completed = store.read_json(key) is not None
-    result = {"phase": args.phase, "family": args.family, "marker_key": key, "completed": completed}
+    # Within a single run the local content-addressed store (carried job->job as
+    # an artifact) records completion. On a fresh RESUME dispatch there is no
+    # local store, so the durable record is the create-only marker in the remote
+    # store: consult it read-only, fail-closed, so a resume skips genuinely
+    # completed tasks without re-doing their work.
+    local_completed = store.read_json(key) is not None
+    remote_completed = False
+    if args.remote_root:
+        contract = read_json(args.contract) if args.contract else {}
+        remote_key = f"{args.remote_marker_prefix.rstrip('/')}/{key}" if args.remote_marker_prefix else key
+        remote_completed = _remote_marker_completed(args.remote_root, remote_key, contract)
+    completed = local_completed or remote_completed
+    result = {
+        "phase": args.phase,
+        "family": args.family,
+        "marker_key": key,
+        "completed": completed,
+        "local_completed": local_completed,
+        "remote_completed": remote_completed,
+    }
     if args.output:
         write_json(args.output, result)
     print(json.dumps(result, sort_keys=True))
@@ -237,6 +307,29 @@ def _load_markers(markers_dir: str) -> list[dict[str, Any]]:
     return [json.loads(path.read_text()) for path in paths]
 
 
+def _reduce_batches(partition_count: int, *, job_cap: int) -> tuple[int, list[dict[str, int]]]:
+    """Split ``partition_count`` partitions into at most ``job_cap`` contiguous
+    batches. ``batch_size`` is the smallest stride that keeps the job count under
+    the cap, so a family with more partitions than the cap still fits one matrix.
+    """
+    if partition_count <= 0:
+        raise SystemExit("plan-reduce produced no partitions")
+    if job_cap <= 0:
+        raise SystemExit("reduce job cap must be positive")
+    batch_size = max(1, math.ceil(partition_count / job_cap))
+    batches = [
+        {
+            "batch_index": index,
+            "partition_start": start,
+            "partition_count": min(batch_size, partition_count - start),
+        }
+        for index, start in enumerate(range(0, partition_count, batch_size))
+    ]
+    if len(batches) > job_cap:  # pragma: no cover - arithmetic guarantees this
+        raise SystemExit("reduce batching failed to fit the job cap")
+    return batch_size, batches
+
+
 def cmd_plan_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args.store_root)
@@ -249,25 +342,225 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         plan = PLACES.adaptive_genesis_plan(
             markers, store=store, scratch_root=Path(args.scratch_dir), limits=limits
         )
+
+    partition_count = len(plan["partitions"])
+    # The cap on reducer JOBS is the tighter of the workflow matrix cap and the
+    # admitted ``max_reducers_per_family`` budget the cost model is built on.
+    max_reducers = int(contract.get("caps", {}).get("max_reducers_per_family", REDUCE_MATRIX_CAP))
+    job_cap = min(REDUCE_MATRIX_CAP, max_reducers)
+    if args.max_reduce_jobs is not None:
+        job_cap = min(job_cap, args.max_reduce_jobs)
+    batch_size, batches = _reduce_batches(partition_count, job_cap=job_cap)
+    job_count = len(batches)
+    plan["reduce_execution"] = {
+        "schema": "construction-v1-reduce-execution-v1",
+        "partition_count": partition_count,
+        "batch_size": batch_size,
+        "job_count": job_count,
+        "job_cap": job_cap,
+        "matrix_cap": REDUCE_MATRIX_CAP,
+        "batches": batches,
+    }
     write_json(args.output, plan)
-    matrix = {"include": [{"partition_index": index} for index in range(len(plan["partitions"]))]}
+
+    # The matrix has ONE entry per reducer JOB (batch), never per partition, so a
+    # family with more partitions than the cap still dispatches a legal matrix.
+    matrix = {"include": batches}
     if args.matrix_out:
         write_json(args.matrix_out, matrix)
-    summary = {"family": args.family, "partitions": len(plan["partitions"]), "binding": plan["binding"]}
+
+    # P0-3: gate the ledger on the BATCHED reduce job count, not the raw
+    # partition count, plus the fixed head/finalize tails. Fails closed here --
+    # before the reduce matrix is provisioned -- when the projection exceeds cap.
+    ledger_check: dict[str, Any] | None = None
+    if args.ledger is not None:
+        ledger = read_json(args.ledger)
+        prior = int(ledger.get("prior_runner_minutes", 0))
+        spent = sum(int(item["runner_minutes"]) for item in ledger.get("phases", []))
+        cap = int(ledger["max_total_runner_minutes"])
+        projected_reduce = job_count * int(args.reduce_minutes_per_job)
+        projected = prior + spent + projected_reduce + int(args.tail_minutes)
+        ledger_check = {
+            "prior_runner_minutes": prior,
+            "spent_runner_minutes": spent,
+            "reduce_job_count": job_count,
+            "reduce_minutes_per_job": int(args.reduce_minutes_per_job),
+            "projected_reduce_minutes": projected_reduce,
+            "tail_minutes": int(args.tail_minutes),
+            "projected_runner_minutes": projected,
+            "max_total_runner_minutes": cap,
+            "within_cap": projected <= cap,
+        }
+        if projected > cap:
+            raise SystemExit(
+                f"projected {projected} runner minutes exceed cap {cap} "
+                f"(prior={prior} spent={spent} reduce_jobs={job_count}x"
+                f"{args.reduce_minutes_per_job} tail={args.tail_minutes}); "
+                "failing closed before provisioning the reduce matrix"
+            )
+
+    summary = {
+        "family": args.family,
+        "partitions": partition_count,
+        "reduce_batch_size": batch_size,
+        "reduce_job_count": job_count,
+        "reduce_job_cap": job_cap,
+        "binding": plan["binding"],
+    }
+    if ledger_check is not None:
+        summary["ledger_check"] = ledger_check
     print(json.dumps(summary, sort_keys=True))
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# source-limits (per-object transform bound derived from the projection report)
+# --------------------------------------------------------------------------- #
+def cmd_source_limits(args: argparse.Namespace) -> int:
+    """Emit the transform's per-object source-limits from a projection report.
+
+    The transform rejects any locator whose ``source_row_group >= groups`` or
+    ``source_row_index >= records`` for its object (main.rs). Projected rows keep
+    their ORIGINAL row-group index (0..N) and per-group row offset, so a single
+    ``row_groups:1`` bound would reject nearly every real row. This derives a
+    correct, safe UPPER bound (object total rows / total row groups) per object,
+    indexed by object_index, with (1,1) placeholders for unread objects.
+    """
+    report = read_json(args.report)
+    per_object: dict[int, tuple[int, int]] = {}
+    if args.family == "addresses":
+        for source in report["sources"]:
+            per_object[int(source["source_object_index"])] = (
+                int(source["parquet_rows"]),
+                int(source["parquet_row_groups"]),
+            )
+    else:
+        identity = report["identity"]
+        selected = sorted({int(item["object_index"]) for item in identity["ranges"]})
+        objects = identity["objects"]
+        if len(selected) != len(objects):
+            raise SystemExit("places projection report object/range mismatch")
+        for object_index, obj in zip(selected, objects):
+            per_object[object_index] = (int(obj["records"]), int(obj["row_group_count"]))
+    if not per_object:
+        raise SystemExit("projection report exposes no source objects")
+    limits = []
+    for object_index in range(max(per_object) + 1):
+        records, groups = per_object.get(object_index, (1, 1))
+        limits.append({"records": records, "row_groups": groups})
+    payload = {"objects": limits}
+    write_json(args.output, payload)
+    print(json.dumps({"objects": len(limits), "read_objects": sorted(per_object)}, sort_keys=True))
+    return 0
+
+
+# --------------------------------------------------------------------------- #
+# predict-reduce (dry-run capacity certification, no network)
+# --------------------------------------------------------------------------- #
+def _inventory_total_records(inventory: dict[str, Any]) -> int:
+    totals = inventory.get("totals") or {}
+    if "records" in totals:
+        return int(totals["records"])
+    plan = inventory.get("map_plan") or inventory.get("plan") or {}
+    tasks = plan.get("tasks") or []
+    if not tasks:
+        raise SystemExit("inventory has neither totals.records nor map-plan tasks")
+    return sum(int(task.get("rows", task.get("expected_input_records", 0))) for task in tasks)
+
+
+def cmd_predict_reduce(args: argparse.Namespace) -> int:
+    """Predict the reduce partition/batch/minute demand from committed inventory
+    statistics, with no map run and no network, so a dry-run fails closed when a
+    real execute could not fit the matrix, reducer, or minute budget."""
+    contract = read_json(args.contract)
+    limits = _limits_for(contract, args.family)
+    inventory = read_json(args.inventory)
+    total_records = _inventory_total_records(inventory)
+
+    if args.family == "addresses":
+        row_cap = args.row_cap or limits.max_pack_rows
+        # Each genesis partition holds at most ``row_cap`` records, so the minimum
+        # partition count is a tight lower bound on the reduce demand.
+        predicted_partitions = math.ceil(total_records / row_cap)
+        basis = f"ceil({total_records} records / {row_cap} row cap)"
+    else:
+        # Places reduces TERM rows (one output term batch per input feature batch,
+        # up to MAX_TERMS_PER_FEATURE terms/feature); use that conservative upper
+        # bound against the per-partition term-row cap.
+        terms_per_feature = PLACES.MAX_TERMS_PER_FEATURE
+        term_rows = total_records * terms_per_feature
+        predicted_partitions = math.ceil(term_rows / limits.partition_term_rows)
+        basis = (
+            f"ceil({total_records} features x {terms_per_feature} terms / "
+            f"{limits.partition_term_rows} term-row cap)"
+        )
+    predicted_partitions = max(1, predicted_partitions)
+
+    max_reducers = int(contract.get("caps", {}).get("max_reducers_per_family", REDUCE_MATRIX_CAP))
+    job_cap = min(REDUCE_MATRIX_CAP, max_reducers)
+    if args.max_reduce_jobs is not None:
+        job_cap = min(job_cap, args.max_reduce_jobs)
+    batch_size, batches = _reduce_batches(predicted_partitions, job_cap=job_cap)
+    job_count = len(batches)
+
+    projected_reduce = job_count * int(args.reduce_minutes_per_job)
+    result: dict[str, Any] = {
+        "family": args.family,
+        "total_records": total_records,
+        "predicted_partitions": predicted_partitions,
+        "prediction_basis": basis,
+        "reduce_batch_size": batch_size,
+        "reduce_job_count": job_count,
+        "reduce_job_cap": job_cap,
+        "matrix_cap": REDUCE_MATRIX_CAP,
+        "projected_reduce_minutes": projected_reduce,
+        "fits_matrix_cap": job_count <= REDUCE_MATRIX_CAP,
+        "fits_reducer_cap": job_count <= max_reducers,
+    }
+    if job_count > REDUCE_MATRIX_CAP or job_count > max_reducers:
+        raise SystemExit(
+            f"predicted reduce needs {job_count} jobs; exceeds matrix cap "
+            f"{REDUCE_MATRIX_CAP} / reducer cap {max_reducers}"
+        )
+    if args.ledger is not None:
+        ledger = read_json(args.ledger)
+        prior = int(ledger.get("prior_runner_minutes", 0))
+        spent = sum(int(item["runner_minutes"]) for item in ledger.get("phases", []))
+        cap = int(ledger["max_total_runner_minutes"])
+        projected = prior + spent + projected_reduce + int(args.tail_minutes)
+        result.update({
+            "prior_runner_minutes": prior,
+            "spent_runner_minutes": spent,
+            "tail_minutes": int(args.tail_minutes),
+            "projected_runner_minutes": projected,
+            "max_total_runner_minutes": cap,
+            "within_cap": projected <= cap,
+        })
+        if projected > cap:
+            raise SystemExit(
+                f"predicted {projected} runner minutes exceed cap {cap} "
+                f"(prior={prior} spent={spent} reduce_jobs={job_count}x"
+                f"{args.reduce_minutes_per_job} tail={args.tail_minutes})"
+            )
+    if args.output:
+        write_json(args.output, result)
+    print(json.dumps(result, sort_keys=True))
     return 0
 
 
 # --------------------------------------------------------------------------- #
 # run-reduce
 # --------------------------------------------------------------------------- #
-def cmd_run_reduce(args: argparse.Namespace) -> int:
-    contract = read_json(args.contract)
-    store = _store(args.store_root)
-    limits = _limits_for(contract, args.family)
-    plan = read_json(args.plan)
-    markers = _load_markers(args.markers_dir)
-    partition = plan["partitions"][args.partition_index]
+def _reduce_one_partition(
+    args: argparse.Namespace,
+    *,
+    store: Any,
+    limits: Any,
+    plan: dict[str, Any],
+    markers: list[dict[str, Any]],
+    partition_index: int,
+) -> dict[str, Any]:
+    partition = plan["partitions"][partition_index]
     if args.family == "addresses":
         reduction = ADDRESS.reduce_partition(
             partition=partition,
@@ -290,13 +583,64 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
             verifier_binary=Path(args.verifier_binary),
             limits=limits,
         )
-    write_json(args.output, reduction)
-    # A per-partition completion marker so admit-task can skip a completed
-    # reducer on a fresh resume dispatch.
+    # A per-partition completion marker in the LOCAL store: it records completion
+    # within this run (carried job->job as an artifact). A fresh RESUME dispatch
+    # has no local store and instead relies on the durable create-only marker in
+    # the REMOTE store, which admit-task consults read-only via --remote-root.
+    # Batching is an execution grouping only: the marker and serving artifact are
+    # byte-identical to the unbatched plan.
     store.write_marker_last(
-        _reduce_marker_key(args.family, args.partition_index),
-        {"partition_index": args.partition_index, "artifact": reduction.get("artifact")},
+        _reduce_marker_key(args.family, partition_index),
+        {"partition_index": partition_index, "artifact": reduction.get("artifact")},
     )
+    return reduction
+
+
+def cmd_run_reduce(args: argparse.Namespace) -> int:
+    contract = read_json(args.contract)
+    store = _store(args.store_root)
+    limits = _limits_for(contract, args.family)
+    plan = read_json(args.plan)
+    markers = _load_markers(args.markers_dir)
+
+    # Batch mode: one reducer JOB processes a contiguous partition range serially
+    # and writes one output per partition into --output-dir (0000.json ...). This
+    # is what keeps the reduce matrix under the cap for planet-scale families.
+    if args.batch_index is not None or args.output_dir is not None:
+        if args.output_dir is None:
+            raise SystemExit("batch reduce requires --output-dir")
+        batches = plan.get("reduce_execution", {}).get("batches")
+        if not batches:
+            raise SystemExit("plan has no reduce_execution batches; re-run plan-reduce")
+        if args.batch_index is None or not 0 <= args.batch_index < len(batches):
+            raise SystemExit("reduce --batch-index is outside the plan")
+        batch = batches[args.batch_index]
+        start = batch["partition_start"]
+        count = batch["partition_count"]
+        output_dir = Path(args.output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        processed = []
+        for partition_index in range(start, start + count):
+            reduction = _reduce_one_partition(
+                args, store=store, limits=limits, plan=plan,
+                markers=markers, partition_index=partition_index,
+            )
+            write_json(output_dir / f"{partition_index:04d}.json", reduction)
+            processed.append(partition_index)
+        result = {"family": args.family, "batch_index": args.batch_index,
+                  "partition_start": start, "partition_count": count,
+                  "partitions": processed}
+        print(json.dumps(result, sort_keys=True))
+        return 0
+
+    # Legacy single-partition mode (one job per partition).
+    if args.partition_index is None or args.output is None:
+        raise SystemExit("single-partition reduce requires --partition-index and --output")
+    reduction = _reduce_one_partition(
+        args, store=store, limits=limits, plan=plan,
+        markers=markers, partition_index=args.partition_index,
+    )
+    write_json(args.output, reduction)
     print(json.dumps({"family": args.family, "partition_index": args.partition_index,
                       "artifact": reduction.get("artifact")}, sort_keys=True))
     return 0
@@ -491,6 +835,11 @@ def build_parser() -> argparse.ArgumentParser:
     admit.add_argument("--phase", choices=["map", "reduce", "head"], required=True)
     admit.add_argument("--task-id", default="")
     admit.add_argument("--index", type=int, default=0)
+    admit.add_argument("--remote-root", default=None,
+                       help="Optional durable remote store consulted read-only for resume skips.")
+    admit.add_argument("--remote-marker-prefix", default=None,
+                       help="Namespace prefix under which durable markers live in the remote store.")
+    admit.add_argument("--contract", type=Path, default=None)
     admit.add_argument("--output", type=Path)
     admit.set_defaults(func=cmd_admit_task)
 
@@ -517,7 +866,32 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--row-cap", type=int, default=None)
     plan.add_argument("--output", type=Path, required=True)
     plan.add_argument("--matrix-out", type=Path)
+    plan.add_argument("--max-reduce-jobs", type=int, default=None,
+                      help="Override the reduce job cap (default min(256, caps.max_reducers_per_family)).")
+    plan.add_argument("--ledger", type=Path, default=None,
+                      help="If set, fail closed when the batched reduce projection exceeds the ledger cap.")
+    plan.add_argument("--reduce-minutes-per-job", type=int, default=90)
+    plan.add_argument("--tail-minutes", type=int, default=0,
+                      help="Fixed head+finalize minutes added to the reduce projection.")
     plan.set_defaults(func=cmd_plan_reduce)
+
+    source_limits = sub.add_parser("source-limits")
+    source_limits.add_argument("--report", type=Path, required=True)
+    source_limits.add_argument("--family", choices=FAMILIES, required=True)
+    source_limits.add_argument("--output", type=Path, required=True)
+    source_limits.set_defaults(func=cmd_source_limits)
+
+    predict = sub.add_parser("predict-reduce")
+    predict.add_argument("--contract", type=Path, required=True)
+    predict.add_argument("--family", choices=FAMILIES, required=True)
+    predict.add_argument("--inventory", type=Path, required=True)
+    predict.add_argument("--row-cap", type=int, default=None)
+    predict.add_argument("--max-reduce-jobs", type=int, default=None)
+    predict.add_argument("--ledger", type=Path, default=None)
+    predict.add_argument("--reduce-minutes-per-job", type=int, default=90)
+    predict.add_argument("--tail-minutes", type=int, default=0)
+    predict.add_argument("--output", type=Path)
+    predict.set_defaults(func=cmd_predict_reduce)
 
     reduce = sub.add_parser("run-reduce")
     reduce.add_argument("--contract", type=Path, required=True)
@@ -525,12 +899,18 @@ def build_parser() -> argparse.ArgumentParser:
     reduce.add_argument("--family", choices=FAMILIES, required=True)
     reduce.add_argument("--plan", type=Path, required=True)
     reduce.add_argument("--markers-dir", required=True)
-    reduce.add_argument("--partition-index", type=int, required=True)
+    reduce.add_argument("--partition-index", type=int, default=None,
+                        help="Legacy single-partition mode; one reducer job per partition.")
+    reduce.add_argument("--batch-index", type=int, default=None,
+                        help="Batch mode: process the contiguous partition range of this batch serially.")
     reduce.add_argument("--proof-binary", default="")
     reduce.add_argument("--encoder-binary", required=True)
     reduce.add_argument("--verifier-binary", required=True)
     reduce.add_argument("--scratch-dir", required=True)
-    reduce.add_argument("--output", type=Path, required=True)
+    reduce.add_argument("--output", type=Path, default=None,
+                        help="Single-partition output path (legacy mode).")
+    reduce.add_argument("--output-dir", type=Path, default=None,
+                        help="Batch mode output directory; writes NNNN.json per partition.")
     reduce.set_defaults(func=cmd_run_reduce)
 
     head = sub.add_parser("run-head")

@@ -26,7 +26,11 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import global_v2_places_inventory as inventory  # noqa: E402
-from experiment_hosted_rowgroups import BoundedWriter, network_received_bytes  # noqa: E402
+from experiment_hosted_rowgroups import (  # noqa: E402
+    BoundedWriter,
+    network_received_bytes,
+    urlopen_with_retry,
+)
 
 
 SCHEMA = "overture-places-construction-v1-projection-report-v1"
@@ -87,9 +91,11 @@ def head_identity(uri: str) -> dict[str, Any]:
         method="HEAD",
         headers={"User-Agent": "overture-geocoder-places-construction-v1/1"},
     )
-    with urllib.request.urlopen(request, timeout=60) as response:
-        etag = response.headers.get("ETag")
-        size = response.headers.get("Content-Length")
+    # P1-3: retry the read-only HEAD with bounded exponential backoff; fail
+    # closed (never treat a transient fault as a changed/absent object).
+    _body, headers = urlopen_with_retry(request, timeout=60)
+    etag = headers.get("ETag")
+    size = headers.get("Content-Length")
     if etag is None or size is None:
         raise ValueError("Places source identity response is incomplete")
     return {"etag": etag.strip('"'), "bytes": int(size)}
@@ -218,6 +224,53 @@ def projection_identity(
     }
 
 
+def validate_only(args: argparse.Namespace) -> dict[str, Any]:
+    """P1-1: parse the inventory, validate the task shape against the frozen
+    gates, and print the ranges this task WOULD read -- with no S3 access. Lets
+    a dry-run honestly exercise the real Places projection argument + inventory
+    schema path cheaply."""
+    value = inventory.validate_inventory(json.loads(args.inventory.read_text()))
+    inventory_file_sha256 = sha256_file(args.inventory)
+    spec_sha256 = sha256_file(args.evidence_spec)
+    if args.task_index < 0 or args.task_index >= len(value["map_plan"]["tasks"]):
+        raise ValueError("Places projection task index is outside the inventory")
+    task = value["map_plan"]["tasks"][args.task_index]
+    selected_compressed = sum(item["selected_compressed_bytes"] for item in task["ranges"])
+    if (
+        task["expected_input_records"] > args.max_rows
+        or task["row_groups"] > args.max_groups
+        or selected_compressed > args.max_selected_compressed_bytes
+        or task["selected_uncompressed_bytes"] > args.max_selected_uncompressed_bytes
+    ):
+        raise ValueError("Places projection task exceeds a frozen source gate")
+    identity = projection_identity(value, task, inventory_file_sha256, spec_sha256)
+    would_read = [
+        {
+            "uri": value["objects"][item["object_index"]]["uri"],
+            "object_index": item["object_index"],
+            "first_row_group": item["first_row_group"],
+            "last_row_group": item["last_row_group"],
+        }
+        for item in task["ranges"]
+    ]
+    result = {
+        "schema": "overture-places-construction-v1-validate-only-v1",
+        "task_index": args.task_index,
+        "inventory_sha256": identity["inventory_sha256"],
+        "evidence_spec_sha256": spec_sha256,
+        "expected_input_records": task["expected_input_records"],
+        "row_groups": task["row_groups"],
+        "selected_compressed_bytes": selected_compressed,
+        "selected_uncompressed_bytes": task["selected_uncompressed_bytes"],
+        "would_read_ranges": would_read,
+        "s3_accessed": False,
+    }
+    if args.report is not None:
+        args.report.parent.mkdir(parents=True, exist_ok=True)
+        args.report.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
+    return result
+
+
 def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str, Any]:
     import pyarrow as pa
     import pyarrow.fs as pafs
@@ -259,6 +312,10 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
     bounded = BoundedWriter(args.output, args.max_output_bytes)
     rows = batches = maximum_batch_rows = 0
     checked: set[int] = set()
+    # P0-1 integrity parity with the address projector: retain each object's
+    # pre-read etag+byte identity so it can be re-verified AFTER the read.
+    identities_before: dict[int, dict[str, Any]] = {}
+    checked_uris: dict[int, str] = {}
     network_before = measured_network_received_bytes()
     try:
         for row_range in task["ranges"]:
@@ -275,6 +332,8 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
                 if info.size != source["bytes"]:
                     raise ValueError("Places source size changed after inventory")
                 checked.add(object_index)
+                identities_before[object_index] = current
+                checked_uris[object_index] = source["uri"]
             parquet = pq.ParquetFile(
                 source["uri"].removeprefix("s3://"), filesystem=filesystem
             )
@@ -325,6 +384,14 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
     output = pq.ParquetFile(args.output)
     if output.metadata.num_rows != rows or output.schema_arrow.metadata != metadata:
         raise ValueError("Places projection verification differs")
+    # P0-1: re-verify every read object's etag+bytes AFTER the read, matching the
+    # address projector's pre/post identity pin, so a mid-read source mutation is
+    # caught before the artifact is trusted.
+    if not args.skip_head_identity:
+        for object_index, before in identities_before.items():
+            after = head_identity(checked_uris[object_index])
+            if after != before:
+                raise ValueError("Places source identity changed during the read")
     network_after = measured_network_received_bytes()
     network_delta = (
         network_after - network_before
@@ -347,6 +414,11 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
             "records": output.metadata.num_rows,
             "row_groups": output.metadata.num_row_groups,
         },
+        "verification": {
+            "pre_post_source_identity_match": not args.skip_head_identity,
+            "output_record_count_match": True,
+            "objects_identity_verified": sorted(identities_before),
+        },
         "resources": {
             "elapsed_seconds": time.monotonic() - started,
             "peak_rss_bytes": resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
@@ -368,8 +440,10 @@ def main() -> None:
     parser.add_argument("--inventory", type=Path, required=True)
     parser.add_argument("--evidence-spec", type=Path, required=True)
     parser.add_argument("--task-index", type=int, required=True)
-    parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--report", type=Path, required=True)
+    parser.add_argument("--output", type=Path)
+    parser.add_argument("--report", type=Path)
+    parser.add_argument("--validate-only", action="store_true",
+                        help="Validate the task + print the ranges it would read; no S3, no output.")
     parser.add_argument("--max-rows", type=int, default=1_000_000)
     parser.add_argument("--max-groups", type=int, default=64)
     parser.add_argument(
@@ -383,6 +457,11 @@ def main() -> None:
         "--skip-head-identity", action="store_true", help=argparse.SUPPRESS
     )
     args = parser.parse_args()
+    if args.validate_only:
+        print(json.dumps(validate_only(args), sort_keys=True))
+        return
+    if args.output is None or args.report is None:
+        parser.error("--output and --report are required unless --validate-only")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     print(json.dumps(run(args), sort_keys=True))
 

@@ -79,6 +79,48 @@ def test_execute_data_plane_uses_the_native_adapter_not_a_missing_contract():
     assert "control/runtime.json" in value
 
 
+def test_places_map_uses_the_places_projector_not_the_address_experiment():
+    # P0-1: Places has its own S3 projector; the address row-group experiment has
+    # no --family places code path, so the Places map branch MUST call it.
+    value = text()
+    assert "scripts/project_places_construction_v1.py" in value
+    # The address projector is still wired for the address family.
+    assert "scripts/experiment_hosted_rowgroups.py" in value
+    # source-limits is derived per-object from the projection report, never a
+    # hardcoded row_groups:1 bound that would reject real projected locators.
+    assert "construction_v1_hosted.py source-limits" in value
+    assert '"row_groups":1' not in value
+
+
+def test_reduce_is_batched_under_the_matrix_and_reducer_cap():
+    # P0-3: the reduce matrix has ONE entry per batch JOB (batch_index), each job
+    # processes a contiguous partition range via --batch-index/--output-dir, and
+    # plan-reduce gates the ledger on the BATCHED job count.
+    value = text()
+    assert "matrix.batch_index" in value
+    assert "matrix.partition_index" not in value
+    assert "--batch-index" in value
+    assert "--output-dir reductions" in value
+    plan_block = value[value.index("Fan in map minutes") : value.index("Publish the plan")]
+    assert "--ledger control/ledger.json" in plan_block
+    assert "--reduce-minutes-per-job" in plan_block
+    assert "--tail-minutes" in plan_block
+
+
+def test_dry_run_runs_the_real_projection_validators_and_capacity_prediction():
+    # P1-1: a dry-run must invoke the REAL projection argument/inventory-schema
+    # validation (no S3) and predict the reduce partition/batch/minute demand,
+    # so a dry-run certifies the execute could actually parse and fit.
+    value = text()
+    dry_block = value[
+        value.index("Bounded planning sample") : value.index("Free disk before bounded map work")
+    ]
+    assert "--validate-only" in dry_block
+    assert "scripts/project_places_construction_v1.py --validate-only" in dry_block
+    assert "scripts/experiment_hosted_rowgroups.py --validate-only" in dry_block
+    assert "construction_v1_hosted.py predict-reduce" in dry_block
+
+
 def test_phase_outputs_flow_between_jobs_as_pinned_artifacts():
     value = text()
     doc = parsed()

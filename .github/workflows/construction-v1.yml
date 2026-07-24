@@ -285,17 +285,47 @@ jobs:
           set -euo pipefail
           START=$SECONDS
           echo "TASK BEGIN $TASK_ID (family=$FAMILY_KEY index=$TASK_INDEX mode=dry-run)"
+          RELEASE="$(jq -r '.release' control/request.json)"
+          mkdir -p dryrun
+          # P1-1: run the REAL projection argument + inventory-schema validation
+          # (no S3) and a reduce capacity prediction, so a dry-run certifies the
+          # execute would actually parse, fit the matrix, and fit the budget.
           case "$FAMILY_KEY" in
-            addresses) INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json ;;
-            places)    INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json ;;
+            addresses)
+              INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json
+              python scripts/experiment_hosted_rowgroups.py --validate-only \
+                --release "$RELEASE" --family addresses --inventory-report "$INVENTORY" \
+                --task-index "$TASK_INDEX" --json-out "dryrun/validate-${TASK_INDEX}.json" \
+                --target-rowgroup-uncompressed-bytes 400000000 --max-rows 4000000 --max-groups 72
+              ;;
+            places)
+              INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json
+              SPEC=benchmarks/places-construction-v1-evidence-spec.json
+              python scripts/project_places_construction_v1.py --validate-only \
+                --inventory "$INVENTORY" --evidence-spec "$SPEC" \
+                --task-index "$TASK_INDEX" --report "dryrun/validate-${TASK_INDEX}.json" \
+                --max-rows 4000000 --max-groups 72 \
+                --max-selected-compressed-bytes 536870912 --max-selected-uncompressed-bytes 1000000000
+              ;;
           esac
-          ROWS="$(jq -r --argjson i "$TASK_INDEX" 'def t: (.map_plan.tasks // .plan.tasks // .checks.canonical_inventory_identity.tasks); (t[$i] | (.rows // .expected_input_records)) // "unknown"' "$INVENTORY" 2>/dev/null || echo unknown)"
-          BYTES="$(jq -r --argjson i "$TASK_INDEX" 'def t: (.map_plan.tasks // .plan.tasks // .checks.canonical_inventory_identity.tasks); (t[$i].selected_uncompressed_bytes) // "unknown"' "$INVENTORY" 2>/dev/null || echo unknown)"
+          ROWS="$(jq -r '.planned_rows // .expected_input_records' "dryrun/validate-${TASK_INDEX}.json")"
+          BYTES="$(jq -r '.planned_selected_uncompressed_bytes // .selected_uncompressed_bytes' "dryrun/validate-${TASK_INDEX}.json")"
+          RANGES="$(jq -r '.would_read_ranges | length' "dryrun/validate-${TASK_INDEX}.json")"
+          # Predict the reduce partition/batch/minute demand from inventory stats
+          # and fail closed if a real execute could not fit matrix/reducer/budget.
+          TAIL_MINUTES=$(( HEAD_PHASE_ESTIMATE_MINUTES + FINALIZE_PHASE_ESTIMATE_MINUTES ))
+          python scripts/construction_v1_hosted.py predict-reduce \
+            --contract control/contract.json --family "$FAMILY_KEY" --inventory "$INVENTORY" \
+            --ledger control/ledger.json --reduce-minutes-per-job "$REDUCE_PHASE_ESTIMATE_MINUTES" \
+            --tail-minutes "$TAIL_MINUTES" --output "dryrun/predict-${TASK_INDEX}.json"
+          PARTITIONS="$(jq -r '.predicted_partitions' "dryrun/predict-${TASK_INDEX}.json")"
+          JOBS="$(jq -r '.reduce_job_count' "dryrun/predict-${TASK_INDEX}.json")"
           ELAPSED=$(( SECONDS - START ))
-          echo "TASK END   $TASK_ID planned_rows=$ROWS selected_uncompressed_bytes=$BYTES elapsed=${ELAPSED}s r2_writes=0"
+          echo "TASK END   $TASK_ID planned_rows=$ROWS selected_uncompressed_bytes=$BYTES would_read_ranges=$RANGES predicted_partitions=$PARTITIONS reduce_jobs=$JOBS elapsed=${ELAPSED}s r2_writes=0"
           {
             echo "### dry-run map sample: \`$TASK_ID\`"
-            echo "- Planned input rows: $ROWS | Selected uncompressed bytes: $BYTES | Elapsed: ${ELAPSED}s | R2 writes: 0"
+            echo "- Planned input rows: $ROWS | Selected uncompressed bytes: $BYTES | Ranges validated: $RANGES | Elapsed: ${ELAPSED}s | R2 writes: 0"
+            echo "- Predicted reduce partitions: $PARTITIONS across $JOBS batch jobs (fits matrix + budget)"
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Free disk before bounded map work (execute mode only)
@@ -338,21 +368,44 @@ jobs:
             echo "TASK END   $TASK_ID already-completed=true elapsed=$(( SECONDS - START ))s"
           else
             BINDIR="crates/target/release"
-            case "$FAMILY_KEY" in
-              addresses) TRANSFORM="$BINDIR/address-transform-v1"; PROOF="$BINDIR/address-proof-directory";
-                         INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json ;;
-              places)    TRANSFORM="$BINDIR/places-transform-v1"; PROOF="$BINDIR/places-proof-directory";
-                         INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json ;;
-            esac
             RELEASE="$(jq -r '.release' control/request.json)"
-            # Project the exact inventory-assigned row groups from S3 (read-only).
-            /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
-              --release "$RELEASE" --family "$FAMILY_KEY" --inventory-report "$INVENTORY" \
-              --task-index "$TASK_INDEX" --output work/projected.parquet \
-              --json-out work/projection.json --target-rowgroup-uncompressed-bytes 400000000 \
-              --max-rows 4000000 --max-groups 72 --max-output-bytes 500000000
-            ROWS="$(jq -r '.records // .rows // 0' work/projection.json 2>/dev/null || echo 0)"
-            printf '{"objects":[{"records":%s,"row_groups":1}]}\n' "$ROWS" > work/source-limits.json
+            # Project the exact inventory-assigned row groups from S3 (read-only),
+            # then read the authoritative projected row count from the report so
+            # the transform's per-object source-limits bound is positive+exact.
+            case "$FAMILY_KEY" in
+              addresses)
+                TRANSFORM="$BINDIR/address-transform-v1"; PROOF="$BINDIR/address-proof-directory"
+                INVENTORY=benchmarks/address-construction-v1-data/inventory/addresses.json
+                /usr/bin/time -v python scripts/experiment_hosted_rowgroups.py \
+                  --release "$RELEASE" --family "$FAMILY_KEY" --inventory-report "$INVENTORY" \
+                  --task-index "$TASK_INDEX" --output work/projected.parquet \
+                  --json-out work/projection.json --target-rowgroup-uncompressed-bytes 400000000 \
+                  --max-rows 4000000 --max-groups 72 --max-output-bytes 500000000
+                ROWS="$(jq -r '.output.rows' work/projection.json)"
+                ;;
+              places)
+                # P0-1: Places has its own S3 projector (nested-column flatten +
+                # etag/byte identity pins verified pre- AND post-read); the
+                # address row-group experiment has no Places code path.
+                TRANSFORM="$BINDIR/places-transform-v1"; PROOF="$BINDIR/places-proof-directory"
+                INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json
+                SPEC=benchmarks/places-construction-v1-evidence-spec.json
+                /usr/bin/time -v python scripts/project_places_construction_v1.py \
+                  --inventory "$INVENTORY" --evidence-spec "$SPEC" \
+                  --task-index "$TASK_INDEX" --output work/projected.parquet \
+                  --report work/projection.json --max-rows 4000000 --max-groups 72 \
+                  --max-selected-compressed-bytes 536870912 \
+                  --max-selected-uncompressed-bytes 1000000000 --max-output-bytes 500000000
+                ROWS="$(jq -r '.output.records' work/projection.json)"
+                ;;
+            esac
+            test "$ROWS" -gt 0
+            # Derive the transform's per-object source-limits bound from the
+            # projection report so real projected locators (original row-group
+            # indices) are never spuriously rejected.
+            python scripts/construction_v1_hosted.py source-limits \
+              --report work/projection.json --family "$FAMILY_KEY" \
+              --output work/source-limits.json
             /usr/bin/time -v python scripts/construction_v1_hosted.py run-map \
               --contract control/contract.json --store-root store --family "$FAMILY_KEY" \
               --task-id "$TASK_ID" --input work/projected.parquet \
@@ -430,20 +483,29 @@ jobs:
             --ledger control/ledger.json --next-phase-minutes "$PART_ESTIMATE" \
             --output control/plan-ledger-check.json
           mkdir -p plan-scratch plan
+          # P0-3: the reducer plan batches partitions into <=256 matrix JOBS and
+          # fails closed here if the BATCHED reduce projection (job_count x the
+          # per-job estimate + head/finalize tails) would exceed the ledger cap.
+          TAIL_MINUTES=$(( HEAD_PHASE_ESTIMATE_MINUTES + FINALIZE_PHASE_ESTIMATE_MINUTES ))
           python scripts/construction_v1_hosted.py plan-reduce \
             --contract control/contract.json --store-root mapdl/store --family "$FAMILY_KEY" \
             --markers-dir mapdl/markers --scratch-dir plan-scratch \
+            --ledger control/ledger.json \
+            --reduce-minutes-per-job "$REDUCE_PHASE_ESTIMATE_MINUTES" \
+            --tail-minutes "$TAIL_MINUTES" \
             --output plan/plan.json --matrix-out plan/reduce-matrix.json
           MATRIX="$(jq -c '.' plan/reduce-matrix.json)"
           COUNT="$(jq '.include | length' <<<"$MATRIX")"
           if [ "$COUNT" -gt 256 ]; then echo "reduce matrix exceeds 256 cap" >&2; exit 1; fi
+          PARTITIONS="$(jq -r '.reduce_execution.partition_count' plan/plan.json)"
+          BATCH_SIZE="$(jq -r '.reduce_execution.batch_size' plan/plan.json)"
           {
             echo "reduce_matrix=$MATRIX"
             echo "reduce_count=$COUNT"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## Reducer plan"
-            echo "- Reduce partitions: $COUNT (matrix cap 256)"
+            echo "- Reduce partitions: $PARTITIONS across $COUNT batch jobs (batch size $BATCH_SIZE, matrix cap 256)"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Publish the plan, merged store, and updated ledger
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -459,7 +521,7 @@ jobs:
             control/ledger.json
 
   reduce:
-    name: ${{ needs.admit.outputs.family_key }} reduce ${{ matrix.partition_index }}
+    name: ${{ needs.admit.outputs.family_key }} reduce batch ${{ matrix.batch_index }}
     needs: [admit, plan]
     if: inputs.mode == 'execute'
     runs-on: ubuntu-24.04
@@ -487,10 +549,10 @@ jobs:
           path: cv1
       - name: Build the pinned construction binaries
         run: cargo build -p geocoder-construction --bins --release
-      - name: Run one selective reducer create-only
+      - name: Run one selective reducer batch create-only
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
-          PARTITION_INDEX: ${{ matrix.partition_index }}
+          BATCH_INDEX: ${{ matrix.batch_index }}
         run: |
           set -euo pipefail
           test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 30000000
@@ -498,33 +560,36 @@ jobs:
           mkdir -p reductions reduce-scratch phase
           python scripts/construction_v1_hosted.py ledger-check \
             --ledger cv1/control/ledger.json --next-phase-minutes "$REDUCE_PHASE_ESTIMATE_MINUTES"
-          echo "REDUCE BEGIN $FAMILY_KEY partition=$PARTITION_INDEX"
+          echo "REDUCE BEGIN $FAMILY_KEY batch=$BATCH_INDEX"
           BINDIR="crates/target/release"
           case "$FAMILY_KEY" in
             addresses) PROOF="$BINDIR/address-proof-directory"; ENC="$BINDIR/address-serving-encode-v1"; VER="$BINDIR/address-serving-verify-v1" ;;
             places)    PROOF=""; ENC="$BINDIR/places-serving-encode-v1"; VER="$BINDIR/places-serving-verify-v1" ;;
           esac
+          # P0-3: one matrix job reduces a contiguous BATCH of partitions serially,
+          # writing one create-only serving object + marker per partition into
+          # reductions/. The ledger fragment records this job's real elapsed time.
           /usr/bin/time -v python scripts/construction_v1_hosted.py run-reduce \
             --contract cv1/control/contract.json --store-root cv1/mapdl/store --family "$FAMILY_KEY" \
             --plan cv1/plan/plan.json --markers-dir cv1/mapdl/markers \
-            --partition-index "$PARTITION_INDEX" --proof-binary "$PROOF" \
+            --batch-index "$BATCH_INDEX" --proof-binary "$PROOF" \
             --encoder-binary "$ENC" --verifier-binary "$VER" --scratch-dir reduce-scratch \
-            --output "reductions/$(printf '%04d' "$PARTITION_INDEX").json"
-          echo "REDUCE END $FAMILY_KEY partition=$PARTITION_INDEX elapsed=$(( SECONDS - START ))s marker_written_last=true"
+            --output-dir reductions
+          echo "REDUCE END $FAMILY_KEY batch=$BATCH_INDEX elapsed=$(( SECONDS - START ))s marker_written_last=true"
           ELAPSED_MIN=$(( (SECONDS - START + 59) / 60 ))
-          jq -n --arg phase "reduce-${PARTITION_INDEX}" --argjson m "$ELAPSED_MIN" \
-            '{phase:$phase,runner_minutes:$m}' > "phase/ledger-fragment-${PARTITION_INDEX}.json"
-      - name: Publish this reducer's store fragment, reduction, and ledger fragment
+          jq -n --arg phase "reduce-batch-${BATCH_INDEX}" --argjson m "$ELAPSED_MIN" \
+            '{phase:$phase,runner_minutes:$m}' > "phase/ledger-fragment-${BATCH_INDEX}.json"
+      - name: Publish this reducer batch's store fragment, reductions, and ledger fragment
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
-          name: cv1-reduce-${{ matrix.partition_index }}
+          name: cv1-reduce-${{ matrix.batch_index }}
           if-no-files-found: error
           retention-days: 7
           include-hidden-files: true
           path: |
             cv1/mapdl/store
             reductions
-            phase/ledger-fragment-${{ matrix.partition_index }}.json
+            phase/ledger-fragment-${{ matrix.batch_index }}.json
 
   head:
     name: Global Places head (execute)
