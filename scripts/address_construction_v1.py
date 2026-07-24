@@ -142,6 +142,8 @@ class StageWatchdog:
         self.peak_rss_bytes = 0
         self.peak_disk_bytes = 0
         self.failure: str | None = None
+        self.finished = False
+        self.process = None
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -155,27 +157,47 @@ class StageWatchdog:
             if path.is_file()
         )
 
-    def _run(self) -> None:
-        import psutil
+    def _observe(self) -> None:
+        self.peak_rss_bytes = max(self.peak_rss_bytes, self.process.memory_info().rss)
+        self.peak_disk_bytes = max(self.peak_disk_bytes, self.disk_bytes(self.roots))
+        if self.peak_rss_bytes > self.limits.max_rss_bytes:
+            self.failure = "whole-stage RSS exceeded its hard cap"
+        elif self.peak_disk_bytes > self.limits.max_scratch_bytes:
+            self.failure = "whole-stage scratch exceeded its hard cap"
+        elif time.monotonic() - self.started > self.limits.wall_seconds:
+            self.failure = "whole-stage wall time exceeded its hard cap"
 
-        process = psutil.Process(os.getpid())
-        while not self.stop.wait(0.01):
-            self.peak_rss_bytes = max(self.peak_rss_bytes, process.memory_info().rss)
-            self.peak_disk_bytes = max(
-                self.peak_disk_bytes, self.disk_bytes(self.roots)
-            )
-            if self.peak_rss_bytes > self.limits.max_rss_bytes:
-                self.failure = "whole-stage RSS exceeded its hard cap"
-            elif self.peak_disk_bytes > self.limits.max_scratch_bytes:
-                self.failure = "whole-stage scratch exceeded its hard cap"
-            elif time.monotonic() - self.started > self.limits.wall_seconds:
-                self.failure = "whole-stage wall time exceeded its hard cap"
-            if self.failure:
-                if self.connection is not None:
-                    self.connection.interrupt()
-                return
+    def _abort(self) -> None:
+        # Always called after self.failure is recorded, so a fault raised here
+        # still surfaces through __exit__ rather than replacing the real cause.
+        if self.connection is not None:
+            self.connection.interrupt()
+
+    def _run(self) -> None:
+        # These caps are the only bound on the stage, so a monitor thread that
+        # stops observing must fail the stage rather than let it run unguarded.
+        # Exceptions raised here would otherwise die inside the daemon thread,
+        # leaving __exit__ to report success and evidence() to report zero peaks.
+        try:
+            self._observe()
+            while not self.failure and not self.stop.wait(0.01):
+                self._observe()
+        except BaseException as error:  # noqa: BLE001 - fail closed on any fault
+            self.failure = f"stage watchdog stopped observing: {error!r}"
+            self._abort()
+            return
+        if self.failure:
+            self._abort()
+            return
+        self.finished = True
 
     def __enter__(self):
+        import psutil
+
+        # Import and attach on the caller's thread so a missing dependency or an
+        # unreadable process fails loudly at the call site instead of silently
+        # disabling the guard from inside the daemon thread.
+        self.process = psutil.Process(os.getpid())
         self.thread.start()
         return self
 
@@ -185,6 +207,8 @@ class StageWatchdog:
         self.peak_disk_bytes = max(
             self.peak_disk_bytes, self.disk_bytes(self.roots)
         )
+        if self.failure is None and not self.finished:
+            self.failure = "stage watchdog exited without recording an observation"
         if exc_type is None and self.failure:
             raise RuntimeError(self.failure)
 

@@ -356,3 +356,37 @@ def test_typed_corruption_is_task_fatal(tmp_path, binaries):
         ]
     )
     assert result.returncode != 0
+
+
+def test_stage_watchdog_fails_closed_when_the_monitor_thread_dies(tmp_path):
+    # The watchdog thread is the only thing enforcing the RSS/scratch/wall caps,
+    # so a fault inside it must fail the stage instead of dying silently and
+    # leaving __exit__ to report success against zeroed evidence.
+    watchdog = CONSTRUCTION.StageWatchdog([tmp_path], CONSTRUCTION.Limits())
+    watchdog._observe = lambda: (_ for _ in ()).throw(OSError("proc vanished"))
+    with pytest.raises(RuntimeError, match="stage watchdog stopped observing"):
+        with watchdog:
+            pass
+
+
+def test_stage_watchdog_fails_closed_when_the_thread_never_observes(tmp_path):
+    watchdog = CONSTRUCTION.StageWatchdog([tmp_path], CONSTRUCTION.Limits())
+    watchdog.thread = SimpleNamespace(start=lambda: None, join=lambda: None)
+    with pytest.raises(RuntimeError, match="without recording an observation"):
+        with watchdog:
+            pass
+
+
+def test_stage_watchdog_interrupts_and_reports_a_hard_cap_breach(tmp_path):
+    interrupted = []
+    connection = SimpleNamespace(interrupt=lambda: interrupted.append(True))
+    watchdog = CONSTRUCTION.StageWatchdog(
+        [tmp_path],
+        CONSTRUCTION.Limits(max_rss_bytes=1),
+        connection,
+    )
+    with pytest.raises(RuntimeError, match="RSS exceeded its hard cap"):
+        with watchdog:
+            watchdog.thread.join(5)
+    assert interrupted == [True]
+    assert watchdog.evidence()["peak_rss_bytes"] > 0
