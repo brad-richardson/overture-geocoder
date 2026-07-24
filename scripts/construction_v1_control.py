@@ -176,6 +176,14 @@ def prepare(values: argparse.Namespace) -> tuple[dict[str, Any], bool]:
     elif not HEX64.fullmatch(values.legacy_core_manifest_sha256):
         blockers.append("legacy core release-manifest SHA-256 is not canonical")
 
+    # Retained runner minutes from earlier attempts. A fresh resume dispatch
+    # binds them into both the request and the typed confirmation so the honest
+    # prior total cannot be silently reset to zero.
+    prior_runner_minutes = int(getattr(values, "prior_runner_minutes", 0) or 0)
+    if prior_runner_minutes < 0:
+        blockers.append("prior runner minutes must be a non-negative integer")
+    caps = {**CAPS, "prior_runner_minutes": prior_runner_minutes}
+
     readiness: dict[str, Any] = {}
     matrices: dict[str, list[dict[str, Any]]] = {}
     family_contracts: dict[str, Any] = {}
@@ -206,7 +214,7 @@ def prepare(values: argparse.Namespace) -> tuple[dict[str, Any], bool]:
             },
             "families": family_contracts,
             "versions": {**VERSIONS, "cargo_lock_sha256": sha256_file(ROOT / "crates/Cargo.lock"), "address_source_sha256": sha256_file(ROOT / "scripts/address_construction_v1.py"), "places_source_sha256": sha256_file(ROOT / "scripts/places_construction_v1.py")},
-            "caps": CAPS,
+            "caps": caps,
             "publication": {"production_writes": False, "non_promoting_slice": True, "preview_only": True},
         }
         # Avoid a self-referential fixed point: namespace binds the independently hashed request core.
@@ -223,11 +231,11 @@ def prepare(values: argparse.Namespace) -> tuple[dict[str, Any], bool]:
             "forbidden": ["catalog.json", "v2/catalog.json", "v2/releases/"],
         }
         request_sha = sha256_bytes(canonical(request))
-        typed = confirmation(request_sha, CAPS)
+        typed = confirmation(request_sha, caps)
 
     projected_minutes = 30 + len(matrices["addresses"]) * 60 + len(matrices["places"]) * 45 + 2 * CAPS["max_reducers_per_family"] * CAPS["reduce_wall_minutes"] + 300
-    if projected_minutes > CAPS["max_total_runner_minutes"]:
-        blockers.append("projected runner minutes exceed the admitted cap")
+    if prior_runner_minutes + projected_minutes > CAPS["max_total_runner_minutes"]:
+        blockers.append("prior plus projected runner minutes exceed the admitted cap")
     report = {
         "schema": "overture-construction-v1-review-package-v1",
         "admitted": not blockers and request is not None and all(item["ready"] for item in readiness.values()),
@@ -241,7 +249,7 @@ def prepare(values: argparse.Namespace) -> tuple[dict[str, Any], bool]:
             name: {"derivation": "adaptive-genesis-plan-v1", "replaceable": True, "maximum_entries": CAPS["max_reducers_per_family"], "admitted_marker_set": [task["task_id"] for task in matrix]}
             for name, matrix in matrices.items()
         },
-        "cost": {"projected_runner_minutes_upper_bound": projected_minutes, "max_total_runner_minutes": CAPS["max_total_runner_minutes"], "max_cost_usd": CAPS["max_cost_usd"]},
+        "cost": {"projected_runner_minutes_upper_bound": projected_minutes, "prior_runner_minutes": prior_runner_minutes, "max_total_runner_minutes": CAPS["max_total_runner_minutes"], "max_cost_usd": CAPS["max_cost_usd"]},
         "next_action": "Satisfy every blocker, rerun prepare, review the canonical request, then dispatch once with its exact hash and typed confirmation.",
     }
     return report, report["admitted"]
@@ -255,6 +263,7 @@ def main() -> int:
         prep.add_argument(f"--{name}", required=True)
     prep.add_argument("--legacy-core-version")
     prep.add_argument("--legacy-core-manifest-sha256")
+    prep.add_argument("--prior-runner-minutes", type=int, default=0)
     prep.add_argument("--output", type=Path, required=True)
     admit = sub.add_parser("admit-dispatch")
     admit.add_argument("--request", type=Path, required=True)
@@ -272,6 +281,7 @@ def main() -> int:
             slice_id=identity.get("slice_id", ""), staging_id=identity.get("staging_id", ""),
             producer_commit=request.get("producer_commit", ""), legacy_core_version=core.get("version"),
             legacy_core_manifest_sha256=core.get("manifest_sha256"),
+            prior_runner_minutes=request.get("caps", {}).get("prior_runner_minutes", 0),
         ))
         actual_sha = sha256_bytes(canonical(request))
         if args.run_attempt != 1:
