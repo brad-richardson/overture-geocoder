@@ -8,8 +8,9 @@ from v2 with a contract the Python builder and Rust Worker can reproduce exactly
 and pins the three Unicode string semantics that v3 left unstated (see
 `2026-07-24-places-digest-divergence-root-cause.md`).
 
-The normalization contract is pinned to Rust semantics at **Unicode 16.0** (the
-Rust standard-library tables). `places-transform-v1` is authoritative; the Python
+The normalization contract is pinned to Rust semantics at **Unicode 17.0** (the
+Rust standard-library tables for the word class and lowercase map, and
+`unicode-normalization` 0.1.25 for NFKD and combining marks; both carry 17.0). `places-transform-v1` is authoritative; the Python
 baseline drives its lowercase, whitespace and word-character tables from
 `scripts/places_unicode_tables_v1.json`, exported from those same Rust tables, so
 neither side carries an independent (version-skewed) Unicode opinion. The steps:
