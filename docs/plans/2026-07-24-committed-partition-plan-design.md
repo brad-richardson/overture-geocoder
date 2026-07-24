@@ -96,8 +96,17 @@ partition above the given fraction of any cap:
 Because the prefix is a hash, a pre-split partition's children each hold roughly
 `u/16` of its load. So a >50% policy costs **+15% partition count** and buys
 16x headroom on the 175 hot partitions, while everything left untouched is
-already below half a cap and must double before it breaks. That is years of
-growth, not months, for a very cheap price.
+already below half a cap and must double before it breaks.
+
+> **Partially superseded by the 2026-07-22.0 growth test**
+> (`2026-07-24-growth-test-and-path-to-planet.md` §3-§4). The headroom policy is
+> confirmed: >90% would have absorbed five weeks of real drift, and >50% has
+> ample margin. But the `u/16` claim holds only for the **distinct-token** cap.
+> A hash prefix cannot split a *single token*, so a cell whose rows concentrate
+> on one token has a hard floor no depth can lower — measured at 742,392 rows
+> (74.2% of the row cap) for `('b2e3', 'jp')`. Headroom therefore does **not**
+> buy "years of growth" against the row cap in token-skewed cells. Resolve
+> before genesis.
 
 Uniform subdivision remains impossible: `17,816 x 16 = 285,056` partitions is
 **7x over the ledger cap**. So the rule still holds —
