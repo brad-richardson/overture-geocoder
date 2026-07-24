@@ -1,0 +1,14 @@
+{
+  "evidence_spec_sha256": "5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d",
+  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "observations": {
+    "duplicate_uuid": {
+      "duplicate_uuid_rows_total": 0,
+      "maximum_uuid_multiplicity": 1
+    }
+  },
+  "ready": true,
+  "reasons": [],
+  "scale_evidence_sha256": "71afc784d340b2c031ef70caef852daca12f947b205358388944962efda2e148",
+  "schema": "overture-places-construction-v1-readiness-v1"
+}

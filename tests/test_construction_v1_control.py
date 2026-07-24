@@ -25,19 +25,45 @@ def arguments(**overrides):
     return argparse.Namespace(**values)
 
 
-def test_review_package_is_deterministic_genesis_and_places_fail_closed():
+def test_review_package_is_deterministic_genesis_and_admits_both_families():
     first, admitted = CONTROL.prepare(arguments())
     second, _ = CONTROL.prepare(arguments())
-    assert not admitted
+    assert admitted
+    assert first["blockers"] == []
     assert CONTROL.canonical(first) == CONTROL.canonical(second)
     assert first["request_sha256"] == CONTROL.sha256_bytes(CONTROL.canonical(first["request"]))
     assert first["request"]["lineage"] == {"genesis": True, "generation": 1, "predecessor": None}
     assert first["readiness"]["addresses"]["ready"] is True
-    assert first["readiness"]["places"]["ready"] is False
-    assert any(reason.startswith("places readiness:") for reason in first["blockers"])
+    assert first["readiness"]["places"]["ready"] is True
     assert len(first["map_matrices"]["addresses"]) == 127
     assert len(first["map_matrices"]["places"]) == 89
     assert first["cost"]["projected_runner_minutes_upper_bound"] <= first["cost"]["max_total_runner_minutes"]
+
+
+def test_control_pins_match_the_real_committed_evidence_files():
+    """Close the hole: pin the exact committed bytes/identity, not a synthetic
+    fixture, so a stale spec/readiness/inventory pin (or a not-ready pinned
+    readiness) fails closed in CI instead of silently admitting nothing."""
+    for name, contract in CONTROL.FAMILIES.items():
+        for field, pin in (
+            ("inventory", "inventory_file_sha256"),
+            ("spec", "spec_sha256"),
+            ("readiness", "readiness_file_sha256"),
+        ):
+            actual = CONTROL.sha256_file(ROOT / contract[field])
+            assert actual == contract[pin], (
+                f"{name} {field} pin is stale: committed {actual} != pinned {contract[pin]}"
+            )
+        readiness = json.loads((ROOT / contract["readiness"]).read_text())
+        assert readiness.get("ready") is True, f"{name} pinned readiness is not ready:true"
+        identity = {
+            **readiness.get("checks", {}).get("canonical_inventory_identity", {}),
+            **readiness.get("checks", {}),
+            **readiness,
+        }
+        assert identity.get("evidence_spec_sha256") == contract["spec_sha256"]
+        assert identity.get("scale_evidence_sha256") == contract["scale_evidence_sha256"]
+        assert identity.get("inventory_sha256") == contract["inventory_sha256"]
 
 
 def test_request_and_confirmation_bind_every_operator_change():

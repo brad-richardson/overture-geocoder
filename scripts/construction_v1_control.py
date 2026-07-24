@@ -41,11 +41,11 @@ FAMILIES = {
         "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
         "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
         "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
-        "spec": "benchmarks/places-construction-v1-evidence-spec.json",
-        "spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
-        "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v1.json",
-        "readiness_file_sha256": "8b6888e15c2471a36b0943c51100627ed091cab001dbde785c8e404c70440445",
-        "scale_evidence_sha256": "9043241ac6ff332605ea11709269a9fe582612e65cfdc328a1b52b57d613f23f",
+        "spec": "benchmarks/places-construction-v1-evidence-spec-v2.json",
+        "spec_sha256": "5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d",
+        "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v2.json",
+        "readiness_file_sha256": "9398d3a2262f83d197df1fc5c439b5438a704365a14dd38c7de37dc324a59010",
+        "scale_evidence_sha256": "71afc784d340b2c031ef70caef852daca12f947b205358388944962efda2e148",
         "task_source": "inventory",
         "construction": "places-construction-v1",
     },
@@ -293,7 +293,8 @@ def main() -> int:
         if not admitted:
             raise SystemExit("readiness or admission failed: " + "; ".join(regenerated["blockers"]))
         if args.github_output:
-            compact = lambda family: {"include": [{"task_id": item["task_id"], "task_index": item["task_index"]} for item in regenerated["map_matrices"][family]]}
+            def compact(family):
+                return {"include": [{"task_id": item["task_id"], "task_index": item["task_index"]} for item in regenerated["map_matrices"][family]]}
             with args.github_output.open("a") as output:
                 output.write(f"address_matrix={json.dumps(compact('addresses'), separators=(',', ':'))}\n")
                 output.write(f"places_matrix={json.dumps(compact('places'), separators=(',', ':'))}\n")

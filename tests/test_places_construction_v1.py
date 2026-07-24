@@ -801,6 +801,8 @@ def test_sharded_head_manifest_tamper_fails_closed(
         ).returncode
 
     assert verify(manifest) == 0
+    assert manifest["schema"] == "overture-places-global-head-sharded-v2"
+    assert manifest["merged_head_binding"]["records"] == manifest["total_records"]
     inflated = json.loads(json.dumps(manifest))
     inflated["total_records"] += 1
     assert verify(inflated) != 0
@@ -809,3 +811,14 @@ def test_sharded_head_manifest_tamper_fails_closed(
         reassigned["shards"][0]["shard_id"] + 1
     ) % reassigned["shard_count"]
     assert verify(reassigned) != 0
+    # Independent reduce-side binding closes the consistent-drop MAJOR: tampering
+    # only the independent binding (leaving the self-declared totals intact) is
+    # caught, and dropping a whole shard fails because the independent binding
+    # still counts the dropped shard's tokens.
+    tampered_binding = json.loads(json.dumps(manifest))
+    tampered_binding["merged_head_binding"]["head_sum_a"] = "0" * 64
+    assert verify(tampered_binding) != 0
+    if len(manifest["shards"]) > 1:
+        dropped = json.loads(json.dumps(manifest))
+        dropped["shards"] = dropped["shards"][1:]
+        assert verify(dropped) != 0

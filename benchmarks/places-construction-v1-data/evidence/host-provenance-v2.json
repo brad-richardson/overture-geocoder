@@ -1,0 +1,23 @@
+{
+  "schema": "overture-places-construction-v1-host-provenance-v1",
+  "hosts": {
+    "bradflix": {
+      "hostname": "bradflix",
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "cores": 20,
+      "os": "Ubuntu 24.04",
+      "arch": "x86_64"
+    },
+    "brads-macbook-air": {
+      "hostname": "Brads-MacBook-Air",
+      "cpu": "Apple M4",
+      "cores": 10,
+      "os": "macOS 26.5.2",
+      "arch": "arm64"
+    }
+  },
+  "task_run_host": "bradflix",
+  "census_host": "brads-macbook-air",
+  "rehearsal_host": "bradflix",
+  "note": "Baseline/candidate task-run timings and the functional rehearsal (map/plan/reduce, hash-sharded head, Worker local decoder) were measured on the stable server host 'bradflix'. The laptop 'brads-macbook-air' exhibits ~2.6x single-threaded Python-baseline timing variance under sustained thermal load, which corrupts the candidate-vs-baseline speedup ratio but never affects binding equality or determinism (identical on both hosts). Census token-universe metrics are hardware-independent and were computed on the laptop."
+}

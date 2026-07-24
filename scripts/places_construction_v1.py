@@ -1150,6 +1150,89 @@ def _head_merge_stage(
     )
 
 
+# Dual-lane additive head-entry digest domains, identical to the Rust
+# `places-serving-encode-v1` / verifier. Summing SHA-256(domain || u64_be(len) ||
+# entry) mod 2^256 is commutative/associative, so the digest is
+# partition-independent.
+HEAD_DIGEST_DOMAIN_A = b"overture-places-head-shard-v1\0"
+HEAD_DIGEST_DOMAIN_B = b"overture-places-head-shard-v1\x01"
+
+
+def _encode_head_entry(row: dict[str, Any]) -> bytes:
+    """Re-encode one head serving entry byte-for-byte as the Rust encoder does.
+
+    This is a deliberately independent second implementation of the head-entry
+    wire format. It never sees the shard bytes, so the digest it produces over
+    the merged head is an independent reduce-side binding the sharded verifier
+    reconciles the shard bytes against.
+    """
+    import struct
+
+    def put_text(buffer: bytearray, value: str) -> None:
+        raw = value.encode("utf-8")
+        if len(raw) > 0xFFFF:
+            raise ValueError("head serving text exceeds u16")
+        buffer.extend(len(raw).to_bytes(2, "little"))
+        buffer.extend(raw)
+
+    entry = bytearray()
+    put_text(entry, row["token"])
+    entry.append(row["field_mask"])
+    entry.append(row["confidence_rank"])
+    feature_id = bytes(row["feature_id"])
+    if len(feature_id) != 16:
+        raise ValueError("head feature id is not 16 bytes")
+    entry.extend(feature_id)
+    entry.extend(struct.pack("<d", row["longitude"]))
+    entry.extend(struct.pack("<d", row["latitude"]))
+    entry.extend(struct.pack("<I", row["source_object_index"]))
+    entry.extend(struct.pack("<I", row["source_row_group"]))
+    entry.extend(struct.pack("<Q", row["source_row_index"]))
+    for name in ("primary_name", "brand_name", "category", "locality", "region", "country"):
+        put_text(entry, row[name] if row[name] is not None else "")
+    return bytes(entry)
+
+
+def _independent_merged_head_binding(merged_path: Path) -> dict[str, Any]:
+    """Independent dual-lane digest + counts over the pre-shard merged head."""
+    import pyarrow.parquet as pq
+
+    sum_a = 0
+    sum_b = 0
+    records = 0
+    tokens: set[str] = set()
+    columns = [
+        "token", "field_mask", "confidence_rank", "feature_id", "longitude",
+        "latitude", "source_object_index", "source_row_group", "source_row_index",
+        "primary_name", "brand_name", "category", "locality", "region", "country",
+    ]
+    parquet = pq.ParquetFile(merged_path)
+    for batch in parquet.iter_batches(batch_size=MAX_IPC_BATCH_ROWS, columns=columns):
+        for row in batch.to_pylist():
+            entry = _encode_head_entry(row)
+            prefix = len(entry).to_bytes(8, "big")
+            sum_a = (
+                sum_a
+                + int.from_bytes(
+                    hashlib.sha256(HEAD_DIGEST_DOMAIN_A + prefix + entry).digest(), "big"
+                )
+            ) % A.UINT256
+            sum_b = (
+                sum_b
+                + int.from_bytes(
+                    hashlib.sha256(HEAD_DIGEST_DOMAIN_B + prefix + entry).digest(), "big"
+                )
+            ) % A.UINT256
+            tokens.add(row["token"])
+            records += 1
+    return {
+        "records": records,
+        "index_entries": len(tokens),
+        "head_sum_a": f"{sum_a:064x}",
+        "head_sum_b": f"{sum_b:064x}",
+    }
+
+
 def _tree_merge_head_candidates(
     connection: Any,
     candidate_paths: list[Path],
@@ -1237,6 +1320,18 @@ def build_sharded_global_head_from_markers(
         total_records, total_index_entries = connection.execute(
             f"SELECT count(*), count(DISTINCT token) FROM read_parquet('{merged}')"
         ).fetchone()
+        # Independent reduce-side binding: digest the merged head with the
+        # standalone Python re-encoder before sharding. The sharded verifier
+        # reconciles the shard bytes against this, so a shard encoder that
+        # consistently drops a token cannot pass (disclosed MAJOR closure).
+        merged_head_binding = _independent_merged_head_binding(merged)
+        if (
+            merged_head_binding["records"] != total_records
+            or merged_head_binding["index_entries"] != total_index_entries
+        ):
+            raise ValueError(
+                "Places independent merged-head binding disagrees with the merged head"
+            )
         shard_dir = workspace / "shards"
         # PARTITION_BY encodes the shard in the path and omits it from the data
         # files, so each shard parquet carries only the serving columns.
@@ -1309,9 +1404,18 @@ def build_sharded_global_head_from_markers(
         connection.close()
         if summed_records != total_records or summed_index_entries != total_index_entries:
             raise ValueError("Places head sharding dropped or duplicated rows")
+        # The Rust per-shard digest sums must also match the independent binding;
+        # the sharded verifier re-checks this from bytes, we assert it early here.
+        if (
+            f"{sum_a:064x}" != merged_head_binding["head_sum_a"]
+            or f"{sum_b:064x}" != merged_head_binding["head_sum_b"]
+        ):
+            raise ValueError(
+                "Places per-shard head digest sums differ from the independent binding"
+            )
         input_binding = A.combine_bindings([marker["binding"] for marker in markers])
         manifest = {
-            "schema": "overture-places-global-head-sharded-v1",
+            "schema": "overture-places-global-head-sharded-v2",
             "shard_count": shard_count,
             "shard_bits": shard_bits,
             "result_cap": limits.head_result_cap,
@@ -1321,6 +1425,7 @@ def build_sharded_global_head_from_markers(
             "total_index_entries": total_index_entries,
             "head_sum_a": f"{sum_a:064x}",
             "head_sum_b": f"{sum_b:064x}",
+            "merged_head_binding": merged_head_binding,
             "input_binding": input_binding,
             "shards": [
                 {key: entry[key] for key in entry if key != "key"}
@@ -1348,7 +1453,7 @@ def build_sharded_global_head_from_markers(
             manifest_path, "serve/places-v1/head-manifest", ".json"
         )
         return {
-            "schema": "overture-places-global-head-sharded-v1",
+            "schema": "overture-places-global-head-sharded-v2",
             "shard_count": shard_count,
             "shard_bits": shard_bits,
             "result_cap": limits.head_result_cap,
@@ -1359,6 +1464,7 @@ def build_sharded_global_head_from_markers(
             "populated_shards": len(shard_entries),
             "head_sum_a": f"{sum_a:064x}",
             "head_sum_b": f"{sum_b:064x}",
+            "merged_head_binding": merged_head_binding,
             "input_binding": input_binding,
             "manifest_object": manifest_object,
             "shard_objects": [

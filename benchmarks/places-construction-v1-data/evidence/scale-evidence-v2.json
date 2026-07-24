@@ -1,0 +1,696 @@
+{
+  "schema": "overture-places-construction-v1-scale-evidence-v1",
+  "evidence_spec_sha256": "5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d",
+  "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
+  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+  "provenance": {
+    "schema": "overture-places-construction-v1-host-provenance-v1",
+    "hosts": {
+      "bradflix": {
+        "hostname": "bradflix",
+        "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+        "cores": 20,
+        "os": "Ubuntu 24.04",
+        "arch": "x86_64"
+      },
+      "brads-macbook-air": {
+        "hostname": "Brads-MacBook-Air",
+        "cpu": "Apple M4",
+        "cores": 10,
+        "os": "macOS 26.5.2",
+        "arch": "arm64"
+      }
+    },
+    "task_run_host": "bradflix",
+    "census_host": "brads-macbook-air",
+    "rehearsal_host": "bradflix",
+    "note": "Baseline/candidate task-run timings and the functional rehearsal (map/plan/reduce, hash-sharded head, Worker local decoder) were measured on the stable server host 'bradflix'. The laptop 'brads-macbook-air' exhibits ~2.6x single-threaded Python-baseline timing variance under sustained thermal load, which corrupts the candidate-vs-baseline speedup ratio but never affects binding equality or determinism (identical on both hosts). Census token-universe metrics are hardware-independent and were computed on the laptop."
+  },
+  "candidate_universe": [
+    15,
+    5,
+    13,
+    1,
+    76,
+    55,
+    85,
+    73,
+    71,
+    86,
+    74,
+    87
+  ],
+  "census": [
+    {
+      "task_index": 15,
+      "metrics": {
+        "cjk_features": 1044,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "c329",
+        "maximum_spatial_cell_term_rows": 782342,
+        "maximum_token": "us",
+        "maximum_token_rows": 348537,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 1044,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.386068017960184
+      }
+    },
+    {
+      "task_index": 5,
+      "metrics": {
+        "cjk_features": 143,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "ae2c",
+        "maximum_spatial_cell_term_rows": 1349737,
+        "maximum_token": "us",
+        "maximum_token_rows": 445671,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 143,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.505132363667568
+      }
+    },
+    {
+      "task_index": 13,
+      "metrics": {
+        "cjk_features": 481,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b529",
+        "maximum_spatial_cell_term_rows": 850901,
+        "maximum_token": "us",
+        "maximum_token_rows": 596673,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 481,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.556551439805054
+      }
+    },
+    {
+      "task_index": 1,
+      "metrics": {
+        "cjk_features": 417,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "9b39",
+        "maximum_spatial_cell_term_rows": 930600,
+        "maximum_token": "mx",
+        "maximum_token_rows": 929154,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 417,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.818283555636577
+      }
+    },
+    {
+      "task_index": 76,
+      "metrics": {
+        "cjk_features": 5217,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "96cc",
+        "maximum_spatial_cell_term_rows": 689895,
+        "maximum_token": "vn",
+        "maximum_token_rows": 354477,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 5217,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.547855030774422
+      }
+    },
+    {
+      "task_index": 55,
+      "metrics": {
+        "cjk_features": 406,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "bd83",
+        "maximum_spatial_cell_term_rows": 417194,
+        "maximum_token": "fr",
+        "maximum_token_rows": 302349,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 406,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.528319449482086
+      }
+    },
+    {
+      "task_index": 85,
+      "metrics": {
+        "cjk_features": 457771,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "a3d6",
+        "maximum_spatial_cell_term_rows": 3109163,
+        "maximum_token": "kr",
+        "maximum_token_rows": 513157,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 457771,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 8.14948976988877
+      }
+    },
+    {
+      "task_index": 73,
+      "metrics": {
+        "cjk_features": 13782,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "93c7",
+        "maximum_spatial_cell_term_rows": 1035436,
+        "maximum_token": "th",
+        "maximum_token_rows": 524905,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 13782,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.532878141774946
+      }
+    },
+    {
+      "task_index": 71,
+      "metrics": {
+        "cjk_features": 2517,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "93c7",
+        "maximum_spatial_cell_term_rows": 1768566,
+        "maximum_token": "in",
+        "maximum_token_rows": 499764,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 2517,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.331134680896658
+      }
+    },
+    {
+      "task_index": 86,
+      "metrics": {
+        "cjk_features": 982315,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b1e0",
+        "maximum_spatial_cell_term_rows": 5759513,
+        "maximum_token": "jp",
+        "maximum_token_rows": 984845,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 982315,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 13.85040611954925
+      }
+    },
+    {
+      "task_index": 74,
+      "metrics": {
+        "cjk_features": 2053,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "8fcb",
+        "maximum_spatial_cell_term_rows": 2814029,
+        "maximum_token": "id",
+        "maximum_token_rows": 335689,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 2053,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.9944263238486934
+      }
+    },
+    {
+      "task_index": 87,
+      "metrics": {
+        "cjk_features": 976641,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b2e3",
+        "maximum_spatial_cell_term_rows": 8554422,
+        "maximum_token": "jp",
+        "maximum_token_rows": 980122,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 976641,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 13.954833121289445
+      }
+    }
+  ],
+  "roles": {
+    "representative": 76,
+    "near_cap": 73,
+    "densest_spatial": 87,
+    "token_fanout": 86,
+    "multilingual_cjk": 85,
+    "duplicate_heavy": 1,
+    "head_heavy": 13
+  },
+  "task_runs": {
+    "1": {
+      "baseline": {
+        "elapsed_seconds": 72.62821325473487,
+        "emitted_term_rows": 6732305,
+        "semantic_sum_a": "4ab97253282e3e3d64d43c3af2210bcd7305d480c9a103fe4a27f57806afda1a",
+        "semantic_sum_b": "7f818d95efdc6a5d1eae5b91eb3ea7e7c14ea461a3c985f654e4b6939415e149"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 6732305,
+            "semantic_sum_a": "4ab97253282e3e3d64d43c3af2210bcd7305d480c9a103fe4a27f57806afda1a",
+            "semantic_sum_b": "7f818d95efdc6a5d1eae5b91eb3ea7e7c14ea461a3c985f654e4b6939415e149"
+          },
+          "output_sha256": "a6b1bdcb7d6c0e098d6a5e910050937ca436d9f0c17991d165699c54268292d8",
+          "resources": {
+            "peak_rss_bytes": 564846592,
+            "peak_scratch_bytes": 1723474604,
+            "wall_seconds": 11.438440852798522
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 6732305,
+            "semantic_sum_a": "4ab97253282e3e3d64d43c3af2210bcd7305d480c9a103fe4a27f57806afda1a",
+            "semantic_sum_b": "7f818d95efdc6a5d1eae5b91eb3ea7e7c14ea461a3c985f654e4b6939415e149"
+          },
+          "output_sha256": "a6b1bdcb7d6c0e098d6a5e910050937ca436d9f0c17991d165699c54268292d8",
+          "resources": {
+            "peak_rss_bytes": 587956224,
+            "peak_scratch_bytes": 1723474605,
+            "wall_seconds": 11.468613209202886
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "b538a8d7260461e1a8c2070f0e2e5aba241cf919d63fe8c71b4f80d6f4c42094"
+        },
+        "output": {
+          "bytes": 61035749
+        },
+        "resources": {
+          "remote_read_bytes": 75817550
+        }
+      },
+      "host": "bradflix"
+    },
+    "13": {
+      "baseline": {
+        "elapsed_seconds": 46.403781038708985,
+        "emitted_term_rows": 4508828,
+        "semantic_sum_a": "891c64989d8676c4e1346a8d2595eb51c943020d31b3cd6e553b44ee9598a421",
+        "semantic_sum_b": "fab96179ee460910d42042747b7bc5bb8b5bf32cf3480a60b4da1572b625fd4b"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 4508828,
+            "semantic_sum_a": "891c64989d8676c4e1346a8d2595eb51c943020d31b3cd6e553b44ee9598a421",
+            "semantic_sum_b": "fab96179ee460910d42042747b7bc5bb8b5bf32cf3480a60b4da1572b625fd4b"
+          },
+          "output_sha256": "aa5a9295573b5b600b4b3f8a7821093f5b1a71537e3f07b2fff0ab99a72215d4",
+          "resources": {
+            "peak_rss_bytes": 566878208,
+            "peak_scratch_bytes": 1150756430,
+            "wall_seconds": 7.923171436414123
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 4508828,
+            "semantic_sum_a": "891c64989d8676c4e1346a8d2595eb51c943020d31b3cd6e553b44ee9598a421",
+            "semantic_sum_b": "fab96179ee460910d42042747b7bc5bb8b5bf32cf3480a60b4da1572b625fd4b"
+          },
+          "output_sha256": "aa5a9295573b5b600b4b3f8a7821093f5b1a71537e3f07b2fff0ab99a72215d4",
+          "resources": {
+            "peak_rss_bytes": 549933056,
+            "peak_scratch_bytes": 1150756430,
+            "wall_seconds": 7.90325487870723
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "84734a814cd6c830f67694549eb047dd3137cbbe2d83d22d4f6a3464a6d53e60"
+        },
+        "output": {
+          "bytes": 35598173
+        },
+        "resources": {
+          "remote_read_bytes": 47984245
+        }
+      },
+      "host": "bradflix"
+    },
+    "73": {
+      "baseline": {
+        "elapsed_seconds": 74.74462692718953,
+        "emitted_term_rows": 6510993,
+        "semantic_sum_a": "f0f435622394be3cf05f2690c8abaededc39d62ca21eb36b8ef58a97001bb58b",
+        "semantic_sum_b": "cf5d9d1e4764c8d43605332fc7b4b96717b5f1166f862c8acad72b546064f6b4"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 6510993,
+            "semantic_sum_a": "f0f435622394be3cf05f2690c8abaededc39d62ca21eb36b8ef58a97001bb58b",
+            "semantic_sum_b": "cf5d9d1e4764c8d43605332fc7b4b96717b5f1166f862c8acad72b546064f6b4"
+          },
+          "output_sha256": "4dbd8aeb4fe34261b788921b1b25701a00cd4871336b79830c9abc13a3d7ba1b",
+          "resources": {
+            "peak_rss_bytes": 601784320,
+            "peak_scratch_bytes": 1878722572,
+            "wall_seconds": 13.170457088388503
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 6510993,
+            "semantic_sum_a": "f0f435622394be3cf05f2690c8abaededc39d62ca21eb36b8ef58a97001bb58b",
+            "semantic_sum_b": "cf5d9d1e4764c8d43605332fc7b4b96717b5f1166f862c8acad72b546064f6b4"
+          },
+          "output_sha256": "4dbd8aeb4fe34261b788921b1b25701a00cd4871336b79830c9abc13a3d7ba1b",
+          "resources": {
+            "peak_rss_bytes": 616427520,
+            "peak_scratch_bytes": 1878722571,
+            "wall_seconds": 13.215742317959666
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "7fbaecad78bf6c1543f193e2bf8daf5648245121a38ea1242360f70c194958fe"
+        },
+        "output": {
+          "bytes": 65808213
+        },
+        "resources": {
+          "remote_read_bytes": 80851227
+        }
+      },
+      "host": "bradflix"
+    },
+    "76": {
+      "baseline": {
+        "elapsed_seconds": 79.86157849058509,
+        "emitted_term_rows": 7514886,
+        "semantic_sum_a": "d342049f9c30767209792c7cac5d20d7d622a770f8790e460c65d67c35f433ff",
+        "semantic_sum_b": "dbdcb419d2bea9bdc1f781c2e5d8906d975b0bf75f5f75fc9c73954f6152e2fe"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 7514886,
+            "semantic_sum_a": "d342049f9c30767209792c7cac5d20d7d622a770f8790e460c65d67c35f433ff",
+            "semantic_sum_b": "dbdcb419d2bea9bdc1f781c2e5d8906d975b0bf75f5f75fc9c73954f6152e2fe"
+          },
+          "output_sha256": "4dc18e7bd6480c8124d43f98391381ae2ed3d1f3d3c5662a3446972be993aca7",
+          "resources": {
+            "peak_rss_bytes": 569921536,
+            "peak_scratch_bytes": 1930091540,
+            "wall_seconds": 12.506138613447547
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 7514886,
+            "semantic_sum_a": "d342049f9c30767209792c7cac5d20d7d622a770f8790e460c65d67c35f433ff",
+            "semantic_sum_b": "dbdcb419d2bea9bdc1f781c2e5d8906d975b0bf75f5f75fc9c73954f6152e2fe"
+          },
+          "output_sha256": "4dc18e7bd6480c8124d43f98391381ae2ed3d1f3d3c5662a3446972be993aca7",
+          "resources": {
+            "peak_rss_bytes": 593035264,
+            "peak_scratch_bytes": 1930091539,
+            "wall_seconds": 12.562142681330442
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "824b669f2a88cc1d1a24caf30074932e07ba8f3d995d51cfed8477eff1a1824c"
+        },
+        "output": {
+          "bytes": 62988581
+        },
+        "resources": {
+          "remote_read_bytes": 76862435
+        }
+      },
+      "host": "bradflix"
+    },
+    "85": {
+      "baseline": {
+        "elapsed_seconds": 75.287712787278,
+        "emitted_term_rows": 8146613,
+        "semantic_sum_a": "1ad75e862083374a9aaf8f4edbf0724925e13211b079b341c825ba8477dcb198",
+        "semantic_sum_b": "ace058ad0d9ea17ca7966be3a66a33f7700afa0399601c08252240f8ffda74b2"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 8146613,
+            "semantic_sum_a": "1ad75e862083374a9aaf8f4edbf0724925e13211b079b341c825ba8477dcb198",
+            "semantic_sum_b": "ace058ad0d9ea17ca7966be3a66a33f7700afa0399601c08252240f8ffda74b2"
+          },
+          "output_sha256": "bafd228762b91122d8d4e156ac4b0d444b68a61f089566dbd426bd8340c30323",
+          "resources": {
+            "peak_rss_bytes": 604344320,
+            "peak_scratch_bytes": 2097120709,
+            "wall_seconds": 14.856552434153855
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 8146613,
+            "semantic_sum_a": "1ad75e862083374a9aaf8f4edbf0724925e13211b079b341c825ba8477dcb198",
+            "semantic_sum_b": "ace058ad0d9ea17ca7966be3a66a33f7700afa0399601c08252240f8ffda74b2"
+          },
+          "output_sha256": "bafd228762b91122d8d4e156ac4b0d444b68a61f089566dbd426bd8340c30323",
+          "resources": {
+            "peak_rss_bytes": 599429120,
+            "peak_scratch_bytes": 2097120709,
+            "wall_seconds": 14.795495223253965
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "f095beb140f83c18bc3131e00dda8bd130b20b3d11702e69a7680675af05c9a1"
+        },
+        "output": {
+          "bytes": 63818643
+        },
+        "resources": {
+          "remote_read_bytes": 81918916
+        }
+      },
+      "host": "bradflix"
+    },
+    "86": {
+      "baseline": {
+        "elapsed_seconds": 91.36966101173311,
+        "emitted_term_rows": 13822456,
+        "semantic_sum_a": "5718f48e9be344062d684518da83ed551425b72f173b3d902204861baf279819",
+        "semantic_sum_b": "8b071da94f392c169098dac839d6784e91ce287b6cf6456c4cbdf0fd6eb62282"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 13822456,
+            "semantic_sum_a": "5718f48e9be344062d684518da83ed551425b72f173b3d902204861baf279819",
+            "semantic_sum_b": "8b071da94f392c169098dac839d6784e91ce287b6cf6456c4cbdf0fd6eb62282"
+          },
+          "output_sha256": "f2072e0cdbc92277abafa1a2a2ede4a798b077b011573299893f0dc3b5dc6a98",
+          "resources": {
+            "peak_rss_bytes": 616759296,
+            "peak_scratch_bytes": 3526290295,
+            "wall_seconds": 20.991424900479615
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 13822456,
+            "semantic_sum_a": "5718f48e9be344062d684518da83ed551425b72f173b3d902204861baf279819",
+            "semantic_sum_b": "8b071da94f392c169098dac839d6784e91ce287b6cf6456c4cbdf0fd6eb62282"
+          },
+          "output_sha256": "f2072e0cdbc92277abafa1a2a2ede4a798b077b011573299893f0dc3b5dc6a98",
+          "resources": {
+            "peak_rss_bytes": 627122176,
+            "peak_scratch_bytes": 3526292802,
+            "wall_seconds": 21.277010364457965
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "fcbcc35cc5fb6d4fb3c3fd6c070f284bc8edbfe2d7579341c8294b38cc48ee20"
+        },
+        "output": {
+          "bytes": 63769426
+        },
+        "resources": {
+          "remote_read_bytes": 83993244
+        }
+      },
+      "host": "bradflix"
+    },
+    "87": {
+      "baseline": {
+        "elapsed_seconds": 92.46969625074416,
+        "emitted_term_rows": 13677732,
+        "semantic_sum_a": "a335fc2b26fb3b6ba0e02fe64ac4f2eb2780a385ad0fc830114399e50e053958",
+        "semantic_sum_b": "d99da326465a26c4de9e9d1b601f5204e1cb6df7b3939c540c14bc0d117170fc"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 13677732,
+            "semantic_sum_a": "a335fc2b26fb3b6ba0e02fe64ac4f2eb2780a385ad0fc830114399e50e053958",
+            "semantic_sum_b": "d99da326465a26c4de9e9d1b601f5204e1cb6df7b3939c540c14bc0d117170fc"
+          },
+          "output_sha256": "91e05b66f27be73637c8781f7cc81d193dbf4317045d77873baa291ef8fce911",
+          "resources": {
+            "peak_rss_bytes": 589090816,
+            "peak_scratch_bytes": 3493198887,
+            "wall_seconds": 21.02400093525648
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 13677732,
+            "semantic_sum_a": "a335fc2b26fb3b6ba0e02fe64ac4f2eb2780a385ad0fc830114399e50e053958",
+            "semantic_sum_b": "d99da326465a26c4de9e9d1b601f5204e1cb6df7b3939c540c14bc0d117170fc"
+          },
+          "output_sha256": "91e05b66f27be73637c8781f7cc81d193dbf4317045d77873baa291ef8fce911",
+          "resources": {
+            "peak_rss_bytes": 587030528,
+            "peak_scratch_bytes": 3493199679,
+            "wall_seconds": 20.84508322738111
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "dd6f2442e95fcf4619f786d77936ad433866b6d8aa24ed6e773199e23bfd8751"
+        },
+        "output": {
+          "bytes": 62640365
+        },
+        "resources": {
+          "remote_read_bytes": 82287111
+        }
+      },
+      "host": "bradflix"
+    }
+  },
+  "rehearsal": {
+    "adaptive_subdivision": true,
+    "exact_reconciliation": true,
+    "head_populated_shards": 64,
+    "head_result_cap": 10,
+    "head_shard_bits": 6,
+    "head_shard_count": 64,
+    "head_sharded": true,
+    "head_verified": true,
+    "host": "bradflix",
+    "interruption_phases": [
+      "local_write",
+      "immutable_publish",
+      "before_marker"
+    ],
+    "logical_tasks": 7,
+    "maximum_selective_amplification": 1.132744,
+    "maximum_worker_index_probes": 1,
+    "multi_task_fan_in": true,
+    "observed": {
+      "adaptive_max_depth": 2,
+      "adaptive_plan_seconds": 89.704,
+      "head_excluded_over_row_cap_task_ids": [
+        "role-01",
+        "role-13",
+        "role-73",
+        "role-87"
+      ],
+      "head_input_candidate_rows": 4745166,
+      "head_merged_task_ids": [
+        "role-76",
+        "role-85",
+        "role-86"
+      ],
+      "head_serving_encode_note": "",
+      "head_total_index_entries": 2283623,
+      "head_total_records": 4349810,
+      "mapped_tasks": [
+        76,
+        73,
+        87,
+        86,
+        85,
+        1,
+        13
+      ],
+      "reduced_partitions": [
+        "p-b0de",
+        "p-9b39",
+        "p-9d36"
+      ],
+      "resume_seconds": 0.272,
+      "scale_note": "Full seven-role fan-in over the real 2026-06-17.0 census tasks, including the dense CJK role tasks 86 (token_fanout) and 87 (densest_spatial). Post-#143 map scratch hygiene keeps their per-stage scratch under the 8 GiB cap, so no substitution is needed. The global head is hash-sharded and every shard is reconciled against an independent reduce-side binding; the actual Worker head-shard decoder resolves real tokens from the built shard bytes (worker_local_decoder_evidence).",
+      "subdivided_cells": [
+        "93c7",
+        "a3d6",
+        "afdc",
+        "b1df",
+        "b1e0",
+        "b1e1",
+        "b2e1",
+        "b2e3",
+        "b5da"
+      ],
+      "subdivided_partition_count": 159,
+      "subdivided_partition_reduction": {
+        "binding_matches_plan": true,
+        "partition_id": "p-93c7-h0",
+        "read_amplification": 23.89688,
+        "records": 46315
+      },
+      "worker_head_probes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "worker_local_decoder": {
+        "class": "worker_local_decoder_evidence",
+        "decoder": "geocoder-worker::places_construction_v1::lookup_head_shard",
+        "manifest_key": "serve/places-v1/head-manifest/sha256/11b90f0f22f55723c3b5f92db43ad1bb666cb5bee6d04ea887b4086579d3d61a.json",
+        "misroute_rejections": 8,
+        "sample_tokens": [
+          "\u5805\u305f",
+          "\u30a6\u30a7\u30eb\u30c6\u30db\u30f3\u30c6",
+          "\u1107\u116e\u11a8\u1106\u1175",
+          "\u8328\u6728\u897f\u99c5\u524d\u5e97",
+          "\u1106\u1166\u110c\u1169\u11bc\u1103\u1173\u1107\u1175\u1100\u1165\u11ab",
+          "\u5c71\u6771\u6599\u7406",
+          "\u5b87\u57ce\u6574\u5099\u8eca\u5834",
+          "\u304d\u3082\u3064\u304d\u60c5\u5831\u5316\u63a8\u9032\u30bb\u30f3\u30bf\u30fc"
+        ],
+        "shard_bits": 6,
+        "tokens_resolved": 8
+      },
+      "worker_routed_probes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "overlap_reconciliation": true,
+    "packs": 127,
+    "parquet_row_groups": 492,
+    "partitions": 1205,
+    "resume_before_projection": true,
+    "routed_verified": true,
+    "worker_head_query": true,
+    "worker_local_decoder_evidence": true,
+    "worker_routed_query": true,
+    "census_complete": true,
+    "construction_phase_pending": false
+  }
+}
