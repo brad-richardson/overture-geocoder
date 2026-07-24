@@ -510,6 +510,17 @@ def map_task(
             limits,
             [workspace],
         )
+        # Fail closed on ANY invalid_source_locator: a correctly report-derived
+        # source-limits bound never rejects a real projected locator, so a
+        # non-zero count means the limits or projected locators are inconsistent
+        # (the silent wrong-bytes class the old row_groups:1 defect exposed).
+        if transform_report.get("rejections_by_precedence", {}).get(
+            "invalid_source_locator", 0
+        ):
+            raise ValueError(
+                "address transform rejected projected locators as invalid_source_locator; "
+                "source-limits and projected row-group/row indices are inconsistent"
+            )
         database_path = workspace / "construction.duckdb"
         duckdb_scratch = workspace / "duckdb-spill"
         duckdb_scratch.mkdir()

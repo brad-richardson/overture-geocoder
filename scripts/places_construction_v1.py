@@ -371,6 +371,16 @@ def map_task(
             ),
         )
         transform = json.loads(transform_report_path.read_text())
+        # Fail closed on ANY invalid_source_locator: a correctly report-derived
+        # source-limits bound never rejects a real projected locator, so a
+        # non-zero count means the limits or projected row-group/row indices are
+        # inconsistent (the silent wrong-bytes class the old row_groups:1 defect
+        # exposed: the transform exits 0 while dropping rows).
+        if transform.get("rejections_by_precedence", {}).get("invalid_source_locator", 0):
+            raise ValueError(
+                "places transform rejected projected locators as invalid_source_locator; "
+                "source-limits and projected row-group/row indices are inconsistent"
+            )
         # Staged deletion (1/4): the hydrated stream is dead once the transform
         # has read it. Drop it before DuckDB ingest so it never coexists with the
         # term table.

@@ -8,6 +8,9 @@ execute-mode guard, and ENFORCES the runner-minute ledger (sum + abort) rather
 than merely printing it.
 """
 
+import argparse
+import importlib.util
+import sys
 from pathlib import Path
 
 import yaml
@@ -92,6 +95,51 @@ def test_places_map_uses_the_places_projector_not_the_address_experiment():
     assert '"row_groups":1' not in value
 
 
+def _load_module(name: str, relative: str):
+    spec = importlib.util.spec_from_file_location(name, Path(__file__).parent.parent / relative)
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    return module
+
+
+def test_places_evidence_spec_is_threaded_from_the_contract_not_hardcoded():
+    # MAJOR (post-#146): the Places evidence spec is pinned in exactly ONE place
+    # (construction_v1_control.py). The workflow must read the spec path from the
+    # admission-derived contract, never a hardcoded version constant, so a bump
+    # can't leave the projector stamping a stale sha (silent digest divergence).
+    value = text()
+    assert "jq -er '.families.places.spec' control/contract.json" in value
+    # No hardcoded evidence-spec path literal survives in the workflow.
+    assert "evidence-spec.json" not in value
+    assert "evidence-spec-v2.json" not in value
+
+
+def test_derived_contract_carries_the_control_pinned_spec_for_each_family(tmp_path):
+    # The single-source pin flows control.py -> request -> derived contract, so
+    # the projector's spec path always matches the admission-verified sha.
+    control = _load_module("contract_test_control", "scripts/construction_v1_control.py")
+    hosted = _load_module("contract_test_hosted", "scripts/construction_v1_hosted.py")
+    report, _ = control.prepare(argparse.Namespace(
+        request_id="request-20260722-a1", build_id="build-20260722-a1",
+        slice_id="slice-20260722-a1", staging_id="staging-20260722-a1",
+        producer_commit="1" * 40, legacy_core_version="legacy-core-20260722-a1",
+        legacy_core_manifest_sha256="2" * 64, prior_runner_minutes=0))
+    request_path = tmp_path / "request.json"
+    request_path.write_bytes(control.canonical(report["request"]))
+    contract = tmp_path / "contract.json"
+    runtime = tmp_path / "runtime.json"
+    assert hosted.main(["derive-contract", "--request", str(request_path),
+                        "--output", str(contract), "--runtime", str(runtime),
+                        "--allow-unpinned-duckdb"]) == 0
+    import json
+
+    families = json.loads(contract.read_text())["families"]
+    for family in ("addresses", "places"):
+        assert families[family]["spec"] == control.FAMILIES[family]["spec"]
+        assert families[family]["spec_sha256"] == control.FAMILIES[family]["spec_sha256"]
+
+
 def test_reduce_is_batched_under_the_matrix_and_reducer_cap():
     # P0-3: the reduce matrix has ONE entry per batch JOB (batch_index), each job
     # processes a contiguous partition range via --batch-index/--output-dir, and
@@ -103,8 +151,10 @@ def test_reduce_is_batched_under_the_matrix_and_reducer_cap():
     assert "--output-dir reductions" in value
     plan_block = value[value.index("Fan in map minutes") : value.index("Publish the plan")]
     assert "--ledger control/ledger.json" in plan_block
-    assert "--reduce-minutes-per-job" in plan_block
     assert "--tail-minutes" in plan_block
+    # batch_size and reduce minutes are derived from the MEASURED per-partition
+    # reduce time (a per-family constant), not a hand-tuned per-job flag.
+    assert "--reduce-minutes-per-job" not in value
 
 
 def test_dry_run_runs_the_real_projection_validators_and_capacity_prediction():

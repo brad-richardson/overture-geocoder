@@ -33,7 +33,10 @@ HOSTED = _load("preflight_hosted", "scripts/construction_v1_hosted.py")
 
 ADDRESS_INVENTORY = ROOT / "benchmarks/address-construction-v1-data/inventory/addresses.json"
 PLACES_INVENTORY = ROOT / "benchmarks/places-construction-v1-data/inventory/places.json"
-PLACES_SPEC = ROOT / "benchmarks/places-construction-v1-evidence-spec.json"
+CONTROL = _load("preflight_control", "scripts/construction_v1_control.py")
+# The evidence spec is pinned in ONE place (construction_v1_control.py); tests
+# read it from there so a version bump can never leave a stale literal behind.
+PLACES_SPEC = ROOT / CONTROL.FAMILIES["places"]["spec"]
 
 
 # --------------------------------------------------------------------------- #
@@ -238,12 +241,18 @@ def test_predict_reduce_addresses_needs_batching_but_fits_budget(tmp_path, capsy
     assert HOSTED.main([
         "predict-reduce", "--contract", str(contract), "--family", "addresses",
         "--inventory", str(ADDRESS_INVENTORY), "--ledger", str(ledger),
-        "--reduce-minutes-per-job", "90", "--tail-minutes", "210",
+        "--tail-minutes", "210",
     ]) == 0
     out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert out["predicted_partitions"] >= 474  # exceeds the 256 matrix cap raw
     assert out["reduce_job_count"] <= 128       # but batches under the cap
     assert out["within_cap"] is True
+    # The projection reports the measured per-partition timing it used and each
+    # batch job fits the reduce job timeout.
+    timing = out["timing_assumption"]
+    assert timing["measured_reduce_minutes_per_partition"] > 0
+    assert out["reduce_batch_size"] <= timing["timeout_max_batch"]
+    assert timing["per_job_minutes"] <= timing["job_timeout_minutes"]
 
 
 def test_predict_reduce_fails_closed_when_minutes_exceed_cap(tmp_path):
@@ -254,9 +263,25 @@ def test_predict_reduce_fails_closed_when_minutes_exceed_cap(tmp_path):
         HOSTED.main([
             "predict-reduce", "--contract", str(contract), "--family", "places",
             "--inventory", str(PLACES_INVENTORY), "--ledger", str(ledger),
-            "--reduce-minutes-per-job", "90", "--tail-minutes", "210",
+            "--tail-minutes", "210",
         ])
     assert "exceed cap" in str(excinfo.value)
+
+
+def test_reduce_batching_fails_closed_when_a_batch_cannot_fit_the_job_timeout():
+    # If the measured per-partition reduce time is so large that the batch a legal
+    # matrix requires cannot serially fit one job's timeout, batching fails closed
+    # rather than dispatch a job that would time out.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._reduce_batches(100_000, job_cap=128, timeout_max_batch=10)
+    assert "failing closed" in str(excinfo.value)
+
+
+def test_reduce_batching_reports_measured_timing_that_fits_the_timeout():
+    # Planet Places (2421 predicted partitions) at the measured 1.0 min/partition
+    # batches to 19 partitions/job -> ~19 min << the 330-min job timeout.
+    batch_size, batches = HOSTED._reduce_batches(2421, job_cap=128, timeout_max_batch=165)
+    assert batch_size == 19 and len(batches) == 128
 
 
 # --------------------------------------------------------------------------- #

@@ -300,7 +300,11 @@ jobs:
               ;;
             places)
               INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json
-              SPEC=benchmarks/places-construction-v1-evidence-spec.json
+              # Single source of truth: the evidence-spec path is threaded from
+              # the admission-pinned contract (construction_v1_control.py), never
+              # a hardcoded constant, so a spec version bump cannot silently
+              # diverge from the sha the admission gate verified.
+              SPEC="$(jq -er '.families.places.spec' control/contract.json)"
               python scripts/project_places_construction_v1.py --validate-only \
                 --inventory "$INVENTORY" --evidence-spec "$SPEC" \
                 --task-index "$TASK_INDEX" --report "dryrun/validate-${TASK_INDEX}.json" \
@@ -314,9 +318,12 @@ jobs:
           # Predict the reduce partition/batch/minute demand from inventory stats
           # and fail closed if a real execute could not fit matrix/reducer/budget.
           TAIL_MINUTES=$(( HEAD_PHASE_ESTIMATE_MINUTES + FINALIZE_PHASE_ESTIMATE_MINUTES ))
+          # batch_size + reduce minutes derive from the MEASURED per-partition
+          # reduce time (construction_v1_hosted.MEASURED_REDUCE_MINUTES_PER_PARTITION);
+          # predict-reduce reports the timing assumption it used.
           python scripts/construction_v1_hosted.py predict-reduce \
             --contract control/contract.json --family "$FAMILY_KEY" --inventory "$INVENTORY" \
-            --ledger control/ledger.json --reduce-minutes-per-job "$REDUCE_PHASE_ESTIMATE_MINUTES" \
+            --ledger control/ledger.json \
             --tail-minutes "$TAIL_MINUTES" --output "dryrun/predict-${TASK_INDEX}.json"
           PARTITIONS="$(jq -r '.predicted_partitions' "dryrun/predict-${TASK_INDEX}.json")"
           JOBS="$(jq -r '.reduce_job_count' "dryrun/predict-${TASK_INDEX}.json")"
@@ -389,7 +396,9 @@ jobs:
                 # address row-group experiment has no Places code path.
                 TRANSFORM="$BINDIR/places-transform-v1"; PROOF="$BINDIR/places-proof-directory"
                 INVENTORY=benchmarks/places-construction-v1-data/inventory/places.json
-                SPEC=benchmarks/places-construction-v1-evidence-spec.json
+                # Spec path threaded from the admission-pinned contract (see the
+                # dry-run branch); never a hardcoded version constant.
+                SPEC="$(jq -er '.families.places.spec' control/contract.json)"
                 /usr/bin/time -v python scripts/project_places_construction_v1.py \
                   --inventory "$INVENTORY" --evidence-spec "$SPEC" \
                   --task-index "$TASK_INDEX" --output work/projected.parquet \
@@ -490,9 +499,7 @@ jobs:
           python scripts/construction_v1_hosted.py plan-reduce \
             --contract control/contract.json --store-root mapdl/store --family "$FAMILY_KEY" \
             --markers-dir mapdl/markers --scratch-dir plan-scratch \
-            --ledger control/ledger.json \
-            --reduce-minutes-per-job "$REDUCE_PHASE_ESTIMATE_MINUTES" \
-            --tail-minutes "$TAIL_MINUTES" \
+            --ledger control/ledger.json --tail-minutes "$TAIL_MINUTES" \
             --output plan/plan.json --matrix-out plan/reduce-matrix.json
           MATRIX="$(jq -c '.' plan/reduce-matrix.json)"
           COUNT="$(jq '.include | length' <<<"$MATRIX")"

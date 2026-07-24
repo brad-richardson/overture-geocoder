@@ -47,6 +47,32 @@ ROOT = Path(__file__).resolve().parents[1]
 # while per-partition markers and serving outputs are unchanged.
 REDUCE_MATRIX_CAP = 256
 
+# The reduce matrix runs under this per-JOB timeout (construction-v1.yml reduce
+# job timeout-minutes). A batch job reduces its partitions serially, so its wall
+# time must fit here.
+REDUCE_JOB_TIMEOUT_MINUTES = 330
+# Fraction of the job timeout usable for reduce work; the remainder is margin for
+# checkout, cargo build, and artifact IO on the runner.
+REDUCE_TIMEOUT_MARGIN_FRACTION = 0.5
+# Measured per-partition reduce wall time (minutes), with a safety factor over a
+# real census-task measurement, used BOTH to bound batch_size under the job
+# timeout AND to project honest reduce runner-minutes. Places: the densest CJK
+# census tasks (86 densest_spatial + 87 token_fanout, release 2026-06-17.0,
+# planet HOSTED_LIMITS) reduce a near-1M-term-row plain partition in ~7-10s and
+# the worst subdivided/high-amplification partition in 14.53s (~0.24 min) end to
+# end (directory select + serving encode + Rust verify). 1.0 min is a >4x margin
+# covering hotter cells, R2 latency, and slower hosted runners than the bradflix
+# measurement host. Addresses: no fresh planet reduce measurement in this change;
+# 2.0 min is a deliberately conservative upper bound (address reduce is a
+# directory select + encode + verify over <=1M rows, comparable-or-lighter).
+MEASURED_REDUCE_MINUTES_PER_PARTITION = {"places": 1.0, "addresses": 2.0}
+
+
+def _timeout_max_batch(per_partition_minutes: float, *, job_timeout: int, margin: float) -> int:
+    """Largest number of partitions one reduce job can serially fit in its timeout."""
+    usable = job_timeout * margin
+    return max(1, int(usable // per_partition_minutes))
+
 
 def _load(name: str, relative: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
@@ -307,16 +333,29 @@ def _load_markers(markers_dir: str) -> list[dict[str, Any]]:
     return [json.loads(path.read_text()) for path in paths]
 
 
-def _reduce_batches(partition_count: int, *, job_cap: int) -> tuple[int, list[dict[str, int]]]:
+def _reduce_batches(
+    partition_count: int, *, job_cap: int, timeout_max_batch: int | None = None
+) -> tuple[int, list[dict[str, int]]]:
     """Split ``partition_count`` partitions into at most ``job_cap`` contiguous
     batches. ``batch_size`` is the smallest stride that keeps the job count under
     the cap, so a family with more partitions than the cap still fits one matrix.
+
+    ``timeout_max_batch`` (derived from the MEASURED per-partition reduce time and
+    the job timeout) fails closed when the batch a legal matrix would require
+    cannot serially fit one job's timeout -- batching must never silently produce
+    a job that times out.
     """
     if partition_count <= 0:
         raise SystemExit("plan-reduce produced no partitions")
     if job_cap <= 0:
         raise SystemExit("reduce job cap must be positive")
     batch_size = max(1, math.ceil(partition_count / job_cap))
+    if timeout_max_batch is not None and batch_size > timeout_max_batch:
+        raise SystemExit(
+            f"reduce needs batch_size {batch_size} to fit {job_cap} jobs, but the "
+            f"measured per-partition reduce time only admits {timeout_max_batch} "
+            f"partitions per {REDUCE_JOB_TIMEOUT_MINUTES}-min job; failing closed"
+        )
     batches = [
         {
             "batch_index": index,
@@ -350,8 +389,26 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
     job_cap = min(REDUCE_MATRIX_CAP, max_reducers)
     if args.max_reduce_jobs is not None:
         job_cap = min(job_cap, args.max_reduce_jobs)
-    batch_size, batches = _reduce_batches(partition_count, job_cap=job_cap)
+    per_partition = (
+        args.reduce_minutes_per_partition
+        if args.reduce_minutes_per_partition is not None
+        else MEASURED_REDUCE_MINUTES_PER_PARTITION[args.family]
+    )
+    timeout_max_batch = _timeout_max_batch(
+        per_partition, job_timeout=args.job_timeout_minutes, margin=args.timeout_margin
+    )
+    batch_size, batches = _reduce_batches(
+        partition_count, job_cap=job_cap, timeout_max_batch=timeout_max_batch
+    )
     job_count = len(batches)
+    per_job_minutes = math.ceil(batch_size * per_partition)
+    timing = {
+        "measured_reduce_minutes_per_partition": per_partition,
+        "job_timeout_minutes": args.job_timeout_minutes,
+        "timeout_margin": args.timeout_margin,
+        "timeout_max_batch": timeout_max_batch,
+        "per_job_minutes": per_job_minutes,
+    }
     plan["reduce_execution"] = {
         "schema": "construction-v1-reduce-execution-v1",
         "partition_count": partition_count,
@@ -359,6 +416,7 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         "job_count": job_count,
         "job_cap": job_cap,
         "matrix_cap": REDUCE_MATRIX_CAP,
+        "timing_assumption": timing,
         "batches": batches,
     }
     write_json(args.output, plan)
@@ -369,22 +427,23 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
     if args.matrix_out:
         write_json(args.matrix_out, matrix)
 
-    # P0-3: gate the ledger on the BATCHED reduce job count, not the raw
-    # partition count, plus the fixed head/finalize tails. Fails closed here --
-    # before the reduce matrix is provisioned -- when the projection exceeds cap.
+    # P0-3 + measured economics: gate the ledger on the honest total reduce
+    # minutes (partitions x measured per-partition time, batching-invariant),
+    # plus the fixed head/finalize tails. Fails closed here -- before the reduce
+    # matrix is provisioned -- when the projection exceeds cap.
     ledger_check: dict[str, Any] | None = None
     if args.ledger is not None:
         ledger = read_json(args.ledger)
         prior = int(ledger.get("prior_runner_minutes", 0))
         spent = sum(int(item["runner_minutes"]) for item in ledger.get("phases", []))
         cap = int(ledger["max_total_runner_minutes"])
-        projected_reduce = job_count * int(args.reduce_minutes_per_job)
+        projected_reduce = math.ceil(partition_count * per_partition)
         projected = prior + spent + projected_reduce + int(args.tail_minutes)
         ledger_check = {
             "prior_runner_minutes": prior,
             "spent_runner_minutes": spent,
             "reduce_job_count": job_count,
-            "reduce_minutes_per_job": int(args.reduce_minutes_per_job),
+            "measured_reduce_minutes_per_partition": per_partition,
             "projected_reduce_minutes": projected_reduce,
             "tail_minutes": int(args.tail_minutes),
             "projected_runner_minutes": projected,
@@ -394,8 +453,8 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         if projected > cap:
             raise SystemExit(
                 f"projected {projected} runner minutes exceed cap {cap} "
-                f"(prior={prior} spent={spent} reduce_jobs={job_count}x"
-                f"{args.reduce_minutes_per_job} tail={args.tail_minutes}); "
+                f"(prior={prior} spent={spent} reduce={partition_count}x"
+                f"{per_partition}min tail={args.tail_minutes}); "
                 "failing closed before provisioning the reduce matrix"
             )
 
@@ -405,6 +464,7 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         "reduce_batch_size": batch_size,
         "reduce_job_count": job_count,
         "reduce_job_cap": job_cap,
+        "timing_assumption": timing,
         "binding": plan["binding"],
     }
     if ledger_check is not None:
@@ -500,10 +560,20 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
     job_cap = min(REDUCE_MATRIX_CAP, max_reducers)
     if args.max_reduce_jobs is not None:
         job_cap = min(job_cap, args.max_reduce_jobs)
-    batch_size, batches = _reduce_batches(predicted_partitions, job_cap=job_cap)
+    per_partition = (
+        args.reduce_minutes_per_partition
+        if args.reduce_minutes_per_partition is not None
+        else MEASURED_REDUCE_MINUTES_PER_PARTITION[args.family]
+    )
+    timeout_max_batch = _timeout_max_batch(
+        per_partition, job_timeout=args.job_timeout_minutes, margin=args.timeout_margin
+    )
+    batch_size, batches = _reduce_batches(
+        predicted_partitions, job_cap=job_cap, timeout_max_batch=timeout_max_batch
+    )
     job_count = len(batches)
 
-    projected_reduce = job_count * int(args.reduce_minutes_per_job)
+    projected_reduce = math.ceil(predicted_partitions * per_partition)
     result: dict[str, Any] = {
         "family": args.family,
         "total_records": total_records,
@@ -513,6 +583,13 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
         "reduce_job_count": job_count,
         "reduce_job_cap": job_cap,
         "matrix_cap": REDUCE_MATRIX_CAP,
+        "timing_assumption": {
+            "measured_reduce_minutes_per_partition": per_partition,
+            "job_timeout_minutes": args.job_timeout_minutes,
+            "timeout_margin": args.timeout_margin,
+            "timeout_max_batch": timeout_max_batch,
+            "per_job_minutes": math.ceil(batch_size * per_partition),
+        },
         "projected_reduce_minutes": projected_reduce,
         "fits_matrix_cap": job_count <= REDUCE_MATRIX_CAP,
         "fits_reducer_cap": job_count <= max_reducers,
@@ -539,8 +616,8 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
         if projected > cap:
             raise SystemExit(
                 f"predicted {projected} runner minutes exceed cap {cap} "
-                f"(prior={prior} spent={spent} reduce_jobs={job_count}x"
-                f"{args.reduce_minutes_per_job} tail={args.tail_minutes})"
+                f"(prior={prior} spent={spent} reduce={predicted_partitions}x"
+                f"{per_partition}min tail={args.tail_minutes})"
             )
     if args.output:
         write_json(args.output, result)
@@ -869,8 +946,11 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--max-reduce-jobs", type=int, default=None,
                       help="Override the reduce job cap (default min(256, caps.max_reducers_per_family)).")
     plan.add_argument("--ledger", type=Path, default=None,
-                      help="If set, fail closed when the batched reduce projection exceeds the ledger cap.")
-    plan.add_argument("--reduce-minutes-per-job", type=int, default=90)
+                      help="If set, fail closed when the reduce projection exceeds the ledger cap.")
+    plan.add_argument("--reduce-minutes-per-partition", type=float, default=None,
+                      help="Measured per-partition reduce minutes (default: the measured per-family constant).")
+    plan.add_argument("--job-timeout-minutes", type=int, default=REDUCE_JOB_TIMEOUT_MINUTES)
+    plan.add_argument("--timeout-margin", type=float, default=REDUCE_TIMEOUT_MARGIN_FRACTION)
     plan.add_argument("--tail-minutes", type=int, default=0,
                       help="Fixed head+finalize minutes added to the reduce projection.")
     plan.set_defaults(func=cmd_plan_reduce)
@@ -888,7 +968,10 @@ def build_parser() -> argparse.ArgumentParser:
     predict.add_argument("--row-cap", type=int, default=None)
     predict.add_argument("--max-reduce-jobs", type=int, default=None)
     predict.add_argument("--ledger", type=Path, default=None)
-    predict.add_argument("--reduce-minutes-per-job", type=int, default=90)
+    predict.add_argument("--reduce-minutes-per-partition", type=float, default=None,
+                         help="Measured per-partition reduce minutes (default: the measured per-family constant).")
+    predict.add_argument("--job-timeout-minutes", type=int, default=REDUCE_JOB_TIMEOUT_MINUTES)
+    predict.add_argument("--timeout-margin", type=float, default=REDUCE_TIMEOUT_MARGIN_FRACTION)
     predict.add_argument("--tail-minutes", type=int, default=0)
     predict.add_argument("--output", type=Path)
     predict.set_defaults(func=cmd_predict_reduce)

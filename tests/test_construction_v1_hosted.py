@@ -200,6 +200,53 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
     assert (remote / marker_key).is_file()
 
 
+def test_high_noncontiguous_source_row_groups_survive_correct_limits_and_fail_closed_on_wrong(
+    tmp_path, binaries
+):
+    """Close the silent wrong-bytes class through the REAL transform: projected
+    rows carrying a high, non-contiguous source_row_group (255) survive a
+    correctly report-derived source-limits bound, and a wrong row_groups:1 bound
+    is caught (fail-closed) instead of silently dropping every row at exit 0."""
+    contract, _ = _derive(tmp_path)
+    # Planet-shaped locators: original row group 255, non-contiguous, three rows.
+    rows = [
+        {"id": str(uuid.UUID(int=i)), "street": "Main Street", "number": str(10 + i),
+         "unit": "", "postcode": "02180", "postal_city": "Stoneham",
+         "address_levels": ["MA", "Stoneham"], "country": "US", "point": [-71.0, 42.0],
+         "source_object_index": 0, "source_row_group": 255, "source_row_index": i}
+        for i in range(3)
+    ]
+    projected = tmp_path / "projected-255.parquet"
+    ADDR_SPIKE.write_fixture(projected, rows)
+
+    def run_map(source_limits: Path, store: Path, markers: Path):
+        markers.mkdir()
+        return HOSTED.main([
+            "run-map", "--contract", str(contract), "--store-root", str(store),
+            "--family", "addresses", "--task-id", "addresses-map-000",
+            "--input", str(projected), "--source-limits", str(source_limits),
+            "--transform-binary", str(binaries["address-transform-v1"]),
+            "--proof-binary", str(binaries["address-proof-directory"]),
+            "--scratch-dir", str(tmp_path / f"scratch-{store.name}"),
+            "--marker-out", str(markers / "000.json"),
+        ])
+
+    # A row_groups:1 bound rejects every locator (255 >= 1) -> fail closed.
+    wrong = tmp_path / "wrong-limits.json"
+    wrong.write_text(json.dumps({"objects": [{"records": 3, "row_groups": 1}]}))
+    with pytest.raises(Exception) as excinfo:
+        run_map(wrong, tmp_path / "store-wrong", tmp_path / "markers-wrong")
+    assert "invalid_source_locator" in str(excinfo.value)
+
+    # A correct per-object bound (row_groups > 255) admits every row.
+    correct = tmp_path / "correct-limits.json"
+    correct.write_text(json.dumps({"objects": [{"records": 3, "row_groups": 256}]}))
+    marker_out = tmp_path / "markers-ok" / "000.json"
+    assert run_map(correct, tmp_path / "store-ok", tmp_path / "markers-ok") == 0
+    marker = json.loads(marker_out.read_text())
+    assert marker["binding"]["records"] == 3  # every row survived, none dropped
+
+
 def _address_map_store(tmp_path: Path, contract: Path, binaries, tag: str) -> tuple[Path, Path]:
     """Build a store + markers dir with one address map task from a tiny fixture."""
     store = tmp_path / f"store-{tag}"
