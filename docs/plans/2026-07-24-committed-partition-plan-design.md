@@ -46,67 +46,103 @@ From the plan job of run `30113308268`:
 - **17,816** partitions, **128** reduce jobs, batch size 140
 - projected 18,248 runner-minutes against the 40,000 cap
 
-Current caps (`places_construction_v1.Limits`):
+Effective caps, read from the harvested plan's own `limits` (these are the
+**contract** values, which differ from the `places_construction_v1.Limits`
+dataclass defaults — the defaults say 256 MiB / 250,000 tokens):
 
 | cap | value |
 |---|---|
-| `partition_term_rows` | 1,000,000 |
-| `partition_estimated_bytes` | 268,435,456 (256 MiB) |
-| `partition_distinct_tokens` | 250,000 |
-| `adaptive_subdivision_depth` | 8 |
+| `term_rows` | 1,000,000 |
+| `estimated_uncompressed_bytes` | 536,870,912 (512 MiB) |
+| `distinct_tokens` | 200,000 |
+| `maximum_depth` | 8 |
 
-Average partition holds **31,141 rows — 3.1% of the row cap**. Partition count
-is driven by the number of populated cells, not by subdivision; only the dense
-cells subdivide at all.
+Measured distribution over the harvested plan:
 
-## The headroom budget is real and small
+| statistic | value |
+|---|---|
+| depth histogram | **16,428** at depth 0, **1,324** at depth 1, **64** at depth 2 |
+| deepest subdivision | **2**, against a cap of 8 |
+| populated cells | 16,511, of which only **83** subdivide at all |
+| peak utilisation of any cap | **0.998** (one partition at 998,196 rows) |
+| p99 / p50 utilisation | 0.497 / **0.0007** |
+| mean partition | 31,141 rows — 3.1% of the row cap |
+
+The distribution is extremely skewed: half the partitions sit at under a
+thousandth of a cap while one is at 99.8%. Partition count is driven by the
+number of populated cells, not by subdivision.
+
+## The headroom budget, measured
 
 `MEASURED_REDUCE_MINUTES_PER_PARTITION` is **flat**: 1.0 min/partition for
 places, 2.0 for addresses. Projected reduce minutes are therefore
 `partitions x 1.0`, so **partition count is budget**.
 
 Subdividing one partition one level adds 15 partitions and 15 projected minutes.
+Remaining budget is `40,000 - 18,248 = 21,752` minutes.
 
-- Remaining budget: `40,000 - 18,248 = 21,752` minutes
-- **Affordable pre-splits: about 1,450 partitions**, one level each
+Measured cost of a threshold policy over the harvested plan — pre-split every
+partition above the given fraction of any cap:
 
-That is enough for meaningful headroom but nowhere near uniform. Subdividing
-*everything* one extra level would give `17,816 x 16 = 285,056` partitions and
-285,056 projected minutes — **7x over the ledger cap**. So:
+| threshold | splits | added partitions/minutes | total partitions | fits budget |
+|---|---|---|---|---|
+| >90% | 16 | +240 | 18,056 | yes |
+| >75% | 53 | +795 | 18,611 | yes |
+| **>50%** | **175** | **+2,625** | **20,441** | **yes** |
+| >35% | 324 | +4,860 | 22,676 | yes |
+| >25% | 535 | +8,025 | 25,841 | yes |
+| >10% | 1,589 | +23,835 | 41,651 | **no** |
 
-> Buffer must be threshold-driven — subdivide only cells within X% of a cap —
-> never uniform.
+Because the prefix is a hash, a pre-split partition's children each hold roughly
+`u/16` of its load. So a >50% policy costs **+15% partition count** and buys
+16x headroom on the 175 hot partitions, while everything left untouched is
+already below half a cap and must double before it breaks. That is years of
+growth, not months, for a very cheap price.
 
-A reasonable starting policy: pre-split any partition above **50%** of any cap,
-then report the resulting count and projected minutes, and let the operator
-choose the threshold with the numbers in hand rather than guessing.
+Uniform subdivision remains impossible: `17,816 x 16 = 285,056` partitions is
+**7x over the ledger cap**. So the rule still holds —
 
-**Related finding:** the flat cost model is itself the binding constraint, not
-real compute. A 31k-row partition does not take a minute. Making
-`MEASURED_REDUCE_MINUTES_PER_PARTITION` row-aware (e.g. a floor plus a
-per-million-rows term) would free most of the headroom budget and is worth doing
-independently — it is what makes generous buffering affordable.
+> Buffer must be threshold-driven, never uniform.
+
+— but the affordable thresholds are far more generous than the flat cost model
+suggested before measuring. **Recommend >50%, with >35% comfortably affordable
+if more margin is wanted.**
+
+**Superseded finding:** an earlier draft made a row-aware reduce cost model a
+prerequisite, on the assumption that headroom was capped near 1,450 splits. The
+measured distribution dissolves that: >50% needs only 175 splits. A row-aware
+cost model is still worth doing — a 31k-row partition does not take a minute —
+but it is now an independent efficiency item, not a blocker, and it cannot be
+calibrated until a reduce phase actually completes.
 
 ## Design
 
 ### 1. The committed artifact
 
-`data/places_partition_plan_v1.json` (or similar), pinned by SHA into the
-request identity exactly as the inventory and evidence spec already are.
+`scripts/places_partition_plan_v1.json`, pinned by SHA into the request identity
+exactly as the inventory and evidence spec already are. **Seeded in this branch
+from the harvested plan.**
 
-Contents:
+Only the branches where subdivision happened are stored — a cell absent from the
+tree is depth 0. That is what makes this cheap:
 
-- `schema`, `plan_version`, `generated_from` (Overture release + inventory SHA)
-- `partition_contract`: scheme, minimum/maximum level, the caps the plan was
-  generated against
-- `splits`: only the branches where subdivision happened — a cell with no entry
-  is depth 0. Most cells are depth 0, so this is far smaller than enumerating
-  all 17,816 partitions. Expect a few hundred KB, and it diffs readably.
-- `provenance`: measured rows/bytes/distinct-tokens per split branch at
-  generation time, plus the headroom threshold used
+| | |
+|---|---|
+| cells in the tree | **83** (of 16,511 populated) |
+| leaf branches | 1,388 |
+| file size | **10,259 bytes**, 92 lines, one cell per line |
+| partitions reconstructed | **17,816 — exactly matches the derived plan** |
 
-Store measured stats as provenance, not as truth. The build must never trust
-them — see the gate below.
+The whole planet partition tree is ten kilobytes and diffs cleanly. Contents:
+
+- `schema`, `plan_version`, `generated_from` (Overture release, source run,
+  term rows, partition count)
+- `partition_contract`: scheme kind and the caps the plan was generated against
+- `headroom`: policy and threshold used (the seed used none)
+- `cells`: `cell -> ["depth:prefixhex", ...]`
+
+Measured stats stay provenance, never truth. The build must not trust them —
+see the gate below.
 
 ### 2. The offline generator
 
@@ -114,7 +150,7 @@ One script, runnable on a single large machine:
 
     python scripts/generate_places_partition_plan.py \
       --release 2026-06-17.0 --inventory ... --caps ... \
-      --headroom-fraction 0.5 --output data/places_partition_plan_v1.json
+      --headroom-fraction 0.5 --output scripts/places_partition_plan_v1.json
 
 It does what `adaptive_genesis_plan` does today (DuckDB aggregation over the
 term universe), plus the headroom pre-split, and reports:
@@ -215,15 +251,28 @@ per-partition counts from the gate serve both purposes.
 
 ## Sequencing
 
-1. Make the reduce cost model row-aware. Small, independent, and it sets the
-   real headroom budget. Without it, buffering is capped at ~1,450 pre-splits.
-2. Harvest plan v1 from the run that just computed it. Run `30113308268` already
-   produced the real 17,816-partition tree; it is inside the 63 GB `cv1-plan`
-   artifact, so extracting just `plan/plan.json` needs some care but avoids a
-   dedicated planet pass.
-3. Build the generator, reproduce v1 from it, and diff against the harvested
-   tree. Reproducing a known-good answer is the correctness proof.
+1. ~~Row-aware reduce cost model.~~ **Demoted** — the measured distribution shows
+   generous thresholds already fit the budget. Independent efficiency item, and
+   uncalibratable until a reduce phase completes.
+2. **Harvest plan v1. Done.** Extracted `plan/plan.json` (9,906,835 bytes) from
+   the 63 GB `cv1-plan` artifact by reading its ZIP64 central directory over HTTP
+   range requests and inflating one member — about 2 MB transferred instead of
+   63 GB (`scratchpad/harvest.py`). Reduced to the 10 KB committed tree above.
+3. **Build the generator and reproduce v1 from it.** Reproducing a known-good
+   answer is the correctness proof, and the seed makes that check exact:
+   the generator must emit byte-identical `cells` when run with
+   `--headroom-fraction none` against release `2026-06-17.0`.
 4. Map-side assignment plus the fail-closed gate.
 5. R2 staging for partition-keyed fragments; reduce reads selectively.
 
-Steps 1-3 are independent of the in-flight run and can start now.
+Step 3 can start now and needs a machine that can hold the term universe —
+which is the point of the generator being an offline script.
+
+## Harvest note
+
+The extraction technique is reusable and worth keeping: GitHub artifact blobs
+honour HTTP Range, so any single file can be pulled from a huge artifact by
+reading the ZIP64 end-of-central-directory locator from the tail, then the
+central directory, then just that member's compressed extent. For this artifact
+the central directory was 178,259 bytes covering 1,092 entries, and
+`plan/plan.json` happened to be the first entry at offset 0.
