@@ -197,6 +197,20 @@ def test_map_matrix_respects_concurrency_and_the_256_cap():
     )
 
 
+def test_map_matrix_lookup_uses_the_singular_dispatch_family_key():
+    # admit-dispatch emits address_matrix=/places_matrix= keyed by the SINGULAR
+    # dispatch input family, while the contract families dict is plural
+    # (addresses/places). The gate step must read matrices.env with the raw
+    # input family, not FAMILY_KEY — the plural form silently matched nothing
+    # for address and failed the first real dry-run dispatch.
+    value = text()
+    control = (WORKFLOW.parent.parent.parent / "scripts" / "construction_v1_control.py").read_text()
+    assert 'sed -n "s/^${FAMILY}_matrix=//p" control/matrices.env' in value
+    assert '"s/^${FAMILY_KEY}_matrix=//p"' not in value
+    assert 'output.write(f"address_matrix=' in control
+    assert 'output.write(f"places_matrix=' in control
+
+
 def test_every_phase_carries_the_330_minute_job_timeout():
     doc = parsed()
     jobs = doc["jobs"]
