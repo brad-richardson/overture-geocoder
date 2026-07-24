@@ -9,6 +9,7 @@ acceptance gate fails closed.
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -137,6 +138,191 @@ def test_marker_binding_equals_combined_pack_bindings():
         [pack["directory"]["binding"] for pack in marker["packs"]]
     )
     assert combined == marker["binding"]
+
+
+# --------------------------------------------------------------------------- #
+# Streaming genesis planner equivalence                                       #
+# --------------------------------------------------------------------------- #
+
+
+def _reference_genesis_plan(markers, *, row_cap):
+    """Verbatim pre-remediation Address ``genesis_plan``.
+
+    Frozen here as the equivalence oracle: it materializes every per-pack binding
+    (the ``buckets`` map) exactly as the shipped implementation did before the
+    streaming/aggregate refactor. The new in-memory and streaming planners must
+    reproduce its output byte for byte.
+    """
+    ADDRESS = FANIN.ADDRESS
+    if row_cap <= 0:
+        raise ValueError("partition row cap must be positive")
+    buckets: dict = {}
+    for marker in markers:
+        for pack in marker["packs"]:
+            for item in pack["directory"]["bucket_summaries"]:
+                buckets.setdefault(
+                    (item["country"], item["maximum_bucket"]), []
+                ).append(item["binding"])
+    summaries = {
+        identity: ADDRESS.combine_bindings(bindings)
+        for identity, bindings in buckets.items()
+    }
+    partitions = []
+
+    def emit(country, prefix, bits, entries):
+        binding = ADDRESS.combine_bindings([item[1] for item in entries])
+        if binding["records"] <= row_cap:
+            remaining = 64 - bits
+            start = prefix << remaining if bits else 0
+            end = start + (1 << remaining) - 1
+            partitions.append(
+                {
+                    "id": f"a-{country}"
+                    if bits == 0
+                    else f"a-{country}-h-{prefix:0{bits}b}",
+                    "country": country,
+                    "hash_bits": bits,
+                    "hash_prefix": f"{prefix:0{bits}b}" if bits else "",
+                    "hash_start": start,
+                    "hash_end": end,
+                    "binding": binding,
+                }
+            )
+            return
+        if bits == 16:
+            raise ValueError(
+                "Address genesis partition exceeds cap at construction ceiling"
+            )
+        for bit in (0, 1):
+            child_prefix = (prefix << 1) | bit
+            shift = 16 - (bits + 1)
+            child = [item for item in entries if item[0] >> shift == child_prefix]
+            if child:
+                emit(country, child_prefix, bits + 1, child)
+
+    countries = sorted({country for country, _ in summaries})
+    for country in countries:
+        emit(
+            country,
+            0,
+            0,
+            sorted(
+                (bucket, binding)
+                for (name, bucket), binding in summaries.items()
+                if name == country
+            ),
+        )
+    total = ADDRESS.combine_bindings([p["binding"] for p in partitions])
+    expected = ADDRESS.combine_bindings([m["binding"] for m in markers])
+    if total != expected:
+        raise ValueError(
+            "genesis partition bindings do not cover map output exactly"
+        )
+    return {
+        "schema": ADDRESS.PLAN_SCHEMA,
+        "maximum_hash_bits": 16,
+        "row_cap": row_cap,
+        "partitions": partitions,
+        "binding": total,
+    }
+
+
+def _equivalence_markers():
+    """Nontrivial synthetic markers: multiple tasks, countries, and bisection."""
+    return [
+        FANIN.generate_address_marker(
+            _address_spec(
+                index,
+                {"us": 9_000, "br": 6_500, "mx": 2_200, "ca": 700, "de": 40},
+            ),
+            seed=index,
+            pack_rows=500,
+        )
+        for index in range(6)
+    ]
+
+
+@pytest.mark.parametrize("row_cap", [400, 1_000, 4_000, 25_000, 250_000])
+def test_streaming_genesis_plan_is_byte_identical(tmp_path, row_cap):
+    ADDRESS = FANIN.ADDRESS
+    markers = _equivalence_markers()
+
+    reference = _reference_genesis_plan(markers, row_cap=row_cap)
+    in_memory = ADDRESS.genesis_plan(markers, row_cap=row_cap)
+
+    # At tight caps bisection must actually fire so the recursive path is
+    # exercised; at generous caps whole countries fit in one partition.
+    if row_cap <= 4_000:
+        assert any(p["hash_bits"] > 0 for p in reference["partitions"])
+    assert ADDRESS.canonical_json(in_memory) == ADDRESS.canonical_json(reference)
+
+    paths = []
+    for index, marker in enumerate(markers):
+        path = tmp_path / f"marker-{index:04d}.json"
+        path.write_text(json.dumps(marker, separators=(",", ":")))
+        paths.append(path)
+    streamed = ADDRESS.genesis_plan_streaming(paths, row_cap=row_cap)
+    assert ADDRESS.canonical_json(streamed) == ADDRESS.canonical_json(reference)
+
+
+def test_streaming_genesis_plan_matches_on_empty_and_single():
+    ADDRESS = FANIN.ADDRESS
+    assert ADDRESS.canonical_json(
+        ADDRESS.genesis_plan([], row_cap=1_000)
+    ) == ADDRESS.canonical_json(_reference_genesis_plan([], row_cap=1_000))
+    single = [
+        FANIN.generate_address_marker(
+            _address_spec(0, {"fr": 3_000}), seed=42, pack_rows=700
+        )
+    ]
+    assert ADDRESS.canonical_json(
+        ADDRESS.genesis_plan(single, row_cap=800)
+    ) == ADDRESS.canonical_json(_reference_genesis_plan(single, row_cap=800))
+
+
+def test_genesis_plan_direct_invariants():
+    """Prove the plan properties directly, not only via the reference oracle.
+
+    Deterministic bytes, exact binding reconciliation (count + both digest lanes),
+    every partition under row_cap, and per-country hash ranges that tile the full
+    64-bit space exactly once (no gap, no overlap).
+    """
+    ADDRESS = FANIN.ADDRESS
+    row_cap = 1_000
+    markers = _equivalence_markers()
+
+    first = ADDRESS.genesis_plan(markers, row_cap=row_cap)
+    second = ADDRESS.genesis_plan(markers, row_cap=row_cap)
+    assert ADDRESS.canonical_json(first) == ADDRESS.canonical_json(second)
+
+    # Exact reconciliation: combined partition bindings equal combined markers.
+    expected = ADDRESS.combine_bindings([m["binding"] for m in markers])
+    combined = ADDRESS.combine_bindings([p["binding"] for p in first["partitions"]])
+    assert combined == expected == first["binding"]
+    assert combined["records"] == sum(m["binding"]["records"] for m in markers)
+
+    span = 1 << 64
+    by_country: dict[str, list] = {}
+    for partition in first["partitions"]:
+        assert partition["binding"]["records"] <= row_cap
+        assert partition["hash_start"] <= partition["hash_end"]
+        by_country.setdefault(partition["country"], []).append(partition)
+
+    for country, parts in by_country.items():
+        ranges = sorted((p["hash_start"], p["hash_end"]) for p in parts)
+        cursor = 0
+        for start, end in ranges:
+            assert start == cursor, f"{country} has a gap/overlap at {cursor}"
+            cursor = end + 1
+        assert cursor == span, f"{country} does not tile the full hash space"
+
+
+def test_streaming_and_in_memory_reject_nonpositive_row_cap(tmp_path):
+    ADDRESS = FANIN.ADDRESS
+    with pytest.raises(ValueError, match="row cap must be positive"):
+        ADDRESS.genesis_plan([], row_cap=0)
+    with pytest.raises(ValueError, match="row cap must be positive"):
+        ADDRESS.genesis_plan_streaming([], row_cap=0)
 
 
 # --------------------------------------------------------------------------- #

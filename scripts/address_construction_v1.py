@@ -638,19 +638,36 @@ def map_task(
         return {**marker, "admitted_existing": False}
 
 
-def genesis_plan(markers: list[dict[str, Any]], *, row_cap: int) -> dict[str, Any]:
-    if row_cap <= 0:
-        raise ValueError("partition row cap must be positive")
-    buckets: dict[tuple[str, int], list[dict[str, Any]]] = {}
-    for marker in markers:
-        for pack in marker["packs"]:
-            for item in pack["directory"]["bucket_summaries"]:
-                buckets.setdefault((item["country"], item["maximum_bucket"]), []).append(
-                    item["binding"]
-                )
-    summaries = {
-        identity: combine_bindings(bindings) for identity, bindings in buckets.items()
-    }
+def _accumulate_bucket_summaries(
+    marker: dict[str, Any], summaries: dict[tuple[str, int], dict[str, Any]]
+) -> None:
+    """Fold one marker's pack bucket summaries into the running aggregate.
+
+    The aggregate holds one binding per ``(country, maximum_bucket)`` identity —
+    bounded by ~200 countries x 65,536 buckets — instead of materializing every
+    per-pack binding. Because ``combine_bindings`` is an associative, commutative
+    modular sum, folding entries in one at a time yields the identical binding a
+    single combine over the full list would produce.
+    """
+    for pack in marker["packs"]:
+        for item in pack["directory"]["bucket_summaries"]:
+            key = (item["country"], item["maximum_bucket"])
+            current = summaries.get(key)
+            summaries[key] = combine_bindings(
+                [item["binding"]] if current is None else [current, item["binding"]]
+            )
+
+
+def _plan_from_summaries(
+    summaries: dict[tuple[str, int], dict[str, Any]],
+    expected: dict[str, Any],
+    row_cap: int,
+) -> dict[str, Any]:
+    """Bisect the bounded per-(country, bucket) aggregate into a genesis plan.
+
+    ``summaries`` and ``expected`` fully determine the output, so this is shared
+    verbatim by the in-memory and streaming entry points.
+    """
     partitions = []
 
     def emit(country: str, prefix: int, bits: int, entries: list[tuple[int, dict]]) -> None:
@@ -693,7 +710,6 @@ def genesis_plan(markers: list[dict[str, Any]], *, row_cap: int) -> dict[str, An
             ),
         )
     total = combine_bindings([partition["binding"] for partition in partitions])
-    expected = combine_bindings([marker["binding"] for marker in markers])
     if total != expected:
         raise ValueError("genesis partition bindings do not cover map output exactly")
     return {
@@ -703,6 +719,37 @@ def genesis_plan(markers: list[dict[str, Any]], *, row_cap: int) -> dict[str, An
         "partitions": partitions,
         "binding": total,
     }
+
+
+def genesis_plan(markers: list[dict[str, Any]], *, row_cap: int) -> dict[str, Any]:
+    if row_cap <= 0:
+        raise ValueError("partition row cap must be positive")
+    summaries: dict[tuple[str, int], dict[str, Any]] = {}
+    expected = zero_binding()
+    for marker in markers:
+        _accumulate_bucket_summaries(marker, summaries)
+        expected = combine_bindings([expected, marker["binding"]])
+    return _plan_from_summaries(summaries, expected, row_cap)
+
+
+def genesis_plan_streaming(marker_paths, *, row_cap: int) -> dict[str, Any]:
+    """Plan from marker files read one at a time, never holding them all at once.
+
+    Produces output byte-identical to ``genesis_plan`` on the same markers, but
+    only the bounded per-(country, bucket) aggregate and a single decoded marker
+    live in memory at any moment. This is the planet-scale entry point; the
+    in-memory ``genesis_plan`` stays for small inputs and existing callers.
+    """
+    if row_cap <= 0:
+        raise ValueError("partition row cap must be positive")
+    summaries: dict[tuple[str, int], dict[str, Any]] = {}
+    expected = zero_binding()
+    for path in marker_paths:
+        marker = json.loads(Path(path).read_text())
+        _accumulate_bucket_summaries(marker, summaries)
+        expected = combine_bindings([expected, marker["binding"]])
+        del marker
+    return _plan_from_summaries(summaries, expected, row_cap)
 
 
 def export_filter(

@@ -509,15 +509,26 @@ def _self_rss_bytes() -> int:
 
 
 def run_plan_worker(family: str, markers_dir: Path, row_cap: int, result_path: Path) -> None:
-    """In-process worker: load synthetic markers and invoke the real planner."""
+    """In-process worker: invoke the real planner over the synthetic markers.
+
+    When the planner exposes a streaming entry point (``genesis_plan_streaming``),
+    feed it marker file paths so the planet-scale fan-in never materializes every
+    marker at once. Otherwise fall back to the in-memory list API.
+    """
     module = ADDRESS if family == "address" else PLACES
-    markers = load_markers(markers_dir)
+    marker_paths = sorted(markers_dir.glob("marker-*.json"))
+    streaming = getattr(module, "genesis_plan_streaming", None)
     started = time.monotonic()
-    plan = module.genesis_plan(markers, row_cap=row_cap)
+    if streaming is not None:
+        plan = streaming(marker_paths, row_cap=row_cap)
+        planner = f"{module.__name__}.genesis_plan_streaming"
+    else:
+        plan = module.genesis_plan(load_markers(markers_dir), row_cap=row_cap)
+        planner = f"{module.__name__}.genesis_plan"
     wall = time.monotonic() - started
     result = {
         "family": family,
-        "planner": f"{module.__name__}.genesis_plan",
+        "planner": planner,
         "plan_schema": plan["schema"],
         "partitions": len(plan["partitions"]),
         "row_cap": row_cap,
