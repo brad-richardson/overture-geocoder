@@ -24,7 +24,7 @@ use unicode_normalization::{char::is_combining_mark, UnicodeNormalization};
 use uuid::Uuid;
 
 const MAX_RECORD_BYTES: usize = 1_048_576;
-const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v3";
+const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v4";
 const TRANSFORM_VERSION: &str = "places-rust-arrow-transform-v1";
 const DIGEST_VERSION: &str = "sha256-add-mod-2^256-two-domain-v1";
 const DOMAIN_A: &[u8] = b"overture-places-construction-v1\0";
@@ -184,12 +184,31 @@ fn is_cjk(character: char) -> bool {
     )
 }
 
+/// Fold a Greek final sigma (U+03C2) to a plain lowercase sigma (U+03C3).
+///
+/// Rust `char::to_lowercase` is context-free and always lowers `Σ` to `σ`,
+/// but a lowercase Greek query naturally carries the final form `ς`, so the
+/// index and the Worker query tokenizer both apply this fold to keep the two
+/// forms searchable against one another. This is what Unicode case folding
+/// does; see `tokenizer_version` `nfkd-lower-stripmark-cjk-bigram-v4`.
+fn fold_final_sigma(character: char) -> char {
+    if character == '\u{03c2}' {
+        '\u{03c3}'
+    } else {
+        character
+    }
+}
+
 fn normalized_words(value: &str) -> Vec<String> {
+    // Trim Unicode `White_Space` only (Rust `str::trim`), decompose with NFKD,
+    // then lowercase per-char. Lowercasing runs *after* NFKD so that
+    // compatibility-decomposed styled capitals (e.g. `𝓓` -> `D`) become
+    // lowercase-searchable (`d`) rather than surviving as bare capitals.
     let folded: String = value
         .trim()
-        .chars()
-        .flat_map(char::to_lowercase)
         .nfkd()
+        .flat_map(char::to_lowercase)
+        .map(fold_final_sigma)
         .filter(|character| !is_combining_mark(*character))
         .collect();
     let mut words = Vec::new();
@@ -631,6 +650,63 @@ mod tests {
     fn tokenizer_matches_hand_vectors() {
         assert_eq!(tokens(" Café / 東京 "), vec!["cafe", "東京"]);
         assert_eq!(tokens("カフェ"), vec!["カフェ", "カフ", "フェ"]);
+    }
+
+    #[test]
+    fn final_sigma_folds_to_plain_sigma() {
+        // Context-free lowercase of Σ is σ; final sigma ς folds to σ too, so a
+        // lowercase Greek query matches the index. No terminal ς ever survives.
+        assert_eq!(tokens("ΝΕΟΣ ΚΟΣΜΟΣ"), vec!["νεοσ", "κοσμοσ"]);
+        assert_eq!(tokens("Ιρις"), vec!["ιρισ"]);
+        assert!(!tokens("ΚΟΣΜΟΣ")[0].contains('\u{03c2}'));
+    }
+
+    #[test]
+    fn lowercases_after_nfkd_for_styled_capitals() {
+        // Math-styled and enclosed capitals compat-decompose to bare capitals;
+        // lowercasing after NFKD makes them lowercase-searchable.
+        assert_eq!(
+            tokens("\u{1D4D3}\u{1D4EE}\u{1D4F9}\u{1D4D4}\u{1D4ED}"),
+            vec!["deped"]
+        );
+    }
+
+    #[test]
+    fn trims_white_space_only_keeping_c0_controls() {
+        // Rust str::trim keeps the C0 separators U+001C..U+001F that CPython
+        // str.strip() would remove; they are token separators either way.
+        assert_eq!(tokens("\u{1d}NUNU Shop"), vec!["nunu", "shop"]);
+    }
+
+    #[test]
+    fn golden_token_vectors_match_fixture() {
+        let path = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../tests/fixtures/places_tokenizer_v4_golden.json"
+        );
+        let fixture: serde_json::Value =
+            serde_json::from_reader(File::open(path).unwrap()).unwrap();
+        assert_eq!(
+            fixture["tokenizer_version"].as_str().unwrap(),
+            TOKENIZER_VERSION
+        );
+        for vector in fixture["token_vectors"].as_array().unwrap() {
+            let input = vector["input"].as_str().unwrap();
+            let expected: BTreeMap<String, ()> = vector["expected"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|token| (token.as_str().unwrap().to_owned(), ()))
+                .collect();
+            let actual: BTreeMap<String, ()> =
+                tokens(input).into_iter().map(|token| (token, ())).collect();
+            assert_eq!(
+                actual,
+                expected,
+                "token vector {} mismatch",
+                vector["name"].as_str().unwrap()
+            );
+        }
     }
 
     #[test]

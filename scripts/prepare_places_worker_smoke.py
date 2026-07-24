@@ -36,7 +36,7 @@ from experiment_places_head_repack import (  # noqa: E402
 
 CATALOG_MAGIC = b"PCAT0001"
 CATALOG_PREAMBLE = struct.Struct("<8sI")
-TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v3"
+TOKENIZER_VERSION = "nfkd-lower-stripmark-cjk-bigram-v4"
 RESULT_LIMIT = 10
 SHARD_FETCH_LIMIT = 25
 # Fixture famous cap: bounds the packed head's famous set (rare-prominent

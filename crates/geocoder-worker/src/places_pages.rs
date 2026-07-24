@@ -64,7 +64,7 @@ const MAX_CATALOG_SHARDS: usize = 32_768;
 const PLACES_CATALOG_CACHE_MAX_ENTRIES: usize = 1;
 const MAX_QUADKEY_LEVEL: usize = 15;
 const PARTITION_SCHEME: &str = "world-quadkey-v1";
-pub(crate) const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v3";
+pub(crate) const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v4";
 const LEGACY_TOKENIZER_VERSION: &str = "nfkd-latin-fold-cjk-bigram-v2";
 
 thread_local! {
@@ -91,12 +91,28 @@ fn is_cjk(character: char) -> bool {
     )
 }
 
+/// Fold a Greek final sigma (U+03C2) to a plain lowercase sigma (U+03C3) so a
+/// lowercase Greek query matches the context-free `σ` held in the index. This
+/// mirrors the index-side fold in the `places-transform-v1` tokenizer
+/// (`tokenizer_version` `nfkd-lower-stripmark-cjk-bigram-v4`).
+fn fold_final_sigma(character: char) -> char {
+    if character == '\u{03c2}' {
+        '\u{03c3}'
+    } else {
+        character
+    }
+}
+
 fn normalized_words(value: &str) -> Vec<String> {
+    // Trim Unicode `White_Space` only, NFKD-decompose, then lowercase per-char
+    // so compatibility-decomposed styled capitals fold to lowercase. Kept
+    // byte-for-byte identical to the authoritative `places-transform-v1`
+    // tokenizer so query terms match indexed document terms.
     let folded: String = value
         .trim()
-        .chars()
-        .flat_map(char::to_lowercase)
         .nfkd()
+        .flat_map(char::to_lowercase)
+        .map(fold_final_sigma)
         .filter(|character| !is_combining_mark(*character))
         .collect();
     let mut words = Vec::new();

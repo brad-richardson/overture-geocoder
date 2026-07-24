@@ -1,9 +1,23 @@
 #!/usr/bin/env python3
-"""Frozen streaming Python semantic baseline for Places construction-v1."""
+"""Frozen streaming Python semantic baseline for Places construction-v1.
+
+The tokenizer emulates Rust `places-transform-v1` string semantics exactly
+(tokenizer_version `nfkd-lower-stripmark-cjk-bigram-v4`). Rust is the
+authoritative side; CPython's own `str.lower`/`str.strip`/`str.isalnum` differ
+from Rust on three well-defined Unicode behaviours (Greek `Final_Sigma`, the C0
+separators U+001C..U+001F, and the `Other_Alphabetic` symbol word class) and on
+Unicode version. Instead of trusting CPython's tables, the baseline drives the
+lowercase mapping, whitespace set and word-character set from
+`places_unicode_tables_v1.json`, which is exported from the very same Rust
+`std::char` tables the transform uses (regenerate with
+`places-unicode-tables-v1`). This removes CPython's independent Unicode opinion
+on those properties, so the two implementations cannot drift apart by version.
+"""
 
 from __future__ import annotations
 
 import argparse
+import bisect
 import hashlib
 import json
 import math
@@ -32,6 +46,52 @@ REJECTIONS = (
 )
 
 
+# ---------------------------------------------------------------------------
+# Rust-exported Unicode property tables (see module docstring). Loading fails
+# closed: without the tables the baseline must not silently fall back to
+# CPython semantics that the contract does not pin.
+# ---------------------------------------------------------------------------
+_TABLES_PATH = Path(__file__).with_name("places_unicode_tables_v1.json")
+_TABLES = json.loads(_TABLES_PATH.read_text())
+_WHITESPACE = frozenset(chr(codepoint) for codepoint in _TABLES["whitespace"])
+_LOWERCASE_MAP = {
+    int(key): "".join(chr(codepoint) for codepoint in value)
+    for key, value in _TABLES["lowercase_map"].items()
+}
+_WORD_RANGES: list[list[int]] = _TABLES["word_char_ranges"]
+_WORD_RANGE_STARTS = [start for start, _ in _WORD_RANGES]
+_SIGMA_SOURCE = chr(_TABLES["sigma_fold"][0])
+_SIGMA_TARGET = chr(_TABLES["sigma_fold"][1])
+
+
+def rust_trim(value: str) -> str:
+    """Trim exactly Unicode `White_Space` (Rust `str::trim`), unlike
+    CPython `str.strip()` which also strips the C0 separators U+001C..U+001F."""
+    start, end = 0, len(value)
+    while start < end and value[start] in _WHITESPACE:
+        start += 1
+    while end > start and value[end - 1] in _WHITESPACE:
+        end -= 1
+    return value[start:end]
+
+
+def rust_lower(character: str) -> str:
+    """Context-free per-char lowercase from Rust `char::to_lowercase`; unlike
+    CPython `str.lower`, never applies the Greek `Final_Sigma` context rule."""
+    return _LOWERCASE_MAP.get(ord(character), character)
+
+
+def is_word_char(character: str) -> bool:
+    """Rust `char::is_alphanumeric()` from the exported ranges; includes the
+    `Other_Alphabetic` symbols CPython `str.isalnum()` excludes."""
+    codepoint = ord(character)
+    index = bisect.bisect_right(_WORD_RANGE_STARTS, codepoint) - 1
+    return (
+        index >= 0
+        and _WORD_RANGES[index][0] <= codepoint <= _WORD_RANGES[index][1]
+    )
+
+
 def is_cjk(character: str) -> bool:
     value = ord(character)
     return (
@@ -44,15 +104,21 @@ def is_cjk(character: str) -> bool:
 
 
 def tokens(value: str) -> set[str]:
-    folded = "".join(
-        character
-        for character in unicodedata.normalize("NFKD", value.strip().lower())
-        if not unicodedata.category(character).startswith("M")
-    )
+    # Mirror Rust `normalized_words`: trim White_Space, NFKD-decompose, then
+    # lowercase per-char (after NFKD, so styled capitals fold), fold final
+    # sigma, and drop combining marks.
+    folded_chars: list[str] = []
+    for character in unicodedata.normalize("NFKD", rust_trim(value)):
+        for lowered in rust_lower(character):
+            if lowered == _SIGMA_SOURCE:
+                lowered = _SIGMA_TARGET
+            if not unicodedata.category(lowered).startswith("M"):
+                folded_chars.append(lowered)
+    folded = "".join(folded_chars)
     words: list[str] = []
     current: list[str] = []
     for character in folded:
-        if character.isalnum() or character == "_":
+        if is_word_char(character) or character == "_":
             current.append(character)
         elif current:
             words.append("".join(current))
@@ -163,11 +229,11 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
         columns = {name: batch[name] for name in batch.schema.names}
         for index in range(batch.num_rows):
             input_features += 1
-            primary = text(columns["primary_name"], index).strip()
+            primary = rust_trim(text(columns["primary_name"], index))
             if not primary:
                 rejected["missing_primary_name"] += 1
                 continue
-            raw_id = text(columns["id"], index).strip()
+            raw_id = rust_trim(text(columns["id"], index))
             try:
                 identifier = uuid.UUID(raw_id)
             except (ValueError, AttributeError):
@@ -177,7 +243,7 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
                 rejected["invalid_uuid"] += 1
                 continue
             if (
-                text(columns["operating_status"], index).strip().lower()
+                rust_trim(text(columns["operating_status"], index)).lower()
                 == "permanently_closed"
             ):
                 rejected["permanently_closed"] += 1
@@ -211,7 +277,7 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
             fields: dict[str, int] = {}
             common = columns["common_names"][index].as_py() or []
             has_multilingual = any(
-                value and value.strip() != primary for value in common
+                value and rust_trim(value) != primary for value in common
             )
             values = [
                 (primary, 1),

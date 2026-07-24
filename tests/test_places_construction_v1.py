@@ -19,6 +19,7 @@ pytest.importorskip("pyarrow.compute")  # register pa.compute; not auto-imported
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests/fixtures/places_construction_v1.json"
+GOLDEN_FIXTURE = ROOT / "tests/fixtures/places_tokenizer_v4_golden.json"
 
 
 def geometry(row: dict) -> bytes:
@@ -258,6 +259,53 @@ def test_python_baseline_matches_rust_semantic_binding(
         "semantic_sum_b",
     ):
         assert baseline[field] == rust[field]
+
+
+def test_tokenizer_v4_golden_vectors(baseline_module):
+    fixture = json.loads(GOLDEN_FIXTURE.read_text())
+    assert fixture["tokenizer_version"] == "nfkd-lower-stripmark-cjk-bigram-v4"
+    for vector in fixture["token_vectors"]:
+        assert baseline_module.tokens(vector["input"]) == set(vector["expected"]), (
+            f"golden token vector {vector['name']} diverged"
+        )
+
+
+def test_tokenizer_v4_golden_rust_baseline_equivalence(
+    tmp_path, transform_binary, baseline_module
+):
+    fixture = json.loads(GOLDEN_FIXTURE.read_text())
+    rows = fixture["rows"]
+    rust, table = run_transform(tmp_path, transform_binary, rows)
+
+    projected = tmp_path / "golden-baseline.parquet"
+    write_fixture(projected, rows)
+    source_limits = tmp_path / "golden-baseline-limits.json"
+    source_limits.write_text(
+        json.dumps({"objects": [{"records": len(rows), "row_groups": 3}]})
+    )
+    baseline = baseline_module.run(projected, source_limits)
+
+    # Rust and the patched baseline must now agree byte-for-byte, and both must
+    # match the frozen golden values so neither side can silently drift.
+    expected = fixture["expected"]
+    for field in (
+        "input_features",
+        "admitted_features",
+        "multilingual_features",
+        "cjk_features",
+        "emitted_term_rows",
+        "semantic_sum_a",
+        "semantic_sum_b",
+    ):
+        assert rust[field] == baseline[field] == expected[field], field
+
+    tokens_by_feature: dict[str, set[str]] = {}
+    for token, feature_id in zip(
+        table["token"].to_pylist(), table["feature_id"].to_pylist(), strict=True
+    ):
+        tokens_by_feature.setdefault(str(uuid.UUID(bytes=feature_id)), set()).add(token)
+    for feature_id, expected_tokens in expected["per_feature_tokens"].items():
+        assert tokens_by_feature[feature_id] == set(expected_tokens), feature_id
 
 
 def decode_serving(path: Path, mode: str) -> list[dict]:

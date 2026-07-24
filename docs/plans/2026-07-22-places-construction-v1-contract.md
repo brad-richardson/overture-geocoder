@@ -14,9 +14,33 @@ Rust is authoritative for admission, normalization, tokenization, routing,
 ranking, and proof payloads. Rejection precedence is missing primary name,
 invalid UUID, permanently closed, invalid geometry, invalid confidence,
 invalid source locator, oversized record, invalid record. Names use primary plus
-multilingual common values. NFKD lower-case mark-stripping tokenization preserves
-alphanumeric/underscore words and adds CJK bigrams. Field masks are name `1`,
-brand `2`, category `4`, context `8`; repeated tokens combine masks.
+multilingual common values. Tokenization preserves alphanumeric/underscore words
+and adds CJK bigrams. Field masks are name `1`, brand `2`, category `4`, context
+`8`; repeated tokens combine masks.
+
+### Pinned tokenizer semantics (`nfkd-lower-stripmark-cjk-bigram-v4`)
+
+The tokenizer is pinned to Rust standard-library semantics at **Unicode 16.0**,
+as implemented by `places-transform-v1` and mirrored in the Worker query
+tokenizer. In order: trim leading/trailing Unicode `White_Space` only (Rust
+`str::trim`, so the C0 separators U+001C..U+001F are *kept*, unlike CPython
+`str.strip`); NFKD-decompose; lowercase per character with context-free
+`char::to_lowercase` (no Greek `Final_Sigma`), applied **after** NFKD so
+compatibility-decomposed styled capitals fold to lowercase; fold final sigma `ς`
+(U+03C2) → `σ` (U+03C3); drop combining marks; keep runs of
+`char::is_alphanumeric` (which includes the `Other_Alphabetic` enclosed symbols
+CPython `str.isalnum` omits) plus ASCII `_`; and split on everything else.
+
+Because a dual-implementation digest contract is implicitly pinned to a Unicode
+version, the Python semantic baseline does **not** use CPython's Unicode tables
+for the lowercase mapping, whitespace set, or word-character class. It loads
+`scripts/places_unicode_tables_v1.json`, exported from the Rust toolchain by the
+`places-unicode-tables-v1` binary, so the two implementations cannot drift apart
+across CPython/Rust Unicode upgrades. (NFKD decomposition and the combining-mark
+filter remain CPython's; they matched Rust exactly on all local task data, and a
+regenerated table is required before adopting a new Unicode version.) This
+`v4` string replaces `v3`, which never pinned these behaviours; nothing shipped
+on `v3`, so there is no back-compatibility obligation.
 
 Confidence must be finite and in `[0,1]`; rank is `round(confidence*255)`. The
 provisional spatial grid is 256 by 256: `x=floor((lon+180)/360*256)` and

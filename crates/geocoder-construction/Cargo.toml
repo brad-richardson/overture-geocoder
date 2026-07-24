@@ -38,6 +38,10 @@ path = "src/bin/places_serving_encode_v1.rs"
 name = "places-serving-verify-v1"
 path = "src/bin/places_serving_verify_v1.rs"
 
+[[bin]]
+name = "places-unicode-tables-v1"
+path = "src/bin/places_unicode_tables_v1.rs"
+
 [dependencies]
 anyhow = { workspace = true }
 arrow-array = "54.3.1"
