@@ -115,6 +115,36 @@ def baseline_module():
     return module
 
 
+def test_ipc_batch_constants_are_derived_and_within_cap(construction_module):
+    module = construction_module
+    # The hydrate input batch is derived from the IPC cap by construction, so a
+    # term batch (one output batch per input batch, MAX_TERMS_PER_FEATURE terms
+    # each in the worst case) can never exceed the IPC cap that ingest enforces.
+    assert module.HYDRATE_BATCH_ROWS == (
+        module.MAX_IPC_BATCH_ROWS // module.MAX_TERMS_PER_FEATURE
+    )
+    assert (
+        module.HYDRATE_BATCH_ROWS * module.MAX_TERMS_PER_FEATURE
+        <= module.MAX_IPC_BATCH_ROWS
+    )
+    assert module.MAX_TERMS_PER_FEATURE >= 1
+    # hydrate() must default to the derived batch, and ingest() must reject any
+    # batch over the shared cap -- the two former hard-coded 65,536 literals now
+    # come from one constant.
+    import inspect
+
+    signature = inspect.signature(module.hydrate)
+    assert signature.parameters["batch_rows"].default == module.HYDRATE_BATCH_ROWS
+    # The single cap constant must equal the frozen evidence-spec value.
+    spec = json.loads(
+        (ROOT / "benchmarks/places-construction-v1-evidence-spec.json").read_text()
+    )
+    assert (
+        module.MAX_IPC_BATCH_ROWS
+        == spec["acceptance_gates"]["resources"]["maximum_ipc_batch_rows"]
+    )
+
+
 def run_transform(
     tmp_path: Path, binary: Path, rows: list[dict], *, use_limits: bool = True
 ):

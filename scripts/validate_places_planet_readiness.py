@@ -9,6 +9,7 @@ import importlib.util
 import json
 import platform
 import subprocess
+import sys
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,16 @@ def load_inventory_module():
     spec = importlib.util.spec_from_file_location("places_readiness_inventory", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def load_construction_module():
+    path = ROOT / "scripts/places_construction_v1.py"
+    spec = importlib.util.spec_from_file_location("places_readiness_construction", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     return module
 
@@ -225,13 +236,41 @@ def validate(
             ),
             "multilingual/CJK coverage is absent",
         )
-        require(
-            any(
-                item["metrics"]["maximum_uuid_multiplicity"] > 1
-                for item in census.values()
-            ),
-            "duplicate coverage is absent",
-        )
+    # Duplicate-UUID coverage is deliberately NOT a planet gate. Real
+    # 2026-06-17.0 census data carries zero duplicate UUIDs across all tasks
+    # (`duplicate_uuid_rows: 0` everywhere), so a planet `require(... > 1)` could
+    # never close on real data — it was an unclosable gate lying about being
+    # closable. The duplicate-handling path is instead gated fail-closed against a
+    # checked-in synthetic fixture in the test suite
+    # (`tests/fixtures/places_duplicate_uuid.json`, exercised by
+    # `tests/test_places_duplicate_uuid_gate.py`), which drives duplicate UUIDs
+    # through map -> plan -> reduce and asserts multiplicity is preserved. Here we
+    # only record the real-data observation informationally.
+    duplicate_observation = {
+        "maximum_uuid_multiplicity": max(
+            (item["metrics"]["maximum_uuid_multiplicity"] for item in census.values()),
+            default=0,
+        ),
+        "duplicate_uuid_rows_total": sum(
+            item["metrics"]["duplicate_uuid_rows"] for item in census.values()
+        ),
+    }
+
+    # IPC batch-row cap drift guard: the construction pipeline's single
+    # MAX_IPC_BATCH_ROWS constant, the hydrate/ingest invariant derived from it,
+    # and the frozen evidence-spec `maximum_ipc_batch_rows` must agree exactly, so
+    # the spec, hydrate, ingest, and write_arrow_query call sites cannot drift.
+    construction = load_construction_module()
+    spec_ipc_cap = spec["acceptance_gates"]["resources"]["maximum_ipc_batch_rows"]
+    require(
+        construction.MAX_IPC_BATCH_ROWS == spec_ipc_cap,
+        "construction IPC batch cap differs from the frozen evidence spec",
+    )
+    require(
+        construction.HYDRATE_BATCH_ROWS * construction.MAX_TERMS_PER_FEATURE
+        <= construction.MAX_IPC_BATCH_ROWS,
+        "hydrate batch is not derived within the IPC cap",
+    )
 
     gates = spec["acceptance_gates"]
     task_runs = (
@@ -385,6 +424,11 @@ def validate(
         "inventory_sha256": inventory.get("inventory_sha256"),
         "scale_evidence_sha256": sha256_file(evidence_path),
         "reasons": reasons,
+        "observations": {
+            # Informational, never gated: duplicate coverage is enforced by the
+            # synthetic fixture gate in the test suite, not by planet data.
+            "duplicate_uuid": duplicate_observation,
+        },
     }
     return report
 
