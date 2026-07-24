@@ -152,7 +152,9 @@ jobs:
             --output control/contract.json --runtime control/runtime.json \
             --strict-versions
 
-          MAP_MATRIX="$(sed -n "s/^${FAMILY_KEY}_matrix=//p" control/matrices.env)"
+          # matrices.env keys use the dispatch input's singular family form
+          # (address_matrix/places_matrix), not the plural contract key.
+          MAP_MATRIX="$(sed -n "s/^${FAMILY}_matrix=//p" control/matrices.env)"
           test -n "$MAP_MATRIX"
           MAP_COUNT="$(jq '.include | length' <<<"$MAP_MATRIX")"
           if [ "$MAP_COUNT" -gt 256 ]; then
