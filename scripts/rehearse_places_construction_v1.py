@@ -830,12 +830,30 @@ def run_assemble(args: argparse.Namespace) -> None:
     rehearsal["census_complete"] = True
     rehearsal["construction_phase_pending"] = False
 
+    # Host provenance: record which physical host produced each measured section
+    # so the frozen bundle is self-describing (timings are hardware-sensitive; the
+    # binding/determinism evidence is not). Every task-run in --task-run-dir came
+    # from one host, tagged here; census and rehearsal hosts are recorded too.
+    provenance = json.loads(Path(args.provenance).read_text())
+    for host_key in (
+        provenance["task_run_host"],
+        provenance["census_host"],
+        provenance["rehearsal_host"],
+    ):
+        if host_key not in provenance["hosts"]:
+            raise ValueError(f"provenance references undeclared host {host_key}")
+    task_run_host = provenance["task_run_host"]
+    for run in task_runs.values():
+        run["host"] = task_run_host
+    rehearsal["host"] = provenance["rehearsal_host"]
+
     evidence = {
         "schema": "overture-places-construction-v1-scale-evidence-v1",
         "evidence_spec_sha256": A.sha256_file(spec_path),
         "inventory_file_sha256": A.sha256_file(INVENTORY),
         "inventory_sha256": inventory["inventory_sha256"],
         "schema_fingerprint_sha256": inventory["schema_contract"]["fingerprint_sha256"],
+        "provenance": provenance,
         "candidate_universe": universe,
         "census": [census[index] for index in universe],
         "roles": roles,
@@ -907,6 +925,7 @@ def main() -> None:
     a.add_argument("--census-dir", required=True)
     a.add_argument("--task-run-dir", required=True)
     a.add_argument("--rehearsal", required=True)
+    a.add_argument("--provenance", required=True)
     a.add_argument("--output", required=True)
     a.set_defaults(func=run_assemble)
 

@@ -7,6 +7,7 @@
   "head_shard_count": 64,
   "head_sharded": true,
   "head_verified": true,
+  "host": "bradflix",
   "interruption_phases": [
     "local_write",
     "immutable_publish",

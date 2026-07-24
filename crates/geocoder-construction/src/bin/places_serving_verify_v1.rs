@@ -545,10 +545,13 @@ mod tests {
         )
     }
 
-    /// The independent reduce-side binding closes the consistent-drop hole: a
-    /// manifest whose shards AND self-declared totals both omit a token still
-    /// fails because the merged-head binding (produced independently) still
-    /// counts it.
+    /// The independent reduce-side binding closes the consistent-drop hole in
+    /// isolation: the manifest's self-declared totals AND the per-shard bytes are
+    /// mutually consistent (so the old self-vs-cross-shard reconciliation, and
+    /// every per-shard check, pass), yet verification still fails because the
+    /// independent merged-head binding — produced without ever seeing the shard
+    /// bytes — still counts the dropped token. Only the new independent
+    /// reconciliation catches it.
     #[test]
     fn independent_binding_catches_a_consistently_dropped_token() {
         let dir = std::env::temp_dir().join(format!("plhd-verify-{}", std::process::id()));
@@ -573,11 +576,15 @@ mod tests {
             add_256(&mut whole_b, &head_digest(HEAD_DIGEST_DOMAIN_B, &entry));
         }
 
+        // The manifest's self-declared totals are ALWAYS derived from the shards
+        // actually written (so they are internally consistent and pass every
+        // pre-existing per-shard and self-vs-cross-shard check). Only the
+        // independent merged binding (`binding_*`) is supplied separately.
         let write_manifest = |shard_specs: &BTreeMap<u64, Vec<&str>>,
-                              merged_records: u64,
-                              merged_entries: u64,
-                              merged_a: [u8; 32],
-                              merged_b: [u8; 32]|
+                              binding_records: u64,
+                              binding_entries: u64,
+                              binding_a: [u8; 32],
+                              binding_b: [u8; 32]|
          -> std::path::PathBuf {
             let mut shard_json = Vec::new();
             let mut total_records = 0_u64;
@@ -603,14 +610,14 @@ mod tests {
                     hex(&b)
                 ));
             }
-            let _ = (total_records, total_entries, total_a, total_b);
+            // Self-declared totals mirror the written shards exactly.
             let manifest = format!(
-                "{{\"schema\":\"overture-places-global-head-sharded-v2\",\"shard_count\":{},\"shard_bits\":{shard_bits},\"total_records\":{merged_records},\"total_index_entries\":{merged_entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\",\"merged_head_binding\":{{\"records\":{merged_records},\"index_entries\":{merged_entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\"}},\"shards\":[{}]}}",
+                "{{\"schema\":\"overture-places-global-head-sharded-v2\",\"shard_count\":{},\"shard_bits\":{shard_bits},\"total_records\":{total_records},\"total_index_entries\":{total_entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\",\"merged_head_binding\":{{\"records\":{binding_records},\"index_entries\":{binding_entries},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\"}},\"shards\":[{}]}}",
                 1_u64 << shard_bits,
-                hex(&merged_a),
-                hex(&merged_b),
-                hex(&merged_a),
-                hex(&merged_b),
+                hex(&total_a),
+                hex(&total_b),
+                hex(&binding_a),
+                hex(&binding_b),
                 shard_json.join(",")
             );
             let path = dir.join("head-manifest.json");
@@ -621,7 +628,8 @@ mod tests {
             path
         };
 
-        // Honest full manifest reconciles.
+        // Honest full manifest: self-declared totals, shards, and the independent
+        // binding all agree.
         let good = write_manifest(
             &by_shard,
             all.len() as u64,
@@ -631,8 +639,11 @@ mod tests {
         );
         verify_sharded_head(&good).expect("complete sharded head must verify");
 
-        // Consistently drop "market" from BOTH its shard and the self-declared
-        // totals, but the independent merged binding still covers all tokens.
+        // Consistent drop: "market" is removed from its shard AND the manifest's
+        // self-declared totals shrink to match (so the shards and self-totals stay
+        // mutually consistent). The independent binding still counts all six
+        // tokens, so verification must fail — proving the independent
+        // reconciliation, not the self-consistency check, is what catches it.
         let mut dropped = by_shard.clone();
         for tokens in dropped.values_mut() {
             tokens.retain(|token| *token != "market");

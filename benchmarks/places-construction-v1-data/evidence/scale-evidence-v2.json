@@ -4,6 +4,29 @@
   "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
   "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
   "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+  "provenance": {
+    "schema": "overture-places-construction-v1-host-provenance-v1",
+    "hosts": {
+      "bradflix": {
+        "hostname": "bradflix",
+        "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+        "cores": 20,
+        "os": "Ubuntu 24.04",
+        "arch": "x86_64"
+      },
+      "brads-macbook-air": {
+        "hostname": "Brads-MacBook-Air",
+        "cpu": "Apple M4",
+        "cores": 10,
+        "os": "macOS 26.5.2",
+        "arch": "arm64"
+      }
+    },
+    "task_run_host": "bradflix",
+    "census_host": "brads-macbook-air",
+    "rehearsal_host": "bradflix",
+    "note": "Baseline/candidate task-run timings and the functional rehearsal (map/plan/reduce, hash-sharded head, Worker local decoder) were measured on the stable server host 'bradflix'. The laptop 'brads-macbook-air' exhibits ~2.6x single-threaded Python-baseline timing variance under sustained thermal load, which corrupts the candidate-vs-baseline speedup ratio but never affects binding equality or determinism (identical on both hosts). Census token-universe metrics are hardware-independent and were computed on the laptop."
+  },
   "candidate_universe": [
     15,
     5,
@@ -255,7 +278,8 @@
         "resources": {
           "remote_read_bytes": 75817550
         }
-      }
+      },
+      "host": "bradflix"
     },
     "13": {
       "baseline": {
@@ -302,7 +326,8 @@
         "resources": {
           "remote_read_bytes": 47984245
         }
-      }
+      },
+      "host": "bradflix"
     },
     "73": {
       "baseline": {
@@ -349,7 +374,8 @@
         "resources": {
           "remote_read_bytes": 80851227
         }
-      }
+      },
+      "host": "bradflix"
     },
     "76": {
       "baseline": {
@@ -396,7 +422,8 @@
         "resources": {
           "remote_read_bytes": 76862435
         }
-      }
+      },
+      "host": "bradflix"
     },
     "85": {
       "baseline": {
@@ -443,7 +470,8 @@
         "resources": {
           "remote_read_bytes": 81918916
         }
-      }
+      },
+      "host": "bradflix"
     },
     "86": {
       "baseline": {
@@ -490,7 +518,8 @@
         "resources": {
           "remote_read_bytes": 83993244
         }
-      }
+      },
+      "host": "bradflix"
     },
     "87": {
       "baseline": {
@@ -537,7 +566,8 @@
         "resources": {
           "remote_read_bytes": 82287111
         }
-      }
+      },
+      "host": "bradflix"
     }
   },
   "rehearsal": {
@@ -549,6 +579,7 @@
     "head_shard_count": 64,
     "head_sharded": true,
     "head_verified": true,
+    "host": "bradflix",
     "interruption_phases": [
       "local_write",
       "immutable_publish",
