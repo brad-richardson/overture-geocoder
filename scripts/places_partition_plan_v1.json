@@ -1,9 +1,9 @@
 {
   "schema": "overture-places-partition-plan-v1",
   "plan_version": 1,
-  "generated_from": {"overture_release": "2026-06-17.0", "partitions": 17816, "source_plan_schema": "overture-places-adaptive-genesis-plan-v1", "source_run": "30113308268", "term_rows": 554814222},
-  "partition_contract": {"caps": {"distinct_tokens": 200000, "estimated_uncompressed_bytes": 536870912, "maximum_depth": 8, "maximum_fan_in_packs": 256, "maximum_fan_in_tasks": 128, "term_rows": 1000000}, "kind": "token-sha256-nibble-prefix-v1"},
-  "headroom": {"policy": "none \u2014 seeded from a derived plan", "threshold": null},
+  "generated_from": {"overture_release": "2026-06-17.0", "partitions": 17816, "source_run": "30113308268", "term_rows": 554814222},
+  "partition_contract": {"caps": {"distinct_tokens": 200000, "estimated_uncompressed_bytes": 536870912, "maximum_depth": 8, "term_rows": 1000000}, "kind": "token-sha256-nibble-prefix-v1"},
+  "headroom": {"policy": "none", "pre_split_partitions": 0, "threshold": null},
   "cells": {
     "4ae7": ["1:0","1:1","1:2","1:3","1:4","1:5","1:6","1:7","1:8","1:9","1:a","1:b","1:c","1:d","1:e","1:f"],
     "4e56": ["1:0","1:1","1:2","1:3","1:4","1:5","1:6","1:7","1:8","1:9","1:a","1:b","1:c","1:d","1:e","1:f"],
