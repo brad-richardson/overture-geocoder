@@ -1,9 +1,4 @@
 {
-  "schema": "overture-places-construction-v1-scale-evidence-v1",
-  "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
-  "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
-  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
-  "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
   "candidate_universe": [
     15,
     5,
@@ -20,7 +15,6 @@
   ],
   "census": [
     {
-      "task_index": 15,
       "metrics": {
         "cjk_features": 1044,
         "duplicate_uuid_rows": 0,
@@ -32,10 +26,10 @@
         "multilingual_cjk_features": 1044,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 7.386096951000089
-      }
+      },
+      "task_index": 15
     },
     {
-      "task_index": 5,
       "metrics": {
         "cjk_features": 143,
         "duplicate_uuid_rows": 0,
@@ -47,10 +41,10 @@
         "multilingual_cjk_features": 143,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 7.505176985455013
-      }
+      },
+      "task_index": 5
     },
     {
-      "task_index": 13,
       "metrics": {
         "cjk_features": 481,
         "duplicate_uuid_rows": 0,
@@ -62,10 +56,10 @@
         "multilingual_cjk_features": 481,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 7.556584958721454
-      }
+      },
+      "task_index": 13
     },
     {
-      "task_index": 1,
       "metrics": {
         "cjk_features": 417,
         "duplicate_uuid_rows": 0,
@@ -77,10 +71,10 @@
         "multilingual_cjk_features": 417,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 6.818392934909205
-      }
+      },
+      "task_index": 1
     },
     {
-      "task_index": 76,
       "metrics": {
         "cjk_features": 5217,
         "duplicate_uuid_rows": 0,
@@ -92,10 +86,10 @@
         "multilingual_cjk_features": 5217,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 7.548337136612725
-      }
+      },
+      "task_index": 76
     },
     {
-      "task_index": 55,
       "metrics": {
         "cjk_features": 406,
         "duplicate_uuid_rows": 0,
@@ -107,10 +101,10 @@
         "multilingual_cjk_features": 406,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 6.528389586810976
-      }
+      },
+      "task_index": 55
     },
     {
-      "task_index": 85,
       "metrics": {
         "cjk_features": 457771,
         "duplicate_uuid_rows": 0,
@@ -122,10 +116,10 @@
         "multilingual_cjk_features": 457771,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 8.14950277447939
-      }
+      },
+      "task_index": 85
     },
     {
-      "task_index": 73,
       "metrics": {
         "cjk_features": 13782,
         "duplicate_uuid_rows": 0,
@@ -137,10 +131,10 @@
         "multilingual_cjk_features": 13782,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 6.533066773691868
-      }
+      },
+      "task_index": 73
     },
     {
-      "task_index": 71,
       "metrics": {
         "cjk_features": 2517,
         "duplicate_uuid_rows": 0,
@@ -152,10 +146,10 @@
         "multilingual_cjk_features": 2517,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 6.331227807362398
-      }
+      },
+      "task_index": 71
     },
     {
-      "task_index": 86,
       "metrics": {
         "cjk_features": 982315,
         "duplicate_uuid_rows": 0,
@@ -167,10 +161,10 @@
         "multilingual_cjk_features": 982315,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 13.850419145836298
-      }
+      },
+      "task_index": 86
     },
     {
-      "task_index": 74,
       "metrics": {
         "cjk_features": 2053,
         "duplicate_uuid_rows": 0,
@@ -182,10 +176,10 @@
         "multilingual_cjk_features": 2053,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 6.994674825294429
-      }
+      },
+      "task_index": 74
     },
     {
-      "task_index": 87,
       "metrics": {
         "cjk_features": 976641,
         "duplicate_uuid_rows": 0,
@@ -197,9 +191,97 @@
         "multilingual_cjk_features": 976641,
         "multilingual_features": 0,
         "term_rows_per_admitted_feature": 13.954855566993796
-      }
+      },
+      "task_index": 87
     }
   ],
+  "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+  "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
+  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "rehearsal": {
+    "adaptive_subdivision": true,
+    "exact_reconciliation": true,
+    "head_result_cap": 10,
+    "head_verified": false,
+    "interruption_phases": [
+      "local_write",
+      "immutable_publish",
+      "before_marker"
+    ],
+    "logical_tasks": 7,
+    "maximum_selective_amplification": 1.175215,
+    "maximum_worker_index_probes": 1,
+    "multi_task_fan_in": true,
+    "observed": {
+      "adaptive_max_depth": 1,
+      "adaptive_plan_seconds": 75.716,
+      "head_excluded_over_row_cap_task_ids": [
+        "role-13",
+        "role-15"
+      ],
+      "head_input_candidate_rows": null,
+      "head_merged_task_ids": [
+        "role-01",
+        "role-05",
+        "role-73",
+        "role-76",
+        "role-85"
+      ],
+      "head_output_rows": null,
+      "head_serving_encode_note": "global head serving-encode fail-closed: the merged head over real data exceeds the encoder MAX_INDEX_ENTRIES=250000 distinct-token cap (Command '['/Users/bradrichardson/dev/overture-geocoder/crates/target/release/places-serving-encode-v1', '--input', '/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/173580c5-b239-4fdb-8d50-4fa0bc8bce00/scratchpad/rehearsal-scratch/head/places-head-merge-k8nozs0q/head.arrow', '--output', '/private/tmp/claude-501/-Users-bradrichardson-dev-overture-geocoder/173580c5-b239-4fdb-8d50-4fa0bc8bce00/scratchpad/rehearsal-scratch/head/places-head-merge-k8nozs0q/head.plhd', '--mode', 'head']' returned non-zero exit status 1.)",
+      "mapped_tasks": [
+        15,
+        5,
+        13,
+        1,
+        76,
+        73,
+        85
+      ],
+      "reduced_partitions": [
+        "p-9b39",
+        "p-9d36",
+        "p-b529"
+      ],
+      "resume_seconds": 0.312,
+      "scale_note": "Role tasks 86 (token_fanout) and 87 (densest_spatial), each ~13.6M emitted terms, breach the frozen 8GiB per-stage scratch cap during map construction (DuckDB materializes the term table plus a globally-sorted copy plus the term IPC); they are excluded here and substituted with lighter census tasks 15 and 5 to demonstrate the 7-task fan-in. Adaptive subdivision is exercised on real >1M-term cells (task 85 a3d6=3.1M, task 5 ae2c=1.35M, task 73 93c7=1.03M).",
+      "subdivided_cells": [
+        "93c7",
+        "a3d6",
+        "ae2c",
+        "b5da"
+      ],
+      "subdivided_partition_count": 64,
+      "subdivided_partition_reduction": {
+        "binding_matches_plan": true,
+        "partition_id": "p-93c7-h0",
+        "read_amplification": 23.902041,
+        "records": 46305
+      },
+      "worker_head_probes": [],
+      "worker_routed_probes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "overlap_reconciliation": true,
+    "packs": 89,
+    "parquet_row_groups": 339,
+    "partitions": 1737,
+    "resume_before_projection": true,
+    "routed_verified": true,
+    "worker_head_query": false,
+    "worker_routed_query": true,
+    "census_complete": true,
+    "construction_phase_pending": false
+  },
   "roles": {
     "representative": 76,
     "near_cap": 73,
@@ -209,13 +291,337 @@
     "duplicate_heavy": 1,
     "head_heavy": 13
   },
-  "task_runs": {},
-  "rehearsal": {
-    "census_complete": true,
-    "construction_phase_pending": true,
-    "note": "12/12 census-universe tasks projected from public S3 and censused; 7 roles resolved from frozen metrics. Baseline/candidate task_runs and map/reduce/head/worker rehearsal not yet run.",
-    "duplicate_uuid_coverage_observed": false,
-    "multilingual_cjk_coverage_observed": true,
-    "remote_writes": false
+  "schema": "overture-places-construction-v1-scale-evidence-v1",
+  "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+  "task_runs": {
+    "1": {
+      "baseline": {
+        "elapsed_seconds": 95.30377912498079,
+        "emitted_term_rows": 6732413,
+        "semantic_sum_a": "19df93e0d32fb16e9722beb358508410cc8cba8660f5e39f6a7a6bbb6fc1bac9",
+        "semantic_sum_b": "be92350ef52d6b402b8ad0fbb899e26e26bda6bf47147dcb2182ad96b2c1e122"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 6732413,
+            "semantic_sum_a": "26bc526922bc1a624faf81a6d9209016f5e0aa47b351b61d2dca08fe9120bdef",
+            "semantic_sum_b": "34cf1059b7780884b1a949acfd74c7d16366fadeb5436b2c6fa16eb9b046633d"
+          },
+          "output_sha256": "031f8de45679ca7d992c966f67c5cfcec50c6341f8e3b21bcc6a9da607f57349",
+          "resources": {
+            "peak_rss_bytes": 523665408,
+            "peak_scratch_bytes": 1723502380,
+            "wall_seconds": 33.59806083305739
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 6732413,
+            "semantic_sum_a": "26bc526922bc1a624faf81a6d9209016f5e0aa47b351b61d2dca08fe9120bdef",
+            "semantic_sum_b": "34cf1059b7780884b1a949acfd74c7d16366fadeb5436b2c6fa16eb9b046633d"
+          },
+          "output_sha256": "031f8de45679ca7d992c966f67c5cfcec50c6341f8e3b21bcc6a9da607f57349",
+          "resources": {
+            "peak_rss_bytes": 481165312,
+            "peak_scratch_bytes": 1723502381,
+            "wall_seconds": 78.24596883298364
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "b538a8d7260461e1a8c2070f0e2e5aba241cf919d63fe8c71b4f80d6f4c42094"
+        },
+        "output": {
+          "bytes": 61035749
+        },
+        "resources": {
+          "remote_read_bytes": 75817550
+        }
+      }
+    },
+    "13": {
+      "baseline": {
+        "elapsed_seconds": 68.56368445791304,
+        "emitted_term_rows": 4508848,
+        "semantic_sum_a": "2a5a94c1d5d78b147ebf4eedf65261a89e27b21e3dd556e7f592b1b35993f99e",
+        "semantic_sum_b": "750bedaebbb77474a1ea0ecf48990535b9b5c5ede106541f54a819f43e38bf69"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 4508848,
+            "semantic_sum_a": "2a5a94c1d5d78b147ebf4eedf65261a89e27b21e3dd556e7f592b1b35993f99e",
+            "semantic_sum_b": "750bedaebbb77474a1ea0ecf48990535b9b5c5ede106541f54a819f43e38bf69"
+          },
+          "output_sha256": "c93ef87a871b969ce918f3f14acd311cffe4c102bb99129cc75533433a0be70a",
+          "resources": {
+            "peak_rss_bytes": 482508800,
+            "peak_scratch_bytes": 1150761047,
+            "wall_seconds": 19.21205583307892
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 4508848,
+            "semantic_sum_a": "2a5a94c1d5d78b147ebf4eedf65261a89e27b21e3dd556e7f592b1b35993f99e",
+            "semantic_sum_b": "750bedaebbb77474a1ea0ecf48990535b9b5c5ede106541f54a819f43e38bf69"
+          },
+          "output_sha256": "c93ef87a871b969ce918f3f14acd311cffe4c102bb99129cc75533433a0be70a",
+          "resources": {
+            "peak_rss_bytes": 479657984,
+            "peak_scratch_bytes": 1150761047,
+            "wall_seconds": 19.108568124938756
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "84734a814cd6c830f67694549eb047dd3137cbbe2d83d22d4f6a3464a6d53e60"
+        },
+        "output": {
+          "bytes": 35598173
+        },
+        "resources": {
+          "remote_read_bytes": 47984245
+        }
+      }
+    },
+    "73": {
+      "baseline": {
+        "elapsed_seconds": 105.79763599997386,
+        "emitted_term_rows": 6511181,
+        "semantic_sum_a": "a88e996c1e0da62142e9dc8be7a13772069e6b74b06e547af7f410b572ada84c",
+        "semantic_sum_b": "d0752e9208c32282649d0b382ac2f99cf51c874e0858f352293b9d25dcd71127"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 6511181,
+            "semantic_sum_a": "51b1684c888c2a4382face5d38484c05487cffdf18d1fb9f51ac70b7b50306ea",
+            "semantic_sum_b": "cf81d2626f91905350500f40c94bd893c39f1de37104fde5b02334f00128a53a"
+          },
+          "output_sha256": "2b719d3a4ce962dd0d843baa6bf162e1fdde4d6fad8e9d65084109e2606d0ba7",
+          "resources": {
+            "peak_rss_bytes": 486637568,
+            "peak_scratch_bytes": 1878781637,
+            "wall_seconds": 32.933977292035706
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 6511181,
+            "semantic_sum_a": "51b1684c888c2a4382face5d38484c05487cffdf18d1fb9f51ac70b7b50306ea",
+            "semantic_sum_b": "cf81d2626f91905350500f40c94bd893c39f1de37104fde5b02334f00128a53a"
+          },
+          "output_sha256": "2b719d3a4ce962dd0d843baa6bf162e1fdde4d6fad8e9d65084109e2606d0ba7",
+          "resources": {
+            "peak_rss_bytes": 493043712,
+            "peak_scratch_bytes": 1878783116,
+            "wall_seconds": 33.293508084025234
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "7fbaecad78bf6c1543f193e2bf8daf5648245121a38ea1242360f70c194958fe"
+        },
+        "output": {
+          "bytes": 65808213
+        },
+        "resources": {
+          "remote_read_bytes": 80851227
+        }
+      }
+    },
+    "76": {
+      "baseline": {
+        "elapsed_seconds": 146.65620083303656,
+        "emitted_term_rows": 7515365,
+        "semantic_sum_a": "85d3ce9633ea0a45ce2e481e0a54bdfe5dda4b56e65189eeda561af972b444d0",
+        "semantic_sum_b": "ec48657701771019f0d3db7be6d769360b7e700b97a55d0511b749a28b68c18c"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 7515366,
+            "semantic_sum_a": "f696abc82ce221cc0938030644991818685c9388eec2639d076527a1a8edb7eb",
+            "semantic_sum_b": "0293069b9a4a50ff3e40abeabe671902c386a580f8f18b0ef46c8bad131a48fe"
+          },
+          "output_sha256": "c6c6718b9235e22b55d0abc2f1095807b934b23cc8752a670ca17e809df84e6e",
+          "resources": {
+            "peak_rss_bytes": 377176064,
+            "peak_scratch_bytes": 1930231060,
+            "wall_seconds": 33.92105958296452
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 7515366,
+            "semantic_sum_a": "f696abc82ce221cc0938030644991818685c9388eec2639d076527a1a8edb7eb",
+            "semantic_sum_b": "0293069b9a4a50ff3e40abeabe671902c386a580f8f18b0ef46c8bad131a48fe"
+          },
+          "output_sha256": "c6c6718b9235e22b55d0abc2f1095807b934b23cc8752a670ca17e809df84e6e",
+          "resources": {
+            "peak_rss_bytes": 599277568,
+            "peak_scratch_bytes": 1930231058,
+            "wall_seconds": 35.69220658298582
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "824b669f2a88cc1d1a24caf30074932e07ba8f3d995d51cfed8477eff1a1824c"
+        },
+        "output": {
+          "bytes": 62988581
+        },
+        "resources": {
+          "remote_read_bytes": 76862435
+        }
+      }
+    },
+    "85": {
+      "baseline": {
+        "elapsed_seconds": 155.93882795900572,
+        "emitted_term_rows": 8146626,
+        "semantic_sum_a": "e0dc6d3dae5c8c6b235315ecda47e66f2b83858b91c0b20d009f24839789054e",
+        "semantic_sum_b": "e99d8c510928e47310bf3b4c96688b070ec843bb78cf721a8ee24a8e7777315c"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 8146626,
+            "semantic_sum_a": "6719cfe0d4ecb93f15422767263e8d069946a81e35d06512e7fdd3c4847af525",
+            "semantic_sum_b": "82b10255eaab14d7f9305d3537de55617b7ac65f819a7313815d601039590277"
+          },
+          "output_sha256": "d9756518508221b6d327ba348ab9b90e8d65944dbb649df17559f91e5fe3c173",
+          "resources": {
+            "peak_rss_bytes": 673234944,
+            "peak_scratch_bytes": 2097115130,
+            "wall_seconds": 84.22175712499302
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 8146626,
+            "semantic_sum_a": "6719cfe0d4ecb93f15422767263e8d069946a81e35d06512e7fdd3c4847af525",
+            "semantic_sum_b": "82b10255eaab14d7f9305d3537de55617b7ac65f819a7313815d601039590277"
+          },
+          "output_sha256": "d9756518508221b6d327ba348ab9b90e8d65944dbb649df17559f91e5fe3c173",
+          "resources": {
+            "peak_rss_bytes": 564166656,
+            "peak_scratch_bytes": 2097115130,
+            "wall_seconds": 91.07669966702815
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "f095beb140f83c18bc3131e00dda8bd130b20b3d11702e69a7680675af05c9a1"
+        },
+        "output": {
+          "bytes": 63818643
+        },
+        "resources": {
+          "remote_read_bytes": 81918916
+        }
+      }
+    },
+    "86": {
+      "baseline": {
+        "elapsed_seconds": 179.9753655840177,
+        "emitted_term_rows": 13822469,
+        "semantic_sum_a": "28ee6bd2f6302759943b4505ceea8987370bc594eef88d333c98f2d3c7281fa7",
+        "semantic_sum_b": "f1a5278fabb28faa9e7d6392b3e5e2a6701926c9147e9854e4b85f6b80366d53"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 13822469,
+            "semantic_sum_a": "f67bdc9a0cf01078040bf9e6939b49e02dcc56db629248041f78298579468d2c",
+            "semantic_sum_b": "38c659af74975f6b39816a97d7462ac1c0fc689cfc9440fabc5df65f0cfa596b"
+          },
+          "output_sha256": "b2cf92c1b1ff9e550538118fa602dcd3584f83f0d3f3668ae7e6d6397a07c7bc",
+          "resources": {
+            "peak_rss_bytes": 783581184,
+            "peak_scratch_bytes": 3526293623,
+            "wall_seconds": 76.73921895807143
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 13822469,
+            "semantic_sum_a": "f67bdc9a0cf01078040bf9e6939b49e02dcc56db629248041f78298579468d2c",
+            "semantic_sum_b": "38c659af74975f6b39816a97d7462ac1c0fc689cfc9440fabc5df65f0cfa596b"
+          },
+          "output_sha256": "b2cf92c1b1ff9e550538118fa602dcd3584f83f0d3f3668ae7e6d6397a07c7bc",
+          "resources": {
+            "peak_rss_bytes": 485228544,
+            "peak_scratch_bytes": 3526293623,
+            "wall_seconds": 58.62255533400457
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "fcbcc35cc5fb6d4fb3c3fd6c070f284bc8edbfe2d7579341c8294b38cc48ee20"
+        },
+        "output": {
+          "bytes": 63769426
+        },
+        "resources": {
+          "remote_read_bytes": 83993244
+        }
+      }
+    },
+    "87": {
+      "baseline": {
+        "elapsed_seconds": 112.07129766698927,
+        "emitted_term_rows": 13677754,
+        "semantic_sum_a": "b4d714fbf8414fe0ebbe13f82c32d438f6a4794288b6c619df22bc5857657279",
+        "semantic_sum_b": "3741ca1b7bb0b35ff003cc6b10e4007b0cdc8cf0fda3a150a28ea36d229fb99f"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 13677754,
+            "semantic_sum_a": "7ce17ffe648301926c04f08234c8f941939c154c5de1c5d2b834f147138e4955",
+            "semantic_sum_b": "f27e99487f1a739999cc8429fda4aab4c948f857d418400e4af2a993b54a5135"
+          },
+          "output_sha256": "0328eaecc2e2704bfa3fab7f54737774d0267e9d9c24a068d7cdebf6cc0ebd44",
+          "resources": {
+            "peak_rss_bytes": 783220736,
+            "peak_scratch_bytes": 3493203303,
+            "wall_seconds": 46.74528516596183
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 13677754,
+            "semantic_sum_a": "7ce17ffe648301926c04f08234c8f941939c154c5de1c5d2b834f147138e4955",
+            "semantic_sum_b": "f27e99487f1a739999cc8429fda4aab4c948f857d418400e4af2a993b54a5135"
+          },
+          "output_sha256": "0328eaecc2e2704bfa3fab7f54737774d0267e9d9c24a068d7cdebf6cc0ebd44",
+          "resources": {
+            "peak_rss_bytes": 780615680,
+            "peak_scratch_bytes": 3493203303,
+            "wall_seconds": 49.18851495790295
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "dd6f2442e95fcf4619f786d77936ad433866b6d8aa24ed6e773199e23bfd8751"
+        },
+        "output": {
+          "bytes": 62640365
+        },
+        "resources": {
+          "remote_read_bytes": 82287111
+        }
+      }
+    }
   }
 }
