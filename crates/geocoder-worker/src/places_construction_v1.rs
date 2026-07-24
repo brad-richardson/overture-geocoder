@@ -587,6 +587,94 @@ mod tests {
         }
     }
 
+    /// Local-decoder evidence over real, locally-built head shards.
+    ///
+    /// This is the honest, no-network `worker_local_decoder_evidence` class the
+    /// readiness validator accepts in place of a deployed Worker: it exercises
+    /// the *actual* Worker head-shard decode + lookup path
+    /// (`lookup_head_shard`, including the mis-route fail-closed check) against
+    /// the `.plhd` bytes produced by the census sharded-head build. It is
+    /// `#[ignore]`d so normal `cargo test` skips it; the rehearsal runs it with
+    /// `--ignored` after setting the sample environment.
+    ///
+    /// `PLACES_HEAD_SHARD_BITS` — head manifest `shard_bits`.
+    /// `PLACES_HEAD_SAMPLES` — `token\tshard_id\tpath` rows joined by `\n`.
+    /// `PLACES_HEAD_EVIDENCE_OUT` — path to write a small JSON evidence summary.
+    #[test]
+    #[ignore = "requires locally-built head shards; driven by the rehearsal"]
+    fn local_decoder_resolves_real_head_shards() {
+        use super::{head_shard_id, lookup_head_shard};
+        let shard_bits: u32 = std::env::var("PLACES_HEAD_SHARD_BITS")
+            .expect("PLACES_HEAD_SHARD_BITS is required")
+            .parse()
+            .expect("shard bits must parse");
+        let samples =
+            std::env::var("PLACES_HEAD_SAMPLES").expect("PLACES_HEAD_SAMPLES is required");
+        let rows: Vec<&str> = samples.lines().filter(|line| !line.is_empty()).collect();
+        assert!(!rows.is_empty(), "no head-shard samples supplied");
+        let mut resolved = 0usize;
+        let mut misroute_rejected = 0usize;
+        for row in &rows {
+            let mut parts = row.split('\t');
+            let token = parts.next().expect("token");
+            let shard_id: u32 = parts
+                .next()
+                .expect("shard id")
+                .parse()
+                .expect("shard id parses");
+            let path = parts.next().expect("path");
+            // The decoder itself must agree the token addresses this shard.
+            assert_eq!(
+                head_shard_id(token, shard_bits),
+                shard_id,
+                "sample shard id disagrees with the decoder"
+            );
+            let bytes = std::fs::read(path).expect("read head shard bytes");
+            let hits = lookup_head_shard(
+                &bytes,
+                shard_id,
+                shard_bits,
+                token,
+                64 * 1024 * 1024,
+                5_000_000,
+                64 * 1024,
+                256,
+                10,
+            )
+            .expect("real head shard must decode and resolve the token");
+            assert!(!hits.is_empty(), "token {token} resolved zero head records");
+            assert_eq!(&hits[0].token, token, "decoded head record token differs");
+            resolved += 1;
+            // Mis-route fail-closed: the same bytes served under any other shard
+            // id must be rejected rather than silently answered.
+            let wrong = (shard_id + 1) % (1u32 << shard_bits);
+            if wrong != shard_id {
+                assert!(
+                    lookup_head_shard(
+                        &bytes,
+                        wrong,
+                        shard_bits,
+                        token,
+                        64 * 1024 * 1024,
+                        5_000_000,
+                        64 * 1024,
+                        256,
+                        10,
+                    )
+                    .is_err(),
+                    "mis-routed head-shard fetch for {token} was not rejected"
+                );
+                misroute_rejected += 1;
+            }
+        }
+        if let Ok(out) = std::env::var("PLACES_HEAD_EVIDENCE_OUT") {
+            let json = format!(
+                "{{\"class\":\"worker_local_decoder_evidence\",\"decoder\":\"geocoder-worker::places_construction_v1::lookup_head_shard\",\"shard_bits\":{shard_bits},\"tokens_resolved\":{resolved},\"misroute_rejections\":{misroute_rejected}}}"
+            );
+            std::fs::write(out, json).expect("write head decoder evidence");
+        }
+    }
+
     #[test]
     fn rejects_corruption_order_regression_and_header_lies() {
         let mut corrupt_index = artifact(

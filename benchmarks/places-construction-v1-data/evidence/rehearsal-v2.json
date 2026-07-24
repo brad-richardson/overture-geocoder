@@ -1,0 +1,120 @@
+{
+  "adaptive_subdivision": true,
+  "exact_reconciliation": true,
+  "head_populated_shards": 64,
+  "head_result_cap": 10,
+  "head_shard_bits": 6,
+  "head_shard_count": 64,
+  "head_sharded": true,
+  "head_verified": true,
+  "interruption_phases": [
+    "local_write",
+    "immutable_publish",
+    "before_marker"
+  ],
+  "logical_tasks": 7,
+  "maximum_selective_amplification": 1.132744,
+  "maximum_worker_index_probes": 1,
+  "multi_task_fan_in": true,
+  "observed": {
+    "adaptive_max_depth": 2,
+    "adaptive_plan_seconds": 89.704,
+    "head_excluded_over_row_cap_task_ids": [
+      "role-01",
+      "role-13",
+      "role-73",
+      "role-87"
+    ],
+    "head_input_candidate_rows": 4745166,
+    "head_merged_task_ids": [
+      "role-76",
+      "role-85",
+      "role-86"
+    ],
+    "head_serving_encode_note": "",
+    "head_total_index_entries": 2283623,
+    "head_total_records": 4349810,
+    "mapped_tasks": [
+      76,
+      73,
+      87,
+      86,
+      85,
+      1,
+      13
+    ],
+    "reduced_partitions": [
+      "p-b0de",
+      "p-9b39",
+      "p-9d36"
+    ],
+    "resume_seconds": 0.272,
+    "scale_note": "Full seven-role fan-in over the real 2026-06-17.0 census tasks, including the dense CJK role tasks 86 (token_fanout) and 87 (densest_spatial). Post-#143 map scratch hygiene keeps their per-stage scratch under the 8 GiB cap, so no substitution is needed. The global head is hash-sharded and every shard is reconciled against an independent reduce-side binding; the actual Worker head-shard decoder resolves real tokens from the built shard bytes (worker_local_decoder_evidence).",
+    "subdivided_cells": [
+      "93c7",
+      "a3d6",
+      "afdc",
+      "b1df",
+      "b1e0",
+      "b1e1",
+      "b2e1",
+      "b2e3",
+      "b5da"
+    ],
+    "subdivided_partition_count": 159,
+    "subdivided_partition_reduction": {
+      "binding_matches_plan": true,
+      "partition_id": "p-93c7-h0",
+      "read_amplification": 23.89688,
+      "records": 46315
+    },
+    "worker_head_probes": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "worker_local_decoder": {
+      "class": "worker_local_decoder_evidence",
+      "decoder": "geocoder-worker::places_construction_v1::lookup_head_shard",
+      "manifest_key": "serve/places-v1/head-manifest/sha256/11b90f0f22f55723c3b5f92db43ad1bb666cb5bee6d04ea887b4086579d3d61a.json",
+      "misroute_rejections": 8,
+      "sample_tokens": [
+        "\u5805\u305f",
+        "\u30a6\u30a7\u30eb\u30c6\u30db\u30f3\u30c6",
+        "\u1107\u116e\u11a8\u1106\u1175",
+        "\u8328\u6728\u897f\u99c5\u524d\u5e97",
+        "\u1106\u1166\u110c\u1169\u11bc\u1103\u1173\u1107\u1175\u1100\u1165\u11ab",
+        "\u5c71\u6771\u6599\u7406",
+        "\u5b87\u57ce\u6574\u5099\u8eca\u5834",
+        "\u304d\u3082\u3064\u304d\u60c5\u5831\u5316\u63a8\u9032\u30bb\u30f3\u30bf\u30fc"
+      ],
+      "shard_bits": 6,
+      "tokens_resolved": 8
+    },
+    "worker_routed_probes": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "overlap_reconciliation": true,
+  "packs": 127,
+  "parquet_row_groups": 492,
+  "partitions": 1205,
+  "resume_before_projection": true,
+  "routed_verified": true,
+  "worker_head_query": true,
+  "worker_local_decoder_evidence": true,
+  "worker_routed_query": true
+}

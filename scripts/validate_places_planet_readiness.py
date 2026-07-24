@@ -172,7 +172,7 @@ def validate(
     spec_sha256 = sha256_file(spec_path)
     inventory_file_sha256 = sha256_file(inventory_path)
     require(
-        spec.get("schema") == "overture-places-construction-v1-evidence-spec-v1",
+        spec.get("schema") == "overture-places-construction-v1-evidence-spec-v2",
         "evidence spec schema differs",
     )
     try:
@@ -397,12 +397,39 @@ def validate(
         ("adaptive_subdivision", "adaptive subdivision is absent"),
         ("multi_task_fan_in", "multi-task fan-in is absent"),
         ("routed_verified", "routed artifacts are unverified"),
-        ("head_verified", "head artifact is unverified"),
+        ("head_verified", "sharded head artifact is unverified"),
+        ("head_sharded", "head is not hash-sharded"),
         ("worker_routed_query", "Worker routed query evidence is absent"),
         ("worker_head_query", "Worker head query evidence is absent"),
+        # worker_head_query is produced by the ACTUAL geocoder-worker head-shard
+        # decoder resolving real tokens from locally-built PLHD shard bytes. The
+        # spec names this the worker_local_decoder_evidence class: no deployed
+        # Worker or R2 fetch is required or implied. Require the class flag so the
+        # evidence provenance is explicit and honest.
+        ("worker_local_decoder_evidence", "Worker local-decoder evidence is absent"),
         ("resume_before_projection", "resume-before-projection evidence is absent"),
     ):
         require(rehearsal.get(field) is True, reason)
+    sharded_spec = (
+        spec.get("acceptance_gates", {}).get("head", {}).get("sharded", {})
+        if isinstance(spec.get("acceptance_gates"), dict)
+        else {}
+    )
+    require(
+        sharded_spec.get("manifest_schema") == "overture-places-global-head-sharded-v2",
+        "sharded head manifest schema differs from spec",
+    )
+    require(
+        sharded_spec.get("independent_reduce_side_binding_required") is True,
+        "spec does not require the independent reduce-side head binding",
+    )
+    require(
+        spec.get("acceptance_gates", {})
+        .get("coverage", {})
+        .get("worker_local_decoder_evidence_required")
+        is True,
+        "spec does not require worker local-decoder evidence",
+    )
     require(
         rehearsal.get("interruption_phases") == coverage["interruption_phases"],
         "interruption phase set differs",
