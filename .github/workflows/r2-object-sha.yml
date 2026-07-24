@@ -1,0 +1,34 @@
+name: R2 Object SHA
+
+# Read-only: fetch one object from the geocoder-shards bucket and print its
+# byte length and SHA-256. Used to pin exact manifest identities (e.g. the
+# legacy core release-manifest) without distributing R2 credentials locally.
+
+on:
+  workflow_dispatch:
+    inputs:
+      object_key:
+        description: "Object key within the bucket (e.g. 2026-07-13.0/release-manifest.json)"
+        required: true
+        type: string
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  BUCKET: geocoder-shards
+
+jobs:
+  object-sha:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Fetch object and compute SHA-256
+        run: |
+          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          KEY="${{ inputs.object_key }}"
+          aws s3 cp "s3://$BUCKET/$KEY" object.bin --endpoint-url "$ENDPOINT" --region auto
+          echo "object_key=$KEY"
+          echo "byte_length=$(wc -c < object.bin | tr -d ' ')"
+          echo "sha256=$(sha256sum object.bin | awk '{print $1}')"
