@@ -25,7 +25,7 @@ SCRIPT_DIR = ROOT / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-import global_v2_places_inventory as inventory  # noqa: E402
+import places_inventory_v1 as inventory  # noqa: E402
 from experiment_hosted_rowgroups import (  # noqa: E402
     BoundedWriter,
     network_received_bytes,

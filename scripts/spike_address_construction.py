@@ -262,7 +262,7 @@ def run_legacy_baseline(
     script_dir = Path(__file__).resolve().parent
     sys.path.insert(0, str(script_dir))
     try:
-        import global_v2_address_map as address_map
+        import pack_schemas_v1 as pack_schemas
         from experiment_address_reduce import strict_batch_records
     finally:
         sys.path.pop(0)
@@ -333,26 +333,26 @@ def run_legacy_baseline(
         streams = [read_chunk(path) for path in chunk_paths]
         with pq.ParquetWriter(
             output_path,
-            address_map.shuffle_schema(),
+            pack_schemas.shuffle_schema(),
             compression="zstd",
             compression_level=6,
             version="2.6",
         ) as writer:
             for _, payload in heapq.merge(*streams):
                 output_rows.append(
-                    address_map._payload_to_shuffle_row(payload, maximum_hash_bits=16)
+                    pack_schemas.payload_to_shuffle_row(payload, maximum_hash_bits=16)
                 )
                 rows += 1
                 if len(output_rows) == batch_rows:
                     table = pa.Table.from_pylist(
-                        output_rows, schema=address_map.shuffle_schema()
+                        output_rows, schema=pack_schemas.shuffle_schema()
                     )
                     writer.write_table(table, row_group_size=batch_rows)
                     peak_batch_rows = max(peak_batch_rows, len(output_rows))
                     output_rows = []
             if output_rows:
                 table = pa.Table.from_pylist(
-                    output_rows, schema=address_map.shuffle_schema()
+                    output_rows, schema=pack_schemas.shuffle_schema()
                 )
                 writer.write_table(table, row_group_size=batch_rows)
                 peak_batch_rows = max(peak_batch_rows, len(output_rows))

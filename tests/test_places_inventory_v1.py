@@ -10,7 +10,7 @@ SCRIPT_DIR = Path(__file__).resolve().parents[1] / "scripts"
 if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
-from global_v2_places_inventory import (  # noqa: E402
+from places_inventory_v1 import (  # noqa: E402
     REQUIRED_FIELD_TYPES,
     approved_prefix,
     build_inventory,

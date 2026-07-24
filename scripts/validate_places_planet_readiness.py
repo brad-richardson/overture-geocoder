@@ -31,7 +31,7 @@ def sha256_file(path: Path) -> str:
 
 
 def load_inventory_module():
-    path = ROOT / "scripts/global_v2_places_inventory.py"
+    path = ROOT / "scripts/places_inventory_v1.py"
     spec = importlib.util.spec_from_file_location("places_readiness_inventory", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)

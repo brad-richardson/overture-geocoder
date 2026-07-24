@@ -640,7 +640,7 @@ def main() -> None:
     try:
         import pyarrow.fs as pafs
     except ImportError as exc:  # pragma: no cover - hosted dependency boundary
-        raise SystemExit("global_v2_places_inventory.py requires pyarrow") from exc
+        raise SystemExit("places_inventory_v1.py requires pyarrow") from exc
     filesystem = pafs.S3FileSystem(anonymous=True, region=REGION)
     listed = list_source_objects(args.release)
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:

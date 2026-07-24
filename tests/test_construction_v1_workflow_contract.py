@@ -77,8 +77,6 @@ def test_execute_data_plane_uses_the_native_adapter_not_a_missing_contract():
     value = text()
     for command in ("run-map", "plan-reduce", "run-reduce", "run-head", "finalize"):
         assert f"scripts/construction_v1_hosted.py {command}" in value
-    # It must NOT depend on the global_v2 contract this workflow never produces.
-    assert "global_v2_hosted.py" not in value
     assert "control/runtime.json" in value
 
 
