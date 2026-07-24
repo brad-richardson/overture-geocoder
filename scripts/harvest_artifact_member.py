@@ -48,7 +48,19 @@ def get_range(start: int, length: int) -> bytes:
         URL, headers={"Range": f"bytes={start}-{start + length - 1}"}
     )
     with urllib.request.urlopen(request) as response:
-        return response.read()
+        # A host that ignores Range answers 200 with the WHOLE object, which for
+        # a 63 GB artifact would silently read the lot and desync every offset
+        # below. Refuse anything that is not a partial response of the exact
+        # length asked for.
+        if response.status != 206:
+            raise SystemExit(
+                f"range request returned HTTP {response.status}, not 206; "
+                "the host is not honouring Range"
+            )
+        data = response.read()
+    if len(data) != length:
+        raise SystemExit(f"range request returned {len(data)} bytes, expected {length}")
+    return data
 
 
 def total_size() -> int:
@@ -74,7 +86,7 @@ print(f"central directory: {entries:,} entries, {cd_size:,} bytes @ {cd_offset:,
 
 directory = get_range(cd_offset, cd_size)
 position = 0
-found = None
+matches: list[tuple] = []
 scanned = 0
 while position < len(directory) - 4 and directory[position : position + 4] == b"PK\x01\x02":
     name_len, extra_len, comment_len = struct.unpack(
@@ -109,13 +121,21 @@ while position < len(directory) - 4 and directory[position : position + 4] == b"
                 index += 8
         ptr += 4 + tag_size
     scanned += 1
-    if name.endswith(WANTED_SUFFIX):
-        found = (name, method, comp_size, uncomp_size, local_offset)
-        break
+    # Anchor on a path boundary: a bare endswith would let "otherplan/plan.json"
+    # satisfy a request for "plan/plan.json". Scan the whole directory rather
+    # than stopping at the first hit, so an ambiguous request fails loudly
+    # instead of silently returning whichever member happened to come first.
+    if name == WANTED_SUFFIX or name.endswith("/" + WANTED_SUFFIX):
+        matches.append((name, method, comp_size, uncomp_size, local_offset))
     position += 46 + name_len + extra_len + comment_len
 
-if not found:
+if not matches:
     raise SystemExit(f"{WANTED_SUFFIX} not found after scanning {scanned:,} entries")
+if len(matches) > 1:
+    raise SystemExit(
+        f"{WANTED_SUFFIX} is ambiguous, matching: {[m[0] for m in matches]}"
+    )
+found = matches[0]
 
 name, method, comp_size, uncomp_size, local_offset = found
 print(

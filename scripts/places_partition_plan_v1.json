@@ -1,7 +1,7 @@
 {
   "schema": "overture-places-partition-plan-v1",
   "plan_version": 1,
-  "generated_from": {"overture_release": "2026-06-17.0", "partitions": 17816, "source_run": "30113308268", "term_rows": 554814222},
+  "generated_from": {"overture_release": "2026-06-17.0", "partitions": 17816, "populated_cells": 16511, "source_run": "30113308268", "term_rows": 554814222},
   "partition_contract": {"caps": {"distinct_tokens": 200000, "estimated_uncompressed_bytes": 536870912, "maximum_depth": 8, "term_rows": 1000000}, "kind": "token-sha256-nibble-prefix-v1"},
   "headroom": {"policy": "none", "pre_split_partitions": 0, "threshold": null},
   "cells": {

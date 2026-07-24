@@ -130,7 +130,7 @@ tree is depth 0. That is what makes this cheap:
 |---|---|
 | cells in the tree | **83** (of 16,511 populated) |
 | leaf branches | 1,388 |
-| file size | **10,259 bytes**, 92 lines, one cell per line |
+| file size | **10,154 bytes**, 93 lines, one cell per line |
 | partitions reconstructed | **17,816 — exactly matches the derived plan** |
 
 The whole planet partition tree is ten kilobytes and diffs cleanly. Contents:
@@ -258,10 +258,18 @@ per-partition counts from the gate serve both purposes.
    the 63 GB `cv1-plan` artifact by reading its ZIP64 central directory over HTTP
    range requests and inflating one member — about 2 MB transferred instead of
    63 GB (`scratchpad/harvest.py`). Reduced to the 10 KB committed tree above.
-3. **Build the generator and reproduce v1 from it.** Reproducing a known-good
-   answer is the correctness proof, and the seed makes that check exact:
-   the generator must emit byte-identical `cells` when run with
-   `--headroom-fraction none` against release `2026-06-17.0`.
+3. **Build the generator and reproduce v1 from it. Done** —
+   `scripts/generate_places_partition_plan.py`, with `--check` verifying the
+   committed plan byte for byte. The committed v1 is the generator's own output.
+
+   Note what that proof does and does not cover. `cells` records only
+   subdivided branches (1,388 of 17,816 partitions, 7.8%); the other 16,428 are
+   implicit depth-0 partitions determined by the *populated-cell set*, which
+   lives in the data. A generator that dropped or invented depth-0 cells would
+   leave `cells` untouched. The plan therefore records `populated_cells`
+   alongside `partitions`, so a byte-for-byte `--check` pins the whole partition
+   set via the identity `populated_cells - subdivided_cells + branches =
+   partitions`.
 4. Map-side assignment plus the fail-closed gate.
 5. R2 staging for partition-keyed fragments; reduce reads selectively.
 

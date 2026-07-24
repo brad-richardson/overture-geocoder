@@ -302,6 +302,12 @@ def main(argv: list[str] | None = None) -> int:
             "overture_release": args.release,
             "source_run": args.source_run,
             "partitions": len(leaves),
+            # The tree only records subdivided branches, so `cells` alone pins
+            # just those partitions -- every other populated cell contributes an
+            # implicit depth-0 partition that lives in the data, not the file.
+            # Recording the populated-cell set makes a byte-for-byte --check
+            # cover the whole partition set instead of the subdivided fraction.
+            "populated_cells": len({leaf.cell for leaf in leaves}),
             "term_rows": sum(leaf.rows for leaf in measured),
         },
         "partition_contract": {"kind": SCHEME_KIND, "caps": caps},
