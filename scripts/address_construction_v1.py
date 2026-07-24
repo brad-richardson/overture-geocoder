@@ -18,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+from stat import S_ISREG
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -149,13 +150,25 @@ class StageWatchdog:
 
     @staticmethod
     def disk_bytes(roots: list[Path]) -> int:
-        return sum(
-            path.stat().st_size
-            for root in roots
-            if root.exists()
-            for path in root.rglob("*")
-            if path.is_file()
-        )
+        # Scratch churns continuously while the guarded stage runs: DuckDB
+        # writes and unlinks spill blocks under the same workspace, and packs
+        # are unlinked after upload. A path can therefore vanish between being
+        # listed and being measured. That race is routine, so skip the entry
+        # instead of letting the error reach the monitor loop, where it would
+        # read as the watchdog failing to observe and abort a healthy stage.
+        # One stat per path also avoids a second is_file() syscall.
+        total = 0
+        for root in roots:
+            if not root.exists():
+                continue
+            for path in root.rglob("*"):
+                try:
+                    info = path.stat()
+                except OSError:
+                    continue
+                if S_ISREG(info.st_mode):
+                    total += info.st_size
+        return total
 
     def _observe(self) -> None:
         self.peak_rss_bytes = max(self.peak_rss_bytes, self.process.memory_info().rss)
