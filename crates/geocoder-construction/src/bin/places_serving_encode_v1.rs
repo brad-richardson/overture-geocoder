@@ -17,7 +17,39 @@ const HEAD_MAGIC: &[u8; 8] = b"PLHD0002";
 const HEADER_BYTES: u64 = 32;
 const MAX_INDEX_ENTRIES: usize = 250_000;
 const MAX_INDEX_KEY_BYTES: usize = 268_435_456;
+// Dual-lane additive head-entry digest domains. Summed mod 2^256, so the digest
+// is commutative/associative over entries and therefore partition-independent:
+// the sum over a set of head shards equals the sum over the un-sharded head.
+const HEAD_DIGEST_DOMAIN_A: &[u8] = b"overture-places-head-shard-v1\0";
+const HEAD_DIGEST_DOMAIN_B: &[u8] = b"overture-places-head-shard-v1\x01";
 type OrderKey = (String, String, String, u8, [u8; 16], u32, u32, u64);
+
+fn head_digest(domain: &[u8], payload: &[u8]) -> [u8; 32] {
+    let mut hasher = Sha256::new();
+    hasher.update(domain);
+    hasher.update((payload.len() as u64).to_be_bytes());
+    hasher.update(payload);
+    hasher.finalize().into()
+}
+
+fn add_256(accumulator: &mut [u8; 32], value: &[u8; 32]) {
+    let mut carry = 0_u16;
+    for index in (0..32).rev() {
+        let sum = u16::from(accumulator[index]) + u16::from(value[index]) + carry;
+        accumulator[index] = sum as u8;
+        carry = sum >> 8;
+    }
+}
+
+fn hex(value: &[u8]) -> String {
+    const DIGITS: &[u8; 16] = b"0123456789abcdef";
+    let mut output = String::with_capacity(value.len() * 2);
+    for byte in value {
+        output.push(DIGITS[(byte >> 4) as usize] as char);
+        output.push(DIGITS[(byte & 0x0f) as usize] as char);
+    }
+    output
+}
 
 struct IndexEntry {
     hash: u64,
@@ -91,12 +123,18 @@ fn main() -> Result<()> {
     let mut input = None;
     let mut output = None;
     let mut mode = None;
+    let mut digest_out: Option<PathBuf> = None;
     while let Some(flag) = values.next() {
         let value = values.next().context("missing command-line value")?;
         match flag.to_str() {
             Some("--input") => input = Some(PathBuf::from(value)),
             Some("--output") => output = Some(PathBuf::from(value)),
             Some("--mode") => mode = value.to_str().map(str::to_owned),
+            // Optional. When set, write the artifact's records + dual-lane
+            // additive head-entry digest as JSON. The sharded-head control
+            // plane collects these per shard and the sharded verifier
+            // independently re-derives and reconciles them from the bytes.
+            Some("--digest-out") => digest_out = Some(PathBuf::from(value)),
             _ => bail!("unknown argument {}", flag.to_string_lossy()),
         }
     }
@@ -121,6 +159,8 @@ fn main() -> Result<()> {
     let mut index = Vec::<IndexEntry>::new();
     let mut active_key: Option<Vec<u8>> = None;
     let mut previous: Option<OrderKey> = None;
+    let mut digest_sum_a = [0_u8; 32];
+    let mut digest_sum_b = [0_u8; 32];
     for batch in reader {
         let batch = batch?;
         let groups = required::<StringArray>(&batch, "execution_group")?;
@@ -222,6 +262,16 @@ fn main() -> Result<()> {
                 .len()
                 .try_into()
                 .context("serving entry exceeds u32")?;
+            if digest_out.is_some() {
+                add_256(
+                    &mut digest_sum_a,
+                    &head_digest(HEAD_DIGEST_DOMAIN_A, &entry),
+                );
+                add_256(
+                    &mut digest_sum_b,
+                    &head_digest(HEAD_DIGEST_DOMAIN_B, &entry),
+                );
+            }
             let serving_key = index_key(&mode, cell, token);
             if active_key.as_ref() != Some(&serving_key) {
                 if index.len() >= MAX_INDEX_ENTRIES {
@@ -285,5 +335,13 @@ fn main() -> Result<()> {
     destination.write_all(&index_count.to_le_bytes())?;
     destination.write_all(&0_u32.to_le_bytes())?;
     destination.flush()?;
+    if let Some(path) = digest_out {
+        let sidecar = format!(
+            "{{\"records\":{count},\"index_entries\":{index_count},\"head_sum_a\":\"{}\",\"head_sum_b\":\"{}\"}}",
+            hex(&digest_sum_a),
+            hex(&digest_sum_b)
+        );
+        std::fs::write(path, sidecar).context("write head digest sidecar")?;
+    }
     Ok(())
 }

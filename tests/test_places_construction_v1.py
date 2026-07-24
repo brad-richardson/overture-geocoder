@@ -508,3 +508,226 @@ def test_complete_local_places_slice_interrupt_resume_and_reconcile(
         ]
     )
     assert result.returncode != 0
+
+
+_VOCAB = [
+    "cafe",
+    "bakery",
+    "museum",
+    "harbor",
+    "market",
+    "garden",
+    "temple",
+    "library",
+    "theater",
+    "bridge",
+    "castle",
+    "gallery",
+    "station",
+    "clinic",
+    "studio",
+    "arcade",
+]
+
+
+def _sharded_head_marker(module, binaries, tmp_path, store, task_id, seed, count):
+    rows = []
+    for index in range(count):
+        words = " ".join(
+            _VOCAB[(index + offset) % len(_VOCAB)] for offset in range(3)
+        )
+        rows.append(
+            {
+                "id": str(uuid.UUID(int=int(seed, 16) * 1_000_000 + index)),
+                "primary_name": f"{words} {index}",
+                "category": "library",
+                "locality": "Town",
+                "country": "XX",
+                "confidence": 1.0 - (index % 8) / 20,
+                "point": [0.0, 0.0],
+                "source_row_index": index,
+            }
+        )
+    source = tmp_path / f"{task_id}.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    parquet = pq.ParquetFile(source)
+    (tmp_path / f"{task_id}-limits.json").write_text(
+        json.dumps(
+            {
+                "objects": [
+                    {
+                        "records": len(rows),
+                        "row_groups": parquet.metadata.num_row_groups,
+                    }
+                ]
+            }
+        )
+    )
+    limits = module.Limits(
+        max_input_rows=1_000,
+        max_pack_rows=2_000,
+        parquet_row_group_rows=700,
+        max_output_bytes=512 * 1024**2,
+        wall_seconds=120,
+        allow_unpinned_duckdb=True,
+    )
+    marker = module.map_task(
+        input_path=source,
+        source_limits=tmp_path / f"{task_id}-limits.json",
+        store=store,
+        scratch_root=tmp_path / f"{task_id}-scratch",
+        request_sha256=seed * 32,
+        task_id=task_id,
+        transform_binary=binaries["places-transform-v1"],
+        proof_binary=binaries["places-proof-directory"],
+        limits=limits,
+    )
+    return marker, limits
+
+
+def test_sharded_global_head_partitions_reconciles_and_serves(
+    tmp_path, construction_binaries, construction_module
+):
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker_a, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-a", "ab", 160
+    )
+    marker_b, _ = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-b", "cd", 140
+    )
+
+    result = module.build_sharded_global_head_from_markers(
+        markers=[marker_a, marker_b],
+        store=store,
+        scratch_root=tmp_path / "head-scratch",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=limits,
+        shard_bits=4,
+    )
+    assert result["shard_count"] == 16
+    # The vocabulary spreads tokens across several shards.
+    assert result["populated_shards"] >= 2
+    # build_* already ran the sharded verifier; totals reconcile.
+    assert result["total_records"] > 0
+    assert result["total_index_entries"] > 0
+
+    # Every entry lands in the shard its index hash addresses, and the union of
+    # all shard entries equals a single un-sharded head over the same merge.
+    seen_records = 0
+    union_tokens = set()
+    for shard in result["shard_objects"]:
+        head_rows = decode_serving(store.path(shard["key"]), "head")
+        seen_records += len(head_rows)
+        for row in head_rows:
+            assert module.head_shard_of(row["token"], 4) == shard["shard_id"]
+            union_tokens.add(row["token"])
+    assert seen_records == result["total_records"]
+    assert len(union_tokens) == result["total_index_entries"]
+
+    # Worker-style serving path: token -> shard id -> that shard answers.
+    sample_token = sorted(union_tokens)[0]
+    target = module.head_shard_of(sample_token, 4)
+    shard_key = next(
+        shard["key"] for shard in result["shard_objects"] if shard["shard_id"] == target
+    )
+    hits = [
+        row
+        for row in decode_serving(store.path(shard_key), "head")
+        if row["token"] == sample_token
+    ]
+    assert hits and hits[0]["rank"] == max(row["rank"] for row in hits)
+
+
+def test_sharded_global_head_merge_is_order_independent(
+    tmp_path, construction_binaries, construction_module
+):
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker_a, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-a", "ab", 130
+    )
+    marker_b, _ = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-b", "cd", 170
+    )
+
+    def build(order):
+        return module.build_sharded_global_head_from_markers(
+            markers=order,
+            store=store,
+            scratch_root=tmp_path / "head-scratch",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+            shard_bits=5,
+        )
+
+    forward = build([marker_a, marker_b])
+    reverse = build([marker_b, marker_a])
+    # Associative/idempotent tree-merge: fold order cannot change the bound set.
+    for field in (
+        "total_records",
+        "total_index_entries",
+        "populated_shards",
+        "head_sum_a",
+        "head_sum_b",
+    ):
+        assert forward[field] == reverse[field]
+
+
+def test_sharded_head_manifest_tamper_fails_closed(
+    tmp_path, construction_binaries, construction_module
+):
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-a", "ab", 120
+    )
+    result = module.build_sharded_global_head_from_markers(
+        markers=[marker],
+        store=store,
+        scratch_root=tmp_path / "head-scratch",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=limits,
+        shard_bits=4,
+    )
+    manifest = json.loads(store.path(result["manifest_object"]["key"]).read_text())
+    # Copy shard files to a stable local path the tampered manifest points at.
+    shard_dir = tmp_path / "verify-shards"
+    shard_dir.mkdir()
+    for shard in manifest["shards"]:
+        source = store.path(
+            next(
+                obj["key"]
+                for obj in result["shard_objects"]
+                if obj["shard_id"] == shard["shard_id"]
+            )
+        )
+        target = shard_dir / f"shard-{shard['shard_id']:06d}.plhd"
+        target.write_bytes(source.read_bytes())
+        shard["path"] = str(target)
+
+    def verify(doc) -> int:
+        path = tmp_path / "manifest.json"
+        path.write_text(json.dumps(doc))
+        return subprocess.run(
+            [
+                str(construction_binaries["places-serving-verify-v1"]),
+                "--mode",
+                "head-sharded",
+                "--manifest",
+                str(path),
+            ]
+        ).returncode
+
+    assert verify(manifest) == 0
+    inflated = json.loads(json.dumps(manifest))
+    inflated["total_records"] += 1
+    assert verify(inflated) != 0
+    reassigned = json.loads(json.dumps(manifest))
+    reassigned["shards"][0]["shard_id"] = (
+        reassigned["shards"][0]["shard_id"] + 1
+    ) % reassigned["shard_count"]
+    assert verify(reassigned) != 0
