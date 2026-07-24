@@ -15,6 +15,7 @@ import pytest
 pa = pytest.importorskip("pyarrow")
 ipc = pytest.importorskip("pyarrow.ipc")
 pq = pytest.importorskip("pyarrow.parquet")
+pytest.importorskip("pyarrow.compute")  # register pa.compute; not auto-imported in pyarrow 25
 
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests/fixtures/places_construction_v1.json"

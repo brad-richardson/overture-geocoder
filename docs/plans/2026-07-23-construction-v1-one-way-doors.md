@@ -61,10 +61,13 @@ waive any of them for schedule pressure on the 25th.
   merge" is by definition a one-way accumulation. Fine — but the frozen
   `maximum_level = 12` equality check plus the 1.5M-row hard abort means a
   future dense cell (Tokyo-class) can wedge planning with no escape hatch.
-  Before first publish, either (a) census-verify the densest global cells
-  against the cap on the target release, or (b) adopt the adaptive
-  subdivision (checkpoint-5) as the contract. Changing the partition scheme
-  after publication invalidates all Places serving partitions at once.
+  RESOLVED BY MEASUREMENT (2026-07-24 census, real 2026-06-17.0 data): six
+  base 256x256 cells exceed the 1,000,000 term-row hard cap — ae2c 1.35M,
+  93c7 1.77M, 8fcb 2.81M, a3d6 3.11M, b1e0 5.76M, b2e3 8.55M (Japan). Four
+  exceed 1.5M. Adaptive subdivision (checkpoint-5) MUST be the contract;
+  the fixed-grid abort path cannot survive planet data. Changing the
+  partition scheme after publication invalidates all Places serving
+  partitions at once, so this must be locked before genesis.
 - Address: country + FNV-1a high-bit, 1M-row sticky splits — same logic;
   cheaper to widen the hash-bit ceiling now than after genesis.
 

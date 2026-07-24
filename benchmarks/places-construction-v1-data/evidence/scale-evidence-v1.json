@@ -4,15 +4,218 @@
   "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
   "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
   "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
-  "candidate_universe": [15, 5, 13, 1, 76, 55, 85, 73, 71, 86, 74, 87],
-  "census": [],
-  "roles": {},
+  "candidate_universe": [
+    15,
+    5,
+    13,
+    1,
+    76,
+    55,
+    85,
+    73,
+    71,
+    86,
+    74,
+    87
+  ],
+  "census": [
+    {
+      "task_index": 15,
+      "metrics": {
+        "cjk_features": 1044,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "c329",
+        "maximum_spatial_cell_term_rows": 782343,
+        "maximum_token": "us",
+        "maximum_token_rows": 348537,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 1044,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.386096951000089
+      }
+    },
+    {
+      "task_index": 5,
+      "metrics": {
+        "cjk_features": 143,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "ae2c",
+        "maximum_spatial_cell_term_rows": 1349743,
+        "maximum_token": "us",
+        "maximum_token_rows": 445671,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 143,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.505176985455013
+      }
+    },
+    {
+      "task_index": 13,
+      "metrics": {
+        "cjk_features": 481,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b529",
+        "maximum_spatial_cell_term_rows": 850908,
+        "maximum_token": "us",
+        "maximum_token_rows": 596673,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 481,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.556584958721454
+      }
+    },
+    {
+      "task_index": 1,
+      "metrics": {
+        "cjk_features": 417,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "9b39",
+        "maximum_spatial_cell_term_rows": 930606,
+        "maximum_token": "mx",
+        "maximum_token_rows": 929154,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 417,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.818392934909205
+      }
+    },
+    {
+      "task_index": 76,
+      "metrics": {
+        "cjk_features": 5217,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "96cc",
+        "maximum_spatial_cell_term_rows": 689927,
+        "maximum_token": "vn",
+        "maximum_token_rows": 354477,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 5217,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.548337136612725
+      }
+    },
+    {
+      "task_index": 55,
+      "metrics": {
+        "cjk_features": 406,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "bd83",
+        "maximum_spatial_cell_term_rows": 417205,
+        "maximum_token": "fr",
+        "maximum_token_rows": 302349,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 406,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.528389586810976
+      }
+    },
+    {
+      "task_index": 85,
+      "metrics": {
+        "cjk_features": 457771,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "a3d6",
+        "maximum_spatial_cell_term_rows": 3109170,
+        "maximum_token": "kr",
+        "maximum_token_rows": 513157,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 457771,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 8.14950277447939
+      }
+    },
+    {
+      "task_index": 73,
+      "metrics": {
+        "cjk_features": 13782,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "93c7",
+        "maximum_spatial_cell_term_rows": 1035449,
+        "maximum_token": "th",
+        "maximum_token_rows": 524905,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 13782,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.533066773691868
+      }
+    },
+    {
+      "task_index": 71,
+      "metrics": {
+        "cjk_features": 2517,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "93c7",
+        "maximum_spatial_cell_term_rows": 1768598,
+        "maximum_token": "in",
+        "maximum_token_rows": 499763,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 2517,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.331227807362398
+      }
+    },
+    {
+      "task_index": 86,
+      "metrics": {
+        "cjk_features": 982315,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b1e0",
+        "maximum_spatial_cell_term_rows": 5759519,
+        "maximum_token": "jp",
+        "maximum_token_rows": 984845,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 982315,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 13.850419145836298
+      }
+    },
+    {
+      "task_index": 74,
+      "metrics": {
+        "cjk_features": 2053,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "8fcb",
+        "maximum_spatial_cell_term_rows": 2814220,
+        "maximum_token": "id",
+        "maximum_token_rows": 335689,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 2053,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.994674825294429
+      }
+    },
+    {
+      "task_index": 87,
+      "metrics": {
+        "cjk_features": 976641,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b2e3",
+        "maximum_spatial_cell_term_rows": 8554440,
+        "maximum_token": "jp",
+        "maximum_token_rows": 980122,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 976641,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 13.954855566993796
+      }
+    }
+  ],
+  "roles": {
+    "representative": 76,
+    "near_cap": 73,
+    "densest_spatial": 87,
+    "token_fanout": 86,
+    "multilingual_cjk": 85,
+    "duplicate_heavy": 1,
+    "head_heavy": 13
+  },
   "task_runs": {},
   "rehearsal": {
-    "blocked_before_census": true,
-    "blocker": "public read escalation rejected before task 15 because the session usage/approval limit was exhausted",
-    "source_columns_observed": false,
-    "candidate_metrics_observed": false,
+    "census_complete": true,
+    "construction_phase_pending": true,
+    "note": "12/12 census-universe tasks projected from public S3 and censused; 7 roles resolved from frozen metrics. Baseline/candidate task_runs and map/reduce/head/worker rehearsal not yet run.",
+    "duplicate_uuid_coverage_observed": false,
+    "multilingual_cjk_coverage_observed": true,
     "remote_writes": false
   }
 }
