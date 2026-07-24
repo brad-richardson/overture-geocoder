@@ -2,15 +2,31 @@
 
 Date: 2026-07-16
 
-Use tokenizer version `nfkd-lower-stripmark-cjk-bigram-v3` for the compact Places
-global serving shards. V3 replaces the Python-only case-fold/base-script logic
-from v2 with a contract the Python builder and Rust Worker can reproduce exactly.
+Use tokenizer version `nfkd-lower-stripmark-cjk-bigram-v4` for the compact Places
+global serving shards. V4 replaces the Python-only case-fold/base-script logic
+from v2 with a contract the Python builder and Rust Worker can reproduce exactly,
+and pins the three Unicode string semantics that v3 left unstated (see
+`2026-07-24-places-digest-divergence-root-cause.md`).
 
-The normalization contract is:
+The normalization contract is pinned to Rust semantics at **Unicode 16.0** (the
+Rust standard-library tables). `places-transform-v1` is authoritative; the Python
+baseline drives its lowercase, whitespace and word-character tables from
+`scripts/places_unicode_tables_v1.json`, exported from those same Rust tables, so
+neither side carries an independent (version-skewed) Unicode opinion. The steps:
 
-- Unicode lowercase, then NFKD;
+- trim leading/trailing Unicode `White_Space` only (Rust `str::trim`), which —
+  unlike CPython `str.strip()` — keeps the C0 separators U+001C..U+001F;
+- NFKD-decompose;
+- lowercase per character (context-free `char::to_lowercase`, no Greek
+  `Final_Sigma` rule), applied **after** NFKD so compatibility-decomposed styled
+  capitals (e.g. `𝓓` → `D`) become lowercase-searchable;
+- fold Greek final sigma `ς` (U+03C2) → plain `σ` (U+03C3) so a lowercase Greek
+  query matches the context-free `σ` held in the index (applied in both the index
+  tokenizer and the Worker query tokenizer);
 - remove every combining mark;
-- retain runs of Unicode alphanumeric characters plus ASCII underscore; and
+- retain runs of Unicode alphanumeric characters (`char::is_alphanumeric`, which
+  includes the `Other_Alphabetic` enclosed symbols CPython `str.isalnum` omits)
+  plus ASCII underscore; and
 - collapse all other separators between runs.
 
 Index each normalized word as a whole token. For every contiguous Han,
