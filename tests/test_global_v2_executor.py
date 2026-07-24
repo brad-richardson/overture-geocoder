@@ -966,7 +966,10 @@ def test_hosted_address_reduce_derives_serving_outputs_and_uses_safe_fetch(tmp_p
     reduce_plan = tmp_path / "address-reduce.json"
     partition_plan = tmp_path / "address-partition.json"
     places_plan = tmp_path / "places-plan.json"
-    reduce_plan.write_bytes(executor.canonical_json({"jobs": [{"index": 0, "id": "address-reduce-job-000"}]}))
+    reduce_plan.write_bytes(executor.canonical_json({
+        "schema": hosted.address_plan.REDUCE_PLAN_SCHEMA,
+        "jobs": [{"index": 0, "id": "address-reduce-job-000"}],
+    }))
     partition_plan.write_bytes(b"{}\n")
     places_plan.write_bytes(b"{}\n")
     observed = {}
@@ -1025,6 +1028,7 @@ def test_hosted_head_requires_reduce_completion_and_derives_head(tmp_path, monke
     serving.write_bytes(b"serving")
     candidate.write_bytes(b"candidate")
     producer_report.write_bytes(executor.canonical_json({
+        "schema": hosted.places_reduce.REDUCE_REPORT_SCHEMA,
         "head_candidates": {"object_key": "head-candidates/sha256/c.parquet"},
     }))
     store = r2_verified_store.FilesystemStore(tmp_path / "store")
@@ -1076,6 +1080,7 @@ def test_hosted_head_requires_reduce_completion_and_derives_head(tmp_path, monke
     assert specs[0]["object_key"] == f"{SLICE}/families/places/head.phrp"
     assert counters["retained_records"] == 9
     assert observed["reports"] == [{
+        "schema": hosted.places_reduce.REDUCE_REPORT_SCHEMA,
         "head_candidates": {"object_key": "head-candidates/sha256/c.parquet"},
     }]
     assert observed["fetch"][observed["fetch"].index("--prefix") + 1].endswith(
@@ -1086,7 +1091,9 @@ def test_hosted_head_requires_reduce_completion_and_derives_head(tmp_path, monke
 def test_hosted_places_reduce_validates_report_and_streams_plan_fragments(tmp_path, monkeypatch):
     contract, runtime_value, request = build_contract(), runtime(), build_request()
     places_plan = tmp_path / "places-plan.json"
-    places_plan.write_bytes(executor.canonical_json({"reduce_jobs": [{"index": 0}]}))
+    places_plan.write_bytes(executor.canonical_json({
+        "schema": hosted.places_plan.PLAN_SCHEMA, "reduce_jobs": [{"index": 0}],
+    }))
     dummy = tmp_path / "dummy.json"
     dummy.write_bytes(b"{}\n")
     observed = {}
@@ -1174,6 +1181,55 @@ def test_finalization_fanin_restores_only_exact_reports_and_heads_serving_set(tm
         f"{SLICE}/families/places/head.phrp",
     }
     assert not (tmp_path / "final-inputs/families/places/q-0.pcsh").exists()
+
+
+def test_map_report_boundary_accepts_valid_and_names_drift():
+    schema = hosted.places_plan.MAP_REPORT_SCHEMA
+    hosted.assert_map_report_boundary({"schema": schema, "summary": {}, "fragments": {}})
+    with pytest.raises(ValueError, match=r"map -> aggregate-plan.*expected schema"):
+        hosted.assert_map_report_boundary({"schema": "wrong", "summary": {}, "fragments": {}})
+    with pytest.raises(ValueError, match=r"map -> aggregate-plan.*missing required key 'fragments'"):
+        hosted.assert_map_report_boundary({"schema": schema, "summary": {}})
+    with pytest.raises(ValueError, match=r"map -> aggregate-plan.*'fragments' expected dict, observed list"):
+        hosted.assert_map_report_boundary({"schema": schema, "summary": {}, "fragments": []})
+    with pytest.raises(ValueError, match=r"map -> aggregate-plan.*expected a JSON object, observed list"):
+        hosted.assert_map_report_boundary([])
+
+
+def test_reduce_plan_boundary_accepts_valid_and_names_drift():
+    address_schema = hosted.address_plan.REDUCE_PLAN_SCHEMA
+    places_schema = hosted.places_plan.PLAN_SCHEMA
+    hosted.assert_reduce_plan_boundary({"schema": address_schema, "jobs": []}, family="addresses")
+    hosted.assert_reduce_plan_boundary({"schema": places_schema, "reduce_jobs": []}, family="places")
+    # A Places plan fed where the address reduce plan is expected is the #128 drift class.
+    with pytest.raises(ValueError, match=r"aggregate-plan -> reduce.*expected schema"):
+        hosted.assert_reduce_plan_boundary({"schema": places_schema, "reduce_jobs": []}, family="addresses")
+    with pytest.raises(ValueError, match=r"aggregate-plan -> reduce.*missing required key 'jobs'"):
+        hosted.assert_reduce_plan_boundary({"schema": address_schema}, family="addresses")
+    with pytest.raises(ValueError, match=r"aggregate-plan -> reduce.*'reduce_jobs' expected list, observed dict"):
+        hosted.assert_reduce_plan_boundary({"schema": places_schema, "reduce_jobs": {}}, family="places")
+
+
+def test_reduce_report_boundary_accepts_valid_and_names_drift():
+    schema = hosted.places_reduce.REDUCE_REPORT_SCHEMA
+    hosted.assert_reduce_report_boundary({"schema": schema, "head_candidates": {}})
+    with pytest.raises(ValueError, match=r"reduce -> head.*expected schema"):
+        hosted.assert_reduce_report_boundary({"schema": "stale", "head_candidates": {}})
+    with pytest.raises(ValueError, match=r"reduce -> head.*missing required key 'head_candidates'"):
+        hosted.assert_reduce_report_boundary({"schema": schema})
+    with pytest.raises(ValueError, match=r"reduce -> head.*'head_candidates' expected dict, observed str"):
+        hosted.assert_reduce_report_boundary({"schema": schema, "head_candidates": "c.parquet"})
+
+
+def test_head_report_boundary_accepts_valid_and_names_drift():
+    schema = hosted.places_head.HEAD_REPORT_SCHEMA
+    hosted.assert_head_report_boundary({"schema": schema, "object": {}, "artifact": {}})
+    with pytest.raises(ValueError, match=r"head -> finalize.*expected schema"):
+        hosted.assert_head_report_boundary({"schema": "old", "object": {}, "artifact": {}})
+    with pytest.raises(ValueError, match=r"head -> finalize.*missing required key 'artifact'"):
+        hosted.assert_head_report_boundary({"schema": schema, "object": {}})
+    with pytest.raises(ValueError, match=r"head -> finalize.*'object' expected dict, observed list"):
+        hosted.assert_head_report_boundary({"schema": schema, "object": [], "artifact": {}})
 
 
 def test_preview_publish_is_isolated_create_only_and_catalog_last(tmp_path, monkeypatch):
@@ -1342,8 +1398,12 @@ def test_streaming_family_finalizers_publish_manifests_last(tmp_path, monkeypatc
     address_report = tmp_path / "address-report.json"
     places_report = tmp_path / "places-report.json"
     head_report = tmp_path / "head-report.json"
-    for path in (address_report, places_report, head_report):
+    for path in (address_report, places_report):
         path.write_bytes(b"{}\n")
+    head_report.write_bytes(executor.canonical_json({
+        "schema": hosted.places_head.HEAD_REPORT_SCHEMA,
+        "object": {}, "artifact": {},
+    }))
     inputs = {
         "reports": [
             {"phase": "reduce", "family": "addresses", "index": 0, "path": str(address_report)},
