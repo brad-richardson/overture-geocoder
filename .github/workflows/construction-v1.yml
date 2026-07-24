@@ -349,9 +349,10 @@ jobs:
           docker-images: true
           swap-storage: false
 
-      - name: Build the pinned construction binaries (execute mode only)
-        if: inputs.mode == 'execute'
-        run: cargo build -p geocoder-construction --bins --release
+      # Unconditional so a dry-run also certifies the binaries compile on the
+      # runner (attempt 1 died here in execute mode only).
+      - name: Build the pinned construction binaries
+        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
 
       - name: Admit, project, map, and publish one task create-only (execute)
         if: inputs.mode == 'execute'
@@ -557,7 +558,7 @@ jobs:
           name: cv1-plan
           path: cv1
       - name: Build the pinned construction binaries
-        run: cargo build -p geocoder-construction --bins --release
+        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
       - name: Run one selective reducer batch create-only
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
@@ -636,7 +637,7 @@ jobs:
           set -euo pipefail
           mkdir -p head head-scratch
           if [ "$FAMILY_KEY" = places ]; then
-            cargo build -p geocoder-construction --bins --release
+            cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
             python scripts/construction_v1_hosted.py ledger-check \
               --ledger cv1plan/control/ledger.json --next-phase-minutes "$HEAD_PHASE_ESTIMATE_MINUTES"
             BINDIR="crates/target/release"

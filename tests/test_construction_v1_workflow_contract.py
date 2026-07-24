@@ -211,6 +211,23 @@ def test_map_matrix_lookup_uses_the_singular_dispatch_family_key():
     assert 'output.write(f"places_matrix=' in control
 
 
+def test_cargo_builds_target_the_crates_workspace_manifest():
+    # The workspace Cargo.toml lives in crates/, not the repo root; a bare
+    # `cargo build` on the runner dies with "could not find Cargo.toml"
+    # (planet attempt 1 lost all its map jobs to this in execute mode only,
+    # because the build step was execute-gated and dry-run never compiled).
+    value = text()
+    assert "cargo build -p geocoder-construction" not in value
+    assert value.count(
+        "cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release"
+    ) == 3
+    # The map-job build is unconditional so dry-run certifies compilation.
+    doc = parsed()
+    for step in doc["jobs"]["map"]["steps"]:
+        if "cargo build" in str(step.get("run", "")):
+            assert "if" not in step
+
+
 def test_every_phase_carries_the_330_minute_job_timeout():
     doc = parsed()
     jobs = doc["jobs"]
