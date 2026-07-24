@@ -51,7 +51,7 @@ def test_workflow_pins_actions_and_dependency():
     assert "pyarrow==25.0.0" in requirements
     assert "numpy==2.3.5" in requirements
     assert "duckdb==1.5.1" in requirements
-    assert requirements.count("--hash=sha256:") == 5
+    assert requirements.count("--hash=sha256:") == 8
     # CPython 3.11 manylinux x86_64 + aarch64 wheels used by the hosted
     # rowgroup and ARM Worker workflows.
     assert (
