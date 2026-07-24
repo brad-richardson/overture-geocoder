@@ -228,3 +228,119 @@ Note for offline runs: `.github/requirements-hosted-rowgroup.txt` is
 `--require-hashes` and its `numpy==2.3.5` hash set does not cover the wheel pip
 selects on CPython 3.12 here, so a local venv needs the versions without
 `--require-hashes`. The hosted runners pin Python 3.11.14 and are unaffected.
+
+---
+
+# Appendix: partition scheme options
+
+Added 2026-07-24 after measuring each candidate. This is the §6 step-1 decision.
+
+## The constraint, precisely
+
+- `route()` is a **fixed 256x256 equirectangular grid**; `partition_cell` is
+  `{y:02x}{x:02x}`. `b2e3` is Tokyo. The cell level is **not** adaptive — only
+  the token-hash nibble prefix is.
+- The serving index key is `(mode, cell, token)`
+  (`places_serving_encode_v1.rs:62`), and reduce keeps
+  `row_number() OVER (PARTITION BY partition_cell, token ORDER BY
+  confidence_rank DESC, feature_id, ...) <= maximum_serving_candidates`, which
+  is **256**.
+- Partition count is dominated by **populated cells** (16,633 of 17,863), not by
+  splits. Cap changes barely move the budget; cell-grid changes move it a lot.
+- `reduce/places-v1/leaves` is written (`places_construction_v1.py:976`) and
+  **never read anywhere in the repo**. The head phase explicitly avoids it
+  ("Merge only bounded per-task candidates, never planet term leaves"). It is
+  lineage/evidence, not a serving input.
+
+## A. Raise the caps (row 1M -> 2M, tokens 200k -> 400k)
+
+Measured, re-deriving the tree from the new release at each cap:
+
+| row cap | token cap | partitions | reduce min | floor margin |
+|---|---|---|---|---|
+| 1,000,000 | 200,000 | 17,863 | 17,863 | 1.35x |
+| 1,500,000 | 300,000 | 17,173 | 17,173 | 2.02x |
+| **2,000,000** | **400,000** | **16,978** | **16,978** | **2.69x** |
+| 3,000,000 | 600,000 | 16,798 | 16,798 | 4.04x |
+
+- **Fixes:** the `a1d5` token breach outright; doubles the irreducible margin.
+- **Costs nothing in budget** — it *reduces* partition count by 885 (fewer
+  forced splits), since the floor is the 16,633 populated cells.
+- **Byte cap stays satisfied**: at the worst observed 178 B/row, 2M rows is
+  356 MB against the 512 MiB cap. 3M rows (534 MB) would exceed it, so 2M is
+  the natural stop without also raising bytes.
+- **Not a scheme change.** Addressing is untouched; only tree depth changes.
+- **Risk, uncalibrated:** the row cap plausibly bounds reducer *memory and wall
+  time*, not just output bytes. A reduce batch runs ~140 partitions serially
+  inside a 330-minute timeout. If per-partition cost scales with rows, doubling
+  the cap could approach that timeout. `MEASURED_REDUCE_MINUTES_PER_PARTITION`
+  has never been calibrated because no reduce phase has completed.
+- **Does not remove the floor**, only moves it.
+
+## B. Within-token split (add a `feature_id` hash dimension)
+
+- **Fixes:** removes the floor entirely — unbounded divisibility.
+- **Blocked on a correctness problem.** Serving is keyed `(mode, cell, token)`
+  and top-256 is computed `PARTITION BY partition_cell, token`. If one token's
+  rows span two partitions, both emit the **same index key** from different
+  subsets: a key collision at encode and a wrong top-256 at serving.
+- Therefore requires a new merge stage (reduce fragments -> combine -> re-apply
+  top-256) with its own proof obligations.
+- **Most expensive; the only structurally complete fix.**
+
+## C. Map-side combiner (top-256 per `(cell, token)` at map time)
+
+- **The observation:** only 256 candidates per `(cell, token)` ever reach
+  serving. Carrying 742,392 `'jp'` rows into reduce to select 256 is a 2,900x
+  overshoot.
+- **Exact, not approximate.** Top-N under a *total* order is decomposable: a
+  per-task top-256 followed by a global top-256 over at most 88 x 256 = 22,528
+  rows yields byte-identical output to today. The order
+  (`confidence_rank DESC, feature_id, source_object_index, source_row_group,
+  source_row_index`) is already total.
+- **Fixes the floor by deleting the mass**, and shrinks the 63.5 GB store
+  enough to relieve the §5 transport wall at the same time. Highest leverage.
+- **Cost:** the published leaf would no longer contain every row. No code reads
+  leaves, so nothing functionally breaks — but it changes what the pipeline
+  durably attests, and the reduce binding proof
+  (`selected + discarded = row-group binding`) is built around carrying
+  everything. The proof frame needs rework.
+- Note this only helps where a `(cell, token)` group is huge. It does nothing
+  for a cell that is over cap via many distinct tokens — but that is the
+  divisible case, which subdivision already handles.
+
+## D. Finer cell grid (256x256 -> 512x512)
+
+Measured on a spread sample (every 8th task, 11 of 88, 64,628,143 term rows):
+
+| grid | populated cells | vs 256x256 | largest `(cell, token)` | % of 1M cap |
+|---|---|---|---|---|
+| 256x256 | 1,748 | 1.00x | 450,426 | 45.0% |
+| 512x512 | 4,563 | **2.61x** | 226,350 | 22.6% |
+| 1024x1024 | 12,195 | 6.98x | 166,173 | 16.6% |
+
+- **Fixes:** refinement genuinely halves the floor per level — `'jp'` in Tokyo
+  splits geographically.
+- **But the budget cannot absorb one level.** 16,633 populated cells x 2.61
+  is roughly **43,400 partitions**, past the 40,000 runner-minute ledger cap
+  before any splits at all. (Sample ratios approximate the global union, but
+  even 2x would breach.)
+- **And it is client-visible**: the serving key contains the cell, so every
+  lookup key changes.
+- **Worst cost/benefit of the four.**
+
+## Recommendation
+
+**A now, C next, and treat B/D as rejected.**
+
+A is the only option that is cheap, budget-*positive*, and not a scheme change —
+it buys 2.69x on the floor and removes the observed breach for the cost of one
+constant. It is enough to attempt the planet.
+
+C is the durable fix and it also attacks the transport wall, but it reworks the
+proof frame, so it should not gate the first attempt.
+
+The one thing A needs before committing to it: **calibrate reduce cost against
+rows.** That is unmeasurable until a reduce phase completes, which needs the R2
+staging work (§6 step 2) anyway. So the honest sequence is R2 staging first,
+one completed reduce at the current caps, then set the cap from real timings.
