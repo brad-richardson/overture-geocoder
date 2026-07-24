@@ -51,6 +51,25 @@ HEAD_ORDER = (
     "source_row_group, source_row_index"
 )
 
+# Single source of truth for the IPC batch-row cap. It mirrors the frozen
+# evidence-spec `acceptance_gates.resources.maximum_ipc_batch_rows`; the
+# readiness validator asserts the two cannot drift. Every hydrate, ingest, and
+# write_arrow_query call reads this constant instead of a bare literal so the
+# formerly independent call sites stay locked together.
+MAX_IPC_BATCH_ROWS = 65_536
+# Conservative upper bound on distinct tokens emitted per admitted feature. The
+# authoritative Rust transform emits one output (term) batch per input batch, so
+# a term batch holds at most `input_batch_rows * terms_per_feature` rows. The
+# measured planet mean is ~14 terms/feature on the densest CJK tasks; 32 leaves
+# better than 2x headroom over that mean while keeping the derived hydrate batch
+# a round 2048 rows.
+MAX_TERMS_PER_FEATURE = 32
+# Derive the hydrate input batch from the IPC cap so a term batch stays under
+# MAX_IPC_BATCH_ROWS by construction. ingest() still fail-closes if the bound is
+# ever exceeded on pathological data.
+HYDRATE_BATCH_ROWS = MAX_IPC_BATCH_ROWS // MAX_TERMS_PER_FEATURE
+assert HYDRATE_BATCH_ROWS * MAX_TERMS_PER_FEATURE <= MAX_IPC_BATCH_ROWS
+
 
 @dataclass(frozen=True)
 class Limits:
@@ -163,8 +182,10 @@ def ingest(connection: Any, arrow_path: Path, table_name: str) -> dict[str, int 
     maximum = 0
     with arrow_path.open("rb") as source:
         for batch in ipc.open_stream(source):
-            if batch.num_rows > 65_536:
-                raise ValueError("Places IPC batch exceeds 65,536 rows")
+            if batch.num_rows > MAX_IPC_BATCH_ROWS:
+                raise ValueError(
+                    f"Places IPC batch exceeds {MAX_IPC_BATCH_ROWS} rows"
+                )
             connection.register("places_batch", batch)
             try:
                 if batches == 0:
@@ -189,7 +210,7 @@ def ingest(connection: Any, arrow_path: Path, table_name: str) -> dict[str, int 
 
 
 def hydrate(
-    input_path: Path, output: Path, *, batch_rows: int = 65_536
+    input_path: Path, output: Path, *, batch_rows: int = HYDRATE_BATCH_ROWS
 ) -> dict[str, Any]:
     """Stream the flattened Places physical boundary to IPC without materializing it."""
     import pyarrow.ipc as ipc
@@ -350,6 +371,10 @@ def map_task(
             ),
         )
         transform = json.loads(transform_report_path.read_text())
+        # Staged deletion (1/4): the hydrated stream is dead once the transform
+        # has read it. Drop it before DuckDB ingest so it never coexists with the
+        # term table.
+        hydrated.unlink(missing_ok=True)
         if failpoint == "local_write":
             raise RuntimeError("injected Places interruption: local_write")
         database = workspace / "construction.duckdb"
@@ -360,6 +385,10 @@ def map_task(
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{spill}'")
         ingestion = ingest(connection, transformed, "terms")
+        # Staged deletion (2/4): the term IPC stream is dead once DuckDB has
+        # ingested it into the `terms` table. Drop it before any pack export so
+        # the ~3 GiB IPC copy never coexists with the pack files.
+        transformed.unlink(missing_ok=True)
         head_candidates_path = workspace / "head-candidates.parquet"
         connection.execute(
             f"COPY (SELECT * FROM terms QUALIFY row_number() OVER (PARTITION BY token "
@@ -372,13 +401,6 @@ def map_task(
         if head_candidate_rows > limits.max_head_candidate_rows:
             connection.close()
             raise ValueError("Places task head candidates exceed row cap")
-        connection.execute(
-            f"CREATE TABLE packed AS SELECT *, ((row_number() OVER (ORDER BY {TOTAL_ORDER})-1) "
-            f"// {limits.max_pack_rows})::UINTEGER pack_id FROM terms"
-        )
-        pack_count = connection.execute(
-            "SELECT coalesce(max(pack_id)+1,0)::UINTEGER FROM packed"
-        ).fetchone()[0]
         packs = []
         with A.StageWatchdog(
             [workspace],
@@ -389,11 +411,50 @@ def map_task(
             ),
             connection,
         ) as watchdog:
+            # Write the single pack-tagged copy the map contract requires ONCE, as
+            # an on-disk parquet rather than a second in-database table. A zstd
+            # parquet is several times smaller than the equivalent DuckDB table,
+            # and `terms` is dropped the instant the copy exists, so two full copies
+            # never coexist at DuckDB-table size -- this is what keeps the dense-task
+            # scratch peak inside the cap. The ~3 GiB term IPC is already gone
+            # (staged deletion 2/4).
+            #
+            # Exactly ONE sort runs here: the window `row_number() OVER (ORDER BY
+            # TOTAL_ORDER)` that assigns pack_id. The copy is deliberately NOT given
+            # an outer `ORDER BY` -- that would be a second full external sort of
+            # ~14M rows, doubling the spill and blowing the scratch cap. Each pack
+            # is re-sorted by TOTAL_ORDER when it is extracted below, and TOTAL_ORDER
+            # is a total order, so every pack is byte- and order-identical to the
+            # established per-pack-from-table pipeline regardless of the copy's
+            # physical order.
+            #
+            # A single `COPY ... PARTITION_BY (pack_id)` pass cannot be used to write
+            # the packs directly: DuckDB does NOT preserve row order within a
+            # partition (PRESERVE_ORDER is rejected with PARTITION_BY), so the pack
+            # files would land unsorted and the sorted-pack row-group proof that
+            # reduce reconciles against would break.
             connection.execute("SET threads=1")
+            packed_parquet = workspace / "packed.parquet"
+            connection.execute(
+                f"COPY (SELECT *, ((row_number() OVER (ORDER BY {TOTAL_ORDER})-1) "
+                f"// {limits.max_pack_rows})::UINTEGER pack_id FROM terms) "
+                f"TO '{packed_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD, "
+                f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
+                "PARQUET_VERSION V2)"
+            )
+            # Staged deletion (3/4): `terms` is dead once the copy exists. Drop it
+            # and CHECKPOINT so its blocks are reclaimed before the per-pack files
+            # begin to accumulate.
+            connection.execute("DROP TABLE terms")
+            connection.execute("CHECKPOINT")
+            packed_source = f"read_parquet('{packed_parquet}')"
+            pack_count = connection.execute(
+                f"SELECT coalesce(max(pack_id)+1,0)::UINTEGER FROM {packed_source}"
+            ).fetchone()[0]
             for pack_id in range(pack_count):
                 pack = workspace / f"pack-{pack_id:06d}.parquet"
                 connection.execute(
-                    f"COPY (SELECT * EXCLUDE(pack_id) FROM packed WHERE pack_id={pack_id} "
+                    f"COPY (SELECT * EXCLUDE(pack_id) FROM {packed_source} WHERE pack_id={pack_id} "
                     f"ORDER BY {TOTAL_ORDER}) TO '{pack}' (FORMAT PARQUET, COMPRESSION ZSTD, "
                     f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
                     "PARQUET_VERSION V2, PRESERVE_ORDER true)"
@@ -401,9 +462,9 @@ def map_task(
                 ordered = workspace / f"pack-{pack_id:06d}.arrow"
                 rows = A.write_arrow_query(
                     connection,
-                    f"SELECT * EXCLUDE(pack_id) FROM packed WHERE pack_id={pack_id} ORDER BY {TOTAL_ORDER}",
+                    f"SELECT * EXCLUDE(pack_id) FROM {packed_source} WHERE pack_id={pack_id} ORDER BY {TOTAL_ORDER}",
                     ordered,
-                    65_536,
+                    MAX_IPC_BATCH_ROWS,
                 )
                 proof_path = workspace / f"pack-{pack_id:06d}.directory.json"
                 proof, proof_evidence = directory(
@@ -426,6 +487,11 @@ def map_task(
                         "proof_evidence": proof_evidence,
                     }
                 )
+                # Staged deletion (4/4): store.put_content already copied the pack
+                # bytes out, so the workspace originals are dead weight. Unlink each
+                # immediately to keep the retained-pack set from accumulating.
+                pack.unlink(missing_ok=True)
+                ordered.unlink(missing_ok=True)
         construction_evidence = watchdog.evidence()
         connection.close()
         head_candidates = {
@@ -662,7 +728,7 @@ def adaptive_genesis_plan(
         for path in paths:
             parquet = pq.ParquetFile(path)
             for batch in parquet.iter_batches(
-                batch_size=65_536,
+                batch_size=MAX_IPC_BATCH_ROWS,
                 columns=[
                     "partition_cell",
                     "token_hash",
@@ -785,7 +851,9 @@ def reduce_partition(
                     group_selected = []
                     group_discarded = []
                     for batch in parquet.iter_batches(
-                        batch_size=65_536, row_groups=[index], use_threads=False
+                        batch_size=MAX_IPC_BATCH_ROWS,
+                        row_groups=[index],
+                        use_threads=False,
                     ):
                         maximum_batch_rows = max(maximum_batch_rows, batch.num_rows)
                         mask = _partition_mask(batch, partition)
@@ -849,7 +917,7 @@ def reduce_partition(
             f"ORDER BY confidence_rank DESC, feature_id, source_object_index, source_row_group, "
             f"source_row_index)<={limits.maximum_serving_candidates} ORDER BY {TOTAL_ORDER}",
             arrow,
-            65_536,
+            MAX_IPC_BATCH_ROWS,
         )
         connection.close()
         routed = workspace / "routed.plrv"
@@ -935,7 +1003,7 @@ def build_global_head(
             f"WHERE head_position<={result_cap} "
             f"ORDER BY {HEAD_ORDER}",
             arrow,
-            65_536,
+            MAX_IPC_BATCH_ROWS,
         )
         connection.close()
         head = workspace / "head.plhd"
@@ -1018,7 +1086,7 @@ def build_global_head_from_markers(
             f"source_object_index, source_row_group, source_row_index)<={limits.head_result_cap} "
             f"ORDER BY {HEAD_ORDER}",
             arrow,
-            65_536,
+            MAX_IPC_BATCH_ROWS,
         )
         connection.close()
         head = workspace / "head.plhd"

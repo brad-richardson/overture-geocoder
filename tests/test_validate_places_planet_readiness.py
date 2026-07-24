@@ -132,3 +132,64 @@ def test_readiness_fails_closed_on_missing_or_nondeterministic_evidence(tmp_path
     assert report["ready"] is False
     assert any("not deterministic" in reason for reason in report["reasons"])
     assert any("Worker head" in reason for reason in report["reasons"])
+
+
+def test_readiness_does_not_gate_on_duplicate_uuid_coverage(tmp_path):
+    # Real 2026-06-17.0 data has zero duplicate UUIDs. Evidence shaped like that
+    # (maximum_uuid_multiplicity == 1, duplicate_uuid_rows == 0 everywhere) must
+    # still validate ready -- the duplicate gate was unclosable on real data and
+    # is now a synthetic-fixture gate, recorded here only as an observation.
+    spec, inventory, evidence = complete_evidence()
+    for item in evidence["census"]:
+        item["metrics"]["maximum_uuid_multiplicity"] = 1
+        item["metrics"]["duplicate_uuid_rows"] = 0
+    # Zeroing the duplicate metrics changes the (metric-driven) role selection, so
+    # recompute roles + task_runs to keep the rest of the evidence self-consistent;
+    # the point under test is only that zero duplicate coverage does not block.
+    census_map = {item["task_index"]: item for item in evidence["census"]}
+    roles = validator.select_roles(inventory, census_map)
+    evidence["roles"] = roles
+    template = next(iter(evidence["task_runs"].values()))
+    binding = template["baseline"]
+    candidate = template["candidates"][0]
+    evidence["task_runs"] = {}
+    for task_index in roles.values():
+        task = inventory["map_plan"]["tasks"][task_index]
+        evidence["task_runs"][str(task_index)] = {
+            "projection": {
+                "identity": {"task_digest": task["task_digest"]},
+                "output": {"bytes": 1000},
+                "resources": {"remote_read_bytes": 1000},
+            },
+            "baseline": dict(binding),
+            "candidates": [dict(candidate), dict(candidate)],
+        }
+    path = tmp_path / "evidence.json"
+    path.write_text(json.dumps(evidence))
+    report = validator.validate(
+        SPEC_PATH, INVENTORY_PATH, path, runtime=spec["runtime"]
+    )
+    assert report["ready"] is True, report["reasons"]
+    assert not any("duplicate" in reason for reason in report["reasons"])
+    assert report["observations"]["duplicate_uuid"] == {
+        "maximum_uuid_multiplicity": 1,
+        "duplicate_uuid_rows_total": 0,
+    }
+
+
+def test_readiness_ipc_cap_drift_guard(tmp_path, monkeypatch):
+    # If the construction module's single IPC cap constant drifts from the frozen
+    # evidence-spec value, readiness must fail closed.
+    spec, _, evidence = complete_evidence()
+    path = tmp_path / "evidence.json"
+    path.write_text(json.dumps(evidence))
+    construction = validator.load_construction_module()
+    monkeypatch.setattr(construction, "MAX_IPC_BATCH_ROWS", 12345, raising=True)
+    monkeypatch.setattr(
+        validator, "load_construction_module", lambda: construction, raising=True
+    )
+    report = validator.validate(
+        SPEC_PATH, INVENTORY_PATH, path, runtime=spec["runtime"]
+    )
+    assert report["ready"] is False
+    assert any("IPC batch cap" in reason for reason in report["reasons"])
