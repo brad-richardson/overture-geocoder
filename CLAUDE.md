@@ -57,8 +57,14 @@ Two things that repeatedly get lost:
   `scripts/run_slice_construction_v1.py` run all five phases on real Overture
   data in ~13 seconds with no credentials. Changes that cannot be shown on it
   are usually design documents, not changes.
-- The address family shuffle is DEFERRED, not done. See the "DEFERRED, do not
-  lose" section of `docs/plans/2026-07-24-construction-v1-follow-ups.md`.
+- The address map shuffle will NOT be ported, decided 2026-07-25. Address map
+  output is already hash-clustered (`pack_id` is a row counter over
+  `TOTAL_ORDER`, which begins `country, maximum_bucket` = the top 16 bits of
+  `route_hash`), so the shuffle buys little; the transport cost is whole-object
+  hydration at reduce, not layout. The address partition key
+  (`address_key_hash` / `route_hash` / `hash_bucket`) and `MAXIMUM_HASH_BITS`
+  remain FROZEN. See the "DEFERRED, do not lose" section of
+  `docs/plans/2026-07-24-construction-v1-follow-ups.md`.
 
 ## Data Pipeline
 
