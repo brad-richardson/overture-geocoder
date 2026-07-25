@@ -69,6 +69,55 @@ SERVING_PARTITION = "PARTITION BY partition_cell, token"
 # Subdivision is by token hash, so every row of a token shares a prefix at every
 # depth and the group is indivisible. reduce_partition asserts this.
 SERVING_GROUP_SAFE_OWNERSHIP = "token-sha256-nibble-prefix-v1"
+
+# --- shuffle -------------------------------------------------------------
+# Map tasks are row-group ranges of the SOURCE, so without a shuffle every
+# partition_cell is scattered across every task and any consumer of one cell has
+# to reach into all of them. That scatter -- not size -- is why the whole store
+# had to travel between phases.
+#
+# So map emits its output keyed by a bucket of the cell, exactly as the ID index
+# stages by UUID prefix (build_id_index.py). Two properties matter:
+#
+#   a cell never splits across buckets, so one consumer holds a cell's COMPLETE
+#   data and every per-cell decision (top-N, subdivision, cap checks) is local;
+#
+#   buckets are hash-uniform, so per-consumer input is bounded by construction
+#   at total/SHUFFLE_BUCKETS rather than by how the data happens to be shaped.
+#
+# The bucket is a Knuth multiplicative hash of `partition_key` -- the (y<<8)|x
+# grid index the transform already emits -- so it needs no new column and no
+# DuckDB hash function whose value could drift across versions.
+SHUFFLE_BUCKET_BITS = 8
+SHUFFLE_BUCKETS = 1 << SHUFFLE_BUCKET_BITS
+SHUFFLE_MULTIPLIER = 2_654_435_761  # Knuth, floor(2^32 / phi), odd
+
+
+def shuffle_bucket_sql(bits: int = SHUFFLE_BUCKET_BITS) -> str:
+    return (
+        f"((((partition_key::UBIGINT * {SHUFFLE_MULTIPLIER}) % 4294967296) "
+        f">> {32 - bits}))::UINTEGER"
+    )
+
+
+def shuffle_bucket(partition_key: int, bits: int = SHUFFLE_BUCKET_BITS) -> int:
+    """Python mirror of shuffle_bucket_sql; the two must never disagree.
+
+    Takes the HIGH bits of the multiplicative hash. Taking the low bits instead
+    (``% buckets``) silently degenerates: partition_key is ``(y << 8) | x``, so
+    the low 8 bits of the product depend only on x, and every cell in a
+    longitude column would land in one bucket -- a pole-to-pole meridian strip
+    per consumer. Cell counts stay perfectly even, so only a data-weighted test
+    catches it.
+    """
+    return ((partition_key * SHUFFLE_MULTIPLIER) % 4294967296) >> (32 - bits)
+
+
+def cell_partition_key(cell: str) -> int:
+    """(y<<8)|x for a `{y:02x}{x:02x}` partition cell, matching route()."""
+    if len(cell) != 4:
+        raise ValueError(f"Places partition cell is malformed: {cell!r}")
+    return (int(cell[:2], 16) << 8) | int(cell[2:], 16)
 COMBINER_SCHEMA = "overture-places-map-combiner-v1"
 
 # Single source of truth for the IPC batch-row cap. It mirrors the frozen
@@ -111,6 +160,10 @@ class Limits:
     partition_distinct_tokens: int = 250_000
     adaptive_subdivision_depth: int = 8
     maximum_serving_candidates: int = 256
+    # Number of shuffle buckets map keys its output by. Raising it lowers
+    # per-consumer input proportionally at the cost of more objects; it is
+    # the single knob that bounds reduce input independently of data shape.
+    shuffle_bucket_bits: int = SHUFFLE_BUCKET_BITS
     head_result_cap: int = 10
     max_head_candidate_rows: int = 5_000_000
     require_bound_projection: bool = False
@@ -135,6 +188,7 @@ class Limits:
                     self.maximum_serving_candidates,
                     self.head_result_cap,
                     self.max_head_candidate_rows,
+                    self.shuffle_bucket_bits,
                 )
             )
             or self.wall_seconds <= 0
@@ -541,9 +595,13 @@ def map_task(
             # reduce reconciles against would break.
             connection.execute("SET threads=1")
             packed_parquet = workspace / "packed.parquet"
+            # pack_id is the SHUFFLE BUCKET, not a row counter. This is the
+            # whole change: a pack now holds every row this task has for a set
+            # of cells, and holds nothing for any other cell, so a consumer of
+            # those cells reads this one file instead of scanning for its rows.
             connection.execute(
-                f"COPY (SELECT *, ((row_number() OVER (ORDER BY {TOTAL_ORDER})-1) "
-                f"// {limits.max_pack_rows})::UINTEGER pack_id FROM terms) "
+                f"COPY (SELECT *, {shuffle_bucket_sql(limits.shuffle_bucket_bits)} "
+                f"pack_id FROM terms) "
                 f"TO '{packed_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD, "
                 f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
                 "PARQUET_VERSION V2)"
@@ -554,10 +612,15 @@ def map_task(
             connection.execute("DROP TABLE terms")
             connection.execute("CHECKPOINT")
             packed_source = f"read_parquet('{packed_parquet}')"
-            pack_count = connection.execute(
-                f"SELECT coalesce(max(pack_id)+1,0)::UINTEGER FROM {packed_source}"
-            ).fetchone()[0]
-            for pack_id in range(pack_count):
+            # Only buckets this task actually produced. A sparse task (few
+            # cells) writes few fragments; nothing emits empty objects.
+            present = [
+                int(row[0])
+                for row in connection.execute(
+                    f"SELECT DISTINCT pack_id FROM {packed_source} ORDER BY pack_id"
+                ).fetchall()
+            ]
+            for pack_id in present:
                 pack = workspace / f"pack-{pack_id:06d}.parquet"
                 connection.execute(
                     f"COPY (SELECT * EXCLUDE(pack_id) FROM {packed_source} WHERE pack_id={pack_id} "
@@ -583,6 +646,7 @@ def map_task(
                 packs.append(
                     {
                         "pack_id": pack_id,
+                        "shuffle_bucket": pack_id,
                         "object": store.put_content(
                             pack, "map/places-v1/packs", ".parquet"
                         ),
