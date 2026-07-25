@@ -421,12 +421,27 @@ jobs:
             # `plan_staged_bytes_hydrated == 0` is not a bug: the ADDRESS genesis
             # plan is built from marker JSON alone, so the plan phase reads no pack
             # bodies at all. `reduce_staged_bytes_hydrated > 0` is where the address
-            # family's remaining transport problem lives, and it is asserted rather
-            # than hidden: the address reducer has no shuffle (deliberately
-            # deferred), so it hydrates packs from essentially every map task and its
-            # peak equals its total. A GREEN address slice therefore means
-            # "the transport moves address map output durably", NOT "the address
-            # planet build is unblocked at reduce" -- it is not.
+            # family's transport cost lives, and it is asserted rather than hidden.
+            #
+            # `reduce_staged_objects_released > 0` is the tripwire for the defect that
+            # made `reduce_staged_peak_resident_bytes == reduce_staged_bytes_hydrated`
+            # exactly: the address reducer never called the staged store's `release()`
+            # at all, so a job finished holding every pack it had opened. Zero
+            # releases is that regression, and nothing else here can see it.
+            #
+            # It is asserted as `> 0` and NOT as `peak < total`, deliberately. This
+            # slice's whole forward map output is ONE 10.9 MB pack, so peak EQUALS
+            # total however promptly the reducer evicts -- a strict inequality here
+            # would be unsatisfiable rather than strict. The strict bound (peak stays
+            # at one pack while many are reduced) is asserted in
+            # tests/test_address_construction_v1.py::
+            # test_reduce_partition_releases_packs_and_bounds_peak_resident, and
+            # measured on a planet-shaped slice in
+            # docs/plans/construction-v1-state.md.
+            #
+            # A GREEN address slice therefore means "the transport moves address map
+            # output durably and the reducer's resident input is bounded", NOT "an
+            # address planet build has been executed" -- none has, for either family.
             #
             # The `finalize_*` peak/released pair is asserted for BOTH families, for
             # the same reason and against the same defect (finalize hydrated its
@@ -476,6 +491,8 @@ jobs:
               and ((.finalize_staged_peak_resident_bytes | numbers) < (.finalize_staged_bytes_hydrated | numbers))
               and (.plan_staged_bytes_hydrated | numbers) == 0
               and (.reduce_staged_bytes_hydrated | numbers) > 0
+              and (.reduce_staged_objects_released | numbers) > 0
+              and ((.reduce_staged_peak_resident_bytes | numbers) <= (.reduce_staged_bytes_hydrated | numbers))
               and (.head_staged_bytes_hydrated | numbers) == 0
               and .serving_object_key == "artifact"
               and (.head_manifest_objects | numbers) == 0

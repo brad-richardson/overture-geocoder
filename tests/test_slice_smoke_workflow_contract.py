@@ -160,10 +160,24 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
     ) == 2
     assert value.count("(.finalize_staged_objects_released | numbers) > 0") == 2
     # Addresses plan from marker JSON alone, so zero is the CORRECT plan-phase
-    # figure there -- asserted as zero rather than skipped, and the address
-    # reducer's unbounded fan-in is stated rather than hidden.
+    # figure there -- asserted as zero rather than skipped.
     assert "(.plan_staged_bytes_hydrated | numbers) == 0" in value
     assert "(.reduce_staged_bytes_hydrated | numbers) > 0" in value
+    # The address REDUCE tripwire, the same defect one phase earlier than finalize's:
+    # `reduce_partition` held every pack it opened until the process exited, which made
+    # peak EQUAL total. A zero release count is that regression and no other assertion
+    # here can see it -- including the finalize pair above, which is a different phase.
+    #
+    # It is `> 0` rather than `peak < total` because this slice's forward map output is
+    # a SINGLE pack, so peak equals total however promptly the reducer evicts. The
+    # strict bound lives in tests/test_address_construction_v1.py and the wiring bound
+    # in tests/test_construction_v1_hosted.py; the workflow comment says so.
+    assert "(.reduce_staged_objects_released | numbers) > 0" in value
+    assert (
+        "(.reduce_staged_peak_resident_bytes | numbers) <= "
+        "(.reduce_staged_bytes_hydrated | numbers)" in value
+    )
+    assert "test_reduce_partition_releases_packs_and_bounds_peak_resident" in value
     # Head hydration is measured, not bounded (one read_parquet over every
     # candidate pack), so the figure must at least be produced.
     assert "(.head_staged_bytes_hydrated | numbers) > 0" in value
@@ -177,7 +191,10 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
     # reintroduce the hole by copying the old shape.
     bare = re.findall(r"\.\w*staged\w* [<>=]+ ", value)
     assert bare == [], f"unguarded staging comparisons: {bare}"
-    assert "NOT \"the address\n            # planet build is unblocked at reduce\"" in value
+    # What a green address slice does and does not prove, stated in the job itself.
+    # Replaces the older "planet build is unblocked at reduce" wording, whose premise
+    # (that address reduce was transport-blocked for want of a shuffle) was wrong.
+    assert 'NOT "an\n            # address planet build has been executed"' in value
     # Still no credentials: the staging backend is a directory, not R2.
     assert "R2_ACCESS_KEY_ID" not in value
     assert "secrets." not in value

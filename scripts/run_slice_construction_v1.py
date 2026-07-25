@@ -335,11 +335,18 @@ if STAGED:
                for b in execution["batches"]]
     reduce_staged = {
         "staged_bytes_hydrated": sum(r["staged_bytes_hydrated"] for r in reports),
+        "staged_objects_hydrated": sum(r["staged_objects_hydrated"] for r in reports),
         "staged_peak_resident_bytes": max(r["staged_peak_resident_bytes"] for r in reports),
+        # Summed, not maxed: this is "did the reducer evict at all", and zero is the
+        # signature of the defect it replaced (the address reducer held every pack it
+        # opened until the process exited, so peak == total by construction).
+        "staged_objects_released": sum(r["staged_objects_released"] for r in reports),
     }
     print(f"  staging: hydrated {reduce_staged['staged_bytes_hydrated']/1e6:.2f} MB "
-          f"across {len(reports)} jobs, worst job peak resident "
-          f"{reduce_staged['staged_peak_resident_bytes']/1e6:.2f} MB")
+          f"in {reduce_staged['staged_objects_hydrated']} objects across "
+          f"{len(reports)} jobs, worst job peak resident "
+          f"{reduce_staged['staged_peak_resident_bytes']/1e6:.2f} MB, released "
+          f"{reduce_staged['staged_objects_released']} objects")
 
 # --- head -----------------------------------------------------------------
 t = phase("run-head")
@@ -519,9 +526,16 @@ if STAGED:
     summary["plan_staged_peak_resident_bytes"] = plan_staged["staged_peak_resident_bytes"]
     summary["plan_staged_objects_released"] = plan_staged["staged_objects_released"]
     summary["reduce_staged_bytes_hydrated"] = reduce_staged["staged_bytes_hydrated"]
+    summary["reduce_staged_objects_hydrated"] = reduce_staged["staged_objects_hydrated"]
     summary["reduce_staged_peak_resident_bytes"] = reduce_staged[
         "staged_peak_resident_bytes"
     ]
+    # The tripwire for the reduce phase, and the reason it is a separate key from
+    # peak/total: on a slice whose whole map output is ONE pack, peak necessarily
+    # EQUALS total no matter how promptly the reducer evicts, so peak-below-total is
+    # not assertable there. A zero release count is, and zero is exactly what the
+    # address reducer reported before it called `release()` at all.
+    summary["reduce_staged_objects_released"] = reduce_staged["staged_objects_released"]
     # Head is MEASURED, not bounded: it hands every head-candidate pack to one
     # read_parquet, so peak == total by construction. Recorded so the planet figure
     # comes from a run rather than an estimate.

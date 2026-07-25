@@ -66,9 +66,44 @@ REDUCE_TIMEOUT_MARGIN_FRACTION = 0.5
 # the worst subdivided/high-amplification partition in 14.53s (~0.24 min) end to
 # end (directory select + serving encode + Rust verify). 1.0 min is a >4x margin
 # covering hotter cells, R2 latency, and slower hosted runners than the bradflix
-# measurement host. Addresses: no fresh planet reduce measurement in this change;
-# 2.0 min is a deliberately conservative upper bound (address reduce is a
-# directory select + encode + verify over <=1M rows, comparable-or-lighter).
+# measurement host.
+#
+# Addresses: 2.0 min is now CALIBRATED rather than a shrug, and it STAYS 2.0.
+# Measured on the real Seattle slice (release 2026-07-22.0, 104,928 rows, staged
+# transport, `scripts/run_slice_construction_v1.py --family addresses`), reducing at
+# four partition sizes cut out of the same map output:
+#
+#     rows/partition   3,279   14,990   52,464   104,928
+#     sec/partition     0.177   0.434    1.022     1.800
+#
+# which is linear in rows over a fixed floor. Least squares over those four points:
+# 0.168 s of per-partition overhead (three proof-directory spawns, the serving encoder,
+# the Rust verifier, one DuckDB connection) plus 1.573e-5 s/row. A PLANET partition is
+# capped at `max_pack_rows` = 1,000,000 rows, so compute projects to 0.168 + 15.7 =
+# ~15.9 s = ~0.265 min. Add hydration, which the slice cannot measure because its
+# staging backend is a local filesystem: at reduce batch 12 the planet reduce phase
+# reads ~0.21 TB over ~474 partitions, i.e. ~440 MB per partition, ~0.12 min at a
+# conservative 60 MB/s from a hosted runner. Honest planet projection: ~0.39 min per
+# partition.
+#
+# 2.0 is KEPT as a ~5x margin over that, deliberately, for three reasons:
+#   * it is the same margin discipline as places 1.0 over 0.24 (>4x), and the address
+#     figure is extrapolated from a slice rather than measured on a planet-shaped
+#     partition, so it deserves at least as much headroom;
+#   * this constant also feeds `projected_reduce_minutes` and therefore the
+#     fail-closed ledger cost gate. Lowering it makes that gate LESS conservative on
+#     the strength of a slice measurement, which is the wrong direction;
+#   * it never refuses a legitimate plan on COST: 474 x 2.0 = 948 runner-minutes
+#     against a 40,000-minute cap.
+# What 2.0 DOES constrain, and a reader tuning `--max-reduce-jobs` will hit: it caps
+# `_timeout_max_batch` at floor(330 * 0.5 / 2.0) = 82 partitions per job, where the
+# honest ~0.39 would admit 423. That is 6.8x more headroom than the planet plan needs
+# (~474 partitions at batch 12 / job cap 40), but a cap below ~6 jobs on a 474-partition
+# plan needs batch >= 79 and lands within sight of 82 -- and a cap of 5 (batch 95) exits
+# with the `_reduce_batches` SystemExit. That refusal is correct fail-closed behaviour,
+# not a bug; pass `--reduce-minutes-per-partition` with a justified figure to go lower.
+# A real planet reduce measurement should replace this;
+# `--reduce-minutes-per-partition` overrides it per dispatch in the meantime.
 MEASURED_REDUCE_MINUTES_PER_PARTITION = {"places": 1.0, "addresses": 2.0}
 
 
@@ -1143,6 +1178,50 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # run-reduce
 # --------------------------------------------------------------------------- #
+def _batch_retention(
+    family: str,
+    plan: dict[str, Any],
+    markers: list[dict[str, Any]],
+    start: int,
+    count: int,
+) -> list[frozenset[str]]:
+    """Per-partition sets of pack keys that LATER partitions of this batch still need.
+
+    An address reduce job processes a contiguous partition range serially, and a pack
+    that straddles a partition boundary is selected by both sides of it. Releasing
+    purely per-partition would therefore re-fetch and re-verify such a pack once per
+    partition: measured on a planet-shaped 32-partition / 14-pack slice at batch 32,
+    per-partition release alone turned 14 object reads into 45 (11.62 MB -> 39.08 MB).
+    (At batch 8 the same comparison is 17 reads / 14.28 MB against 45 / 39.08 MB --
+    same conclusion, different baseline.) Suffix-unioning the future needs of the job
+    keeps each pack for exactly as long as the job still wants it -- so R2 reads fall
+    with batch size, which is the property the reduce job cap is tuned against.
+
+    It does NOT make the peak batch-independent-and-small; it makes it
+    batch-independent at `(map tasks holding this partition's country) x pack bytes`,
+    because the map-side sort is INTRA-task. `address_construction_v1.reduce_partition`
+    enforces that against the scratch cap.
+    ``entry[i]`` is the union over partitions ``i+1 ..``; the last is empty, so the
+    final partition of a job releases everything.
+
+    Places is excluded: its jobs own a shuffle-bucket RANGE and open each fragment
+    once for the whole range already (`reduce_bucket_range`), so there is no
+    per-partition re-fetch to suppress.
+    """
+    if family != "addresses" or count <= 1:
+        return [frozenset()] * max(count, 0)
+    needs = [
+        ADDRESS.partition_pack_keys(markers, plan["partitions"][index])
+        for index in range(start, start + count)
+    ]
+    retention: list[frozenset[str]] = [frozenset()] * count
+    future: set[str] = set()
+    for offset in range(count - 2, -1, -1):
+        future |= needs[offset + 1]
+        retention[offset] = frozenset(future)
+    return retention
+
+
 def _reduce_one_partition(
     args: argparse.Namespace,
     *,
@@ -1151,6 +1230,7 @@ def _reduce_one_partition(
     plan: dict[str, Any],
     markers: list[dict[str, Any]],
     partition_index: int,
+    retain_keys: frozenset[str] | None = None,
 ) -> dict[str, Any]:
     partition = plan["partitions"][partition_index]
     if args.family == "addresses":
@@ -1163,6 +1243,7 @@ def _reduce_one_partition(
             encoder_binary=Path(args.encoder_binary),
             verifier_binary=Path(args.verifier_binary),
             limits=limits,
+            retain_keys=retain_keys,
         )
     else:
         reduction = PLACES.reduce_partition(
@@ -1323,10 +1404,12 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         processed = []
-        for partition_index in range(start, start + count):
+        retain = _batch_retention(args.family, plan, markers, start, count)
+        for offset, partition_index in enumerate(range(start, start + count)):
             reduction = _reduce_one_partition(
                 args, store=store, limits=limits, plan=plan,
                 markers=markers, partition_index=partition_index,
+                retain_keys=retain[offset],
             )
             write_json(output_dir / f"{partition_index:04d}.json", reduction)
             processed.append(partition_index)
