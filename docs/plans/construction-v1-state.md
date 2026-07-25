@@ -153,6 +153,32 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
 
 Not started, deliberately — Places first, proven, then port.
 
+- **The address map now emits a per-address, spatially keyed records artifact**
+  (2026-07-25). `overture-address-map-address-records-v1`: one row per admitted
+  address, `partition_cell`/`partition_key` derived from the E7 coordinates with
+  the SAME 256x256 scheme and the SAME high-bits shuffle as Places, plus the
+  display projection the structured forward endpoint returns. One pack per
+  present shuffle bucket, a proof directory with per-row-group and per-cell
+  counts, and a fail-closed equality against the admitted row count at map time
+  and on resume. This is the one address thing that could not be added after the
+  planet address map without re-running it
+  (`docs/plans/2026-07-25-reverse-v2-design.md`). It is purely ADDITIVE: the
+  forward packs are byte-identical, and it is not the deferred forward-shuffle
+  port.
+  - **Address map markers written before 2026-07-25 cannot resume.** Markers are
+    write-once, so an older marker is intact and self-consistent but carries no
+    records artifact, and both `validate_marker` and `finalize` fail closed on it
+    by design — the alternative is one run silently mixing tasks that have the
+    artifact with tasks that do not, which is the failure the artifact exists to
+    prevent. Remediation is to delete that task's marker and re-run its map task;
+    the forward packs are content-addressed, so the re-run republishes identical
+    bytes and only adds the records packs. No planet address map has run, so today
+    this affects local work directories only.
+  - Both families now publish their map-phase per-record packs durably through
+    **one** finalize seam (`PER_RECORD_ARTIFACTS` in `construction_v1_hosted.py`),
+    under `families/places/positions/` and `families/addresses/records/`.
+    Without that they would expire with the 7-day GitHub artifact retention, and
+    a reverse index would cost the planet map re-run they exist to avoid.
 - **There is now an address slice harness** (2026-07-25). `--family addresses` on
   both slice scripts runs 104,928 real Overture addresses (Seattle,
   `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 s with no

@@ -45,6 +45,154 @@ SERVING_ORDER = (
 )
 UINT256 = 1 << 256
 
+# --------------------------------------------------------------------------- #
+# The spatial cell scheme, shared with Places
+# --------------------------------------------------------------------------- #
+# The address family's FORWARD key is `(country, route_hash)` and is not spatial.
+# Nothing below changes that: `address_key_hash`, `route_hash`, `hash_bucket`,
+# TOTAL_ORDER, SERVING_ORDER, the pack layout, and the genesis partition plan are
+# all untouched. These constants exist for ONE additive artifact -- the per-address
+# records artifact -- whose only consumer is a future spatial reverse index.
+# `partition_cell` here is a column on that artifact and never a routing key for
+# `.aidx`/`.adat`.
+#
+# The scheme has to be bit-identical to the Places one, because one reverse
+# pipeline is meant to serve both families off the same cell keys and the same
+# bucket ranges. The authoritative definition of the cell is `route()` in
+# `crates/geocoder-construction/src/bin/places_transform_v1.rs`; the shuffle is
+# `shuffle_bucket`/`shuffle_bucket_sql` in `scripts/places_construction_v1.py`.
+# Both are MIRRORED here rather than imported, so this module keeps no dependency
+# on the Places plane -- and `tests/test_address_records_artifact.py` cross-checks
+# every mirror against its original (the Rust binary for the cell, the Places
+# module for the shuffle) so the two cannot drift silently.
+CELL_GRID = 256
+# Addresses carry only E7 fixed-point coordinates (`address-transform-v1` emits
+# `longitude_e7`/`latitude_e7` as non-null Int32), so the cell is derived in EXACT
+# INTEGER arithmetic over those, not in floating point. 360 degrees is 3.6e9 E7
+# units and 180 degrees is 1.8e9, so a cell is a whole number of E7 units in both
+# axes, so for any E7 input the integer floor equals the float floor `route()`
+# computes. The parity test pins exactly that -- `route_e7(e7) == route(e7 / 1e7)`
+# -- against the real binary at every one of the 257 x and 257 y boundaries and
+# one E7 unit either side.
+#
+# What that does NOT claim: it is not "no rounding to reason about". There is a
+# real quantization seam. An address whose RAW f64 position sits within about
+# 5e-8 degrees of a cell boundary can round, at E7, to the other side of it, so
+# its cell differs from the one the raw f64 would have produced. That is ~5 mm on
+# the ground, it is inherent in the transform emitting E7 (which the serving
+# encoder needs anyway), and the reverse design accepts it as a residual: the
+# encoder, the verifier and the worker all key off the SAME E7 value, so nothing
+# disagrees with anything -- the record is simply in the neighbouring cell, and a
+# reverse query for a point 5 mm away reads that cell too.
+LONGITUDE_E7_ORIGIN = 1_800_000_000
+LATITUDE_E7_ORIGIN = 900_000_000
+LONGITUDE_E7_PER_CELL = 2 * LONGITUDE_E7_ORIGIN // CELL_GRID  # 14,062,500
+LATITUDE_E7_PER_CELL = 2 * LATITUDE_E7_ORIGIN // CELL_GRID  # 7,031,250
+# Knuth multiplicative hash, floor(2^32 / phi), odd. Takes the HIGH bits: the
+# partition key is `(y << 8) | x`, so the LOW bits of the product depend only on
+# x and every cell in a longitude column would land in one bucket.
+SHUFFLE_BUCKET_BITS = 8
+SHUFFLE_MULTIPLIER = 2_654_435_761
+
+ADDRESS_RECORDS_SCHEMA = "overture-address-map-address-records-v1"
+ADDRESS_RECORDS_DIRECTORY_SCHEMA = "overture-address-map-address-records-directory-v1"
+# The display projection the structured forward endpoint returns, so a reverse hit
+# and a structured forward hit for the same feature render identically and reverse
+# needs no secondary lookup. `address_levels` is carried whole rather than as two
+# extracted admin levels because that is exactly what `address_serving_encode_v1`
+# writes into the serving payload.
+ADDRESS_RECORDS_DISPLAY_COLUMNS = (
+    "country",
+    "display_country",
+    "postal_city",
+    "postcode",
+    "street",
+    "number",
+    "unit",
+    "address_levels",
+)
+# Every admitted row is one record, identified by feature ID *and* source locator.
+# Two admitted address rows can legitimately share a feature ID (the serving order
+# breaks ties on the locator triple for exactly that reason), so this artifact is
+# per-ROW with locator identity and never a GROUP BY on the ID -- aggregating
+# would silently collapse two real addresses into one and reverse would lose one.
+ADDRESS_RECORDS_ORDER = (
+    "partition_cell, feature_id, source_object_index, source_row_group, "
+    "source_row_index"
+)
+
+
+def route_e7(longitude_e7: int, latitude_e7: int) -> tuple[int, str]:
+    """`(partition_key, partition_cell)` for E7 coordinates.
+
+    Python mirror of `route()` in places_transform_v1.rs. Out-of-range coordinates
+    clamp into the edge cell exactly as the Rust does; callers that must not
+    tolerate them check `unroutable_e7` first.
+    """
+    x = min(
+        CELL_GRID - 1,
+        max(0, longitude_e7 + LONGITUDE_E7_ORIGIN) // LONGITUDE_E7_PER_CELL,
+    )
+    y = min(
+        CELL_GRID - 1,
+        max(0, latitude_e7 + LATITUDE_E7_ORIGIN) // LATITUDE_E7_PER_CELL,
+    )
+    return (y << 8) | x, f"{y:02x}{x:02x}"
+
+
+def unroutable_e7(longitude_e7: int, latitude_e7: int) -> bool:
+    """Whether E7 coordinates fall outside the world bounds.
+
+    DEFENCE IN DEPTH, not a live filter. `address-transform-v1` already rejects an
+    out-of-world coordinate as `invalid_geometry` (`parse_point`, main.rs:206-210
+    checks `is_finite` and the +-180/+-90 ranges), so no admitted row should ever
+    reach this. It is checked anyway because `Int32` E7 can REPRESENT +-214.7
+    degrees, the check lives in a different language and repository layer from this
+    one, and the consequence of a gap is silent: clamping would file an address at
+    the antimeridian or a pole and reverse would confidently return it.
+
+    Because the Rust check makes this unreachable, failing closed on it cannot
+    abort a planet run over one bad source row -- the transform would have rejected
+    that row first. Do not remove the Rust check on the grounds that this one
+    exists: that WOULD turn a single bad row into a planet-map abort.
+    """
+    return (
+        abs(longitude_e7) > LONGITUDE_E7_ORIGIN
+        or abs(latitude_e7) > LATITUDE_E7_ORIGIN
+    )
+
+
+def route_e7_sql() -> tuple[str, str]:
+    """DuckDB expressions for `(partition_key, partition_cell)`, mirroring route_e7.
+
+    ``greatest(0, ...)`` then ``least(255, ...)`` reproduces the Rust
+    ``clamp(0, 255)`` on both sides, and keeps the dividend non-negative so
+    DuckDB's truncating ``//`` is a floor.
+    """
+    x = (
+        f"least({CELL_GRID - 1}, greatest(0, longitude_e7::BIGINT + "
+        f"{LONGITUDE_E7_ORIGIN}) // {LONGITUDE_E7_PER_CELL})"
+    )
+    y = (
+        f"least({CELL_GRID - 1}, greatest(0, latitude_e7::BIGINT + "
+        f"{LATITUDE_E7_ORIGIN}) // {LATITUDE_E7_PER_CELL})"
+    )
+    return f"(({y}) * 256 + ({x}))::UINTEGER", f"printf('%02x%02x', {y}, {x})"
+
+
+def shuffle_bucket(partition_key: int, bits: int = SHUFFLE_BUCKET_BITS) -> int:
+    """Python mirror of `shuffle_bucket_sql`, and of the Places implementation."""
+    return ((partition_key * SHUFFLE_MULTIPLIER) % 4294967296) >> (32 - bits)
+
+
+def shuffle_bucket_sql(
+    key_expression: str = "partition_key", bits: int = SHUFFLE_BUCKET_BITS
+) -> str:
+    return (
+        f"(((({key_expression})::UBIGINT * {SHUFFLE_MULTIPLIER}) % 4294967296) "
+        f">> {32 - bits})::UINTEGER"
+    )
+
 
 @dataclass(frozen=True)
 class Limits:
@@ -60,6 +208,11 @@ class Limits:
     duckdb_threads: int = 2
     required_duckdb_version: str = "1.5.1"
     allow_unpinned_duckdb: bool = False
+    # Buckets the per-address records artifact is shuffled into. Same meaning and
+    # same default as the Places `shuffle_bucket_bits`, so a reverse consumer can
+    # own one bucket RANGE across both families. It bounds nothing about the
+    # forward address packs.
+    shuffle_bucket_bits: int = SHUFFLE_BUCKET_BITS
 
     def validate(self) -> None:
         numeric = (
@@ -70,11 +223,16 @@ class Limits:
             self.max_scratch_bytes,
             self.max_output_bytes,
             self.max_serving_bytes,
+            self.shuffle_bucket_bits,
         )
         if any(value <= 0 for value in numeric) or self.wall_seconds <= 0:
             raise ValueError("construction limits must be positive")
         if self.duckdb_threads <= 0:
             raise ValueError("DuckDB threads must be positive")
+        # The shuffle takes `bits` HIGH bits of a 32-bit product, so anything above
+        # 32 silently produces bucket 0 for every cell.
+        if self.shuffle_bucket_bits > 24:
+            raise ValueError("address records shuffle bucket bits are out of range")
 
 
 def canonical_json(value: Any) -> bytes:
@@ -440,6 +598,282 @@ def transform(
     return report, evidence
 
 
+def address_records_directory(
+    parquet_path: Path, *, bucket: int, bits: int
+) -> dict[str, Any]:
+    """Row-group directory for one address-records pack, and its cell invariant.
+
+    The forward packs get an exact two-lane binding from the Rust proof binary,
+    which reads `semantic_digest_a`/`_b` off each row. Those digests bind the
+    FORWARD payload -- the normalized keys, the locator, the display fields -- and
+    this artifact's payload is a different projection with a derived spatial column,
+    so reusing them would produce a proof frame that looks exact while binding
+    something else. A records pack is therefore bound by its content hash
+    (`put_content`) plus this directory: per-row-group record counts and per-cell
+    record counts, which is what a reverse consumer needs to size a cell's shard
+    and pick its sub-cell depth WITHOUT reading any data, and to check it read every
+    row it was promised.
+
+    It also enforces the property the shuffle exists for: every cell in the pack
+    hashes to the pack's own bucket, so a cell is never split across buckets and
+    one consumer holds a cell's complete data.
+    """
+    import pyarrow.parquet as pq
+
+    parquet = pq.ParquetFile(parquet_path)
+    row_groups = []
+    totals: dict[str, int] = {}
+    null_island = 0
+    for index in range(parquet.metadata.num_row_groups):
+        batch = parquet.read_row_group(
+            index, columns=["partition_cell", "longitude_e7", "latitude_e7"]
+        )
+        counts: dict[str, int] = {}
+        for cell in batch.column("partition_cell").to_pylist():
+            if cell is None:
+                raise ValueError("address records row carries no partition cell")
+            counts[cell] = counts.get(cell, 0) + 1
+            totals[cell] = totals.get(cell, 0) + 1
+        longitudes = batch.column("longitude_e7").to_pylist()
+        latitudes = batch.column("latitude_e7").to_pylist()
+        for longitude, latitude in zip(longitudes, latitudes, strict=True):
+            if longitude is None or latitude is None:
+                raise ValueError("address records row carries no coordinate")
+            if unroutable_e7(longitude, latitude):
+                raise ValueError("address records row carries an unroutable coordinate")
+            if longitude == 0 and latitude == 0:
+                null_island += 1
+        row_groups.append(
+            {
+                "index": index,
+                "records": batch.num_rows,
+                "cells": [
+                    {"partition_cell": cell, "records": counts[cell]}
+                    for cell in sorted(counts)
+                ],
+            }
+        )
+    for cell in totals:
+        if shuffle_bucket(cell_partition_key(cell), bits) != bucket:
+            raise ValueError("address records cell landed in the wrong shuffle bucket")
+    return {
+        "schema": ADDRESS_RECORDS_DIRECTORY_SCHEMA,
+        "shuffle_bucket": bucket,
+        "records": parquet.metadata.num_rows,
+        # (0, 0) is a real cell (`8080`) and a well-known source defect, so it is
+        # COUNTED and kept, never dropped: dropping it would break the equality
+        # against the admitted count that this artifact's value rests on.
+        "null_island_records": null_island,
+        "row_groups": row_groups,
+        "cells": [
+            {"partition_cell": cell, "records": totals[cell]} for cell in sorted(totals)
+        ],
+    }
+
+
+def cell_partition_key(cell: str) -> int:
+    """(y<<8)|x for a `{y:02x}{x:02x}` partition cell, matching route_e7.
+
+    Mirrors `places_construction_v1.cell_partition_key`; cross-checked against it.
+    """
+    if len(cell) != 4:
+        raise ValueError(f"address partition cell is malformed: {cell!r}")
+    return (int(cell[:2], 16) << 8) | int(cell[2:], 16)
+
+
+def emit_address_records(
+    connection: Any,
+    *,
+    source_table: str,
+    workspace: Path,
+    store: LocalObjectStore,
+    limits: Limits,
+    admitted_rows: int,
+) -> dict[str, Any]:
+    """Emit `overture-address-map-address-records-v1` from the transform table.
+
+    One row per ADMITTED address -- feature ID, source locator, `partition_cell`,
+    `partition_key`, the E7 coordinates, and the display projection the structured
+    forward endpoint returns -- bucketed by the SAME shuffle Places uses, one pack
+    per PRESENT bucket.
+
+    Why it exists, and why here rather than later: the address map's forward packs
+    are keyed by a ROW COUNTER (`row_number() // max_pack_rows`) and carry no
+    spatial column at all, so no spatial index can ever be built from them. Adding
+    a spatially keyed artifact after the planet address map has run means re-running
+    the planet address map. Emitting it now makes an address reverse index purely
+    additive (docs/plans/2026-07-25-reverse-v2-design.md, section 3).
+
+    Why it is additive: it reads the already-materialised transform table and
+    writes new objects. `address_key_hash`, `route_hash`, `hash_bucket`,
+    TOTAL_ORDER, SERVING_ORDER, the forward pack layout and the genesis partition
+    plan are all untouched, and every downstream phase reads `marker["packs"]`,
+    never this. It is not the deferred forward-shuffle port
+    (2026-07-24-construction-v1-follow-ups.md) and must not be used to start it.
+
+    Why per-ROW and not a GROUP BY on the feature ID: two admitted rows can share
+    a feature ID -- SERVING_ORDER breaks ties on the locator triple precisely
+    because they can -- so aggregating would collapse two real addresses into one
+    and reverse would silently lose one. The record count is therefore an EQUALITY
+    against the transform's admitted rows, not an upper bound.
+    """
+    import pyarrow.parquet as pq
+
+    bits = limits.shuffle_bucket_bits
+    key_sql, cell_sql = route_e7_sql()
+    # Fail closed BEFORE writing anything: an out-of-world coordinate has no
+    # truthful cell, and the clamp that keeps the SQL total would file the address
+    # at the antimeridian or a pole. Counted, named, and fatal -- never dropped.
+    # Unreachable in practice, because `address-transform-v1` already rejects such
+    # a row as `invalid_geometry` (see `unroutable_e7`); this is the second lock on
+    # the same door, in a different layer.
+    unroutable = connection.execute(
+        f"SELECT count(*) FROM {source_table} WHERE "
+        f"abs(longitude_e7::BIGINT) > {LONGITUDE_E7_ORIGIN} OR "
+        f"abs(latitude_e7::BIGINT) > {LATITUDE_E7_ORIGIN}"
+    ).fetchone()[0]
+    if unroutable:
+        raise ValueError(
+            f"{unroutable} admitted address rows carry coordinates outside the world "
+            "bounds and cannot be assigned a partition cell"
+        )
+    display = ", ".join(ADDRESS_RECORDS_DISPLAY_COLUMNS)
+    # `partition_key` is deliberately NOT a column: it is `cell_partition_key` of
+    # `partition_cell`, a pure 4-hex-character decode, so shipping it would be ~4
+    # redundant bytes per row -- about 1.9 GB planet-wide -- for a value any reader
+    # can derive. The Places positions packs dropped it for the same reason. It is
+    # still computed here because the shuffle hashes it.
+    projection = (
+        f"SELECT feature_id, {cell_sql} AS partition_cell, "
+        "longitude_e7, latitude_e7, source_object_index, source_row_group, "
+        f"source_row_index, {display} FROM {source_table}"
+    )
+    # One tagged copy, then one file per present bucket, exactly as the Places
+    # positions packs do. `COPY ... PARTITION_BY` cannot be used because DuckDB
+    # does not preserve row order within a partition, and these packs are sorted.
+    tagged = workspace / "address-records-tagged.parquet"
+    connection.execute(
+        # The bucket is derived from the same E7 columns the projection carries, so
+        # the key never has to be materialised as a column to be hashed.
+        f"COPY (SELECT *, {shuffle_bucket_sql(key_sql, bits)} AS records_bucket "
+        f"FROM ({projection})) "
+        f"TO '{tagged}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
+        f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2)"
+    )
+    records = pq.ParquetFile(tagged).metadata.num_rows
+    if records != admitted_rows:
+        raise ValueError("address records differ from the admitted row count")
+    source = f"read_parquet('{tagged}')"
+    present = [
+        int(row[0])
+        for row in connection.execute(
+            f"SELECT DISTINCT records_bucket FROM {source} ORDER BY records_bucket"
+        ).fetchall()
+    ]
+    packs = []
+    output_bytes = 0
+    null_island = 0
+    for bucket in present:
+        pack = workspace / f"address-records-{bucket:06d}.parquet"
+        connection.execute(
+            f"COPY (SELECT * EXCLUDE(records_bucket) FROM {source} "
+            f"WHERE records_bucket = {bucket} ORDER BY {ADDRESS_RECORDS_ORDER}) "
+            f"TO '{pack}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
+            f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2, "
+            "PRESERVE_ORDER true)"
+        )
+        if pack.stat().st_size > limits.max_output_bytes:
+            raise ValueError("address records pack exceeds its output cap")
+        # Bound the AGGREGATE too, not just each pack. The forward path caps the
+        # sum of its packs, and a per-pack-only cap is satisfied by any number of
+        # just-under-cap packs -- so with 256 buckets the artifact could be 256x
+        # the bound the cap appears to state.
+        if output_bytes + pack.stat().st_size > limits.max_output_bytes:
+            raise ValueError("address records output exceeded its hard cap in total")
+        directory_value = address_records_directory(pack, bucket=bucket, bits=bits)
+        directory_path = workspace / f"address-records-{bucket:06d}.directory.json"
+        directory_path.write_text(json.dumps(directory_value, sort_keys=True) + "\n")
+        pack_object = store.put_content(pack, "map/address/records", ".parquet")
+        directory_object = store.put_content(
+            directory_path, "map/address/record-directories", ".json"
+        )
+        null_island += directory_value["null_island_records"]
+        output_bytes += pack_object["bytes"] + directory_object["bytes"]
+        packs.append(
+            {
+                "pack_id": bucket,
+                "shuffle_bucket": bucket,
+                "records": directory_value["records"],
+                "object": pack_object,
+                "directory_object": directory_object,
+                "directory": directory_value,
+            }
+        )
+        pack.unlink(missing_ok=True)
+        directory_path.unlink(missing_ok=True)
+    tagged.unlink(missing_ok=True)
+    if sum(item["records"] for item in packs) != records:
+        raise ValueError("address records packs do not reconstruct the record count")
+    return {
+        "schema": ADDRESS_RECORDS_SCHEMA,
+        "records": records,
+        "admitted_rows": admitted_rows,
+        "shuffle_bucket_bits": bits,
+        "unroutable_records": 0,
+        "null_island_records": null_island,
+        "output_bytes": output_bytes,
+        "packs": packs,
+    }
+
+
+def validate_address_records(
+    marker: dict[str, Any], store: LocalObjectStore
+) -> None:
+    """A resumed marker must carry the address records artifact, intact.
+
+    Without this, a marker written before the artifact existed resumes silently and
+    one run mixes tasks that have records with tasks that do not -- so the planet
+    reverse build would be short by whole map tasks with nothing failing.
+    """
+    records = marker.get("address_records")
+    if (
+        not isinstance(records, dict)
+        or records.get("schema") != ADDRESS_RECORDS_SCHEMA
+    ):
+        raise ValueError(
+            "Address marker is missing its per-address records artifact. A marker "
+            "written before the artifact existed cannot be upgraded in place -- "
+            "markers are write-once and this one is intact and self-consistent, it "
+            "just predates the artifact. Remediation is to DELETE this task's "
+            f"marker ({marker.get('task_id')!r}) from the store and re-run its map "
+            "task; the forward packs are content-addressed, so the re-run publishes "
+            "the identical bytes and only adds the records packs."
+        )
+    packs = records.get("packs")
+    if not packs:
+        raise ValueError("Address records artifact records no packs")
+    for pack in packs:
+        for identity in (pack["object"], pack["directory_object"]):
+            path = store.path(identity["key"])
+            if (
+                not path.is_file()
+                or path.stat().st_size != identity["bytes"]
+                or sha256_file(path) != identity["sha256"]
+            ):
+                raise ValueError(
+                    "Address immutable records object is missing or changed"
+                )
+        stored = json.loads(store.path(pack["directory_object"]["key"]).read_text())
+        if stored != pack["directory"]:
+            raise ValueError("Address marker embeds a different records directory")
+        if pack["directory"]["shuffle_bucket"] != pack["shuffle_bucket"]:
+            raise ValueError("Address records pack bucket differs from its directory")
+    if sum(pack["records"] for pack in packs) != records["records"]:
+        raise ValueError("Address records packs do not reconstruct the record count")
+    if records["records"] != marker["transform"]["admitted_rows"]:
+        raise ValueError("Address records differ from the admitted row count")
+
+
 def marker_key(task_id: str) -> str:
     if not task_id or any(character not in "abcdefghijklmnopqrstuvwxyz0123456789-_" for character in task_id):
         raise ValueError("task ID is not a safe canonical component")
@@ -477,6 +911,7 @@ def validate_marker(
         [pack["directory"]["binding"] for pack in marker["packs"]]
     ) != marker["binding"]:
         raise ValueError("Address marker pack bindings do not reconcile")
+    validate_address_records(marker, store)
     return marker
 
 
@@ -630,6 +1065,19 @@ def map_task(
                         "proof_evidence": directory_evidence,
                     }
                 )
+            # Additive, and inside the same watchdog so the records artifact is
+            # bounded by the same RSS/scratch/wall caps as the forward packs. It
+            # reads `packed` and writes new objects; the forward packs above are
+            # already written and are not touched, which is why their bytes are
+            # unchanged by this artifact existing.
+            address_records = emit_address_records(
+                connection,
+                source_table="packed",
+                workspace=workspace,
+                store=store,
+                limits=limits,
+                admitted_rows=transform_report["admitted_rows"],
+            )
         construction_evidence = watchdog.evidence()
         connection.close()
         if failpoint in {"after_objects", "before_marker"}:
@@ -679,6 +1127,14 @@ def map_task(
                 "packs": pack_count,
             },
             "packs": packs,
+            # The per-address, spatially keyed records artifact. Deliberately NOT
+            # inside "packs": every downstream phase (genesis_plan,
+            # _accumulate_bucket_summaries, reduce_partition) iterates
+            # marker["packs"], so keeping this separate is what makes the addition
+            # invisible to the forward pipeline. Its bytes are reported under its
+            # own key for the same reason -- "output_bytes" keeps meaning the
+            # forward map output.
+            "address_records": address_records,
             "binding": binding,
             "output_bytes": output_bytes,
         }

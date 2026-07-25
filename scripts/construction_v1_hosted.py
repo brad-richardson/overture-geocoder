@@ -89,10 +89,44 @@ REMOTE = _load("construction_v1_hosted_remote", "scripts/construction_v1_remote.
 CONTROL = _load("construction_v1_hosted_control", "scripts/construction_v1_control.py")
 
 FAMILIES = ("addresses", "places")
-# Families whose map phase emits per-place positions packs, and which therefore
-# MUST publish them at finalize. Addresses will join this set when the shuffle is
-# ported to them; until then a missing positions set there is correct, not a gap.
-POSITIONS_FAMILIES = ("places",)
+
+# The map phase's per-RECORD artifact, per family. ONE publication seam covers
+# both: same fail-closed gate at finalize, same create-only verified publication,
+# same manifest listing, same result keys. Only the marker key, the published
+# sub-prefix, and the schema string differ.
+#
+# Both families are in this table, so a missing per-record set is a GAP for either
+# of them -- never "correct". (This replaced a places-only set, whose comment said
+# a missing addresses set was correct because the address shuffle had not been
+# ported. That reasoning was superseded: addresses now emit a spatially keyed
+# records artifact for the reverse index WITHOUT the forward shuffle port, which
+# is still deliberately deferred.)
+#
+# Publishing them is not decoration. The map store otherwise travels only as a
+# GitHub artifact with 7-day retention, so eight days after a planet run the
+# per-record packs would be gone and a spatial reverse index would cost exactly
+# the full planet map re-run these artifacts exist to avoid.
+PER_RECORD_ARTIFACTS: dict[str, dict[str, str]] = {
+    "addresses": {
+        "marker_key": "address_records",
+        "prefix": "records",
+        "schema": ADDRESS.ADDRESS_RECORDS_SCHEMA,
+    },
+    "places": {
+        "marker_key": "positions",
+        "prefix": "positions",
+        "schema": PLACES.POSITIONS_SCHEMA,
+    },
+}
+
+
+def _per_record_artifact(marker: dict[str, Any], family: str) -> dict[str, Any] | None:
+    """One marker's per-record artifact, or None when it carries none."""
+    spec = PER_RECORD_ARTIFACTS.get(family)
+    if spec is None:
+        return None
+    value = marker.get(spec["marker_key"])
+    return value if isinstance(value, dict) else None
 
 # Conservative bounded hosted limits. They stay well under a 330-minute job and
 # are overridable per run through the contract so a rehearsal can shrink them.
@@ -355,13 +389,15 @@ def cmd_run_map(args: argparse.Namespace) -> int:
         "records": marker["binding"]["records"],
         "packs": len(marker["packs"]),
     }
-    # Places also emits the per-place positions packs (one row per admitted place
-    # RECORD, same shuffle as the term packs). Report them so a map job's log
-    # shows the artifact exists; nothing downstream of map consumes them yet.
-    positions = marker.get("positions")
-    if isinstance(positions, dict):
-        summary["positions_packs"] = len(positions["packs"])
-        summary["positions_records"] = positions["records"]
+    # Both families emit a per-RECORD artifact from map alongside the serving
+    # packs -- Places per place, addresses per address, each on the same 256x256
+    # cell scheme and the same shuffle. Report it under ONE key pair regardless of
+    # family so a log consumer needs no per-family branch; nothing downstream of
+    # map consumes them yet.
+    per_record = _per_record_artifact(marker, args.family)
+    if per_record is not None:
+        summary["positions_packs"] = len(per_record["packs"])
+        summary["positions_records"] = per_record["records"]
     if args.output:
         write_json(args.output, summary)
     print(json.dumps(summary, sort_keys=True))
@@ -1117,15 +1153,20 @@ def _artifact_keys(family: str, reductions: list[dict[str, Any]], head: dict[str
     return objects
 
 
-def _positions_objects(markers: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The map-phase positions packs and their directories, deduplicated by key.
+def _positions_objects(
+    markers: list[dict[str, Any]], family: str
+) -> list[dict[str, Any]]:
+    """One family's map-phase per-record packs and directories, deduped by key.
 
     These are NOT serving artifacts, and they are published for one reason: the
     store otherwise travels only as a GitHub artifact with a 7-day retention, so
-    eight days after a planet run the per-place records would be gone and a
-    spatial reverse index would cost the full map re-run this artifact exists to
-    avoid. Publishing them puts them in durable storage under the same
-    create-only, verified-once treatment as everything else in the slice.
+    eight days after a planet run the per-record packs would be gone and a spatial
+    reverse index would cost the full map re-run these artifacts exist to avoid.
+    Publishing them puts them in durable storage under the same create-only,
+    verified-once treatment as everything else in the slice.
+
+    Family-generic: `PER_RECORD_ARTIFACTS` says which marker key to read, so
+    Places positions and address records travel the identical path.
 
     Deduplicated by key because the keys are content-addressed: two tasks that
     produced byte-identical bytes are one object, and the exact-set publisher
@@ -1133,10 +1174,10 @@ def _positions_objects(markers: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     unique: dict[str, dict[str, Any]] = {}
     for marker in markers:
-        positions = marker.get("positions")
-        if not isinstance(positions, dict):
+        per_record = _per_record_artifact(marker, family)
+        if per_record is None:
             continue
-        for pack in positions["packs"]:
+        for pack in per_record["packs"]:
             for identity in (pack["object"], pack["directory_object"]):
                 unique[identity["key"]] = identity
     return sorted(unique.values(), key=lambda item: item["key"])
@@ -1164,41 +1205,48 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     artifacts = _artifact_keys(args.family, reductions, head)
     if len({item["key"] for item in artifacts}) != len(artifacts):
         raise SystemExit("duplicate serving artifact key")
-    # Map-phase per-place positions packs, published alongside the serving set so
-    # they outlive the 7-day artifact retention.
+    # Map-phase per-RECORD packs, published alongside the serving set so they
+    # outlive the 7-day artifact retention. One seam for both families
+    # (PER_RECORD_ARTIFACTS): Places positions and address records.
     #
-    # FAIL CLOSED when a family that carries positions cannot publish them.
-    # Skipping publication on a missing --markers-dir would be the P1-1 failure
-    # one level up: a workflow wiring mistake would quietly produce a slice with
-    # no per-place records, and the cost of noticing is a full planet map re-run.
-    # Families with no positions yet (addresses) are unaffected.
-    if args.family in POSITIONS_FAMILIES and not args.markers_dir:
+    # FAIL CLOSED when a family that carries them cannot publish them. Skipping
+    # publication on a missing --markers-dir would be the durable-publication
+    # failure one level up: a workflow wiring mistake would quietly produce a
+    # slice with no per-record packs, and the cost of noticing is a full planet
+    # map re-run. BOTH families are in the table, so neither gets a free pass.
+    per_record_spec = PER_RECORD_ARTIFACTS.get(args.family)
+    if per_record_spec is not None and not args.markers_dir:
         raise SystemExit(
             f"finalize --markers-dir is required for the {args.family} family: its "
-            "map phase emits per-place positions packs, and they must be published "
-            "durably rather than expiring with the map artifact retention"
+            f"map phase emits {per_record_spec['schema']} packs, and they must be "
+            "published durably rather than expiring with the map artifact retention"
         )
     positions_markers = (
         _load_markers(args.markers_dir)
-        if args.markers_dir and args.family in POSITIONS_FAMILIES
+        if args.markers_dir and per_record_spec is not None
         else []
     )
-    # And a marker that carries no positions is a gap too: it means one map task
-    # in this slice predates the artifact, so the published set would be missing
-    # exactly that task's places.
+    # And a marker that carries no per-record artifact is a gap too: it means one
+    # map task in this slice predates the artifact, so the published set would be
+    # missing exactly that task's records.
     if any(
-        not isinstance(marker.get("positions"), dict) for marker in positions_markers
+        _per_record_artifact(marker, args.family) is None
+        for marker in positions_markers
     ):
         raise SystemExit(
-            f"a {args.family} map marker carries no positions artifact; its per-place "
-            "records cannot be published, so the slice would be incomplete"
+            f"a {args.family} map marker carries no "
+            f"{per_record_spec['marker_key']} artifact; its per-record packs cannot "
+            "be published, so the slice would be incomplete. A marker written "
+            "before the artifact existed cannot be upgraded in place (markers are "
+            "write-once): delete that task's marker and re-run its map task."
         )
-    positions = _positions_objects(positions_markers)
+    positions = _positions_objects(positions_markers, args.family)
     positions_records = sum(
-        marker["positions"]["records"] for marker in positions_markers
+        _per_record_artifact(marker, args.family)["records"]
+        for marker in positions_markers
     )
     if {item["key"] for item in positions} & {item["key"] for item in artifacts}:
-        raise SystemExit("positions object collides with a serving artifact key")
+        raise SystemExit("per-record object collides with a serving artifact key")
 
     family_manifest = {
         "schema": "construction-v1-family-manifest-v1",
@@ -1209,10 +1257,12 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "partitions": reconciliation["partitions"],
         "artifacts": sorted(artifacts, key=lambda item: item["key"]),
         "head": {"shard_count": head["shard_count"], "total_records": head["total_records"]} if head else None,
-        # Listed separately from `artifacts`: these are build-phase per-place
-        # records, not serving objects, and nothing serves them today.
+        # Listed separately from `artifacts`: these are build-phase per-record
+        # packs, not serving objects, and nothing serves them today. The key stays
+        # `positions` for both families because it is already the published
+        # manifest shape; `schema` says which artifact it actually is.
         "positions": {
-            "schema": PLACES.POSITIONS_SCHEMA,
+            "schema": per_record_spec["schema"],
             "records": positions_records,
             "objects": positions,
         } if positions else None,
@@ -1246,9 +1296,16 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     for artifact in artifacts:
         exact_set.append((f"{slice_root}/families/{args.family}/objects/{Path(artifact['key']).name}",
                           store.path(artifact["key"])))
+    # Per-family sub-prefix: `positions/` for places, `records/` for addresses --
+    # so the published tree names the artifact it holds instead of calling address
+    # records "positions". Both go through the same exact-set publisher and the
+    # same verify_whole_slice_once below.
     for artifact in positions:
-        exact_set.append((f"{slice_root}/families/{args.family}/positions/{Path(artifact['key']).name}",
-                          store.path(artifact["key"])))
+        exact_set.append((
+            f"{slice_root}/families/{args.family}/{per_record_spec['prefix']}/"
+            f"{Path(artifact['key']).name}",
+            store.path(artifact["key"]),
+        ))
     marker_key = f"{contract['namespaces']['markers'].rstrip('/')}/finalize/{args.family}.json"
     marker = REMOTE.publish_exact_set(
         remote,
@@ -1451,10 +1508,10 @@ def build_parser() -> argparse.ArgumentParser:
     final.add_argument("--reductions-dir", required=True)
     final.add_argument("--head", type=Path, default=None)
     final.add_argument("--markers-dir", default=None,
-                      help="Map markers, so the per-place positions packs are published "
-                           "durably instead of expiring with the 7-day artifact retention. "
-                           "REQUIRED for families that emit positions (places); optional "
-                           "for families that do not (addresses).")
+                      help="Map markers, so the per-record packs are published durably "
+                           "instead of expiring with the 7-day artifact retention. "
+                           "REQUIRED for every family in PER_RECORD_ARTIFACTS, which is "
+                           "both of them (places positions, address records).")
     final.add_argument("--remote-root", required=True)
     final.add_argument("--work-root", required=True)
     final.add_argument("--fail-after-upload", type=int, default=None)

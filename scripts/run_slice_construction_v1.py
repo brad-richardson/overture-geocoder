@@ -183,6 +183,25 @@ if ADDRESSES:
     print(f"  admitted {map_summary['admitted_rows']:,} / rejected "
           f"{map_summary['rejected_rows']:,} -> {map_summary['map_packs']} packs"
           f"  {time.time()-t:.1f}s")
+    # Guarded exactly as the hosted CLI guards it: a marker written before the
+    # artifact existed has no such key, and the diagnosis for that is finalize's
+    # fail-closed gate, not a KeyError here.
+    art = marker.get("address_records")
+    if isinstance(art, dict):
+        cells = sorted({
+            cell["partition_cell"]
+            for pack in art["packs"] for cell in pack["directory"]["cells"]
+        })
+        map_summary["address_records_rows"] = art["records"]
+        map_summary["address_records_packs"] = len(art["packs"])
+        map_summary["address_records_bytes"] = art["output_bytes"]
+        map_summary["address_records_cells"] = cells
+        map_summary["address_records_null_island"] = art["null_island_records"]
+        print(f"  address-records {art['records']:,} rows in "
+              f"{len(art['packs'])} bucket packs ({art['output_bytes']/1e6:.2f} MB), "
+              f"cells {cells}, buckets {[p['shuffle_bucket'] for p in art['packs']]}, "
+              f"null-island {art['null_island_records']}, "
+              f"unroutable {art['unroutable_records']}")
 else:
     comb = marker["combiner"]
     map_summary = {

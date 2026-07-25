@@ -186,18 +186,110 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
     remote = tmp_path / "remote"
     final = tmp_path / "final.json"
     _run("finalize", "--contract", contract, "--store-root", store, "--family", "addresses",
-         "--plan", plan, "--reductions-dir", reductions_dir, "--remote-root", remote,
+         "--plan", plan, "--reductions-dir", reductions_dir, "--markers-dir", markers_dir,
+         "--remote-root", remote,
          "--work-root", tmp_path / "final-work", "--output", final)
     result = json.loads(final.read_text())
     assert result["reconciles"] is True
     assert result["marker_written_last"] is True
-    # The family manifest + slice manifest + one serving object per partition,
-    # all present in the "remote" and byte-verified exactly once.
-    assert result["objects"] == 2 + len(partitions)
+
+    # The per-address records packs must be PUBLISHED, not merely produced -- the
+    # same reasoning as the Places positions packs, through the SAME seam
+    # (PER_RECORD_ARTIFACTS): the store travels as a GitHub artifact with a 7-day
+    # retention, so anything outside the durable slice is gone a week after a
+    # planet run, and then an address reverse index costs the full address map
+    # re-run this artifact exists to avoid.
+    manifest = json.loads((tmp_path / "final-work/family-manifest.json").read_text())
+    published_records = manifest["positions"]
+    assert published_records["schema"] == HOSTED.ADDRESS.ADDRESS_RECORDS_SCHEMA
+    expected_records = sum(
+        json.loads(path.read_text())["address_records"]["records"]
+        for path in sorted(markers_dir.glob("*.json"))
+    )
+    assert published_records["records"] == expected_records == len(rows)
+    assert result["positions_objects"] == len(published_records["objects"]) > 0
+    assert result["positions_records"] == expected_records
+    # Addresses publish under records/, not positions/: the tree names the
+    # artifact it holds instead of calling address records "positions".
+    slice_root = json.loads(contract.read_text())["namespaces"]["slice"].rstrip("/")
+    for item in published_records["objects"]:
+        path = remote / f"{slice_root}/families/addresses/records/{Path(item['key']).name}"
+        assert path.is_file()
+        assert path.stat().st_size == item["bytes"]
+    # The family manifest + slice manifest + one serving object per partition +
+    # the records set, all present in the "remote" and byte-verified exactly once.
+    assert result["objects"] == 2 + len(partitions) + len(published_records["objects"])
+    assert json.loads((tmp_path / "final-work/slice-manifest.json").read_text())[
+        "positions_object_count"
+    ] == len(published_records["objects"])
     # The completion marker is outside the verified family prefix and written
     # last: publish_exact_set HEAD-verified it.
     marker_key = result["marker_key"]
     assert (remote / marker_key).is_file()
+
+    # Publishing must not be skippable by omission. Before the records artifact
+    # existed, addresses were EXEMPT from this gate; they no longer are, so a
+    # workflow that forgets --markers-dir fails instead of shipping an address
+    # slice with no per-address records.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "addresses", "--plan", str(plan),
+                     "--reductions-dir", str(reductions_dir),
+                     "--remote-root", str(tmp_path / "remote-b"),
+                     "--work-root", str(tmp_path / "final-work-b"),
+                     "--output", str(tmp_path / "final-b.json")])
+    assert "--markers-dir is required" in str(excinfo.value)
+    assert HOSTED.ADDRESS.ADDRESS_RECORDS_SCHEMA in str(excinfo.value)
+
+    # A marker that predates the artifact is the same gap one level in, and the
+    # error must say how to remediate it: markers are write-once.
+    stale_markers = tmp_path / "stale-markers"
+    stale_markers.mkdir()
+    for path in sorted(markers_dir.glob("*.json")):
+        stale = json.loads(path.read_text())
+        stale.pop("address_records")
+        (stale_markers / path.name).write_text(json.dumps(stale))
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "addresses", "--plan", str(plan),
+                     "--reductions-dir", str(reductions_dir),
+                     "--markers-dir", str(stale_markers),
+                     "--remote-root", str(tmp_path / "remote-c"),
+                     "--work-root", str(tmp_path / "final-work-c"),
+                     "--output", str(tmp_path / "final-c.json")])
+    assert "carries no address_records artifact" in str(excinfo.value)
+    assert "re-run its map task" in str(excinfo.value)
+
+
+def test_the_per_record_publication_seam_covers_both_families():
+    """One seam, not two parallel mechanisms.
+
+    The publication path, the fail-closed gate, the manifest listing and the
+    result keys are all family-generic; only the marker key, the published
+    sub-prefix and the schema string come from the table. A family added to
+    FAMILIES without an entry here would silently publish nothing.
+    """
+    assert set(HOSTED.PER_RECORD_ARTIFACTS) == set(HOSTED.FAMILIES)
+    assert HOSTED.PER_RECORD_ARTIFACTS["places"]["marker_key"] == "positions"
+    assert HOSTED.PER_RECORD_ARTIFACTS["addresses"]["marker_key"] == "address_records"
+    # Distinct sub-prefixes, so the published tree never calls address records
+    # "positions".
+    prefixes = {spec["prefix"] for spec in HOSTED.PER_RECORD_ARTIFACTS.values()}
+    assert prefixes == {"positions", "records"}
+    assert HOSTED.PER_RECORD_ARTIFACTS["places"]["schema"] == HOSTED.PLACES.POSITIONS_SCHEMA
+    assert HOSTED.PER_RECORD_ARTIFACTS["addresses"]["schema"] == (
+        HOSTED.ADDRESS.ADDRESS_RECORDS_SCHEMA
+    )
+    # The accessor reads the family's own key and nothing else, so a places marker
+    # cannot satisfy the address gate or vice versa.
+    places_marker = {"positions": {"records": 1, "packs": []}}
+    address_marker = {"address_records": {"records": 2, "packs": []}}
+    assert HOSTED._per_record_artifact(places_marker, "places")["records"] == 1
+    assert HOSTED._per_record_artifact(places_marker, "addresses") is None
+    assert HOSTED._per_record_artifact(address_marker, "addresses")["records"] == 2
+    assert HOSTED._per_record_artifact(address_marker, "places") is None
+    # Objects are collected per family from the family's own key.
+    assert HOSTED._positions_objects([address_marker], "places") == []
 
 
 def test_high_noncontiguous_source_row_groups_survive_correct_limits_and_fail_closed_on_wrong(
