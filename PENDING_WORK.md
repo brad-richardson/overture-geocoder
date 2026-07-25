@@ -10,6 +10,15 @@ state doc supersedes them where they disagree. Open follow-ups live in
 `docs/plans/2026-07-24-construction-v1-follow-ups.md`; irreversible choices in
 `docs/plans/2026-07-23-construction-v1-one-way-doors.md`.
 
+**As of 2026-07-25 NEITHER family is ready for a planet dispatch.** Three blockers
+remain, all in the finalize/mirror path: the serial `aws s3api` mirror needs 8.4 h
+(Places) / 12.4 h (addresses) against a 360-minute timeout; the address marker fan-in
+is 14.6 GB of JSON / 23.9 GB RSS on a 16 GB runner; and address finalize's local
+publish tree is ~100-145 GB against a 25 GB floor. See the dispatch-readiness banner
+at the top of the state doc and the **"planet dispatch readiness"** section at the end
+of the follow-ups doc, which also records why this class of blocker was missed for so
+long.
+
 The fast local loop is `scripts/build_slice_inventory_v1.py` plus
 `scripts/run_slice_construction_v1.py`: all five construction phases on real
 Overture data in ~13 seconds (~20s including the inventory build) with no

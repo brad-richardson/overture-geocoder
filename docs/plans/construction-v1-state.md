@@ -6,6 +6,31 @@ is the current picture and supersedes them where they disagree.
 
 Last updated 2026-07-25.
 
+## DISPATCH READINESS: NEITHER FAMILY IS READY (2026-07-25)
+
+Read this before believing anything below about how close a planet dispatch is.
+Eight PRs on 2026-07-25 closed every blocker known at the time; a dedicated
+address-family readiness pass then found three more, one of which stops Places too:
+
+- **The R2 mirror cannot finish inside its job timeout, in BOTH families.** Its
+  serial `aws s3api` loop costs a MEASURED 0.34 s per invocation: 8.4 h for Places
+  (44,305 objects), 12.4 h for addresses (65,751), against a 360-minute timeout and a
+  `FINALIZE_PHASE_ESTIMATE_MINUTES` of 120 — before any bytes move.
+- **The address marker fan-in is 14.6 GB of JSON / 23.9 GB RSS on a 16 GB runner**,
+  loaded whole by `plan-reduce`, by all 121 reduce jobs, and by finalize.
+- **Address finalize's local publish tree is ~100-145 GB against a 25 GB floor.**
+
+All three are in the finalize/mirror path, which has never executed at scale.
+Everything upstream of head is in good shape. Full detail, the measurements, the
+same-class gaps found alongside, a "why none of this was caught earlier" section, and
+the ordered dispatch prerequisites are in the **"planet dispatch readiness"** section
+at the end of `docs/plans/2026-07-24-construction-v1-follow-ups.md`.
+
+One sequencing fact that governs any partial run: the request identity digests
+`places_construction_v1.py`, `address_construction_v1.py`, `Cargo.lock` and `caps`,
+and `namespaces.immutable_root` is a hash of that — so **map output produced before a
+fix touching those lands is not reusable by the resumed run.**
+
 ## The one-paragraph version
 
 The pipeline works end to end on real data at small scale, and until 2026-07-25
@@ -19,7 +44,9 @@ and JSON only, and each consumer fetches by key exactly the objects its markers
 name — the same shape `build_id_index.py` already uses. **For PLACES** what
 remains before a planet dispatch is operational rather than structural: a scoped
 staging-only R2 token, and row-group range reads to tighten read amplification
-further. **For ADDRESSES the reduce phase is bounded too** as of 2026-07-25: it now
+further. **That "operational rather than structural" claim is now WRONG** — see the
+dispatch-readiness section above: the R2 mirror's throughput blocks Places too, and it
+is structural. **For ADDRESSES the reduce phase is bounded too** as of 2026-07-25: it now
 releases each hydrated pack at its last use and enforces the result against
 `max_scratch_bytes`, so a job holds one hash SLICE of packs — one per map task holding
 its country, single-digit GB at planet scale — instead of everything it ever opened.
