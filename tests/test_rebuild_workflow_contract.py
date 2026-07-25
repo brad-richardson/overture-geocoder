@@ -202,11 +202,30 @@ def test_every_phase_is_independently_gated_on_a_dispatch_selection():
     names = [n or "" for n in step_names(_cleanup_job())]
     phase_steps = [n for n in names if n.startswith("Phase ")]
     assert len(phase_steps) == 5, phase_steps
+    seen = set()
     for step in _cleanup_job()["steps"]:
-        if (step.get("name") or "").startswith("Phase "):
-            assert re.fullmatch(
-                r"steps\.plan\.outputs\.phase[1-5] == 'true'", step["if"]
-            ), step["name"]
+        name = step.get("name") or ""
+        number = re.match(r"Phase (\d) - ", name)
+        if not number:
+            continue
+        # The gate must name the *same* phase as the step: a mis-numbered gate
+        # would run a phase the dispatcher did not select.
+        assert step["if"] == (
+            f"steps.plan.outputs.phase{number.group(1)} == 'true'"
+        ), name
+        seen.add(number.group(1))
+    assert seen == {"1", "2", "3", "4", "5"}, seen
+
+
+def test_ttl_sleep_is_gated_on_the_same_phase_five_selection():
+    gate = "steps.plan.outputs.phase5 == 'true'"
+    for name in (
+        "Prune catalog and verify",
+        "Verify live worker before deleting",
+        "Wait out worker catalog cache TTL",
+        "Phase 5 - delete pruned version prefixes",
+    ):
+        assert step_by_name(_cleanup_job(), name)["if"] == gate, name
 
 
 def test_protected_prefix_guard_precedes_every_delete():
@@ -214,7 +233,10 @@ def test_protected_prefix_guard_precedes_every_delete():
     names = [step.get("name") for step in steps]
     guard = names.index("Assert no target intersects a protected prefix")
     for index, step in enumerate(steps):
-        if "s3 rm" in step.get("run", ""):
+        # Strip the sourced helper's definition: the plan step *writes* the
+        # `s3 rm` helper, it does not run one.
+        body = re.sub(r"cat > /tmp/r2-rm\.sh <<'SH'.*?\nSH\n", "", step.get("run", ""), flags=re.S)
+        if "s3 rm" in body or re.search(r"^\s*RM \"", body, re.M):
             assert guard < index, step.get("name")
     protected = load(CLEANUP)["env"]["PROTECTED_PREFIXES"].split()
     assert protected == ["2026-07-13.0", "2026-07-18.0", "2026-07-02.3", "backups"]
@@ -238,12 +260,16 @@ def test_protected_prefix_guard_rejects_intersecting_targets(tmp_path):
     script = tmp_path / "guard.py"
     script.write_text(body)
     protected = "2026-07-13.0 2026-07-18.0 2026-07-02.3 backups"
+    # The workflow passes the target file as argv[2]; keep this test's file in
+    # tmp_path so it never touches the real /tmp/delete-targets.txt.
+    targets = tmp_path / "delete-targets.txt"
 
     def run(lines):
-        targets = Path("/tmp/delete-targets.txt")
         targets.write_text("".join(f"{line}\n" for line in lines))
         return subprocess.run(
-            [sys.executable, str(script), protected], capture_output=True, text=True
+            [sys.executable, str(script), protected, str(targets)],
+            capture_output=True,
+            text=True,
         )
 
     ok = run(["1|2026-07-02.0/staging/", "3|2026-07-17.0/"])
@@ -254,13 +280,81 @@ def test_protected_prefix_guard_rejects_intersecting_targets(tmp_path):
         "3|2026-07-13.0/",               # the live latest
         "5|2026-07-02.3/",               # id-index-bearing rollback
         "1|backups/catalog-x.json",      # catalog backups
-        "3|staging/",                    # too short / unqualified
+        "3|staging/",                    # denied pipeline root
+        "3|staging/global-v2/",           # denied pipeline root
+        "5|catalog.json",                 # the catalog itself
+        "5|2026-07-02.1/catalog.json",    # a catalog at any depth
+        "3|2026-07-13.0 /",               # whitespace defeating the comparison
+        "3| 2026-07-13.0/",               # leading whitespace
+        "3|2026-07-13.0\t/",              # tab
         "2|/2026-07-17.0/",              # absolute
         "3|2026-07-17.0/../2026-07-13.0/",  # traversal
+        "3|foo",                          # unqualified, no slash
     ):
         result = run([bad])
         assert result.returncode == 1, (bad, result.stdout)
         assert "::error::" in result.stdout, bad
+
+
+def test_global_v2_inputs_reject_multiline_values():
+    """A two-line value would pass the per-line grep and smuggle line 2 in."""
+    plan = step_by_name(_cleanup_job(), "Validate inputs and compute deletion targets")
+    check = plan["run"].split("check_global_v2() {", 1)[1]
+    # The newline/whitespace rejection must come before the grep that only sees
+    # the first line.
+    reject = check.index("must be a single line")
+    grep = check.index("[0-9a-f]{64}")
+    assert reject < grep, "multi-line rejection must precede the regex check"
+    for pattern in ("*$'\\n'*", "*$'\\r'*", "*$'\\t'*"):
+        assert pattern in check, pattern
+
+
+def test_a_mistyped_confirmation_fails_the_run():
+    workflow = load(CLEANUP)
+    confirm = jobs(workflow)["confirm"]
+    # Ungated job, so a typo is a red run rather than a green skip...
+    assert "if" not in confirm
+    run = confirm["steps"][0]["run"]
+    assert '"$CONFIRM" != "CLEANUP"' in run and "exit 1" in run
+    # ...and the cleanup job still carries its own gate and waits on it.
+    cleanup = jobs(workflow)["cleanup"]
+    assert cleanup["if"] == "github.event.inputs.confirm == 'CLEANUP'"
+    assert cleanup["needs"] == "confirm"
+
+
+def test_dry_run_input_routes_every_delete_through_dryrun():
+    workflow = load(CLEANUP)
+    triggers = workflow[True] if True in workflow else workflow["on"]
+    dry = triggers["workflow_dispatch"]["inputs"]["dry_run"]
+    assert dry["type"] == "boolean" and dry["default"] is False
+    assert workflow["env"]["DRY_RUN"] == "${{ github.event.inputs.dry_run }}"
+
+    plan = step_by_name(_cleanup_job(), "Validate inputs and compute deletion targets")
+    helper = plan["run"].split("cat > /tmp/r2-rm.sh", 1)[1].split("\nSH\n", 1)[0]
+    assert '"${DRY_RUN:-false}" = "true"' in helper
+    assert "--dryrun" in helper
+    # Real deletes keep an audit trail rather than suppressing per-key output.
+    assert not re.search(r"s3 rm[^\n]*--only-show-errors", helper)
+    assert "/tmp/deleted-keys.log" in helper
+
+    # Every phase deletes through the shared helper; no raw `s3 rm` survives.
+    for step in _cleanup_job()["steps"]:
+        name = step.get("name") or ""
+        if name.startswith("Phase ") or name == "Prune catalog and verify":
+            body = step.get("run", "")
+            assert "s3 rm" not in body, name
+            if name.startswith("Phase "):
+                assert "source /tmp/r2-rm.sh" in body, name
+
+
+def test_dry_run_mode_is_announced_and_the_audit_log_is_uploaded():
+    steps = _cleanup_job()["steps"]
+    announce = step_by_name(_cleanup_job(), "Announce dry-run mode")
+    assert "DRY RUN" in announce["run"]
+    assert "GITHUB_STEP_SUMMARY" in announce["run"]
+    upload = [s for s in steps if "upload-artifact" in (s.get("uses") or "")]
+    assert len(upload) == 1, upload
+    assert upload[0]["with"]["path"] == "/tmp/deleted-keys.log"
 
 
 def test_global_v2_prefix_regex_guard_is_full_digest_only():
@@ -306,11 +400,17 @@ def test_phase_four_deletes_only_the_addresses_object_subtree():
 
 def test_cleanup_keeps_inventory_and_live_probe_bookends():
     names = [n or "" for n in step_names(_cleanup_job())]
-    assert names[-1] == "Post-run live worker probe and inventory"
+    phases = [index for index, name in enumerate(names) if name.startswith("Phase ")]
     pre = names.index("Pre-run live worker probe and inventory")
-    assert pre < min(
-        index for index, name in enumerate(names) if name.startswith("Phase ")
-    )
+    post = names.index("Post-run live worker probe and inventory")
+    assert pre < min(phases)
+    # The post-run bookend follows every phase; only the audit-trail reporting
+    # steps come after it.
+    assert post > max(phases)
+    assert names[post + 1:] == [
+        "Summarize the delete audit trail",
+        "Upload the delete audit log",
+    ]
     for name in (
         "Pre-run live worker probe and inventory",
         "Post-run live worker probe and inventory",

@@ -29,6 +29,10 @@ on:
       phases:
         description: 'Space-separated phases to run, e.g. "1 2 3" or "4" or "5"'
         required: true
+      dry_run:
+        description: 'Run every delete with --dryrun (deletes nothing)'
+        type: boolean
+        default: false
       global_v2_orphan_prefix:
         description: 'Phase 2 only: full staging/global-v2/<64-hex>/ prefix to delete entirely'
         required: false
@@ -50,6 +54,8 @@ env:
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
   BUCKET: geocoder-shards
+  # When true every delete runs with --dryrun and removes nothing
+  DRY_RUN: ${{ github.event.inputs.dry_run }}
   # Phase 1: kept versions whose staging/ (pipeline-only data) is deleted.
   # finalize_rebuild.py excludes staging/ from the release exact-set, so these
   # versions stay servable; {version}/collection.json is asserted afterwards.
@@ -64,11 +70,47 @@ env:
   PROTECTED_PREFIXES: "2026-07-13.0 2026-07-18.0 2026-07-02.3 backups"
 
 jobs:
+  # A mistyped confirm value must be a red run, not a green no-op: the
+  # job-level gate on `cleanup` silently skips (and reports success), so the
+  # typo is caught here, in an ungated job, before anything else starts.
+  confirm:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fail loudly on a mistyped confirmation
+        env:
+          CONFIRM: ${{ github.event.inputs.confirm }}
+        run: |
+          set -euo pipefail
+          if [ "$CONFIRM" != "CLEANUP" ]; then
+            echo "::error::confirm must be exactly 'CLEANUP' (got '$CONFIRM'); nothing ran"
+            exit 1
+          fi
+          echo "confirmation accepted"
+
   cleanup:
     runs-on: ubuntu-latest
+    needs: confirm
     if: github.event.inputs.confirm == 'CLEANUP'
     steps:
       - uses: actions/checkout@v7
+
+      - name: Announce dry-run mode
+        env:
+          DRY_RUN: ${{ github.event.inputs.dry_run }}
+          PHASES: ${{ github.event.inputs.phases }}
+        run: |
+          set -euo pipefail
+          if [ "$DRY_RUN" = "true" ]; then
+            banner="**DRY RUN** - every delete runs with \`--dryrun\`; nothing is removed."
+          else
+            banner="**LIVE RUN** - deletes are real."
+          fi
+          {
+            echo "# R2 cleanup: $banner"
+            echo ""
+            echo "Phases requested: \`$PHASES\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "$banner"
 
       - name: Validate inputs and compute deletion targets
         id: plan
@@ -103,6 +145,15 @@ jobs:
           # unrelated pipelines' data.
           check_global_v2() {
             local label="$1" value="$2"
+            # A multi-line dispatch value would pass the per-line grep on its
+            # first line and smuggle the remaining lines into the target file as
+            # extra targets. Reject any embedded newline, tab or other
+            # whitespace before anything else looks at the value.
+            case "$value" in
+              *$'\n'*|*$'\r'*|*$'\t'*|*" "*)
+                echo "::error::$label must be a single line with no whitespace"
+                exit 1;;
+            esac
             if [ -z "$value" ]; then
               echo "::error::$label is required for the selected phase."
               echo "Candidate prefixes under staging/global-v2/ (supply one verbatim):"
@@ -126,6 +177,30 @@ jobs:
               >/dev/null || { echo "::error::$label does not exist: $value"; exit 1; }
           }
 
+          # Shared delete helper, sourced by every phase so dry-run handling and
+          # the audit trail are identical in all of them.
+          cat > /tmp/r2-rm.sh <<'SH'
+          # Requires ENDPOINT, BUCKET and DRY_RUN in the environment.
+          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          RM() {
+            local target="$1"
+            echo "=== $target (dry_run=${DRY_RUN:-false}) ===" >> /tmp/deleted-keys.log
+            if [ "${DRY_RUN:-false}" = "true" ]; then
+              # --dryrun lists exactly what a real run would remove.
+              S3 s3 rm "s3://$BUCKET/$target" --recursive --dryrun | tee -a /tmp/deleted-keys.log
+            else
+              # No --only-show-errors: every deleted key goes to the audit log
+              # artifact, while the console gets a per-target key count so the
+              # run log stays readable.
+              local keys
+              keys=$(S3 s3 rm "s3://$BUCKET/$target" --recursive \
+                       | tee -a /tmp/deleted-keys.log | grep -c '^delete:' || true)
+              echo "deleted $keys keys under $target"
+            fi
+          }
+          SH
+
+          : > /tmp/deleted-keys.log
           : > /tmp/delete-targets.txt
           if selected 1; then
             for version in $STAGING_ONLY; do
@@ -165,21 +240,35 @@ jobs:
         # deleted - nothing can be deleted that was not checked here.
         run: |
           set -euo pipefail
-          python3 - "$PROTECTED_PREFIXES" <<'PY'
+          python3 - "$PROTECTED_PREFIXES" /tmp/delete-targets.txt <<'PY'
           import sys
 
           protected = [p.strip("/") for p in sys.argv[1].split() if p.strip("/")]
           assert protected, "PROTECTED_PREFIXES must be non-empty"
 
+          # Never deletable as a target in its own right, at any depth: these
+          # would take out an entire pipeline root or the catalog itself.
+          DENIED = {"staging", "staging/global-v2", "catalog.json"}
+
           bad = []
-          with open("/tmp/delete-targets.txt") as src:
+          with open(sys.argv[2]) as src:
               targets = [line.strip().split("|", 1) for line in src if line.strip()]
           assert targets, "no targets to check"
 
           for phase, target in targets:
-              norm = target.strip("/")
-              if not norm or len(norm) < 8 or "/" not in target:
-                  bad.append((phase, target, "target too short or unqualified"))
+              # Normalize whitespace *first*: "2026-07-13.0 /" would otherwise
+              # compare unequal to the protected prefix and slip through.
+              if target != target.strip() or any(c.isspace() for c in target):
+                  bad.append((phase, target, "target contains whitespace"))
+                  continue
+              norm = target.strip().strip("/")
+              if not norm or "/" not in target:
+                  bad.append((phase, target, "unqualified target"))
+                  continue
+              # Exact-match deny, plus a catalog.json at any depth. No phase
+              # deletes a catalog; phase 5 rewrites the root one in place.
+              if norm in DENIED or norm.split("/")[-1] == "catalog.json":
+                  bad.append((phase, target, f"denied target {norm!r}"))
                   continue
               if target.startswith("/") or ".." in target.split("/"):
                   bad.append((phase, target, "malformed target"))
@@ -235,8 +324,10 @@ jobs:
         if: steps.plan.outputs.phase1 == 'true'
         run: |
           set -euo pipefail
-          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # exported for the sourced helper below
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
           # Deletes only phase-1 lines from the guarded target file. The version
           # itself must survive: finalize_rebuild.py excludes staging/ from the
           # release exact-set, so collection.json must still be there after.
@@ -244,7 +335,7 @@ jobs:
             [ "$phase" = "1" ] || continue
             case "$target" in */staging/) ;; *) echo "::error::not a staging target: $target"; exit 1;; esac
             echo "Deleting s3://$BUCKET/$target ..."
-            S3 s3 rm "s3://$BUCKET/$target" --recursive --only-show-errors
+            RM "$target"
             version="${target%/staging/}"
             S3 s3 ls "s3://$BUCKET/$version/collection.json" >/dev/null \
               || { echo "::error::$version/collection.json missing after staging delete"; exit 1; }
@@ -255,8 +346,10 @@ jobs:
         if: steps.plan.outputs.phase2 == 'true'
         run: |
           set -euo pipefail
-          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # exported for the sourced helper below
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
           # Whole-prefix mode: the producing pipeline was deleted in PR #154 and
           # nothing references this digest.
           while IFS='|' read -r phase target; do
@@ -264,15 +357,17 @@ jobs:
             printf '%s' "$target" | grep -Eq '^staging/global-v2/[0-9a-f]{64}/$' \
               || { echo "::error::phase 2 target failed re-validation: $target"; exit 1; }
             echo "Deleting s3://$BUCKET/$target ..."
-            S3 s3 rm "s3://$BUCKET/$target" --recursive --only-show-errors
+            RM "$target"
           done < /tmp/delete-targets.txt
 
       - name: Phase 3 - delete unreferenced orphan version prefixes
         if: steps.plan.outputs.phase3 == 'true'
         run: |
           set -euo pipefail
-          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # exported for the sourced helper below
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
           S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-live.json
           while IFS='|' read -r phase target; do
             [ "$phase" = "3" ] || continue
@@ -282,15 +377,17 @@ jobs:
             python3 scripts/prune_catalog.py assert-unreferenced \
               --catalog /tmp/catalog-live.json --version "$version"
             echo "Deleting s3://$BUCKET/$target ..."
-            S3 s3 rm "s3://$BUCKET/$target" --recursive --only-show-errors
+            RM "$target"
           done < /tmp/delete-targets.txt
 
       - name: Phase 4 - delete global-v2 address map objects only
         if: steps.plan.outputs.phase4 == 'true'
         run: |
           set -euo pipefail
-          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # exported for the sourced helper below
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
           # Evidence-preserving mode: the objects subtree only. The 2026-07-22
           # checkpoint asks that manifests/, reports/ and inventory/ be retained
           # as benchmark evidence, so they are asserted present afterwards.
@@ -304,7 +401,7 @@ jobs:
               | grep -Eq '^staging/global-v2/[0-9a-f]{64}/$' \
               || { echo "::error::phase 4 target failed re-validation: $target"; exit 1; }
             echo "Deleting s3://$BUCKET/$target ..."
-            S3 s3 rm "s3://$BUCKET/$target" --recursive --only-show-errors
+            RM "$target"
             base="${target%"$ADDRESSES_SUBTREE"}"
             for keep in manifests reports inventory; do
               count=$(S3 s3 ls "s3://$BUCKET/${base}immutable/$keep/" --recursive \
@@ -319,8 +416,10 @@ jobs:
         if: steps.plan.outputs.phase5 == 'true'
         run: |
           set -euo pipefail
-          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # exported for the sourced helper below
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
 
           S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog.json
           # Keep a timestamped backup in the bucket before editing
@@ -380,8 +479,10 @@ jobs:
         if: steps.plan.outputs.phase5 == 'true'
         run: |
           set -euo pipefail
-          ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
-          S3() { aws "$@" --endpoint-url "$ENDPOINT" --region auto; }
+          # exported for the sourced helper below
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
           S3 s3 cp "s3://$BUCKET/catalog.json" /tmp/catalog-live.json
           while IFS='|' read -r phase target; do
             [ "$phase" = "5" ] || continue
@@ -390,7 +491,7 @@ jobs:
             python3 scripts/prune_catalog.py assert-unreferenced \
               --catalog /tmp/catalog-live.json --version "$version"
             echo "Deleting s3://$BUCKET/$target ..."
-            S3 s3 rm "s3://$BUCKET/$target" --recursive --only-show-errors
+            RM "$target"
           done < /tmp/delete-targets.txt
 
       - name: Post-run live worker probe and inventory
@@ -432,3 +533,27 @@ jobs:
             gib=$(python3 -c "print(f'{$bytes/2**30:.2f}')")
             echo "$prefix  objects=$objects  size=${gib}GiB"
           done
+
+      - name: Summarize the delete audit trail
+        if: always() && steps.plan.outcome == 'success'
+        run: |
+          set -euo pipefail
+          {
+            echo ""
+            echo "## Deleted keys per target (dry_run=${DRY_RUN:-false})"
+            echo ""
+            echo '```'
+            awk '/^=== /{if (name) print name" -> "n" keys"; name=$2; n=0; next}
+                 /delete: s3:/{n++}
+                 END{if (name) print name" -> "n" keys"}' /tmp/deleted-keys.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          wc -l /tmp/deleted-keys.log
+
+      - name: Upload the delete audit log
+        if: always() && steps.plan.outcome == 'success'
+        uses: actions/upload-artifact@v7
+        with:
+          name: r2-cleanup-deleted-keys
+          path: /tmp/deleted-keys.log
+          if-no-files-found: warn
