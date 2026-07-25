@@ -174,9 +174,43 @@ The documented gate is a warm median at or under 250 ms per route class
   separate spatial structure, as the divisions reverse shards already are
   (`build_shards.py --reverse`).
 
-**Unbuilt and recorded nowhere else: POI and address reverse need their own
-spatial index.** No design exists. Do not assume the construction-v1 output can
-be adapted to it.
+**This is a deliberate, documented scoping decision, not an oversight.** An
+earlier draft of this section claimed it was recorded nowhere; that was wrong.
+Three contract docs say it:
+
+- `docs/address-structured-endpoint-contract.md`: *"This exact-key view is not
+  the future general-search layout. Free-form street forward search and
+  nearest-address reverse search should be separate secondary indexes (likely
+  country/postcode/locality and **spatial ownership** respectively) behind the
+  same v2 API. Forcing all three access patterns into this hash layout would
+  make each of them worse."*
+- `docs/global-v2-build-readiness.md`: *"The first address capability is exact
+  structured forward lookup. Free-text address forward and address reverse
+  require separate secondary indexes later."*
+- `docs/v2-release-catalog-contract.md`: the address family advertises only
+  `structured_forward`; *"General address forward/reverse can be enabled only by
+  a later build whose artifacts and Worker support those operations."*
+
+So the capability machinery is already built for this: the catalog advertises
+per-operation, and the API returns a clean unsupported/503 rather than
+pretending. What is missing is the secondary index itself -- no design, no
+build, and it is not on the current path.
+
+**It is cheaper than it sounds, and today's work helps rather than hinders:**
+
+- Addresses already carry coordinates through the map phase
+  (`crates/geocoder-construction/src/main.rs`, the `address-transform-v1`
+  binary, references longitude/latitude throughout). The input data for a
+  spatial index is already flowing; nothing new needs extracting.
+- Places already has the spatial machinery -- `partition_cell` plus the
+  cell-keyed shuffle. An address reverse index wants **the same spatial
+  partitioning**, so the shuffle built for Places is directly reusable.
+- The realistic shape is a SECOND serving index off the same map output, keyed
+  spatially instead of by `route_hash` -- not a second pipeline.
+
+The remaining real work is a nearest-neighbour structure within a cell and
+Worker support, which the divisions reverse shards
+(`build_shards.py --reverse`) already demonstrate at smaller scale.
 
 ### Expected forward performance (projection, not measurement)
 
