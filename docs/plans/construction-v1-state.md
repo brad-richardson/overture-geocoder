@@ -283,10 +283,16 @@ What it is, precisely:
   family and slice manifests and covered by the single whole-slice verification.
   This is not optional: the store otherwise travels only as a GitHub artifact
   with `retention-days: 7`, so an unpublished artifact expires a week after a
-  planet run and reverse costs the map re-run this whole thing exists to avoid;
+  planet run and reverse costs the map re-run this whole thing exists to avoid.
+  Nor is it optional by omission -- `finalize --markers-dir` is REQUIRED for every
+  family in `POSITIONS_FAMILIES` (places today), and a marker set where any task
+  carries no positions is rejected, so a wiring mistake cannot quietly ship a
+  slice without per-place records;
 - fails closed if the row count is not exactly `admitted_features`, if a cell
   lands in the wrong bucket, or if a resumed marker's positions artifact is
-  absent or does not reconcile.
+  absent or does not reconcile. The slice-smoke CI job asserts
+  `positions_objects > 0` and `positions_records > 0` from the harness summary,
+  so a run that emits but fails to publish it is a red build.
 
 Measured on the Monaco slice (38,182 projected, 38,172 admitted): **38,172 rows
 in 4 packs, 1,718,410 bytes** -- 45.0 compressed bytes per record (63.5
