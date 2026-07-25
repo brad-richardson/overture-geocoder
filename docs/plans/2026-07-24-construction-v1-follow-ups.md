@@ -1235,3 +1235,69 @@ the 4096-vs-256 tradeoff open, and this is the evidence that reopens it.
   batch-and-evict ... the floor is the only guard it has" — and only `slice-smoke.yml`
   gained the `head_staged_objects_released > 0` gate. **The actual planet dispatch has
   no such gate.**
+
+### Added later on 2026-07-25: publish-set object count, researched and mostly dismissed
+
+Per-record artifacts are 53% of the Places publish set and ~99% of the address one, at
+two objects per pack, so halving them looked like the obvious lever. It is not the
+lever, and the research is worth recording so nobody re-derives it.
+
+**Directories are 0.02-0.06% of the bytes they accompany.** MEASURED: places pack
+821,862 B / directory **259 B**; address pack 2,469,833 B / directory **382 B**.
+Planet-wide, places directories total ~4.1 MB against 3.3-6.7 GB of packs; addresses
+~6.2 MB against 13.4 GB. **Half of every per-record object carries a twentieth of a
+percent of the payload.**
+
+**Nothing reads them.** `grep` over `crates/` and `clients/` finds zero consumers; the
+only reader is `validate_positions` / `validate_address_records` re-verifying against
+the copy already in the marker. The intended consumer is the build-time bucket-range
+reverse reducer in `2026-07-25-reverse-v2-design.md`, and per-pack directories make
+that reducer's read count *worse*: `89xs` pack GETs plus `89xs` directory GETs, versus
+`89xs + 89` with one directory manifest per task.
+
+**Packaging cannot fix the mirror blocker.** At the MEASURED 0.34 s x 2 invocations per
+object, one-directory-manifest-per-task ("B1") gives places 32,735 objects = **371 min**
+and addresses 33,366 = **378 min** — still over the 360-minute timeout, at zero
+retries, before a byte moves. **The concurrent publisher is mandatory, not optional.**
+
+**And given the publisher, B1 is redundant for wall-clock.** Projected at a bounded
+pool with a persistent client, 65,751 objects is 1.7-6.8 min; the byte floor dominates
+by an order of magnitude (100-145 GB = 17-50 min at 50-200 MB/s, of which 87-132 GB is
+`.av1` payload that no packaging change touches). B1 buys ~0.8 min of a ~25 min phase.
+The crossover where a concurrent publisher stops sufficing is ~576,000 objects against
+a structural ceiling of 86,523 — **6.7x to 27x of headroom**.
+
+**Where object count still genuinely bites:** the `max_remote_operations` structural
+ceiling is **86.5% of the 400,000 cap**, and the cap's own comment calls its 1.16x
+margin "deliberately modest". B1 takes that to 53.9%. That is the one durable win.
+
+**So: do B1 only as a rider.** It edits `emit_positions` / `emit_address_records`, which
+are digested into `request_sha256`, so on its own it would relocate
+`namespaces.immutable_root` and orphan existing map output — unjustifiable for 0.8 min.
+But both family scripts are already changing before dispatch (BLOCKER B's streaming
+plan path, and the Places `_reduce_ingest` fix), so **B1's marginal cost is ~zero if it
+rides those and unjustifiable if it doesn't.** Blast radius is small and nothing frozen
+moves: pack bytes, `SHUFFLE_BUCKET_BITS`, `TOTAL_ORDER`, `SERVING_ORDER` and every
+forward digest stay identical.
+
+**Explicitly dismissed:** embedding the directory in the parquet footer (0.8% better
+than B1, for a second writer and loss of independent readability); dropping the
+mirror's redundant trailing `head-object` (a free 2x that still leaves addresses at
+372 min); reducing `SHUFFLE_BUCKET_BITS` (moves forward reduce ownership and every
+forward digest for a non-binding lever).
+
+**The real lever is inside the publisher.** `verify_whole_slice_once` streams every
+published object (`construction_v1_remote.py:277`) — cheap against a local tree, but a
+literal R2 implementation makes it a **full re-download of 100-145 GB**, doubling the
+phase. `HEAD` plus an ETag/checksum comparison turns it into N HEADs, a projected
+0.3-3.4 min, and is worth more than every packaging option combined. Related: the
+budget counts operations against a **local** `FilesystemRemote`, and `remote.list()`
+charges 1 op where ListObjectsV2 pages at 1,000 keys and a planet slice costs **45-66**.
+
+**One correction to the numbers recorded above.** The address 65,024 per-record figure
+is a *structural bound* (127 x 256), not a projection. Address map tasks are
+**single-country** (task 0 is MX only, 3.93 M rows, MEASURED from the committed
+inventory), so a task populates only the buckets its country's cells hash into.
+Modelling per-country extent gives **~20,600 packs / ~41,200 objects**, putting
+addresses nearer **33%** of the operation cap than 66%. PROJECTED — and it falls out
+for free from the single planet-shaped map task already listed as a prerequisite.
