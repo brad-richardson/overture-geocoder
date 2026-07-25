@@ -314,9 +314,14 @@ map jobs by design -- an admitted marker with no positions is rejected rather
 than resumed, so one run can never mix tasks that have positions with tasks that
 do not. The error names the marker key to delete for a re-map.
 
-Nothing downstream of map CONSUMES it yet. Reduce, head and the genesis plan read
-`marker["packs"]` explicitly, so the new files are ignored by construction rather
-than by luck; only finalize touches them, to publish them.
+Nothing downstream of map CONSUMES it yet, and the boundary is structural: the
+positions packs live under `marker["positions"]["packs"]` and nowhere else, while
+`bucket_range_fragments` (the reducer's term-fragment selector), head and the
+genesis plan read `marker["packs"]`. The two key spaces are disjoint --
+`map/places-v1/positions/` versus `map/places-v1/packs/` -- so a positions pack
+cannot be mistaken for a term fragment. **Keep it that way**: putting positions
+into the top-level `packs` list would make the reducer ingest them as term rows.
+Only finalize touches them, to publish them.
 
 The sequencing argument that produced the decision:
 
