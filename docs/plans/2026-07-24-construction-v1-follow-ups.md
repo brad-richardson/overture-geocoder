@@ -298,11 +298,18 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
 `CLOUDFLARE_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. The map
 jobs hold no cloud credentials, by design.
 
-**What changes when the staging work lands.** The map/reduce R2-staging work
-(in flight, 2026-07-25) needs R2 write access from the *map* jobs. It will reuse
-those same workflow-level credentials, by owner decision, to avoid blocking the
-staging work on a token change. That will be a real widening of blast radius,
-recorded here before it happens rather than after:
+**Superseded 2026-07-25: this has now happened.** The staging work landed, and
+the `map`, `plan`, `reduce` and `head` jobs all receive those same
+workflow-level credentials alongside `finalize`. The description below was
+written before the change and is accurate as a description of the state it
+created; only the tense is wrong. The follow-up at the end is OPEN and is now
+the last credential item before a planet dispatch.
+
+**What changed when the staging work landed.** The map/reduce R2-staging work
+needed R2 write access from the *map* jobs. It reuses those same workflow-level
+credentials, by owner decision, to avoid blocking the staging work on a token
+change. That is a real widening of blast radius, recorded here before it happened
+rather than after:
 
 - The reused key is the general-purpose R2 key. It can write anywhere in the
   bucket, including keys the create-only finalize discipline is meant to protect.
@@ -359,8 +366,14 @@ branches or because the gap is about scope rather than a defect.
    - `admit-task` marker idempotence, including the `_remote_marker_completed`
      HEAD path;
    - the free-disk-space gate;
-   - **inter-job artifact transport of the store and markers** — the actual
-     planet blocker (run 30113308268 died on a 63 GB plan artifact);
+   - ~~**inter-job artifact transport of the store and markers** — the actual
+     planet blocker (run 30113308268 died on a 63 GB plan artifact);~~
+     **partially closed 2026-07-25.** Both slice jobs now run the R2 staging
+     transport with a filesystem backend and each phase on its own EMPTY local
+     store, and assert `map_staged_objects_published > 0` plus
+     `finalize_staged_objects_hydrated > 0`. What is still uncovered is the
+     GitHub-artifact plumbing itself (upload/download paths and merge behaviour),
+     which only `tests/test_construction_v1_workflow_contract.py` pins;
    - ~~the entire addresses family (no slice harness exists — see the DEFERRED
      section)~~ — **closed 2026-07-25**: `--family addresses` on both slice
      scripts, and a second smoke job runs the address slice in CI;
@@ -472,6 +485,16 @@ phases that have never run.
 > byte-identical. It does not start the port above and must not be cited as
 > having started it.
 
+> **The R2 staging transport does NOT start it either (2026-07-25).** Both
+> families' map output now moves through `staging/global-v2/<request_sha256>/
+> construction-v1/<family>/` instead of a GitHub artifact. That is the TRANSPORT
+> of the store, not the routing key of its contents: `address_key_hash`,
+> `route_hash`, `hash_bucket`, TOTAL_ORDER, SERVING_ORDER, the forward pack layout
+> and the genesis partition plan are untouched, the marker records the same keys it
+> always did, and the reduce ownership model for addresses is still
+> `partition-batch`. The address forward partition key is FROZEN. Do not cite the
+> staging work as having begun the port.
+
 > **Status 2026-07-25: DONE.** Both scripts now take `--family addresses`. The
 > loop is 104,928 real Overture addresses (Seattle, release `2026-07-22.0`,
 > `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 seconds
@@ -507,6 +530,51 @@ consistency item on surfaces the bundle touched.
    places reducer's `emit_verification` already binds published bytes to the
    partition's identity per partition; the finalize-side check does not, and this
    is pre-existing for both families.
+
+## Added 2026-07-25, from moving the map store to R2 staging
+
+The transport landed (see the "store transport" section of
+`construction-v1-state.md`). These are the items deliberately NOT done in it.
+None can lose data: every one of them is a cost or hardening item, and the
+fail-closed rules are already in place.
+
+1. **`path()` hydrates a WHOLE object; row-group range reads are still unbuilt.**
+   This is step 2 of `2026-07-24-r2-staging-design.md` §7 and is the item that
+   still has real headroom in it. It is *sufficient* without them — the map-side
+   shuffle makes a fragment hold a complete set of cells and nothing else, so a
+   bucket-range reduce job fetches only the fragments in its own range rather than
+   the whole store — but the reducer only needs the row groups whose
+   `routing_groups` name its cells, and the frozen evidence spec already declares
+   `selective_read_amplification_max` 4.0. **That bound is enforced by nothing at
+   run time**, only by `validate_places_planet_readiness.py` against the
+   rehearsal. Range reads and the run-time gate belong together.
+2. **`ensure_uploaded` reads every uploaded object back.** That is the create-only
+   verification contract and it is why the transport is trustworthy, but it means
+   map downloads what it just uploaded: ~34 GB of extra planet GETs, ~380 MB per
+   map task. Cheap, measured, and worth revisiting only if it shows up in the
+   wall-clock — do NOT drop the readback to save it without replacing the
+   verification with something equally strong.
+3. **`aws s3api` is one subprocess per object.** Fine for whole objects and it is
+   what `S3Store` already does everywhere else, but it is the wrong shape for
+   range reads, so item 1 probably wants a real HTTP client with connection reuse
+   rather than shelling out per request.
+4. **R2 Class B request volume is unestimated.** One 63.5 GB download becomes many
+   small GETs. At 256 buckets and ~89 map tasks the object count is ~22.5k per
+   family, which is trivially cheap; row-group range reads would take it to
+   10^5–10^6. Estimate it before the first planet dispatch, not in a bill.
+5. **A locally-cached object is not re-verified on read.** `path()` verifies
+   everything it HYDRATES against the digest in the key, and callers
+   (`validate_marker`, `validate_positions`, the reducer's per-pack SHA check)
+   re-digest what they read anyway, so nothing is unchecked in practice. But
+   `path()` itself trusts a local file that already exists, exactly as
+   `LocalObjectStore.path` always did. Unchanged behaviour, written down because
+   the staging seam is where someone will look for it.
+6. **Nothing expires an abandoned construction-v1 staging prefix yet.**
+   `r2-cleanup.yml` can delete one by hand (its phase-2 guard matches the prefix
+   shape this transport writes, deliberately), but there is no lifecycle rule and
+   no failure-path wipe. A failed planet run now leaves up to ~34 GB of staging
+   debris per family. Same class as item (a) below for the rebuild workflow, and
+   it should probably be fixed the same way.
 
 ## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
 

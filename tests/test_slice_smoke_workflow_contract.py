@@ -124,6 +124,28 @@ def test_asserts_real_counts_not_just_the_reconciles_literal():
     assert '.populated_shards > 0 and .total_records > 0' in value
 
 
+def test_both_slices_prove_the_r2_staging_transport_credential_free():
+    # The artifact-carried store is the planet blocker, so the transport that
+    # replaces it must be exercised on every relevant PR rather than only on a
+    # credentialed dispatch. Both families assert the same three things:
+    #   - the staging prefix matches the bucket convention r2-cleanup.yml guards;
+    #   - map actually PUBLISHED objects to staging; and
+    #   - finalize actually HYDRATED objects back from it, which is only possible
+    #     because each phase runs with its own empty local store. A change that
+    #     reverted to one shared local store would leave this at 0.
+    value = text()
+    for family in ("places", "addresses"):
+        assert (
+            f'.staging_prefix | test("^staging/global-v2/[0-9a-f]{{64}}/'
+            f'construction-v1/{family}$")' in value
+        ), family
+    assert value.count(".map_staged_objects_published > 0") == 2
+    assert value.count(".finalize_staged_objects_hydrated > 0") == 2
+    # Still no credentials: the staging backend is a directory, not R2.
+    assert "R2_ACCESS_KEY_ID" not in value
+    assert "secrets." not in value
+
+
 def test_retry_preserves_every_attempt_and_shouts_when_it_retries():
     value = text()
     # Per-attempt log filenames; a retry must not overwrite attempt 1.

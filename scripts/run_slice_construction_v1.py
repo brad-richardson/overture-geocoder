@@ -37,6 +37,7 @@ asymmetries, both of them properties of the pipeline rather than of this script:
       --release 2026-07-22.0 --work slice/address-work
 """
 import argparse
+import importlib.util
 import json
 import subprocess
 import sys
@@ -44,6 +45,13 @@ import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+
+_SPEC = importlib.util.spec_from_file_location(
+    "slice_construction_staging", ROOT / "scripts/construction_staging_v1.py"
+)
+assert _SPEC and _SPEC.loader
+STAGING = importlib.util.module_from_spec(_SPEC)
+_SPEC.loader.exec_module(STAGING)
 VENV = sys.executable
 BIN = ROOT / "crates/target/release"
 
@@ -61,6 +69,13 @@ parser.add_argument("--max-reduce-jobs", type=int, default=None,
                     help="Cap reduce jobs, widening the bucket stride "
                          "(use 1 to force one job over the whole bucket space).")
 parser.add_argument("--family", choices=("addresses", "places"), default="places")
+# The intermediate store's transport. Default ON with a filesystem staging root,
+# because the artifact-carried store is the planet blocker and the point of this
+# loop is that the transport is exercised on every change with no credentials.
+# --no-staging runs the legacy single-store shape for an A/B byte comparison.
+parser.add_argument("--no-staging", action="store_true",
+                    help="Run the legacy artifact-shaped transport: one local "
+                         "store shared by every phase, no staging mirror.")
 args = parser.parse_args()
 
 WORK = args.work
@@ -103,8 +118,27 @@ def phase(name):
 
 
 WORK.mkdir(parents=True, exist_ok=True)
-store = WORK / "store"
+STAGED = not args.no_staging
+# R2 staging, filesystem-backed. One run-scoped, family-scoped prefix inside it,
+# derived by the hosted CLI from the contract's request_sha256 exactly as a hosted
+# job derives it -- so this exercises the real key layout, not a stand-in.
+staging = WORK / "staging"
 markers = WORK / "markers"; markers.mkdir(exist_ok=True)
+
+
+def store_for(phase: str) -> Path:
+    """This phase's LOCAL store directory.
+
+    With staging on, every phase gets its OWN EMPTY directory, which is the whole
+    claim under test: a hosted phase runs on a fresh runner with no store artifact
+    and must fetch only the keys its markers name. Sharing one directory would let
+    a consumer read map output straight off local disk and prove nothing.
+    """
+    return WORK / (f"store-{phase}" if STAGED else "store")
+
+
+def staging_argv() -> tuple:
+    return ("--staging-root", staging) if STAGED else ()
 
 # --- contract -------------------------------------------------------------
 t = phase("derive-contract")
@@ -130,7 +164,16 @@ request.write_text(json.dumps({
 contract = WORK / "contract.json"
 hosted("derive-contract", "--request", request, "--output", contract,
        "--runtime", WORK / "runtime.json", "--allow-unpinned-duckdb")
+REQUEST_SHA256 = json.loads(contract.read_text())["request_sha256"]
+# Derived by the same function the hosted CLI uses, so the harness reports the
+# prefix a hosted job would actually write rather than a look-alike.
+STAGING_PREFIX = STAGING.staging_prefix(REQUEST_SHA256, FAMILY)
 print(f"  ok {time.time()-t:.1f}s")
+if STAGED:
+    print(f"  intermediate store transport: R2 staging (filesystem backend) at "
+          f"{STAGING_PREFIX}")
+    print("  every phase gets its own EMPTY local store, so each one fetches only "
+          "the keys its markers name")
 
 # --- projection (the part no test covers) ---------------------------------
 t = phase(f"project task {TASK_INDEX} from S3")
@@ -164,14 +207,17 @@ print(f"  projected {records:,} real Overture {FAMILY}  {time.time()-t:.1f}s")
 
 # --- map ------------------------------------------------------------------
 t = phase("run-map")
-hosted("run-map", "--contract", contract, "--store-root", store,
+hosted("run-map", "--contract", contract, "--store-root", store_for("map"),
+       *staging_argv(),
        "--family", FAMILY, "--task-id", TASK_ID, "--input", projected,
        "--source-limits", WORK / "source-limits.json",
        "--transform-binary", TRANSFORM,
        "--proof-binary", PROOF,
        "--scratch-dir", WORK / "map-scratch",
-       "--marker-out", markers / f"{TASK_ID}.json")
+       "--marker-out", markers / f"{TASK_ID}.json",
+       "--output", WORK / "map.json")
 marker = json.loads((markers / f"{TASK_ID}.json").read_text())
+map_staged = json.loads((WORK / "map.json").read_text())
 map_summary: dict = {}
 if ADDRESSES:
     transform_report = marker["transform"]
@@ -215,7 +261,8 @@ else:
 # --- plan -----------------------------------------------------------------
 t = phase("plan-reduce")
 plan = WORK / "plan.json"
-plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store,
+plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store_for("plan"),
+             *staging_argv(),
              "--family", FAMILY, "--markers-dir", markers,
              "--scratch-dir", WORK / "plan-scratch", "--output", plan,
              "--matrix-out", WORK / "reduce-matrix.json"]
@@ -246,7 +293,8 @@ else:
 t = phase(f"run-reduce x{execution['job_count']} {execution['ownership']} jobs")
 reductions = WORK / "reductions"; reductions.mkdir(exist_ok=True)
 for batch in execution["batches"]:
-    hosted("run-reduce", "--contract", contract, "--store-root", store,
+    hosted("run-reduce", "--contract", contract, "--store-root", store_for("reduce"),
+           *staging_argv(),
            "--family", FAMILY, "--plan", plan, "--markers-dir", markers,
            "--batch-index", batch["batch_index"],
            # Addresses re-prove every fetched row group inside reduce, so the
@@ -267,7 +315,8 @@ head_args = () if ADDRESSES else (
     "--encoder-binary", ENCODER, "--verifier-binary", VERIFIER,
     "--scratch-dir", WORK / "head-scratch", "--shard-bits", "4",
 )
-hosted("run-head", "--contract", contract, "--store-root", store,
+hosted("run-head", "--contract", contract, "--store-root", store_for("head"),
+       *staging_argv(),
        "--family", FAMILY, "--markers-dir", markers, *head_args,
        "--output", head)
 head_result = json.loads(head.read_text())
@@ -281,7 +330,8 @@ else:
 # --- finalize -------------------------------------------------------------
 t = phase("finalize (filesystem remote)")
 final = WORK / "final.json"
-hosted("finalize", "--contract", contract, "--store-root", store,
+hosted("finalize", "--contract", contract, "--store-root", store_for("finalize"),
+       *staging_argv(),
        "--family", FAMILY, "--plan", plan, "--reductions-dir", reductions,
        # Threaded for BOTH families. Finalize publishes the map phase's
        # per-record artifact from the markers, and for a family that carries one
@@ -306,28 +356,49 @@ print(f"  per-record artifact published: {result['positions_objects']} objects, 
 # overhead dominates at this size, and a small slice combines far less than the
 # planet does (fewer rows share a (cell, token) group). Report the parts.
 def tree_bytes(path):
-    return sum(p.stat().st_size for p in path.rglob("*") if p.is_file())
+    return sum(p.stat().st_size for p in path.rglob("*")
+               if p.is_file() and not p.name.endswith(".metadata.json"))
 
+
+# With staging on, the COMPLETE store lives in the staging tree -- each phase's
+# local directory holds only the subset that phase wrote or hydrated -- so the
+# class report is read from there. Keys and byte totals are unchanged either way:
+# a staging key is `<prefix>/<class>/sha256/...` and the objects are byte-identical
+# to a --no-staging run, so these numbers stay comparable with history. The
+# FilesystemStore's `.metadata.json` sidecars are excluded for the same reason.
+if STAGED:
+    class_root = staging / STAGING_PREFIX
+else:
+    class_root = store_for("map")
 classes = {
     d.name + "/" + s.name: tree_bytes(s)
-    for d in sorted(store.iterdir()) if d.is_dir()
+    for d in sorted(class_root.iterdir()) if d.is_dir()
     for s in sorted(d.iterdir()) if s.is_dir()
 }
 print("\nstore by artifact class:")
 for name, size in sorted(classes.items(), key=lambda kv: -kv[1]):
     if size:
         print(f"  {size/1e6:8.2f} MB  {name}")
-print(f"  {tree_bytes(store)/1e6:8.2f} MB  TOTAL for {records:,} {FAMILY}")
+print(f"  {tree_bytes(class_root)/1e6:8.2f} MB  TOTAL for {records:,} {FAMILY}")
 print(f"  {tree_bytes(WORK / 'remote')/1e6:8.2f} MB  published slice")
+if STAGED:
+    print(f"\nR2 staging transport (filesystem backend, prefix {STAGING_PREFIX}):")
+    print(f"  map      published {map_staged['staged_objects_published']:3d} objects "
+          f"({map_staged['staged_bytes_published']/1e6:8.2f} MB), hydrated "
+          f"{map_staged['staged_objects_hydrated']:3d}")
+    print(f"  finalize published {result['staged_objects_published']:3d} objects "
+          f"({result['staged_bytes_published']/1e6:8.2f} MB), hydrated "
+          f"{result['staged_objects_hydrated']:3d} "
+          f"({result['staged_bytes_hydrated']/1e6:.2f} MB) into an EMPTY local store")
 print(
     "\nNOTE: do not extrapolate these linearly to planet scale. Only the map/\n"
     "class is what the inter-phase transport carries out of map, and a slice this\n"
     "small under-combines relative to the planet."
 )
-# The head keys are here because `reconciles` alone is not evidence: for places
-# it is a hardcoded literal in the finalize adapter, and an EMPTY head (zero
-# populated shards, zero records) satisfies every other check. A caller that
-# wants to know the run produced something must be able to assert on counts.
+# The head keys are here because `reconciles` alone is not evidence: it is a real
+# validator result for both families now (#166), but an EMPTY head (zero populated
+# shards, zero records) reconciles perfectly and satisfies every other check. A
+# caller that wants to know the run produced something must assert on counts.
 summary = {"family": FAMILY,
            "records": records, "partitions": len(partitions),
            "reduce_seconds_per_partition": round(elapsed/max(1,len(partitions)), 3),
@@ -355,6 +426,18 @@ summary = {"family": FAMILY,
 if execution.get("bucket_stride") is not None:
     summary["reduce_bucket_stride"] = execution["bucket_stride"]
     summary["reduce_bucket_count"] = execution["bucket_count"]
+# Staging keys are emitted only when staging is on, for the same reason: a `jq -e`
+# on them must be a real assertion. `map_staged_objects_published > 0` proves the
+# map phase's intermediate output actually left for staging, and
+# `finalize_staged_objects_hydrated > 0` proves a downstream phase read it back
+# from there rather than off a store it inherited on local disk -- which together
+# are the whole claim of this transport.
+if STAGED:
+    summary["staging_prefix"] = STAGING_PREFIX
+    summary["map_staged_objects_published"] = map_staged["staged_objects_published"]
+    summary["map_staged_bytes_published"] = map_staged["staged_bytes_published"]
+    summary["finalize_staged_objects_hydrated"] = result["staged_objects_hydrated"]
+    summary["finalize_staged_bytes_hydrated"] = result["staged_bytes_hydrated"]
 if head_result.get("head", "absent") is not None:
     summary["head_shard_count"] = head_result["shard_count"]
     summary["head_populated_shards"] = head_result["populated_shards"]

@@ -31,8 +31,17 @@ name: Construction v1 slice smoke
 # hosted-imports covers top-level import failures only: a syntax error or a
 # module-level import of a dependency missing from the pinned set.
 #
+# Both slice jobs also exercise the R2 STAGING transport for the intermediate
+# store, with a filesystem backend: every phase runs with its own EMPTY local
+# store and hydrates by key from the run-scoped staging prefix, which is the
+# shape the hosted jobs now run (construction-v1.yml carries markers and JSON
+# only). `map_staged_objects_published` and `finalize_staged_objects_hydrated`
+# are asserted non-zero below, so a change that quietly reverted to a shared
+# local store -- and therefore proved nothing about transport -- is a red build.
+#
 # It needs NO credentials: the Overture release parquet is read anonymously from
-# the public us-west-2 bucket, and finalize publishes to a filesystem remote.
+# the public us-west-2 bucket, finalize publishes to a filesystem remote, and the
+# staging backend is a directory.
 on:
   push:
     branches: [main]
@@ -200,6 +209,9 @@ jobs:
               and (.store_bytes_by_class["serve/places-v1"] > 0)
               and .positions_objects > 0
               and .positions_records > 0
+              and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/places$"))
+              and .map_staged_objects_published > 0
+              and .finalize_staged_objects_hydrated > 0
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2
@@ -384,6 +396,9 @@ jobs:
               and .positions_objects > 0
               and .positions_records == .admitted_rows
               and .positions_bytes > 0
+              and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/addresses$"))
+              and .map_staged_objects_published > 0
+              and .finalize_staged_objects_hydrated > 0
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The address slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2

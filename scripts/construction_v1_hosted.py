@@ -9,7 +9,11 @@ planes (``address_construction_v1.py`` / ``places_construction_v1.py``). It:
   hosted job depends on a file that was never produced;
 * wraps each phase (admit / map / plan / reduce / head / finalize) as a CLI
   subcommand driving the real data plane against a single content-addressed
-  store directory that the workflow carries between jobs as an artifact;
+  store. With ``--staging-root`` / ``--staging-bucket`` that store lives in a
+  run-scoped R2 staging prefix and the local directory is only a cache, so the
+  63.5 GB planet Places store no longer travels between jobs as an artifact
+  (``scripts/construction_staging_v1.py``, ``docs/plans/2026-07-24-r2-staging-design.md``);
+  without them it is the legacy artifact-carried directory;
 * publishes only the final slice create-only through the backend-neutral
   ``construction_v1_remote`` primitives (create-only, per-upload HEAD, marker
   written last, one exact-prefix listing + one streaming read per object); and
@@ -87,6 +91,7 @@ ADDRESS = _load("construction_v1_hosted_address", "scripts/address_construction_
 PLACES = _load("construction_v1_hosted_places", "scripts/places_construction_v1.py")
 REMOTE = _load("construction_v1_hosted_remote", "scripts/construction_v1_remote.py")
 CONTROL = _load("construction_v1_hosted_control", "scripts/construction_v1_control.py")
+STAGING = _load("construction_v1_hosted_staging", "scripts/construction_staging_v1.py")
 
 FAMILIES = ("addresses", "places")
 
@@ -248,8 +253,75 @@ def _limits_for(contract: dict[str, Any], family: str):
     return module.Limits(**filtered)
 
 
-def _store(store_root: str):
-    return ADDRESS.LocalObjectStore(Path(store_root))
+def _store(args: argparse.Namespace, *, request_sha256: str | None = None):
+    """The phase's object store: local-only, or local cache over R2 staging.
+
+    Without staging flags this is byte-for-byte the previous behaviour -- one
+    content-addressed directory the workflow carries job -> job as an artifact.
+
+    With them the local directory becomes a CACHE and the record of truth is the
+    run-scoped R2 staging prefix, so a phase runs with an EMPTY local store and
+    fetches only the keys its markers name. That is the whole point: the 63.5 GB
+    map store stops travelling between phases. Consumers DISCOVER their objects by
+    deriving `staging_prefix(request_sha256, family)` + the key already recorded in
+    the marker/plan/reduction JSON -- there is no listing and no side manifest.
+    """
+    local = ADDRESS.LocalObjectStore(Path(args.store_root))
+    store_root = getattr(args, "staging_root", None)
+    bucket = getattr(args, "staging_bucket", None)
+    endpoint_url = getattr(args, "staging_endpoint_url", None)
+    if store_root is None and not bucket and not endpoint_url:
+        return local
+    if request_sha256 is None:
+        raise SystemExit(
+            "R2 staging needs the contract's request_sha256 to derive its "
+            "run-scoped prefix; pass --contract"
+        )
+    backend = STAGING.staging_backend(
+        store_root=store_root, bucket=bucket, endpoint_url=endpoint_url
+    )
+    return STAGING.StagedObjectStore(
+        local, backend, STAGING.staging_prefix(request_sha256, args.family)
+    )
+
+
+def _staging_evidence(store: Any) -> dict[str, Any]:
+    """Staging transport counters, or {} for a local-only store.
+
+    Reported so a run that was SUPPOSED to fetch its inputs from staging and
+    silently found them all locally is visible: `staged_objects_hydrated == 0` in
+    a consumer phase means the local cache was not empty, which is the failure
+    mode this whole increment exists to remove.
+    """
+    evidence = getattr(store, "evidence", None)
+    return evidence() if callable(evidence) else {}
+
+
+def _add_staging_arguments(parser: argparse.ArgumentParser) -> None:
+    """Flags selecting the R2 staging transport for the intermediate store.
+
+    Mutually exclusive backends on purpose: `--staging-root` is a local directory
+    (credential-free, used by the slice harness and the tests), `--staging-bucket`
+    plus `--staging-endpoint-url` is real R2. Omitting all three keeps the legacy
+    artifact-carried store, so this is opt-in per phase rather than a flag day.
+    """
+    parser.add_argument(
+        "--staging-root",
+        default=None,
+        help="Filesystem staging root (credential-free): the intermediate store "
+             "is mirrored here create-only and hydrated from here on read.",
+    )
+    parser.add_argument(
+        "--staging-bucket",
+        default=None,
+        help="R2 bucket holding the run-scoped staging prefix for the "
+             "intermediate store.",
+    )
+    parser.add_argument(
+        "--staging-endpoint-url",
+        default=None,
+        help="R2 S3-compatible endpoint URL for --staging-bucket.",
+    )
 
 
 def _reduce_marker_key(family: str, index: int) -> str:
@@ -336,7 +408,11 @@ def _remote_marker_completed(remote_root: str, key: str, contract: dict[str, Any
 
 
 def cmd_admit_task(args: argparse.Namespace) -> int:
-    store = _store(args.store_root)
+    # The contract is optional for a purely local marker check and REQUIRED once
+    # staging is in play, because the staging prefix is derived from its
+    # request_sha256. _store fails closed on the second case.
+    admit_contract = read_json(args.contract) if args.contract else {}
+    store = _store(args, request_sha256=admit_contract.get("request_sha256"))
     if args.phase == "map":
         key = _family_module(args.family).marker_key(args.task_id)
     elif args.phase == "reduce":
@@ -345,17 +421,19 @@ def cmd_admit_task(args: argparse.Namespace) -> int:
         key = _head_marker_key()
     else:
         raise SystemExit(f"unknown phase {args.phase}")
-    # Within a single run the local content-addressed store (carried job->job as
-    # an artifact) records completion. On a fresh RESUME dispatch there is no
-    # local store, so the durable record is the create-only marker in the remote
-    # store: consult it read-only, fail-closed, so a resume skips genuinely
-    # completed tasks without re-doing their work.
-    local_completed = store.read_json(key) is not None
+    # Within a single run the local content-addressed store records completion.
+    # With R2 staging that store is a local CACHE over the run-scoped staging
+    # prefix, so `read_json` also consults staging and a fresh resume dispatch
+    # sees genuinely completed tasks with no local store at all -- which is the
+    # durable record the --remote-root HEAD path was standing in for.
+    existing = store.read_json(key)
+    local_completed = existing is not None
     remote_completed = False
     if args.remote_root:
-        contract = read_json(args.contract) if args.contract else {}
         remote_key = f"{args.remote_marker_prefix.rstrip('/')}/{key}" if args.remote_marker_prefix else key
-        remote_completed = _remote_marker_completed(args.remote_root, remote_key, contract)
+        remote_completed = _remote_marker_completed(
+            args.remote_root, remote_key, admit_contract
+        )
     completed = local_completed or remote_completed
     result = {
         "phase": args.phase,
@@ -365,6 +443,21 @@ def cmd_admit_task(args: argparse.Namespace) -> int:
         "local_completed": local_completed,
         "remote_completed": remote_completed,
     }
+    # A SKIPPED task must still contribute its marker to the fan-in, or the plan
+    # phase silently plans without it. That was harmless while the store travelled
+    # as an artifact -- a fresh runner had no local store, so nothing was ever
+    # skipped -- but the staged marker makes resume real, so the skip path now has
+    # to materialise the marker it is skipping on.
+    if args.marker_out and completed:
+        if existing is None:
+            raise SystemExit(
+                f"admit-task --marker-out was requested for {key} but the marker's "
+                "payload is not readable (completion was observed only through a "
+                "HEAD). Refusing to report a skip that would drop this task from "
+                "the fan-in."
+            )
+        write_json(args.marker_out, existing)
+        result["marker_out"] = str(args.marker_out)
     if args.output:
         write_json(args.output, result)
     print(json.dumps(result, sort_keys=True))
@@ -376,7 +469,7 @@ def cmd_admit_task(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 def cmd_run_map(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
-    store = _store(args.store_root)
+    store = _store(args, request_sha256=contract["request_sha256"])
     limits = _limits_for(contract, args.family)
     request_sha256 = contract["request_sha256"]
     common = dict(
@@ -410,6 +503,7 @@ def cmd_run_map(args: argparse.Namespace) -> int:
     if per_record is not None:
         summary["positions_packs"] = len(per_record["packs"])
         summary["positions_records"] = per_record["records"]
+    summary.update(_staging_evidence(store))
     if args.output:
         write_json(args.output, summary)
     print(json.dumps(summary, sort_keys=True))
@@ -596,7 +690,7 @@ def _places_reduce_execution(
 
 def cmd_plan_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
-    store = _store(args.store_root)
+    store = _store(args, request_sha256=contract["request_sha256"])
     limits = _limits_for(contract, args.family)
     markers = _load_markers(args.markers_dir)
     if args.family == "addresses":
@@ -1118,7 +1212,7 @@ def _reduce_bucket_range(
 
 def cmd_run_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
-    store = _store(args.store_root)
+    store = _store(args, request_sha256=contract["request_sha256"])
     limits = _limits_for(contract, args.family)
     plan = read_json(args.plan)
     markers = _load_markers(args.markers_dir)
@@ -1211,7 +1305,7 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 def cmd_run_head(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
-    store = _store(args.store_root)
+    store = _store(args, request_sha256=contract["request_sha256"])
     if args.family != "places":
         write_json(args.output, {"family": args.family, "head": None, "note": "no global head phase"})
         print(json.dumps({"family": args.family, "head": None}, sort_keys=True))
@@ -1227,9 +1321,9 @@ def cmd_run_head(args: argparse.Namespace) -> int:
         limits=limits,
         shard_bits=args.shard_bits,
     )
-    write_json(args.output, result)
     store.write_marker_last(_head_marker_key(), {"shard_count": result["shard_count"],
                                                  "total_records": result["total_records"]})
+    write_json(args.output, {**result, **_staging_evidence(store)})
     print(json.dumps({"family": "places", "shard_count": result["shard_count"],
                       "populated_shards": result["populated_shards"]}, sort_keys=True))
     return 0
@@ -1281,7 +1375,7 @@ def _positions_objects(
 
 def cmd_finalize(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
-    store = _store(args.store_root)
+    store = _store(args, request_sha256=contract["request_sha256"])
     plan = read_json(args.plan)
     reductions = [read_json(path) for path in sorted(Path(args.reductions_dir).glob("*.json"))]
     if not reductions:
@@ -1426,6 +1520,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "positions_objects": len(positions),
         "positions_records": positions_records,
         "positions_bytes": sum(item["bytes"] for item in positions),
+        **_staging_evidence(store),
     }
     write_json(args.output, result)
     print(json.dumps({"family": args.family, "objects": verification["objects"],
@@ -1496,7 +1591,12 @@ def build_parser() -> argparse.ArgumentParser:
     admit.add_argument("--remote-marker-prefix", default=None,
                        help="Namespace prefix under which durable markers live in the remote store.")
     admit.add_argument("--contract", type=Path, default=None)
+    admit.add_argument("--marker-out", type=Path, default=None,
+                       help="Write the COMPLETED task's marker here, so a skipped "
+                            "task still reaches the plan phase's fan-in. Fails "
+                            "closed if completion was observed without a payload.")
     admit.add_argument("--output", type=Path)
+    _add_staging_arguments(admit)
     admit.set_defaults(func=cmd_admit_task)
 
     run_map = sub.add_parser("run-map")
@@ -1511,6 +1611,7 @@ def build_parser() -> argparse.ArgumentParser:
     run_map.add_argument("--scratch-dir", required=True)
     run_map.add_argument("--marker-out", type=Path, required=True)
     run_map.add_argument("--output", type=Path)
+    _add_staging_arguments(run_map)
     run_map.set_defaults(func=cmd_run_map)
 
     plan = sub.add_parser("plan-reduce")
@@ -1532,6 +1633,7 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--timeout-margin", type=float, default=REDUCE_TIMEOUT_MARGIN_FRACTION)
     plan.add_argument("--tail-minutes", type=int, default=0,
                       help="Fixed head+finalize minutes added to the reduce projection.")
+    _add_staging_arguments(plan)
     plan.set_defaults(func=cmd_plan_reduce)
 
     source_limits = sub.add_parser("source-limits")
@@ -1582,6 +1684,7 @@ def build_parser() -> argparse.ArgumentParser:
                         help="Single-partition output path (legacy mode).")
     reduce.add_argument("--output-dir", type=Path, default=None,
                         help="Batch mode output directory; writes NNNN.json per partition.")
+    _add_staging_arguments(reduce)
     reduce.set_defaults(func=cmd_run_reduce)
 
     head = sub.add_parser("run-head")
@@ -1594,6 +1697,7 @@ def build_parser() -> argparse.ArgumentParser:
     head.add_argument("--scratch-dir", default="/tmp/construction-v1-head-scratch")
     head.add_argument("--shard-bits", type=int, default=4)
     head.add_argument("--output", type=Path, required=True)
+    _add_staging_arguments(head)
     head.set_defaults(func=cmd_run_head)
 
     final = sub.add_parser("finalize")
@@ -1612,6 +1716,7 @@ def build_parser() -> argparse.ArgumentParser:
     final.add_argument("--work-root", required=True)
     final.add_argument("--fail-after-upload", type=int, default=None)
     final.add_argument("--output", type=Path, required=True)
+    _add_staging_arguments(final)
     final.set_defaults(func=cmd_finalize)
 
     append = sub.add_parser("ledger-append")

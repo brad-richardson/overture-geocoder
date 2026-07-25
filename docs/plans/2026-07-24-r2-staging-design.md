@@ -1,8 +1,20 @@
 # R2 staging for the construction-v1 store: design
 
-Date: 2026-07-24. Status: DRAFT for owner review. No code written yet.
+Date: 2026-07-24. **Status: IMPLEMENTED 2026-07-25, with §7 steps 1, 3 and 4 done
+and step 2 (row-group range reads) deferred.** The living record of what shipped
+is the "store transport" section of `construction-v1-state.md`; read that first
+and treat this document as the reasoning behind it.
 
-This is §6 step 2 of `2026-07-24-growth-test-and-path-to-planet.md`, and it is
+Two things below are now stale and worth naming rather than editing in place:
+§4.1's proposed `R2StagingStore` shipped as `StagedObjectStore` in
+`scripts/construction_staging_v1.py`, wrapping `LocalObjectStore` as a cache
+rather than replacing it; and §4.2's insistence that `path()` must do row-group
+range reads turned out not to be a prerequisite — bucket-range reduce (PR #160)
+landed first and made a fragment hold a complete set of cells, so a consumer's
+whole-object fetches are already limited to its own bucket range. Range reads
+remain worth doing for read amplification and are tracked as a follow-up.
+
+This is §6 step 2 of `2026-07-24-growth-test-and-path-to-planet.md`, and it was
 the only remaining hard blocker on a planet build.
 
 ## 1. The problem, measured
