@@ -55,10 +55,13 @@ MAXIMUM_DEPTH = 8
 # Mirrors construction_v1_hosted.MEASURED_REDUCE_MINUTES_PER_PARTITION["places"].
 REDUCE_MINUTES_PER_PARTITION = 1.0
 
+# Must stay identical to construction_v1_hosted.LIMITS["places"]; a plan
+# generated against different caps than the build enforces is exactly the
+# mismatch the contract-compatibility check exists to reject.
 DEFAULT_CAPS = {
-    "term_rows": 1_000_000,
+    "term_rows": 2_000_000,
     "estimated_uncompressed_bytes": 536_870_912,
-    "distinct_tokens": 200_000,
+    "distinct_tokens": 400_000,
     "maximum_depth": MAXIMUM_DEPTH,
 }
 

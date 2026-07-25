@@ -132,9 +132,43 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # each planning read while keeping the number of INSERT batches small.
         "max_fan_in_tasks": 128,
         "max_fan_in_packs": 256,
-        "partition_term_rows": 1_000_000,
+        # Raised from 1,000,000 / 200,000 after the 2026-07-22.0 growth test
+        # (docs/plans/2026-07-24-growth-test-and-path-to-planet.md, appendix A).
+        # Two independent reasons, one per cap:
+        #
+        #   term_rows      A hash prefix cannot split a SINGLE token, so the
+        #                  largest (cell, token) pair is a hard floor no depth
+        #                  can lower -- measured at 742,392 rows for
+        #                  ('b2e3','jp'), 74.2% of the old cap. 2,000,000 takes
+        #                  that margin from 1.35x to 2.69x.
+        #   distinct_tokens  Cell a1d5 breached the old 200,000 cap outright at
+        #                  201,568 after five weeks of drift.
+        #
+        # The byte cap stays: at the worst observed 178 bytes/row, 2,000,000
+        # rows is 356 MB against 512 MiB. 3,000,000 (534 MB) would exceed it, so
+        # 2,000,000 is the largest row cap this byte cap admits.
+        #
+        # Raising these REDUCES partition count because fewer partitions are
+        # forced to subdivide; the budget floor is the 16,633 populated cells,
+        # not the splits. The committed plan lands at 16,888 partitions.
+        #
+        # Caveat on the term_rows rationale above: the map-side combiner landed
+        # in the same change and takes that 742,392-row group to 1,078, so the
+        # indivisible floor is no longer what binds. 2,000,000 still buys real
+        # margin -- the largest post-combiner partition is 944,978 rows, which
+        # would sit at 94% of the OLD cap -- but the 'jp' figure is the
+        # pre-combiner motivation, not the current one.
+        #
+        # These exceed three declared hard caps in the frozen evidence spec
+        # (partition_term_rows_hard_cap 1000000,
+        # partition_distinct_tokens_hard_cap 250000,
+        # partition_estimated_uncompressed_bytes_hard_cap 268435456). Those keys
+        # are read by no code -- the byte limit already exceeded its declared cap
+        # before this change -- so nothing fails closed. Tracked as a follow-up:
+        # enforce them or delete them.
+        "partition_term_rows": 2_000_000,
         "partition_estimated_bytes": 512 * 1024**2,
-        "partition_distinct_tokens": 200_000,
+        "partition_distinct_tokens": 400_000,
     },
 }
 
@@ -528,6 +562,23 @@ def _inventory_total_records(inventory: dict[str, Any]) -> int:
     return sum(int(task.get("rows", task.get("expected_input_records", 0))) for task in tasks)
 
 
+COMMITTED_PLACES_PARTITION_PLAN = ROOT / "scripts/places_partition_plan_v1.json"
+
+
+def _committed_plan_partitions(path: Path | None) -> tuple[int, str]:
+    """Partition count recorded by the committed Places partition plan.
+
+    Fails closed on a missing or malformed plan rather than silently falling
+    back to the row-derived estimate, which is a lower bound (see the caller).
+    """
+    plan_path = path or COMMITTED_PLACES_PARTITION_PLAN
+    plan = read_json(plan_path)
+    recorded = plan.get("generated_from", {}).get("partitions")
+    if not isinstance(recorded, int) or recorded < 1:
+        raise SystemExit(f"committed partition plan {plan_path} records no partition count")
+    return recorded, f"committed plan {plan_path.name} partitions"
+
+
 def cmd_predict_reduce(args: argparse.Namespace) -> int:
     """Predict the reduce partition/batch/minute demand from committed inventory
     statistics, with no map run and no network, so a dry-run fails closed when a
@@ -549,10 +600,27 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
         # bound against the per-partition term-row cap.
         terms_per_feature = PLACES.MAX_TERMS_PER_FEATURE
         term_rows = total_records * terms_per_feature
-        predicted_partitions = math.ceil(term_rows / limits.partition_term_rows)
+        by_rows = math.ceil(term_rows / limits.partition_term_rows)
+        # The term-row division alone is NOT an upper bound, and treating it as
+        # one made this gate 14x optimistic. Places partition count is floored by
+        # the number of POPULATED SPATIAL CELLS -- one partition per cell before
+        # any subdivision -- and that floor is completely independent of the row
+        # cap. Dividing by a larger cap therefore shrinks the estimate while the
+        # truth does not move: at the 2,000,000 cap this predicted 1,211
+        # partitions against a real 16,888.
+        #
+        # The committed partition plan records the real structural count, so use
+        # it as the floor. max() keeps the gate conservative in both directions:
+        # if a release genuinely needs more subdivision than the committed tree
+        # has, the row-derived figure still wins.
+        floor, floor_basis = _committed_plan_partitions(
+            getattr(args, "partition_plan", None)
+        )
+        predicted_partitions = max(by_rows, floor)
         basis = (
-            f"ceil({total_records} features x {terms_per_feature} terms / "
-            f"{limits.partition_term_rows} term-row cap)"
+            f"max(ceil({total_records} features x {terms_per_feature} terms / "
+            f"{limits.partition_term_rows} term-row cap) = {by_rows}, "
+            f"{floor_basis} = {floor})"
         )
     predicted_partitions = max(1, predicted_partitions)
 
@@ -962,6 +1030,10 @@ def build_parser() -> argparse.ArgumentParser:
     source_limits.set_defaults(func=cmd_source_limits)
 
     predict = sub.add_parser("predict-reduce")
+    predict.add_argument(
+        "--partition-plan", type=Path, default=None,
+        help="Committed Places partition plan supplying the structural partition floor "
+             "(default: scripts/places_partition_plan_v1.json).")
     predict.add_argument("--contract", type=Path, required=True)
     predict.add_argument("--family", choices=FAMILIES, required=True)
     predict.add_argument("--inventory", type=Path, required=True)

@@ -860,3 +860,201 @@ def test_pinned_tables_do_not_follow_the_running_interpreter():
     assert any(
         not interpreter_tables.category(mark).startswith("M") for mark in marks
     )
+
+
+def test_map_combiner_discards_below_serving_rank_and_proves_additivity(
+    tmp_path, construction_binaries, construction_module
+):
+    # The slice fixture above splits 450 features across two cells, so every
+    # (cell, token) group lands at 225 -- just under the 256 serving cap, and the
+    # combiner never fires. Put every feature in ONE cell so it does.
+    module = construction_module
+    rows = [
+        {
+            "id": str(uuid.UUID(int=2_000 + index)),
+            "primary_name": f"Common Place {index}",
+            "category": "library",
+            "locality": "Town",
+            "country": "XX",
+            "confidence": 1.0 - (index % 10) / 20,
+            "point": [0.0, 0.0],
+            "source_row_index": index,
+        }
+        for index in range(450)
+    ]
+    source = tmp_path / "source.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    parquet = pq.ParquetFile(source)
+    source_limits = tmp_path / "source-limits.json"
+    source_limits.write_text(
+        json.dumps(
+            {
+                "objects": [
+                    {"records": len(rows), "row_groups": parquet.metadata.num_row_groups}
+                ]
+            }
+        )
+    )
+    limits = module.Limits(
+        max_input_rows=500,
+        max_pack_rows=1_500,
+        parquet_row_group_rows=700,
+        max_rss_bytes=2 * 1024**3,
+        max_scratch_bytes=2 * 1024**3,
+        max_output_bytes=512 * 1024**2,
+        wall_seconds=120,
+        allow_unpinned_duckdb=True,
+    )
+    marker = module.map_task(
+        input_path=source,
+        source_limits=source_limits,
+        store=module.A.LocalObjectStore(tmp_path / "store"),
+        scratch_root=tmp_path / "scratch",
+        request_sha256="ef" * 32,
+        task_id="places-hot",
+        transform_binary=construction_binaries["places-transform-v1"],
+        proof_binary=construction_binaries["places-proof-directory"],
+        limits=limits,
+    )
+
+    combiner = marker["combiner"]
+    cap = limits.maximum_serving_candidates
+    # Five tokens are shared by all 450 features in this single cell -- "common"
+    # and "place" from the name, plus "library", "town", "xx" -- and each
+    # feature also contributes one unique index token. So the exact arithmetic
+    # is: five groups cut to the cap, 450 singleton groups untouched.
+    shared, singletons = 5, len(rows)
+    assert combiner["input_rows"] == shared * len(rows) + singletons
+    assert combiner["retained_rows"] == shared * cap + singletons
+    assert combiner["discarded"]["records"] == shared * (len(rows) - cap)
+    assert marker["binding"]["records"] == combiner["retained_rows"]
+
+    # The proof the combiner rests on: kept + discarded reconstructs the
+    # transform's binding exactly, over both digest lanes.
+    reconstructed = module.A.combine_bindings(
+        [marker["binding"], combiner["discarded"]]
+    )
+    assert reconstructed["records"] == marker["transform"]["emitted_term_rows"]
+    assert reconstructed["semantic_sum_a"] == marker["transform"]["semantic_sum_a"]
+    assert reconstructed["semantic_sum_b"] == marker["transform"]["semantic_sum_b"]
+
+
+def test_combiner_retains_the_highest_ranked_candidates_not_merely_the_right_count(
+    tmp_path, construction_binaries, construction_module
+):
+    # Counts and binding additivity are ORDER-INVARIANT: they hold identically if
+    # the combiner sorts backwards. Inverting confidence_rank in the combiner
+    # would make every task retain its WORST candidates and the reducer would
+    # serve them -- no row lost, no binding violated, nothing else failing. So
+    # this asserts WHICH rows survive.
+    module = construction_module
+    cap = module.Limits().maximum_serving_candidates
+    total = cap + 60
+    # confidence_rank is a coarse u8 bucket, so confidence must span the full
+    # 0..1 range for the ranking to be observable at all -- a narrow band
+    # collapses every row into one bucket and the assertion below cannot
+    # discriminate. Ascending with index means the top `cap` rows are the
+    # highest indices; a reversed sort keeps the lowest instead.
+    rows = [
+        {
+            "id": str(uuid.UUID(int=7_000 + index)),
+            "primary_name": "Shared Name",
+            "category": "library",
+            "locality": "Town",
+            "country": "XX",
+            "confidence": index / (total - 1),
+            "point": [0.0, 0.0],
+            "source_row_index": index,
+        }
+        for index in range(total)
+    ]
+    source = tmp_path / "source.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    source_limits = tmp_path / "source-limits.json"
+    source_limits.write_text(
+        json.dumps({"objects": [{"records": total,
+                                 "row_groups": pq.ParquetFile(source).metadata.num_row_groups}]})
+    )
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker = module.map_task(
+        input_path=source,
+        source_limits=source_limits,
+        store=store,
+        scratch_root=tmp_path / "scratch",
+        request_sha256="12" * 32,
+        task_id="places-rank",
+        transform_binary=construction_binaries["places-transform-v1"],
+        proof_binary=construction_binaries["places-proof-directory"],
+        limits=module.Limits(
+            max_input_rows=total + 10,
+            max_pack_rows=100_000,
+            parquet_row_group_rows=4_096,
+            max_rss_bytes=2 * 1024**3,
+            max_scratch_bytes=2 * 1024**3,
+            max_output_bytes=512 * 1024**2,
+            wall_seconds=180,
+            allow_unpinned_duckdb=True,
+        ),
+    )
+
+    duckdb = pytest.importorskip("duckdb")
+    connection = duckdb.connect()
+    packs = [str(store.path(pack["object"]["key"])) for pack in marker["packs"]]
+    minimum_kept, maximum_kept, kept_rows = connection.execute(
+        "SELECT min(confidence_rank), max(confidence_rank), count(*) "
+        f"FROM read_parquet({packs!r}) WHERE token = 'shared'"
+    ).fetchone()
+    connection.close()
+
+    # Compare against the range the SOURCE spans, not the packs': every token in
+    # this fixture saturates, so the packs' own min/max is the combined band and
+    # comparing to it is vacuous. Confidence runs 0.0 -> 1.0, so the full rank
+    # band is 0 -> 255 by construction.
+    assert kept_rows == cap, "the saturated group should be cut to exactly the cap"
+    # The decisive pair: the surviving band sits at the TOP of the source range.
+    # Invert the combiner's sort and these flip -- max drops well below 255 and
+    # min becomes 0 -- which is precisely the mutation that counts and binding
+    # additivity cannot see.
+    assert maximum_kept == 255
+    assert minimum_kept > 0
+
+
+def test_per_task_combining_then_global_topn_equals_a_single_global_topn():
+    # The exactness claim the combiner rests on: top-N under a TOTAL order is
+    # decomposable. Combining per map task and then taking the reducer's global
+    # top-N must select the same rows as taking the global top-N over every
+    # untouched row. The multi-task case is the one that could break.
+    duckdb = pytest.importorskip("duckdb")
+    connection = duckdb.connect()
+    connection.execute(
+        "CREATE TABLE terms AS SELECT "
+        "  (i % 3)::INTEGER AS task, 'cell' AS partition_cell, 'tok' AS token, "
+        "  ((i * 37) % 11)::UTINYINT AS confidence_rank, "
+        "  ((i * 53) % 997)::INTEGER AS feature_id, "
+        "  0::INTEGER AS source_object_index, 0::INTEGER AS source_row_group, "
+        "  i::INTEGER AS source_row_index "
+        "FROM range(900) t(i)"
+    )
+    order = (
+        "confidence_rank DESC, feature_id, source_object_index, "
+        "source_row_group, source_row_index"
+    )
+    cap = 16
+
+    direct = connection.execute(
+        f"SELECT source_row_index FROM terms QUALIFY row_number() OVER ("
+        f"PARTITION BY partition_cell, token ORDER BY {order}) <= {cap} "
+        "ORDER BY source_row_index"
+    ).fetchall()
+    staged = connection.execute(
+        "SELECT source_row_index FROM ("
+        f"  SELECT * FROM terms QUALIFY row_number() OVER ("
+        f"    PARTITION BY task, partition_cell, token ORDER BY {order}) <= {cap}"
+        f") QUALIFY row_number() OVER ("
+        f"PARTITION BY partition_cell, token ORDER BY {order}) <= {cap} "
+        "ORDER BY source_row_index"
+    ).fetchall()
+    connection.close()
+
+    assert len(direct) == cap
+    assert staged == direct

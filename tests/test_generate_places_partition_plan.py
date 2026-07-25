@@ -20,6 +20,38 @@ SPEC.loader.exec_module(GEN)
 COMMITTED = ROOT / "scripts/places_partition_plan_v1.json"
 
 
+def test_generator_caps_match_the_caps_the_hosted_build_enforces():
+    # A plan generated against looser caps than the build enforces would place
+    # partitions the reducer then rejects; tighter, and the offline generator
+    # silently over-subdivides. Neither is caught anywhere else, because the
+    # generator runs on a different machine from the build.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import construction_v1_hosted as HOSTED
+
+    places = HOSTED.HOSTED_LIMITS["places"]
+    assert GEN.DEFAULT_CAPS["term_rows"] == places["partition_term_rows"]
+    assert GEN.DEFAULT_CAPS["distinct_tokens"] == places["partition_distinct_tokens"]
+    assert (
+        GEN.DEFAULT_CAPS["estimated_uncompressed_bytes"]
+        == places["partition_estimated_bytes"]
+    )
+
+
+def test_committed_plan_records_the_caps_the_hosted_build_enforces():
+    # The test above pins the GENERATOR's defaults to the build. This pins the
+    # committed artefact itself: a plan generated under looser caps than the
+    # build enforces places partitions the reducer then rejects. Without this,
+    # the plan silently goes stale on the next cap change.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import construction_v1_hosted as HOSTED
+
+    places = HOSTED.HOSTED_LIMITS["places"]
+    caps = json.loads(COMMITTED.read_text())["partition_contract"]["caps"]
+    assert caps["term_rows"] == places["partition_term_rows"]
+    assert caps["distinct_tokens"] == places["partition_distinct_tokens"]
+    assert caps["estimated_uncompressed_bytes"] == places["partition_estimated_bytes"]
+
+
 def plan_with(partitions):
     return {"schema": "x", "partitions": partitions}
 
@@ -64,10 +96,10 @@ def test_committed_plan_reconstructs_its_recorded_partition_count():
     # cell contributes exactly one depth-0 partition.
     subdivided_cells = len(committed["cells"])
     recorded = committed["generated_from"]["partitions"]
-    assert branches == 1_388
-    assert subdivided_cells == 83
-    assert recorded == 17_816
-    assert recorded - branches + subdivided_cells == 16_511  # populated cells
+    assert branches == 272
+    assert subdivided_cells == 17
+    assert recorded == 16_888
+    assert recorded - branches + subdivided_cells == 16_633  # populated cells
 
 
 def test_headroom_splits_only_leaves_over_the_threshold():
