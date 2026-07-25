@@ -137,6 +137,8 @@ Not started, deliberately — Places first, proven, then port.
 
 ## Query surface, and what construction-v1 does NOT build
 
+Reverse design now exists: `2026-07-25-reverse-v2-design.md`.
+
 Everything above is about **build time**. It is easy to read the partition-key
 discussion as a statement about lookup performance. It is not. Keep these
 separate.
