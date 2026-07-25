@@ -209,6 +209,111 @@ def test_map_matrix_lookup_uses_the_singular_dispatch_family_key():
     assert 'output.write(f"places_matrix=' in control
 
 
+# --- head shard count -------------------------------------------------------
+# The production head shard count is a SIZING decision with a hard downstream
+# cliff: a head shard is one PLHD artifact and the encoder fail-closes at
+# MAX_INDEX_ENTRIES distinct tokens. The workflow shipped `--shard-bits 4` (16
+# shards) against a committed design of 4096, which at the measured planet token
+# universe is 6-8x OVER the cap -- and the only thing that reported it was the
+# encoder's `bail!`, at encode time. (Ordering, stated precisely: today
+# `max_head_candidate_rows = 5_000_000` aborts a ~65M-row planet head phase before
+# either check runs, so the sizing has to be right for when that cap is raised.)
+# These tests exist so that literal can never silently drift below the design again.
+
+ENCODER_SOURCE = (
+    Path(__file__).parent.parent
+    / "crates"
+    / "geocoder-construction"
+    / "src"
+    / "bin"
+    / "places_serving_encode_v1.rs"
+)
+# Measured planet token universe, docs/plans/2026-07-24-places-global-scale-plan.md
+# (12-task census: 4,749,161 distinct tokens over 14.1% of the source rows, linearly
+# extrapolated because distinct-per-feature was still rising in-sample).
+PLANET_DISTINCT_TOKENS_LOW = 25_000_000
+PLANET_DISTINCT_TOKENS_HIGH = 33_600_000
+
+
+def _encoder_max_index_entries() -> int:
+    # Anchored on the exact declaration, colon included: a substring match would
+    # silently bind to a RENAMED superstring constant
+    # (`const MAX_INDEX_ENTRIES_PER_SHARD: usize = 900_000;`) and return the wrong
+    # number, which is the one way this check could fail quietly.
+    for line in ENCODER_SOURCE.read_text().splitlines():
+        if line.strip().startswith("const MAX_INDEX_ENTRIES:"):
+            return int(line.split("=")[1].strip().rstrip(";").replace("_", ""))
+    raise AssertionError(
+        "`const MAX_INDEX_ENTRIES:` not found in the Places serving encoder"
+    )
+
+
+def test_head_shard_bits_constant_matches_the_committed_design():
+    places = _load_module("contract_test_places", "scripts/places_construction_v1.py")
+    # 12 bits => 4096 shards, the count the global-scale plan committed to (and the
+    # count the production ID index already uses).
+    assert places.DEFAULT_HEAD_SHARD_BITS == 12
+    assert (1 << places.DEFAULT_HEAD_SHARD_BITS) == 4096
+    # The Python mirror of the encoder cap must track the Rust enforcing side.
+    assert places.SERVING_MAX_INDEX_ENTRIES == _encoder_max_index_entries()
+
+
+def test_planet_head_entries_per_shard_clear_the_encoder_cap_with_margin():
+    # The sizing arithmetic itself, encoded as a test: revise the token-universe
+    # estimate upward past what 4096 shards can hold and THIS trips, instead of a
+    # planet head phase tripping after map+reduce+merge are spent.
+    places = _load_module("contract_test_places", "scripts/places_construction_v1.py")
+    cap = places.SERVING_MAX_INDEX_ENTRIES
+    bits = places.DEFAULT_HEAD_SHARD_BITS
+    for tokens in (PLANET_DISTINCT_TOKENS_LOW, PLANET_DISTINCT_TOKENS_HIGH):
+        entries = places.head_entries_per_shard(tokens, bits)
+        assert entries <= cap
+        # Real hashing is not perfectly uniform and the estimate is an
+        # extrapolation, so require a wide margin, not a bare pass.
+        assert entries * 10 <= cap, f"{entries} entries/shard is under 10x margin"
+        assert places.minimum_head_shard_bits(tokens) <= bits
+    # And the value the workflow used to pass is genuinely over the cap -- this is
+    # the defect statement, kept executable.
+    assert places.head_entries_per_shard(PLANET_DISTINCT_TOKENS_LOW, 4) > cap
+    assert places.minimum_head_shard_bits(PLANET_DISTINCT_TOKENS_HIGH) > 4
+
+
+def test_workflow_head_phase_passes_the_designed_shard_bits():
+    value = text()
+    places = _load_module("contract_test_places", "scripts/places_construction_v1.py")
+    expected = f"--shard-bits {places.DEFAULT_HEAD_SHARD_BITS}"
+    assert expected in value
+    # Exactly one head invocation carries it (addresses have no head phase), and no
+    # other shard-bits literal survives anywhere in the workflow.
+    assert value.count("--shard-bits") == 1
+    assert value.count(expected) == 1
+
+
+def test_hosted_head_shard_bits_default_is_the_constant_not_a_literal():
+    # The whole defect was a literal drifting from the constant, so the CLI default
+    # must BE the constant object, verified through the real parser.
+    hosted = _load_module("contract_test_hosted_head", "scripts/construction_v1_hosted.py")
+    places = _load_module("contract_test_places", "scripts/places_construction_v1.py")
+    parser = hosted.build_parser()
+    namespace = parser.parse_args([
+        "run-head", "--contract", "c.json", "--store-root", "s",
+        "--family", "places", "--markers-dir", "m", "--output", "o.json",
+    ])
+    assert namespace.shard_bits == places.DEFAULT_HEAD_SHARD_BITS == 12
+
+
+def test_slice_harness_picks_its_small_shard_bits_explicitly():
+    # A 4096-shard head over a 38k-place Monaco slice is nonsense, so the harness
+    # keeps a small count -- but as a NAMED, deliberate slice choice, never as an
+    # inherited default that silently tracks whatever production uses.
+    harness = (
+        WORKFLOW.parent.parent.parent / "scripts" / "run_slice_construction_v1.py"
+    ).read_text()
+    assert "SLICE_HEAD_SHARD_BITS = 4" in harness
+    assert '"--shard-bits", str(SLICE_HEAD_SHARD_BITS)' in harness
+    assert '"--shard-bits", "4"' not in harness
+
+
 def test_cargo_builds_target_the_crates_workspace_manifest():
     # The workspace Cargo.toml lives in crates/, not the repo root; a bare
     # `cargo build` on the runner dies with "could not find Cargo.toml"
@@ -371,7 +476,19 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # same permissive-get defect, which was demonstrated as publishable.
     assert 'test "$SERVING" -ge "$REDUCTIONS"' not in value
     assert "POP=\"$(jq -r '.populated_shards // 0' headdl/head/head.json)\"" in value
-    assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP ))"' in value
+    # The head ROUTING MANIFEST is part of the published serving set (shard objects
+    # are content-addressed, so it is the only shard_id -> object map), so the
+    # equality carries its term. Family-generic: addresses report 0.
+    #
+    # Extracted fail-closed, the same principle as the staging asserts: bash
+    # arithmetic reads an absent key's "null" as 0, so `jq -r` + `// 0` would turn a
+    # MISSING manifest into a passing gate. `jq -e` + `| numbers` exits non-zero.
+    assert (
+        'MANIFESTS="$(jq -er \'.head_manifest_objects | numbers\' '
+        'final-work/result.json)"' in value
+    )
+    assert "jq -r '.head_manifest_objects'" not in value
+    assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP + MANIFESTS ))"' in value
     assert 'test "$SERVING" -gt 0' in value
 
     # And the finalize job asserts its RESIDENCY bound, not just its output set.

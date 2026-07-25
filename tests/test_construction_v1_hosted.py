@@ -659,12 +659,18 @@ def test_the_serving_object_set_is_family_correct_and_fails_closed():
                # The leaf is a build intermediate the head phase reads; it holds
                # TERM rows and must NOT be published.
                "leaf_object": identity("reduce/places-v1/leaves/sha256/b.parquet")}]
-    head = {"populated_shards": 1, "shard_count": 16,
-            "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]}
+    head = {"populated_shards": 1, "shard_count": 16, "shard_bits": 4,
+            "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")],
+            "manifest_object": identity(
+                "serve/places-v1/head-manifest/sha256/d.json"
+            )}
     keys = [item["key"] for item in HOSTED._artifact_keys("places", places, head)]
+    # The head routing manifest is part of the serving set: shard objects are
+    # content-addressed, so it is the only shard_id -> object map there is.
     assert keys == [
         "serve/places-v1/routed/sha256/a.plrv",
         "serve/places-v1/head/sha256/c.plhd",
+        "serve/places-v1/head-manifest/sha256/d.json",
     ]
 
     # A reduction naming no serving object ABORTS instead of shortening the set.
@@ -747,6 +753,17 @@ def test_the_head_half_of_the_serving_set_fails_closed_too(tmp_path):
     with pytest.raises(SystemExit):
         HOSTED._artifact_keys("places", reductions, {
             "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]})
+    # 7. Every shard handed over, and NO routing manifest. This is the shape that
+    # shipped: 4,094 content-addressed `.plhd` objects with nothing recording which
+    # shard each one is, so a reader must probe all of them.
+    for absent in (None, {}, "", {"key": "k"}):
+        head = {"shard_count": 1, "populated_shards": 1, "shard_bits": 1,
+                "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]}
+        if absent is not None:
+            head["manifest_object"] = absent
+        with pytest.raises(SystemExit) as excinfo:
+            HOSTED._artifact_keys("places", reductions, head)
+        assert "head manifest" in str(excinfo.value), absent
     # And a family with no head phase must not smuggle shards into the slice.
     with pytest.raises(SystemExit) as excinfo:
         HOSTED._artifact_keys(
@@ -813,10 +830,14 @@ def test_places_finalize_publishes_every_routed_object(tmp_path, binaries):
     result = json.loads(final.read_text())
     head_result = json.loads(head.read_text())
 
-    # One routed `.plrv` per partition, plus one `.plhd` per populated head shard.
+    # One routed `.plrv` per partition, one `.plhd` per populated head shard, and
+    # the one head routing manifest that maps shard ids to those objects.
     assert result["serving_object_key"] == "routed_object"
     assert result["reduction_serving_objects"] == len(partitions)
-    assert result["serving_objects"] == len(partitions) + head_result["populated_shards"]
+    assert result["head_manifest_objects"] == 1
+    assert result["serving_objects"] == (
+        len(partitions) + head_result["populated_shards"] + 1
+    )
     routed = sorted(path.name for path in remote.rglob("*.plrv"))
     assert len(routed) == len(partitions) > 0
     # Every published name is the digest the reducer recorded: registration, not
@@ -833,6 +854,33 @@ def test_places_finalize_publishes_every_routed_object(tmp_path, binaries):
     )
     manifest = json.loads((tmp_path / "final-work/family-manifest.json").read_text())
     assert len(manifest["artifacts"]) == result["serving_objects"]
+
+    # The published family manifest must be enough to ROUTE a token with no
+    # probing: shard_bits says how to compute the shard id, and the head manifest
+    # object it names carries the shard_id -> published object map. The head
+    # manifest is published (under its content-addressed name) and carries no
+    # runner-local absolute path, so its bytes do not depend on the store root.
+    head_block = manifest["head"]
+    assert head_block["shard_bits"] == head_result["shard_bits"]
+    assert head_block["populated_shards"] == head_result["populated_shards"]
+    assert head_block["shard_count"] == 1 << head_block["shard_bits"]
+    routing_name = head_block["manifest"]["object"]
+    published_manifest = next(
+        path for path in remote.rglob("*.json") if path.name == routing_name
+    )
+    routing = json.loads(published_manifest.read_text())
+    assert routing["shard_bits"] == head_block["shard_bits"]
+    assert len(routing["shards"]) == head_result["populated_shards"]
+    published_shards = {path.name for path in remote.rglob("*.plhd")}
+    for shard in routing["shards"]:
+        # `path` is the published object name, not an absolute local path.
+        assert shard["path"] in published_shards
+        assert "/" not in shard["path"]
+        assert shard["path"] == f"{shard['sha256']}.plhd"
+        assert 0 <= shard["shard_id"] < routing["shard_count"]
+    assert len({shard["shard_id"] for shard in routing["shards"]}) == len(
+        routing["shards"]
+    )
 
     # And wrong bytes under a right routed key abort rather than publish.
     victim = json.loads((reductions / sorted(p.name for p in reductions.glob("*.json"))[0]).read_text())

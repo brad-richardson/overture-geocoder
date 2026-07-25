@@ -806,3 +806,30 @@ that were each confirmed to fail without it. What was deliberately NOT done:
    is outside the present change (the mirror is a separate shell step, and
    `publish_exact_set`'s own `ConflictError` path DOES compare bytes), and it is
    logged rather than fixed here.
+
+## Added 2026-07-25, from the review of the head shard count and its manifest (#169)
+
+All three are fail-closed today and none is a regression; they are recorded because
+the review confirmed them by construction, not by guess.
+
+1. **Nothing at RUNTIME checks that the head manifest's `shards[].path` values are
+   the objects actually published.** The manifest is now the head's routing table,
+   and finalize's exact-set equality
+   (`serving == reductions + populated_shards + head_manifest_objects`) counts
+   objects without cross-checking the manifest's contents against them. So a head
+   phase that handed over a mismatched object in a shard slot would satisfy the gate
+   and publish a manifest naming an object that is not in the slice. Only a TEST
+   asserts the subset property (`tests/test_construction_v1_hosted.py`,
+   `test_places_finalize_publishes_every_routed_object`). This is the most
+   interesting of the three: it wants a real assertion in `cmd_finalize` — every
+   `shards[].path` must appear in the published set, and every published `.plhd`
+   must appear in the manifest — which is a cheap set comparison over data finalize
+   already holds. The Rust sharded verifier does check the manifest against the
+   shard BYTES, but it runs in the head phase, against the head phase's own view.
+2. **A duplicate manifest/shard key aborts with a bare `ValueError: duplicate
+   artifact key`** out of `publish_exact_set`, rather than the named `SystemExit`
+   every other finalize precondition raises. Correct behaviour, worse diagnosis.
+3. **`_artifact_keys` does not validate `shard_count`/`shard_bits`** the way it
+   validates `shard_objects`, `populated_shards` and `manifest_object`, so a places
+   head result missing either reaches `head_block` construction and dies with a
+   `KeyError` instead of a message naming the field. Same class as (2).

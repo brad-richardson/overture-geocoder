@@ -196,10 +196,30 @@ def test_both_slices_assert_the_exact_published_serving_set():
     assert '.serving_object_key == "routed_object"' in value
     assert '.serving_object_key == "artifact"' in value
     assert ".reduction_serving_objects == .partitions" in value
-    # Places: one routed object per partition PLUS one shard per populated head
-    # shard. Addresses: partitions only, since they have no head phase.
-    assert ".serving_objects == .partitions + .head_populated_shards" in value
-    assert ".serving_objects == .partitions" in value
+    # ONE equality, both families: one routed object per partition, one shard per
+    # populated head shard, and the head ROUTING MANIFEST that maps shard ids to
+    # those content-addressed shard objects. Addresses report
+    # `head_manifest_objects == 0` and no head shards, so the same expression
+    # reduces to partitions -- written out rather than dropped, so neither family
+    # can drift to its own arithmetic.
+    # The manifest term carries `| numbers` for the same reason every staging
+    # assert does: jq coerces `null` to 0 inside `+`, so a bare
+    # `.head_manifest_objects` would let a MISSING key sum to a passing equality.
+    assert (
+        ".serving_objects\n                   "
+        "== .partitions + .head_populated_shards\n                      "
+        "+ (.head_manifest_objects | numbers)" in value
+    )
+    assert (
+        ".serving_objects == .partitions + (.head_manifest_objects | numbers)" in value
+    )
+    assert "(.head_manifest_objects | numbers) == 1" in value
+    assert "(.head_manifest_objects | numbers) == 0" in value
+    # The bare forms would let the manifest go unpublished, or go unnoticed.
+    assert ".serving_objects == .partitions + .head_populated_shards\n" not in value
+    assert ".head_manifest_objects ==" not in value.replace(
+        "(.head_manifest_objects | numbers) ==", ""
+    )
 
 
 def test_retry_preserves_every_attempt_and_shouts_when_it_retries():

@@ -250,19 +250,22 @@ store:
 | plan hydrated / peak resident | 32.88 MB / **16.44 MB** (8 released) | 0 / 0 |
 | reduce hydrated / worst job peak | 16.44 MB / **8.30 MB** | 10.89 MB / 10.89 MB |
 | head hydrated / peak resident | 7.35 MB / 7.35 MB (unbatched) | 0 / 0 (no head phase) |
-| finalize hydrated from staging | 56 objects / 71.88 MB (28 objects, twice) | 10 objects / 64.29 MB (5 objects, twice) |
-| finalize peak resident / released | **12.09 MB** / 56 objects | **29.17 MB** / 10 objects |
-| serving objects published | 20 (4 `.plrv` + 16 `.plhd`) | 1 `.av1` |
+| finalize hydrated from staging | 58 objects / 71.89 MB (29 objects, twice) | 10 objects / 64.29 MB (5 objects, twice) |
+| finalize peak resident / released | **12.09 MB** / 58 objects | **29.17 MB** / 10 objects |
+| serving objects published | 21 (4 `.plrv` + 16 `.plhd` + 1 head manifest) | 1 `.av1` |
 
 Finalize's `hydrated` doubled and its `peak resident` fell, in the same change:
-28 → 56 hydrations is the same 28 objects fetched once per pass, and 35.94 MB →
+29 → 58 hydrations is the same 29 objects fetched once per pass, and 35.95 MB →
 12.09 MB peak is the whole point — before, `peak == hydrated` because nothing was
-ever released. The published byte set is unchanged by it: `set_sha256`
-`48c895cd…` for Places (31 files, 35,953,036 bytes) and `73a0e76f…` for
-addresses (8 files, 32,147,481 bytes), identical before and after.
+ever released. The residency change did not touch the published byte set; the
+addresses set is unchanged end to end (`set_sha256` `73a0e76f…`, 8 files,
+32,147,481 bytes). The **Places** set did change, once, and for a different
+reason: PR #169 added the head routing manifest to it, taking it from 31 files /
+35,953,036 bytes to **32 files / 35,962,007 bytes**. That is a deliberate
+one-object addition, not a byte drift — see the head-manifest decision below.
 
 The published slice is **byte-identical** to a `--no-staging` run of the same
-slice — same content-addressed names, same sizes; 31 files for Places, 8 for
+slice — same content-addressed names, same sizes; 32 files for Places, 8 for
 addresses.
 
 Two byte totals in `store_bytes_by_class` do wobble, and neither is about
@@ -270,12 +273,13 @@ transport:
 
 - `map/` drifts a few bytes run to run in **both** modes, because the pack proof
   directories inline per-run wall-time and RSS evidence;
-- `serve/` differs by 96 bytes between a staged and a `--no-staging` run because
-  the head **manifest** embeds each shard's absolute local path, which contains
-  the `--store-root` directory name. That manifest is not part of the published
-  slice (`_artifact_keys` collects `shard_objects`, not `manifest_object`), which
-  is why the published trees are still identical. It is a real wart — a digest
-  that depends on a runner's directory layout — and is tracked as a follow-up.
+- `serve/` used to differ by 96 bytes between a staged and a `--no-staging` run
+  because the head **manifest** embedded each shard's absolute local path, which
+  contains the `--store-root` directory name. **Closed in PR #169**: the manifest's
+  per-shard `path` is now the content-addressed object NAME, which is both what the
+  verifier resolves (relative to the manifest's own directory) and what finalize
+  publishes. The manifest is now itself published — it is the head's routing table —
+  and the two published trees are identical at 32 files including it.
 
 **The Places routed serving objects now actually get published.** They did not:
 `_artifact_keys` read `reduction["artifact"]`, which only the ADDRESS reducer sets,
@@ -288,8 +292,9 @@ a reduction naming none is fatal. `leaf_object` stays unpublished on purpose: it
 the head phase's input, it holds TERM rows, and the positions packs are the durable
 per-record artifact. The published serving set is asserted to COVER the reduction
 set — Monaco publishes 4 `.plrv` (one per partition, names matching the reducer's
-recorded digests exactly) plus 16 `.plhd`, and the slice grew from 11.86 MB to
-35.95 MB, which is the routed payload that was previously being lost.
+recorded digests exactly) plus 16 `.plhd` and the head routing manifest, and the
+slice grew from 11.86 MB to 35.96 MB, which is the routed payload that was
+previously being lost.
 
 **The head half had the identical defect and is closed the same way.**
 `head.get("shard_objects", [])` was the same permissive get one line down: a places
@@ -411,6 +416,37 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
   a multiplicative hash of the cell so per-bucket cell COUNTS are uniform by
   construction. Retiring the committed plan is a separate change with its own
   argument to make.
+- **The head shard count is `DEFAULT_HEAD_SHARD_BITS = 12` (4096 shards), and no
+  caller may re-type it as a literal.** A head shard is one PLHD artifact and its
+  index-entry count is its distinct-token count, capped at `MAX_INDEX_ENTRIES =
+  250_000` by the encoder. The workflow and the hosted CLI default both shipped a
+  hardcoded `4` (16 shards) while the design said 4096: at the measured 25–33.6M
+  planet distinct tokens that is 1.6–2.1M entries per shard, 6–8× over the cap,
+  and the only thing that reported it was the encoder's `bail!`, at encode time.
+  Fixed in the workflow and wired to the constant in the CLI (PR #169), with the
+  head builder now measuring the worst shard exactly and failing closed *before*
+  any encode. Note that `max_head_candidate_rows = 5_000_000` is enforced earlier
+  still and the planet head candidate set is ~65M rows, so a planet head aborts at
+  that admission cap today and never reaches either check — the shard sizing has to
+  be right for when that cap is raised, not instead of it. **256 shards
+  (`shard_bits = 8`) is the viable cheaper alternative**: 97,656 entries/shard
+  still clears the cap, and against the retired 16-shard baseline it **adds 240
+  objects to the finalize publish set instead of 4,080** — i.e. 257 head objects in
+  absolute terms rather than 4,097 (all shards populated, plus the one routing
+  manifest, which is one object at *any* shard count and so cancels out of the
+  delta). Whether to trade head-shard granularity for a smaller publish set is an
+  owner call that has not been made; 4096 is what the committed design says, so 4096
+  is what ships until it is.
+- **The head routing manifest is a published serving object.** Head shards are
+  content-addressed, so `shard_id -> object` exists only in that manifest, and
+  `shard_bits` only there and in the family manifest. It was built and never added
+  to finalize's publish set, which was survivable at 16 shards (probe all 16 and let
+  `lookup_head_shard`'s misroute rejection sort it out) and is not at 4096. It is
+  now in the exact-set gate arithmetic
+  (`serving == reductions + populated_shards + head_manifest_objects`), and its
+  per-shard `path` is the published object NAME rather than an absolute local path —
+  which also retires the wart above where the manifest digest depended on the
+  `--store-root` directory name.
 
 ## Addresses
 
