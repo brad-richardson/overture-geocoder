@@ -40,6 +40,66 @@ PLACES_SPEC = ROOT / CONTROL.FAMILIES["places"]["spec"]
 
 
 # --------------------------------------------------------------------------- #
+# Partition caps: three surfaces that must not drift apart silently
+# --------------------------------------------------------------------------- #
+PARTITION_CAP_FIELDS = (
+    "partition_term_rows",
+    "partition_estimated_bytes",
+    "partition_distinct_tokens",
+)
+# The caps the FROZEN places evidence spec v2 declares, and the caps the hosted
+# planet build actually runs. They DIFFER, deliberately and with measured
+# justification (the 2026-07-22.0 growth test; see the HOSTED_LIMITS comment and
+# docs/plans/2026-07-24-construction-v1-follow-ups.md). Pinned here so neither
+# side can move without this test naming the other one: the spec caps used to be
+# read by no code at all, which is how the build came to exceed them unnoticed.
+SPEC_V2_PARTITION_CAPS = {
+    "partition_term_rows": 1_000_000,
+    "partition_estimated_bytes": 268_435_456,
+    "partition_distinct_tokens": 250_000,
+}
+HOSTED_PARTITION_CAPS = {
+    "partition_term_rows": 2_000_000,
+    "partition_estimated_bytes": 512 * 1024**2,
+    "partition_distinct_tokens": 400_000,
+}
+
+
+def test_evidence_spec_partition_caps_are_read_by_the_rehearsal():
+    # The spec's three partition hard caps were dead declarations: the rehearsal
+    # restated the same numbers as literals, so the spec text was unchecked and
+    # the rehearsal was free to drift off the spec it produces evidence under.
+    # It now READS them, and the values still match what v2 froze.
+    pytest.importorskip("pyarrow")
+    rehearse = _load("preflight_rehearse", "scripts/rehearse_places_construction_v1.py")
+    assert rehearse.EVIDENCE_SPEC == PLACES_SPEC
+    assert rehearse.spec_partition_caps() == SPEC_V2_PARTITION_CAPS
+    declared = json.loads(PLACES_SPEC.read_text())["acceptance_gates"]["map_reduce"]
+    assert declared["partition_term_rows_hard_cap"] == 1_000_000
+    assert declared["partition_estimated_uncompressed_bytes_hard_cap"] == 268_435_456
+    assert declared["partition_distinct_tokens_hard_cap"] == 250_000
+
+
+def test_places_limits_defaults_are_the_hosted_production_caps():
+    # The dataclass defaults were left behind when the hosted caps were raised, so
+    # every caller that is not the hosted CLI planned at caps the planet build no
+    # longer uses. Defaults and hosted limits are now one value per cap.
+    limits = HOSTED.PLACES.Limits()
+    for field in PARTITION_CAP_FIELDS:
+        assert getattr(limits, field) == HOSTED_PARTITION_CAPS[field] == \
+            HOSTED.HOSTED_LIMITS["places"][field], field
+
+
+def test_hosted_partition_caps_exceed_the_frozen_spec_caps_by_declaration():
+    # This is the deliberate divergence, asserted rather than assumed: raising the
+    # rehearsal to these values would break spec v2's "relaxation_policy: none"
+    # and its adaptive-subdivision coverage gate, so closing the gap needs a
+    # places evidence spec v3, not an edit.
+    for field in PARTITION_CAP_FIELDS:
+        assert HOSTED_PARTITION_CAPS[field] > SPEC_V2_PARTITION_CAPS[field], field
+
+
+# --------------------------------------------------------------------------- #
 # P1-3: bounded retry wrapper
 # --------------------------------------------------------------------------- #
 class _FakeResponse:
@@ -253,6 +313,50 @@ def test_predict_reduce_addresses_needs_batching_but_fits_budget(tmp_path, capsy
     assert timing["measured_reduce_minutes_per_partition"] > 0
     assert out["reduce_batch_size"] <= timing["timeout_max_batch"]
     assert timing["per_job_minutes"] <= timing["job_timeout_minutes"]
+
+
+def test_predict_reduce_addresses_floors_on_the_per_country_bisection(tmp_path, capsys):
+    # The addresses branch divided records by a row cap with NO structural floor --
+    # the same defect PR #155 fixed on the places branch. The address planner
+    # bisects each country independently, so every country contributes at least one
+    # partition and an over-cap country's leaf count is a power of two. On the
+    # planet inventory the row-derived figure is 474 and the real shape is 725, so
+    # the gate was ~1.5x optimistic (not 14x: the address floor is 34 countries,
+    # far below the row-derived figure, unlike Places' 16,633 cells).
+    contract = _contract(tmp_path)
+    assert HOSTED.main([
+        "predict-reduce", "--contract", str(contract), "--family", "addresses",
+        "--inventory", str(ADDRESS_INVENTORY),
+    ]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    inventory = json.loads(ADDRESS_INVENTORY.read_text())
+    row_cap = HOSTED.HOSTED_LIMITS["addresses"]["max_pack_rows"]
+    by_rows = -(-HOSTED._inventory_total_records(inventory) // row_cap)
+    floor, _basis = HOSTED._address_structural_partitions(inventory, row_cap)
+    assert by_rows == 474 and floor == 725
+    assert out["predicted_partitions"] == floor > by_rows
+    assert "per-country hash bisection" in out["prediction_basis"]
+
+
+def test_address_structural_floor_counts_every_country_and_rounds_to_powers_of_two():
+    # Both effects the row division misses, isolated. Two countries of one row each
+    # are two partitions, not one; a country at 3x the cap needs four leaves,
+    # not three, because the split halves.
+    floor, basis = HOSTED._address_structural_partitions(
+        {"exact_country_rows": {"AA": 1, "BB": 1}, "totals": {"records": 2}}, 1_000_000
+    )
+    assert floor == 2 and "2 inventory countries" in basis
+    floor, _basis = HOSTED._address_structural_partitions(
+        {"exact_country_rows": {"AA": 3_000_000}, "totals": {"records": 3_000_000}},
+        1_000_000,
+    )
+    assert floor == 4
+
+
+def test_address_structural_floor_fails_closed_without_per_country_rows():
+    # Falling back to the row-derived figure would silently restore the optimism.
+    with pytest.raises(SystemExit, match="exact_country_rows"):
+        HOSTED._address_structural_partitions({"totals": {"records": 10}}, 1_000_000)
 
 
 def test_predict_reduce_fails_closed_when_minutes_exceed_cap(tmp_path):

@@ -76,6 +76,15 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
   that is about to be stored is digested back to the plan binding on both lanes,
   with the serving stream derived from that proven leaf rather than from a second
   unproven predicate.
+- **Places finalize actually reconciles.** `reconciles: true` for places was a
+  literal, checked only against the summed binding. It is now
+  `places_construction_v1.validate_complete_reduction`: the partition id set must
+  match the plan exactly, and each reduction's binding must equal the binding the
+  plan recorded for *that* partition. A duplicate covering a missing partition of
+  equal size, or two partitions carrying each other's rows, keeps the sum correct
+  and is now rejected. `Limits`'s partition-cap defaults are also the hosted
+  production caps now, and `predict-reduce`'s addresses branch is floored by the
+  per-country bisection the planner performs (474 -> 725 on the planet inventory).
 - **Reduce is watched** — `StageWatchdog` now wraps the reducer's Python +
   pyarrow + DuckDB ingest and its serving encode, with the same caps and the
   same fail-closed semantics as the two `map_task` stages. It was the one phase

@@ -211,29 +211,57 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
 
 1. ~~**`reduce_partition` has no `StageWatchdog`.**~~ ADDRESSED — see "Already
    addressed" above.
-2. **Three evidence-spec hard caps are dead declarations that now disagree with
-   the build.** `partition_term_rows_hard_cap` (1,000,000),
-   `partition_distinct_tokens_hard_cap` (250,000) and
-   `partition_estimated_uncompressed_bytes_hard_cap` (268,435,456) are read by
-   no code; the byte one was already violated before this change. The spec ships
-   a `.sha256` companion and is meant to be frozen. Either enforce them or
-   delete them — a frozen spec stating caps the build ignores is a trap.
-   **Scheduled:** fixed immediately after the two in-flight PRs (per-place
-   artifact; reduce-by-bucket-range) merge, together with item 3 — both touch
-   the same limit values, so doing them separately guarantees a conflict.
-3. **`Limits` dataclass defaults were not raised with the hosted limits.**
-   `places_construction_v1.Limits` still defaults to 1,000,000 / 250,000 /
-   256 MiB, and `rehearse_places_construction_v1.py` explicitly pins
-   1,000,000 / 250,000. Hosted overrides win so nothing breaks, but rehearsals
-   now plan at caps the hosted build no longer uses and are not representative.
-   **Scheduled:** same slot as item 2 — right after the per-place-artifact and
-   reduce-by-bucket-range PRs merge. Deliberately not done before then:
-   `places_construction_v1.py` and its tests are being edited by both of those
-   PRs, and a defaults change now is a pure merge conflict.
-4. **`predict-reduce` was 14x optimistic and this change made it worse.** Fixed
-   in PR #155 by flooring the prediction with the committed plan's partition
-   count. Worth a follow-up: the addresses branch of the same function divides
-   records by a row cap with no structural floor, and may have the same defect.
+2. ~~**Three evidence-spec hard caps are dead declarations that now disagree with
+   the build.**~~ **ENFORCED 2026-07-25** — chosen over deletion, and the choice
+   needs recording because neither option was free. The three caps
+   (`partition_term_rows_hard_cap` 1,000,000,
+   `partition_estimated_uncompressed_bytes_hard_cap` 268,435,456,
+   `partition_distinct_tokens_hard_cap` 250,000) are **rehearsal** gates, not
+   hosted-build limits: the spec is frozen against release `2026-06-17.0` and a
+   12-task candidate universe, and `rehearse_places_construction_v1.py` restated
+   the same three numbers as literals. So they are now READ from the spec
+   (`rehearse_places_construction_v1.spec_partition_caps`) and enforced by
+   `adaptive_genesis_plan`, which subdivides or fails at maximum depth against
+   exactly those values. Nothing in the repo now states a partition cap that no
+   code reads.
+   **Not deleted, and not raised to the hosted values,** because either edit
+   changes the spec bytes: its `.sha256` companion, the pin in
+   `construction_v1_control.py`, and the `evidence_spec_sha256` recorded inside
+   the frozen `evidence/readiness-v2.json` and `evidence/scale-evidence-v2.json`
+   all bind to the current bytes, and the spec's own relaxation policy is "none;
+   any gate change requires a new schema/version". Raising these is a places
+   evidence **spec v3** plus a re-run of the real-data rehearsal, which is a
+   tracked task and not hygiene.
+3. ~~**`Limits` dataclass defaults were not raised with the hosted limits.**~~
+   **DONE 2026-07-25 for the dataclass; deliberately NOT done for the
+   rehearsal.** `places_construction_v1.Limits` now defaults to 2,000,000 /
+   512 MiB / 400,000 — one value per cap, shared with
+   `HOSTED_LIMITS["places"]` and asserted equal by
+   `tests/test_construction_v1_preflight.py`, so every non-hosted caller plans at
+   the caps the planet build actually uses.
+   The rehearsal pins stay at the spec's declared caps (now read from the spec
+   rather than copied) for the reason in item 2: it produces evidence under frozen
+   spec v2, whose relaxation policy is "none" and whose coverage gate requires
+   genuine adaptive subdivision. "Rehearsal reflects production" is therefore
+   still open, and it is a spec-v3 task.
+4. ~~**`predict-reduce` was 14x optimistic and this change made it worse.**~~
+   Fixed for places in PR #155 by flooring the prediction with the committed
+   plan's partition count. **The addresses branch had the same defect class —
+   VERIFIED REAL and fixed 2026-07-25, but the magnitude is ~1.5x, not 14x.**
+   `_plan_from_summaries` bisects each country independently, so every country
+   with rows contributes at least one partition and an over-cap country's leaf
+   count is a power of two — both invisible in a total row count. On the planet
+   inventory at the 1,000,000 row cap the row division predicts **474** and the
+   per-country bisection floor is **725**. It is nowhere near the Places 14x
+   because the address structural floor is 34 countries, far below the
+   row-derived figure, whereas Places' 16,633 populated cells dwarfed its 1,211.
+   Fixed by `construction_v1_hosted._address_structural_partitions`, which floors
+   the prediction from the inventory's `exact_country_rows` and fails closed when
+   an inventory carries none. Note for the DEFERRED address-shuffle section
+   below: its claim that "the address inventory records no per-country row counts"
+   is **wrong** — `exact_country_rows` (34 countries, 434,397,621 of the
+   473,576,753 records exactly attributed) is already there, and country skew can
+   be read off it without a map run.
 5. **The committed plan is only read by `predict-reduce` and the generator.**
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
@@ -281,14 +309,20 @@ is promoted, and before any run dispatched from a fork-visible surface.
 Recorded rather than fixed, either because the file is contested by in-flight
 branches or because the gap is about scope rather than a defect.
 
-1. **Places reconciliation is a hardcoded literal.** `finalize` reports
-   `reconciles: true` for places from a constant
-   (`construction_v1_hosted.py:852`), while the addresses branch actually calls
-   `validate_complete_reduction`. So `reconciles == true` proves nothing about
-   places, which is why the slice smoke job asserts record/partition/head counts
-   instead. **Port the addresses equivalent to places** and make the literal
-   impossible. Not fixed in #159: that file is being edited by two other
-   branches.
+1. ~~**Places reconciliation is a hardcoded literal.**~~ **DONE 2026-07-25.**
+   `places_construction_v1.validate_complete_reduction` is the addresses
+   equivalent, ported, and `finalize` now calls
+   `_family_module(family).validate_complete_reduction` for both families, so the
+   literal is gone rather than hidden. It checks three independent things, because
+   the summed binding — all the places branch used to check — sees none of them:
+   the partition id set matches the plan exactly (no missing, extra or duplicate),
+   each reduction's binding equals the binding the PLAN recorded for that
+   partition, and the combined binding equals the plan's. Failing cases are
+   tested: a duplicate standing in for a missing partition of equal binding and a
+   pair of partitions carrying each other's rows both keep the sum correct and are
+   both rejected, plus a misfiled reduction fails the real `finalize` in
+   `tests/test_construction_v1_hosted.py`. The slice smoke job keeps its count
+   assertions: an EMPTY run still reconciles.
 2. **The smoke job's assertions on head are counts, not identity.** `run-head`
    computes an `input_binding` (records + semantic sums) that nothing compares
    against the reduce output. Non-zero counts rule out an empty head; they do not
@@ -392,9 +426,14 @@ route_hash)` -- the partition key at a fixed granularity. Easier than Places:
   8,023 of 8,704, only 681 mixed. The existing reduce already exploits this via
   per-row-group routing summaries.
 
-**First concrete step: measure country skew.** It sets K and is currently
-unknown -- the address inventory records no per-country row counts. Measure it
-from one real map run, the same way Places cell skew was measured.
+**First concrete step: measure country skew.** It sets K. Correction
+(2026-07-25): this said the address inventory records no per-country row counts,
+and that is wrong -- `exact_country_rows` in
+`benchmarks/address-construction-v1-data/inventory/addresses.json` attributes
+434,397,621 of the 473,576,753 records to 34 countries, with the remaining
+39,179,132 in the 681 mixed-or-unknown row groups. Skew for K can be read off
+that today (it is what the new `predict-reduce` floor uses); a real map run is
+still needed for the post-transform distribution, not for the source skew.
 
 **Related:** `MEASURED_REDUCE_MINUTES_PER_PARTITION["addresses"] = 2.0` is
 genuinely uncalibrated and the comment in `construction_v1_hosted.py` says so.

@@ -781,6 +781,61 @@ def _committed_plan_partitions(path: Path | None) -> tuple[int, str]:
     return recorded, f"committed plan {plan_path.name} partitions"
 
 
+def _address_structural_partitions(
+    inventory: dict[str, Any], row_cap: int
+) -> tuple[int, str]:
+    """Address genesis partition floor implied by the PLAN'S SHAPE, not its size.
+
+    `ceil(records / row_cap)` is not an upper bound on the address partition
+    count, for the same class of reason it was not one for Places (see the places
+    branch below): the plan is not a flat division of rows.
+    `address_construction_v1._plan_from_summaries` bisects EACH COUNTRY
+    independently over `hash_bucket`, so two effects push the true count above the
+    row-derived figure and neither is visible in a total row count:
+
+    * every country with any rows contributes at least one partition;
+    * a country over the cap splits by HALVING, so its leaf count is a power of
+      two and overshoots `ceil(country_rows / row_cap)` by up to 2x.
+
+    `route_hash` is uniform, so modelling each country's split as an even
+    bisection is the right model rather than a convenience -- the same argument
+    the places bucket-range prediction uses. Skew can only make the real count
+    larger, so this stays a floor.
+
+    Fails closed when the inventory carries no per-country row counts, matching
+    `_committed_plan_partitions`: a silent fallback to the row-derived figure is
+    exactly the optimism this exists to remove.
+    """
+    per_country = inventory.get("exact_country_rows")
+    if not isinstance(per_country, dict) or not per_country:
+        raise SystemExit(
+            "address inventory records no exact_country_rows, so the per-country "
+            "partition floor cannot be derived; rebuild the inventory with "
+            "scripts/inventory_address_rowgroups.py"
+        )
+    attributed = sum(int(rows) for rows in per_country.values())
+    if attributed <= 0:
+        raise SystemExit("address inventory exact_country_rows are all zero")
+    total = _inventory_total_records(inventory)
+    # Rows in mixed-or-unknown-country row groups are not attributed to any
+    # country. Spread them proportionally rather than dropping them: dropping
+    # them would make the floor optimistic again by exactly their share.
+    scale = max(1.0, total / attributed)
+    # address_construction_v1 refuses to subdivide past 16 hash bits.
+    maximum_leaves = 1 << 16
+    floor = 0
+    for rows in per_country.values():
+        leaves = 1
+        scaled = int(rows) * scale
+        while scaled / leaves > row_cap and leaves < maximum_leaves:
+            leaves *= 2
+        floor += leaves
+    return floor, (
+        f"per-country hash bisection over {len(per_country)} inventory countries "
+        f"(x{scale:.4f} for unattributed rows)"
+    )
+
+
 def cmd_predict_reduce(args: argparse.Namespace) -> int:
     """Predict the reduce partition/batch/minute demand from committed inventory
     statistics, with no map run and no network, so a dry-run fails closed when a
@@ -792,10 +847,17 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
 
     if args.family == "addresses":
         row_cap = args.row_cap or limits.max_pack_rows
-        # Each genesis partition holds at most ``row_cap`` records, so the minimum
-        # partition count is a tight lower bound on the reduce demand.
-        predicted_partitions = math.ceil(total_records / row_cap)
-        basis = f"ceil({total_records} records / {row_cap} row cap)"
+        # Each genesis partition holds at most ``row_cap`` records, so this is a
+        # lower bound -- but NOT an upper one, and it was the only term here, which
+        # is the same optimism the places branch had (PR #155). Floor it with the
+        # per-country bisection the address planner actually performs.
+        by_rows = math.ceil(total_records / row_cap)
+        floor, floor_basis = _address_structural_partitions(inventory, row_cap)
+        predicted_partitions = max(by_rows, floor)
+        basis = (
+            f"max(ceil({total_records} records / {row_cap} row cap) = {by_rows}, "
+            f"{floor_basis} = {floor})"
+        )
     else:
         # Places reduces TERM rows (one output term batch per input feature batch,
         # up to MAX_TERMS_PER_FEATURE terms/feature); use that conservative upper
@@ -1192,13 +1254,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         raise SystemExit("finalize requires at least one reduction")
     head = read_json(args.head) if args.head and Path(args.head).exists() else None
 
-    if args.family == "addresses":
-        reconciliation = ADDRESS.validate_complete_reduction(plan, reductions)
-    else:
-        binding = ADDRESS.combine_bindings([item["binding"] for item in reductions])
-        if binding != plan["binding"]:
-            raise SystemExit("places reduction binding differs from the genesis plan")
-        reconciliation = {"partitions": len(reductions), "binding": binding, "reconciles": True}
+    # `reconciles` is REPORTED BY THE VALIDATOR for both families now. It used to
+    # be a constant on the places branch, checked only against the summed binding,
+    # so a duplicated partition standing in for a missing one -- or two partitions
+    # that swapped their outputs -- reported `reconciles: true`.
+    reconciliation = _family_module(args.family).validate_complete_reduction(
+        plan, reductions
+    )
 
     request_sha256 = contract["request_sha256"]
     slice_root = contract["namespaces"]["slice"].rstrip("/")

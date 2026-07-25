@@ -615,6 +615,27 @@ def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binar
                      "--output", str(tmp_path / "final-c.json")])
     assert "carries no positions artifact" in str(excinfo.value)
 
+    # `reconciles: true` for places used to be a LITERAL: finalize compared only
+    # the summed binding, so a reduction that did not belong to this plan at all
+    # still reconciled. Misfile one -- same bytes, same binding, a partition id
+    # the plan never had -- and finalize must refuse to publish. This is the
+    # failing case that proves the flag can now be false.
+    misfiled = tmp_path / "reductions-misfiled"
+    misfiled.mkdir()
+    for path in sorted(reductions_dir.glob("*.json")):
+        reduction = json.loads(path.read_text())
+        if path.name == "0000.json":
+            reduction["partition"] = {**reduction["partition"], "id": "p-not-in-plan"}
+        (misfiled / path.name).write_text(json.dumps(reduction))
+    with pytest.raises(ValueError, match="missing, extra, or duplicate"):
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(misfiled), "--head", str(head),
+                     "--markers-dir", str(markers_dir),
+                     "--remote-root", str(tmp_path / "remote-d"),
+                     "--work-root", str(tmp_path / "final-work-d"),
+                     "--output", str(tmp_path / "final-d.json")])
+
 
 def test_ledger_fails_closed_before_the_next_phase(tmp_path):
     ledger = tmp_path / "ledger.json"
