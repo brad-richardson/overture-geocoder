@@ -50,6 +50,26 @@ HEAD_ORDER = (
     "token, confidence_rank DESC, feature_id, source_object_index, "
     "source_row_group, source_row_index"
 )
+# The serving-candidate ranking, used in EXACTLY two places: the map-side
+# combiner and the reducer's serving QUALIFY. It must be one constant, not two
+# literals. The map combiner is only exact because it ranks rows the same way
+# the reducer does -- if the two ever disagreed, every map task would retain the
+# wrong candidates and the reducer would serve them, with no row lost, no
+# binding violated, and no test failing. A shared constant makes that class of
+# bug impossible rather than merely unobserved.
+SERVING_ORDER = (
+    "confidence_rank DESC, feature_id, source_object_index, "
+    "source_row_group, source_row_index"
+)
+SERVING_PARTITION = "PARTITION BY partition_cell, token"
+# The combiner deletes rows outside the top-N of each (partition_cell, token)
+# group. That is exact ONLY while a group is never split across two reduce
+# partitions -- otherwise a row outside the global top-N could be inside a
+# sub-partition's top-N, and the combiner would already have deleted it.
+# Subdivision is by token hash, so every row of a token shares a prefix at every
+# depth and the group is indivisible. reduce_partition asserts this.
+SERVING_GROUP_SAFE_OWNERSHIP = "token-sha256-nibble-prefix-v1"
+COMBINER_SCHEMA = "overture-places-map-combiner-v1"
 
 # Single source of truth for the IPC batch-row cap. It mirrors the frozen
 # evidence-spec `acceptance_gates.resources.maximum_ipc_batch_rows`; the
@@ -281,6 +301,19 @@ def validate_marker(
         != marker["binding"]
     ):
         raise ValueError("Places marker binding differs from packs")
+    # An admitted marker must record the combiner, and its additivity must still
+    # reconstruct the transform. Without this a pre-combiner marker resumes
+    # silently and one run mixes combined and uncombined tasks.
+    combiner = marker.get("combiner")
+    if not isinstance(combiner, dict) or combiner.get("schema") != COMBINER_SCHEMA:
+        raise ValueError("Places marker is missing its combiner record")
+    if combiner.get("retained_rows") != marker["binding"]["records"]:
+        raise ValueError("Places combiner retained rows differ from the marker binding")
+    if (
+        A.combine_bindings([marker["binding"], combiner["discarded"]])["records"]
+        != marker["transform"]["emitted_term_rows"]
+    ):
+        raise ValueError("Places combiner kept+discarded differs from transform")
     return marker
 
 
@@ -431,9 +464,7 @@ def map_task(
         # from 742,392 rows to 1,078 -- which is what dissolves the hard floor
         # that no subdivision depth could lower.
         combine_rank = (
-            "row_number() OVER (PARTITION BY partition_cell, token ORDER BY "
-            "confidence_rank DESC, feature_id, source_object_index, "
-            "source_row_group, source_row_index)"
+            f"row_number() OVER ({SERVING_PARTITION} ORDER BY {SERVING_ORDER})"
         )
 
         def binding_of(sql: str) -> dict[str, Any]:
@@ -445,27 +476,32 @@ def map_task(
                 )
             return total
 
-        connection.execute(
-            f"CREATE TABLE ranked AS SELECT *, {combine_rank} AS combine_rank FROM terms"
-        )
-        connection.execute("DROP TABLE terms")
+        # Deliberately NO materialized `ranked` table. Ranking into a second
+        # table and then splitting it holds `terms` + `ranked` + the new table at
+        # once -- measured at ~3x the term-table size -- which breaks the staged
+        # deletion discipline the pack export below depends on. Streaming the
+        # discarded binding straight off `terms` costs a second sort and peaks
+        # at ~1.5x instead.
+        #
         # The discarded set is proven, not assumed: its binding plus the packs'
         # binding must reconstruct the transform's binding exactly. That is the
         # same selected/discarded additivity the reducer already enforces per
         # row group, so nothing is taken on trust because rows were dropped.
         discarded_binding = binding_of(
-            "SELECT * EXCLUDE(combine_rank) FROM ranked WHERE combine_rank > "
+            f"SELECT * FROM terms QUALIFY {combine_rank} > "
             f"{limits.maximum_serving_candidates}"
         )
         connection.execute(
-            "CREATE TABLE terms AS SELECT * EXCLUDE(combine_rank) FROM ranked "
-            f"WHERE combine_rank <= {limits.maximum_serving_candidates}"
+            f"CREATE TABLE combined AS SELECT * FROM terms QUALIFY {combine_rank} "
+            f"<= {limits.maximum_serving_candidates}"
         )
-        connection.execute("DROP TABLE ranked")
+        connection.execute("DROP TABLE terms")
+        connection.execute("CHECKPOINT")
+        connection.execute("ALTER TABLE combined RENAME TO terms")
         connection.execute("CHECKPOINT")
         combined_rows = connection.execute("SELECT count(*) FROM terms").fetchone()[0]
         combiner = {
-            "schema": "overture-places-map-combiner-v1",
+            "schema": COMBINER_SCHEMA,
             "serving_candidate_cap": limits.maximum_serving_candidates,
             "input_rows": transform["emitted_term_rows"],
             "retained_rows": combined_rows,
@@ -897,6 +933,28 @@ def reduce_partition(
 
     if sorted(marker["task_id"] for marker in markers) != plan["marker_task_ids"]:
         raise ValueError("Places reducer marker set is missing or extra")
+    # The map already deleted every row outside the top-N of each
+    # (partition_cell, token) group, so the reducer MUST rank with the same N.
+    # Reducing at a larger N would silently serve a truncated candidate list --
+    # no row lost, no binding violated, no error raised anywhere.
+    # `maximum_serving_candidates` is a Limits field and _limits_for lets a
+    # contract override it, so the stages can drift across a re-derived contract
+    # on a resumed run. Mirrors the existing "Places task head cap differs".
+    for marker in markers:
+        recorded = marker.get("combiner")
+        if not isinstance(recorded, dict):
+            raise ValueError("Places reducer marker predates the map combiner")
+        if recorded.get("serving_candidate_cap") != limits.maximum_serving_candidates:
+            raise ValueError("Places map combine cap differs from the reducer serving cap")
+    # And the combiner is exact only while a (partition_cell, token) group is
+    # never split across partitions -- true for token-hash subdivision, false
+    # for any within-token split dimension.
+    ownership = partition.get("ownership", {}).get("kind", SERVING_GROUP_SAFE_OWNERSHIP)
+    if ownership != SERVING_GROUP_SAFE_OWNERSHIP:
+        raise ValueError(
+            "Places partition ownership splits a token group; the map combiner "
+            "is not exact under this scheme"
+        )
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=f"reduce-{partition['id']}-", dir=scratch_root
@@ -991,9 +1049,9 @@ def reduce_partition(
         arrow = workspace / "leaf.arrow"
         serving_rows = A.write_arrow_query(
             connection,
-            f"SELECT * FROM selected QUALIFY row_number() OVER (PARTITION BY partition_cell, token "
-            f"ORDER BY confidence_rank DESC, feature_id, source_object_index, source_row_group, "
-            f"source_row_index)<={limits.maximum_serving_candidates} ORDER BY {TOTAL_ORDER}",
+            f"SELECT * FROM selected QUALIFY row_number() OVER ({SERVING_PARTITION} "
+            f"ORDER BY {SERVING_ORDER})<={limits.maximum_serving_candidates} "
+            f"ORDER BY {TOTAL_ORDER}",
             arrow,
             MAX_IPC_BATCH_ROWS,
         )

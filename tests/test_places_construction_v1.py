@@ -939,6 +939,86 @@ def test_map_combiner_discards_below_serving_rank_and_proves_additivity(
     assert reconstructed["semantic_sum_b"] == marker["transform"]["semantic_sum_b"]
 
 
+def test_combiner_retains_the_highest_ranked_candidates_not_merely_the_right_count(
+    tmp_path, construction_binaries, construction_module
+):
+    # Counts and binding additivity are ORDER-INVARIANT: they hold identically if
+    # the combiner sorts backwards. Inverting confidence_rank in the combiner
+    # would make every task retain its WORST candidates and the reducer would
+    # serve them -- no row lost, no binding violated, nothing else failing. So
+    # this asserts WHICH rows survive.
+    module = construction_module
+    cap = module.Limits().maximum_serving_candidates
+    total = cap + 60
+    # confidence_rank is a coarse u8 bucket, so confidence must span the full
+    # 0..1 range for the ranking to be observable at all -- a narrow band
+    # collapses every row into one bucket and the assertion below cannot
+    # discriminate. Ascending with index means the top `cap` rows are the
+    # highest indices; a reversed sort keeps the lowest instead.
+    rows = [
+        {
+            "id": str(uuid.UUID(int=7_000 + index)),
+            "primary_name": "Shared Name",
+            "category": "library",
+            "locality": "Town",
+            "country": "XX",
+            "confidence": index / (total - 1),
+            "point": [0.0, 0.0],
+            "source_row_index": index,
+        }
+        for index in range(total)
+    ]
+    source = tmp_path / "source.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    source_limits = tmp_path / "source-limits.json"
+    source_limits.write_text(
+        json.dumps({"objects": [{"records": total,
+                                 "row_groups": pq.ParquetFile(source).metadata.num_row_groups}]})
+    )
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker = module.map_task(
+        input_path=source,
+        source_limits=source_limits,
+        store=store,
+        scratch_root=tmp_path / "scratch",
+        request_sha256="12" * 32,
+        task_id="places-rank",
+        transform_binary=construction_binaries["places-transform-v1"],
+        proof_binary=construction_binaries["places-proof-directory"],
+        limits=module.Limits(
+            max_input_rows=total + 10,
+            max_pack_rows=100_000,
+            parquet_row_group_rows=4_096,
+            max_rss_bytes=2 * 1024**3,
+            max_scratch_bytes=2 * 1024**3,
+            max_output_bytes=512 * 1024**2,
+            wall_seconds=180,
+            allow_unpinned_duckdb=True,
+        ),
+    )
+
+    duckdb = pytest.importorskip("duckdb")
+    connection = duckdb.connect()
+    packs = [str(store.path(pack["object"]["key"])) for pack in marker["packs"]]
+    minimum_kept, maximum_kept, kept_rows = connection.execute(
+        "SELECT min(confidence_rank), max(confidence_rank), count(*) "
+        f"FROM read_parquet({packs!r}) WHERE token = 'shared'"
+    ).fetchone()
+    connection.close()
+
+    # Compare against the range the SOURCE spans, not the packs': every token in
+    # this fixture saturates, so the packs' own min/max is the combined band and
+    # comparing to it is vacuous. Confidence runs 0.0 -> 1.0, so the full rank
+    # band is 0 -> 255 by construction.
+    assert kept_rows == cap, "the saturated group should be cut to exactly the cap"
+    # The decisive pair: the surviving band sits at the TOP of the source range.
+    # Invert the combiner's sort and these flip -- max drops well below 255 and
+    # min becomes 0 -- which is precisely the mutation that counts and binding
+    # additivity cannot see.
+    assert maximum_kept == 255
+    assert minimum_kept > 0
+
+
 def test_per_task_combining_then_global_topn_equals_a_single_global_topn():
     # The exactness claim the combiner rests on: top-N under a TOTAL order is
     # decomposable. Combining per map task and then taking the reducer's global

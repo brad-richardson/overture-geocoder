@@ -147,8 +147,13 @@ count — which also relieves the runner-minute budget.
 
 **This needs owner review and cannot be settled from these measurements alone.**
 The row cap plausibly also bounds reducer memory and wall time, not just output
-bytes, and `MEASURED_REDUCE_MINUTES_PER_PARTITION` is still uncalibrated because
-no reduce phase has ever completed. The alternative — adding a within-token
+bytes. Note that `MEASURED_REDUCE_MINUTES_PER_PARTITION` **is** calibrated
+(`construction_v1_hosted.py:57-68`: a near-1M-term-row partition reduces in
+~7-10s, worst subdivided case 14.53s, with 1.0 min set as a >4x margin) — what
+has never completed is a hosted *reduce phase*, which is not the same thing.
+Extrapolating that measurement, 2,000,000 rows lands near ~30s against a 1.0 min
+budget, so the timeout risk is smaller than a purely unmeasured cap would imply.
+The alternative — adding a within-token
 split dimension (e.g. by `feature_id` hash) — is structurally correct but
 changes the partition scheme, which one-way-doors §5 requires locking before
 genesis.
@@ -170,10 +175,13 @@ cv1-plan     1 artifact    63.5 GB
 | phase | transfer |
 |---|---|
 | reduce (128 batches) | downloads 63.5 GB **each**, and re-uploads `cv1/mapdl/store` **each** |
-| head | downloads `cv1-reduce-*` with `merge-multiple` — all 128 copies |
-| finalize | downloads `cv1-head` + `cv1-plan` |
+| head | downloads `cv1-reduce-*` with `merge-multiple` — all 128 copies — plus `cv1-plan` |
+| finalize | downloads **all 128 `cv1-reduce-*`** with `merge-multiple`, plus `cv1-head` and `cv1-plan` |
 
-That is roughly **24 TB** of artifact traffic for one family. More decisively,
+Summing those legs is roughly **33 TB** for one family. Treat that as a derived
+figure, not a measured one: only the 63.5 GB store size and the artifact counts
+were measured (run `30113308268`); the total is those multiplied by the legs
+enumerated above. More decisively,
 63.5 GB does not fit on a GitHub runner at all, which is why `reduce batch 2`
 failed its `df >= 30 GB` guard after a 12-minute download. This is not slow —
 it is impossible. The earlier note captured the reduce leg only; head and
@@ -240,14 +248,14 @@ Added 2026-07-24 after measuring each candidate. This is the §6 step-1 decision
 - `route()` is a **fixed 256x256 equirectangular grid**; `partition_cell` is
   `{y:02x}{x:02x}`. `b2e3` is Tokyo. The cell level is **not** adaptive — only
   the token-hash nibble prefix is.
-- The serving index key is `(mode, cell, token)`
-  (`places_serving_encode_v1.rs:62`), and reduce keeps
+- The serving index key is `cell\0token` in `routed` mode and the bare token
+  otherwise (`places_serving_encode_v1.rs:62-70`), and reduce keeps
   `row_number() OVER (PARTITION BY partition_cell, token ORDER BY
   confidence_rank DESC, feature_id, ...) <= maximum_serving_candidates`, which
   is **256**.
 - Partition count is dominated by **populated cells** (16,633 of 17,863), not by
   splits. Cap changes barely move the budget; cell-grid changes move it a lot.
-- `reduce/places-v1/leaves` is written (`places_construction_v1.py:976`) and
+- `reduce/places-v1/leaves` is written (`places_construction_v1.py:1044`) and
   **never read anywhere in the repo**. The head phase explicitly avoids it
   ("Merge only bounded per-task candidates, never planet term leaves"). It is
   lineage/evidence, not a serving input.
@@ -270,11 +278,25 @@ Measured, re-deriving the tree from the new release at each cap:
   356 MB against the 512 MiB cap. 3M rows (534 MB) would exceed it, so 2M is
   the natural stop without also raising bytes.
 - **Not a scheme change.** Addressing is untouched; only tree depth changes.
-- **Risk, uncalibrated:** the row cap plausibly bounds reducer *memory and wall
-  time*, not just output bytes. A reduce batch runs ~140 partitions serially
-  inside a 330-minute timeout. If per-partition cost scales with rows, doubling
-  the cap could approach that timeout. `MEASURED_REDUCE_MINUTES_PER_PARTITION`
-  has never been calibrated because no reduce phase has completed.
+- **But it does contradict the frozen evidence spec.**
+  `places-construction-v1-evidence-spec-v2.json:114-116` declares
+  `partition_term_rows_hard_cap: 1000000`,
+  `partition_distinct_tokens_hard_cap: 250000`, and
+  `partition_estimated_uncompressed_bytes_hard_cap: 268435456`. The new values
+  exceed all three. Those three keys are read by no code — the byte limit
+  already exceeded its declared cap (512 MiB vs 256 MiB) before this change —
+  so nothing fails closed. That is itself the problem: they are dead
+  declarations that now disagree with reality. Either enforce them or drop
+  them; leaving a frozen spec stating caps the build ignores is a trap for the
+  next reader.
+- **Risk, bounded by an existing measurement.** The row cap also bounds reducer
+  memory and wall time. `MEASURED_REDUCE_MINUTES_PER_PARTITION` **is**
+  calibrated (`construction_v1_hosted.py:57-68`) — ~7-10s for a near-1M-row
+  partition, 14.53s worst, 1.0 min carrying a >4x margin. Doubling the cap
+  extrapolates to ~30s, so a 140-partition batch is ~70 min against a 330-minute
+  timeout. What has never completed is a hosted reduce *phase*; the per-partition
+  constant is not a guess. An earlier draft of this document called it
+  uncalibrated, which was wrong.
 - **Does not remove the floor**, only moves it.
 
 ## B. Within-token split (add a `feature_id` hash dimension)
@@ -321,10 +343,13 @@ Measured on a spread sample (every 8th task, 11 of 88, 64,628,143 term rows):
 
 - **Fixes:** refinement genuinely halves the floor per level — `'jp'` in Tokyo
   splits geographically.
-- **But the budget cannot absorb one level.** 16,633 populated cells x 2.61
-  is roughly **43,400 partitions**, past the 40,000 runner-minute ledger cap
-  before any splits at all. (Sample ratios approximate the global union, but
-  even 2x would breach.)
+- **But the budget cannot absorb one level.** 16,633 populated cells x 2.61 is
+  roughly **43,400 partitions**. At the calibrated 1.0 reduce-minute per Places
+  partition that is ~43,400 projected reduce minutes against a 40,000
+  `max_total_runner_minutes` ledger cap (`construction_v1_control.py:70`) — and
+  that cap covers *all* phases, not just reduce, so the real breach is worse.
+  (Partitions and minutes coincide here only because the constant is 1.0.
+  Sample ratios approximate the global union, but even 2x would breach.)
 - **And it is client-visible**: the serving key contains the cell, so every
   lookup key changes.
 - **Worst cost/benefit of the four.**

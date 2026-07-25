@@ -144,3 +144,31 @@ should be closed before anything serves publicly.
   thread — `__exit__` then reported success and `evidence()` reported zero
   peaks. Fixed to fail closed, with the `psutil` attach moved to the caller's
   thread so a missing dependency fails at the call site.
+
+## Added 2026-07-25, from the adversarial review of PR #155
+
+1. **`reduce_partition` has no `StageWatchdog`.** `StageWatchdog` wraps only the
+   two `map_task` stages. In the reducer the RSS/scratch/wall caps reach the
+   encoder/verifier *subprocesses* via `A.run_bounded`, but the Python +
+   pyarrow + DuckDB ingest loop is unbounded. Pre-existing, but raising
+   `partition_term_rows` to 2,000,000 doubles the peak of exactly the phase
+   nothing is watching. **Fix before the first planet reduce.**
+2. **Three evidence-spec hard caps are dead declarations that now disagree with
+   the build.** `partition_term_rows_hard_cap` (1,000,000),
+   `partition_distinct_tokens_hard_cap` (250,000) and
+   `partition_estimated_uncompressed_bytes_hard_cap` (268,435,456) are read by
+   no code; the byte one was already violated before this change. The spec ships
+   a `.sha256` companion and is meant to be frozen. Either enforce them or
+   delete them — a frozen spec stating caps the build ignores is a trap.
+3. **`Limits` dataclass defaults were not raised with the hosted limits.**
+   `places_construction_v1.Limits` still defaults to 1,000,000 / 250,000 /
+   256 MiB, and `rehearse_places_construction_v1.py` explicitly pins
+   1,000,000 / 250,000. Hosted overrides win so nothing breaks, but rehearsals
+   now plan at caps the hosted build no longer uses and are not representative.
+4. **`predict-reduce` was 14x optimistic and this change made it worse.** Fixed
+   in PR #155 by flooring the prediction with the committed plan's partition
+   count. Worth a follow-up: the addresses branch of the same function divides
+   records by a row cap with no structural floor, and may have the same defect.
+5. **The committed plan is only read by `predict-reduce` and the generator.**
+   Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
+   tree does not yet control anything.

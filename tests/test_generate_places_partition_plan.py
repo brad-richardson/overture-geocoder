@@ -37,6 +37,21 @@ def test_generator_caps_match_the_caps_the_hosted_build_enforces():
     )
 
 
+def test_committed_plan_records_the_caps_the_hosted_build_enforces():
+    # The test above pins the GENERATOR's defaults to the build. This pins the
+    # committed artefact itself: a plan generated under looser caps than the
+    # build enforces places partitions the reducer then rejects. Without this,
+    # the plan silently goes stale on the next cap change.
+    sys.path.insert(0, str(ROOT / "scripts"))
+    import construction_v1_hosted as HOSTED
+
+    places = HOSTED.HOSTED_LIMITS["places"]
+    caps = json.loads(COMMITTED.read_text())["partition_contract"]["caps"]
+    assert caps["term_rows"] == places["partition_term_rows"]
+    assert caps["distinct_tokens"] == places["partition_distinct_tokens"]
+    assert caps["estimated_uncompressed_bytes"] == places["partition_estimated_bytes"]
+
+
 def plan_with(partitions):
     return {"schema": "x", "partitions": partitions}
 

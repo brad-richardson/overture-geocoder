@@ -12,18 +12,25 @@ produces. Measured from run `30113308268`: **63.5 GB** for Places.
 
 It moves between phases as a GitHub Actions artifact, whole, every time:
 
-| phase | transfer |
-|---|---|
-| map -> plan | 89 artifacts, 63.5 GB, merged into `cv1-plan` |
-| plan -> reduce | each of **128** batches downloads all 63.5 GB |
-| reduce -> reduce | each batch **re-uploads** `cv1/mapdl/store` in its own artifact |
-| reduce -> head | head downloads `cv1-reduce-*` with `merge-multiple` — all 128 copies |
-| head -> finalize | `cv1-head` + `cv1-plan`, 63.5 GB each |
+| phase | transfer | workflow line |
+|---|---|---|
+| map -> plan | 89 artifacts, 63.5 GB, merged into `cv1-plan` | :438-447, :520-528 |
+| plan -> reduce | each of **128** batches downloads all 63.5 GB | :555-559 |
+| reduce -> reduce | each batch **re-uploads** `cv1/mapdl/store` | :592-600 |
+| reduce -> head | all 128 `cv1-reduce-*` via `merge-multiple`, plus `cv1-plan` | :623-631 |
+| head -> finalize | **all 128 `cv1-reduce-*` again**, plus `cv1-head` and `cv1-plan` | :686-700 |
 
-Roughly **24 TB** for one family.
+Summing those legs is roughly **33 TB** for one family. That total is *derived* —
+only the 63.5 GB store size and the artifact counts are measured (run
+`30113308268`); the rest is multiplication. Note the finalize leg: it pulls all
+128 reduce artifacts a second time, which is the single largest item and was
+missed in the first draft of this design.
 
-**It is not a performance problem.** A runner has ~70 GB of disk and ~25-30 GB
-usable after the toolchain, so 63.5 GB does not fit. `places reduce batch 2`
+**It is not a performance problem.** 63.5 GB does not fit on a runner.
+The hard evidence for that is the repo's own guards, not a disk-size figure:
+map runs `free-disk-space` and then requires 25 GB free
+(`construction-v1.yml:340-342, :365`), and reduce requires 30 GB free with no
+`free-disk-space` step at all (:568). `places reduce batch 2`
 spent 12 minutes downloading and then failed on the first line of its run step,
 `test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 30000000`. The guard worked.
 The job cannot start.
@@ -37,7 +44,7 @@ softens the wall; it does not remove it.
 Three properties mean nothing about the semantics has to change.
 
 **The reducer's compute is already selective.** `reduce_partition` reads
-`row_groups=[index]` for only the row groups whose `routing_summaries` name its
+`row_groups=[index]` for only the row groups whose per-row-group `routing_groups` name its
 `partition_cell`, and validates a per-row-group binding proof
 (`selected + discarded == row_group binding`). It has never wanted the whole
 store — only the delivery mechanism forces it to hold one.
@@ -48,9 +55,15 @@ create-only writes exactly as `finalize` already does them
 (`put-object --if-none-match '*'`, then `head-object` to confirm).
 
 **Selective reads are already the declared contract.** The frozen evidence spec
-carries `"selective_read_amplification_max": 4.0`. A bound on read amplification
-only makes sense for a selective reader. This design *restores* the intended
-contract rather than inventing one.
+carries `"selective_read_amplification_max": 4.0`
+(`places-construction-v1-evidence-spec-v2.json:118`). A bound on read
+amplification only makes sense for a selective reader, so this design *restores*
+an intended contract rather than inventing one. But be precise about its status:
+that bound is enforced **only** by the small-scale rehearsal readiness validator
+(`validate_places_planet_readiness.py:389-393`, against
+`rehearsal.maximum_selective_amplification`). Nothing in `construction-v1.yml`
+or `places_construction_v1.py` measures or gates amplification at run time. It
+is a declared contract awaiting an enforcer — see §6.
 
 ## 3. What already exists
 
@@ -59,7 +72,7 @@ This is the part that makes the work small. None of the following is new:
 | asset | what it gives us |
 |---|---|
 | `scripts/r2_verified_store.py` | An `ObjectStore` Protocol with `FilesystemStore` **and** `S3Store` (R2 via `aws s3api`). Content-addressed `immutable_key()`, create-only `ensure_uploaded()`, `verified_download()` with size+SHA checks, and manifest upload/restore. Covered by `tests/test_r2_verified_store.py`. |
-| `.github/workflows/rehearse-address-r2-map-reduce.yml` | A **credentialed, matrix-parallel, real-data R2 map-reduce rehearsal** that already builds map fragments, uploads them under a per-task prefix with `r2_verified_store.py`, and verifies resume. The pattern is proven in this repo, not theoretical. |
+| `.github/workflows/rehearse-address-r2-map-reduce.yml` | A **credentialed, matrix-parallel, real-data** rehearsal that builds map fragments, uploads them under a per-task prefix with `r2_verified_store.py`, and verifies resume from empty/stale state. **Read the limits carefully:** each matrix job reduces only its *own* fragments against a local oracle — there is no cross-task fan-in reduce — transfers are whole-object manifest uploads/downloads with **no row-group range reads**, and each task deletes its R2 prefix at the end. It proves the credential path, the create-only store, and resume. It does **not** prove §4.2, which is the hard part. |
 | `.github/workflows/rebuild-r2-shards.yml` | The `id-stage-release` -> `id-stage-release-finalize` job shape: matrix jobs writing **disjoint** R2 staging prefixes, then a barrier job that verifies the exact per-type marker set before writing an aggregate marker. This is the pattern the owner asked to keep. |
 | `scripts/build_id_index.py`, the worker | Range-reading parquet from R2 by row group, already in production for the ID index. |
 
@@ -74,9 +87,14 @@ the construction code uses: `path(key)`, `put_content(source, prefix, suffix)`,
 Add an `R2StagingStore` with the same surface, backed by `r2_verified_store`:
 
 - `put_content` -> `ensure_uploaded()` create-only, returning the same
-  `{key, bytes, sha256}` dict. Identical semantics: a re-run that produces
-  byte-identical content is a no-op, and differing content for the same digest
-  key is impossible by construction.
+  `{key, bytes, sha256}` dict. The create-only semantics match: a re-run that
+  produces byte-identical content is a no-op, and differing content under the
+  same digest key is impossible by construction. **The key layouts differ** —
+  `put_content` builds `{prefix}/sha256/{digest}{suffix}`
+  (`address_construction_v1.py:307`) while `immutable_key` builds
+  `{prefix}/sha256/{digest}/{basename}` (`r2_verified_store.py:47-57`). The
+  adapter must preserve the construction key shape, since marker payloads
+  already record those keys.
 - `read_json` / `write_marker_last` -> small objects, plain get/put. Marker
   written last is preserved.
 - `path(key)` is the hard one — see below.
@@ -97,16 +115,17 @@ So the reducer needs **row-group-level range reads**, not object-level fetches:
 
 1. Range-read the parquet footer (a few KB) to get per-row-group byte offsets
    and sizes.
-2. Consult the existing proof directory's `routing_summaries` to choose row
-   groups — unchanged logic.
+2. Consult the existing proof directory's per-row-group `routing_groups` to
+   choose row groups — unchanged logic. (`routing_summaries` is the pack-level
+   roll-up; `routing_groups` is the per-row-group field the reducer reads.)
 3. Range-read only those row groups and feed them to the existing
    `iter_batches(row_groups=[index])` path.
 
 `places_proof_directory` records row-group **record counts**, not byte offsets,
 so no proof format change is needed — the footer supplies offsets, and the
 existing per-row-group binding proof still validates what was read. Read
-amplification is bounded by row-group granularity, which the spec already caps
-at 4.0 and which a gate should assert rather than assume.
+amplification is bounded by row-group granularity, which the spec declares at
+4.0 but does not yet enforce at run time — see §6.
 
 ### 4.3 Phase-by-phase
 
