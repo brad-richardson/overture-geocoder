@@ -200,6 +200,17 @@ def test_the_address_slice_asserts_real_counts_and_the_documented_no_op_head():
         '.reduce_ownership == "partition-batch"',
         '.store_bytes_by_class["map/address"] > 0',
         '.store_bytes_by_class["reduce/address"] > 0',
+        # Map EMITTED the per-address records artifact, complete, and the slice is
+        # still the two-cell spatial fixture it is pinned to be.
+        ".address_records_rows == .admitted_rows",
+        ".address_records_packs > 0",
+        ".address_records_null_island == 0",
+        "(.address_records_cells | length) == 2",
+        # And finalize PUBLISHED it durably. An emitted-but-unpublished artifact
+        # expires with the 7-day map artifact retention and satisfies every other
+        # assertion in this job.
+        ".positions_objects > 0",
+        ".positions_records == .admitted_rows",
     ):
         assert assertion in value, assertion
     # Addresses have no global head; run-head must say so rather than produce an

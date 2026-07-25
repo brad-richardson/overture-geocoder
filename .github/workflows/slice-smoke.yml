@@ -357,6 +357,14 @@ jobs:
             # assert -- which is why the reduce-ownership key is asserted instead:
             # it proves the run went through the batch dispatch, not the legacy
             # one-job-per-partition path.
+            #
+            # The per-address records artifact gets THREE independent assertions,
+            # because each covers a different way it can silently go missing:
+            # address_records_* prove map EMITTED it complete (rows == admitted, two
+            # cells so the spatial fixture is still spatial); positions_* prove
+            # finalize PUBLISHED it durably, which is the whole point -- an emitted
+            # but unpublished artifact expires with the 7-day map artifact retention
+            # and satisfies every other assertion here.
             jq -e '
               .family == "addresses"
               and .reconciles == true
@@ -368,6 +376,14 @@ jobs:
               and .reduce_job_count > 0
               and (.store_bytes_by_class["map/address"] > 0)
               and (.store_bytes_by_class["reduce/address"] > 0)
+              and .address_records_rows == .admitted_rows
+              and .address_records_packs > 0
+              and .address_records_bytes > 0
+              and .address_records_null_island == 0
+              and (.address_records_cells | length) == 2
+              and .positions_objects > 0
+              and .positions_records == .admitted_rows
+              and .positions_bytes > 0
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The address slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2

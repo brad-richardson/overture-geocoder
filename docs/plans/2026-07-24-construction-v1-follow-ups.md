@@ -407,6 +407,15 @@ no fast local loop. Building the address equivalent is probably the actual first
 task, since without it any address work repeats the pattern of designing against
 phases that have never run.
 
+> **Still deferred after the records artifact (2026-07-25).** The address map now
+> emits `overture-address-map-address-records-v1`, which carries a spatial
+> `partition_cell` and rides the Places shuffle. That is a COLUMN on a new
+> artifact for a future reverse index, not a routing key: `address_key_hash`,
+> `route_hash`, `hash_bucket`, TOTAL_ORDER, SERVING_ORDER, the forward pack
+> layout and the genesis plan are untouched, and the forward packs are
+> byte-identical. It does not start the port above and must not be cited as
+> having started it.
+
 > **Status 2026-07-25: DONE.** Both scripts now take `--family addresses`. The
 > loop is 104,928 real Overture addresses (Seattle, release `2026-07-22.0`,
 > `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 seconds
