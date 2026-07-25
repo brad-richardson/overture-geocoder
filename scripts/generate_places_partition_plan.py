@@ -26,8 +26,17 @@ a sixteenth of its parent's load.
 Examples:
 
     # Reproduce a committed plan exactly (the correctness proof).
+    #
+    # `--caps` is REQUIRED here and is not optional polish: DEFAULT_CAPS now
+    # carries distinct_tokens 250000 (the encoder's MAX_INDEX_ENTRIES, so future
+    # generations plan under what the serving encoder can actually emit), while
+    # the committed artifact records the 400000 it was genuinely generated
+    # against. Reproduction must use the RECORDED generation caps -- the bare
+    # command emits 250000 and exits 1 on the caps line. See the committed
+    # plan's own `partition_contract.caps`.
     python scripts/generate_places_partition_plan.py --from-plan plan.json \\
-      --release 2026-06-17.0 --check scripts/places_partition_plan_v1.json
+      --release 2026-06-17.0 --caps recorded-generation-caps.json \\
+      --check scripts/places_partition_plan_v1.json
 
     # Re-buffer an existing tree with 50% headroom.
     python scripts/generate_places_partition_plan.py --from-plan plan.json \\

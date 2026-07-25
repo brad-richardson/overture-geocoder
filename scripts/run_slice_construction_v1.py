@@ -52,6 +52,16 @@ _SPEC = importlib.util.spec_from_file_location(
 assert _SPEC and _SPEC.loader
 STAGING = importlib.util.module_from_spec(_SPEC)
 _SPEC.loader.exec_module(STAGING)
+
+# Loaded for `CAPS` alone, so the harness's synthetic request carries the SAME
+# operation cap the control plane admits. It used to carry a literal, which
+# silently became the superseded 100,000 when #173 raised the real one.
+_CONTROL_SPEC = importlib.util.spec_from_file_location(
+    "slice_construction_control", ROOT / "scripts/construction_v1_control.py"
+)
+assert _CONTROL_SPEC and _CONTROL_SPEC.loader
+CONTROL = importlib.util.module_from_spec(_CONTROL_SPEC)
+_CONTROL_SPEC.loader.exec_module(CONTROL)
 VENV = sys.executable
 BIN = ROOT / "crates/target/release"
 
@@ -159,7 +169,7 @@ request.write_text(json.dumps({
     "families": {"addresses": {}, "places": {}},
     "versions": {"duckdb": "1.5.1", "pyarrow": "25.0.0", "numpy": "2.3.5",
                  "python": "3.12.3", "rustc": "local"},
-    "caps": {"max_remote_operations": 100000,
+    "caps": {"max_remote_operations": CONTROL.CAPS["max_remote_operations"],
              "max_remote_write_bytes": 1_000_000_000_000},
     # Namespaced per family so the two slices never publish into one another's
     # create-only prefixes. Changing these changes `request_sha256`, so a work
