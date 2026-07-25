@@ -89,6 +89,10 @@ REMOTE = _load("construction_v1_hosted_remote", "scripts/construction_v1_remote.
 CONTROL = _load("construction_v1_hosted_control", "scripts/construction_v1_control.py")
 
 FAMILIES = ("addresses", "places")
+# Families whose map phase emits per-place positions packs, and which therefore
+# MUST publish them at finalize. Addresses will join this set when the shuffle is
+# ported to them; until then a missing positions set there is correct, not a gap.
+POSITIONS_FAMILIES = ("places",)
 
 # Conservative bounded hosted limits. They stay well under a 330-minute job and
 # are overridable per run through the contract so a rehearsal can shrink them.
@@ -1161,19 +1165,37 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if len({item["key"] for item in artifacts}) != len(artifacts):
         raise SystemExit("duplicate serving artifact key")
     # Map-phase per-place positions packs, published alongside the serving set so
-    # they outlive the 7-day artifact retention. Requires the map markers; when
-    # they are not supplied nothing is published and the summary says so, rather
-    # than silently shipping an incomplete slice.
+    # they outlive the 7-day artifact retention.
+    #
+    # FAIL CLOSED when a family that carries positions cannot publish them.
+    # Skipping publication on a missing --markers-dir would be the P1-1 failure
+    # one level up: a workflow wiring mistake would quietly produce a slice with
+    # no per-place records, and the cost of noticing is a full planet map re-run.
+    # Families with no positions yet (addresses) are unaffected.
+    if args.family in POSITIONS_FAMILIES and not args.markers_dir:
+        raise SystemExit(
+            f"finalize --markers-dir is required for the {args.family} family: its "
+            "map phase emits per-place positions packs, and they must be published "
+            "durably rather than expiring with the map artifact retention"
+        )
     positions_markers = (
         _load_markers(args.markers_dir)
-        if args.markers_dir and args.family == "places"
+        if args.markers_dir and args.family in POSITIONS_FAMILIES
         else []
     )
+    # And a marker that carries no positions is a gap too: it means one map task
+    # in this slice predates the artifact, so the published set would be missing
+    # exactly that task's places.
+    if any(
+        not isinstance(marker.get("positions"), dict) for marker in positions_markers
+    ):
+        raise SystemExit(
+            f"a {args.family} map marker carries no positions artifact; its per-place "
+            "records cannot be published, so the slice would be incomplete"
+        )
     positions = _positions_objects(positions_markers)
     positions_records = sum(
-        marker["positions"]["records"]
-        for marker in positions_markers
-        if isinstance(marker.get("positions"), dict)
+        marker["positions"]["records"] for marker in positions_markers
     )
     if {item["key"] for item in positions} & {item["key"] for item in artifacts}:
         raise SystemExit("positions object collides with a serving artifact key")
@@ -1430,7 +1452,9 @@ def build_parser() -> argparse.ArgumentParser:
     final.add_argument("--head", type=Path, default=None)
     final.add_argument("--markers-dir", default=None,
                       help="Map markers, so the per-place positions packs are published "
-                           "durably instead of expiring with the 7-day artifact retention.")
+                           "durably instead of expiring with the 7-day artifact retention. "
+                           "REQUIRED for families that emit positions (places); optional "
+                           "for families that do not (addresses).")
     final.add_argument("--remote-root", required=True)
     final.add_argument("--work-root", required=True)
     final.add_argument("--fail-after-upload", type=int, default=None)

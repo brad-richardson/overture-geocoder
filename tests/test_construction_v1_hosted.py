@@ -495,6 +495,34 @@ def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binar
         "positions_object_count"
     ] == len(positions["objects"])
 
+    # Publishing them must not be skippable by omission: a workflow that forgets
+    # --markers-dir would otherwise ship a places slice with no per-place records,
+    # and the cost of noticing that is a full planet map re-run.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions_dir), "--head", str(head),
+                     "--remote-root", str(tmp_path / "remote-b"),
+                     "--work-root", str(tmp_path / "final-work-b"),
+                     "--output", str(tmp_path / "final-b.json")])
+    assert "--markers-dir is required" in str(excinfo.value)
+    # A marker that predates the artifact is the same gap, one level in.
+    stale_markers = tmp_path / "stale-markers"
+    stale_markers.mkdir()
+    for path in sorted(markers_dir.glob("*.json")):
+        stale = json.loads(path.read_text())
+        stale.pop("positions")
+        (stale_markers / path.name).write_text(json.dumps(stale))
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions_dir), "--head", str(head),
+                     "--markers-dir", str(stale_markers),
+                     "--remote-root", str(tmp_path / "remote-c"),
+                     "--work-root", str(tmp_path / "final-work-c"),
+                     "--output", str(tmp_path / "final-c.json")])
+    assert "carries no positions artifact" in str(excinfo.value)
+
 
 def test_ledger_fails_closed_before_the_next_phase(tmp_path):
     ledger = tmp_path / "ledger.json"
