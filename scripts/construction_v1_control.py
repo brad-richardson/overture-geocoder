@@ -71,7 +71,56 @@ CAPS = {
     "prior_runner_minutes": 0,
     "max_cost_usd": "1200.00",
     "max_reducers_per_family": 128,
-    "max_remote_operations": 100_000,
+    # Raised from 100_000 after projecting what a planet finalize actually charges.
+    #
+    # The unit cost is fixed by the publication primitives, not chosen: every
+    # published object costs 3 operations (create-only put + per-upload HEAD in
+    # construction_v1_remote.publish_exact_set, plus one streaming read in
+    # verify_whole_slice_once) with 3 fixed for the slice (marker put, marker HEAD,
+    # one exact-prefix listing). So ops = 3N + 3 in the published object count N,
+    # and N is known before reduce runs -- which is why the cap is now paired with
+    # a plan-time gate (construction_v1_hosted._gate_finalize_publication) instead
+    # of standing alone.
+    #
+    # Planet N, per family, from committed artifacts:
+    #
+    #   places       16,888 routed serving objects (scripts/places_partition_plan
+    #                _v1.json generated_from.partitions, one per partition)
+    #              +  4,096 head shards (1 << DEFAULT_HEAD_SHARD_BITS)
+    #              +  2 manifests
+    #              +  2 objects (pack + row-group directory) per per-record pack,
+    #                 and map emits one pack per PRESENT shuffle bucket per task:
+    #                 89 map tasks (places inventory map_plan.task_count) x up to
+    #                 256 buckets. MEASURED on release 2026-06-17.0, the four
+    #                 planet tasks inside source object 0 occupy 107/149/160/109
+    #                 buckets, so ~131/task => ~23,300 objects; the structural
+    #                 bound is 89 x 256 x 2 = 45,568.
+    #                 => N 44,304 measured (132,915 ops), 66,554 bound (199,665)
+    #
+    #   addresses      725 serving objects (per-country bisection estimate)
+    #              +  2 manifests
+    #              +  127 tasks x <=256 buckets x 2 = <=65,024 record objects
+    #                 => N <= 65,751 (197,256 ops)
+    #
+    # Both families are therefore OVER 100_000 at planet scale, and the old cap
+    # tripped inside finalize's running counter -- part-way through publishing tens
+    # of thousands of objects at the end of a multi-hour run, with create-only
+    # publication making the retry byte-safe and pointless (it trips at the same
+    # object).
+    #
+    # 300_000 is sized off the STRUCTURAL CEILING rather than the measurement: at
+    # the inventory gate's max_tasks 128 (both families' plan limits), all 256
+    # buckets occupied in every task, 4,096 head shards and the committed 16,888
+    # partitions, places is 86,522 objects = 259,569 operations. 300_000 clears that
+    # ceiling by 1.16x, which is 40,431 spare operations = room for 13,477 more
+    # partitions than the committed plan; it is ~2.3x the measured planet places
+    # projection. The margin is deliberately modest because it no longer stands
+    # alone: predict-reduce and plan-reduce both refuse a run whose projection
+    # exceeds it, so an inventory that outgrows this cap fails in the dry run
+    # instead of at publication. R2 charges ~$4.50 per million class-A operations,
+    # so the whole budget is under $1.50 either way; the byte caps below, not this
+    # one, are what bound a runaway's cost.
+    "max_remote_operations": 300_000,
     "max_remote_write_bytes": 1_000_000_000_000,
     "max_cleanup_objects": 20_000,
     "max_cleanup_bytes": 250_000_000_000,

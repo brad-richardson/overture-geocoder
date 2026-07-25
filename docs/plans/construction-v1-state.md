@@ -55,8 +55,21 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
 
 ## What has landed
 
-- **Caps raised** to `partition_term_rows` 2,000,000 and `distinct_tokens`
-  400,000 (`construction_v1_hosted.HOSTED_LIMITS`).
+- **Caps raised** to `partition_term_rows` 2,000,000
+  (`construction_v1_hosted.HOSTED_LIMITS`). `distinct_tokens` was raised with it
+  to 400,000 and is back at **250,000**: that is the Rust encoder's
+  `MAX_INDEX_ENTRIES`, and a routed index key is `cell\0token` with the cell
+  constant per partition, so a partition's `count(DISTINCT token)` IS its routed
+  index-entry count. 400,000 admitted partitions the routed encode would `bail!`
+  on. It changes no plan today (worst measured cell `a1d5` is 201,568 tokens).
+- **The finalize publication is projected before it is paid for.** Every published
+  object costs 3 remote operations plus 3 fixed for the slice, and planet places is
+  ~44,300 objects (16,888 routed + 4,096 head shards + ~23,300 positions objects +
+  2 manifests) = ~133,000 operations against an old cap of 100,000 — enforced by a
+  running counter inside finalize, so it tripped part-way through publishing at the
+  end of the run. `predict-reduce` and `plan-reduce` now both fail closed on the
+  projection, and `max_remote_operations` is 300,000, sized off the structural
+  ceiling (`construction_v1_control.CAPS`).
 - **Map-side combiner** — keeps only the top `maximum_serving_candidates` (256)
   rows per `(partition_cell, token)`. Exact, because top-N under a total order
   is decomposable. Removes 46% of planet term rows.

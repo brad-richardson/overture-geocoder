@@ -61,8 +61,16 @@ SPEC_V2_PARTITION_CAPS = {
 HOSTED_PARTITION_CAPS = {
     "partition_term_rows": 2_000_000,
     "partition_estimated_bytes": 512 * 1024**2,
-    "partition_distinct_tokens": 400_000,
+    # NOT divergent: the Places serving encoder's MAX_INDEX_ENTRIES is 250,000 and a
+    # routed artifact's index-entry count is exactly its partition's distinct-token
+    # count, so this cap is bounded by the encoder and happens to land on the same
+    # value the frozen spec declares. See
+    # tests/test_construction_v1_publication_budget.py, which pins it to the Rust
+    # constant, and the HOSTED_LIMITS comment for why 400,000 was wrong.
+    "partition_distinct_tokens": 250_000,
 }
+# The two caps that genuinely exceed the frozen spec's hard caps.
+SPEC_DIVERGENT_CAP_FIELDS = ("partition_term_rows", "partition_estimated_bytes")
 
 
 def test_evidence_spec_partition_caps_are_read_by_the_rehearsal():
@@ -114,8 +122,21 @@ def test_hosted_partition_caps_exceed_the_frozen_spec_caps_by_declaration():
     # rehearsal to these values would break spec v2's "relaxation_policy: none"
     # and its adaptive-subdivision coverage gate, so closing the gap needs a
     # places evidence spec v3, not an edit.
-    for field in PARTITION_CAP_FIELDS:
+    for field in SPEC_DIVERGENT_CAP_FIELDS:
         assert HOSTED_PARTITION_CAPS[field] > SPEC_V2_PARTITION_CAPS[field], field
+    # And the third cap is NOT part of that divergence any more. It was raised to
+    # 400,000 with the other two, which put it over the serving encoder's hard
+    # MAX_INDEX_ENTRIES; it is back at the encoder's value, which is also the value
+    # the spec declares. Pinned as an equality so a future "raise the divergent
+    # caps" edit cannot quietly take this one with it.
+    assert (
+        HOSTED_PARTITION_CAPS["partition_distinct_tokens"]
+        == SPEC_V2_PARTITION_CAPS["partition_distinct_tokens"]
+        == HOSTED.PLACES.SERVING_MAX_INDEX_ENTRIES
+    )
+    assert set(PARTITION_CAP_FIELDS) - set(SPEC_DIVERGENT_CAP_FIELDS) == {
+        "partition_distinct_tokens"
+    }
 
 
 # --------------------------------------------------------------------------- #
@@ -290,8 +311,13 @@ def _contract(tmp_path: Path, max_reducers: int = 128) -> Path:
         "families": {"addresses": {}, "places": {}},
         "versions": {"duckdb": "1.5.1", "pyarrow": "25.0.0", "numpy": "2.3.5",
                      "python": "3.12.12", "rustc": "test"},
+        # The ADMITTED remote-operation cap, read from the control module rather
+        # than restated: predict-reduce now projects the finalize publication
+        # against it on the real planet inventories, and a stale literal here would
+        # be testing a budget no run is dispatched with.
         "caps": {"max_reducers_per_family": max_reducers,
-                 "max_remote_operations": 100000, "max_remote_write_bytes": 1_000_000_000_000},
+                 "max_remote_operations": CONTROL.CAPS["max_remote_operations"],
+                 "max_remote_write_bytes": 1_000_000_000_000},
         "namespaces": {"immutable_root": "construction-v1/deadbeef",
                        "slice": "construction-v1/deadbeef/slice/slice-x/",
                        "markers": "construction-v1/deadbeef/markers/"},

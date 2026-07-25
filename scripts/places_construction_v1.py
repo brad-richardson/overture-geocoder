@@ -30,6 +30,12 @@ DEFAULT_HEAD_SHARD_BITS = 12
 # crates/geocoder-construction/src/bin/places_serving_encode_v1.rs. The Rust encoder
 # is the enforcing side; this copy exists only so the Python head builder can
 # fail-fast BEFORE spending an encode, and a contract test pins the two together.
+#
+# It binds BOTH serving lanes, not just the head. A head shard's index entries are
+# its distinct tokens; a ROUTED partition's index keys are `cell\0token` with the
+# cell constant per partition, so a routed artifact's index-entry count is exactly
+# that partition's `count(DISTINCT token)` -- which is why
+# `Limits.partition_distinct_tokens` may never exceed this value.
 SERVING_MAX_INDEX_ENTRIES = 250_000
 
 
@@ -344,9 +350,14 @@ class Limits:
     # produces evidence under the FROZEN places evidence spec v2, whose
     # relaxation policy is "none", so it pins the three caps that spec declares
     # instead of these. See docs/plans/2026-07-24-construction-v1-follow-ups.md.
+    #
+    # `partition_distinct_tokens` is the exception to that raise: it is BOUNDED by
+    # SERVING_MAX_INDEX_ENTRIES, because a routed artifact's index-entry count is
+    # exactly its partition's distinct-token count. A partition admitted above that
+    # value cannot be encoded at all.
     partition_term_rows: int = 2_000_000
     partition_estimated_bytes: int = 512 * 1024**2
-    partition_distinct_tokens: int = 400_000
+    partition_distinct_tokens: int = SERVING_MAX_INDEX_ENTRIES
     adaptive_subdivision_depth: int = 8
     maximum_serving_candidates: int = 256
     # Number of shuffle buckets map keys its output by. Raising it lowers

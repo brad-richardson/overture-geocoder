@@ -897,3 +897,42 @@ the review confirmed them by construction, not by guess.
    validates `shard_objects`, `populated_shards` and `manifest_object`, so a places
    head result missing either reaches `head_block` construction and dies with a
    `KeyError` instead of a message naming the field. Same class as (2).
+
+## Added 2026-07-25: the finalize publication budget, and what it left open
+
+`max_remote_operations` was 100,000 against a projected planet publication of
+~133,000 operations, and it is enforced by a running counter inside finalize, so
+it tripped part-way through publishing tens of thousands of objects at the end of
+a multi-hour run. Fixed by projecting the publication at PLAN time (and in the dry
+run) and raising the cap to 300,000 on the structural ceiling — see
+`construction_v1_control.CAPS` for the arithmetic and
+`tests/test_construction_v1_publication_budget.py` for the executable version.
+Three things fall out of it and are NOT done:
+
+(a) **The routed serving lane still has no fail-fast index-entry guard.** The head
+    lane measures its worst shard before any encode; the routed lane discovers an
+    over-cap partition only as the Rust encoder's `bail!`. Lowering
+    `partition_distinct_tokens` to the encoder's `MAX_INDEX_ENTRIES` (250,000)
+    means the planner subdivides instead of ever admitting such a partition, so
+    the guard is no longer the only thing standing between a plan and a late
+    abort — but it is still the difference between "cannot happen by construction"
+    and "cannot happen, and is checked". Port the head lane's pre-encode
+    measurement (`build_sharded_global_head_from_markers`) onto `reduce_partition`.
+
+(b) **The committed partition plan is admissible under the tightened token cap but
+    less buffered than a fresh generation.** `scripts/places_partition_plan_v1.json`
+    was generated with `distinct_tokens` 400,000 and `--headroom-fraction 0.5`, so
+    every unsplit leaf holds <=200,000 tokens and therefore satisfies the 250,000
+    cap. A regeneration at 0.5 of 250,000 would pre-split every leaf over 125,000
+    tokens instead, producing a different (larger) tree. Its recorded
+    `partition_contract.caps` is now the cap the build enforces; the `headroom`
+    block still records the 0.5-of-400,000 run that produced the tree. Fold this
+    into the next plan regeneration rather than doing it on its own — it needs a
+    full local offline map to measure from.
+
+(c) **The publication projection's head term assumes the production shard count.**
+    The plan phase projects `1 << DEFAULT_HEAD_SHARD_BITS` head shards because it
+    does not know what `run-head --shard-bits` the head phase will be handed. That
+    is the safe direction (a smaller head publishes fewer objects), but it means
+    the slice harness is projected as if it published 4,096 head shards. Threading
+    the real value through the plan phase would make the projection exact.
