@@ -958,3 +958,346 @@ Six things fall out of it and are NOT done:
     slice) is charged to no budget at all, so "remote operations" in the cap means
     "operations against the published slice prefix", not "operations this run
     performs". Either name that in the cap or give staging its own counter.
+
+## Added 2026-07-25: planet dispatch readiness — NEITHER FAMILY IS READY
+
+Eight PRs merged on 2026-07-25 (#168 #169 #170 #171 #172 #173 #174 #175) closed every
+blocker known at the time, and it was tempting to call the list clear. A dedicated
+**address-family** readiness pass then found three more hard blockers, one of which
+stops Places too. Recording them here because they were discovered by measurement,
+the measurements are expensive to reproduce, and the session task list they lived in
+is not durable.
+
+**Verdict as of 2026-07-25: NOT READY, both families.** Everything upstream of head
+is in good shape. The remaining blockers are all in the finalize/mirror path, which
+has never executed at scale.
+
+### BLOCKER A — the R2 mirror cannot finish inside its job timeout (BOTH families)
+
+`construction-v1.yml`'s mirror step is a **serial** `find | while read` loop invoking
+`aws s3api` at least twice per object (`put-object --if-none-match '*'` then an
+unconditional `head-object`; three on conflict). MEASURED aws-cli v2 process startup:
+**0.34 s per invocation**.
+
+| family | objects | invocations | projected wall-clock | job timeout |
+|---|---|---|---|---|
+| addresses | 65,751 | 131,502 | **12.4 h** | 360 min |
+| places | 44,305 | 88,610 | **8.4 h** | 360 min |
+
+That is before a single byte moves, against `FINALIZE_PHASE_ESTIMATE_MINUTES: "120"`.
+A planet run therefore completes admit, map, plan, reduce and head, publishes
+everything, and dies on wall-clock in the last step. Section 1 above covers the
+mirror's *integrity* gaps; its **throughput was recorded nowhere**.
+
+Fix direction: publish to R2 directly from Python with a bounded worker pool and a
+persistent client, and delete the local tree plus the shell loop. This is the same
+restructure as items (1) and (3) of "from bounding the finalize/publication phase"
+above, and it closes BLOCKER C at the same time.
+
+### BLOCKER B — the address marker fan-in is 14.6 GB of JSON / 23.9 GB RSS (addresses)
+
+Not the pack bodies — the **markers**. An address map marker carries two parallel
+arrays per pack, `bucket_summaries` and `row_groups[*].routing_groups`, at a MEASURED
+314.62 B/entry compact, inflated **1.556x** by `construction_v1_hosted.write_json`'s
+`indent=2`.
+
+- MEASURED: one Seattle marker (104,928 rows) is **50,990,203 bytes**.
+- MEASURED: `_load_markers` over 127 planet-shaped markers = 6.48 GB JSON →
+  **10.60 GB peak RSS** in 22.5 s.
+- PROJECTED from the committed inventory's real `exact_country_rows`: **14,944,644**
+  `bucket_summaries` entries x 2 arrays → **14.64 GB on disk / 23.94 GB RSS**.
+
+The runner is `ubuntu-24.04` — **16 GB RAM**. This OOMs in `plan-reduce` (no
+`StageWatchdog`, no `run_bounded` on the address branch), in **every one of the 121
+reduce jobs** (`selected_row_groups` walks `routing_groups`), and in `finalize`
+(`positions_markers` stays referenced through the whole publication).
+
+Also an artifact problem: `cv1-plan` re-uploads `mapdl/markers`; at a MEASURED gzip
+ratio of 0.222 that is a 3.25 GB artifact expanding to 14.6 GB in each of 123
+consumers — **~400 GB of artifact download**, against the reduce job's 30 GB floor.
+
+`address_construction_v1.genesis_plan_streaming` exists, is documented verbatim as
+"the planet-scale entry point", and **is called by nothing in production** — only the
+fan-in benchmark via `getattr`, plus one test.
+
+`construction-v1-state.md`'s "markers, plan, reductions ... single-digit MB" is wrong
+for addresses by three orders of magnitude.
+
+Fix direction: point `plan-reduce` at the streaming path, and give reduce and finalize
+a **marker projection** rather than the marker — reduce needs only
+`(pack key, group index, country, min/max route_hash)` per row group, finalize only the
+per-record pack identities. Both are <=2% of the marker. Then assert marker bytes per
+task in the slice smoke so it cannot regress.
+
+### BLOCKER C — address finalize's local publish tree is ~100-145 GB (addresses)
+
+MEASURED: the `.av1` is **278.0 B/record**, entirely uncompressed, with an 8-byte
+length prefix on every text field and both normalized *and* display text stored
+(`address_serving_encode_v1.rs`). Structural floor with all text empty: 184 B/record.
+Records packs measured at 28.3 B/record. The transform requires only country,
+geometry, record, source locator and uuid — street and number are **not** required, so
+essentially all 473,576,753 planet records reach the serving lane.
+
+PROJECTED publish tree: 725 `.av1` at 87-132 GB + 65,024 records objects at 13.4 GB =
+**~100-145 GB**, written locally before the mirror and then streamed again by
+`verify_whole_slice_once`, against a `df -ge 25000000` floor. Per-object caps are all
+fine (largest `.av1` ~278 MB vs `max_serving_bytes` 2 GiB) — the **aggregate** cannot
+land. Item (3) of "from bounding the finalize/publication phase" records "13-18 GB at
+planet scale"; that is the **Places** figure, and addresses are 6-8x the floor it
+stands behind.
+
+### Same-class gaps found alongside, not dispatch-blocking on their own
+
+1. **Places `_reduce_ingest` hydrates without releasing.** #171's eviction,
+   `check_resident` and cache-as-watchdog-root landed on **addresses only**.
+   `places_construction_v1._reduce_ingest` never releases, has no `resident_bytes`
+   check, and its `slice-smoke.yml` assert is a non-strict `<=` that zero releases
+   satisfies. Same defect class, unfixed on the family closest to dispatch. **The
+   general lesson: several 2026-07-25 fixes were applied to one family only. Sweep for
+   parity rather than assuming it.**
+2. **No runtime gate that the head manifest's `shards[].path` values are published.**
+   Only a test asserts it. A head phase handing over a mismatched object in a shard
+   slot would satisfy #168's counting equality and publish a routing manifest naming a
+   nonexistent object, so a reader resolves a shard to a 404. Wants a two-way set
+   comparison in `cmd_finalize` over data it already holds. Two smaller residuals:
+   a duplicate manifest/shard key raises a bare `ValueError` rather than a named
+   `SystemExit`, and a places head result missing `shard_count`/`shard_bits` reaches
+   `head_block` construction and raises `KeyError`.
+3. **The committed partition plan is not actually pinned into the request identity.**
+   `2026-07-24-committed-partition-plan-design.md` says it is "pinned by SHA into the
+   request identity"; that is aspirational and **unimplemented**. The request digests
+   `Cargo.lock`, `address_construction_v1.py`, `places_construction_v1.py`, the
+   per-family inventory/spec/readiness files and `caps` — **not**
+   `scripts/places_partition_plan_v1.json`, whose digest appears in no file, test or
+   workflow. So the artifact determining every partition boundary can change without
+   changing the request hash. Either implement the pinning or correct the doc.
+4. **The fan-in benchmark's PASS is 3.11x optimistic and certifies a path production
+   does not take.** `benchmark_construction_fanin.py` reported "Address: PASS,
+   1.35 GiB peak RSS" by (a) calling `genesis_plan_streaming`, which production never
+   invokes, and (b) using a synthetic marker generator that emits **only**
+   `bucket_summaries` — no `row_groups`/`routing_groups`, the array the reduce phase
+   actually reads — written compact rather than through `write_json`. Its 4.30 GiB
+   marker figure understates the real set by exactly 1.556 x 2 = **3.11x**.
+5. **Four address evidence-spec v3 hard caps are exceeded and enforce nothing.**
+   `process_group_rss_hard_cap_bytes` 4 GiB vs 12 GiB (3x);
+   `scratch_and_output_hard_cap_bytes` 16 GiB vs 24+8 GiB (1.9x);
+   `map_output_hard_cap_bytes` 2 GiB vs 8 GiB (4x);
+   `construction_wall_hard_cap_seconds` 900 vs 18,000 (20x).
+   `validate_address_planet_readiness.py` never reads `acceptance_gates` — only spec
+   sha, inventory sha, runtime versions and the pinned evidence's `all_gates_passed`
+   flag. There is no address counterpart to
+   `rehearse_places_construction_v1.spec_partition_caps()` and no test pinning the
+   divergence, while `relaxation_policy` is `"none"`. The existing "three `*_hard_cap`
+   values" item above is entirely about the **Places** spec.
+6. **`HEAD_PHASE_ESTIMATE_MINUTES` and `FINALIZE_PHASE_ESTIMATE_MINUTES` are
+   unsourced**, unlike the measured reduce constant, and they feed the ledger gate.
+   BLOCKER A shows finalize's 120 against a real 8.4 h — so this is not a stale guess,
+   it is a gate reporting green on a number that was never derived. Derive both from
+   the same throughput model as A's fix.
+7. **No address read-amplification bound exists.** `selective_read_amplification_max`
+   is declared only in the Places spec, so nothing would have caught the address
+   reducer's 12.7x. Also `_load_markers` globs `*.json`: a stale marker from an older
+   harness revision was silently loaded alongside the current one, double-counting a
+   plan and failing two phases later in the serving encoder.
+
+### Numbers worth keeping (all MEASURED unless noted)
+
+- Address reduce is **batch 6 / 121 jobs**, not 3/242 — 242 exceeds
+  `max_reducers_per_family = 128` and `predict-reduce` refuses it. 3/242 is what the
+  slice harness's synthetic request produces, and it misled analysis for a while.
+- Address publication budget **passes**: 65,751 objects, 197,256 first-attempt /
+  **263,008** retry-inclusive against the 400,000 cap (65.8%).
+- Address runner minutes **pass**: `projected_runner_minutes` 9,160 / 40,000 (22.9%).
+- Address reduce peak resident is `#map tasks holding the country x pack bytes`
+  ~= 8.1 GB; the workspace adds ~7 GB (PROJECTED by scaling the measured
+  189,325,026 B slice workspace), so scratch+cache ~= **15 GB of 25.77 GB — 1.7x
+  headroom, not the 2.8x the state doc claims**.
+- #171's suffix-union retention was confirmed correct on real multi-partition data
+  (2 jobs, batch 4: each hydrated 1 object, released 1, peak = 1 pack). That path has
+  **zero CI coverage** — Seattle yields exactly 1 partition and 1 pack, so
+  `_batch_retention` returns empty and `check_resident` never sees more than one pack.
+
+### Why none of this was caught earlier
+
+Worth writing down, because it predicts where the next blocker hides.
+
+1. **The slice is 3-4 orders of magnitude too small in the dimension that matters.**
+   Every blocker here is an *aggregate* property — 127 markers, 44k objects x process
+   startup, 4,096 shards, a fan-in degenerating because 89 <= 128. A one-task,
+   38k-record fixture cannot express any of them. The fast loop is excellent for
+   correctness and structurally blind to scale.
+2. **Slice-tuned caps sat in production config** (`--shard-bits 4`,
+   `max_head_candidate_rows = 5_000_000`, `partition_distinct_tokens = 400_000`).
+   The slice passes and nothing compared the config to the planet projection. The fix
+   pattern that worked: make the planet projection an **executable test**.
+3. **Green signals that meant nothing.** The fan-in benchmark (above). Spec caps "read
+   by no code", then satisfied by coincidence. Unwiring the publication gate passed 97
+   tests; unwiring retention passed 1,075; `released > 0` was satisfied by maximal
+   over-retention. **Mutation-test call sites, not helpers.**
+4. **Projections lived in prose.** The design doc said 4,096 shards; the workflow
+   passed 4. The doc said bounded fan-in stages; the code ran one. And doc claims were
+   wrong in both directions — addresses "have no shuffle", finalize's bound is "small",
+   peak is "one pack".
+5. **Per-family asymmetry**, as above.
+6. **The back half had never run.** Everything downstream of reduce was reasoned about
+   rather than executed. BLOCKER A needed nothing but multiplying 0.34 s by 88,610.
+
+### Dispatch prerequisites, in order
+
+1. BLOCKER A + C together (one R2 publication backend; deletes the local tree and the
+   shell mirror).
+2. BLOCKER B (marker projection + the streaming plan path).
+3. Same-class gap 1 (Places `_reduce_ingest`), then a per-family parity sweep.
+4. A multi-task, multi-partition slice fixture in CI, so this class is visible.
+5. Derive the head and finalize phase estimates (gap 6).
+6. **Cheapest high-value step, do it early:** run ONE real planet-shaped map task
+   (`--task-index N`, ~4M rows) to convert BLOCKER B's 14.6 GB from PROJECTED to
+   MEASURED for ~1/127th of a full map.
+7. Note the request identity digests the two family scripts and `caps`, so any fix
+   touching them changes `namespaces.immutable_root`. **Map output produced before
+   those fixes land is not reusable by the resumed run** — sequence the expensive
+   phases after the hash-changing changes.
+
+### Added later on 2026-07-25, from the adversarial review of PR #176 (head phase)
+
+PR #176 bounded the head **merge** correctly. The review found that the region it
+declared out of scope in one parenthetical is **2.79x larger than the region it
+bounds**, and that raising `max_head_candidate_rows` hands a planet run into it.
+Both findings below are EXECUTION-VERIFIED on a real 12-task run, not projected.
+
+**The post-merge region: ~38-42 GB against a 25.6 GB floor.** Watchdog-covered merge
+peak 91,648,680 B; post-watchdog peak **255,645,926 B**, which is **5.46x** the final
+merged parquet (5.71x and 6.32x on two other fixtures). Four full copies of the head
+payload are live simultaneously and none is released: `merged` (never unlinked, though
+its last consumer runs *before* the 4,096-iteration encode loop), the `shard_dir`
+parquets (never unlinked per shard), `verify_dir/*.plhd` (the sharded verifier needs
+all at once), and the store's `put_content` copy of every `.plhd` — two copies by
+construction, since `put_content` copies bytes and the original is then moved into
+`verify_dir`.
+
+**`max_scratch_bytes` is set ABOVE the disk the job guarantees.** 24 GiB = 25.770 GB
+against a head-job floor of `25000000` x 1024 = **25.600 GB**, and unlike `map` the
+head job does not run `free-disk-space`. So the guard provably cannot fire first: the
+real terminal state is a bare **ENOSPC around shard ~2,000 of 4,096**. Demonstrated —
+with the cap between the merge and post-merge peaks, the phase passes the guarded merge
+and dies inside the encode loop with `RuntimeError: child scratch exceeded its hard
+cap`: no phase, no knob, no diagnosis.
+
+**`COPY ... PARTITION_BY` at 4,096 shards is unbounded RAM and OOMs rather than
+spills.** Reproduced at `--shard-bits 12` with a 4 GB `memory_limit` **and
+`temp_directory` set** — DuckDB's partitioned writer holds a buffer per open partition
+and does not spill. At hosted settings: 2M rows 2.54 GiB, 8M 4.67 GiB, 16M 5.74 GiB
+(+1.07 GiB per doubling) → **65.8M ~= 7.8-8.0 GiB against the 8 GB limit**, ~8.9 GiB at
+the 134.3M projection. Also ~50 s/M rows = **~55 min for the COPY alone** against
+`HEAD_PHASE_ESTIMATE_MINUTES: "90"` for the whole phase including 4,096 encodes.
+
+Preferred fix: batch the COPY over shard ranges so open partitions are bounded by the
+batch, not the shard count — this preserves the design's 4,096 serving layout. The
+fallback, `shard_bits = 8` (256 shards, 97,656 entries/shard, still under the encoder
+cap), changes the serving layout and is an owner decision; note PR #169 already left
+the 4096-vs-256 tradeoff open, and this is the evidence that reopens it.
+
+**Also found, and generalisable:**
+
+- **A pre-planet gate was closed by deleting it.** Follow-up 12 was "verify
+  head-candidate volume fits, MEASURED from a real planet map run"; it is struck
+  through as "RAISED" while conceding the measurement "is still the better number and
+  still unavailable". Nothing now fails fast if the real count lands above 200M — it
+  fails at merge admission, after map and reduce. **Raising a cap is not the same as
+  satisfying the gate that cap stood in for.**
+- **Two more unguarded call sites** (the recurring theme): swapping `map_task`'s
+  per-task check to the global cap passes all 1218 tests — the new
+  `max_task_head_candidate_rows` has zero execution coverage — and deleting the
+  watchdog's store root passes too. Also `build_sharded_global_head_from_markers`
+  never calls `limits.validate()`, and `_limits_for` builds `Limits(**filtered)`
+  without validating while silently dropping unknown keys.
+- **A stated bound quoted only its cheap term.** `peak <= fan_in x largest pack +
+  |level k| + |level k+1|`, but every budget sentence quoted the cache term alone:
+  measured, cache is 27.1% and the tree is 73%, so the merge's own planet peak is
+  ~16-19 GB = 60-74% of `max_scratch_bytes`, not the advertised 10.7%.
+- **The peak law holds only for uniform packs.** Under skew (`[94444, 21692x7]`,
+  fan-in 4) peak was 159,520, not 4 x 94,444. The true law is `sum of the fan_in
+  largest`, which is always <= `fan_in x largest` — so the **bound is safe and
+  conservative**; only the equality claim was wrong.
+- **The diagnosis that names the knob cannot fire.** `check_resident` compares the
+  cache alone against the full 24 GiB, so at planet scale it is ~3.8x from firing;
+  what fires instead is a bare `RuntimeError` from `StageWatchdog` or `run_bounded`.
+- The rehearsal **never exercises a multi-stage tree**: `spec_head_caps` reads
+  `maximum_merge_fan_in` — a *maximum* — as the value to run, giving fan-in 16 over 7
+  tasks, i.e. one group, eager hydration, zero unlinks. The frozen evidence covers no
+  multi-stage merge at all.
+- ~2.7-3.7 GB of unmeasured Python RSS in `_independent_merged_head_binding`'s
+  `tokens: set[str]` (109 B/token x 25-34M planet tokens), concurrent with DuckDB's
+  8 GB budget on a ~16 GB runner, with no watchdog after the merge exits.
+- `disk_bytes()` costs 97.7 ms per sweep over a 4,096-partition workspace, run in a
+  5 ms busy loop for each of 4,096 encoder subprocesses, single-threaded in the parent.
+- `construction-v1.yml`'s head-job comment is stale — it still says head "cannot
+  batch-and-evict ... the floor is the only guard it has" — and only `slice-smoke.yml`
+  gained the `head_staged_objects_released > 0` gate. **The actual planet dispatch has
+  no such gate.**
+
+### Added later on 2026-07-25: publish-set object count, researched and mostly dismissed
+
+Per-record artifacts are 53% of the Places publish set and ~99% of the address one, at
+two objects per pack, so halving them looked like the obvious lever. It is not the
+lever, and the research is worth recording so nobody re-derives it.
+
+**Directories are 0.02-0.06% of the bytes they accompany.** MEASURED: places pack
+821,862 B / directory **259 B**; address pack 2,469,833 B / directory **382 B**.
+Planet-wide, places directories total ~4.1 MB against 3.3-6.7 GB of packs; addresses
+~6.2 MB against 13.4 GB. **Half of every per-record object carries a twentieth of a
+percent of the payload.**
+
+**Nothing reads them.** `grep` over `crates/` and `clients/` finds zero consumers; the
+only reader is `validate_positions` / `validate_address_records` re-verifying against
+the copy already in the marker. The intended consumer is the build-time bucket-range
+reverse reducer in `2026-07-25-reverse-v2-design.md`, and per-pack directories make
+that reducer's read count *worse*: `89xs` pack GETs plus `89xs` directory GETs, versus
+`89xs + 89` with one directory manifest per task.
+
+**Packaging cannot fix the mirror blocker.** At the MEASURED 0.34 s x 2 invocations per
+object, one-directory-manifest-per-task ("B1") gives places 32,735 objects = **371 min**
+and addresses 33,366 = **378 min** — still over the 360-minute timeout, at zero
+retries, before a byte moves. **The concurrent publisher is mandatory, not optional.**
+
+**And given the publisher, B1 is redundant for wall-clock.** Projected at a bounded
+pool with a persistent client, 65,751 objects is 1.7-6.8 min; the byte floor dominates
+by an order of magnitude (100-145 GB = 17-50 min at 50-200 MB/s, of which 87-132 GB is
+`.av1` payload that no packaging change touches). B1 buys ~0.8 min of a ~25 min phase.
+The crossover where a concurrent publisher stops sufficing is ~576,000 objects against
+a structural ceiling of 86,523 — **6.7x to 27x of headroom**.
+
+**Where object count still genuinely bites:** the `max_remote_operations` structural
+ceiling is **86.5% of the 400,000 cap**, and the cap's own comment calls its 1.16x
+margin "deliberately modest". B1 takes that to 53.9%. That is the one durable win.
+
+**So: do B1 only as a rider.** It edits `emit_positions` / `emit_address_records`, which
+are digested into `request_sha256`, so on its own it would relocate
+`namespaces.immutable_root` and orphan existing map output — unjustifiable for 0.8 min.
+But both family scripts are already changing before dispatch (BLOCKER B's streaming
+plan path, and the Places `_reduce_ingest` fix), so **B1's marginal cost is ~zero if it
+rides those and unjustifiable if it doesn't.** Blast radius is small and nothing frozen
+moves: pack bytes, `SHUFFLE_BUCKET_BITS`, `TOTAL_ORDER`, `SERVING_ORDER` and every
+forward digest stay identical.
+
+**Explicitly dismissed:** embedding the directory in the parquet footer (0.8% better
+than B1, for a second writer and loss of independent readability); dropping the
+mirror's redundant trailing `head-object` (a free 2x that still leaves addresses at
+372 min); reducing `SHUFFLE_BUCKET_BITS` (moves forward reduce ownership and every
+forward digest for a non-binding lever).
+
+**The real lever is inside the publisher.** `verify_whole_slice_once` streams every
+published object (`construction_v1_remote.py:277`) — cheap against a local tree, but a
+literal R2 implementation makes it a **full re-download of 100-145 GB**, doubling the
+phase. `HEAD` plus an ETag/checksum comparison turns it into N HEADs, a projected
+0.3-3.4 min, and is worth more than every packaging option combined. Related: the
+budget counts operations against a **local** `FilesystemRemote`, and `remote.list()`
+charges 1 op where ListObjectsV2 pages at 1,000 keys and a planet slice costs **45-66**.
+
+**One correction to the numbers recorded above.** The address 65,024 per-record figure
+is a *structural bound* (127 x 256), not a projection. Address map tasks are
+**single-country** (task 0 is MX only, 3.93 M rows, MEASURED from the committed
+inventory), so a task populates only the buckets its country's cells hash into.
+Modelling per-country extent gives **~20,600 packs / ~41,200 objects**, putting
+addresses nearer **33%** of the operation cap than 66%. PROJECTED — and it falls out
+for free from the single planet-shaped map task already listed as a prerequisite.
