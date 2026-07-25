@@ -215,6 +215,16 @@ jobs:
             # uploads and EVICTS one object at a time, so a regression to eager
             # hydration makes peak == total and fails here.
             #
+            # Every staging assertion goes through `| numbers`, which is what makes
+            # it FAIL CLOSED. Bare comparisons have two holes in jq's cross-type
+            # ordering, both verified: a MISSING key makes a residency comparison
+            # pass, because `null < number` is true; and a STRING-valued count passes
+            # `> 0`, because numbers sort below strings. Either one turns a dropped
+            # or renamed summary key into a silently green bound -- the exact failure
+            # mode these asserts exist to prevent. `| numbers` yields empty for
+            # anything that is not a JSON number, so `jq -e` exits non-zero instead
+            # of comparing. Same shape as the finalize gate in construction-v1.yml.
+            #
             # `reconciles` alone is NOT evidence the run produced anything: it is
             # now a real validator result for both families, but an EMPTY run
             # reconciles too. Assert real counts, from
@@ -233,15 +243,15 @@ jobs:
               and .positions_objects > 0
               and .positions_records > 0
               and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/places$"))
-              and .map_staged_objects_published > 0
-              and .finalize_staged_objects_hydrated > 0
-              and .finalize_staged_objects_released > 0
-              and (.finalize_staged_peak_resident_bytes < .finalize_staged_bytes_hydrated)
-              and .plan_staged_bytes_hydrated > 0
-              and .plan_staged_objects_released > 0
-              and (.plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated)
-              and (.reduce_staged_peak_resident_bytes <= .reduce_staged_bytes_hydrated)
-              and .head_staged_bytes_hydrated > 0
+              and (.map_staged_objects_published | numbers) > 0
+              and (.finalize_staged_objects_hydrated | numbers) > 0
+              and (.finalize_staged_objects_released | numbers) > 0
+              and ((.finalize_staged_peak_resident_bytes | numbers) < (.finalize_staged_bytes_hydrated | numbers))
+              and (.plan_staged_bytes_hydrated | numbers) > 0
+              and (.plan_staged_objects_released | numbers) > 0
+              and ((.plan_staged_peak_resident_bytes | numbers) < (.plan_staged_bytes_hydrated | numbers))
+              and ((.reduce_staged_peak_resident_bytes | numbers) <= (.reduce_staged_bytes_hydrated | numbers))
+              and (.head_staged_bytes_hydrated | numbers) > 0
               and .serving_object_key == "routed_object"
               and .reduction_serving_objects == .partitions
               and (.serving_objects == .partitions + .head_populated_shards)
@@ -452,13 +462,13 @@ jobs:
               and .positions_records == .admitted_rows
               and .positions_bytes > 0
               and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/addresses$"))
-              and .map_staged_objects_published > 0
-              and .finalize_staged_objects_hydrated > 0
-              and .finalize_staged_objects_released > 0
-              and (.finalize_staged_peak_resident_bytes < .finalize_staged_bytes_hydrated)
-              and .plan_staged_bytes_hydrated == 0
-              and .reduce_staged_bytes_hydrated > 0
-              and .head_staged_bytes_hydrated == 0
+              and (.map_staged_objects_published | numbers) > 0
+              and (.finalize_staged_objects_hydrated | numbers) > 0
+              and (.finalize_staged_objects_released | numbers) > 0
+              and ((.finalize_staged_peak_resident_bytes | numbers) < (.finalize_staged_bytes_hydrated | numbers))
+              and (.plan_staged_bytes_hydrated | numbers) == 0
+              and (.reduce_staged_bytes_hydrated | numbers) > 0
+              and (.head_staged_bytes_hydrated | numbers) == 0
               and .serving_object_key == "artifact"
               and .serving_objects == .partitions
             ' "${WORK}/summary.json" >/dev/null || {

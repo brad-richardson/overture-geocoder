@@ -200,6 +200,167 @@ def test_admission_verify_hook_runs_before_any_upload(tmp_path):
     assert remote.head("construction-v1/binding/markers/gate.json") is None
 
 
+def test_a_plain_tuple_member_whose_file_changes_between_reads_is_refused(tmp_path):
+    """Attack shape 1: `local_member` is digest-verified on NEITHER read.
+
+    Splitting one `read_bytes()` into an admission hash and an upload read lost the
+    invariant "the identity and the payload are the same bytes", which used to hold
+    by construction. A plain `(key, path)` tuple -- which is what finalize's two
+    MANIFESTS are -- goes through no content-addressed store and no digest check, so
+    nothing but this re-hash stands between a changed file and a marker that records
+    the ADMITTED identity over the UPLOADED bytes.
+    """
+    source = tmp_path / "manifest.json"
+    source.write_bytes(b'{"schema":"admitted-v1"}')
+    key = "construction-v1/binding/slice/a/manifest.json"
+    remote = backend(tmp_path)
+
+    def swap(_key: str, _identity: dict[str, object]) -> None:
+        # Rewrite the file after its identity is admitted, before it is uploaded.
+        # SAME LENGTH deliberately, so nothing else in the publisher notices: the
+        # per-upload HEAD is a length comparison, and a tuple member is digest-checked
+        # on neither read. Without the payload re-hash this publishes silently.
+        swapped = b'{"schema":"swapped!!!!"}'
+        assert len(swapped) == len(source.read_bytes())
+        source.write_bytes(swapped)
+
+    with pytest.raises(RuntimeError, match="payload changed between admission and upload"):
+        REMOTE.publish_exact_set(
+            remote,
+            artifacts=[(key, source)],
+            marker_key="construction-v1/binding/markers/tuple.json",
+            request_sha256="1" * 64,
+            verify=swap,
+        )
+    # Nothing published and no marker: the swap is caught before the PUT.
+    assert remote.head(key) is None
+    assert remote.head("construction-v1/binding/markers/tuple.json") is None
+
+
+def test_a_same_length_swap_is_refused_even_though_head_would_pass(tmp_path):
+    """Attack shape 3: the per-upload HEAD compares only `bytes`.
+
+    `head != {"bytes": item["bytes"]}` is a LENGTH check, so a same-length
+    substitution satisfies it completely. Demonstrated by asserting the HEAD the
+    publisher would have performed does in fact pass on the swapped bytes -- the
+    only thing that rejects them is the payload re-hash.
+    """
+    source = tmp_path / "object"
+    admitted_bytes = b"A" * 4096
+    swapped_bytes = b"B" * 4096  # identical length, different bytes
+    source.write_bytes(admitted_bytes)
+    key = "construction-v1/binding/slice/a/same-length"
+    remote = backend(tmp_path, max_write_bytes=64 * 1024, max_read_bytes=64 * 1024)
+
+    with pytest.raises(RuntimeError, match="payload changed between admission and upload"):
+        REMOTE.publish_exact_set(
+            remote,
+            artifacts=[(key, source)],
+            marker_key="construction-v1/binding/markers/same-length.json",
+            request_sha256="2" * 64,
+            verify=lambda _k, _i: source.write_bytes(swapped_bytes),
+        )
+    assert remote.head(key) is None
+    # The HEAD check alone would NOT have caught it: same length, so the comparison
+    # the publisher performs after each upload is satisfied by the wrong bytes.
+    control = backend(tmp_path / "control")
+    control.put_create_only(key, swapped_bytes)
+    assert control.head(key) == {"bytes": len(admitted_bytes)}
+
+
+def test_a_staged_member_with_a_refilled_cache_slot_is_refused(tmp_path):
+    """Attack shape 2: the real `StagedObjectStore`, finalize's exact Member shape.
+
+    `path()` verifies what it HYDRATES, but returns early on
+    `if path.is_file(): return path` -- so the upload loop's re-hydration of an
+    object that is already in the local cache is NOT digest-checked. `release()`
+    then unlinks that slot, which opens a window in which the cache path is
+    unverified-writable and did not exist before the two-pass split. Whatever
+    refills it is what gets uploaded.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "remote_test_staging", ROOT / "scripts/construction_staging_v1.py"
+    )
+    staging_module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = staging_module
+    spec.loader.exec_module(staging_module)
+
+    local_root = tmp_path / "local"
+    admitted_bytes = b"the bytes the producing phase made" * 64
+    digest = hashlib.sha256(admitted_bytes).hexdigest()
+    store_key = f"serve/places-v1/objects/sha256/{digest}.plrv"
+    source = tmp_path / "produced"
+    source.write_bytes(admitted_bytes)
+
+    class _Local:
+        """Minimal `LocalObjectStore` surface: no `release`, deterministic paths."""
+
+        def __init__(self, root: Path):
+            self.root = root
+
+        def path(self, key: str) -> Path:
+            return self.root / key
+
+    backing = staging_module.R2.FilesystemStore(tmp_path / "staging-tree")
+    store = staging_module.StagedObjectStore(
+        _Local(local_root),
+        backing,
+        staging_module.staging_prefix("3" * 64, "places"),
+    )
+    # Seed staging with the real object, exactly as the producing phase would.
+    destination = local_root / store_key
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    destination.write_bytes(admitted_bytes)
+    staging_module.R2.ensure_uploaded(backing, destination, store.staging_key(store_key))
+    destination.unlink()  # finalize starts from an EMPTY local cache
+
+    published_key = f"construction-v1/binding/slice/a/{digest}.plrv"
+    swapped = b"X" * len(admitted_bytes)  # same length, so HEAD would pass
+    releases: list[int] = []
+
+    def release_then_something_refills_the_slot() -> None:
+        """The window itself: released, therefore unverified-writable.
+
+        `release()` unlinks the cache slot; until the next `path()` runs there is a
+        path on disk that the store will hand back WITHOUT verifying (because
+        `path()` short-circuits on `is_file()`). Refilling it right after admission's
+        release is exactly that window -- it did not exist before this function was
+        split into two passes, since there was only ever one read.
+        """
+        store.release(store_key)
+        releases.append(1)
+        if len(releases) == 1:
+            local = local_root / store_key
+            local.parent.mkdir(parents=True, exist_ok=True)
+            local.write_bytes(swapped)
+
+    # Finalize's exact construction (construction_v1_hosted.py): hydrate through
+    # `store.path`, release through the store's own `release`.
+    member = REMOTE.Member(
+        key=published_key,
+        hydrate=lambda: store.path(store_key),
+        release=release_then_something_refills_the_slot,
+    )
+
+    remote = backend(tmp_path, max_write_bytes=1 << 20, max_read_bytes=1 << 20)
+    with pytest.raises(RuntimeError, match="payload changed between admission and upload"):
+        REMOTE.publish_exact_set(
+            remote,
+            artifacts=[member],
+            marker_key="construction-v1/binding/markers/staged.json",
+            request_sha256="3" * 64,
+        )
+    # The wrong bytes reached neither the published tree nor a marker.
+    assert remote.head(published_key) is None
+    assert remote.head("construction-v1/binding/markers/staged.json") is None
+    # And the short-circuit really is the hole being closed: `path()` handed back the
+    # unverified refilled file rather than re-fetching and re-verifying it.
+    assert (local_root / store_key).read_bytes() == swapped
+    assert store.path(store_key).read_bytes() == swapped
+
+
 def test_cleanup_is_exact_preview_only_and_bounded(tmp_path):
     remote = backend(tmp_path)
     preview = "construction-v1/binding/preview/slice-a/"

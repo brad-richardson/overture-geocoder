@@ -723,7 +723,25 @@ object in RAM and one object on disk, and both slice-smoke jobs assert
 `staged_objects_released > 0` and
 `staged_peak_resident_bytes < staged_bytes_hydrated`, fail-closed through
 `| numbers` so a missing or non-numeric key exits non-zero instead of defaulting
-to a value that passes. What was deliberately NOT done:
+to a value that passes. Every staging assert in `slice-smoke.yml` was converted to
+the same shape: a bare comparison is NOT fail-closed, because jq orders `null`
+below numbers (a MISSING peak satisfies `peak < hydrated`) and numbers below
+strings (a STRING count satisfies `> 0`). Both holes were reproduced against real
+jq before the change and are closed after it; the contract test greps for any
+surviving bare `.*staged*` comparison so the old shape cannot be copied back in.
+
+Splitting `publish_exact_set` into an admission pass and an upload pass also lost
+an invariant that had held **by construction** — *the admitted identity and the
+uploaded payload are the same bytes*, previously guaranteed because one
+`read_bytes()` produced both. Nothing else covered the second read: a
+`local_member` (the two manifests) is digest-checked on neither read; a staged
+member's re-hydration hits `StagedObjectStore.path()`'s `if path.is_file(): return
+path` short-circuit, so it is not digest-checked either, and `release()` opens a
+window in which that cache slot is unverified-writable which did not exist before;
+and the per-upload HEAD compares only `bytes`, so a same-length swap passes it. The
+upload loop now re-hashes the payload against the pre-admitted digest — free, since
+the payload is already in RAM — and all three attack shapes are pinned by tests
+that were each confirmed to fail without it. What was deliberately NOT done:
 
 1. **Finalize reads each published object from staging TWICE.** Admission streams
    every file to compute its identity (and to run the content-addressed and
@@ -769,3 +787,22 @@ to a value that passes. What was deliberately NOT done:
    instead of `FilesystemRemote` plus a shell mirror, which is the same
    restructure item (1) above touches. The 25 GB free-disk floor on the finalize
    job is what stands in for it today.
+4. **`StagedObjectStore.path()` does not re-verify a cached object, and eviction
+   now makes that reachable.** This is the pre-existing item (5) of the R2-staging
+   list above, but the two-pass publisher changes its exposure rather than merely
+   inheriting it: `release()` unlinks a cache slot, and until the next `path()` runs
+   there is a path on disk that the store will hand back on `is_file()` alone with
+   no digest check. Contained at the publication point — the upload loop re-hashes
+   the payload against its pre-admitted digest, which is what closed it — but the
+   general fix is for `path()` to verify what it returns from cache, not just what
+   it hydrates. Worth doing because the reducer and head phase read cached objects
+   through the same short-circuit and rely on their own per-pack checks instead.
+5. **The R2 mirror's conflict fallback accepts a pre-existing object on existence
+   alone** (`construction-v1.yml`, the `aws s3api put-object … || head-object`
+   pairs). For a content-addressed key that is nearly harmless, since the name
+   proves the bytes; for the three keys that are NOT content-addressed —
+   `family-manifest.json`, `slice-manifest.json` and the completion marker — it
+   means a differing pre-existing object is accepted as a successful publish. This
+   is outside the present change (the mirror is a separate shell step, and
+   `publish_exact_set`'s own `ConflictError` path DOES compare bytes), and it is
+   logged rather than fixed here.

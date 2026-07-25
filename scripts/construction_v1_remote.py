@@ -175,8 +175,13 @@ def publish_exact_set(
     Identities are computed by STREAMING each file (`file_identity`), never by
     retaining its bytes: holding all payloads simultaneously to reuse them in the
     upload loop was a 13-18 GB dict at planet scale. Each payload is re-read
-    inside the upload loop instead, so peak RAM is one object -- bounded by the
-    partition cap (512 MiB estimated uncompressed) rather than by the set size.
+    inside the upload loop instead, so **peak RAM is exactly the LARGEST SINGLE
+    PUBLISHED OBJECT**, not the set. That is the honest bound and it is a
+    predictable one -- not the partition cap, which bounds only the routed lane: at
+    `--shard-bits 4` the biggest object is a head shard at ~625-690 MB (a 10-11 GB
+    planet head payload over 16 shards). Fine on a 16 GB runner, and once the head
+    goes to 4,096 shards (#169) the largest head shard drops to roughly 2.7 MB,
+    shrinking this bound by ~250x.
 
     `verify`, if given, is called as `verify(key, identity)` during admission with
     the identity just computed from the file. It runs strictly before any upload,
@@ -210,6 +215,24 @@ def publish_exact_set(
         # payload down from admission in a dict. This read is the whole RAM bound.
         path = member.hydrate()
         payload = path.read_bytes()
+        # RESTORES "the identity and the payload are the same bytes". Before this
+        # function was split into two passes that was true by construction -- one
+        # `read_bytes()` produced both the admitted digest and the uploaded bytes.
+        # Two passes means two reads, and NOTHING else re-checks the second one:
+        #   * a plain-tuple / `local_member` member (the two manifests) is never
+        #     digest-verified on either read;
+        #   * a staged member's re-hydration hits `StagedObjectStore.path()`'s
+        #     `if path.is_file(): return path` short-circuit, so the second read is
+        #     not digest-checked either -- and `release()` opens a window in which
+        #     the cache slot is unverified-writable that did not exist before;
+        #   * the per-upload HEAD below compares only `bytes`, so a SAME-LENGTH swap
+        #     passes it.
+        # Without this check the marker would be committed recording the GOOD
+        # identity over BAD bytes, with the admission gate having passed on the good
+        # bytes it read first. `verify_whole_slice_once` does catch it, but that runs
+        # AFTER the marker. Free: the payload is already in RAM.
+        if hashlib.sha256(payload).hexdigest() != item["sha256"]:
+            raise RuntimeError(f"payload changed between admission and upload: {key}")
         try:
             remote.put_create_only(key, payload)
         except ConflictError:
