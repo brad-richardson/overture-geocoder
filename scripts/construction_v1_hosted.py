@@ -35,7 +35,7 @@ import json
 import math
 import platform
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -1583,6 +1583,19 @@ def _artifact_keys(family: str, reductions: list[dict[str, Any]], head: dict[str
             _serving_identity(shard, what=f"{family} head shard {index}")
             for index, shard in enumerate(shards)
         )
+        # The head MANIFEST is a serving object, not build-plane bookkeeping. Head
+        # shards are content-addressed, so the manifest is the only thing that maps
+        # a shard id to the object that answers it, and the only thing that records
+        # `shard_bits`. Publishing the shards without it leaves a reader probing
+        # every shard and relying on the Worker's misroute rejection: 16 probes per
+        # query at shard_bits=4, 4096 at the designed 12 -- i.e. an unusable
+        # dataset. It was collected nowhere (`_artifact_keys` took `shard_objects`
+        # and not `manifest_object`), so it fails closed here like everything else.
+        objects.append(
+            _serving_identity(
+                head.get("manifest_object"), what=f"{family} head manifest"
+            )
+        )
     elif head and head.get("shard_objects"):
         raise SystemExit(
             f"the {family} family has no global head phase, but its head result "
@@ -1686,6 +1699,28 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     if {item["key"] for item in positions} & {item["key"] for item in artifacts}:
         raise SystemExit("per-record object collides with a serving artifact key")
 
+    # Enough for a reader to route a token with no probing: `shard_bits` says how to
+    # compute the shard id, and `manifest` names the published object holding the
+    # shard_id -> object map (content-addressed, so its name is its digest and
+    # `sha256` re-verifies it). Gated on HEAD_FAMILIES rather than on `head` being
+    # truthy: an address-shaped `{"head": null}` result is a truthy dict, and reading
+    # head fields off it would be a KeyError traceback instead of a null head block.
+    head_block = None
+    if args.family in HEAD_FAMILIES:
+        # `_artifact_keys` above already fails closed on a head family with no head
+        # result, no shards, or no manifest object, so every field here exists.
+        head_block = {
+            "shard_count": head["shard_count"],
+            "shard_bits": head["shard_bits"],
+            "populated_shards": head["populated_shards"],
+            "total_records": head["total_records"],
+            "manifest": {
+                "object": PurePosixPath(head["manifest_object"]["key"]).name,
+                "sha256": head["manifest_object"]["sha256"],
+                "bytes": head["manifest_object"]["bytes"],
+            },
+        }
+
     family_manifest = {
         "schema": "construction-v1-family-manifest-v1",
         "family": args.family,
@@ -1694,7 +1729,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "binding": reconciliation["binding"],
         "partitions": reconciliation["partitions"],
         "artifacts": sorted(artifacts, key=lambda item: item["key"]),
-        "head": {"shard_count": head["shard_count"], "total_records": head["total_records"]} if head else None,
+        "head": head_block,
         # Listed separately from `artifacts`: these are build-phase per-record
         # packs, not serving objects, and nothing serves them today. The key stays
         # `positions` for both families because it is already the published
@@ -1853,6 +1888,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         # `reconciles` and `positions_objects` were all non-zero anyway.
         "serving_objects": len(artifacts),
         "reduction_serving_objects": len(reductions),
+        # 1 for a head family, 0 for a family with no head phase. Reported so the
+        # exact-set gates can stay one family-generic equality
+        # (serving == reductions + populated shards + head manifests) instead of
+        # hardcoding a "+1" that would be wrong for addresses.
+        "head_manifest_objects": 1 if head_block else 0,
         "serving_object_key": REDUCTION_SERVING_OBJECTS[args.family],
         **_staging_evidence(store),
     }
@@ -2030,7 +2070,11 @@ def build_parser() -> argparse.ArgumentParser:
     head.add_argument("--encoder-binary", default="")
     head.add_argument("--verifier-binary", default="")
     head.add_argument("--scratch-dir", default="/tmp/construction-v1-head-scratch")
-    head.add_argument("--shard-bits", type=int, default=4)
+    # The default is the ONE committed constant, never a re-typed literal: a 4-bit
+    # (16-shard) head is ~6-8x over the encoder's MAX_INDEX_ENTRIES cap at the
+    # planet token universe, and that only surfaces after map+reduce+merge are paid
+    # for. See scripts/places_construction_v1.py:DEFAULT_HEAD_SHARD_BITS.
+    head.add_argument("--shard-bits", type=int, default=PLACES.DEFAULT_HEAD_SHARD_BITS)
     head.add_argument("--output", type=Path, required=True)
     _add_staging_arguments(head)
     head.set_defaults(func=cmd_run_head)

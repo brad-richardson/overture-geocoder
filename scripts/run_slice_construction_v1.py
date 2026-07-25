@@ -96,6 +96,16 @@ ENCODER = BIN / f"{PREFIX}-serving-encode-v1"
 VERIFIER = BIN / f"{PREFIX}-serving-verify-v1"
 # The store class prefix each family writes under, asserted on by the CI smoke.
 MAP_CLASS = "map/address" if ADDRESSES else "map/places-v1"
+# A DELIBERATE slice-only head shard count, passed explicitly and never inherited
+# from the production default. Production uses
+# `places_construction_v1.DEFAULT_HEAD_SHARD_BITS` (12 => 4096 shards), sized so
+# the planet token universe stays far under the encoder's MAX_INDEX_ENTRIES cap.
+# A 38k-place Monaco slice has a few tens of thousands of tokens, so 4096 shards
+# would be ~4096 nearly-empty PLHD artifacts and thousands of encoder invocations
+# for no signal. 4 bits (16 shards) still exercises the real sharded encode/
+# verify/manifest path; the shard COUNT is a per-build manifest value, not a
+# format constant, which is exactly why the slice may pick its own.
+SLICE_HEAD_SHARD_BITS = 4
 
 
 def run(*argv, capture=False):
@@ -343,7 +353,9 @@ t = phase("run-head")
 head = WORK / "head.json"
 head_args = () if ADDRESSES else (
     "--encoder-binary", ENCODER, "--verifier-binary", VERIFIER,
-    "--scratch-dir", WORK / "head-scratch", "--shard-bits", "4",
+    "--scratch-dir", WORK / "head-scratch",
+    # Explicit slice choice -- see SLICE_HEAD_SHARD_BITS above.
+    "--shard-bits", str(SLICE_HEAD_SHARD_BITS),
 )
 hosted("run-head", "--contract", contract, "--store-root", store_for("head"),
        *staging_argv(),
@@ -393,8 +405,9 @@ print(f"  per-record artifact published: {result['positions_objects']} objects, 
 # used to publish head shards, positions packs and two manifests while silently
 # dropping EVERY routed `.plrv`, and every other number here stayed non-zero.
 print(f"  serving objects published: {result['serving_objects']} "
-      f"(>= {result['reduction_serving_objects']} reductions x "
-      f"{result['serving_object_key']}, plus any head shards)")
+      f"({result['reduction_serving_objects']} reductions x "
+      f"{result['serving_object_key']}, plus any head shards and "
+      f"{result['head_manifest_objects']} head routing manifest)")
 
 # Break the store down by artifact class. A single total invites a linear
 # extrapolation to planet scale, which is wrong twice over: fixed per-artifact
@@ -470,6 +483,10 @@ summary = {"family": FAMILY,
            # assertable keys.
            "serving_objects": result["serving_objects"],
            "reduction_serving_objects": result["reduction_serving_objects"],
+           # 1 for places, 0 for addresses: the head routing manifest is a serving
+           # object, so the exact-set equality is
+           # serving == partitions + populated shards + head manifests.
+           "head_manifest_objects": result["head_manifest_objects"],
            "serving_object_key": result["serving_object_key"],
            "positions_objects": result["positions_objects"],
            "positions_records": result["positions_records"],
