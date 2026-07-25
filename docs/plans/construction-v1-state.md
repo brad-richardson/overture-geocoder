@@ -50,6 +50,10 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
 - **Map-side shuffle** — `pack_id` is now a hash bucket of `partition_key`, so a
   fragment holds a set of cells completely and nothing else. **This is the piece
   the whole architecture turns on.**
+- **Per-place positions artifact** — map emits one row per admitted place,
+  pre-combiner, on the same shuffle as the term packs. 2026-07-25 decision,
+  detailed under "Query surface" below. This is what makes a spatial reverse
+  index additive instead of a planet map re-run.
 - **Slice harness** — `build_slice_inventory_v1.py`, `run_slice_construction_v1.py`.
 - **Partition plan v2** (`scripts/places_partition_plan_v1.json`) — regenerated
   from 2026-07-22.0 post-combiner. Consumed only by `predict-reduce`.
@@ -243,9 +247,52 @@ The remaining real work is a nearest-neighbour structure within a cell and
 Worker support, which the divisions reverse shards
 (`build_shards.py --reverse`) already demonstrate at smaller scale.
 
-### Decide BEFORE the planet build: does map emit a per-place artifact?
+### DECIDED 2026-07-25: map emits a per-place positions artifact
 
-This is the only part of reverse that is expensive to add late, so it is a
+**It is emitted.** Map writes per-place positions packs alongside the term
+fragments, so a spatial reverse index can be built later without re-running the
+planet map phase. The reasoning below is kept because it is the reason, not
+because the question is open.
+
+What it is, precisely:
+
+- one row per **admitted** place -- `feature_id`, `partition_cell`,
+  `longitude`, `latitude`, the minimal form;
+- derived **pre-combiner**, by `GROUP BY feature_id` over the term table before
+  the top-N runs, which is the entire point (see below);
+- bucketed by the **same shuffle** as the term packs, one pack per present
+  bucket, ordered `(shuffle_bucket, partition_cell, feature_id)`, deterministic;
+- named `map/places-v1/positions` with `map/places-v1/position-directories`
+  beside it, distinct from the term `packs`/`directories` so nothing can confuse
+  the two;
+- fails closed if the row count is not exactly `admitted_features`, and a
+  resumed marker without an intact positions artifact is rejected.
+
+Measured on the Monaco slice (38,182 projected, 38,172 admitted): **38,172 rows
+in 4 packs, 1,087,716 bytes** -- 28.5 compressed bytes per place, against 16.4 MB
+of term packs for the same task. That is **6.6%** of the term packs, and
+extrapolates to ~2.1 GB planet-wide, consistent with the ~2.4 GB estimate below.
+
+The positions packs get a content hash and a row-group directory (per-row-group
+and per-cell record counts, plus the assertion that every cell in a pack hashes
+to that pack's bucket). They deliberately do **not** get the term packs' exact
+two-lane binding: that binding is computed from `semantic_digest_a/_b` on TERM
+rows, and a positions row is a derived per-feature row carrying no such digest.
+Synthesizing one (`min()` over a feature's term digests, say) would produce a
+proof frame that looks exact and binds nothing that exists.
+
+**Still open, and still not blocking:** whether the artifact should also carry
+name/category/address fields so a reverse result can be rendered without an
+`/id` round-trip. It is emitted minimal today. Widening it is additive and
+cheap; the row shape is asserted in the tests so it cannot widen by accident.
+
+Nothing downstream consumes it yet. Reduce, head and finalize read
+`marker["packs"]` explicitly, so the new files are ignored by construction
+rather than by luck.
+
+The sequencing argument that produced the decision:
+
+This was the only part of reverse that is expensive to add late, so it was a
 sequencing decision rather than a design one.
 
 Reverse must be built from **per-place records** (one row per place with a
@@ -257,25 +304,18 @@ position), not from term rows:
   groups can be dropped from the term store entirely. Harmless for forward
   search, **silently missing from reverse**.
 
-Map currently emits **no per-place artifact**. Term rows and head candidates
-(top-N per token) are both the wrong shape. So adding reverse later means
-**re-running the planet map phase** -- not redesigning it, but re-running it,
-plus a re-publish.
+Term rows and head candidates (top-N per token) are both the wrong shape, and
+nothing else in map enumerated places. So adding reverse without this artifact
+would have meant **re-running the planet map phase** -- not redesigning it, but
+re-running it, plus a re-publish.
 
-**The insurance is cheap.** Have map also emit a per-place, cell-keyed artifact
-alongside the term fragments: `feature_id`, longitude/latitude, and whatever
-reverse must return. At ~32 bytes for the minimal form that is roughly **2.4 GB
-planet-wide against a ~34 GB term store**, and it rides the same shuffle, the
-same staging, and the same proof frame.
+**The insurance is cheap.** At ~32 bytes for the minimal form that is roughly
+**2.4 GB planet-wide against a ~34 GB term store**, and it rides the same
+shuffle and the same staging.
 
-- Emit it now -> reverse is purely additive later. New encoder, new index, no
-  map re-run.
+- Emit it -> reverse is purely additive later. New encoder, new index, no map
+  re-run.
 - Skip it -> the price of reverse is one full planet map re-run.
-
-Open question if we do it: whether the artifact carries only `feature_id`
-(cheapest, forces an `/id` round-trip to render a result) or also
-name/category/address fields (self-sufficient, larger). That choice does not
-block emitting the positions.
 
 **Everything else about reverse is additive.** Inventory, projection, the
 transform, contract/admission/ledger, the proof frame, the cell scheme, the

@@ -225,7 +225,13 @@ def bucket_range_fragments(
 
 
 COMBINER_SCHEMA = "overture-places-map-combiner-v1"
-PLACE_RECORDS_SCHEMA = "overture-places-map-place-records-v1"
+# The per-place positions artifact: one row per ADMITTED place, bucketed by the
+# same shuffle as the term packs. Named distinctly from the term packs
+# ("positions" vs "packs") because the two ride the same shuffle and a consumer
+# must never confuse them: term rows are ~7.19 per place and post-combiner,
+# these are exactly one per place and pre-combiner.
+POSITIONS_SCHEMA = "overture-places-map-positions-v1"
+POSITIONS_DIRECTORY_SCHEMA = "overture-places-map-positions-directory-v1"
 
 # Single source of truth for the IPC batch-row cap. It mirrors the frozen
 # evidence-spec `acceptance_gates.resources.maximum_ipc_batch_rows`; the
@@ -475,7 +481,203 @@ def validate_marker(
         != marker["transform"]["emitted_term_rows"]
     ):
         raise ValueError("Places combiner kept+discarded differs from transform")
+    validate_positions(marker, store)
     return marker
+
+
+def positions_directory(
+    parquet_path: Path, *, bucket: int, bits: int
+) -> dict[str, Any]:
+    """Row-group directory for one positions pack, and its cell invariant.
+
+    The term packs get an exact two-lane binding from the Rust proof binary,
+    which reads `semantic_digest_a`/`_b` off each TERM row. A positions row is a
+    derived, per-feature row and carries no such digest, and inventing one (say
+    `min()` over a feature's term digests) would produce a proof frame that
+    looks exact while binding nothing that exists. So a positions pack is bound
+    by its content hash (`put_content`) plus this directory: per-row-group record
+    counts and per-cell record counts, which is what a consumer needs to skip
+    row groups and to check that it read every row it was promised.
+
+    It also enforces the property the shuffle exists for: every cell in the pack
+    hashes to the pack's own bucket, so a cell is never split across buckets.
+    """
+    import pyarrow.parquet as pq
+
+    parquet = pq.ParquetFile(parquet_path)
+    row_groups = []
+    totals: dict[str, int] = {}
+    for index in range(parquet.metadata.num_row_groups):
+        cells = parquet.read_row_group(index, columns=["partition_cell"])
+        counts: dict[str, int] = {}
+        for cell in cells.column("partition_cell").to_pylist():
+            if cell is None:
+                raise ValueError("Places positions row carries no partition cell")
+            counts[cell] = counts.get(cell, 0) + 1
+            totals[cell] = totals.get(cell, 0) + 1
+        row_groups.append(
+            {
+                "index": index,
+                "records": cells.num_rows,
+                "cells": [
+                    {"partition_cell": cell, "records": counts[cell]}
+                    for cell in sorted(counts)
+                ],
+            }
+        )
+    for cell in totals:
+        if shuffle_bucket(cell_partition_key(cell), bits) != bucket:
+            raise ValueError("Places positions cell landed in the wrong shuffle bucket")
+    return {
+        "schema": POSITIONS_DIRECTORY_SCHEMA,
+        "shuffle_bucket": bucket,
+        "records": parquet.metadata.num_rows,
+        "row_groups": row_groups,
+        "cells": [
+            {"partition_cell": cell, "records": totals[cell]} for cell in sorted(totals)
+        ],
+    }
+
+
+def emit_positions(
+    connection: Any,
+    *,
+    workspace: Path,
+    store: A.LocalObjectStore,
+    limits: Limits,
+    input_features: int,
+    admitted_features: int,
+) -> dict[str, Any]:
+    """Emit the per-place, cell-keyed positions packs from the `terms` table.
+
+    One row per ADMITTED place -- `feature_id`, `partition_cell`, `longitude`,
+    `latitude`, the ~32-byte minimal form -- bucketed by the same shuffle as the
+    term packs, one pack per PRESENT bucket.
+
+    Two things make this artifact worth its bytes, and both are about WHEN it is
+    produced rather than what it contains.
+
+    It must be derived BEFORE the combiner. The combiner keeps only the top
+    `maximum_serving_candidates` rows per (partition_cell, token), so a place
+    whose tokens are all generic and all sit in saturated groups can vanish from
+    the term set entirely. Harmless for forward search, silently missing from
+    anything that must ENUMERATE places -- a spatial reverse index above all.
+    Deriving positions from the combined set would lose exactly those places.
+
+    And it must be produced HERE rather than added later: term rows and head
+    candidates are both the wrong shape, so a reverse index bolted on afterwards
+    costs a full planet map re-run. Emitting it now makes that work purely
+    additive (docs/plans/construction-v1-state.md).
+
+    The rows are a GROUP BY rather than a window or DISTINCT ON: every column is
+    per-FEATURE (only token, token_hash, field_mask and the digests vary across
+    a feature's term rows), so `min()` is exact and deterministic and a hash
+    aggregate is one streaming pass with no sort.
+
+    Packs are ordered by (partition_cell, feature_id) within a bucket and the
+    buckets are written in ascending order, which is the global
+    (shuffle_bucket, partition_cell, feature_id) order the term packs also use.
+    """
+    import pyarrow.parquet as pq
+
+    bits = limits.shuffle_bucket_bits
+    # Bucketed exactly like the term packs: one tagged copy, then one file per
+    # present bucket. `COPY ... PARTITION_BY` cannot be used because DuckDB does
+    # not preserve row order within a partition, and these packs are sorted.
+    tagged = workspace / "positions-tagged.parquet"
+    connection.execute(
+        "COPY (SELECT feature_id, min(partition_cell) partition_cell, "
+        "  min(longitude) longitude, min(latitude) latitude, "
+        f"  min({shuffle_bucket_sql(bits)}) pack_id "
+        "FROM terms GROUP BY feature_id) "
+        f"TO '{tagged}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
+        f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2)"
+    )
+    records = pq.ParquetFile(tagged).metadata.num_rows
+    if records > input_features or records > limits.max_input_rows:
+        raise ValueError("Places positions exceed the input feature count or row cap")
+    # EXACTLY one row per admitted place. Fewer means two admitted records shared
+    # a feature_id and the GROUP BY collapsed them, which would silently drop a
+    # place from every consumer of this artifact; the whole point is that a place
+    # cannot go missing here, so it fails closed rather than reporting a count.
+    if records != admitted_features:
+        raise ValueError("Places positions differ from the admitted feature count")
+    source = f"read_parquet('{tagged}')"
+    present = [
+        int(row[0])
+        for row in connection.execute(
+            f"SELECT DISTINCT pack_id FROM {source} ORDER BY pack_id"
+        ).fetchall()
+    ]
+    packs = []
+    for pack_id in present:
+        pack = workspace / f"positions-{pack_id:06d}.parquet"
+        connection.execute(
+            f"COPY (SELECT * EXCLUDE(pack_id) FROM {source} WHERE pack_id={pack_id} "
+            "ORDER BY partition_cell, feature_id) "
+            f"TO '{pack}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
+            f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2, "
+            "PRESERVE_ORDER true)"
+        )
+        if pack.stat().st_size > limits.max_output_bytes:
+            raise ValueError("Places positions pack exceeds output cap")
+        directory_value = positions_directory(pack, bucket=pack_id, bits=bits)
+        directory_path = workspace / f"positions-{pack_id:06d}.directory.json"
+        directory_path.write_text(json.dumps(directory_value, sort_keys=True) + "\n")
+        packs.append(
+            {
+                "pack_id": pack_id,
+                "shuffle_bucket": pack_id,
+                "records": directory_value["records"],
+                "object": store.put_content(
+                    pack, "map/places-v1/positions", ".parquet"
+                ),
+                "directory_object": store.put_content(
+                    directory_path, "map/places-v1/position-directories", ".json"
+                ),
+                "directory": directory_value,
+            }
+        )
+        pack.unlink(missing_ok=True)
+        directory_path.unlink(missing_ok=True)
+    tagged.unlink(missing_ok=True)
+    if sum(pack["records"] for pack in packs) != records:
+        raise ValueError("Places positions packs do not reconstruct the record count")
+    return {
+        "schema": POSITIONS_SCHEMA,
+        "records": records,
+        "admitted_features": admitted_features,
+        "shuffle_bucket_bits": bits,
+        "packs": packs,
+    }
+
+
+def validate_positions(marker: dict[str, Any], store: A.LocalObjectStore) -> None:
+    """A resumed marker must carry the positions artifact, intact.
+
+    Without this an admitted marker written before the artifact existed resumes
+    silently and one run mixes tasks that have positions with tasks that do not
+    -- the same failure mode the combiner check above closes.
+    """
+    positions = marker.get("positions")
+    if not isinstance(positions, dict) or positions.get("schema") != POSITIONS_SCHEMA:
+        raise ValueError("Places marker is missing its per-place positions artifact")
+    packs = positions.get("packs")
+    if not packs:
+        raise ValueError("Places positions artifact records no packs")
+    for pack in packs:
+        for identity in (pack["object"], pack["directory_object"]):
+            path = store.path(identity["key"])
+            if (
+                not path.is_file()
+                or path.stat().st_size != identity["bytes"]
+                or A.sha256_file(path) != identity["sha256"]
+            ):
+                raise ValueError("Places immutable positions object is missing or changed")
+    if sum(pack["records"] for pack in packs) != positions["records"]:
+        raise ValueError("Places positions packs do not reconstruct the record count")
+    if positions["records"] != marker["transform"]["admitted_features"]:
+        raise ValueError("Places positions differ from the admitted feature count")
 
 
 def map_task(
@@ -595,58 +797,14 @@ def map_task(
         # the ~3 GiB IPC copy never coexists with the pack files.
         transformed.unlink(missing_ok=True)
 
-        # --- per-place artifact -------------------------------------------
-        # One row per PLACE, emitted here and nowhere else, for two reasons.
-        #
-        # It must come BEFORE the combiner. The combiner keeps only the top
-        # `maximum_serving_candidates` rows per (partition_cell, token), so a
-        # place whose tokens all sit in saturated groups can vanish from the
-        # term set entirely. That is harmless for forward search and fatal for
-        # anything that must enumerate places -- a spatial reverse index above
-        # all. Deriving it from the combined set would silently lose places.
-        #
-        # And it is derived by a GROUP BY rather than a window or a DISTINCT ON:
-        # every column below is per-FEATURE (only token, token_hash, field_mask
-        # and the digests vary across a feature's term rows), so min() is exact
-        # and deterministic, and a hash aggregate is one streaming pass with no
-        # sort. The result is written straight to parquet -- there is no arrow
-        # round trip and no second copy of the term table.
-        #
-        # Ordered by (shuffle bucket, cell, feature_id) so a consumer that wants
-        # one bucket reads a contiguous run and can skip row groups on
-        # statistics, the same access pattern the term fragments give it.
-        places_path = workspace / "places.parquet"
-        connection.execute(
-            "COPY (SELECT feature_id, "
-            f"  min({shuffle_bucket_sql(limits.shuffle_bucket_bits)}) shuffle_bucket, "
-            "  min(partition_cell) partition_cell, min(partition_key) partition_key, "
-            "  min(longitude) longitude, min(latitude) latitude, "
-            "  min(primary_name) primary_name, min(brand_name) brand_name, "
-            "  min(category) category, min(locality) locality, "
-            "  min(region) region, min(country) country, "
-            "  min(confidence_rank) confidence_rank "
-            "FROM terms GROUP BY feature_id "
-            "ORDER BY shuffle_bucket, partition_cell, feature_id) "
-            f"TO '{places_path}' (FORMAT PARQUET, COMPRESSION ZSTD, "
-            f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
-            "PARQUET_VERSION V2, PRESERVE_ORDER true)"
+        positions = emit_positions(
+            connection,
+            workspace=workspace,
+            store=store,
+            limits=limits,
+            input_features=parquet.metadata.num_rows,
+            admitted_features=transform["admitted_features"],
         )
-        place_rows = pq.ParquetFile(places_path).metadata.num_rows
-        if place_rows > parquet.metadata.num_rows:
-            raise ValueError("Places per-place artifact exceeds the input feature count")
-        if place_rows > limits.max_input_rows:
-            raise ValueError("Places per-place artifact exceeds the input row cap")
-        if places_path.stat().st_size > limits.max_output_bytes:
-            raise ValueError("Places per-place artifact exceeds output cap")
-        place_records = {
-            "schema": PLACE_RECORDS_SCHEMA,
-            "records": place_rows,
-            "admitted_features": transform["admitted_features"],
-            "object": store.put_content(
-                places_path, "map/places-v1/place-records", ".parquet"
-            ),
-        }
-        places_path.unlink(missing_ok=True)
         head_candidates_path = workspace / "head-candidates.parquet"
         connection.execute(
             f"COPY (SELECT * FROM terms QUALIFY row_number() OVER (PARTITION BY token "
@@ -870,7 +1028,7 @@ def map_task(
             "packs": packs,
             "head_candidates": head_candidates,
             "combiner": combiner,
-            "place_records": place_records,
+            "positions": positions,
             "binding": binding,
         }
         store.write_marker_last(marker_key(task_id), marker)

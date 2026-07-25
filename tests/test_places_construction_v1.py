@@ -956,11 +956,11 @@ def test_map_combiner_discards_below_serving_rank_and_proves_additivity(
     # rows -- and a place whose tokens ALL sit in saturated groups could vanish
     # from the term set entirely. Anything that must enumerate places (a spatial
     # reverse index above all) reads this artifact, so it is emitted before the
-    # combiner and must still hold exactly one row per admitted feature.
-    records = marker["place_records"]
-    assert records["schema"] == module.PLACE_RECORDS_SCHEMA
-    assert records["records"] == marker["transform"]["admitted_features"]
-    assert records["records"] == len(rows)
+    # combiner and must still hold exactly one row per admitted record.
+    positions = marker["positions"]
+    assert positions["schema"] == module.POSITIONS_SCHEMA
+    assert positions["records"] == marker["transform"]["admitted_features"]
+    assert positions["records"] == len(rows)
     assert combiner["discarded"]["records"] > 0, "fixture must exercise discarding"
 
     # The proof the combiner rests on: kept + discarded reconstructs the
@@ -1775,3 +1775,289 @@ def test_reduce_job_is_wall_bounded_not_only_each_serving_stage(
     assert 0 < module._remaining_wall(started, limits) <= 20
     with pytest.raises(ValueError, match="exhausted its wall budget"):
         module._remaining_wall(module.time.monotonic() - 121.0, limits)
+
+
+def _positions_limits(module, *, max_input_rows: int):
+    return module.Limits(
+        max_input_rows=max_input_rows,
+        max_pack_rows=100_000,
+        parquet_row_group_rows=64,
+        max_rss_bytes=2 * 1024**3,
+        max_scratch_bytes=2 * 1024**3,
+        max_output_bytes=512 * 1024**2,
+        wall_seconds=180,
+        allow_unpinned_duckdb=True,
+    )
+
+
+def _run_positions_map(module, binaries, tmp_path, rows, *, name):
+    source = tmp_path / f"{name}-source.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    limits_path = tmp_path / f"{name}-source-limits.json"
+    limits_path.write_text(json.dumps({"objects": [
+        {"records": len(rows),
+         "row_groups": pq.ParquetFile(source).metadata.num_row_groups}]}))
+    store = module.A.LocalObjectStore(tmp_path / f"{name}-store")
+    marker = module.map_task(
+        input_path=source, source_limits=limits_path, store=store,
+        scratch_root=tmp_path / f"{name}-scratch", request_sha256="56" * 32,
+        task_id=f"places-{name}",
+        transform_binary=binaries["places-transform-v1"],
+        proof_binary=binaries["places-proof-directory"],
+        limits=_positions_limits(module, max_input_rows=len(rows) + 10),
+    )
+    return marker, store
+
+
+def test_positions_packs_are_bucketed_ordered_and_complete(
+    tmp_path, construction_binaries, construction_module
+):
+    # The per-place positions artifact is the whole reason reverse can be added
+    # later without re-running the planet map. It has to satisfy three things at
+    # once: one row per admitted place RECORD, the SAME shuffle as the term packs
+    # (a cell never split across buckets), and a deterministic order in a pack.
+    module = construction_module
+    points = [[0.0, 0.0], [-90.0, -45.0], [139.7, 35.7], [7.4, 43.7], [-58.4, -34.6]]
+    rows = [
+        {
+            "id": str(uuid.UUID(int=11_000 + index)),
+            "primary_name": f"Place {index}", "category": "library",
+            "locality": "Town", "country": "XX", "confidence": 0.5,
+            "point": points[index % len(points)], "source_row_index": index,
+        }
+        for index in range(400)
+    ]
+    marker, store = _run_positions_map(
+        module, construction_binaries, tmp_path, rows, name="positions"
+    )
+
+    positions = marker["positions"]
+    assert positions["schema"] == module.POSITIONS_SCHEMA
+    assert positions["shuffle_bucket_bits"] == module.SHUFFLE_BUCKET_BITS
+    # Exactly one row per admitted place, no more and no fewer.
+    assert positions["records"] == marker["transform"]["admitted_features"] == len(rows)
+    assert sum(pack["records"] for pack in positions["packs"]) == positions["records"]
+
+    # Exactly the buckets the TERM packs used, and nothing else: both artifacts
+    # ride one shuffle, so a bucket present in one and absent from the other
+    # would mean a consumer reading a bucket range sees the cells in one
+    # artifact and not the other.
+    term_buckets = {pack["shuffle_bucket"] for pack in marker["packs"]}
+    positions_buckets = [pack["shuffle_bucket"] for pack in positions["packs"]]
+    assert positions_buckets == sorted(positions_buckets)
+    assert set(positions_buckets) == term_buckets
+    assert len(positions_buckets) >= 4, "fixture must span several cells"
+
+    seen_cells = set()
+    seen_records = set()
+    for pack in positions["packs"]:
+        assert pack["pack_id"] == pack["shuffle_bucket"]
+        assert pack["directory"]["schema"] == module.POSITIONS_DIRECTORY_SCHEMA
+        assert pack["directory"]["shuffle_bucket"] == pack["shuffle_bucket"]
+        path = store.path(pack["object"]["key"])
+        table = pq.read_table(path)
+        # Self-sufficient by decision: a reverse hit must render without an /id
+        # round-trip, and the locator is carried so duplicate ids stay distinct.
+        assert table.column_names == list(module.POSITIONS_COLUMNS)
+        assert "primary_name" in table.column_names
+        assert table.num_rows == pack["records"]
+        cells = table.column("partition_cell").to_pylist()
+        features = table.column("feature_id").to_pylist()
+        locators = list(zip(
+            table.column("source_object_index").to_pylist(),
+            table.column("source_row_group").to_pylist(),
+            table.column("source_row_index").to_pylist(),
+        ))
+        # Every cell in this pack hashes to this pack's bucket -- the property
+        # the whole shuffle exists for, asserted against the Python mirror.
+        for cell in set(cells):
+            assert module.shuffle_bucket(module.cell_partition_key(cell)) == (
+                pack["shuffle_bucket"]
+            )
+        # Deterministic order inside the pack, total on (cell, id, locator).
+        keyed = [(cell, feature, locator)
+                 for cell, feature, locator in zip(cells, features, locators)]
+        assert keyed == sorted(keyed)
+        # The directory must reconcile to the bytes it describes.
+        layout = [group["records"] for group in pack["directory"]["row_groups"]]
+        assert sum(layout) == table.num_rows
+        metadata = pq.ParquetFile(path).metadata
+        assert layout == [
+            metadata.row_group(index).num_rows for index in range(len(layout))
+        ]
+        directory_cells = {
+            item["partition_cell"]: item["records"]
+            for item in pack["directory"]["cells"]
+        }
+        assert directory_cells == collections.Counter(cells)
+        seen_cells |= set(cells)
+        seen_records |= set(zip(features, locators))
+    assert len(seen_records) == len(rows), "a place record must appear exactly once"
+    assert len(seen_cells) >= 4
+
+    # Determinism: a second run over the same input must produce byte-identical
+    # packs, which the content-addressed identities prove directly.
+    again, _ = _run_positions_map(
+        module, construction_binaries, tmp_path, rows, name="positions-again"
+    )
+    for field in ("object", "directory_object"):
+        assert [pack[field]["sha256"] for pack in again["positions"]["packs"]] == [
+            pack[field]["sha256"] for pack in positions["packs"]
+        ]
+
+
+def test_positions_keep_places_the_combiner_removed_entirely(
+    tmp_path, construction_binaries, construction_module
+):
+    # The failure this artifact exists to prevent. Every feature below carries
+    # the SAME five tokens and no unique one, so every (cell, token) group
+    # saturates and the combiner deletes the lowest-ranked features' term rows
+    # completely -- they are not merely truncated, they are gone from the term
+    # store. Deriving positions after the combiner would lose exactly them.
+    module = construction_module
+    cap = module.Limits().maximum_serving_candidates
+    total = cap + 60
+    rows = [
+        {
+            "id": str(uuid.UUID(int=13_000 + index)),
+            "primary_name": "Shared Name", "category": "library",
+            "locality": "Town", "country": "XX",
+            "confidence": index / (total - 1),
+            "point": [0.0, 0.0], "source_row_index": index,
+        }
+        for index in range(total)
+    ]
+    marker, store = _run_positions_map(
+        module, construction_binaries, tmp_path, rows, name="saturated"
+    )
+
+    def features_of(packs):
+        seen = set()
+        for pack in packs:
+            table = pq.read_table(
+                store.path(pack["object"]["key"]), columns=["feature_id"]
+            )
+            seen |= set(table.column("feature_id").to_pylist())
+        return seen
+
+    term_features = features_of(marker["packs"])
+    positions_features = features_of(marker["positions"]["packs"])
+
+    assert marker["combiner"]["discarded"]["records"] > 0
+    # The fixture must actually strand places, or this test proves nothing.
+    stranded = positions_features - term_features
+    assert len(stranded) == total - cap, (
+        "fixture must drop whole places from the term store"
+    )
+    assert len(positions_features) == total == marker["positions"]["records"]
+    assert term_features < positions_features
+
+
+def test_positions_keep_every_copy_of_a_duplicated_id(
+    tmp_path, construction_binaries, construction_module
+):
+    # The frozen evidence spec requires that a repeated GERS id survive as
+    # SEVERAL distinct serving candidates keyed by their source locators
+    # (tests/test_places_duplicate_uuid_gate.py). So the positions artifact is
+    # per admitted RECORD, not per distinct id: grouping by feature_id would both
+    # collapse these copies and abort a planet map job on data the contract
+    # declares valid. Both the same-cell and cross-cell duplicate matter -- the
+    # cross-cell pair also proves the copies can legitimately land in two
+    # different shuffle buckets.
+    module = construction_module
+    twin = str(uuid.UUID(int=19_001))
+    across = str(uuid.UUID(int=19_002))
+    rows = [
+        {"id": twin, "primary_name": "Twin Cafe", "category": "cafe",
+         "locality": "Town", "country": "XX", "confidence": 0.5,
+         "point": [7.4, 43.7], "source_row_index": 0},
+        {"id": twin, "primary_name": "Twin Cafe", "category": "cafe",
+         "locality": "Town", "country": "XX", "confidence": 0.5,
+         "point": [7.4, 43.7], "source_row_index": 1},
+        {"id": across, "primary_name": "Split Cafe", "category": "cafe",
+         "locality": "Town", "country": "XX", "confidence": 0.5,
+         "point": [7.4, 43.7], "source_row_index": 2},
+        {"id": across, "primary_name": "Split Cafe", "category": "cafe",
+         "locality": "Town", "country": "XX", "confidence": 0.5,
+         "point": [139.7, 35.7], "source_row_index": 3},
+        {"id": str(uuid.UUID(int=19_003)), "primary_name": "Solo Cafe",
+         "category": "cafe", "locality": "Town", "country": "XX",
+         "confidence": 0.5, "point": [-58.4, -34.6], "source_row_index": 4},
+    ]
+    marker, store = _run_positions_map(
+        module, construction_binaries, tmp_path, rows, name="duplicate"
+    )
+
+    seen = []
+    for pack in marker["positions"]["packs"]:
+        table = pq.read_table(store.path(pack["object"]["key"]))
+        for row in table.to_pylist():
+            assert module.shuffle_bucket(
+                module.cell_partition_key(row["partition_cell"])
+            ) == pack["shuffle_bucket"]
+            seen.append((str(uuid.UUID(bytes=row["feature_id"])),
+                         row["partition_cell"], row["source_object_index"],
+                         row["source_row_group"], row["source_row_index"],
+                         row["primary_name"]))
+
+    assert marker["positions"]["records"] == len(rows)
+    assert marker["positions"]["records"] == marker["transform"]["admitted_features"]
+    assert len(seen) == len(rows)
+    assert len(set(seen)) == len(rows), "every copy is a distinct row"
+    # Both copies of the same-cell duplicate, distinguished only by locator.
+    same_cell = [entry for entry in seen if entry[0] == twin]
+    assert len(same_cell) == 2
+    assert len({entry[1] for entry in same_cell}) == 1
+    assert len({entry[2:5] for entry in same_cell}) == 2
+    # Both copies of the cross-cell duplicate, in two different cells.
+    split = [entry for entry in seen if entry[0] == across]
+    assert len(split) == 2
+    assert len({entry[1] for entry in split}) == 2
+    # And the rendering fields ride along, so a reverse hit needs no /id lookup.
+    assert {entry[5] for entry in seen} == {"Twin Cafe", "Split Cafe", "Solo Cafe"}
+
+
+def test_resume_fails_closed_on_a_marker_without_positions(
+    tmp_path, construction_binaries, construction_module
+):
+    # A marker written before this artifact existed must not resume silently --
+    # otherwise one run mixes tasks that have positions with tasks that do not,
+    # and the gap is invisible until reverse is built. Same reasoning as the
+    # combiner check next to it.
+    module = construction_module
+    rows = [
+        {
+            "id": str(uuid.UUID(int=17_000 + index)),
+            "primary_name": f"Place {index}", "category": "library",
+            "locality": "Town", "country": "XX", "confidence": 0.5,
+            "point": [7.4, 43.7], "source_row_index": index,
+        }
+        for index in range(40)
+    ]
+    marker, store = _run_positions_map(
+        module, construction_binaries, tmp_path, rows, name="resume"
+    )
+    resumed = module.map_task(
+        input_path=tmp_path / "resume-source.parquet",
+        source_limits=tmp_path / "resume-source-limits.json",
+        store=store, scratch_root=tmp_path / "resume-scratch",
+        request_sha256="56" * 32, task_id="places-resume",
+        transform_binary=construction_binaries["places-transform-v1"],
+        proof_binary=construction_binaries["places-proof-directory"],
+        limits=_positions_limits(module, max_input_rows=len(rows) + 10),
+    )
+    assert resumed["admitted_existing"] is True
+
+    stale = {name: value for name, value in marker.items()
+             if name not in {"positions", "admitted_existing"}}
+    # The error must say how to get unstuck, since a RESUME_FROM of a pre-change
+    # run hits it on every map task.
+    with pytest.raises(ValueError, match="delete map/places-v1/tasks/places-resume"):
+        module.validate_marker(stale, "56" * 32, "places-resume", store)
+
+    # And a marker whose positions claim more rows than its packs hold is not
+    # accepted either: the counts must reconcile, as the pack bindings do.
+    tampered = {**stale, "positions": {
+        **marker["positions"], "records": marker["positions"]["records"] + 1}}
+    with pytest.raises(ValueError, match="positions"):
+        module.validate_marker(tampered, "56" * 32, "places-resume", store)

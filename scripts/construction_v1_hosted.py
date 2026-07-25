@@ -351,6 +351,13 @@ def cmd_run_map(args: argparse.Namespace) -> int:
         "records": marker["binding"]["records"],
         "packs": len(marker["packs"]),
     }
+    # Places also emits the per-place positions packs (one row per admitted
+    # place, same shuffle as the term packs). Report them so a map job's log
+    # shows the artifact exists; nothing downstream of map consumes them yet.
+    positions = marker.get("positions")
+    if isinstance(positions, dict):
+        summary["positions_packs"] = len(positions["packs"])
+        summary["positions_records"] = positions["records"]
     if args.output:
         write_json(args.output, summary)
     print(json.dumps(summary, sort_keys=True))
