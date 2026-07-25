@@ -740,6 +740,53 @@ def test_sharded_global_head_partitions_reconciles_and_serves(
     assert hits and hits[0]["rank"] == max(row["rank"] for row in hits)
 
 
+def test_sharded_head_refuses_shard_bits_that_breach_the_encoder_cap(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    # The head builder must reject a shard_bits whose worst shard would exceed the
+    # encoder's MAX_INDEX_ENTRIES *before* spending an encode. The production
+    # workflow passed 4 (16 shards) against a planet token universe needing 4096,
+    # and the only thing that reported it was the encoder's `bail!` -- after the
+    # entire map/reduce/merge had been paid for.
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-a", "ab", 150
+    )
+    # Squeeze the cap instead of growing the fixture to 250k tokens: the guard is
+    # a comparison against this constant, so this exercises the real code path.
+    monkeypatch.setattr(module, "SERVING_MAX_INDEX_ENTRIES", 4)
+    with pytest.raises(ValueError, match="shard_bits too small for this token universe"):
+        module.build_sharded_global_head_from_markers(
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / "head-scratch",
+            # Absent binaries: reaching either of these would raise
+            # FileNotFoundError, so the ValueError proves the guard fires FIRST.
+            encoder_binary=tmp_path / "no-such-encoder",
+            verifier_binary=tmp_path / "no-such-verifier",
+            limits=limits,
+            shard_bits=1,
+        )
+    # Fail-closed, not advisory: nothing was published under the serving prefix.
+    assert not list((tmp_path / "store").rglob("*.plhd"))
+
+
+def test_head_shard_sizing_arithmetic_is_exact(construction_module):
+    module = construction_module
+    cap = module.SERVING_MAX_INDEX_ENTRIES
+    # Ceiling division, so a remainder never rounds a breaching shard down.
+    assert module.head_entries_per_shard(cap * 16, 4) == cap
+    assert module.head_entries_per_shard(cap * 16 + 1, 4) == cap + 1
+    assert module.head_entries_per_shard(0, 12) == 0
+    assert module.minimum_head_shard_bits(cap * 16) == 4
+    assert module.minimum_head_shard_bits(cap * 16 + 1) == 5
+    with pytest.raises(ValueError):
+        module.head_entries_per_shard(10, 0)
+    with pytest.raises(ValueError):
+        module.head_entries_per_shard(10, 25)
+
+
 def test_sharded_global_head_merge_is_order_independent(
     tmp_path, construction_binaries, construction_module
 ):

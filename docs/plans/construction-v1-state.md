@@ -360,6 +360,22 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
   a multiplicative hash of the cell so per-bucket cell COUNTS are uniform by
   construction. Retiring the committed plan is a separate change with its own
   argument to make.
+- **The head shard count is `DEFAULT_HEAD_SHARD_BITS = 12` (4096 shards), and no
+  caller may re-type it as a literal.** A head shard is one PLHD artifact and its
+  index-entry count is its distinct-token count, capped at `MAX_INDEX_ENTRIES =
+  250_000` by the encoder. The workflow and the hosted CLI default both shipped a
+  hardcoded `4` (16 shards) while the design said 4096: at the measured 25–33.6M
+  planet distinct tokens that is 1.6–2.1M entries per shard, 6–8× over the cap,
+  and the only thing that reported it was the encoder's `bail!` — raised after the
+  whole map, reduce and head merge had been paid for. Fixed in the workflow and
+  wired to the constant in the CLI, with the head builder now measuring the worst
+  shard exactly and failing closed *before* any encode. **256 shards
+  (`shard_bits = 8`) is the viable cheaper alternative**: 97,656 entries/shard
+  still clears the cap and it adds 240 objects to the finalize publish set instead
+  of 4,080, which matters against the 100,000 remote-operation finalize budget.
+  Whether to trade head-shard granularity for publish-set headroom is an owner
+  call that has not been made; 4096 is what the committed design says, so 4096 is
+  what ships until it is.
 
 ## Addresses
 

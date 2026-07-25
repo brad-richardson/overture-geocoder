@@ -18,7 +18,19 @@ from typing import Any
 # token's index hash (12 bits => 4096 shards => first three hex nibbles),
 # mirroring the production UUID-prefix ID index.
 INDEX_DOMAIN = b"overture-places-serving-index-v1\0"
+# 12 bits => 4096 shards, the count docs/plans/2026-07-24-places-global-scale-plan.md
+# committed to (matching the production UUID-prefix ID index). It is sized off the
+# measured planet token universe: ~25-33.6M distinct tokens / 4096 ~= 6.1-8.2k index
+# entries per shard, ~30x under SERVING_MAX_INDEX_ENTRIES. Every production caller
+# must reference THIS constant -- a hardcoded 4 in the workflow and in the hosted CLI
+# default put the planet head 6-8x OVER the encoder cap, and that only surfaced as a
+# `bail!` after the whole map/reduce/merge had been paid for.
 DEFAULT_HEAD_SHARD_BITS = 12
+# Mirror of MAX_INDEX_ENTRIES in
+# crates/geocoder-construction/src/bin/places_serving_encode_v1.rs. The Rust encoder
+# is the enforcing side; this copy exists only so the Python head builder can
+# fail-fast BEFORE spending an encode, and a contract test pins the two together.
+SERVING_MAX_INDEX_ENTRIES = 250_000
 
 
 def index_hash(key: bytes) -> int:
@@ -29,6 +41,28 @@ def head_shard_of(token: str, shard_bits: int) -> int:
     if not 1 <= shard_bits <= 24:
         raise ValueError("head shard bits out of range")
     return index_hash(token.encode("utf-8")) >> (64 - shard_bits)
+
+
+def head_entries_per_shard(index_entries: int, shard_bits: int) -> int:
+    """Uniform-hash index entries per head shard (a LOWER bound on the worst shard).
+
+    A head index entry is one distinct token, so this is the sizing arithmetic that
+    has to clear SERVING_MAX_INDEX_ENTRIES. Real hashing is not perfectly uniform,
+    so the actual worst shard is larger; the head builder measures that exactly.
+    """
+    if index_entries < 0:
+        raise ValueError("index entries cannot be negative")
+    if not 1 <= shard_bits <= 24:
+        raise ValueError("head shard bits out of range")
+    return -(-index_entries // (1 << shard_bits))
+
+
+def minimum_head_shard_bits(index_entries: int) -> int:
+    """Smallest shard_bits whose uniform-hash entries-per-shard clears the cap."""
+    for bits in range(1, 25):
+        if head_entries_per_shard(index_entries, bits) <= SERVING_MAX_INDEX_ENTRIES:
+            return bits
+    raise ValueError("no head shard bits in range can hold this token universe")
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -2358,9 +2392,21 @@ def build_sharded_global_head_from_markers(
     Per-task head candidates are folded associatively to one merged head, then
     partitioned into `1 << shard_bits` shards by the top bits of each token's
     index hash (the same hash the encoder/Worker use). Each non-empty shard is
-    encoded as an independent PLHD head artifact (per-shard entry counts stay far
-    under MAX_INDEX_ENTRIES, which remains a fail-closed guard per shard) and the
-    whole set is bound by a manifest the sharded verifier reconciles.
+    encoded as an independent PLHD head artifact and the whole set is bound by a
+    manifest the sharded verifier reconciles.
+
+    PRECONDITION on `shard_bits`: a head shard is one PLHD artifact, so its
+    distinct-token count must fit the encoder's MAX_INDEX_ENTRIES. That is NOT a
+    property of this function -- it is a property of the value the caller passes.
+    It holds with ~30x margin at DEFAULT_HEAD_SHARD_BITS (12 => 4096 shards) over
+    the measured planet token universe; it is breached by 6-8x at shard_bits=4.
+    Callers must not pass a value that breaches the cap, and this function no
+    longer assumes they got it right: before any encode runs it measures the
+    EXACT worst-case shard from the merged head and raises if that shard would
+    breach the cap, so the failure costs one DuckDB aggregate instead of a full
+    encode pass. Small callers (the slice harness, tests) may legitimately pass a
+    small value -- the shard count is a per-build manifest field, not a format
+    constant -- as long as their token universe fits.
     """
     import duckdb
 
@@ -2415,6 +2461,30 @@ def build_sharded_global_head_from_markers(
         ):
             raise ValueError(
                 "Places independent merged-head binding disagrees with the merged head"
+            )
+        # Fail-fast on the shard_bits precondition, EXACTLY and before any encode.
+        # A head index key is the token alone, so a shard's index-entry count is
+        # its distinct-token count -- the same number the Rust encoder counts and
+        # caps. Measure the worst shard here rather than discovering it as an
+        # encoder `bail!` several thousand shard encodes in (or, for the value the
+        # workflow used to pass, after the entire map/reduce/merge was paid for).
+        # The UDF is applied to the distinct tokens, not to every head row.
+        (worst_shard_entries,) = connection.execute(
+            "SELECT coalesce(max(entries), 0) FROM ("
+            "  SELECT count(*) AS entries FROM ("
+            f"   SELECT DISTINCT token FROM read_parquet('{merged}')"
+            "  ) GROUP BY head_shard(token)"
+            ")"
+        ).fetchone()
+        if worst_shard_entries > SERVING_MAX_INDEX_ENTRIES:
+            raise ValueError(
+                "Places head shard_bits too small for this token universe: "
+                f"shard_bits={shard_bits} ({shard_count} shards) puts "
+                f"{worst_shard_entries} index entries in the worst shard, over the "
+                f"encoder cap of {SERVING_MAX_INDEX_ENTRIES}; "
+                f"{total_index_entries} distinct tokens need at least "
+                f"{minimum_head_shard_bits(total_index_entries)} shard bits even "
+                "under a perfectly uniform hash"
             )
         shard_dir = workspace / "shards"
         # PARTITION_BY encodes the shard in the path and omits it from the data

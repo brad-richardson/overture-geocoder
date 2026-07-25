@@ -951,6 +951,11 @@ def main() -> None:
     r.add_argument("--parquet-row-group-rows", type=int, default=131_072)
     r.add_argument("--hydrate-batch-rows", type=int, default=2048)
     r.add_argument("--reduce-partitions", type=int, default=3)
+    # Deliberately NOT the production DEFAULT_HEAD_SHARD_BITS (12 => 4096 shards).
+    # The rehearsal runs a 12-task candidate universe (~4.7M distinct tokens), where
+    # 6 bits (64 shards) is ~74k entries/shard -- under the encoder cap, and far
+    # fewer artifacts to encode. The head builder measures the worst shard exactly
+    # and fails closed before encoding if a value here ever stops clearing the cap.
     r.add_argument("--head-shard-bits", type=int, default=6)
     r.add_argument("--memory-limit", default="2GB")
     r.add_argument("--threads", type=int, default=2)

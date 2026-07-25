@@ -742,7 +742,7 @@ jobs:
               --encoder-binary "$BINDIR/places-serving-encode-v1" \
               --verifier-binary "$BINDIR/places-serving-verify-v1" \
               --staging-report head/staging.json \
-              --scratch-dir head-scratch --shard-bits 4 --output head/head.json
+              --scratch-dir head-scratch --shard-bits 12 --output head/head.json
             echo "HEAD staging: $(jq -c '{staged_bytes_hydrated,staged_peak_resident_bytes}' head/staging.json)"
             echo "HEAD END places shards=$(jq -r '.shard_count' head/head.json) marker_written_last=true"
           else

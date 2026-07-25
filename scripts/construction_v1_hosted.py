@@ -1896,7 +1896,11 @@ def build_parser() -> argparse.ArgumentParser:
     head.add_argument("--encoder-binary", default="")
     head.add_argument("--verifier-binary", default="")
     head.add_argument("--scratch-dir", default="/tmp/construction-v1-head-scratch")
-    head.add_argument("--shard-bits", type=int, default=4)
+    # The default is the ONE committed constant, never a re-typed literal: a 4-bit
+    # (16-shard) head is ~6-8x over the encoder's MAX_INDEX_ENTRIES cap at the
+    # planet token universe, and that only surfaces after map+reduce+merge are paid
+    # for. See scripts/places_construction_v1.py:DEFAULT_HEAD_SHARD_BITS.
+    head.add_argument("--shard-bits", type=int, default=PLACES.DEFAULT_HEAD_SHARD_BITS)
     head.add_argument("--output", type=Path, required=True)
     _add_staging_arguments(head)
     head.set_defaults(func=cmd_run_head)
