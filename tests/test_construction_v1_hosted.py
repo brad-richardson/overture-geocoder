@@ -381,18 +381,51 @@ def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binar
     _run("plan-reduce", "--contract", contract, "--store-root", store, "--family", "places",
          "--markers-dir", markers_dir, "--scratch-dir", tmp_path / "plan-scratch",
          "--output", plan, "--matrix-out", tmp_path / "reduce-matrix.json")
-    partitions = json.loads(plan.read_text())["partitions"]
+    plan_document = json.loads(plan.read_text())
+    partitions = plan_document["partitions"]
     assert len(partitions) >= 1
+    # Places reduce jobs own a SHUFFLE-BUCKET RANGE, not a partition range: each
+    # job opens the map fragments in its range once and emits every partition
+    # whose cell hashes into it.
+    execution = plan_document["reduce_execution"]
+    assert execution["ownership"] == "shuffle-bucket-range"
+    assert execution["bucket_count"] == 1 << execution["shuffle_bucket_bits"]
+    assert all(batch["bucket_start"] <= batch["bucket_end"] for batch in execution["batches"])
 
     reductions_dir = tmp_path / "reductions"
     reductions_dir.mkdir()
+    for batch in execution["batches"]:
+        _run("run-reduce", "--contract", contract, "--store-root", store, "--family", "places",
+             "--plan", plan, "--markers-dir", markers_dir,
+             "--batch-index", batch["batch_index"],
+             "--encoder-binary", binaries["places-serving-encode-v1"],
+             "--verifier-binary", binaries["places-serving-verify-v1"],
+             "--scratch-dir", tmp_path / f"reduce-scratch-{batch['batch_index']}",
+             "--output-dir", reductions_dir)
+    assert sorted(p.name for p in reductions_dir.glob("*.json")) == [
+        f"{index:04d}.json" for index in range(len(partitions))
+    ]
+
+    # The same partitions reduced one at a time must produce the SAME serving
+    # artifacts: how the bucket space is cut is an execution grouping only.
+    reference_dir = tmp_path / "reductions-per-partition"
+    reference_dir.mkdir()
     for index in range(len(partitions)):
         _run("run-reduce", "--contract", contract, "--store-root", store, "--family", "places",
              "--plan", plan, "--markers-dir", markers_dir, "--partition-index", index,
              "--encoder-binary", binaries["places-serving-encode-v1"],
              "--verifier-binary", binaries["places-serving-verify-v1"],
-             "--scratch-dir", tmp_path / f"reduce-scratch-{index}",
-             "--output", reductions_dir / f"{index:04d}.json")
+             "--scratch-dir", tmp_path / f"reduce-reference-{index}",
+             "--output", reference_dir / f"{index:04d}.json")
+    for index in range(len(partitions)):
+        ranged = json.loads((reductions_dir / f"{index:04d}.json").read_text())
+        single = json.loads((reference_dir / f"{index:04d}.json").read_text())
+        for field in ("partition", "binding", "leaf_object", "routed_object",
+                      "reconciled_row_groups", "serving_candidate_rows"):
+            assert ranged[field] == single[field], (index, field)
+        # Both paths are now watched, and the evidence records real peaks.
+        assert ranged["ingest_evidence"]["peak_rss_bytes"] > 0
+        assert single["ingest_evidence"]["peak_rss_bytes"] > 0
 
     head = tmp_path / "head.json"
     assert _admit_completed(store, "places", "head", index=0) is False

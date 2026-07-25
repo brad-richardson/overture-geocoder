@@ -53,22 +53,34 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
 - **Slice harness** — `build_slice_inventory_v1.py`, `run_slice_construction_v1.py`.
 - **Partition plan v2** (`scripts/places_partition_plan_v1.json`) — regenerated
   from 2026-07-22.0 post-combiner. Consumed only by `predict-reduce`.
+- **Reduce reads by bucket range** — a Places reduce job owns an inclusive
+  `[bucket_start, bucket_end]` (the `build_id_index.py --prefix-start/--prefix-end`
+  convention), derives its fragment set from the map markers, opens each fragment
+  **once**, and emits every partition whose cell hashes into the range. The
+  planner cuts the bucket space into contiguous strides rather than cutting the
+  partition list; `plan-reduce` records the ranges and the workflow matrix key is
+  unchanged. Outputs are byte-identical to the per-partition reducer, which is
+  still there for the single-partition CLI path and the rehearsal.
+- **Reduce is watched** — `StageWatchdog` now wraps the reducer's Python +
+  pyarrow + DuckDB ingest and its serving encode, with the same caps and the
+  same fail-closed semantics as the two `map_task` stages. It was the one phase
+  nothing bounded.
 
 ## The next increment, precisely
 
-**Reduce reads by bucket range.** Today a reduce job is per-partition and
-re-derives which fragments to open each time. It should own a *bucket range*
-(like `build_id_index.py --prefix-start/--prefix-end`), read each of its
-fragments once, and emit every partition whose cell falls in that range.
+**Map writes its fragments to R2 staging instead of the artifact store**, through
+the existing `ObjectStore` seam (`scripts/r2_verified_store.py` already has
+`FilesystemStore` and `S3Store`, create-only, content-addressed, tested). Reduce
+now reads exactly the fragments in its own bucket range, so this is the change
+that turns that from "reads less of a store it downloaded whole" into "fetches
+only its own keys" — and it is the reason the 63.5 GB store no longer has to
+travel between phases.
 
 Then, in order:
 
-1. Map writes fragments to R2 staging instead of the artifact store, through the
-   existing `ObjectStore` seam (`scripts/r2_verified_store.py` already has
-   `FilesystemStore` and `S3Store`, create-only, content-addressed, tested).
-2. Reduce/head/finalize read their own keys from R2. Artifacts carry markers and
+1. Reduce/head/finalize read their own keys from R2. Artifacts carry markers and
    JSON only.
-3. Scoped **staging-only** R2 token for map/reduce — today only `finalize` has
+2. Scoped **staging-only** R2 token for map/reduce — today only `finalize` has
    credentials, and this is a public repo with ~89 parallel map jobs.
 
 ## Numbers worth not re-deriving
@@ -114,6 +126,13 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
   policy, and the fail-closed cap gate all exist to avoid a global planning
   barrier. A cell-keyed shuffle removes that barrier: a consumer holding a cell's
   complete data can decide subdivision locally. Expect to retire most of it.
+  Bucket-range reduce deliberately did NOT retire it: the committed plan's
+  partition count is still `predict-reduce`'s structural floor (PR #155), and the
+  bucket-range prediction spreads that floored count uniformly over the bucket
+  space — uniform being the right model, not a convenience, because the bucket is
+  a multiplicative hash of the cell so per-bucket cell COUNTS are uniform by
+  construction. Retiring the committed plan is a separate change with its own
+  argument to make.
 
 ## Addresses
 
@@ -320,9 +339,9 @@ from capability analyses. Removing it is its own change: it touches the worker,
 
 ## Open follow-ups
 
-See `2026-07-24-construction-v1-follow-ups.md`. The two that can bite:
+See `2026-07-24-construction-v1-follow-ups.md`. The one that can still bite:
 
-1. `reduce_partition` has no `StageWatchdog`, and the raised row cap doubles the
-   peak of the one phase nothing bounds.
-2. Three evidence-spec `*_hard_cap` values are dead declarations the build now
+1. Three evidence-spec `*_hard_cap` values are dead declarations the build now
    exceeds. Enforce them or delete them.
+
+(The reduce `StageWatchdog` gap is closed — see "What has landed".)

@@ -285,6 +285,98 @@ def test_reduce_batching_reports_measured_timing_that_fits_the_timeout():
 
 
 # --------------------------------------------------------------------------- #
+# Places reduce jobs own a SHUFFLE-BUCKET RANGE
+# --------------------------------------------------------------------------- #
+@pytest.mark.parametrize("bits,job_cap", [(8, 256), (8, 128), (8, 100), (4, 16), (4, 3)])
+def test_reduce_bucket_ranges_cover_the_bucket_space_exactly_once(bits, job_cap):
+    # Ownership is exact only if the ranges are a TOTAL, DISJOINT cover of the
+    # bucket space -- a gap silently drops every cell that hashed into it.
+    buckets = 1 << bits
+    counts = [(index % 3) for index in range(buckets)]
+    stride, ranges = HOSTED._reduce_bucket_ranges(counts, job_cap=job_cap)
+    assert len(ranges) <= job_cap
+    covered = []
+    for item in ranges:
+        assert item["bucket_start"] <= item["bucket_end"]
+        covered.extend(range(item["bucket_start"], item["bucket_end"] + 1))
+    assert covered == list(range(buckets))
+    assert stride >= 1
+    # Partition offsets are contiguous, which is what lets a bucket range double
+    # as the partition range the plan and the workflow already speak in.
+    offset = 0
+    for item in ranges:
+        assert item["partition_start"] == offset
+        assert item["partition_count"] == sum(
+            counts[item["bucket_start"] : item["bucket_end"] + 1]
+        )
+        offset += item["partition_count"]
+    assert offset == sum(counts)
+
+
+def test_reduce_bucket_ranges_fail_closed_when_one_bucket_cannot_fit_a_job():
+    # A bucket is INDIVISIBLE -- a cell never splits across buckets -- so there is
+    # no smaller stride to fall back on. Failing closed here is the honest answer;
+    # silently dispatching a job that times out is not.
+    counts = [400] + [0] * 255
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._reduce_bucket_ranges(counts, job_cap=256, timeout_max_batch=165)
+    assert "indivisible" in str(excinfo.value)
+
+
+def test_places_reduce_execution_is_bucket_ranges_over_the_plan():
+    bits = 4
+    partitions = [
+        {"partition_cell": cell, "shuffle_bucket": HOSTED.PLACES.shuffle_bucket(
+            HOSTED.PLACES.cell_partition_key(cell), bits)}
+        for cell in ("0000", "0001", "0002", "00ff", "b2e3", "5e5e", "ffff")
+    ]
+    partitions.sort(key=lambda item: (item["shuffle_bucket"], item["partition_cell"]))
+    batch_size, dispatched, details = HOSTED._places_reduce_execution(
+        partitions, bits=bits, job_cap=16, timeout_max_batch=165
+    )
+    assert details["bucket_count"] == 16 and details["bucket_stride"] == 1
+    # Only populated ranges are dispatched -- an empty range would read nothing --
+    # but every partition is still owned by exactly one of them.
+    assert sum(item["partition_count"] for item in dispatched) == len(partitions)
+    assert [item["batch_index"] for item in dispatched] == list(range(len(dispatched)))
+    assert batch_size == max(item["partition_count"] for item in dispatched)
+    assert details["populated_bucket_ranges"] == len(dispatched)
+
+
+def test_places_reduce_execution_rejects_a_plan_not_ordered_by_bucket():
+    bits = 8
+    ordered = sorted(
+        ("0000", "b2e3", "5e5e", "ffff"),
+        key=lambda cell: HOSTED.PLACES.shuffle_bucket(
+            HOSTED.PLACES.cell_partition_key(cell), bits
+        ),
+    )
+    partitions = [{"partition_cell": cell} for cell in reversed(ordered)]
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._places_reduce_execution(
+            partitions, bits=bits, job_cap=256, timeout_max_batch=None
+        )
+    assert "ordered by shuffle bucket" in str(excinfo.value)
+
+
+def test_predict_reduce_places_plans_bucket_ranges(tmp_path, capsys):
+    contract = _contract(tmp_path)
+    assert HOSTED.main([
+        "predict-reduce", "--contract", str(contract), "--family", "places",
+        "--inventory", str(PLACES_INVENTORY),
+    ]) == 0
+    out = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
+    assert out["reduce_ownership"] == "shuffle-bucket-range"
+    assert out["bucket_count"] == 1 << HOSTED.PLACES.SHUFFLE_BUCKET_BITS
+    # The committed partition-plan floor (PR #155) still supplies the partition
+    # count; only the way jobs are cut changed.
+    assert "committed plan" in out["prediction_basis"]
+    assert out["reduce_job_count"] == out["populated_bucket_ranges"]
+    assert out["reduce_job_count"] <= out["reduce_job_cap"]
+    assert out["reduce_batch_size"] <= out["timing_assumption"]["timeout_max_batch"]
+
+
+# --------------------------------------------------------------------------- #
 # P1-4: fail-closed remote-marker resume skip
 # --------------------------------------------------------------------------- #
 def _admit(tmp_path: Path, store: Path, remote: Path | None, contract: Path):

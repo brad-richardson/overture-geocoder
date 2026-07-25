@@ -116,20 +116,27 @@ hosted("plan-reduce", "--contract", contract, "--store-root", store,
        "--family", "places", "--markers-dir", markers,
        "--scratch-dir", WORK / "plan-scratch", "--output", plan,
        "--matrix-out", WORK / "reduce-matrix.json")
-partitions = json.loads(plan.read_text())["partitions"]
-print(f"  {len(partitions)} partitions  {time.time()-t:.1f}s")
+plan_document = json.loads(plan.read_text())
+partitions = plan_document["partitions"]
+execution = plan_document["reduce_execution"]
+print(f"  {len(partitions)} partitions in {execution['job_count']} bucket-range jobs "
+      f"(stride {execution['bucket_stride']} of {execution['bucket_count']} buckets)"
+      f"  {time.time()-t:.1f}s")
 
 # --- reduce ---------------------------------------------------------------
-t = phase(f"run-reduce x{len(partitions)}")
+# One job per BUCKET RANGE, exactly as the hosted matrix dispatches it: the job
+# opens each map fragment in its range once and emits every partition whose cell
+# hashes into the range.
+t = phase(f"run-reduce x{execution['job_count']} bucket ranges")
 reductions = WORK / "reductions"; reductions.mkdir(exist_ok=True)
-for index in range(len(partitions)):
+for batch in execution["batches"]:
     hosted("run-reduce", "--contract", contract, "--store-root", store,
            "--family", "places", "--plan", plan, "--markers-dir", markers,
-           "--partition-index", index,
+           "--batch-index", batch["batch_index"],
            "--encoder-binary", BIN / "places-serving-encode-v1",
            "--verifier-binary", BIN / "places-serving-verify-v1",
-           "--scratch-dir", WORK / f"reduce-scratch-{index}",
-           "--output", reductions / f"{index:04d}.json")
+           "--scratch-dir", WORK / f"reduce-scratch-{batch['batch_index']}",
+           "--output-dir", reductions)
 elapsed = time.time() - t
 print(f"  {len(partitions)} partitions in {elapsed:.1f}s "
       f"({elapsed/max(1,len(partitions)):.2f}s/partition)")
