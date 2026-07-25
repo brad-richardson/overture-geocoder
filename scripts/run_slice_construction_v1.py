@@ -217,7 +217,13 @@ summary = {"records": records, "partitions": len(partitions),
            # to see that it got them.
            "reduce_job_count": execution["job_count"],
            "reduce_partitions_per_job": execution["batch_size"],
-           "reduce_bucket_stride": execution["bucket_stride"]}
+           "reduce_bucket_stride": execution["bucket_stride"],
+           # Same reasoning for the positions artifact: it is the insurance
+           # against a planet map re-run, and a run that emitted it but failed to
+           # PUBLISH it looks identical from every other key here.
+           "positions_objects": result["positions_objects"],
+           "positions_records": result["positions_records"],
+           "positions_bytes": result["positions_bytes"]}
 # Written as a file as well as printed: stdout can interleave with stderr, so
 # `tail -1` of a merged stream is not a reliable machine-readable surface.
 (WORK / "summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")

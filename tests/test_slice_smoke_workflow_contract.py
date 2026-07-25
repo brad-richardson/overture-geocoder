@@ -108,6 +108,11 @@ def test_asserts_real_counts_not_just_the_reconciles_literal():
         ".head_total_records > 0",
         '.store_bytes_by_class["map/places-v1"] > 0',
         '.store_bytes_by_class["serve/places-v1"] > 0',
+        # The per-place positions artifact is produced by map and PUBLISHED by
+        # finalize; a run that emitted it and failed to publish it satisfies every
+        # other assertion here.
+        ".positions_objects > 0",
+        ".positions_records > 0",
     ):
         assert assertion in value, assertion
     # Read from files the harness wrote, never `tail -1` of a merged stream.
