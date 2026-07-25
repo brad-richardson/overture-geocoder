@@ -186,8 +186,8 @@ through. Every phase reports both (`--staging-report`, and in the slice summary)
 | plan (addresses) | marker JSON only | zero pack bytes |
 | reduce (places) | the fragments in its own bucket range | ~1 GB post-combiner (the bucket-range measurement above) |
 | reduce (addresses) | packs from essentially every map task | **unbounded — see the family caveat below** |
-| head | per-task head candidates (already bounded top-N) | small |
-| finalize | exactly the published set | small |
+| head | EVERY task's head-candidate pack, in one `read_parquet` | **MEASURED, not bounded** — 7.35 MB from one Monaco task, order 10 GB at 89 planet tasks. `run-head --staging-report` records it and the job now carries the 25 GB free-disk floor; batching it is a restructure, tracked as a follow-up |
+| finalize | exactly the published set | small; it holds the slice twice (hydrated + mirrored), so it carries the same floor |
 
 The plan phase's eager `[store.path(k) for k in packs]` defeated its own
 `max_fan_in_packs` batching completely and would have put the whole planet term
@@ -206,10 +206,12 @@ store:
 | map published to staging | 18 objects / 25.53 MB | 7 objects / 90.73 MB |
 | plan hydrated / peak resident | 32.88 MB / **16.44 MB** (8 released) | 0 / 0 |
 | reduce hydrated / worst job peak | 16.44 MB / **8.30 MB** | 10.89 MB / 10.89 MB |
-| finalize hydrated from staging | 24 objects / 11.84 MB | 5 objects / 32.14 MB |
+| head hydrated / peak resident | 7.35 MB / 7.35 MB (unbatched) | 0 / 0 (no head phase) |
+| finalize hydrated from staging | 28 objects / 35.94 MB | 5 objects / 32.14 MB |
+| serving objects published | 20 (4 `.plrv` + 16 `.plhd`) | 1 `.av1` |
 
 The published slice is **byte-identical** to a `--no-staging` run of the same
-slice — same content-addressed names, same sizes; 27 files for Places, 8 for
+slice — same content-addressed names, same sizes; 31 files for Places, 8 for
 addresses.
 
 Two byte totals in `store_bytes_by_class` do wobble, and neither is about
@@ -223,6 +225,20 @@ transport:
   slice (`_artifact_keys` collects `shard_objects`, not `manifest_object`), which
   is why the published trees are still identical. It is a real wart — a digest
   that depends on a runner's directory layout — and is tracked as a follow-up.
+
+**The Places routed serving objects now actually get published.** They did not:
+`_artifact_keys` read `reduction["artifact"]`, which only the ADDRESS reducer sets,
+so a Places finalize published head shards, positions packs and two manifests and
+dropped every `.plrv` — a planet Places execute would have served no routed
+payloads at all, and `objects`, `reconciles` and `positions_objects` were all
+non-zero. The serving key is now a per-family table
+(`REDUCTION_SERVING_OBJECTS`: places → `routed_object`, addresses → `artifact`) and
+a reduction naming none is fatal. `leaf_object` stays unpublished on purpose: it is
+the head phase's input, it holds TERM rows, and the positions packs are the durable
+per-record artifact. The published serving set is asserted to COVER the reduction
+set — Monaco publishes 4 `.plrv` (one per partition, names matching the reducer's
+recorded digests exactly) plus 16 `.plhd`, and the slice grew from 11.86 MB to
+35.95 MB, which is the routed payload that was previously being lost.
 
 **Publication is verified against identity now, not just against itself.**
 `verify_whole_slice_once` derives what it expects from the same files it

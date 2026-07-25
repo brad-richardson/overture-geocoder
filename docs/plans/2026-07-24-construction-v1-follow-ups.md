@@ -281,16 +281,26 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
 
 ## Added 2026-07-25, from the adversarial review of PR #160
 
-1. **The Places routed serving objects never reach the published slice.**
-   Pre-existing, found while reviewing bucket-range reduce, and NOT fixed there.
-   `construction_v1_hosted._artifact_keys` collects `reduction["artifact"]`,
-   which the *address* reducer sets and the Places reducer does not — Places
-   records `leaf_object` and `routed_object` instead. So a Places finalize
-   publishes the head shards and the two manifests, and silently publishes no
-   `.plrv` at all. Every existing check still passes: the reconciliation compares
-   bindings, not the published object set. Whatever publishes routed objects must
-   also assert the published set is non-empty and covers every partition, or the
-   same hole reopens.
+1. ~~**The Places routed serving objects never reach the published slice.**~~
+   **FIXED 2026-07-25.** Pre-existing, found while reviewing bucket-range reduce,
+   and NOT fixed there. `construction_v1_hosted._artifact_keys` collected
+   `reduction["artifact"]`, which the *address* reducer sets and the Places reducer
+   does not — Places records `leaf_object` and `routed_object` instead. So a Places
+   finalize published the head shards, the positions packs and the two manifests,
+   and silently published no `.plrv` at all. Every existing check still passed: the
+   reconciliation compares bindings, not the published object set.
+
+   The fix is a per-family table (`REDUCTION_SERVING_OBJECTS`: places →
+   `routed_object`, addresses → `artifact`) instead of one hardcoded key, and it is
+   **fail-closed** — a reduction naming no serving object aborts and names the key
+   it expected, rather than shortening the published set. `leaf_object` is
+   deliberately NOT published: the leaf is a build intermediate the head phase
+   reads, it holds TERM rows (~7.19 per place), and the per-place positions packs
+   are the durable per-record artifact. As the item asked, the published set is now
+   asserted to cover every partition: finalize reports `serving_objects` and
+   `reduction_serving_objects`, the workflow requires
+   `serving_objects >= reductions > 0`, and the slice smoke asserts the exact
+   equality (places `partitions + head_populated_shards`, addresses `partitions`).
 
 ## Added 2026-07-25: scope down the R2 credentials used by construction-v1
 
@@ -636,6 +646,17 @@ fail-closed rules are already in place.
     exactly why it must be MEASURED from a real planet map run rather than
     projected. Do this before dispatching a planet head phase; it is a fail-closed
     cap, so the failure mode is a clean abort late in an expensive run.
+13. **The head phase's candidate hydration is MEASURED, not bounded.**
+    `build_sharded_global_head_from_markers` hands every task's head-candidate pack
+    to a single `read_parquet([...])`, so unlike the plan phase it cannot
+    batch-and-evict without restructuring how DuckDB reads them, and its peak
+    resident bytes equal its total by construction. Monaco measures 7.35 MB from one
+    map task; at 89 planet tasks the straight-line figure is on the order of 10 GB
+    on one runner. `run-head --staging-report` now records it and the job carries the
+    same 25 GB free-disk floor as every other phase, so the number comes from a run
+    rather than an estimate — but it is a measurement and a floor, not a bound.
+    Batching it (per-shard candidate ranges, or an incremental INSERT loop like the
+    plan phase's) is the fix, and it is a restructure rather than a flag.
 
 ## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
 

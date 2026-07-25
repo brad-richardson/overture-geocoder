@@ -725,6 +725,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
+          # The last phase without a free-disk floor. Head hydrates EVERY task's
+          # head-candidate pack and hands them to one read_parquet, so it cannot
+          # batch-and-evict the way plan does; the floor is the only guard it has.
+          test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
           mkdir -p head head-scratch store
           if [ "$FAMILY_KEY" = places ]; then
             cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
@@ -737,13 +741,16 @@ jobs:
               --family places --markers-dir cv1plan/mapdl/markers \
               --encoder-binary "$BINDIR/places-serving-encode-v1" \
               --verifier-binary "$BINDIR/places-serving-verify-v1" \
+              --staging-report head/staging.json \
               --scratch-dir head-scratch --shard-bits 4 --output head/head.json
+            echo "HEAD staging: $(jq -c '{staged_bytes_hydrated,staged_peak_resident_bytes}' head/staging.json)"
             echo "HEAD END places shards=$(jq -r '.shard_count' head/head.json) marker_written_last=true"
           else
             python scripts/construction_v1_hosted.py run-head \
               --contract cv1plan/control/contract.json --store-root store \
               --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
-              --family addresses --markers-dir cv1plan/mapdl/markers --output head/head.json
+              --family addresses --markers-dir cv1plan/mapdl/markers \
+              --staging-report head/staging.json --output head/head.json
             echo "Address family has no global head phase."
           fi
       - name: Publish the head result (its shards are in R2 staging)
@@ -801,6 +808,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
+          # Finalize hydrates the whole published set (routed shards, head shards,
+          # per-record packs) and then mirrors it, so it holds two copies of the
+          # slice at once. Same free-disk floor as every other phase.
+          test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
           for FRAG in red/phase/ledger-fragment-*.json; do
             [ -f "$FRAG" ] || continue
             PH="$(jq -r '.phase' "$FRAG")"; MN="$(jq -r '.runner_minutes' "$FRAG")"
@@ -824,7 +835,15 @@ jobs:
             --family "$FAMILY_KEY" --plan cv1plan/plan/plan.json --reductions-dir red/reductions \
             --markers-dir cv1plan/mapdl/markers \
             $HEAD_ARG --remote-root publish --work-root final-work --output final-work/result.json
-          echo "FINALIZE local staging complete: $(jq -c '{objects,reconciles,marker_key,positions_objects,staged_objects_hydrated}' final-work/result.json)"
+          echo "FINALIZE local staging complete: $(jq -c '{objects,reconciles,marker_key,serving_objects,positions_objects,staged_objects_hydrated}' final-work/result.json)"
+          # A published slice with no SERVING payload is the defect this gate
+          # exists for: places reductions record `routed_object`, not `artifact`,
+          # so finalize used to drop every .plrv while `objects`, `reconciles` and
+          # `positions_objects` all stayed non-zero.
+          SERVING="$(jq -r '.serving_objects' final-work/result.json)"
+          REDUCTIONS="$(jq -r '.reduction_serving_objects' final-work/result.json)"
+          test "$SERVING" -ge "$REDUCTIONS"
+          test "$SERVING" -gt 0
       - name: Mirror the exact staged slice to R2 create-only, marker written last
         env:
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com

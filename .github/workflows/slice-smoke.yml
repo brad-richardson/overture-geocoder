@@ -192,6 +192,14 @@ jobs:
               echo "::warning title=Slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/run-attempt-1.log in the slice-smoke-evidence artifact."
               echo "SLICE_RETRIED=true" >> "$GITHUB_ENV"
             fi
+            # `serving_objects == partitions + head_populated_shards` is the exact
+            # published serving set for places: one routed `.plrv` per reduce
+            # partition plus one `.plhd` per populated head shard. It is asserted as
+            # an EQUALITY because finalize used to publish head shards, positions
+            # packs and two manifests while dropping every single `.plrv` -- and
+            # `objects`, `reconciles` and `positions_objects` were all non-zero, so
+            # nothing here would have noticed.
+            #
             # `plan_staged_peak_resident_bytes < plan_staged_bytes_hydrated` is the
             # assertable form of "the plan phase batches and EVICTS". It used to
             # hydrate its whole pack fan-in eagerly, which at planet scale is the
@@ -222,6 +230,10 @@ jobs:
               and .plan_staged_objects_released > 0
               and (.plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated)
               and (.reduce_staged_peak_resident_bytes <= .reduce_staged_bytes_hydrated)
+              and .head_staged_bytes_hydrated > 0
+              and .serving_object_key == "routed_object"
+              and .reduction_serving_objects == .partitions
+              and (.serving_objects == .partitions + .head_populated_shards)
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2
@@ -372,6 +384,11 @@ jobs:
               echo "::warning title=Address slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/address-run-attempt-1.log in the slice-smoke-address-evidence artifact."
               echo "ADDRESS_SLICE_RETRIED=true" >> "$GITHUB_ENV"
             fi
+            # The address serving key stays `artifact` -- that reducer has always
+            # recorded it, and it is the key whose absence on the PLACES side hid
+            # the missing routed objects. `serving_objects == partitions` (no head
+            # shards) is the address family's exact published serving set.
+            #
             # `plan_staged_bytes_hydrated == 0` is not a bug: the ADDRESS genesis
             # plan is built from marker JSON alone, so the plan phase reads no pack
             # bodies at all. `reduce_staged_bytes_hydrated > 0` is where the address
@@ -421,6 +438,9 @@ jobs:
               and .finalize_staged_objects_hydrated > 0
               and .plan_staged_bytes_hydrated == 0
               and .reduce_staged_bytes_hydrated > 0
+              and .head_staged_bytes_hydrated == 0
+              and .serving_object_key == "artifact"
+              and .serving_objects == .partitions
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The address slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2

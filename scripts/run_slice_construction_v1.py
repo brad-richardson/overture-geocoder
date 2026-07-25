@@ -340,9 +340,18 @@ head_args = () if ADDRESSES else (
 )
 hosted("run-head", "--contract", contract, "--store-root", store_for("head"),
        *staging_argv(),
+       *(("--staging-report", WORK / "head-staging.json") if STAGED else ()),
        "--family", FAMILY, "--markers-dir", markers, *head_args,
        "--output", head)
 head_result = json.loads(head.read_text())
+head_staged = json.loads((WORK / "head-staging.json").read_text()) if STAGED else {}
+if STAGED and head_staged["staged_bytes_hydrated"]:
+    # Head hydrates EVERY task's head-candidate pack and hands them all to one
+    # read_parquet, so its peak EQUALS its total: measured, not bounded. Recorded
+    # so the planet figure is a number rather than an assumption.
+    print(f"  staging: hydrated {head_staged['staged_bytes_hydrated']/1e6:.2f} MB, "
+          f"peak resident {head_staged['staged_peak_resident_bytes']/1e6:.2f} MB "
+          "(unbatched by design -- see the follow-up)")
 # Addresses have no global head phase; run-head writes {"head": null} for them,
 # so every head key below is guarded rather than assumed.
 if head_result.get("head", "absent") is None:
@@ -373,6 +382,12 @@ print(f"  reconciles={result['reconciles']} marker_written_last={result['marker_
 print(f"  per-record artifact published: {result['positions_objects']} objects, "
       f"{result['positions_records']:,} records, {result['positions_bytes']/1e6:.2f} MB "
       f"(verified as part of the whole-slice check)")
+# The serving payload count, reported separately from `objects`: a places finalize
+# used to publish head shards, positions packs and two manifests while silently
+# dropping EVERY routed `.plrv`, and every other number here stayed non-zero.
+print(f"  serving objects published: {result['serving_objects']} "
+      f"(>= {result['reduction_serving_objects']} reductions x "
+      f"{result['serving_object_key']}, plus any head shards)")
 
 # Break the store down by artifact class. A single total invites a linear
 # extrapolation to planet scale, which is wrong twice over: fixed per-artifact
@@ -439,6 +454,13 @@ summary = {"family": FAMILY,
            # PUBLISH it looks identical from every other key here. The key names
            # stay `positions_*` for both families because they are already the
            # published shape of the finalize result; the mechanism is generic.
+           # The serving payload set. `positions_objects` and `objects` were both
+           # non-zero while places published no `.plrv` at all, so the count of
+           # SERVING objects and the reduction count it must cover are separate,
+           # assertable keys.
+           "serving_objects": result["serving_objects"],
+           "reduction_serving_objects": result["reduction_serving_objects"],
+           "serving_object_key": result["serving_object_key"],
            "positions_objects": result["positions_objects"],
            "positions_records": result["positions_records"],
            "positions_bytes": result["positions_bytes"],
@@ -469,6 +491,13 @@ if STAGED:
     summary["plan_staged_objects_released"] = plan_staged["staged_objects_released"]
     summary["reduce_staged_bytes_hydrated"] = reduce_staged["staged_bytes_hydrated"]
     summary["reduce_staged_peak_resident_bytes"] = reduce_staged[
+        "staged_peak_resident_bytes"
+    ]
+    # Head is MEASURED, not bounded: it hands every head-candidate pack to one
+    # read_parquet, so peak == total by construction. Recorded so the planet figure
+    # comes from a run rather than an estimate.
+    summary["head_staged_bytes_hydrated"] = head_staged["staged_bytes_hydrated"]
+    summary["head_staged_peak_resident_bytes"] = head_staged[
         "staged_peak_resident_bytes"
     ]
 if head_result.get("head", "absent") is not None:

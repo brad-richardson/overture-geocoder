@@ -1183,7 +1183,8 @@ def _reduce_one_partition(
     # byte-identical to the unbatched plan.
     store.write_marker_last(
         _reduce_marker_key(args.family, partition_index),
-        {"partition_index": partition_index, "artifact": reduction.get("artifact")},
+        {"partition_index": partition_index,
+         "artifact": reduction.get(REDUCTION_SERVING_OBJECTS[args.family])},
     )
     return reduction
 
@@ -1228,7 +1229,8 @@ def _reduce_bucket_range(
         write_json(output_dir / f"{partition_index:04d}.json", reduction)
         store.write_marker_last(
             _reduce_marker_key(args.family, partition_index),
-            {"partition_index": partition_index, "artifact": reduction.get("artifact")},
+            {"partition_index": partition_index,
+             "artifact": reduction.get(REDUCTION_SERVING_OBJECTS[args.family])},
         )
     return result
 
@@ -1324,7 +1326,8 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
     )
     write_json(args.output, reduction)
     print(json.dumps({"family": args.family, "partition_index": args.partition_index,
-                      "artifact": reduction.get("artifact"),
+                      "artifact": reduction.get(
+                          REDUCTION_SERVING_OBJECTS[args.family]),
                       **_staging_evidence(store)}, sort_keys=True))
     _write_staging_report(args, store)
     return 0
@@ -1338,6 +1341,7 @@ def cmd_run_head(args: argparse.Namespace) -> int:
     store = _store(args, request_sha256=contract["request_sha256"])
     if args.family != "places":
         write_json(args.output, {"family": args.family, "head": None, "note": "no global head phase"})
+        _write_staging_report(args, store)
         print(json.dumps({"family": args.family, "head": None}, sort_keys=True))
         return 0
     limits = _limits_for(contract, "places")
@@ -1354,20 +1358,66 @@ def cmd_run_head(args: argparse.Namespace) -> int:
     store.write_marker_last(_head_marker_key(), {"shard_count": result["shard_count"],
                                                  "total_records": result["total_records"]})
     write_json(args.output, {**result, **_staging_evidence(store)})
+    # The head phase hydrates EVERY task's head-candidate pack, and
+    # `build_sharded_global_head_from_markers` hands them all to a single
+    # `read_parquet([...])`, so unlike plan it cannot batch-and-evict without a
+    # restructure. Measured rather than bounded, deliberately -- see the follow-up.
+    _write_staging_report(args, store)
     print(json.dumps({"family": "places", "shard_count": result["shard_count"],
-                      "populated_shards": result["populated_shards"]}, sort_keys=True))
+                      "populated_shards": result["populated_shards"],
+                      **_staging_evidence(store)}, sort_keys=True))
     return 0
 
 
 # --------------------------------------------------------------------------- #
 # finalize
 # --------------------------------------------------------------------------- #
+# The key under which each family's reducer records its SERVING object. A table,
+# not `reduction.get("artifact")`, because the two reducers name it differently and
+# the mismatch was silent: a Places reduction carries `routed_object` and
+# `leaf_object` and NO `artifact`, so `.get("artifact")` returned None, the falsy
+# branch skipped it, and a Places finalize published head shards, positions packs
+# and two manifests while dropping every `.plrv` serving payload. Every existing
+# check still passed -- the reconciliation compares BINDINGS out of the reduction
+# JSON and never looks at the published object set.
+#
+# `leaf_object` is deliberately NOT here. The leaf is a build intermediate: the
+# reduce phase proves it against the plan binding and the head phase reads it, and
+# it holds TERM rows (~7.19 per place), so publishing it would multiply the served
+# volume for something nothing serves. The per-place positions packs are the
+# durable per-record artifact, and they are published through their own seam.
+REDUCTION_SERVING_OBJECTS: dict[str, str] = {
+    "addresses": "artifact",
+    "places": "routed_object",
+}
+
+
 def _artifact_keys(family: str, reductions: list[dict[str, Any]], head: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Every serving object the slice must publish, one per reduction plus the head.
+
+    FAIL CLOSED on a reduction that names no serving object. The previous `if
+    artifact:` skip is exactly how the Places routed objects went missing without a
+    single check firing, so a missing object is now an abort that names the key it
+    expected rather than a silently shorter published set.
+    """
+    key = REDUCTION_SERVING_OBJECTS[family]
     objects: list[dict[str, Any]] = []
     for reduction in reductions:
-        artifact = reduction.get("artifact")
-        if artifact:
-            objects.append(artifact)
+        artifact = reduction.get(key)
+        if not artifact:
+            partition = (reduction.get("partition") or {}).get("id", "<unknown>")
+            raise SystemExit(
+                f"{family} reduction for partition {partition} records no "
+                f"{key!r}; its serving object cannot be published, so the slice "
+                "would be missing that partition's payload entirely"
+            )
+        objects.append(artifact)
+    # One serving object per partition, and at least one overall: the published set
+    # must COVER the reduction set, which is the property that was violated.
+    if len(objects) != len(reductions) or not objects:
+        raise SystemExit(  # pragma: no cover - the loop above guarantees this
+            f"{family} serving object set does not cover every reduction"
+        )
     if head:
         objects.extend(head.get("shard_objects", []))
     return objects
@@ -1599,11 +1649,18 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "positions_objects": len(positions),
         "positions_records": positions_records,
         "positions_bytes": sum(item["bytes"] for item in positions),
+        # Reported so a run that publishes NO serving payload is visible from the
+        # result alone. It used to be exactly that for places, and `objects`,
+        # `reconciles` and `positions_objects` were all non-zero anyway.
+        "serving_objects": len(artifacts),
+        "reduction_serving_objects": len(reductions),
+        "serving_object_key": REDUCTION_SERVING_OBJECTS[args.family],
         **_staging_evidence(store),
     }
     write_json(args.output, result)
     print(json.dumps({"family": args.family, "objects": verification["objects"],
                       "reconciles": reconciliation["reconciles"], "marker_written_last": True,
+                      "serving_objects": len(artifacts),
                       "positions_objects": len(positions)}, sort_keys=True))
     return 0
 
