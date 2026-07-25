@@ -493,7 +493,10 @@ work.
 `reduce_partition` now calls the staged store's `release()` at each pack's last use,
 retaining only what the later partitions of the same job still need
 (`construction_v1_hosted._batch_retention`), and enforces the result against
-`limits.max_scratch_bytes` after every fetch.
+`limits.max_scratch_bytes` after every fetch. **Note the knob's scope changed:** for the
+address reduce stage `max_scratch_bytes` governed the temporary workspace alone and now
+governs workspace + the hydrated pack cache. No default changed; planet fit is ~9.2 GB
+against 24 GiB.
 
 Be precise about what that bounds, because a first draft of this note overstated it.
 It does NOT bound resident input to "about one pack": that figure came from a
@@ -520,13 +523,16 @@ longer a prerequisite for anything, since it existed to set K.
 
 **Related:** `MEASURED_REDUCE_MINUTES_PER_PARTITION["addresses"] = 2.0` is now
 CALIBRATED (2026-07-25) and deliberately KEPT at 2.0. Slice measurement: 0.177 s at
-3,279 rows, 0.434 s at 14,990, 1.022 s at 52,464, 1.800 s at 104,928 — linear, ~0.24 s
-per-partition floor plus ~1.5e-5 s/row, so a 1M-row planet partition projects to
-~0.25 min of compute plus ~0.12 min of hydration = ~0.37 min. 2.0 is a ~5x margin,
-matching the >4x the calibrated Places 1.0 carries; it also feeds the fail-closed
-ledger cost projection, where lowering it on slice evidence would be the wrong
-direction, and it does not bind batching (it admits 82 partitions per job). The
-derivation lives in the comment at
+3,279 rows, 0.434 s at 14,990, 1.022 s at 52,464, 1.800 s at 104,928 — linear; least
+squares gives a 0.168 s per-partition floor plus 1.573e-5 s/row, so a 1M-row planet
+partition projects to ~0.265 min of compute plus ~0.12 min of hydration = **~0.39 min**.
+2.0 is a ~5x margin, matching the >4x the calibrated Places 1.0 carries; it also feeds
+the fail-closed ledger cost projection, where lowering it on slice evidence would be
+the wrong direction, and it never refuses a legitimate plan on cost (474 × 2.0 = 948
+runner-minutes against a 40,000 cap). What it DOES constrain is batching: it admits 82
+partitions per job where ~0.39 would admit 423, which is 6.8x more than the planet plan
+needs but means a reduce job cap below ~6 lands within sight of the limit and a cap of 5
+exits via `_reduce_batches`. The derivation lives in the comment at
 `scripts/construction_v1_hosted.py:MEASURED_REDUCE_MINUTES_PER_PARTITION`. A real
 planet reduce measurement should still replace it.
 

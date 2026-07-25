@@ -1399,9 +1399,10 @@ def reduce_partition(
     # diagnosis, on a run the plan phase certified.
     #
     # `resident_bytes` exists only on the staged store, where the local directory is a
-    # CACHE. On a local-only store the directory IS the map output, so there is
-    # nothing to cap and the check is correctly absent -- same discriminator as
-    # `release` above.
+    # CACHE. On a local-only store the directory IS the map output, so there is nothing
+    # to cap and the check is correctly absent. This is a DIFFERENT attribute from
+    # `release` above and therefore literally a different discriminator, but both exist
+    # only on `StagedObjectStore`, so the two guards switch together.
     def resident_bytes() -> int | None:
         return getattr(store, "resident_bytes", None)
 
@@ -1492,13 +1493,24 @@ def reduce_partition(
         )
         selected = workspace / "selected.arrow"
         discarded = workspace / "discarded.arrow"
-        # The hydrated pack CACHE is a watchdog root too, not just the workspace. It
-        # used to be outside every declared cap, so `peak_disk_bytes` under-reported
-        # the job's real disk footprint by however much input it was holding -- on the
-        # planet shape that is the larger of the two. Only when the store is a cache:
-        # on a local-only store this directory is the map output itself, and counting
-        # it would fail a legitimate run against a scratch cap it was never meant to
-        # bound.
+        # The hydrated pack CACHE is a watchdog root too, not just the workspace, so
+        # `max_scratch_bytes` now bounds workspace + cache rather than workspace alone.
+        #
+        # Be precise about the division of labour, because these two guards do NOT
+        # cover the same window. The watchdog is entered only around `export_filter`,
+        # which is AFTER the whole fetch loop, so what it sees in the cache is just the
+        # RETAINED set at that moment -- empty for an unbatched partition or for a job's
+        # last partition. The guard that actually covers the peak is `check_resident`
+        # above, which runs on every fetch, while hydration is happening. Adding the
+        # cache here closes the remaining window (retained packs held across the export
+        # of a batched job) and makes `peak_disk_bytes` account for input as well as
+        # scratch; it is not what bounds the peak.
+        #
+        # Only when the store is a CACHE. On a local-only store this directory is the
+        # map output itself, and counting it would fail a legitimate run against a cap
+        # it was never meant to bound. `release` and `resident_bytes` are DIFFERENT
+        # attributes and so literally different discriminators, but both exist only on
+        # `StagedObjectStore`, so the two guards switch together.
         watchdog_roots = [workspace]
         if release is not None:
             watchdog_roots.append(Path(store.root))

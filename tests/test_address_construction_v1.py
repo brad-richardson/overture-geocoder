@@ -665,9 +665,18 @@ def test_reduce_fails_closed_when_hydrated_packs_exceed_the_scratch_cap(
             limits=tiny,
         )
 
-    # A local-only store has no resident-bytes notion -- the directory IS the map
-    # output, not a cache -- so the same tiny cap must NOT abort it there. Counting the
-    # store against a scratch cap would fail a legitimate offline run.
+    # The other half: a local-only store is EXEMPT from the new resident accounting.
+    # The directory IS the map output there, not a cache, so counting it against a
+    # scratch cap would fail a legitimate offline run.
+    #
+    # This leg proves the exemption STRUCTURALLY -- no `resident_bytes` attribute, so
+    # `check_resident` cannot fire -- and then proves the reduce still completes. It
+    # deliberately does NOT re-run under `tiny`: `max_scratch_bytes` also bounds child
+    # subprocesses through `run_bounded`, and `tiny` is smaller than the workspace, so a
+    # local-only run under it fails with "child scratch exceeded its hard cap" from that
+    # PRE-EXISTING guard rather than passing. There is no cap window that isolates the
+    # new check from the old one, which is why the exemption is asserted on the
+    # interface rather than on a cap value.
     local_root = tmp_path / "local-only"
     shutil.copytree(staging_root / map_store.prefix, local_root)
     for sidecar in local_root.rglob("*.metadata.json"):

@@ -429,16 +429,21 @@ was reaching for (the 39-task derivation lands within 4% of it). The `~5.3 GB at
 batch_size 24` half of that pair was wrong in kind, not just in value: peak does not
 grow with batch size above batch 1. Both are replaced by the derivation above.
 
-That ~8.1 GB worst case sits inside the address `max_scratch_bytes` of 24 GiB, so the
-new check below does not refuse a legitimate planet plan — it refuses one whose
-partitioning or provisioning has drifted, which previously read as ENOSPC.
-
 Because that bound is emergent from a cache policy rather than enforced,
 `reduce_partition` now also checks hydrated resident bytes against
 `limits.max_scratch_bytes` after every fetch, and the hydrated cache is a
 `StageWatchdog` root. Lowering `--max-reduce-jobs`, which this doc recommends for R2
 reads, does NOT lower peak — so without that check an under-provisioned runner meets
 the law as ENOSPC mid-reduce, on a plan the plan phase certified.
+
+**Operators: `max_scratch_bytes` changed meaning for the address reduce stage.** It
+governed the temporary WORKSPACE alone; it now governs workspace **+ the hydrated pack
+cache**. Nothing else moved, and no default changed, but the same number is now being
+asked to cover strictly more. It fits: at planet scale the cache is ~8.1 GB worst case
+and the workspace adds ~1.1 GB, so ~9.2 GB against the address cap of 24 GiB
+(25.77 GB) — 2.8x headroom. The two guards split the work by window: `check_resident`
+runs on every fetch and is what covers the hydration peak, while the watchdog is
+entered only around the export and therefore sees only the packs retained across it.
 
 What the fix DOES buy, on the single-task table (kept because it is the before/after
 on identical inputs — **single map task, not the general case**):

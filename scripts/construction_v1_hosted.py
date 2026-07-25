@@ -97,7 +97,7 @@ REDUCE_TIMEOUT_MARGIN_FRACTION = 0.5
 #     against a 40,000-minute cap.
 # What 2.0 DOES constrain, and a reader tuning `--max-reduce-jobs` will hit: it caps
 # `_timeout_max_batch` at floor(330 * 0.5 / 2.0) = 82 partitions per job, where the
-# honest ~0.37 would admit 445. That is 6.8x more headroom than the planet plan needs
+# honest ~0.39 would admit 423. That is 6.8x more headroom than the planet plan needs
 # (~474 partitions at batch 12 / job cap 40), but a cap below ~6 jobs on a 474-partition
 # plan needs batch >= 79 and lands within sight of 82 -- and a cap of 5 (batch 95) exits
 # with the `_reduce_batches` SystemExit. That refusal is correct fail-closed behaviour,
