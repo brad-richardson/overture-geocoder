@@ -1157,3 +1157,81 @@ Worth writing down, because it predicts where the next blocker hides.
    touching them changes `namespaces.immutable_root`. **Map output produced before
    those fixes land is not reusable by the resumed run** — sequence the expensive
    phases after the hash-changing changes.
+
+### Added later on 2026-07-25, from the adversarial review of PR #176 (head phase)
+
+PR #176 bounded the head **merge** correctly. The review found that the region it
+declared out of scope in one parenthetical is **2.79x larger than the region it
+bounds**, and that raising `max_head_candidate_rows` hands a planet run into it.
+Both findings below are EXECUTION-VERIFIED on a real 12-task run, not projected.
+
+**The post-merge region: ~38-42 GB against a 25.6 GB floor.** Watchdog-covered merge
+peak 91,648,680 B; post-watchdog peak **255,645,926 B**, which is **5.46x** the final
+merged parquet (5.71x and 6.32x on two other fixtures). Four full copies of the head
+payload are live simultaneously and none is released: `merged` (never unlinked, though
+its last consumer runs *before* the 4,096-iteration encode loop), the `shard_dir`
+parquets (never unlinked per shard), `verify_dir/*.plhd` (the sharded verifier needs
+all at once), and the store's `put_content` copy of every `.plhd` — two copies by
+construction, since `put_content` copies bytes and the original is then moved into
+`verify_dir`.
+
+**`max_scratch_bytes` is set ABOVE the disk the job guarantees.** 24 GiB = 25.770 GB
+against a head-job floor of `25000000` x 1024 = **25.600 GB**, and unlike `map` the
+head job does not run `free-disk-space`. So the guard provably cannot fire first: the
+real terminal state is a bare **ENOSPC around shard ~2,000 of 4,096**. Demonstrated —
+with the cap between the merge and post-merge peaks, the phase passes the guarded merge
+and dies inside the encode loop with `RuntimeError: child scratch exceeded its hard
+cap`: no phase, no knob, no diagnosis.
+
+**`COPY ... PARTITION_BY` at 4,096 shards is unbounded RAM and OOMs rather than
+spills.** Reproduced at `--shard-bits 12` with a 4 GB `memory_limit` **and
+`temp_directory` set** — DuckDB's partitioned writer holds a buffer per open partition
+and does not spill. At hosted settings: 2M rows 2.54 GiB, 8M 4.67 GiB, 16M 5.74 GiB
+(+1.07 GiB per doubling) → **65.8M ~= 7.8-8.0 GiB against the 8 GB limit**, ~8.9 GiB at
+the 134.3M projection. Also ~50 s/M rows = **~55 min for the COPY alone** against
+`HEAD_PHASE_ESTIMATE_MINUTES: "90"` for the whole phase including 4,096 encodes.
+
+Preferred fix: batch the COPY over shard ranges so open partitions are bounded by the
+batch, not the shard count — this preserves the design's 4,096 serving layout. The
+fallback, `shard_bits = 8` (256 shards, 97,656 entries/shard, still under the encoder
+cap), changes the serving layout and is an owner decision; note PR #169 already left
+the 4096-vs-256 tradeoff open, and this is the evidence that reopens it.
+
+**Also found, and generalisable:**
+
+- **A pre-planet gate was closed by deleting it.** Follow-up 12 was "verify
+  head-candidate volume fits, MEASURED from a real planet map run"; it is struck
+  through as "RAISED" while conceding the measurement "is still the better number and
+  still unavailable". Nothing now fails fast if the real count lands above 200M — it
+  fails at merge admission, after map and reduce. **Raising a cap is not the same as
+  satisfying the gate that cap stood in for.**
+- **Two more unguarded call sites** (the recurring theme): swapping `map_task`'s
+  per-task check to the global cap passes all 1218 tests — the new
+  `max_task_head_candidate_rows` has zero execution coverage — and deleting the
+  watchdog's store root passes too. Also `build_sharded_global_head_from_markers`
+  never calls `limits.validate()`, and `_limits_for` builds `Limits(**filtered)`
+  without validating while silently dropping unknown keys.
+- **A stated bound quoted only its cheap term.** `peak <= fan_in x largest pack +
+  |level k| + |level k+1|`, but every budget sentence quoted the cache term alone:
+  measured, cache is 27.1% and the tree is 73%, so the merge's own planet peak is
+  ~16-19 GB = 60-74% of `max_scratch_bytes`, not the advertised 10.7%.
+- **The peak law holds only for uniform packs.** Under skew (`[94444, 21692x7]`,
+  fan-in 4) peak was 159,520, not 4 x 94,444. The true law is `sum of the fan_in
+  largest`, which is always <= `fan_in x largest` — so the **bound is safe and
+  conservative**; only the equality claim was wrong.
+- **The diagnosis that names the knob cannot fire.** `check_resident` compares the
+  cache alone against the full 24 GiB, so at planet scale it is ~3.8x from firing;
+  what fires instead is a bare `RuntimeError` from `StageWatchdog` or `run_bounded`.
+- The rehearsal **never exercises a multi-stage tree**: `spec_head_caps` reads
+  `maximum_merge_fan_in` — a *maximum* — as the value to run, giving fan-in 16 over 7
+  tasks, i.e. one group, eager hydration, zero unlinks. The frozen evidence covers no
+  multi-stage merge at all.
+- ~2.7-3.7 GB of unmeasured Python RSS in `_independent_merged_head_binding`'s
+  `tokens: set[str]` (109 B/token x 25-34M planet tokens), concurrent with DuckDB's
+  8 GB budget on a ~16 GB runner, with no watchdog after the merge exits.
+- `disk_bytes()` costs 97.7 ms per sweep over a 4,096-partition workspace, run in a
+  5 ms busy loop for each of 4,096 encoder subprocesses, single-threaded in the parent.
+- `construction-v1.yml`'s head-job comment is stale — it still says head "cannot
+  batch-and-evict ... the floor is the only guard it has" — and only `slice-smoke.yml`
+  gained the `head_staged_objects_released > 0` gate. **The actual planet dispatch has
+  no such gate.**
