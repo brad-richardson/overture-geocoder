@@ -214,9 +214,11 @@ def test_map_matrix_lookup_uses_the_singular_dispatch_family_key():
 # cliff: a head shard is one PLHD artifact and the encoder fail-closes at
 # MAX_INDEX_ENTRIES distinct tokens. The workflow shipped `--shard-bits 4` (16
 # shards) against a committed design of 4096, which at the measured planet token
-# universe is 6-8x OVER the cap -- and the only thing that reports it is a `bail!`
-# raised after the whole map/reduce/merge has been paid for. These tests exist so
-# that literal can never silently drift below the design again.
+# universe is 6-8x OVER the cap -- and the only thing that reported it was the
+# encoder's `bail!`, at encode time. (Ordering, stated precisely: today
+# `max_head_candidate_rows = 5_000_000` aborts a ~65M-row planet head phase before
+# either check runs, so the sizing has to be right for when that cap is raised.)
+# These tests exist so that literal can never silently drift below the design again.
 
 ENCODER_SOURCE = (
     Path(__file__).parent.parent
@@ -477,11 +479,43 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # The head ROUTING MANIFEST is part of the published serving set (shard objects
     # are content-addressed, so it is the only shard_id -> object map), so the
     # equality carries its term. Family-generic: addresses report 0.
+    #
+    # Extracted fail-closed, the same principle as the staging asserts: bash
+    # arithmetic reads an absent key's "null" as 0, so `jq -r` + `// 0` would turn a
+    # MISSING manifest into a passing gate. `jq -e` + `| numbers` exits non-zero.
     assert (
-        'MANIFESTS="$(jq -r \'.head_manifest_objects\' final-work/result.json)"' in value
+        'MANIFESTS="$(jq -er \'.head_manifest_objects | numbers\' '
+        'final-work/result.json)"' in value
     )
+    assert "jq -r '.head_manifest_objects'" not in value
     assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP + MANIFESTS ))"' in value
     assert 'test "$SERVING" -gt 0' in value
+
+    # And the finalize job asserts its RESIDENCY bound, not just its output set.
+    # Finalize used to hydrate the whole published set before its first upload with
+    # no eviction -- 13-18 GB at planet scale, on the last job of a multi-hour run.
+    # This is the planet workflow, so this is where that bound decides whether the
+    # run finishes; the slice-smoke jobs assert the same three facts on the fast
+    # loop. Eager hydration makes peak == hydrated with nothing released, so all
+    # three are false under a regression.
+    assert "(.staged_objects_hydrated | numbers) > 0" in value
+    assert "(.staged_objects_released | numbers) > 0" in value
+    assert (
+        "((.staged_peak_resident_bytes | numbers) < (.staged_bytes_hydrated | numbers))"
+        in value
+    )
+    # `| numbers` rather than a `// 0` default, deliberately: it yields empty for a
+    # missing or non-numeric key, so `jq -e` exits non-zero instead of comparing a
+    # fabricated value. A permissive default here would turn an ABSENT bound into a
+    # passing one, which is the failure mode the gate exists to prevent -- so assert
+    # that shape is NOT used for any of the three.
+    for key in (
+        "staged_objects_hydrated",
+        "staged_objects_released",
+        "staged_peak_resident_bytes",
+        "staged_bytes_hydrated",
+    ):
+        assert f".{key} // 0" not in value, key
 
 
 def test_needs_graph_is_connected():

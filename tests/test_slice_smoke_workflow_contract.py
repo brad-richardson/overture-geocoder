@@ -8,6 +8,7 @@ and task index, and no write to any production surface.
 """
 
 import importlib.util
+import re
 import sys
 from pathlib import Path
 
@@ -139,24 +140,43 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
             f'.staging_prefix | test("^staging/global-v2/[0-9a-f]{{64}}/'
             f'construction-v1/{family}$")' in value
         ), family
-    assert value.count(".map_staged_objects_published > 0") == 2
-    assert value.count(".finalize_staged_objects_hydrated > 0") == 2
+    assert value.count("(.map_staged_objects_published | numbers) > 0") == 2
+    assert value.count("(.finalize_staged_objects_hydrated | numbers) > 0") == 2
     # The plan phase used to hydrate its whole pack fan-in eagerly. Peak below total
     # is the assertable form of "batched and evicted", so this is the tripwire on a
     # regression that no count-based assertion would notice.
     assert (
-        ".plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated" in value
+        "(.plan_staged_peak_resident_bytes | numbers) < (.plan_staged_bytes_hydrated | numbers)"
+        in value
     )
-    assert ".plan_staged_objects_released > 0" in value
+    assert "(.plan_staged_objects_released | numbers) > 0" in value
+    # The identical tripwire on FINALIZE, for the identical defect in the last phase
+    # of the run: it built its whole exact set out of `store.path(...)` calls, so
+    # every published object was hydrated before the first upload and none was
+    # released -- 13-18 GB at planet scale. Asserted for BOTH families, because
+    # finalize's fan-in is the published set regardless of family.
+    assert value.count(
+        "(.finalize_staged_peak_resident_bytes | numbers) < (.finalize_staged_bytes_hydrated | numbers)"
+    ) == 2
+    assert value.count("(.finalize_staged_objects_released | numbers) > 0") == 2
     # Addresses plan from marker JSON alone, so zero is the CORRECT plan-phase
     # figure there -- asserted as zero rather than skipped, and the address
     # reducer's unbounded fan-in is stated rather than hidden.
-    assert ".plan_staged_bytes_hydrated == 0" in value
-    assert ".reduce_staged_bytes_hydrated > 0" in value
+    assert "(.plan_staged_bytes_hydrated | numbers) == 0" in value
+    assert "(.reduce_staged_bytes_hydrated | numbers) > 0" in value
     # Head hydration is measured, not bounded (one read_parquet over every
     # candidate pack), so the figure must at least be produced.
-    assert ".head_staged_bytes_hydrated > 0" in value
-    assert ".head_staged_bytes_hydrated == 0" in value  # addresses have no head
+    assert "(.head_staged_bytes_hydrated | numbers) > 0" in value
+    assert "(.head_staged_bytes_hydrated | numbers) == 0" in value  # no address head
+
+    # EVERY staging comparison is `| numbers`-guarded, because a bare one is not
+    # fail-closed: jq orders null below numbers (so a MISSING peak satisfies
+    # `peak < hydrated`) and numbers below strings (so a STRING count satisfies
+    # `> 0`). Both were verified against real jq. Assert no bare `.<key>_staged_`
+    # comparison survives anywhere in the file, so a future assert cannot
+    # reintroduce the hole by copying the old shape.
+    bare = re.findall(r"\.\w*staged\w* [<>=]+ ", value)
+    assert bare == [], f"unguarded staging comparisons: {bare}"
     assert "NOT \"the address\n            # planet build is unblocked at reduce\"" in value
     # Still no credentials: the staging backend is a directory, not R2.
     assert "R2_ACCESS_KEY_ID" not in value
@@ -182,15 +202,24 @@ def test_both_slices_assert_the_exact_published_serving_set():
     # `head_manifest_objects == 0` and no head shards, so the same expression
     # reduces to partitions -- written out rather than dropped, so neither family
     # can drift to its own arithmetic.
+    # The manifest term carries `| numbers` for the same reason every staging
+    # assert does: jq coerces `null` to 0 inside `+`, so a bare
+    # `.head_manifest_objects` would let a MISSING key sum to a passing equality.
     assert (
         ".serving_objects\n                   "
-        "== .partitions + .head_populated_shards + .head_manifest_objects" in value
+        "== .partitions + .head_populated_shards\n                      "
+        "+ (.head_manifest_objects | numbers)" in value
     )
-    assert ".serving_objects == .partitions + .head_manifest_objects" in value
-    assert ".head_manifest_objects == 1" in value
-    assert ".head_manifest_objects == 0" in value
-    # The bare form would let the manifest go unpublished again.
+    assert (
+        ".serving_objects == .partitions + (.head_manifest_objects | numbers)" in value
+    )
+    assert "(.head_manifest_objects | numbers) == 1" in value
+    assert "(.head_manifest_objects | numbers) == 0" in value
+    # The bare forms would let the manifest go unpublished, or go unnoticed.
     assert ".serving_objects == .partitions + .head_populated_shards\n" not in value
+    assert ".head_manifest_objects ==" not in value.replace(
+        "(.head_manifest_objects | numbers) ==", ""
+    )
 
 
 def test_retry_preserves_every_attempt_and_shouts_when_it_retries():

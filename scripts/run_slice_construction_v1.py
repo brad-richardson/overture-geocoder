@@ -441,6 +441,9 @@ if STAGED:
           f"({result['staged_bytes_published']/1e6:8.2f} MB), hydrated "
           f"{result['staged_objects_hydrated']:3d} "
           f"({result['staged_bytes_hydrated']/1e6:.2f} MB) into an EMPTY local store")
+    print(f"           peak resident {result['staged_peak_resident_bytes']/1e6:.2f} MB, "
+          f"released {result['staged_objects_released']} objects "
+          f"({result['staged_bytes_released']/1e6:.2f} MB) -- one object at a time")
 print(
     "\nNOTE: do not extrapolate these linearly to planet scale. Only the map/\n"
     "class is what the inter-phase transport carries out of map, and a slice this\n"
@@ -500,6 +503,15 @@ if STAGED:
     summary["map_staged_bytes_published"] = map_staged["staged_bytes_published"]
     summary["finalize_staged_objects_hydrated"] = result["staged_objects_hydrated"]
     summary["finalize_staged_bytes_hydrated"] = result["staged_bytes_hydrated"]
+    # Finalize used to hydrate the WHOLE published set before its first upload --
+    # 13-18 GB at planet scale on the last job of a multi-hour run. It now hydrates
+    # one object, verifies it, uploads it and evicts it, so peak-below-total is the
+    # assertable form of that, exactly as it is for the plan phase, and the smoke
+    # job checks both keys.
+    summary["finalize_staged_peak_resident_bytes"] = result[
+        "staged_peak_resident_bytes"
+    ]
+    summary["finalize_staged_objects_released"] = result["staged_objects_released"]
     # The plan phase is the one that used to hydrate its whole fan-in eagerly.
     # Peak-below-total is the assertable form of "batched and evicted", and the
     # smoke job checks it, so a regression to eager hydration is a red build.
