@@ -168,11 +168,15 @@ t = phase("finalize (filesystem remote)")
 final = WORK / "final.json"
 hosted("finalize", "--contract", contract, "--store-root", store,
        "--family", "places", "--plan", plan, "--reductions-dir", reductions,
+       "--markers-dir", markers,
        "--head", head, "--remote-root", WORK / "remote",
        "--work-root", WORK / "final-work", "--output", final)
 result = json.loads(final.read_text())
 print(f"  reconciles={result['reconciles']} marker_written_last={result['marker_written_last']}"
       f"  {time.time()-t:.1f}s")
+print(f"  positions published: {result['positions_objects']} objects, "
+      f"{result['positions_records']:,} records, {result['positions_bytes']/1e6:.2f} MB "
+      f"(verified as part of the whole-slice check)")
 
 # Break the store down by artifact class. A single total invites a linear
 # extrapolation to planet scale, which is wrong twice over: fixed per-artifact

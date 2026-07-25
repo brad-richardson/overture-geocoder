@@ -321,6 +321,40 @@ branches or because the gap is about scope rather than a defect.
    even when running under 3.11.14. Neither affects what the phases prove today,
    but both are places where the harness is not the hosted path.
 
+## Added 2026-07-25, from the review of the per-place positions artifact (PR #157)
+
+All five were raised in review and deliberately deferred: none of them can lose
+data, and each is a hardening or cost item rather than a correctness gap. The
+artifact itself is described in `construction-v1-state.md`.
+
+1. **`validate_positions` trusts the inlined directory.** It verifies each pack
+   object and directory object against its recorded sha256/bytes, but it does
+   not re-read the directory object and compare it to the copy inlined in the
+   marker, does not compare `pack["records"]` against the pack's real parquet row
+   count, and does not check `positions["shuffle_bucket_bits"]` against the
+   marker's own limits. The term packs have the same inline-vs-object pattern, so
+   this is a shared hardening item rather than a new one.
+2. **Marker JSON growth from inlined per-cell directories.** Each positions pack
+   inlines a per-row-group and per-cell record-count directory. At planet fan-in
+   (`max_fan_in_tasks` 128, ~89 map tasks) this could add ~1-2 MB per marker,
+   which then travels with every phase that loads markers. Re-estimate against
+   the per-RECORD emission actually shipped, and if it is material, keep only the
+   directory object and drop the inline copy.
+3. **`emit_positions` runs outside any `StageWatchdog`.** It sits between ingest
+   and the watchdog-wrapped pack export, so its scratch and wall time are absent
+   from `construction_evidence`. Small today (one tagged parquet plus one file per
+   bucket), but it is the only map stage with no resource evidence at all.
+4. **`positions_directory` is an O(rows) Python loop.** Term directories are
+   built by the Rust proof binary; this one reads `partition_cell` per row group
+   in Python. Fine at slice scale, and it is deliberately not the Rust binary
+   (positions rows carry no term digests), but a planet task's cost has not been
+   measured.
+5. **Row-group skipping is currently vacuous.** Hosted `parquet_row_group_rows`
+   is 65,536 and a Monaco positions pack holds ~18k rows, so DuckDB writes ONE
+   row group per pack and the per-row-group directory buys nothing yet. It starts
+   to matter at planet density; until then the per-cell summary is the useful
+   half.
+
 ## DEFERRED, do not lose: port the shuffle to the address family
 
 Raised and deliberately deferred on 2026-07-25 so Places could be proven first.

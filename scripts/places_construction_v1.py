@@ -225,13 +225,43 @@ def bucket_range_fragments(
 
 
 COMBINER_SCHEMA = "overture-places-map-combiner-v1"
-# The per-place positions artifact: one row per ADMITTED place, bucketed by the
-# same shuffle as the term packs. Named distinctly from the term packs
+# The per-place positions artifact: one row per ADMITTED place RECORD, bucketed
+# by the same shuffle as the term packs. Named distinctly from the term packs
 # ("positions" vs "packs") because the two ride the same shuffle and a consumer
-# must never confuse them: term rows are ~7.19 per place and post-combiner,
-# these are exactly one per place and pre-combiner.
+# must never confuse them: term rows are ~7.19 per record and post-combiner,
+# these are exactly one per record and pre-combiner.
 POSITIONS_SCHEMA = "overture-places-map-positions-v1"
 POSITIONS_DIRECTORY_SCHEMA = "overture-places-map-positions-directory-v1"
+# One row per admitted place RECORD, keyed by feature_id plus the source locator
+# -- the same identity the serving path uses. Not keyed by feature_id alone: the
+# frozen evidence spec requires every copy of a repeated id to survive as a
+# distinct candidate keyed by its provenance (test_places_duplicate_uuid_gate).
+#
+# Self-sufficient by decision, not by drift: a reverse hit has to render a name
+# and a category, the ID index returns neither, and `/v2/features/:gers_id` is
+# being removed -- so a positions-only row could not answer a reverse query.
+POSITIONS_COLUMNS = (
+    "feature_id",
+    "partition_cell",
+    "longitude",
+    "latitude",
+    "primary_name",
+    "brand_name",
+    "category",
+    "locality",
+    "region",
+    "country",
+    "confidence_rank",
+    "source_object_index",
+    "source_row_group",
+    "source_row_index",
+)
+POSITIONS_COLUMNS_SQL = ", ".join(POSITIONS_COLUMNS)
+# Total within a pack, because the locator is unique per source record.
+POSITIONS_ORDER = (
+    "partition_cell, feature_id, source_object_index, source_row_group, "
+    "source_row_index"
+)
 
 # Single source of truth for the IPC batch-row cap. It mirrors the frozen
 # evidence-spec `acceptance_gates.resources.maximum_ipc_batch_rows`; the
@@ -481,7 +511,7 @@ def validate_marker(
         != marker["transform"]["emitted_term_rows"]
     ):
         raise ValueError("Places combiner kept+discarded differs from transform")
-    validate_positions(marker, store)
+    validate_positions(marker, store, task_id)
     return marker
 
 
@@ -545,16 +575,33 @@ def emit_positions(
     workspace: Path,
     store: A.LocalObjectStore,
     limits: Limits,
-    input_features: int,
     admitted_features: int,
 ) -> dict[str, Any]:
-    """Emit the per-place, cell-keyed positions packs from the `terms` table.
+    """Emit the per-place-record, cell-keyed positions packs from `terms`.
 
-    One row per ADMITTED place -- `feature_id`, `partition_cell`, `longitude`,
-    `latitude`, the ~32-byte minimal form -- bucketed by the same shuffle as the
-    term packs, one pack per PRESENT bucket.
+    One row per ADMITTED PLACE RECORD -- not per distinct place. The unit is the
+    source record, keyed by `feature_id` PLUS its source locator
+    (`source_object_index`, `source_row_group`, `source_row_index`), which is
+    exactly the identity the serving path uses. Overture ids are effectively
+    unique, but the frozen evidence spec requires that a repeated id survive as
+    several distinct candidates keyed by provenance
+    (tests/test_places_duplicate_uuid_gate.py), so collapsing by `feature_id`
+    would both violate that contract and abort a planet map job on data the
+    contract declares valid. Consumers that want one row per place dedupe by
+    their own policy; this artifact does not choose one for them.
 
-    Two things make this artifact worth its bytes, and both are about WHEN it is
+    Because the unit is the record, `records == admitted_features` holds exactly
+    and no aggregation is involved: the rows are a projection with a `DISTINCT`
+    that removes only the per-token fan-out, so no coordinate or name is ever
+    synthesized across rows.
+
+    The record is SELF-SUFFICIENT: position plus the fields a reverse result has
+    to render (`primary_name`, `brand_name`, `category`, `locality`, `region`,
+    `country`, `confidence_rank`). The ID index returns no names and
+    `/v2/features/:gers_id` is being removed, so a positions-only row could not
+    render a reverse hit at all.
+
+    Two things make the artifact worth its bytes, and both are about WHEN it is
     produced rather than what it contains.
 
     It must be derived BEFORE the combiner. The combiner keeps only the top
@@ -569,14 +616,10 @@ def emit_positions(
     costs a full planet map re-run. Emitting it now makes that work purely
     additive (docs/plans/construction-v1-state.md).
 
-    The rows are a GROUP BY rather than a window or DISTINCT ON: every column is
-    per-FEATURE (only token, token_hash, field_mask and the digests vary across
-    a feature's term rows), so `min()` is exact and deterministic and a hash
-    aggregate is one streaming pass with no sort.
-
-    Packs are ordered by (partition_cell, feature_id) within a bucket and the
-    buckets are written in ascending order, which is the global
-    (shuffle_bucket, partition_cell, feature_id) order the term packs also use.
+    Packs are ordered by (partition_cell, feature_id, locator) within a bucket
+    and the buckets are written in ascending order, which is the global
+    (shuffle_bucket, partition_cell, feature_id, locator) order -- total, because
+    the locator is unique per source record.
     """
     import pyarrow.parquet as pq
 
@@ -586,22 +629,20 @@ def emit_positions(
     # not preserve row order within a partition, and these packs are sorted.
     tagged = workspace / "positions-tagged.parquet"
     connection.execute(
-        "COPY (SELECT feature_id, min(partition_cell) partition_cell, "
-        "  min(longitude) longitude, min(latitude) latitude, "
-        f"  min({shuffle_bucket_sql(bits)}) pack_id "
-        "FROM terms GROUP BY feature_id) "
+        f"COPY (SELECT DISTINCT {POSITIONS_COLUMNS_SQL}, "
+        f"  {shuffle_bucket_sql(bits)} pack_id FROM terms) "
         f"TO '{tagged}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
         f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2)"
     )
     records = pq.ParquetFile(tagged).metadata.num_rows
-    if records > input_features or records > limits.max_input_rows:
-        raise ValueError("Places positions exceed the input feature count or row cap")
-    # EXACTLY one row per admitted place. Fewer means two admitted records shared
-    # a feature_id and the GROUP BY collapsed them, which would silently drop a
-    # place from every consumer of this artifact; the whole point is that a place
-    # cannot go missing here, so it fails closed rather than reporting a count.
+    # EXACTLY one row per admitted record. The DISTINCT removes only the
+    # per-token fan-out, so the count can differ from `admitted_features` in one
+    # way: two admitted records sharing a full identity INCLUDING their source
+    # locator, which the projection cannot produce and the serving path could not
+    # tell apart either. Fail closed rather than silently drop a record from
+    # every consumer of this artifact.
     if records != admitted_features:
-        raise ValueError("Places positions differ from the admitted feature count")
+        raise ValueError("Places positions differ from the admitted record count")
     source = f"read_parquet('{tagged}')"
     present = [
         int(row[0])
@@ -614,7 +655,7 @@ def emit_positions(
         pack = workspace / f"positions-{pack_id:06d}.parquet"
         connection.execute(
             f"COPY (SELECT * EXCLUDE(pack_id) FROM {source} WHERE pack_id={pack_id} "
-            "ORDER BY partition_cell, feature_id) "
+            f"ORDER BY {POSITIONS_ORDER}) "
             f"TO '{pack}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
             f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2, "
             "PRESERVE_ORDER true)"
@@ -652,16 +693,25 @@ def emit_positions(
     }
 
 
-def validate_positions(marker: dict[str, Any], store: A.LocalObjectStore) -> None:
+def validate_positions(
+    marker: dict[str, Any], store: A.LocalObjectStore, task_id: str | None = None
+) -> None:
     """A resumed marker must carry the positions artifact, intact.
 
     Without this an admitted marker written before the artifact existed resumes
     silently and one run mixes tasks that have positions with tasks that do not
-    -- the same failure mode the combiner check above closes.
+    -- the same failure mode the combiner check above closes. Resuming a run that
+    predates this artifact therefore aborts its map jobs BY DESIGN; the error
+    says what to do about it.
     """
     positions = marker.get("positions")
     if not isinstance(positions, dict) or positions.get("schema") != POSITIONS_SCHEMA:
-        raise ValueError("Places marker is missing its per-place positions artifact")
+        hint = marker_key(task_id) if task_id else marker_key(marker["task_id"])
+        raise ValueError(
+            "Places marker is missing its per-place positions artifact "
+            f"(pre-positions marker; delete {hint} to re-map this task, or "
+            "resume from a post-positions run)"
+        )
     packs = positions.get("packs")
     if not packs:
         raise ValueError("Places positions artifact records no packs")
@@ -677,7 +727,7 @@ def validate_positions(marker: dict[str, Any], store: A.LocalObjectStore) -> Non
     if sum(pack["records"] for pack in packs) != positions["records"]:
         raise ValueError("Places positions packs do not reconstruct the record count")
     if positions["records"] != marker["transform"]["admitted_features"]:
-        raise ValueError("Places positions differ from the admitted feature count")
+        raise ValueError("Places positions differ from the admitted record count")
 
 
 def map_task(
@@ -802,7 +852,6 @@ def map_task(
             workspace=workspace,
             store=store,
             limits=limits,
-            input_features=parquet.metadata.num_rows,
             admitted_features=transform["admitted_features"],
         )
         head_candidates_path = workspace / "head-candidates.parquet"

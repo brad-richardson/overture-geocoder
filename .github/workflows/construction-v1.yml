@@ -724,8 +724,9 @@ jobs:
           python scripts/construction_v1_hosted.py finalize \
             --contract cv1plan/control/contract.json --store-root headdl/cv1/cv1/mapdl/store \
             --family "$FAMILY_KEY" --plan cv1plan/plan/plan.json --reductions-dir red/reductions \
+            --markers-dir cv1plan/mapdl/markers \
             $HEAD_ARG --remote-root staging --work-root final-work --output final-work/result.json
-          echo "FINALIZE local staging complete: $(jq -c '{objects,reconciles,marker_key}' final-work/result.json)"
+          echo "FINALIZE local staging complete: $(jq -c '{objects,reconciles,marker_key,positions_objects}' final-work/result.json)"
       - name: Mirror the exact staged slice to R2 create-only, marker written last
         env:
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com

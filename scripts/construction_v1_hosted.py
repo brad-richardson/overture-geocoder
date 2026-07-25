@@ -1113,6 +1113,31 @@ def _artifact_keys(family: str, reductions: list[dict[str, Any]], head: dict[str
     return objects
 
 
+def _positions_objects(markers: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """The map-phase positions packs and their directories, deduplicated by key.
+
+    These are NOT serving artifacts, and they are published for one reason: the
+    store otherwise travels only as a GitHub artifact with a 7-day retention, so
+    eight days after a planet run the per-place records would be gone and a
+    spatial reverse index would cost the full map re-run this artifact exists to
+    avoid. Publishing them puts them in durable storage under the same
+    create-only, verified-once treatment as everything else in the slice.
+
+    Deduplicated by key because the keys are content-addressed: two tasks that
+    produced byte-identical bytes are one object, and the exact-set publisher
+    rejects a repeated key.
+    """
+    unique: dict[str, dict[str, Any]] = {}
+    for marker in markers:
+        positions = marker.get("positions")
+        if not isinstance(positions, dict):
+            continue
+        for pack in positions["packs"]:
+            for identity in (pack["object"], pack["directory_object"]):
+                unique[identity["key"]] = identity
+    return sorted(unique.values(), key=lambda item: item["key"])
+
+
 def cmd_finalize(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args.store_root)
@@ -1135,6 +1160,23 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     artifacts = _artifact_keys(args.family, reductions, head)
     if len({item["key"] for item in artifacts}) != len(artifacts):
         raise SystemExit("duplicate serving artifact key")
+    # Map-phase per-place positions packs, published alongside the serving set so
+    # they outlive the 7-day artifact retention. Requires the map markers; when
+    # they are not supplied nothing is published and the summary says so, rather
+    # than silently shipping an incomplete slice.
+    positions_markers = (
+        _load_markers(args.markers_dir)
+        if args.markers_dir and args.family == "places"
+        else []
+    )
+    positions = _positions_objects(positions_markers)
+    positions_records = sum(
+        marker["positions"]["records"]
+        for marker in positions_markers
+        if isinstance(marker.get("positions"), dict)
+    )
+    if {item["key"] for item in positions} & {item["key"] for item in artifacts}:
+        raise SystemExit("positions object collides with a serving artifact key")
 
     family_manifest = {
         "schema": "construction-v1-family-manifest-v1",
@@ -1145,6 +1187,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "partitions": reconciliation["partitions"],
         "artifacts": sorted(artifacts, key=lambda item: item["key"]),
         "head": {"shard_count": head["shard_count"], "total_records": head["total_records"]} if head else None,
+        # Listed separately from `artifacts`: these are build-phase per-place
+        # records, not serving objects, and nothing serves them today.
+        "positions": {
+            "schema": PLACES.POSITIONS_SCHEMA,
+            "records": positions_records,
+            "objects": positions,
+        } if positions else None,
     }
     family_manifest_path = Path(args.work_root) / "family-manifest.json"
     write_json(family_manifest_path, family_manifest)
@@ -1154,7 +1203,8 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "request_sha256": request_sha256,
         "family": args.family,
         "family_manifest_sha256": hashlib.sha256(family_manifest_path.read_bytes()).hexdigest(),
-        "object_count": len(artifacts),
+        "object_count": len(artifacts) + len(positions),
+        "positions_object_count": len(positions),
         "non_promoting": True,
     }
     slice_manifest_path = Path(args.work_root) / "slice-manifest.json"
@@ -1173,6 +1223,9 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     ]
     for artifact in artifacts:
         exact_set.append((f"{slice_root}/families/{args.family}/objects/{Path(artifact['key']).name}",
+                          store.path(artifact["key"])))
+    for artifact in positions:
+        exact_set.append((f"{slice_root}/families/{args.family}/positions/{Path(artifact['key']).name}",
                           store.path(artifact["key"])))
     marker_key = f"{contract['namespaces']['markers'].rstrip('/')}/finalize/{args.family}.json"
     marker = REMOTE.publish_exact_set(
@@ -1195,10 +1248,14 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         "marker_key": marker_key,
         "marker_written_last": True,
         "verification": verification,
+        "positions_objects": len(positions),
+        "positions_records": positions_records,
+        "positions_bytes": sum(item["bytes"] for item in positions),
     }
     write_json(args.output, result)
     print(json.dumps({"family": args.family, "objects": verification["objects"],
-                      "reconciles": reconciliation["reconciles"], "marker_written_last": True}, sort_keys=True))
+                      "reconciles": reconciliation["reconciles"], "marker_written_last": True,
+                      "positions_objects": len(positions)}, sort_keys=True))
     return 0
 
 
@@ -1371,6 +1428,9 @@ def build_parser() -> argparse.ArgumentParser:
     final.add_argument("--plan", type=Path, required=True)
     final.add_argument("--reductions-dir", required=True)
     final.add_argument("--head", type=Path, default=None)
+    final.add_argument("--markers-dir", default=None,
+                      help="Map markers, so the per-place positions packs are published "
+                           "durably instead of expiring with the 7-day artifact retention.")
     final.add_argument("--remote-root", required=True)
     final.add_argument("--work-root", required=True)
     final.add_argument("--fail-after-upload", type=int, default=None)
