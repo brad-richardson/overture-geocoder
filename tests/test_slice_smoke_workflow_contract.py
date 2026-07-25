@@ -162,12 +162,56 @@ def test_installs_only_the_hash_pinned_dependencies_on_the_hosted_python():
         assert pythons == ["3.11.14"], pythons
 
 
-def test_both_jobs_are_bounded_and_fast():
+def test_every_job_is_bounded_and_fast():
     doc = parsed()
     jobs = doc["jobs"]
-    assert set(jobs) == {"hosted-imports", "slice"}
+    assert set(jobs) == {"hosted-imports", "slice", "address-slice"}
     for name, job in jobs.items():
         assert job["timeout-minutes"] <= 20, name
+
+
+def test_pins_the_address_slice_with_its_own_drift_check():
+    """The address family had no data-plane coverage and no drift gate at all."""
+    doc = parsed()
+    env = doc["env"]
+    assert env["SLICE_RELEASE"] == "2026-07-22.0"
+    assert env["ADDRESS_SLICE_BBOX"] == "-122.34 47.59 -122.30 47.63"
+    assert env["ADDRESS_SLICE_TASK_INDEX"] == "54"
+    value = text()
+    assert 'if [ "$TASK" != "$ADDRESS_SLICE_TASK_INDEX" ]' in value
+    assert "update ADDRESS_SLICE_TASK_INDEX" in value
+    # The slice's value as a spatial fixture is that it spans two level-8 cells,
+    # so a layout change that kept the task index but moved the cell boundary out
+    # of the row group must still fail.
+    assert ".object_index == 8 and .row_group == 108 and .task_records == 104928" in value
+    # The harness must be driven with the address family, not the places default.
+    assert "run_slice_construction_v1.py --family addresses" in value
+    assert "build_slice_inventory_v1.py --family addresses" in value
+
+
+def test_the_address_slice_asserts_real_counts_and_the_documented_no_op_head():
+    value = text()
+    for assertion in (
+        '.family == "addresses"',
+        ".admitted_rows > 0",
+        ".map_packs > 0",
+        # Proves the run used the batch dispatch the hosted matrix uses, not the
+        # legacy one-job-per-partition path.
+        '.reduce_ownership == "partition-batch"',
+        '.store_bytes_by_class["map/address"] > 0',
+        '.store_bytes_by_class["reduce/address"] > 0',
+    ):
+        assert assertion in value, assertion
+    # Addresses have no global head; run-head must say so rather than produce an
+    # empty head that looks like a successful one.
+    assert '.family == "addresses" and .head == null' in value
+    # Read from files the harness wrote, never `tail -1` of a merged stream.
+    assert "address-summary.json" in value
+    # Same retry/evidence discipline as the places job, with its own log names so
+    # a retry cannot overwrite attempt 1 and the two jobs cannot collide.
+    assert 'LOG="slice/address-run-attempt-${ATTEMPT}.log"' in value
+    assert "::warning title=Address slice smoke passed only on retry::" in value
+    assert "ADDRESS_SLICE_RETRIED=true" in value
 
 
 def test_the_import_check_covers_every_hosted_workflow_entrypoint():

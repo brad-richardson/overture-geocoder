@@ -310,8 +310,9 @@ branches or because the gap is about scope rather than a defect.
    - the free-disk-space gate;
    - **inter-job artifact transport of the store and markers** — the actual
      planet blocker (run 30113308268 died on a 63 GB plan artifact);
-   - the entire addresses family (no slice harness exists — see the DEFERRED
-     section);
+   - ~~the entire addresses family (no slice harness exists — see the DEFERRED
+     section)~~ — **closed 2026-07-25**: `--family addresses` on both slice
+     scripts, and a second smoke job runs the address slice in CI;
    - the R2 create-only mirror path.
 5. **Two contract divergences inside what the harness does run.** The harness
    hardcodes the evidence-spec path (`run_slice_construction_v1.py`) instead of
@@ -405,6 +406,12 @@ and `run_slice_construction_v1.py` are Places-only, so addresses currently have
 no fast local loop. Building the address equivalent is probably the actual first
 task, since without it any address work repeats the pattern of designing against
 phases that have never run.
+
+> **Status 2026-07-25: DONE.** Both scripts now take `--family addresses`. The
+> loop is 104,928 real Overture addresses (Seattle, release `2026-07-22.0`,
+> `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 seconds
+> with no credentials. The address shuffle port above is still DEFERRED and
+> untouched: the harness runs the existing row-counter pack layout unchanged.
 
 ## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
 

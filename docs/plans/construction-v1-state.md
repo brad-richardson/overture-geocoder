@@ -153,6 +153,14 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
 
 Not started, deliberately — Places first, proven, then port.
 
+- **There is now an address slice harness** (2026-07-25). `--family addresses` on
+  both slice scripts runs 104,928 real Overture addresses (Seattle,
+  `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 s with no
+  credentials. Use it for every address change, exactly as Places uses Monaco.
+  The slice deliberately straddles the level-8 cell boundary at
+  longitude -122.34375, so it covers cells `c328` and `c329` — two different
+  shuffle buckets.
+
 - **The key is sound; do not change it.** `address_key_hash` is FNV-1a over 8
   normalized fields, so `route_hash` is effectively unique per address. There is
   **no indivisible group**, unlike Places' `(cell, token)`. Subdivide to any
