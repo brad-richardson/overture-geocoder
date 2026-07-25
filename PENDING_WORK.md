@@ -1,4 +1,30 @@
-# Pending Work — 2026-07-19
+# Pending Work — 2026-07-25
+
+## Where the active work is — 2026-07-25
+
+**The active build path is construction-v1, and its living state document is
+`docs/plans/construction-v1-state.md`. Read that first.** It records the current
+Places/Addresses planet-construction contract, what has actually run, and what is
+deferred; the dated docs in `docs/plans/` are point-in-time analyses and the
+state doc supersedes them where they disagree. Open follow-ups live in
+`docs/plans/2026-07-24-construction-v1-follow-ups.md`; irreversible choices in
+`docs/plans/2026-07-23-construction-v1-one-way-doors.md`.
+
+The fast local loop is `scripts/build_slice_inventory_v1.py` plus
+`scripts/run_slice_construction_v1.py`: all five construction phases on real
+Overture data in ~13 seconds (~20s including the inventory build) with no
+credentials. It also runs in CI (`.github/workflows/slice-smoke.yml`).
+
+**The global-v2 executor path is gone.** The `agent/global-v2-executor` work was
+abandoned, and #154 deleted the code: 11 scripts, 3 workflows, and 12 test files,
+including the global-v2 construction path and its R2 shuffle rehearsal.
+construction-v1 replaced it. Anything below describing that executor, its
+dispatch sequence, or its resume protocol is history, not a plan.
+
+What is still load-bearing below: the change/review protocol, the v2 product and
+storage decisions in force, the measured address/Places/producer constraints, and
+the supporting engineering backlog. The dated "Next"/"Sequencing" sections are
+retained for provenance only — they are not the current queue.
 
 ## Change and review protocol — 2026-07-21
 
@@ -17,202 +43,9 @@ Keep implementation changes small and independently reviewable:
 - Keep unfinished experiments and evidence harnesses local and out of production
   PRs until they form their own complete, bounded change.
 
-The current global-v2 v3 work must therefore land as separate address, Places,
-orchestration, and readiness slices rather than as the accumulated worktree.
+## Handoff of 2026-07-19 (historical; superseded by construction-v1)
 
-This is the active roadmap. Completed PR history is intentionally omitted unless
-its result constrains the next decision. The implementation baseline is
-`775ad21` (`main` after #125). The older 2026-07-17 sequencing and evidence log
-remain below for provenance; this handoff supersedes their stale NEXT labels.
-
-## Executor implementation complete — 2026-07-19
-
-The bounded global-v2 family executor is implementation- and review-complete
-on `agent/global-v2-executor`. No planet build, production catalog write, R2
-data write, Worker deployment, or authentication flow has been started from
-this branch.
-
-- The address and Places map/reduce/head paths are disk-bounded, stream remote
-  fragments one at a time, validate exact completion sets and remote SHA/byte
-  evidence, preserve permanent sticky lineage, and perform one final streaming
-  whole-slice verification.
-- The hosted workflow uses exact typed execution confirmation, create-only
-  immutable writes, serialized family matrices under one concurrency cap,
-  resumable phase markers, step-scoped secrets, an isolated preview Worker,
-  signed family-specific smoke queries, and verified preview cleanup. Execute
-  mode rejects GitHub reruns; recovery is a fresh dispatch with cumulative
-  prior runner minutes and a renewed confirmation binding every budget input.
-- The read-only core preflight validates the exact reusable unpromoted core
-  `2026-07-18.0` before its manifest identity can enter the canonical request.
-  The executor never writes `v2/catalog.json` or `v2/releases/*`.
-- Final validation is green: 1,045 Python tests; Rust formatting, clippy, 103
-  core tests, 13 integration tests, 115 Worker tests, one doctest, and the wasm
-  check; changed-file Ruff; actionlint; and `git diff --check`.
-- Independent whole-diff and Worker/publication reviews found no remaining
-  dispatch blocker. Cross-root v1/v2 retention remains a hard
-  **before-publication** task; do not run exceptional cleanup against the
-  retained `2026-07-18.0` core while the unpublished family build exists.
-
-Next: land this implementation through the PR/review/green-CI/merge loop. After
-merge, dispatch only the credentialed read-only core preflight and request
-preparation/dry-run evidence. Present the exact request hash, versions, task and
-reducer matrices, concurrency, runner-minute/cost caps, and storage/verification
-plan for operator sign-off. Do **not** dispatch execute mode before that sign-off.
-
-## Paused executor handoff — 2026-07-19
-
-Work paused at the operator's request before quota exhaustion. No global build,
-R2 write, Worker deployment, authentication flow, or v2 catalog publication was
-started. The worktree is intentionally dirty on
-`agent/global-v2-executor` (tracking `origin/main`); none of the executor work
-below is committed or pushed yet.
-
-### Merged foundation
-
-- PR #125, `Prepare bounded global v2 family build`, merged green as
-  `775ad21ced3aed565432404ff2c70f97364834bb`. It closed the pre-executor
-  trust/scaling gaps: exact retained request lineage; canonical Places/address
-  inventories; bounded mappers; strict address WKB and task identity; fragment,
-  spill, Worker memory/cache, and readiness caps; streaming family finalization;
-  and direct Worker SHA/byte verification of `head.phrp`.
-- The foundation PR's seven CI jobs passed. Its one CI correction replaced 12
-  `workflow_dispatch` inputs (GitHub permits at most 10) with one validated
-  `family_inputs_json` input.
-
-### Canonical planet preflight evidence
-
-Read-only canonical inventories passed locally with CPython 3.11.14,
-PyArrow 25.0.0, NumPy 2.3.5, and
-`.github/requirements-hosted-rowgroup.txt` for Overture `2026-06-17.0`:
-
-- Addresses: inventory SHA
-  `6a306fc9937dac82602dbc5233952c1f74fdb0f7467ad4cc38dcc559dfc9d34e`,
-  source-inventory SHA
-  `aa196a40730676efef70413d45bdcadaada3df07c94599b954efd38cd096ec37`,
-  schema fingerprint
-  `05260dc6878478fe750a82ad3fb9ddd2fdffcda3f25c00f950acfccca132d7e0`,
-  473,576,753 rows, 32 objects, 8,704 row groups, and 127 bounded map tasks.
-  The largest task has 3,999,690 rows and about 296.8 MB selected uncompressed
-  bytes. Total selected compressed input is about 16.7 GB.
-- Places: inventory SHA
-  `b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff`,
-  schema fingerprint
-  `49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a`,
-  75,642,289 rows, 16 objects, 5,120 row groups, and 89 bounded map tasks.
-  The largest task has 999,805 rows (median 987,454).
-- Both matrices fit the retained 128-source-task family cap. No shard creation
-  was dispatched.
-
-### Reusable legacy core
-
-- Successful dry-run Actions run `29624600543` built and remotely finalized
-  immutable, unpromoted legacy core `2026-07-18.0` from the same Overture
-  release `2026-06-17.0` at checkout
-  `db97c0bc7b0c1d515e26bf24b98e666caea12e21`. It verified 262 forward shards,
-  253 reverse shards, and all 4,096 ID shards; promotion was deliberately
-  skipped.
-- The exact SHA of `2026-07-18.0/release-manifest.json` was not present in the
-  Actions log and the unpromoted prefix is not publicly readable. The eventual
-  credentialed **read-only** workflow preflight must download it from R2,
-  validate version/release/completeness, compute its SHA-256, and freeze that
-  identity in the retained request. Do not authenticate interactively or infer
-  the digest.
-
-### Local executor implementation (uncommitted)
-
-- Address plan/reducer modules now validate the exact 127-task completion set,
-  stream remote fragments one at a time through an argv-only fetch adapter,
-  derive stable sticky partitions, assign replaceable reduce jobs, build the
-  existing `.aidx`/`.adat` format, and finalize the Worker collection plus exact
-  global duplicate fanout. Predecessor validation permits maximum-hash-bit
-  growth and row-cap retuning while forbidding bit-depth decreases and retaining
-  sticky split IDs.
-- Address reduce jobs were changed from heaviest-leaf scattering to balanced
-  contiguous `(country, hash_start)` ranges. In the regression fixture, a broad
-  fragment spanning 16 leaves is referenced by at most two adjacent jobs rather
-  than up to 16 jobs, avoiding planet-scale remote download amplification.
-- Places plan/reducer/head modules implement exact map fan-in, sticky
-  `world-quadkey-v1` planning, replaceable reduce jobs, streaming remote fragment
-  reads, existing PCSH/PCAT output, and a bounded two-pass global PHRP head.
-  Predecessor work was being relaxed so maximum level can grow, row caps can be
-  retuned, and tokenizer rotation does not discard geometric split history.
-- `global_v2_executor.py` and `finalize_rebuild.py` contain retained-request,
-  runtime, cost/coverage, exact task/phase completion, immutable slice publish,
-  and remote-verification primitives. The first draft's roughly four full-fleet
-  readbacks were identified as a scaling bug; keep per-upload readback plus one
-  final whole-slice verification, followed only by exact key listing and marker
-  verification.
-- The Worker and `v2_release_manifest.py` locally support an isolated preview
-  catalog only at `smoketest-v2/<safe-run-id>/catalog.json`, only with
-  `ENVIRONMENT=smoke|preview`. Its release manifest is a sibling preview object,
-  preview history is forbidden, and no object is written under `v2/releases/`
-  or `v2/catalog.json`.
-- New/modified executor files include
-  `scripts/global_v2_{address_plan,address_reduce,places_plan,places_reduce,places_head,executor}.py`,
-  `scripts/r2_fragment_fetch.py`, `scripts/finalize_rebuild.py`, the Worker v2
-  preview changes, and their focused tests. `PENDING_WORK.md` also contained
-  pre-existing local edits; stage files explicitly when resuming.
-
-### Exact paused validation state
-
-- Latest focused run: 50 passed, 4 failed across address executor, Places
-  executor, control-plane executor, R2 fetch, and v2 release-manifest tests.
-- Two failures are the same Places issue: `execute_reduce_job`'s new peak
-  scratch/workspace evidence does not yet satisfy `validate_reduce_report`.
-  Align producer and validator, retaining hard scratch/workspace caps.
-- Two failures are the same R2 key issue: `safe_key` must reject empty and dot
-  path components (`a//b`, `a/./b`) in addition to absolute paths, `..`, and
-  shell metacharacters.
-- The manual dispatch workflow, preview Worker deploy/query/cleanup wiring,
-  read-only legacy-core SHA preflight, and tests for that workflow were not yet
-  added. Therefore this branch is **not dispatch-ready** and should not be
-  pushed as a PR until those are complete and reviewed.
-
-### Resume order and parallel ownership
-
-These lanes can resume in parallel; only the final review/PR depends on all
-three:
-
-Global-v2 execution resume is always a **fresh `workflow_dispatch`**, never
-GitHub's **Re-run jobs** action. Execute mode accepts only
-`github.run_attempt == 1`. For a resume, retain the exact request, enter the
-cumulative minutes spent by every earlier attempt as `prior_runner_minutes`,
-and regenerate the typed confirmation: it binds the request and mode plus
-`max_parallel`, `max_total_runner_minutes`, `max_estimated_cost_usd`, and
-`prior_runner_minutes`. This prevents a rerun from silently reusing a zero
-prior-minute budget.
-
-1. **Places lane:** fix the two scratch-evidence tests; finish and test relaxed
-   predecessor compatibility (maximum-level growth, row-cap and tokenizer
-   changes; reject depth decrease/scheme/min-level drift); retain exact remote
-   SHA/byte checks and peak disk evidence.
-2. **Orchestration lane:** fix `safe_key`; finish a main-only, typed-confirmation
-   workflow with resumable phases, create-only R2 writes, exact completion
-   matrices, pinned Python/PyArrow dependencies, a pre-job free-disk gate, and
-   isolated preview Worker smoke/cleanup. Record GitHub runner image provenance,
-   but do not make staged `ImageVersion` rollout nondeterministically break one
-   matrix unless that non-resumability is explicit. If reusing
-   `jlumbroso/free-disk-space`, pin commit
-   `54081f138730dfa15788a46383842cd2f914a1be`, never `@main`.
-3. **Address lane:** finish the bounded bucket-count refactor and rerun locality,
-   predecessor, reducer, duplicate-fanout, replay, and remote-streaming tests.
-4. Run the full Python/Rust/wasm/actionlint/Ruff/diff-check suite, then perform an
-   independent whole-diff review focused on permanent lineage, remote exact-set
-   verification, hosted disk/time limits, create-only semantics, and zero
-   production catalog writes.
-5. Use the standard PR loop: explicitly exclude unrelated local pending-work
-   edits from the implementation commit as appropriate, push, open the PR,
-   address review, require green CI, and merge.
-6. After merge, run only the credentialed read-only preflight needed to obtain
-   the core manifest SHA and build the exact canonical request. Present the
-   request hash, slice/build versions, 127+89 map matrices, reducer counts,
-   concurrency, runner-minute/cost caps, and expected storage/verification work
-   for operator sign-off. **Do not dispatch the planet build before that explicit
-   sign-off.**
-
-## Current handoff (2026-07-19)
-
-### Completed today
+### Completed 2026-07-19
 
 - USA-scale evidence closed green against real Overture `2026-06-17.0` data:
   18,014,140 full-CONUS Places rows produced 13 deterministic serving shards
@@ -274,12 +107,21 @@ prior-minute budget.
    swapping `v2/catalog.json` is a later reviewable operation, not a side effect
    of the data build.
 
-### Next: first global v2 family build
+### Superseded: first global v2 family build
 
-The foundations are resolved, but several public/lineage decisions and the
-global data-plane executor are not dispatch-ready. The existing
-`global_build_manifest.py` numbered reduce partitions predate stable family
-ownership and must not be treated as serving shard IDs.
+**This is no longer the plan.** The global-v2 data-plane executor described here
+was abandoned and deleted in #154; construction-v1 is how the first planet
+Places/Addresses slice gets built, and
+`docs/plans/construction-v1-state.md` is where its current state lives.
+
+The two checklists below are retained as a **requirements inventory** for
+publication, not as a sequence to execute: several entries (stable ownership,
+rejection accounting, head admission, verified create-only publication) are real
+constraints that construction-v1 must still satisfy in its own terms. Read them
+as "things that must be true before anything is published", and cross-check
+against the construction-v1 one-way-doors doc rather than against
+`global_build_manifest.py`, whose numbered reduce partitions were never serving
+shard identities.
 
 #### Must close before dispatching the global build
 
@@ -497,7 +339,10 @@ they can change behind a later geocoder build without changing shard ownership.
   routes. Those sections are retained as an evidence record, not current API
   documentation.
 
-## Sequencing (2026-07-17)
+## Sequencing (2026-07-17) — historical provenance only
+
+The NEXT labels in this section are stale; construction-v1 replaced this
+sequencing. Kept for the dispatched-run ids and measured results it records.
 
 Ordered plan to reach a meaningful non-promoting Places/address shard build
 test. Steps 2 and 3 are independent and can run in parallel; step 4 must not
@@ -670,7 +515,11 @@ Places relevance verdict (step 2).
 5. **After July 25:** verify the promoted rebuild's lineage/reverse baseline,
    then re-size exact-country work. It does not queue-jump the family work.
 
-## Current state
+## State as of 2026-07-19 (historical)
+
+Production status and the serving-side experiment results below were accurate on
+2026-07-19 and are kept as measured evidence. For the current construction-v1
+state see `docs/plans/construction-v1-state.md`.
 
 - Production is healthy on data version `2026-07-13.0` and remains
   division-only. No address, Places, street, or exact-country experiment is
@@ -748,8 +597,21 @@ Places relevance verdict (step 2).
 8. Credentialed external-data workflows run only from `main`. A green evidence
    workflow means measurement and cleanup succeeded; it does not approve a
    family for launch or publication.
+9. Pin every third-party GitHub Action to a full commit SHA, never a tag or
+   `@main`. This includes `jlumbroso/free-disk-space` (currently pinned at
+   `54081f138730dfa15788a46383842cd2f914a1be` in `construction-v1.yml`), which
+   runs with the workspace mounted and is not a first-party action. First-party
+   `actions/*` uses are also SHA-pinned in the construction and data-spike
+   workflows; `ci.yml` still uses tags and is the remaining exception.
 
-## Next work
+## Next work as of 2026-07-19 (historical queue)
+
+**Not the current queue.** These four items are the 2026-07-19 serving/rebuild
+queue, written before construction-v1 existed. The Places relevance,
+address-coverage, and exact-country items remain genuinely open *as serving
+questions*; the July 25 rebuild rehearsal item is spent. The current build queue
+is in `docs/plans/construction-v1-state.md` and
+`docs/plans/2026-07-24-construction-v1-follow-ups.md`.
 
 ### 1. Run and benchmark the routed Places prototype
 
@@ -929,6 +791,16 @@ These do not block the first routed Places or real-fragment address slice:
 4. Reverse `wkb` disposition and post-rebuild exact-country priority.
 
 ## References
+
+Current (construction-v1):
+
+- `docs/plans/construction-v1-state.md` — the living state document
+- `docs/plans/2026-07-24-construction-v1-follow-ups.md` — open follow-ups
+- `docs/plans/2026-07-23-construction-v1-one-way-doors.md` — irreversible choices
+- `docs/plans/2026-07-24-growth-test-and-path-to-planet.md`
+- `docs/plans/2026-07-24-committed-partition-plan-design.md`
+
+Historical:
 
 - `benchmarks/2026-07-17-remote-address-places-r2-evidence.md`
 - `benchmarks/2026-07-16-live-service-baseline.md`

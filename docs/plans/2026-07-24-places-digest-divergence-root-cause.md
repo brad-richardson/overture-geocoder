@@ -1,7 +1,10 @@
 # Places semantic-digest divergence: root cause
 
-Date: 2026-07-24. Status: LOCAL SPIKE, uncommitted. No PRs, no workflows, no
-R2 writes. Evidence produced on the local machine from the real
+Date: 2026-07-24. Status: SHIPPED — committed; the fix landed the same day in
+#141/#142/#143 (#142 exported Rust's lowercase and word-character tables into
+the Python baseline; the remaining NFKD and combining-mark properties are item 3
+of `docs/plans/2026-07-24-construction-v1-follow-ups.md`). Kept as the
+point-in-time root-cause analysis. Evidence produced on the local machine from the real
 `2026-06-17.0` projected task parquets in
 `benchmarks/places-construction-v1-data/projected/`.
 

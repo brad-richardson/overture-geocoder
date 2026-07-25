@@ -77,7 +77,7 @@ the planner subdivide when a task lands within some headroom fraction of them.
 
 ## Verification and test hygiene
 
-### 5. Dry-run does not exercise the execute data plane
+### 5. Dry-run does not exercise the execute data plane — ADDRESSED 2026-07-25
 
 The map job branches on `inputs.mode`: dry-run runs `--validate-only` plus
 `predict-reduce` and never touches `run-map`, the transform binary, the S3
@@ -96,6 +96,46 @@ Two fixes, either of which would have caught all three:
   throwaway namespace) that runs the real `run-map` end to end.
 - A CI job that installs `.github/requirements-hosted-rowgroup.txt` into a
   clean virtualenv and imports every hosted entrypoint module.
+
+**Both shipped** as `.github/workflows/slice-smoke.yml`, on `pull_request` and
+push to `main`, path-filtered to `scripts/`, `crates/geocoder-construction/`,
+the evidence spec, the pinned requirements file, and `construction-v1.yml`
+itself (it is the source the import check derives its module set from):
+
+- `slice` builds the construction binaries, builds the Monaco slice inventory
+  from real row-group statistics, and runs the harness's five real phases
+  (S3 projection -> `run-map` with the transform binary -> `plan-reduce` ->
+  every `run-reduce` partition -> `run-head` -> `finalize`), then asserts that
+  records, partitions, head shard count, populated head shards, head records,
+  and the map/serve artifact-class byte totals are all non-zero, read from the
+  summary file the harness writes. No credentials: the release parquet is read
+  anonymously and finalize publishes to a filesystem remote. ~13s of harness
+  time (~20s including the inventory); two attempts, each with its own fresh
+  work dir and its own log, and a pass-on-retry raises a loud warning
+  annotation, so an intermittent defect cannot hide behind a green check.
+- `hosted-imports` installs *only* the hash-pinned requirements and imports
+  every hosted entrypoint module (`scripts/check_hosted_imports.py`, module set
+  derived from the hosted workflows rather than hardcoded, with a hard error on
+  a missing workflow and a module-count floor).
+
+**Coverage per defect** — the honest version, because the first draft of this
+section overclaimed:
+
+| Defect | Caught by |
+| --- | --- |
+| #149 cargo manifest path | the `slice` job's build step (byte-identical command) |
+| #150 missing `psutil` | the `slice` job. `psutil` is a *function-level* import inside `run_bounded`, so only executing the map phase reaches it |
+| #148 admit-job matrix key | **neither job.** The admission gate, request regeneration, and matrix generation are not run here; only `tests/test_construction_v1_workflow_contract.py` covers that surface |
+
+`hosted-imports` catches top-level import failures only: a syntax error, or a
+module-level import of a dependency missing from the pinned set. It cannot see
+#150's class — with `psutil` uninstalled from the pinned environment every
+derived module still imports cleanly.
+
+The release (`2026-07-22.0`), bbox, and map task index are pinned in the
+workflow env with the reason: the task index is a property of that release's
+row-group layout, and the job fails with an explicit message if the bbox stops
+landing on the pinned task.
 
 ### 6. Rust verifier test does not isolate the independent-binding check
 
@@ -129,13 +169,18 @@ should be closed before anything serves publicly.
 
 ## Documentation drift
 
-- `PENDING_WORK.md` is dated 2026-07-19 and its "Next" section still describes
+Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
+
+- ~~`PENDING_WORK.md` is dated 2026-07-19 and its "Next" section still describes
   the abandoned `agent/global-v2-executor` path. It is the largest doc in the
-  repo and does not mention construction v1 at all.
-- `docs/plans/2026-07-24-places-global-scale-plan.md` and
+  repo and does not mention construction v1 at all.~~ Its stale planning
+  sections were deleted rather than rewritten, and it now points at
+  `docs/plans/construction-v1-state.md` as the living state doc.
+- ~~`docs/plans/2026-07-24-places-global-scale-plan.md` and
   `docs/plans/2026-07-24-places-digest-divergence-root-cause.md` both still
   carry `Status: LOCAL SPIKE — uncommitted, no PR, no workflow`, but they are
-  committed and their recommendations shipped the same day in #141/#142/#143.
+  committed and their recommendations shipped the same day in #141/#142/#143.~~
+  Status lines corrected.
 
 ## Already addressed
 
@@ -144,6 +189,13 @@ should be closed before anything serves publicly.
   thread — `__exit__` then reported success and `evidence()` reported zero
   peaks. Fixed to fail closed, with the `psutil` attach moved to the caller's
   thread so a missing dependency fails at the call site.
+- **Dry-run does not exercise the execute data plane** (item 5 above).
+  `.github/workflows/slice-smoke.yml` runs the real five-phase Places data plane
+  on the Monaco Overture slice on every relevant PR, and imports every hosted
+  entrypoint module under only the hash-pinned dependency set. Both fixes
+  proposed in item 5, in one workflow — but see the per-defect coverage table in
+  item 5: #148's surface (the admission gate) is still test-only, and the import
+  job is a top-level-import tripwire, not data-plane coverage.
 
 ## Added 2026-07-25, from the adversarial review of PR #155
 
@@ -160,11 +212,18 @@ should be closed before anything serves publicly.
    no code; the byte one was already violated before this change. The spec ships
    a `.sha256` companion and is meant to be frozen. Either enforce them or
    delete them — a frozen spec stating caps the build ignores is a trap.
+   **Scheduled:** fixed immediately after the two in-flight PRs (per-place
+   artifact; reduce-by-bucket-range) merge, together with item 3 — both touch
+   the same limit values, so doing them separately guarantees a conflict.
 3. **`Limits` dataclass defaults were not raised with the hosted limits.**
    `places_construction_v1.Limits` still defaults to 1,000,000 / 250,000 /
    256 MiB, and `rehearse_places_construction_v1.py` explicitly pins
    1,000,000 / 250,000. Hosted overrides win so nothing breaks, but rehearsals
    now plan at caps the hosted build no longer uses and are not representative.
+   **Scheduled:** same slot as item 2 — right after the per-place-artifact and
+   reduce-by-bucket-range PRs merge. Deliberately not done before then:
+   `places_construction_v1.py` and its tests are being edited by both of those
+   PRs, and a defaults change now is a pure merge conflict.
 4. **`predict-reduce` was 14x optimistic and this change made it worse.** Fixed
    in PR #155 by flooring the prediction with the committed plan's partition
    count. Worth a follow-up: the addresses branch of the same function divides
@@ -172,6 +231,76 @@ should be closed before anything serves publicly.
 5. **The committed plan is only read by `predict-reduce` and the generator.**
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
+
+## Added 2026-07-25: scope down the R2 credentials used by construction-v1
+
+**State on `main` today:** only the finalize job receives
+`CLOUDFLARE_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY`. The map
+jobs hold no cloud credentials, by design.
+
+**What changes when the staging work lands.** The map/reduce R2-staging work
+(in flight, 2026-07-25) needs R2 write access from the *map* jobs. It will reuse
+those same workflow-level credentials, by owner decision, to avoid blocking the
+staging work on a token change. That will be a real widening of blast radius,
+recorded here before it happens rather than after:
+
+- The reused key is the general-purpose R2 key. It can write anywhere in the
+  bucket, including keys the create-only finalize discipline is meant to protect.
+- It would reach roughly **89 parallel map jobs** instead of one finalize job,
+  in a **public** repository. Exposure surface scales with fan-out.
+
+**The follow-up:** issue a staging-only scoped R2 token — write limited to the
+staging prefix, read-only (or no access) everywhere else — and give the map and
+reduce jobs that token, leaving the broad key with finalize where the promotion
+discipline lives.
+
+Owner: Brad. Deliberate deferral recorded 2026-07-25. Do this before the slice
+is promoted, and before any run dispatched from a fork-visible surface.
+
+## Added 2026-07-25, from the adversarial review of the slice smoke job (#159)
+
+Recorded rather than fixed, either because the file is contested by in-flight
+branches or because the gap is about scope rather than a defect.
+
+1. **Places reconciliation is a hardcoded literal.** `finalize` reports
+   `reconciles: true` for places from a constant
+   (`construction_v1_hosted.py:852`), while the addresses branch actually calls
+   `validate_complete_reduction`. So `reconciles == true` proves nothing about
+   places, which is why the slice smoke job asserts record/partition/head counts
+   instead. **Port the addresses equivalent to places** and make the literal
+   impossible. Not fixed in #159: that file is being edited by two other
+   branches.
+2. **The smoke job's assertions on head are counts, not identity.** `run-head`
+   computes an `input_binding` (records + semantic sums) that nothing compares
+   against the reduce output. Non-zero counts rule out an empty head; they do not
+   rule out a *wrong* head. Comparing `input_binding` to the plan's retained
+   totals is the cheap next step.
+3. **Contract tests pin the smoke job's commands as literals, not as equality
+   with `construction-v1.yml`.** A change to a hosted command plus its own
+   contract test leaves the smoke job silently behind on the old flags. The
+   durable fix is a cross-file equality assertion on the shared command
+   fragments (projector limits, cargo build line) rather than two independent
+   copies of the same string.
+4. **Hosted surfaces the smoke job does NOT cover.** Worth keeping explicit so
+   nobody reads a green check as "the hosted path works":
+   - the admission job — canonical request regeneration, typed confirmation,
+     matrix generation (this is where #148 lived);
+   - `ledger-check` / `ledger-append` and the fan-in re-sum gates;
+   - `admit-task` marker idempotence, including the `_remote_marker_completed`
+     HEAD path;
+   - the free-disk-space gate;
+   - **inter-job artifact transport of the store and markers** — the actual
+     planet blocker (run 30113308268 died on a 63 GB plan artifact);
+   - the entire addresses family (no slice harness exists — see the DEFERRED
+     section);
+   - the R2 create-only mirror path.
+5. **Two contract divergences inside what the harness does run.** The harness
+   hardcodes the evidence-spec path (`run_slice_construction_v1.py`) instead of
+   threading it from the contract, which is exactly the property the hosted
+   contract test enforces for the workflow; and it passes
+   `--allow-unpinned-duckdb` while recording `python: "3.12.3"` in its request
+   even when running under 3.11.14. Neither affects what the phases prove today,
+   but both are places where the harness is not the hosted path.
 
 ## DEFERRED, do not lose: port the shuffle to the address family
 
