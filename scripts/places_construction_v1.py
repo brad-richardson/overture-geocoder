@@ -119,6 +119,7 @@ def cell_partition_key(cell: str) -> int:
         raise ValueError(f"Places partition cell is malformed: {cell!r}")
     return (int(cell[:2], 16) << 8) | int(cell[2:], 16)
 COMBINER_SCHEMA = "overture-places-map-combiner-v1"
+PLACE_RECORDS_SCHEMA = "overture-places-map-place-records-v1"
 
 # Single source of truth for the IPC batch-row cap. It mirrors the frozen
 # evidence-spec `acceptance_gates.resources.maximum_ipc_batch_rows`; the
@@ -487,6 +488,59 @@ def map_task(
         # ingested it into the `terms` table. Drop it before any pack export so
         # the ~3 GiB IPC copy never coexists with the pack files.
         transformed.unlink(missing_ok=True)
+
+        # --- per-place artifact -------------------------------------------
+        # One row per PLACE, emitted here and nowhere else, for two reasons.
+        #
+        # It must come BEFORE the combiner. The combiner keeps only the top
+        # `maximum_serving_candidates` rows per (partition_cell, token), so a
+        # place whose tokens all sit in saturated groups can vanish from the
+        # term set entirely. That is harmless for forward search and fatal for
+        # anything that must enumerate places -- a spatial reverse index above
+        # all. Deriving it from the combined set would silently lose places.
+        #
+        # And it is derived by a GROUP BY rather than a window or a DISTINCT ON:
+        # every column below is per-FEATURE (only token, token_hash, field_mask
+        # and the digests vary across a feature's term rows), so min() is exact
+        # and deterministic, and a hash aggregate is one streaming pass with no
+        # sort. The result is written straight to parquet -- there is no arrow
+        # round trip and no second copy of the term table.
+        #
+        # Ordered by (shuffle bucket, cell, feature_id) so a consumer that wants
+        # one bucket reads a contiguous run and can skip row groups on
+        # statistics, the same access pattern the term fragments give it.
+        places_path = workspace / "places.parquet"
+        connection.execute(
+            "COPY (SELECT feature_id, "
+            f"  min({shuffle_bucket_sql(limits.shuffle_bucket_bits)}) shuffle_bucket, "
+            "  min(partition_cell) partition_cell, min(partition_key) partition_key, "
+            "  min(longitude) longitude, min(latitude) latitude, "
+            "  min(primary_name) primary_name, min(brand_name) brand_name, "
+            "  min(category) category, min(locality) locality, "
+            "  min(region) region, min(country) country, "
+            "  min(confidence_rank) confidence_rank "
+            "FROM terms GROUP BY feature_id "
+            "ORDER BY shuffle_bucket, partition_cell, feature_id) "
+            f"TO '{places_path}' (FORMAT PARQUET, COMPRESSION ZSTD, "
+            f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
+            "PARQUET_VERSION V2, PRESERVE_ORDER true)"
+        )
+        place_rows = pq.ParquetFile(places_path).metadata.num_rows
+        if place_rows > parquet.metadata.num_rows:
+            raise ValueError("Places per-place artifact exceeds the input feature count")
+        if place_rows > limits.max_input_rows:
+            raise ValueError("Places per-place artifact exceeds the input row cap")
+        if places_path.stat().st_size > limits.max_output_bytes:
+            raise ValueError("Places per-place artifact exceeds output cap")
+        place_records = {
+            "schema": PLACE_RECORDS_SCHEMA,
+            "records": place_rows,
+            "admitted_features": transform["admitted_features"],
+            "object": store.put_content(
+                places_path, "map/places-v1/place-records", ".parquet"
+            ),
+        }
+        places_path.unlink(missing_ok=True)
         head_candidates_path = workspace / "head-candidates.parquet"
         connection.execute(
             f"COPY (SELECT * FROM terms QUALIFY row_number() OVER (PARTITION BY token "
@@ -710,6 +764,7 @@ def map_task(
             "packs": packs,
             "head_candidates": head_candidates,
             "combiner": combiner,
+            "place_records": place_records,
             "binding": binding,
         }
         store.write_marker_last(marker_key(task_id), marker)
@@ -856,6 +911,13 @@ def adaptive_genesis_plan(
                         "id": f"p-{cell}{suffix}",
                         "execution_group": cell[:2],
                         "partition_cell": cell,
+                        # The shuffle bucket map wrote this cell's rows into.
+                        # Recorded on the partition so the plan can be ORDERED by
+                        # it below, which is what turns the existing contiguous
+                        # batching into bucket-clustered batching.
+                        "shuffle_bucket": shuffle_bucket(
+                            cell_partition_key(cell), limits.shuffle_bucket_bits
+                        ),
                         "ownership": {
                             "kind": "token-sha256-nibble-prefix-v1",
                             "depth": depth,
@@ -940,6 +1002,27 @@ def adaptive_genesis_plan(
             }
             if partition["binding"]["records"] != partition["term_rows"]:
                 raise ValueError("Places adaptive partition proof row count differs")
+        # Order partitions by SHUFFLE BUCKET, not by cell.
+        #
+        # Reduce batches are contiguous ranges of partition index
+        # (construction_v1_hosted._reduce_batches). Ordered by cell, a 140-
+        # partition batch spans ~140 unrelated buckets and therefore needs a
+        # fragment from every bucket -- which is to say, the whole store. Ordered
+        # by bucket, a batch covers a contiguous BUCKET range, so it needs only
+        # the fragments in that range. That is the property R2 staging then turns
+        # into "fetch only your own shards"; without it, staging would still have
+        # every reducer pulling everything.
+        #
+        # (cell, depth, prefix) stays as the tiebreak so the order is total and
+        # the plan remains byte-reproducible.
+        partitions.sort(
+            key=lambda item: (
+                item["shuffle_bucket"],
+                item["partition_cell"],
+                item["ownership"]["depth"],
+                item["ownership"]["prefix"],
+            )
+        )
         plan = {
             "schema": "overture-places-adaptive-genesis-plan-v1",
             "predecessor": None,

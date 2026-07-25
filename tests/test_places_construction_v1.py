@@ -951,6 +951,18 @@ def test_map_combiner_discards_below_serving_rank_and_proves_additivity(
     assert combiner["discarded"]["records"] == shared * (len(rows) - cap)
     assert marker["binding"]["records"] == combiner["retained_rows"]
 
+    # The per-place artifact must survive the combiner untouched. This fixture
+    # saturates every shared token, so the combiner discards thousands of term
+    # rows -- and a place whose tokens ALL sit in saturated groups could vanish
+    # from the term set entirely. Anything that must enumerate places (a spatial
+    # reverse index above all) reads this artifact, so it is emitted before the
+    # combiner and must still hold exactly one row per admitted feature.
+    records = marker["place_records"]
+    assert records["schema"] == module.PLACE_RECORDS_SCHEMA
+    assert records["records"] == marker["transform"]["admitted_features"]
+    assert records["records"] == len(rows)
+    assert combiner["discarded"]["records"] > 0, "fixture must exercise discarding"
+
     # The proof the combiner rests on: kept + discarded reconstructs the
     # transform's binding exactly, over both digest lanes.
     reconstructed = module.A.combine_bindings(
