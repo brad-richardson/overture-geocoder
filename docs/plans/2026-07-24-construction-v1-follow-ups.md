@@ -178,7 +178,10 @@ should be closed before anything serves publicly.
 Raised and deliberately deferred on 2026-07-25 so Places could be proven first.
 Nothing about it is started. Full reasoning in `construction-v1-state.md`.
 
-**Addresses have the same transport wall and are the bigger half of it:**
+**Addresses have the same BUILD-TIME transport wall and are the bigger half
+of it** (this is about moving bytes between phases, NOT query latency --
+construction-v1 builds forward indexes only, and address reverse does not
+exist; see the query-surface section of `construction-v1-state.md`):
 473,576,753 records / 33.2 GB selected uncompressed, against Places'
 74,223,561 / 10.6 GB. They run through the identical workflow, so the store
 moves as GitHub artifacts exactly the same way, and reduce has never run.

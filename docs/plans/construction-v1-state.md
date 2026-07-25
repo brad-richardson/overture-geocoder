@@ -124,14 +124,79 @@ Not started, deliberately — Places first, proven, then port.
 - **The shuffle is worth porting** and is easier: the natural key is
   `(country, top-K bits of route_hash)` — the partition key at fixed
   granularity, already uniform, no hash-of-a-hash needed.
-- Addresses are the **bigger** transport problem: 473,576,753 records /
-  33.2 GB selected, against Places' 74.2M / 10.6 GB.
+- Addresses are the **bigger BUILD-TIME** transport problem: 473,576,753
+  records / 33.2 GB selected, against Places' 74.2M / 10.6 GB. This is about
+  moving bytes between build phases and says nothing about query latency --
+  see "Query surface" below before inferring anything about lookups.
 - 8,023 of 8,704 row groups are already single-country, so the source is
   largely country-clustered already.
 - **Measure country skew first** to choose K — the inventory records no
   per-country row counts, so it is currently unknown.
 - `MEASURED_REDUCE_MINUTES_PER_PARTITION["addresses"] = 2.0` is genuinely
   uncalibrated and the code says so. The Places 1.0 **is** calibrated.
+
+## Query surface, and what construction-v1 does NOT build
+
+Everything above is about **build time**. It is easy to read the partition-key
+discussion as a statement about lookup performance. It is not. Keep these
+separate.
+
+**Live today (v1, divisions only).** Measured 2026-07-25 from a dev machine, so
+these include RTT to the edge:
+
+| endpoint | cold | warm p50 |
+|---|---|---|
+| `/search` | 434 ms | **47 ms** |
+| `/reverse` | 39 ms | **42 ms** |
+
+The documented gate is a warm median at or under 250 ms per route class
+(`docs/api-v2.md`). Both are inside it.
+
+**v2 is unpublished.** Every v2 endpoint returns
+`503 release_unavailable`, because construction-v1 has never completed a run.
+
+| family | forward | reverse |
+|---|---|---|
+| divisions | `/v2/forward` text mode | `/v2/reverse` -- the ONLY reverse that exists |
+| places / POI | `/v2/forward` text; no proximity -> packed global head, 1-2 exact tokens; with proximity -> exactly ONE quadkey shard, up to 4 tokens | **rejected by the API** |
+| addresses | `/v2/forward` **structured exact only** (`country`+`street`+`number`). Free-text address search is deliberately unadvertised; `types=address` with `q` returns unsupported-capability | **rejected by the API** |
+
+### construction-v1 builds FORWARD indexes only
+
+`docs/api-v2.md` states it directly: *"Reverse currently serves divisions only.
+`poi` and `address` are rejected until their spatial reverse indexes exist."*
+
+- The Places serving key is `cell\0token` in routed mode -- forward.
+- The address serving index is keyed by `route_hash` and ordered by
+  route/key/source -- exact forward lookup.
+- **Neither can serve a reverse query at any key.** The address key being
+  non-spatial is therefore irrelevant to reverse; a reverse index would be a
+  separate spatial structure, as the divisions reverse shards already are
+  (`build_shards.py --reverse`).
+
+**Unbuilt and recorded nowhere else: POI and address reverse need their own
+spatial index.** No design exists. Do not assume the construction-v1 output can
+be adapted to it.
+
+### Expected forward performance (projection, not measurement)
+
+Nothing below is built, so this is reasoning from the read pattern only:
+
+| query | reads | expectation |
+|---|---|---|
+| POI forward with proximity | exactly 1 quadkey shard | same shape as today's `/search`; warm tens of ms |
+| POI forward without proximity | packed global head only | fastest path, small and cacheable |
+| address structured exact | hash -> 1 partition, range read | point lookup, cheapest of the three |
+
+All three are bounded single-shard reads *by contract*, so warm latency is a low
+risk. The real risk is **cold-shard size** -- a first touch is the 434 ms case
+above, and the densest cell (Tokyo) is the largest shard in the system.
+
+### `/v2/features/:gers_id` is slated for removal
+
+Owner decision, 2026-07-25. Do not build on it, do not extend it, and exclude it
+from capability analyses. Removing it is its own change: it touches the worker,
+`docs/api-v2.md`, and tests.
 
 ## Open follow-ups
 
