@@ -355,8 +355,8 @@ def cmd_run_map(args: argparse.Namespace) -> int:
         "records": marker["binding"]["records"],
         "packs": len(marker["packs"]),
     }
-    # Places also emits the per-place positions packs (one row per admitted
-    # place, same shuffle as the term packs). Report them so a map job's log
+    # Places also emits the per-place positions packs (one row per admitted place
+    # RECORD, same shuffle as the term packs). Report them so a map job's log
     # shows the artifact exists; nothing downstream of map consumes them yet.
     positions = marker.get("positions")
     if isinstance(positions, dict):
