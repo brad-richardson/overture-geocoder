@@ -426,6 +426,27 @@ def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binar
         # Both paths are now watched, and the evidence records real peaks.
         assert ranged["ingest_evidence"]["peak_rss_bytes"] > 0
         assert single["ingest_evidence"]["peak_rss_bytes"] > 0
+        # The published bytes are bound to the plan, not merely intended to be.
+        assert ranged["emit_verification"]["binds_published_bytes"] is True
+        assert ranged["emit_verification"]["leaf_binding"] == ranged["binding"]
+        assert ranged["emit_verification"]["foreign_cell_rows"] == 0
+
+    # A plan whose batch claims a partition range the bucket range does not own
+    # must abort: the plan and the reducer would otherwise disagree about
+    # ownership and the reductions directory would be silently misfiled.
+    disagreeing = tmp_path / "plan-disagreeing.json"
+    tampered = json.loads(plan.read_text())
+    tampered["reduce_execution"]["batches"][0]["partition_start"] += 1
+    disagreeing.write_text(json.dumps(tampered))
+    with pytest.raises(SystemExit, match="did not assign"):
+        HOSTED.main([str(a) for a in (
+            "run-reduce", "--contract", contract, "--store-root", store,
+            "--family", "places", "--plan", disagreeing, "--markers-dir", markers_dir,
+            "--batch-index", 0,
+            "--encoder-binary", binaries["places-serving-encode-v1"],
+            "--verifier-binary", binaries["places-serving-verify-v1"],
+            "--scratch-dir", tmp_path / "reduce-disagree",
+            "--output-dir", tmp_path / "reductions-disagree")])
 
     head = tmp_path / "head.json"
     assert _admit_completed(store, "places", "head", index=0) is False

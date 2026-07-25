@@ -494,6 +494,7 @@ def _places_reduce_execution(
     bits: int,
     job_cap: int,
     timeout_max_batch: int | None,
+    fragment_buckets: set[int] | None = None,
 ) -> tuple[int, list[dict[str, int]], dict[str, Any]]:
     """Bucket-range reduce execution for a Places plan."""
     if not partitions:
@@ -507,6 +508,22 @@ def _places_reduce_execution(
         item["batch_index"] = index
     if sum(item["partition_count"] for item in dispatched) != len(partitions):
         raise SystemExit("reduce bucket ranges do not cover every partition once")
+    # Ranges with no partitions are NOT dispatched, so a bucket that holds map
+    # data but no plan partition would be silently skipped -- and the in-job
+    # "fragments but no partitions" guard would never run to catch it. Check it
+    # here, where the map markers are still in hand.
+    if fragment_buckets is not None:
+        covered = {
+            bucket
+            for item in dispatched
+            for bucket in range(item["bucket_start"], item["bucket_end"] + 1)
+        }
+        orphans = sorted(bucket for bucket in fragment_buckets if bucket not in covered)
+        if orphans:
+            raise SystemExit(
+                f"map fragments occupy shuffle buckets {orphans} that no dispatched "
+                "reduce range covers; the plan is missing those cells"
+            )
     batch_size = max(item["partition_count"] for item in dispatched)
     details = {
         "shuffle_bucket_bits": bits,
@@ -556,6 +573,11 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
             bits=int(limits.shuffle_bucket_bits),
             job_cap=job_cap,
             timeout_max_batch=timeout_max_batch,
+            fragment_buckets={
+                int(pack["shuffle_bucket"])
+                for marker in markers
+                for pack in marker["packs"]
+            },
         )
     else:
         batch_size, batches = _reduce_batches(
@@ -787,6 +809,8 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
             counts, job_cap=job_cap, timeout_max_batch=timeout_max_batch
         )
         populated = [item for item in cover if item["partition_count"]]
+        if not populated:
+            raise SystemExit("predicted reduce has no populated bucket ranges")
         batch_size = max(item["partition_count"] for item in populated)
         batches = populated
         details = {

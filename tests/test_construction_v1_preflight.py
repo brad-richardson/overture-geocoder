@@ -343,6 +343,30 @@ def test_places_reduce_execution_is_bucket_ranges_over_the_plan():
     assert details["populated_bucket_ranges"] == len(dispatched)
 
 
+def test_places_reduce_execution_rejects_map_buckets_no_range_covers():
+    # Empty ranges are dropped from the matrix, so a bucket holding map fragments
+    # but no plan partition would never be dispatched and neither in-job guard
+    # would run. Catch it here, where the markers are still in hand.
+    bits = 4
+    partitions = [
+        {"partition_cell": "0000", "shuffle_bucket": HOSTED.PLACES.shuffle_bucket(
+            HOSTED.PLACES.cell_partition_key("0000"), bits)}
+    ]
+    covered = partitions[0]["shuffle_bucket"]
+    orphan = (covered + 1) % 16
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._places_reduce_execution(
+            partitions, bits=bits, job_cap=16, timeout_max_batch=None,
+            fragment_buckets={covered, orphan},
+        )
+    assert "no dispatched" in str(excinfo.value)
+    # The same call with only covered buckets is fine.
+    HOSTED._places_reduce_execution(
+        partitions, bits=bits, job_cap=16, timeout_max_batch=None,
+        fragment_buckets={covered},
+    )
+
+
 def test_places_reduce_execution_rejects_a_plan_not_ordered_by_bucket():
     bits = 8
     ordered = sorted(

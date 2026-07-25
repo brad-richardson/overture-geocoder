@@ -8,6 +8,7 @@ import importlib.util
 import json
 import sys
 import tempfile
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -211,7 +212,18 @@ def bucket_range_fragments(
     # Bucket-major so a range reads its fragments in shuffle order, and the
     # per-fragment scan is a contiguous run of the packed key space.
     fragments.sort(key=lambda item: (item[0], item[1]))
-    return [pack for _, _, pack in fragments]
+    packs = [pack for _, _, pack in fragments]
+    # "Each fragment once" is a claim about OBJECTS, not about list entries, so
+    # the object keys must be unique. A duplicate here -- two markers naming the
+    # same pack, or one marker listing it twice -- would double-count every row
+    # it holds, and because bindings are additive sums the inflation would be
+    # invisible until a reconciliation far downstream. Fail closed instead.
+    keys = [pack["object"]["key"] for pack in packs]
+    if len(keys) != len(set(keys)):
+        raise ValueError("Places bucket range names the same map fragment twice")
+    return packs
+
+
 COMBINER_SCHEMA = "overture-places-map-combiner-v1"
 PLACE_RECORDS_SCHEMA = "overture-places-map-place-records-v1"
 
@@ -1176,7 +1188,9 @@ def _reduce_connection(workspace: Path, limits: Limits) -> Any:
     return connection
 
 
-def _reduce_watchdog(workspace: Path, limits: Limits, connection: Any):
+def _reduce_watchdog(
+    workspace: Path, limits: Limits, connection: Any, wall_seconds: float | None = None
+):
     """The whole-stage RSS/scratch/wall guard, on the reducer's own terms.
 
     The encoder and verifier are bounded because they are subprocesses under
@@ -1185,16 +1199,33 @@ def _reduce_watchdog(workspace: Path, limits: Limits, connection: Any):
     nothing observed -- and raising `partition_term_rows` doubled exactly that
     peak. Same caps, same fail-closed semantics, same evidence shape as the two
     `map_task` stages.
+
+    `wall_seconds` is the REMAINING job budget, not a fresh one per stage. A
+    bucket-range job runs one ingest and then tens of serving stages; giving each
+    the full `limits.wall_seconds` would leave the JOB unbounded in wall time --
+    ~66 partitions x 18,000 s against a 330-minute Actions kill that produces no
+    evidence at all.
     """
     return A.StageWatchdog(
         [workspace],
         A.Limits(
             max_rss_bytes=limits.max_rss_bytes,
             max_scratch_bytes=limits.max_scratch_bytes,
-            wall_seconds=limits.wall_seconds,
+            wall_seconds=limits.wall_seconds if wall_seconds is None else wall_seconds,
         ),
         connection,
     )
+
+
+def _remaining_wall(started: float, limits: Limits) -> float:
+    """What is left of the JOB's wall budget, failing closed when it is gone."""
+    remaining = limits.wall_seconds - (time.monotonic() - started)
+    if remaining <= 0:
+        raise ValueError(
+            "Places reduce job exhausted its wall budget of "
+            f"{limits.wall_seconds}s before finishing its partitions"
+        )
+    return remaining
 
 
 def _reduce_preconditions(
@@ -1297,6 +1328,18 @@ def _reduce_ingest(
             ):
                 maximum_batch_rows = max(maximum_batch_rows, batch.num_rows)
                 if not initialized:
+                    # A term column with this name would NOT raise on DuckDB
+                    # 1.5.1: the injected tag is silently renamed to
+                    # `<name>_1`, so `* EXCLUDE(<name>)` drops the DATA column
+                    # and the emit predicate filters on it instead -- every
+                    # partition then publishes the wrong rows while every
+                    # binding still matches. Nothing downstream could see it,
+                    # so refuse the collision here.
+                    if PARTITION_INDEX_COLUMN in batch.schema.names:
+                        raise ValueError(
+                            f"Places term rows carry a {PARTITION_INDEX_COLUMN} column, "
+                            "which collides with the reducer's partition tag"
+                        )
                     connection.register("places_selected_batch", batch)
                     connection.execute(
                         "CREATE TABLE selected AS SELECT *, 0::INTEGER AS "
@@ -1342,12 +1385,18 @@ def _reduce_ingest(
                         "discarded": discarded_binding,
                     }
                 )
-            # Exact ownership, proven per row group rather than argued: when the
+            # Exact ownership, checked per row group rather than argued: when the
             # job owns the fragment's whole bucket, the partitions it holds must
             # claim EVERY row of the row group, each exactly once. Summing the
             # per-partition selected bindings and comparing to the row group's
             # recorded binding catches a dropped cell and a double-claimed cell
             # in both digest lanes, which a row count alone would not.
+            #
+            # What this does NOT catch, stated plainly: the sum is additive and
+            # order-independent, so SWAPPING two of this job's partitions leaves
+            # it satisfied. That case is caught downstream instead -- each
+            # partition's selected binding must equal the plan's, and the emitted
+            # bytes must digest back to it (`_emit_partition`).
             if require_complete and A.combine_bindings(claimed) != expected:
                 raise ValueError(
                     "Places bucket-range reduce left rows of a fragment unclaimed "
@@ -1365,6 +1414,60 @@ def _reduce_ingest(
     }
 
 
+def _owned_row_check(
+    connection: Any, position: int, partition: dict[str, Any]
+) -> dict[str, int]:
+    """Measure the emit predicate's result set DuckDB-side, before writing it.
+
+    Every binding in this file is computed pyarrow-side while ingesting; the
+    published bytes come out DuckDB-side through
+    ``WHERE __reduce_partition = <position>``. Nothing used to connect the two,
+    so a predicate that selected the WRONG partition produced wrong serving
+    artifacts that every check -- including finalize's reconciliation, which sums
+    the pyarrow-side bindings -- accepted.
+
+    So measure the predicate's own result set, in SQL, against the partition's
+    IDENTITY: its cell, its token-hash ownership prefix, and the plan's row count.
+    Those three pin the set exactly -- the owned rows are precisely the ingested
+    rows with that cell and prefix -- so a predicate selecting anything else
+    fails here rather than at publication.
+    """
+    ownership = partition.get("ownership", {"depth": 0, "prefix": 0})
+    cell = partition["partition_cell"].replace("'", "''")
+    foreign_prefix = "0"
+    if ownership.get("depth"):
+        foreign_prefix = (
+            f"count(*) FILTER (WHERE {_prefix_sql(ownership['depth'])} != "
+            f"{ownership['prefix']})"
+        )
+    records, foreign_cell, foreign_prefix_rows = connection.execute(
+        f"SELECT count(*), count(*) FILTER (WHERE partition_cell != '{cell}'), "
+        f"{foreign_prefix} FROM selected WHERE {PARTITION_INDEX_COLUMN}={position}"
+    ).fetchone()
+    return {
+        "records": int(records),
+        "foreign_cell_rows": int(foreign_cell),
+        "foreign_prefix_rows": int(foreign_prefix_rows),
+    }
+
+
+def _binding_for_parquet(path: Path) -> dict[str, Any]:
+    """Dual-lane binding read back from a written parquet's digest columns."""
+    import pyarrow as pa
+    import pyarrow.parquet as pq
+
+    total = A.zero_binding()
+    parquet = pq.ParquetFile(path)
+    for batch in parquet.iter_batches(
+        batch_size=MAX_IPC_BATCH_ROWS,
+        columns=["semantic_digest_a", "semantic_digest_b"],
+    ):
+        total = A.combine_bindings(
+            [total, binding_for_table(pa.Table.from_batches([batch]))]
+        )
+    return total
+
+
 def _emit_partition(
     *,
     connection: Any,
@@ -1379,6 +1482,8 @@ def _emit_partition(
     selected_binding: dict[str, Any],
     maximum_batch_rows: int,
     ingest_evidence: dict[str, Any],
+    ingestion_scope: str,
+    wall_seconds: float,
 ) -> dict[str, Any]:
     """Encode, verify and store ONE partition out of the ingested table."""
     if not reconciled:
@@ -1389,21 +1494,48 @@ def _emit_partition(
     owned = f"FROM selected WHERE {PARTITION_INDEX_COLUMN}={position}"
     leaf = workspace / f"leaf-{position:05d}.parquet"
     arrow = workspace / f"leaf-{position:05d}.arrow"
-    with _reduce_watchdog(workspace, limits, connection) as watchdog:
+    with _reduce_watchdog(workspace, limits, connection, wall_seconds) as watchdog:
+        predicate = _owned_row_check(connection, position, partition)
+        if (
+            predicate["records"] != partition["binding"]["records"]
+            or predicate["foreign_cell_rows"]
+            or predicate["foreign_prefix_rows"]
+        ):
+            raise ValueError(
+                "Places reduce emit predicate does not select this partition: "
+                f"{predicate} against plan records "
+                f"{partition['binding']['records']}"
+            )
         connection.execute(
             f"COPY (SELECT {columns} {owned} ORDER BY {TOTAL_ORDER}) TO '{leaf}' "
             f"(FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
             f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2, "
             "PRESERVE_ORDER true)"
         )
+        # Bind the BYTES, not the intent: digest the leaf that is about to be
+        # stored and require it to reproduce the plan's binding on both lanes.
+        # This is the only step that ties a published object to the plan; the
+        # SQL check above is a cheap, independent second opinion on the same
+        # predicate.
+        emitted_binding = _binding_for_parquet(leaf)
+        if emitted_binding != partition["binding"]:
+            raise ValueError(
+                "Places reduce leaf bytes do not digest back to the plan binding"
+            )
+        # The serving stream is derived from the leaf that was just PROVEN rather
+        # than from a second, unproven predicate over `selected`. Same rows, same
+        # TOTAL_ORDER, so the encoder input is unchanged -- but there is now
+        # exactly one place where the partition's row set is decided.
         serving_rows = A.write_arrow_query(
             connection,
-            f"SELECT {columns} {owned} QUALIFY row_number() OVER ({SERVING_PARTITION} "
-            f"ORDER BY {SERVING_ORDER})<={limits.maximum_serving_candidates} "
-            f"ORDER BY {TOTAL_ORDER}",
+            f"SELECT * FROM read_parquet('{leaf}') QUALIFY row_number() OVER "
+            f"({SERVING_PARTITION} ORDER BY {SERVING_ORDER})"
+            f"<={limits.maximum_serving_candidates} ORDER BY {TOTAL_ORDER}",
             arrow,
             MAX_IPC_BATCH_ROWS,
         )
+        if serving_rows > predicate["records"]:
+            raise ValueError("Places reduce serving rows exceed the partition")
     serving_evidence = watchdog.evidence()
     routed = workspace / f"routed-{position:05d}.plrv"
     encode_evidence = A.run_bounded(
@@ -1442,15 +1574,24 @@ def _emit_partition(
         "partition": partition,
         "binding": selected_binding,
         "reconciled_row_groups": reconciled,
+        # `scope` because a bucket-range job ingests every partition in its range
+        # in one pass: these numbers describe that pass, not this partition. The
+        # per-partition figures are `emit_verification` and `serving_evidence`.
         "streaming_ingestion": {
             "maximum_batch_rows": maximum_batch_rows,
             "full_table_read_all": False,
+            "scope": ingestion_scope,
         },
         "serving_candidate_rows": serving_rows,
+        "emit_verification": {
+            **predicate,
+            "leaf_binding": emitted_binding,
+            "binds_published_bytes": True,
+        },
         "leaf_object": store.put_content(leaf, "reduce/places-v1/leaves", ".parquet"),
         "routed_object": store.put_content(routed, "serve/places-v1/routed", ".plrv"),
         "encode_evidence": encode_evidence,
-        "ingest_evidence": ingest_evidence,
+        "ingest_evidence": {**ingest_evidence, "scope": ingestion_scope},
         "serving_evidence": serving_evidence,
     }
     # The store already holds the bytes, so the workspace copies are dead weight.
@@ -1482,6 +1623,7 @@ def reduce_partition(
     consumer does once for a whole range.
     """
     _reduce_preconditions(plan, markers, [partition], limits)
+    started = time.monotonic()
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=f"reduce-{partition['id']}-", dir=scratch_root
@@ -1512,6 +1654,8 @@ def reduce_partition(
                 selected_binding=ingested["selected_bindings"][0],
                 maximum_batch_rows=ingested["maximum_batch_rows"],
                 ingest_evidence=watchdog.evidence(),
+                ingestion_scope="partition",
+                wall_seconds=_remaining_wall(started, limits),
             )
         finally:
             connection.close()
@@ -1572,6 +1716,7 @@ def reduce_bucket_range(
             "reductions": [],
             "binding": A.zero_binding(),
         }
+    started = time.monotonic()
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix=f"reduce-b{start:05d}-{end:05d}-", dir=scratch_root
@@ -1602,6 +1747,10 @@ def reduce_bucket_range(
                     selected_binding=ingested["selected_bindings"][position],
                     maximum_batch_rows=ingested["maximum_batch_rows"],
                     ingest_evidence=ingest_evidence,
+                    ingestion_scope="bucket-range-job",
+                    # The REMAINING job budget, so the job -- not each serving
+                    # stage -- is what the wall cap bounds.
+                    wall_seconds=_remaining_wall(started, limits),
                 )
                 for position, (_plan_index, partition) in enumerate(owned)
             ]
@@ -1610,16 +1759,13 @@ def reduce_bucket_range(
     binding = A.combine_bindings([item["binding"] for item in reductions])
     if binding != A.combine_bindings([item[1]["binding"] for item in owned]):
         raise ValueError("Places bucket-range reduce binding differs from the plan")
-    if ingested["fragments_opened"] > len(fragments):
-        raise ValueError("Places bucket-range reduce opened a fragment twice")
     return {
         **summary,
         "fragments_opened": ingested["fragments_opened"],
         "reductions": reductions,
         "binding": binding,
-        "ingest_evidence": ingest_evidence,
+        "ingest_evidence": {**ingest_evidence, "scope": "bucket-range-job"},
     }
-
 
 
 def build_global_head(

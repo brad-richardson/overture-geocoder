@@ -61,6 +61,16 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
   partition list; `plan-reduce` records the ranges and the workflow matrix key is
   unchanged. Outputs are byte-identical to the per-partition reducer, which is
   still there for the single-partition CLI path and the rehearsal.
+- **The reducer's published bytes are bound to the plan.** Every binding in the
+  reducer is computed pyarrow-side while ingesting, but the artifacts come out
+  DuckDB-side through a `WHERE` on the partition tag. Nothing connected the two,
+  so a wrong predicate published the wrong partition's rows and *every* check —
+  including finalize's reconciliation, which sums those same pyarrow bindings —
+  accepted it. Now the predicate's result set is measured in SQL against the
+  partition's identity (cell, ownership prefix, planned row count) and the leaf
+  that is about to be stored is digested back to the plan binding on both lanes,
+  with the serving stream derived from that proven leaf rather than from a second
+  unproven predicate.
 - **Reduce is watched** — `StageWatchdog` now wraps the reducer's Python +
   pyarrow + DuckDB ingest and its serving encode, with the same caps and the
   same fail-closed semantics as the two `map_task` stages. It was the one phase

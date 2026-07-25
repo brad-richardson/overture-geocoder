@@ -1530,3 +1530,248 @@ def test_bucket_range_with_no_partitions_reads_nothing(
     assert result["reductions"] == []
     assert result["fragment_keys"] == []
     assert result["fragments_opened"] == 0
+
+
+class _RewritingConnection:
+    """A DuckDB connection whose SQL is corrupted on the way through.
+
+    Stands in for the class of defect the emit step used to be blind to: the
+    published bytes come out of `WHERE __reduce_partition = <position>`, and
+    nothing measured what that predicate actually returned.
+    """
+
+    def __init__(self, connection, corrupt):
+        self._connection = connection
+        self._corrupt = corrupt
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    def execute(self, sql, *args, **kwargs):
+        return self._connection.execute(self._corrupt(sql), *args, **kwargs)
+
+
+def _reduce_with_corrupted_sql(module, monkeypatch, corrupt):
+    original = module._reduce_connection
+
+    def wrapped(workspace, limits):
+        return _RewritingConnection(original(workspace, limits), corrupt)
+
+    monkeypatch.setattr(module, "_reduce_connection", wrapped)
+
+
+def test_emit_predicate_corruption_fails_closed(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    # The reviewer's repro. Rewrite the emit predicate so every partition
+    # publishes partition 0's rows. Every binding in the reducer is computed
+    # pyarrow-side and still matches the plan, and finalize's reconciliation sums
+    # those same bindings -- so before the emit checks existed, 15 of 16 serving
+    # artifacts were wrong and everything downstream said the run was good.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-corrupt"
+    )
+    assert len(plan["partitions"]) > 1, "the fixture needs partitions to confuse"
+    import re
+
+    _reduce_with_corrupted_sql(
+        module,
+        monkeypatch,
+        lambda sql: re.sub(rf"{module.PARTITION_INDEX_COLUMN}=\d+",
+                           f"{module.PARTITION_INDEX_COLUMN}=0", sql),
+    )
+    with pytest.raises(ValueError, match="emit predicate does not select this partition"):
+        module.reduce_bucket_range(
+            bucket_start=0, bucket_end=3, plan=plan, markers=[marker], store=store,
+            scratch_root=tmp_path / "reduce-corrupt",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_emitted_leaf_bytes_must_digest_back_to_the_plan(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    # The same corruption, but applied ONLY to the COPY that writes the leaf, so
+    # the SQL row-count/ownership check still measures the true set and passes.
+    # What catches it then is the digest of the bytes about to be published.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-bytes"
+    )
+    import re
+
+    def corrupt(sql: str) -> str:
+        if not sql.lstrip().upper().startswith("COPY"):
+            return sql
+        return re.sub(rf"{module.PARTITION_INDEX_COLUMN}=\d+",
+                      f"{module.PARTITION_INDEX_COLUMN}=0", sql)
+
+    _reduce_with_corrupted_sql(module, monkeypatch, corrupt)
+    with pytest.raises(ValueError, match="do not digest back to the plan binding"):
+        module.reduce_bucket_range(
+            bucket_start=0, bucket_end=3, plan=plan, markers=[marker], store=store,
+            scratch_root=tmp_path / "reduce-bytes",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_reduce_ingest_refuses_a_term_column_that_shadows_the_partition_tag(
+    tmp_path, construction_module
+):
+    # No code bug required: on the pinned DuckDB 1.5.1 a term column named
+    # __reduce_partition does NOT raise. The injected tag is renamed to
+    # __reduce_partition_1, so `* EXCLUDE(__reduce_partition)` drops the DATA
+    # column and the emit predicate filters on it -- silently publishing the
+    # wrong rows for every partition. Refuse the collision instead.
+    module = construction_module
+    duckdb = pytest.importorskip("duckdb")
+    fragment = tmp_path / "shadowed.parquet"
+    digests = [bytes(32), bytes(32)]
+    pq.write_table(
+        pa.table(
+            {
+                "partition_cell": pa.array(["0000", "0000"], pa.string()),
+                "token_hash": pa.array([1, 2], pa.uint64()),
+                "semantic_digest_a": pa.array(digests, pa.binary()),
+                "semantic_digest_b": pa.array(digests, pa.binary()),
+                module.PARTITION_INDEX_COLUMN: pa.array([7, 7], pa.int32()),
+            }
+        ),
+        fragment,
+    )
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    identity = store.put_content(fragment, "map/places-v1/packs", ".parquet")
+    pack = {
+        "pack_id": 0,
+        "shuffle_bucket": 0,
+        "object": identity,
+        "directory": {
+            "row_groups": [
+                {
+                    "index": 0,
+                    "routing_groups": [{"partition_cell": "0000"}],
+                    "binding": module.A.zero_binding(),
+                }
+            ]
+        },
+    }
+    connection = duckdb.connect()
+    try:
+        with pytest.raises(ValueError, match="collides with the reducer's partition tag"):
+            module._reduce_ingest(
+                connection=connection,
+                fragments=[pack],
+                partitions=[(0, {"id": "p-0000", "partition_cell": "0000"})],
+                store=store,
+                require_complete=False,
+            )
+    finally:
+        connection.close()
+
+
+def test_bucket_range_fragment_guards_fail_closed(
+    tmp_path, construction_binaries, construction_module
+):
+    # Every fragment-side precondition, each with its own failing case.
+    module = construction_module
+    _store, marker, _plan, _limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-fragments"
+    )
+    kwargs = {"bucket_start": 0, "bucket_end": 3, "bits": 2}
+
+    pre_shuffle = json.loads(json.dumps(marker))
+    del pre_shuffle["packs"][0]["shuffle_bucket"]
+    with pytest.raises(ValueError, match="predates the map-side shuffle"):
+        module.bucket_range_fragments([pre_shuffle], **kwargs)
+
+    mismatched = json.loads(json.dumps(marker))
+    mismatched["packs"][0]["pack_id"] = mismatched["packs"][0]["shuffle_bucket"] + 1
+    with pytest.raises(ValueError, match="pack id differs from its shuffle bucket"):
+        module.bucket_range_fragments([mismatched], **kwargs)
+
+    # A duplicated fragment would double-count every row it holds, and because
+    # bindings are additive sums the inflation is invisible until far downstream.
+    duplicated = json.loads(json.dumps(marker))
+    duplicated["packs"].append(json.loads(json.dumps(duplicated["packs"][0])))
+    with pytest.raises(ValueError, match="same map fragment twice"):
+        module.bucket_range_fragments([duplicated], **kwargs)
+
+
+def test_bucket_range_reduce_fails_closed_on_an_incomplete_plan(
+    tmp_path, construction_binaries, construction_module
+):
+    # The central exactness argument, tested by breaking it: drop one cell from
+    # the plan and the range's partitions no longer claim every row of every
+    # fragment they read. That must abort, not silently publish a short run.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-incomplete"
+    )
+    assert len(plan["partitions"]) > 1
+    incomplete = json.loads(json.dumps(plan))
+    dropped = incomplete["partitions"].pop()
+    bucket = module.shuffle_bucket(
+        module.cell_partition_key(dropped["partition_cell"]), 2
+    )
+    with pytest.raises(ValueError, match="unclaimed"):
+        module.reduce_bucket_range(
+            bucket_start=bucket, bucket_end=bucket, plan=incomplete, markers=[marker],
+            store=store, scratch_root=tmp_path / "reduce-incomplete",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+    # And the degenerate version of the same break: a range whose buckets hold
+    # map fragments but whose plan has no partitions at all for them.
+    emptied = {**incomplete, "partitions": [
+        item for item in incomplete["partitions"]
+        if module.shuffle_bucket(module.cell_partition_key(item["partition_cell"]), 2)
+        != bucket
+    ]}
+    with pytest.raises(ValueError, match="fragments but no plan partitions"):
+        module.reduce_bucket_range(
+            bucket_start=bucket, bucket_end=bucket, plan=emptied, markers=[marker],
+            store=store, scratch_root=tmp_path / "reduce-orphan",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_bucket_range_reduce_fails_closed_when_a_partition_binding_is_wrong(
+    tmp_path, construction_binaries, construction_module
+):
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-binding"
+    )
+    tampered = json.loads(json.dumps(plan))
+    tampered["partitions"][0]["binding"]["records"] += 1
+    with pytest.raises(ValueError, match="binding differs from plan"):
+        module.reduce_bucket_range(
+            bucket_start=0, bucket_end=3, plan=tampered, markers=[marker], store=store,
+            scratch_root=tmp_path / "reduce-binding",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_reduce_job_is_wall_bounded_not_only_each_serving_stage(
+    tmp_path, construction_binaries, construction_module
+):
+    # A bucket-range job runs one ingest and then a serving stage per partition.
+    # Giving each stage a fresh `wall_seconds` would leave the JOB unbounded --
+    # tens of partitions x the full budget against a hard Actions kill that
+    # produces no evidence. The budget is the job's, and it is spent down.
+    module = construction_module
+    started = module.time.monotonic() - 100.0
+    limits = module.Limits(wall_seconds=120)
+    assert 0 < module._remaining_wall(started, limits) <= 20
+    with pytest.raises(ValueError, match="exhausted its wall budget"):
+        module._remaining_wall(module.time.monotonic() - 121.0, limits)

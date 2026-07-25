@@ -238,6 +238,19 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
 
+## Added 2026-07-25, from the adversarial review of PR #160
+
+1. **The Places routed serving objects never reach the published slice.**
+   Pre-existing, found while reviewing bucket-range reduce, and NOT fixed there.
+   `construction_v1_hosted._artifact_keys` collects `reduction["artifact"]`,
+   which the *address* reducer sets and the Places reducer does not — Places
+   records `leaf_object` and `routed_object` instead. So a Places finalize
+   publishes the head shards and the two manifests, and silently publishes no
+   `.plrv` at all. Every existing check still passes: the reconciliation compares
+   bindings, not the published object set. Whatever publishes routed objects must
+   also assert the published set is non-empty and covers every partition, or the
+   same hole reopens.
+
 ## Added 2026-07-25: scope down the R2 credentials used by construction-v1
 
 **State on `main` today:** only the finalize job receives

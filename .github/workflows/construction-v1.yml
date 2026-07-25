@@ -769,7 +769,7 @@ jobs:
             echo "## Construction v1 run result"
             echo
             echo "- Family: \`$FAMILY_KEY\` | Request: \`${{ needs.admit.outputs.request_sha256 }}\`"
-            echo "- Map tasks: ${{ needs.admit.outputs.map_task_count }} | Reduce partitions: ${{ needs.plan.outputs.reduce_count }}"
+            echo "- Map tasks: ${{ needs.admit.outputs.map_task_count }} | Reduce jobs: ${{ needs.plan.outputs.reduce_count }}"
             echo "- Max concurrency: ${{ needs.admit.outputs.max_parallel }} | Cap: ${{ needs.admit.outputs.max_total_runner_minutes }} runner-min | Prior: ${{ needs.admit.outputs.prior_runner_minutes }}"
             echo "- Consumed runner minutes (ledger): $(jq -r '(.prior_runner_minutes // 0) + ([.phases[].runner_minutes] | add // 0)' cv1plan/control/ledger.json 2>/dev/null || echo unavailable)"
             echo "- Slice: immutable, NON-PROMOTING; completion marker create-only and written last"
