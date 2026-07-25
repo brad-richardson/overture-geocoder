@@ -207,11 +207,11 @@ store:
 | plan hydrated / peak resident | 32.88 MB / **16.44 MB** (8 released) | 0 / 0 |
 | reduce hydrated / worst job peak | 16.44 MB / **8.30 MB** | 10.89 MB / 10.89 MB |
 | head hydrated / peak resident | 7.35 MB / 7.35 MB (unbatched) | 0 / 0 (no head phase) |
-| finalize hydrated from staging | 28 objects / 35.94 MB | 5 objects / 32.14 MB |
-| serving objects published | 20 (4 `.plrv` + 16 `.plhd`) | 1 `.av1` |
+| finalize hydrated from staging | 29 objects / 35.95 MB | 5 objects / 32.14 MB |
+| serving objects published | 21 (4 `.plrv` + 16 `.plhd` + 1 head manifest) | 1 `.av1` |
 
 The published slice is **byte-identical** to a `--no-staging` run of the same
-slice — same content-addressed names, same sizes; 31 files for Places, 8 for
+slice — same content-addressed names, same sizes; 32 files for Places, 8 for
 addresses.
 
 Two byte totals in `store_bytes_by_class` do wobble, and neither is about
@@ -219,12 +219,13 @@ transport:
 
 - `map/` drifts a few bytes run to run in **both** modes, because the pack proof
   directories inline per-run wall-time and RSS evidence;
-- `serve/` differs by 96 bytes between a staged and a `--no-staging` run because
-  the head **manifest** embeds each shard's absolute local path, which contains
-  the `--store-root` directory name. That manifest is not part of the published
-  slice (`_artifact_keys` collects `shard_objects`, not `manifest_object`), which
-  is why the published trees are still identical. It is a real wart — a digest
-  that depends on a runner's directory layout — and is tracked as a follow-up.
+- `serve/` used to differ by 96 bytes between a staged and a `--no-staging` run
+  because the head **manifest** embedded each shard's absolute local path, which
+  contains the `--store-root` directory name. **Closed in PR #169**: the manifest's
+  per-shard `path` is now the content-addressed object NAME, which is both what the
+  verifier resolves (relative to the manifest's own directory) and what finalize
+  publishes. The manifest is now itself published — it is the head's routing table —
+  and the two published trees are identical at 32 files including it.
 
 **The Places routed serving objects now actually get published.** They did not:
 `_artifact_keys` read `reduction["artifact"]`, which only the ADDRESS reducer sets,
@@ -237,8 +238,9 @@ a reduction naming none is fatal. `leaf_object` stays unpublished on purpose: it
 the head phase's input, it holds TERM rows, and the positions packs are the durable
 per-record artifact. The published serving set is asserted to COVER the reduction
 set — Monaco publishes 4 `.plrv` (one per partition, names matching the reducer's
-recorded digests exactly) plus 16 `.plhd`, and the slice grew from 11.86 MB to
-35.95 MB, which is the routed payload that was previously being lost.
+recorded digests exactly) plus 16 `.plhd` and the head routing manifest, and the
+slice grew from 11.86 MB to 35.96 MB, which is the routed payload that was
+previously being lost.
 
 **The head half had the identical defect and is closed the same way.**
 `head.get("shard_objects", [])` was the same permissive get one line down: a places
@@ -366,16 +368,29 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
   250_000` by the encoder. The workflow and the hosted CLI default both shipped a
   hardcoded `4` (16 shards) while the design said 4096: at the measured 25–33.6M
   planet distinct tokens that is 1.6–2.1M entries per shard, 6–8× over the cap,
-  and the only thing that reported it was the encoder's `bail!` — raised after the
-  whole map, reduce and head merge had been paid for. Fixed in the workflow and
-  wired to the constant in the CLI (PR #169), with the head builder now measuring
-  the worst shard exactly and failing closed *before* any encode. **256 shards
+  and the only thing that reported it was the encoder's `bail!`, at encode time.
+  Fixed in the workflow and wired to the constant in the CLI (PR #169), with the
+  head builder now measuring the worst shard exactly and failing closed *before*
+  any encode. Note that `max_head_candidate_rows = 5_000_000` is enforced earlier
+  still and the planet head candidate set is ~65M rows, so a planet head aborts at
+  that admission cap today and never reaches either check — the shard sizing has to
+  be right for when that cap is raised, not instead of it. **256 shards
   (`shard_bits = 8`) is the viable cheaper alternative**: 97,656 entries/shard
-  still clears the cap and it adds 240 objects to the finalize publish set instead
-  of 4,080, which matters against the 100,000 remote-operation finalize budget.
-  Whether to trade head-shard granularity for publish-set headroom is an owner
-  call that has not been made; 4096 is what the committed design says, so 4096 is
-  what ships until it is.
+  still clears the cap and it adds 241 objects to the finalize publish set instead
+  of 4,081 (populated shards plus the one routing manifest). Whether to trade
+  head-shard granularity for a smaller publish set is an owner call that has not
+  been made; 4096 is what the committed design says, so 4096 is what ships until it
+  is.
+- **The head routing manifest is a published serving object.** Head shards are
+  content-addressed, so `shard_id -> object` exists only in that manifest, and
+  `shard_bits` only there and in the family manifest. It was built and never added
+  to finalize's publish set, which was survivable at 16 shards (probe all 16 and let
+  `lookup_head_shard`'s misroute rejection sort it out) and is not at 4096. It is
+  now in the exact-set gate arithmetic
+  (`serving == reductions + populated_shards + head_manifest_objects`), and its
+  per-shard `path` is the published object NAME rather than an absolute local path —
+  which also retires the wart above where the manifest digest depended on the
+  `--store-root` directory name.
 
 ## Addresses
 

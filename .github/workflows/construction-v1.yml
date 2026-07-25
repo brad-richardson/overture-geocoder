@@ -841,18 +841,21 @@ jobs:
           # so finalize used to drop every .plrv while `objects`, `reconciles` and
           # `positions_objects` all stayed non-zero.
           # The EXACT set, the same equality the slice-smoke jobs assert: one
-          # routed object per reduction plus one shard per POPULATED head shard.
+          # routed object per reduction, one shard per POPULATED head shard, and
+          # the head MANIFEST that maps shard ids to those content-addressed shard
+          # objects (without it the shards are unroutable).
           # `-ge` would have accepted a slice that published the routed objects and
           # no head shards at all, which is the other half of the same defect.
           # Addresses have no head phase, so head.json carries `head: null` and
-          # POP resolves to 0 through the same expression.
+          # both POP and MANIFESTS resolve to 0 through the same expressions.
           SERVING="$(jq -r '.serving_objects' final-work/result.json)"
           REDUCTIONS="$(jq -r '.reduction_serving_objects' final-work/result.json)"
+          MANIFESTS="$(jq -r '.head_manifest_objects' final-work/result.json)"
           POP=0
           if [ -f headdl/head/head.json ]; then
             POP="$(jq -r '.populated_shards // 0' headdl/head/head.json)"
           fi
-          test "$SERVING" -eq "$(( REDUCTIONS + POP ))"
+          test "$SERVING" -eq "$(( REDUCTIONS + POP + MANIFESTS ))"
           test "$SERVING" -gt 0
       - name: Mirror the exact staged slice to R2 create-only, marker written last
         env:

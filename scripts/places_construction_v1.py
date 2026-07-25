@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 from dataclasses import asdict, dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 # Serving index-hash domain, identical to the Rust encoder/verifier/Worker. The
@@ -2402,11 +2402,18 @@ def build_sharded_global_head_from_markers(
     the measured planet token universe; it is breached by 6-8x at shard_bits=4.
     Callers must not pass a value that breaches the cap, and this function no
     longer assumes they got it right: before any encode runs it measures the
-    EXACT worst-case shard from the merged head and raises if that shard would
-    breach the cap, so the failure costs one DuckDB aggregate instead of a full
-    encode pass. Small callers (the slice harness, tests) may legitimately pass a
-    small value -- the shard count is a per-build manifest field, not a format
-    constant -- as long as their token universe fits.
+    EXACT worst-case shard and raises if that shard would breach the cap, so the
+    failure costs one DuckDB aggregate instead of a full encode pass. Small
+    callers (the slice harness, tests) may legitimately pass a small value -- the
+    shard count is a per-build manifest field, not a format constant -- as long as
+    their token universe fits.
+
+    Scope of that guard, stated honestly: `limits.max_head_candidate_rows`
+    (5,000,000) is enforced above, BEFORE the tree merge, and the planet head
+    candidate set is ~65M rows. So a planet run today aborts cleanly at that
+    admission cap and never reaches this guard at all. The guard is load-bearing
+    once that cap is raised (tracked separately) -- and the shard_bits defect it
+    covers is real either way, because the cap says nothing about shard sizing.
     """
     import duckdb
 
@@ -2450,30 +2457,35 @@ def build_sharded_global_head_from_markers(
         total_records, total_index_entries = connection.execute(
             f"SELECT count(*), count(DISTINCT token) FROM read_parquet('{merged}')"
         ).fetchone()
-        # Independent reduce-side binding: digest the merged head with the
-        # standalone Python re-encoder before sharding. The sharded verifier
-        # reconciles the shard bytes against this, so a shard encoder that
-        # consistently drops a token cannot pass (disclosed MAJOR closure).
-        merged_head_binding = _independent_merged_head_binding(merged)
-        if (
-            merged_head_binding["records"] != total_records
-            or merged_head_binding["index_entries"] != total_index_entries
-        ):
-            raise ValueError(
-                "Places independent merged-head binding disagrees with the merged head"
-            )
+        shard_dir = workspace / "shards"
+        # PARTITION_BY encodes the shard in the path and omits it from the data
+        # files, so each shard parquet carries only the serving columns.
+        connection.execute(
+            f"COPY (SELECT *, head_shard(token) AS __shard FROM read_parquet('{merged}')) "
+            f"TO '{shard_dir}' (FORMAT PARQUET, PARTITION_BY (__shard), COMPRESSION ZSTD, "
+            f"COMPRESSION_LEVEL 6, PARQUET_VERSION V2)"
+        )
         # Fail-fast on the shard_bits precondition, EXACTLY and before any encode.
         # A head index key is the token alone, so a shard's index-entry count is
         # its distinct-token count -- the same number the Rust encoder counts and
         # caps. Measure the worst shard here rather than discovering it as an
-        # encoder `bail!` several thousand shard encodes in (or, for the value the
-        # workflow used to pass, after the entire map/reduce/merge was paid for).
-        # The UDF is applied to the distinct tokens, not to every head row.
+        # encoder `bail!` several thousand shard encodes in.
+        #
+        # Read the ALREADY-PARTITIONED output with hive partitioning rather than
+        # re-deriving the shard: `head_shard` is a per-row Python UDF that
+        # serializes on the GIL, and a `GROUP BY head_shard(token)` over the merged
+        # head measured 25.71s per 1M records (~21-29 min at planet scale) against
+        # 0.43s for this query -- 59x cheaper, measuring the same number. The COPY
+        # above is unconditional work, so this adds none.
+        #
+        # Placed here, the guard precedes BOTH every encode and
+        # `_independent_merged_head_binding` below, which is a pure-Python per-row
+        # loop measured at 7.84 us/record (6-8 min at planet scale).
         (worst_shard_entries,) = connection.execute(
             "SELECT coalesce(max(entries), 0) FROM ("
-            "  SELECT count(*) AS entries FROM ("
-            f"   SELECT DISTINCT token FROM read_parquet('{merged}')"
-            "  ) GROUP BY head_shard(token)"
+            "  SELECT count(DISTINCT token) AS entries FROM read_parquet("
+            f"   '{shard_dir}/**/*.parquet', hive_partitioning = true"
+            "  ) GROUP BY __shard"
             ")"
         ).fetchone()
         if worst_shard_entries > SERVING_MAX_INDEX_ENTRIES:
@@ -2486,19 +2498,34 @@ def build_sharded_global_head_from_markers(
                 f"{minimum_head_shard_bits(total_index_entries)} shard bits even "
                 "under a perfectly uniform hash"
             )
-        shard_dir = workspace / "shards"
-        # PARTITION_BY encodes the shard in the path and omits it from the data
-        # files, so each shard parquet carries only the serving columns.
-        connection.execute(
-            f"COPY (SELECT *, head_shard(token) AS __shard FROM read_parquet('{merged}')) "
-            f"TO '{shard_dir}' (FORMAT PARQUET, PARTITION_BY (__shard), COMPRESSION ZSTD, "
-            f"COMPRESSION_LEVEL 6, PARQUET_VERSION V2)"
-        )
+        # Independent reduce-side binding: digest the merged head with the
+        # standalone Python re-encoder before sharding. The sharded verifier
+        # reconciles the shard bytes against this, so a shard encoder that
+        # consistently drops a token cannot pass (disclosed MAJOR closure).
+        merged_head_binding = _independent_merged_head_binding(merged)
+        if (
+            merged_head_binding["records"] != total_records
+            or merged_head_binding["index_entries"] != total_index_entries
+        ):
+            raise ValueError(
+                "Places independent merged-head binding disagrees with the merged head"
+            )
         shard_entries: list[dict[str, Any]] = []
         sum_a = 0
         sum_b = 0
         summed_records = 0
         summed_index_entries = 0
+        # Each encoded shard is staged here under its CONTENT-ADDRESSED name, which
+        # is also the name finalize publishes it as. The manifest's per-shard `path`
+        # is that bare name: the verifier resolves a relative path against the
+        # manifest's own directory (so verification still reads real bytes), and the
+        # published manifest therefore carries no runner-local absolute path. It
+        # used to embed `store.path(key)`, which made the manifest digest depend on
+        # the `--store-root` directory name -- a 96-byte difference between a staged
+        # and a `--no-staging` run of the same slice. That was tolerable while the
+        # manifest was unpublished; it is not, now that it is the routing table.
+        verify_dir = workspace / "verify-shards"
+        verify_dir.mkdir()
         for shard_path in sorted(shard_dir.glob("__shard=*")):
             shard_id = int(shard_path.name.split("=", 1)[1])
             if not 0 <= shard_id < shard_count:
@@ -2534,17 +2561,23 @@ def build_sharded_global_head_from_markers(
                     wall_seconds=limits.wall_seconds,
                 ),
             )
-            if artifact.stat().st_size > limits.max_output_bytes:
+            artifact_bytes = artifact.stat().st_size
+            if artifact_bytes > limits.max_output_bytes:
                 raise ValueError("Places head shard exceeds output cap")
             digest = json.loads(sidecar.read_text())
             stored = store.put_content(artifact, "serve/places-v1/head", ".plhd")
+            # `put_content` proved the store copy matches these bytes, so moving the
+            # encoder's own output under the object name loses nothing and gives the
+            # verifier a directory of shards named exactly as they are published.
+            object_name = PurePosixPath(stored["key"]).name
+            artifact.replace(verify_dir / object_name)
             shard_entries.append(
                 {
                     "shard_id": shard_id,
-                    "path": str(store.path(stored["key"])),
+                    "path": object_name,
                     "key": stored["key"],
                     "sha256": stored["sha256"],
-                    "bytes": artifact.stat().st_size,
+                    "bytes": artifact_bytes,
                     "records": digest["records"],
                     "index_entries": digest["index_entries"],
                     "head_sum_a": digest["head_sum_a"],
@@ -2569,10 +2602,17 @@ def build_sharded_global_head_from_markers(
                 "Places per-shard head digest sums differ from the independent binding"
             )
         input_binding = A.combine_bindings([marker["binding"] for marker in markers])
+        # This manifest is the head's ROUTING TABLE and it is published: shard
+        # objects are content-addressed, so `shard_id -> path` is the only thing
+        # that says which of the `populated_shards` objects answers a given token,
+        # and `shard_bits` is the only thing that says how to compute the shard id.
+        # Without it a reader must probe every shard and lean on the Worker's
+        # misroute rejection -- survivable at 16 shards, unusable at 4096.
         manifest = {
             "schema": "overture-places-global-head-sharded-v2",
             "shard_count": shard_count,
             "shard_bits": shard_bits,
+            "populated_shards": len(shard_entries),
             "result_cap": limits.head_result_cap,
             "task_ids": sorted(task_ids),
             "input_candidate_rows": input_rows,
@@ -2582,12 +2622,14 @@ def build_sharded_global_head_from_markers(
             "head_sum_b": f"{sum_b:064x}",
             "merged_head_binding": merged_head_binding,
             "input_binding": input_binding,
+            # `key` is the local store key and is dropped: `path` already names the
+            # published object, and a store key is build-plane state.
             "shards": [
                 {key: entry[key] for key in entry if key != "key"}
                 for entry in shard_entries
             ],
         }
-        manifest_path = workspace / "head-manifest.json"
+        manifest_path = verify_dir / "head-manifest.json"
         manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True))
         verify = A.run_bounded(
             [

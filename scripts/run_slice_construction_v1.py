@@ -398,8 +398,9 @@ print(f"  per-record artifact published: {result['positions_objects']} objects, 
 # used to publish head shards, positions packs and two manifests while silently
 # dropping EVERY routed `.plrv`, and every other number here stayed non-zero.
 print(f"  serving objects published: {result['serving_objects']} "
-      f"(>= {result['reduction_serving_objects']} reductions x "
-      f"{result['serving_object_key']}, plus any head shards)")
+      f"({result['reduction_serving_objects']} reductions x "
+      f"{result['serving_object_key']}, plus any head shards and "
+      f"{result['head_manifest_objects']} head routing manifest)")
 
 # Break the store down by artifact class. A single total invites a linear
 # extrapolation to planet scale, which is wrong twice over: fixed per-artifact
@@ -472,6 +473,10 @@ summary = {"family": FAMILY,
            # assertable keys.
            "serving_objects": result["serving_objects"],
            "reduction_serving_objects": result["reduction_serving_objects"],
+           # 1 for places, 0 for addresses: the head routing manifest is a serving
+           # object, so the exact-set equality is
+           # serving == partitions + populated shards + head manifests.
+           "head_manifest_objects": result["head_manifest_objects"],
            "serving_object_key": result["serving_object_key"],
            "positions_objects": result["positions_objects"],
            "positions_records": result["positions_records"],

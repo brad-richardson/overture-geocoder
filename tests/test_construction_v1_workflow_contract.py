@@ -234,10 +234,16 @@ PLANET_DISTINCT_TOKENS_HIGH = 33_600_000
 
 
 def _encoder_max_index_entries() -> int:
+    # Anchored on the exact declaration, colon included: a substring match would
+    # silently bind to a RENAMED superstring constant
+    # (`const MAX_INDEX_ENTRIES_PER_SHARD: usize = 900_000;`) and return the wrong
+    # number, which is the one way this check could fail quietly.
     for line in ENCODER_SOURCE.read_text().splitlines():
-        if "const MAX_INDEX_ENTRIES" in line:
+        if line.strip().startswith("const MAX_INDEX_ENTRIES:"):
             return int(line.split("=")[1].strip().rstrip(";").replace("_", ""))
-    raise AssertionError("MAX_INDEX_ENTRIES not found in the Places serving encoder")
+    raise AssertionError(
+        "`const MAX_INDEX_ENTRIES:` not found in the Places serving encoder"
+    )
 
 
 def test_head_shard_bits_constant_matches_the_committed_design():
@@ -468,7 +474,13 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # same permissive-get defect, which was demonstrated as publishable.
     assert 'test "$SERVING" -ge "$REDUCTIONS"' not in value
     assert "POP=\"$(jq -r '.populated_shards // 0' headdl/head/head.json)\"" in value
-    assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP ))"' in value
+    # The head ROUTING MANIFEST is part of the published serving set (shard objects
+    # are content-addressed, so it is the only shard_id -> object map), so the
+    # equality carries its term. Family-generic: addresses report 0.
+    assert (
+        'MANIFESTS="$(jq -r \'.head_manifest_objects\' final-work/result.json)"' in value
+    )
+    assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP + MANIFESTS ))"' in value
     assert 'test "$SERVING" -gt 0' in value
 
 
