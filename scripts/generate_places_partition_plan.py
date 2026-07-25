@@ -62,13 +62,17 @@ REDUCE_MINUTES_PER_PARTITION = 1.0
 # `distinct_tokens` is 250,000 because that is the Places serving encoder's
 # MAX_INDEX_ENTRIES: a routed artifact's index-entry count is exactly its
 # partition's distinct-token count, so a leaf admitted above it cannot be encoded
-# (see the construction_v1_hosted.HOSTED_LIMITS comment). NOTE for the next
-# regeneration: it was 400,000 when `places_partition_plan_v1.json` was generated,
-# so a re-run at `--headroom-fraction 0.5` will pre-split every leaf over 125,000
-# tokens rather than over 200,000 and the tree will differ. The committed tree is
-# still ADMISSIBLE under the tighter cap -- headroom at 0.5 of 400,000 left every
-# unsplit leaf at <=200,000 tokens -- it is simply less buffered than a fresh
-# generation would be.
+# (see the construction_v1_hosted.HOSTED_LIMITS comment).
+#
+# NOTE for the next regeneration. `places_partition_plan_v1.json` was generated
+# against 400,000 and still RECORDS 400,000, because `partition_contract.caps` is
+# provenance -- the caps the tree was generated under -- and editing it would
+# falsify the `--check` byte-for-byte reproduction proof. The committed tree is
+# still admissible under 250,000: `--headroom-fraction 0.5` of 400,000 left every
+# unsplit leaf at <=200,000 tokens, which is what
+# tests/test_generate_places_partition_plan.py asserts. Re-running at 0.5 of
+# 250,000 will pre-split every leaf over 125,000 tokens instead, so the tree WILL
+# differ and the plan will be more buffered than the committed one.
 DEFAULT_CAPS = {
     "term_rows": 2_000_000,
     "estimated_uncompressed_bytes": 536_870_912,

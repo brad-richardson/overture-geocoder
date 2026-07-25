@@ -61,14 +61,19 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
   `MAX_INDEX_ENTRIES`, and a routed index key is `cell\0token` with the cell
   constant per partition, so a partition's `count(DISTINCT token)` IS its routed
   index-entry count. 400,000 admitted partitions the routed encode would `bail!`
-  on. It changes no plan today (worst measured cell `a1d5` is 201,568 tokens).
-- **The finalize publication is projected before it is paid for.** Every published
-  object costs 3 remote operations plus 3 fixed for the slice, and planet places is
-  ~44,300 objects (16,888 routed + 4,096 head shards + ~23,300 positions objects +
-  2 manifests) = ~133,000 operations against an old cap of 100,000 — enforced by a
-  running counter inside finalize, so it tripped part-way through publishing at the
-  end of the run. `predict-reduce` and `plan-reduce` now both fail closed on the
-  projection, and `max_remote_operations` is 300,000, sized off the structural
+  on. It changes no plan today (worst measured cell `a1d5` is 201,568 tokens). The
+  bound is enforced in `_limits_for`, on the CONTRACT limit that actually reaches
+  the planner, because a check against the constant itself cannot fire.
+- **The finalize publication is projected before it is paid for.** A published object
+  costs 3 remote operations + 3 fixed on a first attempt and **4 + 4 on a resume**
+  (the create-only conflict path re-reads each existing object to prove byte
+  equality); the budget prices the resume. Planet places is ~44,300 objects (16,888
+  routed + 4,096 head shards + 1 head manifest + ~23,300 positions objects + 2
+  manifests) = ~133,000 first attempt / ~177,000 resumed, against an old cap of
+  100,000 — enforced by a running counter inside `verify_whole_slice_once`, so it
+  tripped after every object was already published and left no verification
+  evidence. `predict-reduce` and `plan-reduce` now both fail closed on the
+  projection, and `max_remote_operations` is 400,000, sized off the retry-inclusive
   ceiling (`construction_v1_control.CAPS`).
 - **Map-side combiner** — keeps only the top `maximum_serving_candidates` (256)
   rows per `(partition_cell, token)`. Exact, because top-N under a total order
