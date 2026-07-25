@@ -1,17 +1,27 @@
 #!/usr/bin/env python3
 """Import every hosted entrypoint module under only the hash-pinned deps.
 
-Missing-dependency defects are the cheapest possible way to kill a hosted
-construction-v1 dispatch, and they are invisible to a dry-run: #150 died minutes
-into an execute because `psutil` was imported by a module the dry-run branch
-never loaded. This walks the modules the hosted workflows actually invoke and
-imports each one, so the same class of defect fails in CI in seconds.
+**Scope, stated precisely.** This catches TOP-LEVEL import failures only: a
+syntax error, or a module-level `import x` where `x` is missing from
+`.github/requirements-hosted-rowgroup.txt`. It does NOT catch a
+function-level import of a missing dependency -- which is what #150 actually
+was (`psutil` is imported inside `run_bounded`). #150's class is caught by the
+slice job, which executes the map phase and therefore reaches that call site.
+Do not claim more for this check than it does: it is a cheap, fast tripwire on
+the import graph, not data-plane coverage.
 
 The module set is DERIVED from the workflows rather than hardcoded, so a new
 `scripts/x.py` invocation in a hosted workflow is covered without touching this
-file. Modules that parse arguments at import time cannot be imported and are
-listed in EXECUTED_AT_IMPORT; they are covered by actually running them (the
-slice harness) instead.
+file. The derivation is deliberately literal -- it matches
+`scripts/<lower_snake_name>.py` as written in the workflow text. It does NOT
+see `python -m pkg`, a script path built from a shell variable or matrix value,
+a name with hyphens or uppercase, a heredoc-constructed path, or `importlib`
+indirection. Add such an entrypoint to EXTRA_MODULES by hand; the module-count
+floor below is the backstop that notices if the derivation silently collapses.
+
+Modules that parse arguments at import time cannot be imported and are listed in
+EXECUTED_AT_IMPORT; they are covered by actually running them (the slice
+harness) instead.
 """
 
 from __future__ import annotations
@@ -44,7 +54,14 @@ EXTRA_MODULES = (
 )
 
 # Top-level argparse at import time: running these IS the test.
-EXECUTED_AT_IMPORT = frozenset({"run_slice_construction_v1"})
+# This module itself is excluded: importing the importer proves nothing.
+EXECUTED_AT_IMPORT = frozenset({"run_slice_construction_v1", "check_hosted_imports"})
+
+# Floor on the derived set. A workflow rename, a regex that stops matching, or a
+# refactor that collapses the derivation would otherwise silently narrow this
+# check to almost nothing while still exiting 0. The real set is ~13; this is
+# deliberately loose enough not to churn and tight enough to catch a collapse.
+MINIMUM_MODULES = 10
 
 REFERENCE = re.compile(r"scripts/([a-z0-9_]+)\.py")
 
@@ -54,9 +71,23 @@ def discover(root: Path = ROOT) -> list[str]:
     for relative in WORKFLOWS:
         path = root / relative
         if not path.exists():
-            continue
+            # Hard error, not a skip: a renamed or deleted workflow silently
+            # shrinks the derived set, which is the exact failure this check is
+            # supposed to make impossible.
+            raise SystemExit(
+                f"{relative} does not exist. check_hosted_imports derives its "
+                "module set from it; update WORKFLOWS deliberately rather than "
+                "letting the derived set shrink silently."
+            )
         names.update(REFERENCE.findall(path.read_text()))
-    return sorted(names - EXECUTED_AT_IMPORT)
+    discovered = sorted(names - EXECUTED_AT_IMPORT)
+    if len(discovered) < MINIMUM_MODULES:
+        raise SystemExit(
+            f"derived only {len(discovered)} hosted entrypoint modules "
+            f"({', '.join(discovered)}); the floor is {MINIMUM_MODULES}. The "
+            "derivation has collapsed -- fix it rather than lowering the floor."
+        )
+    return discovered
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -143,7 +143,8 @@ hosted("run-head", "--contract", contract, "--store-root", store,
        "--verifier-binary", BIN / "places-serving-verify-v1",
        "--scratch-dir", WORK / "head-scratch", "--shard-bits", "4",
        "--output", head)
-print(f"  shards {json.loads(head.read_text())['shard_count']}  {time.time()-t:.1f}s")
+head_result = json.loads(head.read_text())
+print(f"  shards {head_result['shard_count']}  {time.time()-t:.1f}s")
 
 # --- finalize -------------------------------------------------------------
 t = phase("finalize (filesystem remote)")
@@ -179,7 +180,18 @@ print(
     "class is what the inter-phase transport carries out of map, and a slice this\n"
     "small under-combines relative to the planet."
 )
-print(json.dumps({"records": records, "partitions": len(partitions),
-                  "reduce_seconds_per_partition": round(elapsed/max(1,len(partitions)), 3),
-                  "store_bytes_by_class": classes,
-                  "reconciles": result["reconciles"]}, sort_keys=True))
+# The head keys are here because `reconciles` alone is not evidence: for places
+# it is a hardcoded literal in the finalize adapter, and an EMPTY head (zero
+# populated shards, zero records) satisfies every other check. A caller that
+# wants to know the run produced something must be able to assert on counts.
+summary = {"records": records, "partitions": len(partitions),
+           "reduce_seconds_per_partition": round(elapsed/max(1,len(partitions)), 3),
+           "store_bytes_by_class": classes,
+           "reconciles": result["reconciles"],
+           "head_shard_count": head_result["shard_count"],
+           "head_populated_shards": head_result["populated_shards"],
+           "head_total_records": head_result["total_records"]}
+# Written as a file as well as printed: stdout can interleave with stderr, so
+# `tail -1` of a merged stream is not a reliable machine-readable surface.
+(WORK / "summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")
+print(json.dumps(summary, sort_keys=True))

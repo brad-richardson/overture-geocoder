@@ -3,13 +3,26 @@ name: Construction v1 slice smoke
 # The construction-v1 execute data plane had ZERO automated coverage: the
 # workflow's dry-run mode runs planning arithmetic only, so three consecutive
 # planet dispatches each died in their first minutes on a one-line defect a
-# dry-run cannot see (#148 matrix key, #149 cargo manifest path, #150 missing
-# psutil). See item 5 of docs/plans/2026-07-24-construction-v1-follow-ups.md.
+# dry-run cannot see. See item 5 of
+# docs/plans/2026-07-24-construction-v1-follow-ups.md.
 #
 # This runs the REAL five-phase Places data plane on a real Overture slice
 # covering Monaco -- S3 projection, transform binary, store writes, reduce,
-# head, finalize -- in ~15 seconds of actual work, plus an import check of every
-# hosted entrypoint module under only the hash-pinned dependency set.
+# head, finalize -- in ~13 seconds of harness time (~20s including the
+# inventory), plus an import check of every hosted entrypoint module under only
+# the hash-pinned dependency set.
+#
+# What this actually covers, per defect, stated honestly:
+#   #149 (cargo manifest path)  -> the build step below; byte-identical command.
+#   #150 (missing psutil)       -> the SLICE job. psutil is imported inside
+#                                  run_bounded, so only executing the map phase
+#                                  reaches it. hosted-imports does NOT catch it.
+#   #148 (admit matrix key)     -> NEITHER job. The admission gate, its request
+#                                  regeneration, and matrix generation are not
+#                                  run here; only tests/test_construction_v1_-
+#                                  workflow_contract.py covers that surface.
+# hosted-imports covers top-level import failures only: a syntax error or a
+# module-level import of a dependency missing from the pinned set.
 #
 # It needs NO credentials: the Overture release parquet is read anonymously from
 # the public us-west-2 bucket, and finalize publishes to a filesystem remote.
@@ -24,6 +37,9 @@ on:
       - "benchmarks/places-construction-v1-evidence-spec-v2.json"
       - ".github/requirements-hosted-rowgroup.txt"
       - ".github/workflows/slice-smoke.yml"
+      # The hosted workflow is the SOURCE the import check derives its module
+      # set from, so a new script invoked there must retrigger this job.
+      - ".github/workflows/construction-v1.yml"
   pull_request:
     paths:
       - "scripts/**"
@@ -33,6 +49,9 @@ on:
       - "benchmarks/places-construction-v1-evidence-spec-v2.json"
       - ".github/requirements-hosted-rowgroup.txt"
       - ".github/workflows/slice-smoke.yml"
+      # The hosted workflow is the SOURCE the import check derives its module
+      # set from, so a new script invoked there must retrigger this job.
+      - ".github/workflows/construction-v1.yml"
   workflow_dispatch:
 
 permissions:
@@ -115,32 +134,69 @@ jobs:
       - name: Run all five construction-v1 phases on the slice
         run: |
           set -uo pipefail
-          # The whole harness is ~15 seconds, so a transient S3 read is cheaper to
+          # The harness is ~13 seconds, so a transient S3 read is cheaper to
           # absorb by rerunning it than by plumbing retries into the projector.
           # Each attempt gets a FRESH work dir: the store is create-only and a
-          # half-written one would mask the real failure.
+          # half-written one would mask the real failure. Each attempt also gets
+          # its OWN log, and every log is uploaded, because a retry that silently
+          # overwrote attempt 1 would hide an INTERMITTENT defect -- exactly the
+          # class this job exists to catch -- behind a green check.
           for ATTEMPT in 1 2; do
             WORK="slice/work"
-            [ "$ATTEMPT" = 1 ] || WORK="slice/work-retry-${ATTEMPT}"
+            [ "$ATTEMPT" = 1 ] || WORK="slice/work-attempt-${ATTEMPT}"
+            LOG="slice/run-attempt-${ATTEMPT}.log"
             echo "::group::slice attempt ${ATTEMPT} (work=${WORK})"
-            if python scripts/run_slice_construction_v1.py \
-                --inventory slice/inventory.json \
-                --task-index "$SLICE_TASK_INDEX" \
-                --release "$SLICE_RELEASE" \
-                --work "$WORK" 2>&1 | tee slice/run.log; then
-              echo "::endgroup::"
-              cp -f "$WORK"/*.json slice/ 2>/dev/null || true
-              # The harness exits non-zero on any phase failure; assert the
-              # finalize reconciliation explicitly too, so a silent "ran but
-              # proved nothing" cannot pass. Its last line is the summary JSON.
-              if ! tail -1 slice/run.log | jq -e '.reconciles == true and .records > 0' >/dev/null; then
-                echo "The slice ran but did not reconcile; this is a data-plane defect, not flakiness." >&2
-                exit 1
-              fi
-              exit 0
-            fi
+            python scripts/run_slice_construction_v1.py \
+              --inventory slice/inventory.json \
+              --task-index "$SLICE_TASK_INDEX" \
+              --release "$SLICE_RELEASE" \
+              --work "$WORK" 2>&1 | tee "$LOG"
+            STATUS=$?
             echo "::endgroup::"
-            echo "Slice attempt ${ATTEMPT} failed (see the phase output above)." >&2
+            # Copy whatever phase reports exist, pass OR fail: they are the
+            # diagnostics, and they are needed most on the failing path.
+            for FILE in "$WORK"/*.json; do
+              [ -f "$FILE" ] || continue
+              cp -f "$FILE" "slice/attempt-${ATTEMPT}-$(basename "$FILE")"
+            done
+            if [ "$STATUS" -ne 0 ]; then
+              echo "Slice attempt ${ATTEMPT} failed with status ${STATUS} (see the phase output above)." >&2
+              continue
+            fi
+            if [ "$ATTEMPT" != 1 ]; then
+              # Loud, and it survives into the run summary. A pass-on-retry is a
+              # finding, not a clean build.
+              echo "::warning title=Slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/run-attempt-1.log in the slice-smoke-evidence artifact."
+              echo "SLICE_RETRIED=true" >> "$GITHUB_ENV"
+            fi
+            # `reconciles` alone is NOT evidence the run produced anything: for
+            # places it is a hardcoded literal in the finalize adapter, and an
+            # empty head satisfies every other check. Assert real counts, from
+            # FILES the harness wrote (the last line of a merged stdout/stderr
+            # stream is not a reliable machine surface), and require the two
+            # artifact classes that carry the data to be non-empty.
+            jq -e '
+              .reconciles == true
+              and .records > 0
+              and .partitions > 0
+              and .head_shard_count > 0
+              and .head_populated_shards > 0
+              and .head_total_records > 0
+              and (.store_bytes_by_class["map/places-v1"] > 0)
+              and (.store_bytes_by_class["serve/places-v1"] > 0)
+            ' "${WORK}/summary.json" >/dev/null || {
+              echo "The slice ran but its summary does not prove it produced data:" >&2
+              cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2
+              echo "This is a data-plane defect, not flakiness." >&2
+              exit 1
+            }
+            jq -e '.populated_shards > 0 and .total_records > 0 and .shard_count > 0' \
+              "${WORK}/head.json" >/dev/null || {
+              echo "run-head produced an empty head; a zero-record head passes every other check." >&2
+              exit 1
+            }
+            cp -f "${WORK}/summary.json" slice/summary.json
+            exit 0
           done
           echo "The Monaco slice failed twice; this is a real data-plane failure or a sustained S3 outage." >&2
           exit 1
@@ -152,17 +208,32 @@ jobs:
             echo "## Construction v1 slice smoke"
             echo
             echo "- Release: \`$SLICE_RELEASE\` | bbox: \`$SLICE_BBOX\` | map task: \`$SLICE_TASK_INDEX\`"
-            if [ -f slice/run.log ]; then
+            if [ "${SLICE_RETRIED:-false}" = true ]; then
+              echo "- **Attempt 1 FAILED; this run passed only on attempt 2.** Not a clean build — see \`slice/run-attempt-1.log\`."
+            fi
+            if [ -f slice/summary.json ]; then
+              echo
+              echo "\`\`\`json"
+              jq -S '.' slice/summary.json
+              echo "\`\`\`"
+            fi
+            for LOG in slice/run-attempt-*.log; do
+              [ -f "$LOG" ] || continue
+              echo
+              echo "<details><summary>$LOG</summary>"
               echo
               echo '```'
-              cat slice/run.log
+              cat "$LOG"
               echo '```'
-            else
+              echo
+              echo "</details>"
+            done
+            if ! ls slice/run-attempt-*.log >/dev/null 2>&1; then
               echo "- The slice run produced no log; see the failing step above."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Publish the slice inventory, reports, and log for diagnosis
+      - name: Publish every attempt's inventory, reports, and logs for diagnosis
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
@@ -171,4 +242,4 @@ jobs:
           retention-days: 7
           path: |
             slice/*.json
-            slice/run.log
+            slice/run-attempt-*.log

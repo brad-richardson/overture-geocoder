@@ -12,8 +12,8 @@ state doc supersedes them where they disagree. Open follow-ups live in
 
 The fast local loop is `scripts/build_slice_inventory_v1.py` plus
 `scripts/run_slice_construction_v1.py`: all five construction phases on real
-Overture data in ~15 seconds with no credentials. It also runs in CI
-(`.github/workflows/slice-smoke.yml`).
+Overture data in ~13 seconds (~20s including the inventory build) with no
+credentials. It also runs in CI (`.github/workflows/slice-smoke.yml`).
 
 **The global-v2 executor path is gone.** The `agent/global-v2-executor` work was
 abandoned, and #154 deleted the code: 11 scripts, 3 workflows, and 12 test files,
@@ -597,6 +597,12 @@ state see `docs/plans/construction-v1-state.md`.
 8. Credentialed external-data workflows run only from `main`. A green evidence
    workflow means measurement and cleanup succeeded; it does not approve a
    family for launch or publication.
+9. Pin every third-party GitHub Action to a full commit SHA, never a tag or
+   `@main`. This includes `jlumbroso/free-disk-space` (currently pinned at
+   `54081f138730dfa15788a46383842cd2f914a1be` in `construction-v1.yml`), which
+   runs with the workspace mounted and is not a first-party action. First-party
+   `actions/*` uses are also SHA-pinned in the construction and data-spike
+   workflows; `ci.yml` still uses tags and is the remaining exception.
 
 ## Next work as of 2026-07-19 (historical queue)
 

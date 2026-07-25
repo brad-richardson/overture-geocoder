@@ -51,6 +51,9 @@ def test_runs_on_pull_request_and_main_push_path_filtered():
         assert "crates/geocoder-construction/**" in paths
         assert ".github/requirements-hosted-rowgroup.txt" in paths
         assert ".github/workflows/slice-smoke.yml" in paths
+        # The hosted workflow is the source the import check derives from, so a
+        # new script invoked there must retrigger this job.
+        assert ".github/workflows/construction-v1.yml" in paths
 
 
 def test_needs_no_credentials_and_writes_no_production_surface():
@@ -92,10 +95,47 @@ def test_pins_the_release_bbox_and_task_index_with_a_drift_check():
     assert "update SLICE_TASK_INDEX" in value
 
 
-def test_asserts_the_finalize_reconciliation_rather_than_mere_exit_status():
+def test_asserts_real_counts_not_just_the_reconciles_literal():
     value = text()
-    assert ".reconciles == true and .records > 0" in value
-    assert "did not reconcile" in value
+    # `reconciles` is a hardcoded literal for places in the finalize adapter, so
+    # the job must assert counts that an empty run cannot satisfy.
+    for assertion in (
+        ".reconciles == true",
+        ".records > 0",
+        ".partitions > 0",
+        ".head_shard_count > 0",
+        ".head_populated_shards > 0",
+        ".head_total_records > 0",
+        '.store_bytes_by_class["map/places-v1"] > 0',
+        '.store_bytes_by_class["serve/places-v1"] > 0',
+    ):
+        assert assertion in value, assertion
+    # Read from files the harness wrote, never `tail -1` of a merged stream.
+    assert "summary.json" in value
+    assert "tail -1" not in value
+    assert '.populated_shards > 0 and .total_records > 0' in value
+
+
+def test_retry_preserves_every_attempt_and_shouts_when_it_retries():
+    value = text()
+    # Per-attempt log filenames; a retry must not overwrite attempt 1.
+    assert 'LOG="slice/run-attempt-${ATTEMPT}.log"' in value
+    assert "slice/run-attempt-*.log" in value
+    # An intermittent defect that passes on attempt 2 must be visible.
+    assert "::warning title=Slice smoke passed only on retry::" in value
+    assert "SLICE_RETRIED=true" in value
+    # Phase reports are copied out on the failing path too.
+    assert 'cp -f "$FILE" "slice/attempt-${ATTEMPT}-$(basename "$FILE")"' in value
+
+
+def test_states_per_defect_coverage_honestly():
+    value = text()
+    header = value[: value.index("on:")]
+    # hosted-imports cannot see #150's function-level psutil import; the slice
+    # job is what covers it, and #148's surface is covered by neither.
+    assert "#150" in header and "SLICE job" in header
+    assert "#148" in header and "NEITHER job" in header
+    assert "top-level import failures only" in header
 
 
 def test_installs_only_the_hash_pinned_dependencies_on_the_hosted_python():
@@ -139,10 +179,23 @@ def test_the_import_check_covers_every_hosted_workflow_entrypoint():
     ):
         assert name in modules, name
     # Modules that parse arguments at import time cannot be imported; the slice
-    # job runs them instead.
+    # job runs them instead. The checker itself is excluded too.
     assert "run_slice_construction_v1" not in modules
+    assert "check_hosted_imports" not in modules
     for name in modules:
         assert (ROOT / "scripts" / f"{name}.py").exists(), name
+    assert len(modules) >= module.MINIMUM_MODULES
+
+
+def test_a_missing_derivation_source_is_a_hard_error_not_a_silent_narrowing():
+    module = load_checker()
+    empty = Path(__file__).parent / "fixtures"
+    try:
+        module.discover(empty)
+    except SystemExit as error:
+        assert "does not exist" in str(error)
+    else:  # pragma: no cover - the point of the test
+        raise AssertionError("a missing workflow must fail closed")
 
 
 def test_the_import_check_actually_imports_them():

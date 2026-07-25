@@ -38,6 +38,8 @@ That is Monaco, 38,182 real Overture places, all five phases, **~13 seconds**,
 no credentials. Use it for every change. If a change cannot be demonstrated on
 this loop, it is probably a design document rather than a change.
 
+This exact loop also runs in CI on every relevant PR as `.github/workflows/slice-smoke.yml`.
+
 ## What has landed
 
 - **Caps raised** to `partition_term_rows` 2,000,000 and `distinct_tokens`
