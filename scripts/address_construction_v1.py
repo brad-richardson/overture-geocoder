@@ -1300,25 +1300,19 @@ def binding_for_arrow(
     return proof_directory(directory_binary, path, layout, output, limits, roots)
 
 
-def reduce_partition(
-    *,
-    partition: dict[str, Any],
-    markers: list[dict[str, Any]],
-    store: LocalObjectStore,
-    scratch_root: Path,
-    directory_binary: Path,
-    encoder_binary: Path,
-    verifier_binary: Path,
-    limits: Limits,
-    query: list[str] | None = None,
-) -> dict[str, Any]:
-    import duckdb
-    import pyarrow.ipc as ipc
-    import pyarrow.parquet as pq
+def selected_row_groups(
+    markers: list[dict[str, Any]], partition: dict[str, Any]
+) -> list[tuple[dict[str, Any], dict[str, Any]]]:
+    """The map row groups whose routing summary overlaps ``partition``'s hash range.
 
-    require_duckdb_runtime(duckdb, limits)
-
-    selected_groups = []
+    Extracted from ``reduce_partition`` so a BATCH driver can ask which packs a
+    partition will need WITHOUT reducing it: that is what lets a job hold a pack for
+    the later partitions of its own batch instead of releasing and re-fetching it.
+    Selection is unchanged -- one row group per (pack, group) pair, in marker order,
+    which is also the order the fetched IPC stream and its proof directory are built
+    in, so this must stay order-preserving.
+    """
+    groups: list[tuple[dict[str, Any], dict[str, Any]]] = []
     for marker in markers:
         for pack in marker["packs"]:
             for group in pack["directory"]["row_groups"]:
@@ -1328,9 +1322,72 @@ def reduce_partition(
                     and route["minimum_route_hash"] <= partition["hash_end"]
                     for route in group["routing_groups"]
                 ):
-                    selected_groups.append((pack, group))
+                    groups.append((pack, group))
+    return groups
+
+
+def partition_pack_keys(
+    markers: list[dict[str, Any]], partition: dict[str, Any]
+) -> set[str]:
+    """The store keys ``partition`` will hydrate. See ``selected_row_groups``."""
+    return {pack["object"]["key"] for pack, _ in selected_row_groups(markers, partition)}
+
+
+def reduce_partition(
+    *,
+    partition: dict[str, Any],
+    markers: list[dict[str, Any]],
+    # Duck-typed on purpose, and annotated to say so: the hosted reduce job passes
+    # a `construction_staging_v1.StagedObjectStore` (construction_v1_hosted._store
+    # builds it family-agnostically and threads it into ADDRESS.reduce_partition),
+    # not the `LocalObjectStore` this used to claim. The annotation mattered because
+    # it hid the fact that this function is the consumer the staging transport's
+    # `release()` was built for.
+    store: Any,
+    scratch_root: Path,
+    directory_binary: Path,
+    encoder_binary: Path,
+    verifier_binary: Path,
+    limits: Limits,
+    query: list[str] | None = None,
+    # Pack keys the LATER partitions of this reducer job will need. They are kept in
+    # the local cache instead of being released, so a batched job fetches each pack
+    # once rather than once per partition. Default None == "nothing follows me",
+    # which is the correct behaviour for the single-partition path and for any
+    # caller that does not batch.
+    retain_keys: set[str] | frozenset[str] | None = None,
+) -> dict[str, Any]:
+    import duckdb
+    import pyarrow.ipc as ipc
+    import pyarrow.parquet as pq
+
+    require_duckdb_runtime(duckdb, limits)
+
+    selected_groups = selected_row_groups(markers, partition)
     if not selected_groups:
         raise ValueError("partition selected no map row groups")
+    # Pack bodies are RELEASED from the local cache as soon as nothing still to be
+    # reduced on this runner needs them, mirroring the places idiom
+    # (places_construction_v1.adaptive_genesis_plan:1201,1226-1228). Without it this
+    # reducer's PEAK resident bytes equal its TOTAL hydrated bytes -- it finishes
+    # holding every pack it ever opened -- which is exactly the
+    # whole-fan-in-on-one-runner shape the R2 staging transport exists to avoid, and
+    # measurably was: 10,886,477 for both counters on a Seattle slice run.
+    #
+    # `release` is present only on the staged store; a local-only store has no such
+    # method and must never be evicted, because there the local directory IS the
+    # store. So the `getattr` guard is the whole idiom rather than defensive style
+    # (construction_staging_v1.py:265-296).
+    release = getattr(store, "release", None)
+    # LAST use, not first. `selected_groups` is a list of (pack, group) pairs and one
+    # pack contributes several row groups, so evicting after the first would force a
+    # re-hydrate and re-verify of the same object for every remaining group of it.
+    # Keyed by object key, so two markers naming the same content-addressed pack
+    # collapse to one release at the later index.
+    last_use = {
+        pack["object"]["key"]: index for index, (pack, _) in enumerate(selected_groups)
+    }
+    retained = frozenset(retain_keys or ())
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f"reduce-{partition['id']}-", dir=scratch_root) as name:
         workspace = Path(name)
@@ -1342,7 +1399,11 @@ def reduce_partition(
             writer = None
             try:
                 for fetch_index, (pack, group) in enumerate(selected_groups):
-                    pack_path = store.path(pack["object"]["key"])
+                    pack_key = pack["object"]["key"]
+                    pack_path = store.path(pack_key)
+                    # Unchanged: every fetch re-verifies the body against the digest
+                    # the marker recorded, whether the body was already local or was
+                    # re-hydrated after a release.
                     if sha256_file(pack_path) != pack["object"]["sha256"]:
                         raise ValueError("selective reducer pack SHA differs")
                     table = pq.ParquetFile(pack_path).read_row_group(group["index"])
@@ -1354,6 +1415,17 @@ def reduce_partition(
                     expected_groups.append(
                         {"index": fetch_index, "records": table.num_rows}
                     )
+                    # The rows are now in the fetched IPC stream, so unless a LATER
+                    # partition of this same job needs it, this pack's bytes are dead
+                    # weight on the runner. Content-addressed and still in staging, so
+                    # releasing is always safe: a later `path()` re-fetches and
+                    # re-verifies it against the digest in its key.
+                    if (
+                        release is not None
+                        and last_use[pack_key] == fetch_index
+                        and pack_key not in retained
+                    ):
+                        release(pack_key)
             finally:
                 if writer is not None:
                     writer.close()

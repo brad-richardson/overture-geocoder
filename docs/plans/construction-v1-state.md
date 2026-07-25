@@ -19,10 +19,13 @@ and JSON only, and each consumer fetches by key exactly the objects its markers
 name — the same shape `build_id_index.py` already uses. **For PLACES** what
 remains before a planet dispatch is operational rather than structural: a scoped
 staging-only R2 token, and row-group range reads to tighten read amplification
-further. **For ADDRESSES the reduce phase is still transport-blocked**, because it
-has no shuffle to narrow its fan-in — deliberately deferred, and the reason a green
-address slice is not an unblocked address planet build. See the family caveat
-below.
+further. **For ADDRESSES the reduce phase is bounded too** as of 2026-07-25: it now
+releases each hydrated pack at its last use, so a job's resident input is about one
+pack instead of everything it ever opened. What remains for addresses is object
+amplification, not a partition that will not fit — tunable today with
+`--max-reduce-jobs` and to be closed by a range-owning reducer. Two earlier claims
+here ("there is no shuffle to narrow it", "an address reduce partition would still
+not fit a runner") were WRONG; see the corrections in the family caveat below.
 
 ## Read the history this way
 
@@ -329,25 +332,88 @@ done and they are not:
   and evicts, a reduce job owns a shuffle-bucket range and fetches only the
   fragments in it (~1 GB post-combiner), head reads bounded candidates, finalize
   reads exactly the published set.
-- **Addresses** are transport-clear for map, plan, and finalize, and still
-  **blocked at reduce**. `address_construction_v1.reduce_partition` selects row
-  groups by `(country, route_hash)` routing summaries across *every* map marker,
-  so a partition hydrates packs from essentially every map task — there is no
-  shuffle to narrow it, deliberately (the port is DEFERRED and the forward
-  partition key is FROZEN). On the Seattle slice that shows up as
-  `reduce_staged_peak_resident_bytes == reduce_staged_bytes_hydrated`, and the
-  smoke job asserts the shape rather than hiding it. At planet scale (473.6 M
-  records / 33.2 GB selected) an address reduce partition would still not fit a
-  runner. **A green address slice means "the transport moves address map output
-  durably", not "the address planet build is unblocked."** Fixing it is the
-  deferred shuffle port, not this change.
+- **Addresses** are transport-clear for map, plan, and finalize. Reduce is now
+  bounded too, and the cost is object amplification rather than a partition that
+  cannot fit a runner. Two earlier claims here were WRONG and are corrected below,
+  because both were driving work in the wrong direction.
+
+#### Correction 1: address map output IS hash-clustered. There is a shuffle-like sort.
+
+This doc previously said "there is no shuffle to narrow it". That is false.
+`pack_id` is `row_number() OVER (ORDER BY {TOTAL_ORDER})` integer-divided by
+`max_pack_rows` (`scripts/address_construction_v1.py:1009-1010`), and `TOTAL_ORDER`
+begins `country, maximum_bucket, ...`
+(`scripts/spike_address_construction.py:77-82`), where `maximum_bucket` is the top
+`MAXIMUM_HASH_BITS = 16` bits of `route_hash`
+(`crates/geocoder-construction/src/main.rs:26,422`). So a map task's packs — and the
+row groups inside them — are **contiguously clustered by `(country, route_hash>>48)`**.
+
+Be precise about what that is and is not. It is an INTRA-TASK sort, not an
+inter-task shuffle: each task orders only its own rows, so a partition's hash range
+still appears in every task that holds rows for that country. The consequence is a
+clean split of the cost:
+
+- **Row-group SELECTION is already tight.** Each row group's `routing_groups`
+  summary is narrow because its rows are hash-contiguous, so a partition reads few
+  groups. Measured 1.55 of 52 groups per partition at 93 partitions (~3.25x byte
+  amplification projected to planet); independently reproduced on a planet-shaped
+  Seattle slice at 2.62 of 53 groups per partition over 32 partitions (4.9%).
+  There is very little left to win here.
+- **Whole-object HYDRATION was the entire problem.** `StagedObjectStore.path()`
+  fetches a WHOLE pack to read one row group, so the amplification is
+  objects-not-bytes: measured 24x on the shaped run, planet-projected 12.7x
+  (~0.63 TB of R2 reads) at today's reduce batch size of 3.
+
+#### Correction 2: the hazard was an unbounded store, not a partition that will not fit.
+
+This doc previously said "at planet scale an address reduce partition would still
+not fit a runner". That is not supported. Worst-case per-job RESIDENT input is
+~4.2 GB, and only ~5.3 GB at batch_size 24, because a partition's pack set is
+dominated by the number of TASKS holding a country rather than by the width of its
+hash range — widening the batch adds tasks slowly.
+
+The real hazard was that the hydrated store sat outside every declared cap.
+`reduce_partition` runs its `StageWatchdog([workspace], limits, connection)` over the
+temporary WORKSPACE (`scripts/address_construction_v1.py`, the watchdog around
+`export_filter`), not over `--store-root`, and nothing else bounded the local cache.
+Combined with a reducer that never released anything, a job's disk use grew
+monotonically with everything it had ever opened, which is exactly what
+`reduce_staged_peak_resident_bytes == reduce_staged_bytes_hydrated` (10,886,477 for
+both on the Seattle slice) was reporting.
+
+**`release()` on the reduce path is what bounds it**, and it is now called: each pack
+is evicted at its last use, except those the later partitions of the same reducer job
+still need (`retain_keys`, computed by `construction_v1_hosted._batch_retention`). On
+a planet-shaped 32-partition / 14-pack slice that decouples peak from batch size
+entirely:
+
+| reducer jobs | batch size | peak resident, before | peak resident, after | object amplification |
+| --- | --- | --- | --- | --- |
+| 32 | 1 | 1,774,192 | 887,478 | 3.36x |
+| 8 | 4 | 2,660,313 | 887,478 | 1.53x |
+| 4 | 8 | 3,653,171 | 887,478 | 1.23x |
+| 1 | 32 | 11,622,309 (== total) | 887,478 | 1.00x |
+
+Peak is flat at one pack; object amplification is unchanged by the fix and falls with
+batch size, which is why `--max-reduce-jobs` is now a dispatch input on
+`construction-v1.yml` (planet: batch 3 = 12.7x / ~0.63 TB, batch 12 = 4.2x /
+~0.21 TB). Reduce output is byte-identical before and after, at every batch size.
+
+A green address slice still means "the transport moves address map output durably"
+rather than "a planet address build has been executed" — no planet execute has run
+for either family. But address reduce is no longer the blocker it was described as.
 
 ## The next increment, precisely
 
-0. **Port the shuffle to the address family** if an address planet build is
-   wanted — it is the remaining transport blocker for that family, and only for
-   it. See the DEFERRED section of the follow-ups doc; the partition key is FROZEN
-   and the first step is measuring country skew.
+0. **A range-owning address reducer** — a port of
+   `places_construction_v1._reduce_ingest` / `reduce_bucket_range`, where one job
+   opens each pack once for a whole contiguous hash range and emits every partition
+   in it. That is the load-bearing fix for the remaining object amplification; it is
+   queued as separate work. **The address map shuffle will NOT be ported** —
+   decided, see the DEFERRED section of the follow-ups doc for the reasoning. Until
+   the range-owning reducer lands, `--max-reduce-jobs` on the dispatch is the lever:
+   a lower job cap means larger batches means fewer pack reads. The forward
+   partition key stays FROZEN either way.
 1. Scoped **staging-only** R2 token for the map/reduce/plan/head jobs, leaving
    the broad key with finalize where the promotion discipline lives. This is now
    the only credential item between here and a planet dispatch.
@@ -414,9 +480,10 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
 
 ## Addresses
 
-Not started, deliberately — Places first, proven, then port. Two things HAVE been
-done for both families at once, because doing them per family would have built the
-same machinery twice:
+Not started, deliberately — Places first, proven. The map-side shuffle port that
+used to be "then port" is now CANCELLED (2026-07-25); the address fix is reduce-side.
+Three things HAVE been done for both families at once, because doing them per family
+would have built the same machinery twice:
 
 - **the R2 staging transport** (2026-07-25). It is transport, not routing: the
   address family's forward packs are unchanged, and every marker records the same
@@ -427,6 +494,10 @@ same machinery twice:
   `route_hash`, `hash_bucket`, TOTAL_ORDER, SERVING_ORDER, the forward pack layout
   and the genesis partition plan are untouched, and the address forward partition
   key is FROZEN;
+- **a bounded address reducer** (2026-07-25). `reduce_partition` releases each
+  hydrated pack at its last use, retaining only what the later partitions of the same
+  reducer job still need. Reduce-side only: no map change, no partition-key change,
+  and reduce output is byte-identical. See the corrections above for the measurements;
 - the per-record map artifact and its one publication seam, below.
 
 - **The address map now emits a per-address, spatially keyed records artifact**

@@ -54,6 +54,26 @@ def test_workflow_exposes_the_required_dispatch_inputs():
     assert inputs["confirmation"]["required"] is True
     assert inputs["resume_from"]["required"] is False
     assert "request_json" in inputs
+    # The reducer job cap is dispatch-time tunable, and it must stay OPTIONAL with an
+    # EMPTY default: a non-empty default would silently change production batching.
+    assert inputs["max_reduce_jobs"]["required"] is False
+    assert inputs["max_reduce_jobs"]["default"] == ""
+
+
+def test_the_reduce_job_cap_reaches_both_the_dry_run_and_the_execute_plan():
+    """A dry-run must certify the reduce shape the execute would actually dispatch.
+
+    The cap only ever LOWERS the job count, so a dry-run that ignored it would
+    certify a matrix and a runner-minute projection for a DIFFERENT batching than the
+    execute uses. Both call sites take the same validated flag.
+    """
+    value = text()
+    assert value.count("MAX_REDUCE_JOBS: ${{ inputs.max_reduce_jobs }}") == 2
+    # Validated, not interpolated straight into a command line: it is free text.
+    assert value.count("max_reduce_jobs must be a positive integer") == 2
+    assert value.count('REDUCE_JOB_FLAG=(--max-reduce-jobs "$MAX_REDUCE_JOBS")') == 2
+    assert '--staging-report plan/staging.json "${REDUCE_JOB_FLAG[@]}"' in value
+    assert '--ledger control/ledger.json "${REDUCE_JOB_FLAG[@]}"' in value
 
 
 def test_first_job_is_the_fail_closed_gate_that_derives_the_contract():

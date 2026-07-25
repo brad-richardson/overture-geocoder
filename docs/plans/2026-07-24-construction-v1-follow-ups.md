@@ -430,10 +430,18 @@ artifact itself is described in `construction-v1-state.md`.
    to matter at planet density; until then the per-cell summary is the useful
    half.
 
-## DEFERRED, do not lose: port the shuffle to the address family
+## DEFERRED, do not lose — now DECIDED: the address map shuffle will NOT be ported
 
-Raised and deliberately deferred on 2026-07-25 so Places could be proven first.
-Nothing about it is started. Full reasoning in `construction-v1-state.md`.
+Raised and deliberately deferred on 2026-07-25 so Places could be proven first;
+**decided against on 2026-07-25** (Brad, explicitly). Nothing about it was ever
+started, and now nothing should be. Full reasoning in `construction-v1-state.md`.
+
+The prohibitions in this section stand entirely unchanged and are the reason it is
+kept rather than deleted: **do NOT change the address forward partition key**
+(`address_key_hash` / `route_hash` / `hash_bucket`), TOTAL_ORDER, SERVING_ORDER, or
+the genesis partition plan, and **do NOT widen `MAXIMUM_HASH_BITS = 16`**
+(`crates/geocoder-construction/src/main.rs:26`) — that would change
+`transform_binary_sha256` and invalidate the frozen address evidence spec v3.
 
 **Addresses have the same BUILD-TIME transport wall and are the bigger half
 of it** (this is about moving bytes between phases, NOT query latency --
@@ -454,31 +462,60 @@ moves as GitHub artifacts exactly the same way, and reduce has never run.
   (`value >> (64 - bits)`), which is exactly the mistake the Places shuffle
   made and had to fix.
 
-**Do port the shuffle.** The natural key is `(country, top-K bits of
-route_hash)` -- the partition key at a fixed granularity. Easier than Places:
+**Do NOT port the shuffle. Decided 2026-07-25.** The plan below was
+`(country, top-K bits of route_hash)` — the partition key at a fixed granularity —
+and it was attractive because `route_hash` is already uniform, partitions map exactly
+either way, and the source is largely country-clustered (`exact_country_row_groups`
+8,023 of 8,704, only 681 mixed). It is not being done, for two reasons that survive
+all of that:
 
-- `route_hash` is already uniform, so buckets are even within a country with no
-  hash-of-a-hash.
-- Partitions map exactly either way. Prefix longer than K is a subset of one
-  shard; prefix shorter than K is the union of exactly `2^(K-L)` shards, all
-  within its own country, reading no foreign data.
-- The source is already largely country-clustered: `exact_country_row_groups`
-  8,023 of 8,704, only 681 mixed. The existing reduce already exploits this via
-  per-row-group routing summaries.
+- **The output is ALREADY hash-clustered, so the shuffle buys little.** `pack_id` is
+  `row_number() OVER (ORDER BY {TOTAL_ORDER})` (`scripts/address_construction_v1.py:1009-1010`)
+  and `TOTAL_ORDER` begins `country, maximum_bucket, ...`
+  (`scripts/spike_address_construction.py:77-82`), where `maximum_bucket` is
+  `route_hash >> 48` (`crates/geocoder-construction/src/main.rs:26,422`). Packs and
+  row groups are therefore contiguous in `(country, route_hash>>48)` already, which
+  is why row-group SELECTION is tight (1.55 of 52 groups per partition at 93
+  partitions; 2.62 of 53 over 32 partitions on a planet-shaped slice). An explicit
+  shuffle would re-derive clustering that the per-task sort already provides.
+- **The arithmetic does not close.** Keeping packs at the >=50 MB that makes R2 reads
+  efficient forces K ~ 3, and at K = 3 the US (8 buckets per task, 256 partitions)
+  still sits at ~32x object amplification. Paying for a whole map-phase change to
+  land at 32x is not worth it.
 
-**First concrete step: measure country skew.** It sets K. Correction
-(2026-07-25): this said the address inventory records no per-country row counts,
-and that is wrong -- `exact_country_rows` in
-`benchmarks/address-construction-v1-data/inventory/addresses.json` attributes
-434,397,621 of the 473,576,753 records to 34 countries, with the remaining
-39,179,132 in the 681 mixed-or-unknown row groups. Skew for K can be read off
-that today (it is what the new `predict-reduce` floor uses); a real map run is
-still needed for the post-transform distribution, not for the source skew.
+**The load-bearing fix is a range-owning reducer instead** — a port of
+`places_construction_v1._reduce_ingest` / `reduce_bucket_range`, in which one reduce
+job opens each pack once for a contiguous hash range and emits every partition inside
+it. Reduce-side only, no map change, no partition-key change. Queued as separate
+work.
 
-**Related:** `MEASURED_REDUCE_MINUTES_PER_PARTITION["addresses"] = 2.0` is
-genuinely uncalibrated and the comment in `construction_v1_hosted.py` says so.
-The Places 1.0 **is** calibrated. Do not repeat the error of calling both
-uncalibrated.
+**Landed 2026-07-25 in the meantime (reduce-side, no map change):**
+`reduce_partition` now calls the staged store's `release()` at each pack's last use,
+retaining only what the later partitions of the same job still need
+(`construction_v1_hosted._batch_retention`). That bounds per-job resident input to
+about one pack independently of batch size (measured: peak flat at 887,478 bytes for
+batch 1, 4, 8 and 32 on a 32-partition / 14-pack slice, versus 1.77 MB / 2.66 MB /
+3.65 MB / 11.62 MB before), and `--max-reduce-jobs` is now a dispatch input on
+`construction-v1.yml` so batch size — and therefore object amplification — is tunable
+without a code change.
+
+**Country skew** can still be read off `exact_country_rows` in
+`benchmarks/address-construction-v1-data/inventory/addresses.json` (434,397,621 of
+473,576,753 records across 34 countries, the remaining 39,179,132 in the 681
+mixed-or-unknown row groups); it is what the `predict-reduce` floor uses. It is no
+longer a prerequisite for anything, since it existed to set K.
+
+**Related:** `MEASURED_REDUCE_MINUTES_PER_PARTITION["addresses"] = 2.0` is now
+CALIBRATED (2026-07-25) and deliberately KEPT at 2.0. Slice measurement: 0.177 s at
+3,279 rows, 0.434 s at 14,990, 1.022 s at 52,464, 1.800 s at 104,928 — linear, ~0.24 s
+per-partition floor plus ~1.5e-5 s/row, so a 1M-row planet partition projects to
+~0.25 min of compute plus ~0.12 min of hydration = ~0.37 min. 2.0 is a ~5x margin,
+matching the >4x the calibrated Places 1.0 carries; it also feeds the fail-closed
+ledger cost projection, where lowering it on slice evidence would be the wrong
+direction, and it does not bind batching (it admits 82 partitions per job). The
+derivation lives in the comment at
+`scripts/construction_v1_hosted.py:MEASURED_REDUCE_MINUTES_PER_PARTITION`. A real
+planet reduce measurement should still replace it.
 
 **Also unbuilt for addresses:** there is no slice harness. `build_slice_inventory_v1.py`
 and `run_slice_construction_v1.py` are Places-only, so addresses currently have
@@ -510,6 +547,14 @@ phases that have never run.
 > `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 seconds
 > with no credentials. The address shuffle port above is still DEFERRED and
 > untouched: the harness runs the existing row-counter pack layout unchanged.
+
+> **Decision 2026-07-25: the port is CANCELLED, not merely deferred.** The two
+> status notes above say "still DEFERRED" and were written before the decision; the
+> reasoning at the top of this section supersedes them. The map phase is not going to
+> be changed. What landed instead is reduce-side only — `release()` at each pack's
+> last use plus `retain_keys` for the rest of the job — and what is queued instead is
+> a range-owning reducer. The partition-key prohibitions in this section are
+> unaffected and remain in force.
 
 ## Added 2026-07-25, from the adversarial review of the hygiene bundle (#166)
 

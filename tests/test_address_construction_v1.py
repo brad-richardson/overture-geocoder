@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 import copy
 import json
+import shutil
 import subprocess
 import sys
 import uuid
@@ -28,6 +29,13 @@ assert CONSTRUCTION_SPEC and CONSTRUCTION_SPEC.loader
 CONSTRUCTION = importlib.util.module_from_spec(CONSTRUCTION_SPEC)
 sys.modules[CONSTRUCTION_SPEC.name] = CONSTRUCTION
 CONSTRUCTION_SPEC.loader.exec_module(CONSTRUCTION)
+STAGING_SPEC = importlib.util.spec_from_file_location(
+    "address_construction_staging_v1", ROOT / "scripts/construction_staging_v1.py"
+)
+assert STAGING_SPEC and STAGING_SPEC.loader
+STAGING = importlib.util.module_from_spec(STAGING_SPEC)
+sys.modules[STAGING_SPEC.name] = STAGING
+STAGING_SPEC.loader.exec_module(STAGING)
 
 
 @pytest.fixture(scope="module")
@@ -439,3 +447,231 @@ def test_stage_watchdog_disk_bytes_counts_only_regular_files(tmp_path):
     (tmp_path / "b.bin").write_bytes(b"b" * 5)
     assert CONSTRUCTION.StageWatchdog.disk_bytes([tmp_path]) == 15
     assert CONSTRUCTION.StageWatchdog.disk_bytes([tmp_path / "missing"]) == 0
+
+
+# --------------------------------------------------------------------------- #
+# Bounded hydration on the reduce path
+# --------------------------------------------------------------------------- #
+REDUCE_REQUEST = "b" * 64
+
+
+def _many_pack_map_output(tmp_path, binaries, store, *, rows: int):
+    """One map task whose output is MANY packs, published through ``store``.
+
+    Streets and numbers vary per row so `route_hash` (FNV-1a over the eight
+    normalized fields, crates/geocoder-construction/src/main.rs:165) spreads across
+    the hash space and the genesis plan can cut it into several partitions.
+    """
+    fixture = [
+        dict(
+            base_row(index + 1, number=str(100 + index * 7), source_row_index=index),
+            street=f"{index % 11} Divided Street",
+            postcode=f"0{2000 + index}",
+        )
+        for index in range(rows)
+    ]
+    Path(tmp_path).mkdir(parents=True, exist_ok=True)
+    projected = tmp_path / "many-packs.parquet"
+    SPIKE_TEST.write_fixture(projected, fixture)
+    source_limits = tmp_path / "many-packs-limits.json"
+    source_limits.write_text(
+        json.dumps({"objects": [{"records": rows, "row_groups": 1}]}) + "\n"
+    )
+    packed = CONSTRUCTION.Limits(
+        max_input_rows=rows,
+        # Small enough that one map task emits MANY packs, which is the whole point:
+        # a single-pack fixture cannot distinguish a bounded reducer from an
+        # unbounded one, because peak equals total either way.
+        max_pack_rows=4,
+        parquet_row_group_rows=2_048,
+        max_rss_bytes=1_024**3,
+        max_scratch_bytes=512 * 1024**2,
+        max_output_bytes=128 * 1024**2,
+        max_serving_bytes=16 * 1024**2,
+        wall_seconds=120,
+        duckdb_memory_limit="256MB",
+        duckdb_threads=2,
+        allow_unpinned_duckdb=True,
+    )
+    marker = CONSTRUCTION.map_task(
+        input_path=projected,
+        source_limits=source_limits,
+        store=store,
+        scratch_root=tmp_path / "many-packs-scratch",
+        request_sha256=REDUCE_REQUEST,
+        task_id="many-packs",
+        transform_binary=binaries["transform"],
+        directory_binary=binaries["directory"],
+        limits=packed,
+    )
+    return marker, packed
+
+
+def _staged_store(tmp_path, local_name: str, staging_root):
+    """A `StagedObjectStore` over a filesystem staging backend, no credentials."""
+    local = CONSTRUCTION.LocalObjectStore(tmp_path / local_name)
+    backend = STAGING.staging_backend(store_root=staging_root)
+    return STAGING.StagedObjectStore(
+        local, backend, STAGING.staging_prefix(REDUCE_REQUEST, "addresses")
+    )
+
+
+def _reduce_all(plan, marker, store, tmp_path, binaries, limits_value, *, retain: bool):
+    """Reduce every partition on ONE store, as a single batched reducer job would.
+
+    ``retain`` mirrors ``construction_v1_hosted._batch_retention``: the pack keys
+    later partitions of the same job still need are kept, everything else is released
+    at its last use.
+    """
+    partitions = plan["partitions"]
+    needs = [CONSTRUCTION.partition_pack_keys([marker], item) for item in partitions]
+    reductions = []
+    for index, partition in enumerate(partitions):
+        future: set[str] = set()
+        if retain:
+            for later in needs[index + 1 :]:
+                future |= later
+        reductions.append(
+            CONSTRUCTION.reduce_partition(
+                partition=partition,
+                markers=[marker],
+                store=store,
+                scratch_root=tmp_path / f"reduce-{index}",
+                directory_binary=binaries["directory"],
+                encoder_binary=binaries["encoder"],
+                verifier_binary=binaries["verifier"],
+                limits=limits_value,
+                retain_keys=frozenset(future),
+            )
+        )
+    return reductions
+
+
+def _comparable(reductions):
+    """The parts of a reduction that must not depend on cache behaviour."""
+    return [
+        {
+            key: item[key]
+            for key in (
+                "partition",
+                "selected_row_groups",
+                "fetched_binding",
+                "selected_binding",
+                "discarded_binding",
+                "artifact",
+                "verification",
+            )
+        }
+        for item in reductions
+    ]
+
+
+def test_reduce_partition_releases_packs_and_bounds_peak_resident(tmp_path, binaries):
+    """Peak HYDRATED input resident stays ~one pack while many packs are reduced.
+
+    This is the test the unreleased-pack defect needed and did not have. Every
+    existing reduce test asserts on OUTPUT, and the output was always correct: the
+    address reducer produced byte-identical artifacts while holding every pack it had
+    ever opened until the process exited, so `staged_peak_resident_bytes` equalled
+    `staged_bytes_hydrated` exactly. On the old code the peak assertion below fails
+    while every binding, artifact and verification assertion still passes.
+    """
+    staging_root = tmp_path / "staging"
+    map_store = _staged_store(tmp_path, "local-map", staging_root)
+    marker, packed = _many_pack_map_output(tmp_path, binaries, map_store, rows=48)
+    pack_sizes = [pack["object"]["bytes"] for pack in marker["packs"]]
+    # Fail closed on a degenerate fixture rather than passing vacuously: with one or
+    # two packs, peak == total however promptly the reducer evicts.
+    assert len(pack_sizes) >= 6
+
+    plan = CONSTRUCTION.genesis_plan([marker], row_cap=8)
+    assert len(plan["partitions"]) >= 4
+
+    # A FRESH local cache: the reducer runs on a runner that has never seen the map
+    # output, exactly as a hosted reduce job does, so every pack must be hydrated.
+    reduce_store = _staged_store(tmp_path, "local-reduce", staging_root)
+    reductions = _reduce_all(
+        plan, marker, reduce_store, tmp_path, binaries, packed, retain=False
+    )
+    evidence = reduce_store.evidence()
+
+    assert evidence["staged_bytes_hydrated"] > 0
+    # The fix: something was actually evicted.
+    assert evidence["staged_objects_released"] > 0
+    # The bound, asserted strictly. This is the line that fails on the old code.
+    assert (
+        evidence["staged_peak_resident_bytes"] < evidence["staged_bytes_hydrated"]
+    ), evidence
+    # And bounded by the DATA, not merely smaller than the total: a reducer that
+    # released only its last pack would satisfy a `<` alone. No partition of this plan
+    # spans more than a handful of packs, so the peak must stay within a couple of the
+    # largest one rather than growing with the number of packs reduced.
+    assert evidence["staged_peak_resident_bytes"] <= 2 * max(pack_sizes), evidence
+    # Nothing is left resident when the job ends.
+    assert evidence["staged_bytes_released"] == evidence["staged_bytes_hydrated"]
+
+    # The SAME map output reduced through a plain LocalObjectStore, which has no
+    # `release` method at all -- that absence is precisely why the reducer reaches it
+    # through `getattr`, since there the local directory IS the store and evicting
+    # would delete the map output. The objects are copied out of the staging tree by
+    # key so the inputs are bit-identical, and the published artifacts and every
+    # binding must come out identical too.
+    local_root = tmp_path / "local-only"
+    shutil.copytree(staging_root / map_store.prefix, local_root)
+    for sidecar in local_root.rglob("*.metadata.json"):
+        sidecar.unlink()
+    local_only = CONSTRUCTION.LocalObjectStore(local_root)
+    assert not hasattr(local_only, "release")
+    local_reductions = _reduce_all(
+        plan, marker, local_only, tmp_path / "local-only-reduce",
+        binaries, packed, retain=False,
+    )
+    assert _comparable(local_reductions) == _comparable(reductions)
+    # A local-only run must not have deleted its own store.
+    for pack in marker["packs"]:
+        assert local_only.path(pack["object"]["key"]).is_file()
+
+
+def test_reduce_batch_retention_keeps_boundary_packs_without_changing_output(
+    tmp_path, binaries
+):
+    """Retaining a batch's future packs cuts re-fetches and leaves output identical.
+
+    A pack straddling a partition boundary is selected by both sides of it, so
+    releasing purely per-partition re-fetches and re-verifies it once per partition.
+    `retain_keys` is what lets a batched reducer job pay for each pack once while
+    still keeping its peak bounded.
+    """
+    staging_root = tmp_path / "staging"
+    map_store = _staged_store(tmp_path, "local-map", staging_root)
+    marker, packed = _many_pack_map_output(tmp_path, binaries, map_store, rows=48)
+    plan = CONSTRUCTION.genesis_plan([marker], row_cap=8)
+
+    per_partition = _staged_store(tmp_path, "local-a", staging_root)
+    without = _reduce_all(
+        plan, marker, per_partition, tmp_path / "a", binaries, packed, retain=False
+    )
+    batched = _staged_store(tmp_path, "local-b", staging_root)
+    with_retention = _reduce_all(
+        plan, marker, batched, tmp_path / "b", binaries, packed, retain=True
+    )
+
+    # Each pack the job needs is fetched exactly once when the job holds what it
+    # still needs, and the distinct-pack count is the floor no cache policy can beat.
+    needed = set()
+    for partition in plan["partitions"]:
+        needed |= CONSTRUCTION.partition_pack_keys([marker], partition)
+    assert batched.evidence()["staged_objects_hydrated"] == len(needed)
+    assert (
+        per_partition.evidence()["staged_objects_hydrated"]
+        >= batched.evidence()["staged_objects_hydrated"]
+    )
+    # Retention must not turn the reducer back into an unbounded one.
+    retained_evidence = batched.evidence()
+    assert (
+        retained_evidence["staged_peak_resident_bytes"]
+        <= retained_evidence["staged_bytes_hydrated"]
+    )
+    assert retained_evidence["staged_objects_released"] == len(needed)
+    # The whole point: cache policy is invisible in the output.
+    assert _comparable(with_retention) == _comparable(without)

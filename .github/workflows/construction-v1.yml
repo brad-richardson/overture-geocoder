@@ -60,6 +60,29 @@ on:
         required: false
         default: ""
         type: string
+      max_reduce_jobs:
+        # An execution-shape knob, dispatch-time tunable so tuning it needs no code
+        # change. It only ever LOWERS the job cap
+        # (construction_v1_hosted.py: `job_cap = min(job_cap, args.max_reduce_jobs)`),
+        # and a lower cap means LARGER contiguous partition batches per job. For
+        # addresses that directly cuts R2 reads: a contiguous partition-index batch is
+        # a contiguous route_hash range within one country, and map output is already
+        # clustered by (country, route_hash>>48), so the packs a job needs overlap
+        # heavily across the partitions IN that job and are hydrated once for the
+        # whole batch rather than once per partition. Measured on a planet-shaped
+        # 32-partition / 14-pack slice: batch 1 = 3.36x object amplification, batch 4
+        # = 1.53x, batch 8 = 1.23x, batch 32 = 1.00x, with peak resident bytes flat at
+        # one pack throughout. Planet projection: batch 3 (today's default) = 12.7x /
+        # ~0.63 TB of R2 reads, batch 12 = 4.2x / ~0.21 TB.
+        #
+        # Empty keeps today's behaviour exactly. It cannot loosen anything: the
+        # per-job timeout gate still fails closed if the resulting batch cannot fit a
+        # reduce job's timeout, and the ledger gate still re-projects runner minutes
+        # from the plan that is actually produced.
+        description: Optional cap on reducer JOBS (positive integer). Lower = larger partition batches per job = fewer R2 pack reads. Empty uses the contract's max_reducers_per_family.
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -289,6 +312,10 @@ jobs:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
           TASK_ID: ${{ matrix.task_id }}
           TASK_INDEX: ${{ matrix.task_index }}
+          # Threaded into predict-reduce as well as into the execute plan, so a
+          # dry-run certifies the reduce shape the execute would actually dispatch
+          # rather than the default one.
+          MAX_REDUCE_JOBS: ${{ inputs.max_reduce_jobs }}
         run: |
           set -euo pipefail
           START=$SECONDS
@@ -329,9 +356,24 @@ jobs:
           # batch_size + reduce minutes derive from the MEASURED per-partition
           # reduce time (construction_v1_hosted.MEASURED_REDUCE_MINUTES_PER_PARTITION);
           # predict-reduce reports the timing assumption it used.
+          # Same validation as the plan phase applies to the same dispatch input, so
+          # a malformed cap is rejected in dry-run instead of surviving to execute.
+          REDUCE_JOB_FLAG=()
+          if [ -n "${MAX_REDUCE_JOBS:-}" ]; then
+            case "$MAX_REDUCE_JOBS" in
+              ''|*[!0-9]*)
+                echo "::error::max_reduce_jobs must be a positive integer, got '$MAX_REDUCE_JOBS'" >&2
+                exit 1 ;;
+            esac
+            if [ "$MAX_REDUCE_JOBS" -lt 1 ]; then
+              echo "::error::max_reduce_jobs must be >= 1, got '$MAX_REDUCE_JOBS'" >&2
+              exit 1
+            fi
+            REDUCE_JOB_FLAG=(--max-reduce-jobs "$MAX_REDUCE_JOBS")
+          fi
           python scripts/construction_v1_hosted.py predict-reduce \
             --contract control/contract.json --family "$FAMILY_KEY" --inventory "$INVENTORY" \
-            --ledger control/ledger.json \
+            --ledger control/ledger.json "${REDUCE_JOB_FLAG[@]}" \
             --tail-minutes "$TAIL_MINUTES" --output "dryrun/predict-${TASK_INDEX}.json"
           PARTITIONS="$(jq -r '.predicted_partitions' "dryrun/predict-${TASK_INDEX}.json")"
           JOBS="$(jq -r '.reduce_job_count' "dryrun/predict-${TASK_INDEX}.json")"
@@ -520,6 +562,7 @@ jobs:
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
           MAP_TASK_COUNT: ${{ needs.admit.outputs.map_task_count }}
+          MAX_REDUCE_JOBS: ${{ inputs.max_reduce_jobs }}
           # Read access to the run-scoped staging prefix: the plan phase reads map
           # packs by key to size partitions. Same reused workflow credentials as
           # map and finalize; scoping is a tracked follow-up.
@@ -557,6 +600,25 @@ jobs:
           # fails closed here if the BATCHED reduce projection (job_count x the
           # per-job estimate + head/finalize tails) would exceed the ledger cap.
           TAIL_MINUTES=$(( HEAD_PHASE_ESTIMATE_MINUTES + FINALIZE_PHASE_ESTIMATE_MINUTES ))
+          # Dispatch-time reducer job cap. Validated here rather than trusted: it is
+          # free-text dispatch input, and a non-numeric value passed straight through
+          # would make argparse abort mid-phase with a confusing error instead of
+          # failing at the gate. Empty means "not set" and the flag is omitted, which
+          # is byte-for-byte today's behaviour.
+          REDUCE_JOB_FLAG=()
+          if [ -n "${MAX_REDUCE_JOBS:-}" ]; then
+            case "$MAX_REDUCE_JOBS" in
+              ''|*[!0-9]*)
+                echo "::error::max_reduce_jobs must be a positive integer, got '$MAX_REDUCE_JOBS'" >&2
+                exit 1 ;;
+            esac
+            if [ "$MAX_REDUCE_JOBS" -lt 1 ]; then
+              echo "::error::max_reduce_jobs must be >= 1, got '$MAX_REDUCE_JOBS'" >&2
+              exit 1
+            fi
+            REDUCE_JOB_FLAG=(--max-reduce-jobs "$MAX_REDUCE_JOBS")
+            echo "Reducer job cap lowered to $MAX_REDUCE_JOBS by dispatch input"
+          fi
           # --store-root is an EMPTY local cache; the packs this phase needs are
           # hydrated by key from the run-scoped staging prefix and verified against
           # the digest in the key.
@@ -565,7 +627,7 @@ jobs:
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
             --markers-dir mapdl/markers --scratch-dir plan-scratch \
             --ledger control/ledger.json --tail-minutes "$TAIL_MINUTES" \
-            --staging-report plan/staging.json \
+            --staging-report plan/staging.json "${REDUCE_JOB_FLAG[@]}" \
             --output plan/plan.json --matrix-out plan/reduce-matrix.json
           # The bound that decides whether this job fits a runner: peak HYDRATED
           # input resident at once, not the total it streamed through.
@@ -588,6 +650,7 @@ jobs:
           {
             echo "## Reducer plan"
             echo "- Reduce partitions: $PARTITIONS across $COUNT jobs, owned by $OWNERSHIP (largest job $BATCH_SIZE partitions, bucket stride $STRIDE, matrix cap 256)"
+            echo "- Effective reducer job cap: $(jq -r '.reduce_execution.job_cap' plan/plan.json) (dispatch input max_reduce_jobs: '${MAX_REDUCE_JOBS:-unset}')"
           } >> "$GITHUB_STEP_SUMMARY"
       # Plan, markers, and the ledger. No store: this artifact WAS the 63.5 GB one
       # every reduce batch downloaded whole.

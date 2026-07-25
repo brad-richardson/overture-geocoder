@@ -1016,6 +1016,69 @@ def test_reduce_batching_matches_the_unbatched_plan(tmp_path, binaries):
         assert u["verification"]["binding"] == b["verification"]["binding"], name
 
 
+def test_batch_retention_is_the_suffix_union_of_what_a_job_still_needs():
+    """`_batch_retention[i]` == the packs partitions i+1.. of the same job will open.
+
+    This is what stops per-partition eviction from re-fetching a pack that straddles a
+    partition boundary once per partition. Asserted on a hand-built plan/marker pair so
+    the suffix-union arithmetic is pinned independently of any fixture's hash layout:
+    the last entry must be EMPTY (the final partition of a job releases everything) and
+    each earlier entry must be a superset of the next.
+    """
+
+    def group(country, low, high):
+        return {
+            "index": 0,
+            "routing_groups": [
+                {
+                    "country": country,
+                    "minimum_route_hash": low,
+                    "maximum_route_hash": high,
+                }
+            ],
+        }
+
+    def pack(name, country, low, high):
+        return {
+            "object": {"key": f"map/address/packs/sha256/{name}.parquet"},
+            "directory": {"row_groups": [group(country, low, high)]},
+        }
+
+    # Three packs over ascending hash ranges, one of them (b) overlapping both
+    # partitions -- exactly the boundary pack the retention exists for.
+    markers = [{
+        "packs": [
+            pack("a" * 64, "US", 0, 89),
+            pack("b" * 64, "US", 90, 210),
+            pack("c" * 64, "US", 211, 300),
+        ]
+    }]
+    plan = {"partitions": [
+        {"id": "p0", "country": "US", "hash_start": 0, "hash_end": 99},
+        {"id": "p1", "country": "US", "hash_start": 100, "hash_end": 199},
+        {"id": "p2", "country": "US", "hash_start": 200, "hash_end": 300},
+    ]}
+    keys = {name: f"map/address/packs/sha256/{name * 64}.parquet" for name in "abc"}
+
+    retention = HOSTED._batch_retention("addresses", plan, markers, 0, 3)
+    assert len(retention) == 3
+    # p0 opens a and b; only b and c are still wanted afterwards, so a is released
+    # at p0 and b is held across the boundary rather than re-fetched at p1.
+    assert retention[0] == frozenset({keys["b"], keys["c"]})
+    assert retention[1] == frozenset({keys["b"], keys["c"]})
+    # The last partition of a job retains nothing, so the job ends holding nothing.
+    assert retention[2] == frozenset()
+    # A suffix union is monotonically non-increasing; anything else means a key could
+    # be released while a later partition still needs it.
+    for earlier, later in zip(retention, retention[1:]):
+        assert later <= earlier
+
+    # A one-partition batch and the places family both retain nothing: places jobs own
+    # a bucket range and open each fragment once for the whole range already.
+    assert HOSTED._batch_retention("addresses", plan, markers, 1, 1) == [frozenset()]
+    assert HOSTED._batch_retention("places", plan, markers, 0, 3) == [frozenset()] * 3
+
+
 def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binaries):
     contract, _ = _derive(tmp_path)
     store = tmp_path / "store"
