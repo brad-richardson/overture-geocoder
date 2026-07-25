@@ -352,3 +352,29 @@ and `run_slice_construction_v1.py` are Places-only, so addresses currently have
 no fast local loop. Building the address equivalent is probably the actual first
 task, since without it any address work repeats the pattern of designing against
 phases that have never run.
+
+## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
+
+An audit of `geocoder-shards` (981.76 GiB) produced an owner-approved five-phase
+cleanup, retargeted into `.github/workflows/r2-cleanup.yml`: abandoned id-index
+`staging/` under `2026-07-02.0` and `2026-07-02.2` (112.67 GiB), the orphaned
+bucket-root `staging/global-v2/165317ba…/` prefix whose pipeline was deleted in
+PR #154 (55.08 GiB), the failed never-catalogued `2026-07-17.0/` (260.77 GiB),
+the `immutable/map/addresses/objects/` subtree under `staging/global-v2/59f326dc…/`
+with `manifests/`, `reports/` and `inventory/` retained as the 2026-07-22
+benchmark evidence (23.62 GiB), and a catalog prune plus delete of `2026-07-02.1`
+(129.12 GiB). `2026-07-13.0`, `2026-07-18.0` (the frozen unpromoted core),
+`2026-07-02.3` and `backups/` are asserted protected in every phase. Three
+tracked items fall out of it:
+
+(a) **The rebuild workflow should wipe its own `{version}/staging/` on failure.**
+    Both phase-1 targets are staging trees a cancelled run left behind; nothing
+    cleans them today, so this debris recurs every failed rebuild.
+(b) **Byte-identical id-index triplication should be deduplicated.** The
+    `2026-07-17.0` id-index is byte-identical to `2026-07-13.0`'s, and the same
+    bytes exist a third time. Either content-address the id-index shards or have
+    a version reference another version's index instead of copying it.
+(c) **Decision for the owner, unchanged here: the monthly scheduled rebuild is
+    currently a no-op** because `vars.ENABLE_SCHEDULED_REBUILD` is unset. That
+    is recorded, not fixed — enabling it is the owner's call, and it changes when
+    new versions (and new staging debris) appear.

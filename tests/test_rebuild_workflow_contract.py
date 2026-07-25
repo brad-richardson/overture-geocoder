@@ -13,6 +13,7 @@ them, but keep it in mind before adding trigger assertions.
 import json
 import re
 import subprocess
+import sys
 from pathlib import Path
 
 import yaml
@@ -161,12 +162,163 @@ def test_hex_range_matrices_are_identical_everywhere():
 
 
 def test_cleanup_waits_out_cache_ttl_before_deleting():
+    # Only the catalog-coupled phase (5) can strand a worker on a version it is
+    # about to delete, so only its delete must follow the wait. Phases 1-4 never
+    # touch catalog.json (asserted separately below) and precede it.
     cleanup = jobs(load(CLEANUP))["cleanup"]
     names = step_names(cleanup)
     wait = names.index("Wait out worker catalog cache TTL")
-    for delete_step in ("Delete pruned and orphaned prefixes", "Phase 2 - wipe latest staging"):
-        assert wait < names.index(delete_step), delete_step
+    assert names.index("Prune catalog and verify") < wait
+    assert wait < names.index("Phase 5 - delete pruned version prefixes")
     assert re.search(r"sleep\s+\d+", step_by_name(cleanup, "Wait out worker catalog cache TTL")["run"])
+
+
+# --- retargeted 2026-07 cleanup: phase gating, protected prefixes, prefix regex
+
+
+def _cleanup_job():
+    return jobs(load(CLEANUP))["cleanup"]
+
+
+def test_only_phase_five_steps_touch_the_root_catalog():
+    """Phases 1-4 are dispatchable alone and must not mutate catalog.json."""
+    for step in _cleanup_job()["steps"]:
+        run = step.get("run", "")
+        writes = re.search(r"cp\s+\S+\s+\"s3://\$BUCKET/catalog\.json\"", run)
+        prunes = "prune_catalog.py allowlist" in run
+        if writes or prunes:
+            gate = step.get("if", "")
+            assert "phase5" in gate, step.get("name")
+
+
+def test_catalog_prune_is_gated_so_prune_argument_is_never_empty():
+    prune = step_by_name(_cleanup_job(), "Prune catalog and verify")
+    assert prune["if"] == "steps.plan.outputs.phase5 == 'true'"
+    assert '--prune "$PRUNE_VERSIONS"' in prune["run"]
+    assert load(CLEANUP)["env"]["PRUNE_VERSIONS"].split(), "PRUNE_VERSIONS is empty"
+
+
+def test_every_phase_is_independently_gated_on_a_dispatch_selection():
+    names = [n or "" for n in step_names(_cleanup_job())]
+    phase_steps = [n for n in names if n.startswith("Phase ")]
+    assert len(phase_steps) == 5, phase_steps
+    for step in _cleanup_job()["steps"]:
+        if (step.get("name") or "").startswith("Phase "):
+            assert re.fullmatch(
+                r"steps\.plan\.outputs\.phase[1-5] == 'true'", step["if"]
+            ), step["name"]
+
+
+def test_protected_prefix_guard_precedes_every_delete():
+    steps = _cleanup_job()["steps"]
+    names = [step.get("name") for step in steps]
+    guard = names.index("Assert no target intersects a protected prefix")
+    for index, step in enumerate(steps):
+        if "s3 rm" in step.get("run", ""):
+            assert guard < index, step.get("name")
+    protected = load(CLEANUP)["env"]["PROTECTED_PREFIXES"].split()
+    assert protected == ["2026-07-13.0", "2026-07-18.0", "2026-07-02.3", "backups"]
+    # No target constant may name a protected prefix.
+    env = load(CLEANUP)["env"]
+    targets = [
+        version
+        for key in ("STAGING_ONLY", "ORPHAN_PREFIXES", "PRUNE_VERSIONS")
+        for version in env[key].split()
+    ]
+    assert targets, "no cleanup targets configured"
+    assert not set(targets) & set(protected), targets
+
+
+def test_protected_prefix_guard_rejects_intersecting_targets(tmp_path):
+    """Run the guard's own python, as the workflow does, over crafted targets."""
+    guard = step_by_name(
+        _cleanup_job(), "Assert no target intersects a protected prefix"
+    )["run"]
+    body = guard.split("<<'PY'\n", 1)[1].rsplit("PY", 1)[0]
+    script = tmp_path / "guard.py"
+    script.write_text(body)
+    protected = "2026-07-13.0 2026-07-18.0 2026-07-02.3 backups"
+
+    def run(lines):
+        targets = Path("/tmp/delete-targets.txt")
+        targets.write_text("".join(f"{line}\n" for line in lines))
+        return subprocess.run(
+            [sys.executable, str(script), protected], capture_output=True, text=True
+        )
+
+    ok = run(["1|2026-07-02.0/staging/", "3|2026-07-17.0/"])
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+
+    for bad in (
+        "1|2026-07-18.0/staging/",       # inside a protected prefix
+        "3|2026-07-13.0/",               # the live latest
+        "5|2026-07-02.3/",               # id-index-bearing rollback
+        "1|backups/catalog-x.json",      # catalog backups
+        "3|staging/",                    # too short / unqualified
+        "2|/2026-07-17.0/",              # absolute
+        "3|2026-07-17.0/../2026-07-13.0/",  # traversal
+    ):
+        result = run([bad])
+        assert result.returncode == 1, (bad, result.stdout)
+        assert "::error::" in result.stdout, bad
+
+
+def test_global_v2_prefix_regex_guard_is_full_digest_only():
+    plan = step_by_name(_cleanup_job(), "Validate inputs and compute deletion targets")
+    pattern = r"^staging/global-v2/[0-9a-f]{64}/$"
+    assert pattern in plan["run"]
+    # Both the bucket-root phases re-validate their own target before deleting.
+    for name in (
+        "Phase 2 - delete orphaned global-v2 staging prefix",
+        "Phase 4 - delete global-v2 address map objects only",
+    ):
+        assert pattern in step_by_name(_cleanup_job(), name)["run"], name
+
+    digest = "5" + "9f326dc2fd0866f54ead2ce0a1b19b5b9955c565cd8ef662d6bf22fc1047a6" + "3"
+    accept = f"staging/global-v2/{digest}/"
+    assert re.fullmatch(pattern[1:-1], accept)
+    for bad in (
+        "staging/",
+        "staging/global-v2/",
+        f"staging/global-v2/{digest[:8]}/",       # truncated digest
+        f"staging/global-v2/{digest}",            # no trailing slash
+        f"staging/global-v2/{digest.upper()}/",   # not lowercase hex
+        f"staging/global-v2/{digest}/immutable/",  # deeper than the digest
+        "",
+    ):
+        assert not re.fullmatch(pattern[1:-1], bad), bad
+    # A bare staging value is refused by an explicit case guard too, not just
+    # by the regex.
+    assert "refuses bare staging prefix" in plan["run"]
+
+
+def test_phase_four_deletes_only_the_addresses_object_subtree():
+    env = load(CLEANUP)["env"]
+    assert env["ADDRESSES_SUBTREE"] == "immutable/map/addresses/objects/"
+    run = step_by_name(
+        _cleanup_job(), "Phase 4 - delete global-v2 address map objects only"
+    )["run"]
+    assert 'may only delete $ADDRESSES_SUBTREE' in run
+    # The retained benchmark evidence is asserted present after the delete.
+    assert "for keep in manifests reports inventory" in run
+    assert "evidence lost" in run
+
+
+def test_cleanup_keeps_inventory_and_live_probe_bookends():
+    names = [n or "" for n in step_names(_cleanup_job())]
+    assert names[-1] == "Post-run live worker probe and inventory"
+    pre = names.index("Pre-run live worker probe and inventory")
+    assert pre < min(
+        index for index, name in enumerate(names) if name.startswith("Phase ")
+    )
+    for name in (
+        "Pre-run live worker probe and inventory",
+        "Post-run live worker probe and inventory",
+    ):
+        run = step_by_name(_cleanup_job(), name)["run"]
+        for path in ("/health", "/search?q=", "/reverse?lat=", "/id/"):
+            assert path in run, (name, path)
+        assert "Total Objects" in run, name
 
 
 def test_rebuild_prune_waits_between_catalog_publish_and_delete():
