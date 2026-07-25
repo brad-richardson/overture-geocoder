@@ -212,6 +212,51 @@ The remaining real work is a nearest-neighbour structure within a cell and
 Worker support, which the divisions reverse shards
 (`build_shards.py --reverse`) already demonstrate at smaller scale.
 
+### Reverse for Places vs addresses is NOT symmetric
+
+Both need a new index, but they start from very different places, and the two
+should almost certainly be designed together rather than separately.
+
+First, a distinction that is easy to miss: **divisions reverse is containment**
+(which admin polygon contains this point) and is already served by
+`build_shards.py --reverse`. **POI and address reverse are nearest-neighbour**
+over points. The existing reverse shards are not a template you can reuse
+directly -- it is a different query.
+
+**Places has a substantial head start.**
+
+- Coarse spatial routing already exists. The serving layout is keyed
+  `cell\0token` and routes to exactly one world-quadkey shard, so given a
+  lat/lon you compute the cell with `route()` and know which shard to open. No
+  new partitioning needed.
+- `places_serving_encode_v1.rs` already reads `longitude`/`latitude` into the
+  serving payload, so positions are present in the served records.
+- What is missing is only a WITHIN-cell spatial structure: records inside a
+  shard are ordered by token, not by position.
+
+**Addresses start further back.** `(country, route_hash)` is not spatial at all,
+so given a lat/lon there is no way to know which shard to open. The coordinates
+do flow through `address-transform-v1`, but the partitioning has to be built.
+The Places cell scheme plus the cell-keyed shuffle is what it should reuse.
+
+**Both hit the same wall in dense cells.** Mean is 4,462 places per cell, which
+a linear within-cell scan handles trivially. The tail does not:
+
+| cell | places (approx) |
+|---|---|
+| `b2e3` Tokyo | **~1,384,000** |
+| `5e5e` São Paulo | ~816,000 |
+| `b1e0` Osaka | ~738,000 |
+
+So a sub-cell spatial subdivision is required for the dense tail. Note the
+existing subdivision is by **token hash**, which is useless for this -- it
+deliberately scatters neighbours. A spatial sub-key (a finer quadkey inside the
+cell) would be needed.
+
+**Conclusion: design one spatial reverse index that serves both families.** Same
+cell scheme, same sub-cell spatial structure, two datasets. Doing them
+separately would build the same dense-cell machinery twice.
+
 ### Expected forward performance (projection, not measurement)
 
 Nothing below is built, so this is reasoning from the read pattern only:
