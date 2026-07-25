@@ -394,7 +394,7 @@ def test_phase_four_deletes_only_the_addresses_object_subtree():
     )["run"]
     assert 'may only delete $ADDRESSES_SUBTREE' in run
     # The retained benchmark evidence is asserted present after the delete.
-    assert "for keep in manifests reports inventory" in run
+    assert 'for keep in "immutable/inventory/" "immutable/map/" "completed/"' in run
     assert "evidence lost" in run
 
 
