@@ -212,6 +212,45 @@ The remaining real work is a nearest-neighbour structure within a cell and
 Worker support, which the divisions reverse shards
 (`build_shards.py --reverse`) already demonstrate at smaller scale.
 
+### Decide BEFORE the planet build: does map emit a per-place artifact?
+
+This is the only part of reverse that is expensive to add late, so it is a
+sequencing decision rather than a design one.
+
+Reverse must be built from **per-place records** (one row per place with a
+position), not from term rows:
+
+- term rows are ~7.19 per place -- wrong shape and 7x the volume; and
+- the combiner keeps only the top `maximum_serving_candidates` per
+  `(cell, token)`, so a place whose tokens are all generic and all in saturated
+  groups can be dropped from the term store entirely. Harmless for forward
+  search, **silently missing from reverse**.
+
+Map currently emits **no per-place artifact**. Term rows and head candidates
+(top-N per token) are both the wrong shape. So adding reverse later means
+**re-running the planet map phase** -- not redesigning it, but re-running it,
+plus a re-publish.
+
+**The insurance is cheap.** Have map also emit a per-place, cell-keyed artifact
+alongside the term fragments: `feature_id`, longitude/latitude, and whatever
+reverse must return. At ~32 bytes for the minimal form that is roughly **2.4 GB
+planet-wide against a ~34 GB term store**, and it rides the same shuffle, the
+same staging, and the same proof frame.
+
+- Emit it now -> reverse is purely additive later. New encoder, new index, no
+  map re-run.
+- Skip it -> the price of reverse is one full planet map re-run.
+
+Open question if we do it: whether the artifact carries only `feature_id`
+(cheapest, forces an `/id` round-trip to render a result) or also
+name/category/address fields (self-sufficient, larger). That choice does not
+block emitting the positions.
+
+**Everything else about reverse is additive.** Inventory, projection, the
+transform, contract/admission/ledger, the proof frame, the cell scheme, the
+cell-keyed shuffle, and R2 staging all carry over unchanged -- reverse wants
+exactly the spatial grouping the shuffle already produces.
+
 ### Reverse for Places vs addresses is NOT symmetric
 
 Both need a new index, but they start from very different places, and the two
