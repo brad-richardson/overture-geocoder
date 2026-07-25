@@ -619,6 +619,254 @@ def test_finalize_refuses_to_publish_bytes_that_are_not_the_bytes(tmp_path, bina
     assert json.loads((tmp_path / "final-clean.json").read_text())["reconciles"] is True
 
 
+def test_the_serving_object_set_is_family_correct_and_fails_closed():
+    """A Places reduction records `routed_object`, not `artifact`.
+
+    `_artifact_keys` collected `reduction.get("artifact")` and skipped a falsy one,
+    so a Places finalize published head shards, positions packs and two manifests
+    and DROPPED every routed `.plrv` serving payload. Nothing caught it: the
+    reconciliation compares bindings out of the reduction JSON and never looks at
+    the published object set.
+    """
+    assert set(HOSTED.REDUCTION_SERVING_OBJECTS) == set(HOSTED.FAMILIES)
+    assert HOSTED.REDUCTION_SERVING_OBJECTS["places"] == "routed_object"
+    assert HOSTED.REDUCTION_SERVING_OBJECTS["addresses"] == "artifact"
+
+    def identity(key: str) -> dict:
+        return {"key": key, "sha256": "a" * 64, "bytes": 10}
+
+    places = [{"partition": {"id": "p-0"},
+               "routed_object": identity("serve/places-v1/routed/sha256/a.plrv"),
+               # The leaf is a build intermediate the head phase reads; it holds
+               # TERM rows and must NOT be published.
+               "leaf_object": identity("reduce/places-v1/leaves/sha256/b.parquet")}]
+    head = {"populated_shards": 1, "shard_count": 16,
+            "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]}
+    keys = [item["key"] for item in HOSTED._artifact_keys("places", places, head)]
+    assert keys == [
+        "serve/places-v1/routed/sha256/a.plrv",
+        "serve/places-v1/head/sha256/c.plhd",
+    ]
+
+    # A reduction naming no serving object ABORTS instead of shortening the set.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("places", [{"partition": {"id": "p-9"},
+                                          "leaf_object": identity("x")}], head)
+    assert "records no 'routed_object'" in str(excinfo.value)
+    assert "p-9" in str(excinfo.value)
+    # Including the exact shape the defect produced: `artifact` present but None.
+    with pytest.raises(SystemExit):
+        HOSTED._artifact_keys("places", [{"partition": {"id": "p-8"},
+                                          "artifact": None,
+                                          "routed_object": None}], head)
+    # TRUTHY but malformed must give the intended message, not a raw
+    # KeyError/TypeError traceback out of the publication verification.
+    for broken in ("a-string", 7, {"key": "k"}, {"key": "k", "sha256": "a" * 64},
+                   {"key": 1, "sha256": "a" * 64, "bytes": 2},
+                   {"key": "k", "sha256": "a" * 64, "bytes": "2"},
+                   {"key": "k", "sha256": 64, "bytes": 2}):
+        with pytest.raises(SystemExit) as excinfo:
+            HOSTED._artifact_keys(
+                "places", [{"partition": {"id": "p-7"}, "routed_object": broken}], head
+            )
+        assert "not a publishable object identity" in str(excinfo.value), broken
+    # Falsy shapes are caught one branch earlier, by the missing-object gate.
+    for empty in ({}, "", 0, []):
+        with pytest.raises(SystemExit) as excinfo:
+            HOSTED._artifact_keys(
+                "places", [{"partition": {"id": "p-6"}, "routed_object": empty}], head
+            )
+        assert "records no 'routed_object'" in str(excinfo.value), empty
+    # The address path is unchanged and equally fail-closed.
+    assert [item["key"] for item in HOSTED._artifact_keys(
+        "addresses", [{"artifact": identity("reduce/address/artifacts/sha256/a.av1")}], None
+    )] == ["reduce/address/artifacts/sha256/a.av1"]
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("addresses", [{"routed_object": identity("x")}], None)
+    assert "records no 'artifact'" in str(excinfo.value)
+
+
+def test_the_head_half_of_the_serving_set_fails_closed_too(tmp_path):
+    """`head.get("shard_objects", [])` was the same permissive get, one line down.
+
+    It published a places slice with ZERO `.plhd` shards -- exit 0,
+    `reconciles: true`, and both new workflow gates satisfied -- including the shape
+    where head.json claims `shard_count: 16` while the tree holds none.
+    """
+    def identity(key: str) -> dict:
+        return {"key": key, "sha256": "b" * 64, "bytes": 20}
+
+    reductions = [{"partition": {"id": "p-0"},
+                   "routed_object": identity("serve/places-v1/routed/sha256/a.plrv")}]
+
+    # 1. --head omitted entirely.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("places", reductions, None)
+    assert "requires a --head result" in str(excinfo.value)
+    # 2. An address-shaped head result threaded to places.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("places", reductions, {"family": "places", "head": None})
+    assert "requires a --head result" in str(excinfo.value)
+    # 3. The nasty one: head.json REPORTS shards and hands over none.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("places", reductions, {
+            "shard_count": 16, "populated_shards": 16, "shard_objects": []})
+    assert "records no shard_objects" in str(excinfo.value)
+    assert "shard_count=16" in str(excinfo.value)
+    # 4. A count that disagrees with the objects handed over.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("places", reductions, {
+            "shard_count": 16, "populated_shards": 16,
+            "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]})
+    assert "reports populated_shards=16" in str(excinfo.value)
+    # 5. A malformed shard entry names itself.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys("places", reductions, {
+            "shard_count": 1, "populated_shards": 1, "shard_objects": [{"key": "k"}]})
+    assert "head shard 0" in str(excinfo.value)
+    # 6. Missing populated_shards at all.
+    with pytest.raises(SystemExit):
+        HOSTED._artifact_keys("places", reductions, {
+            "shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]})
+    # And a family with no head phase must not smuggle shards into the slice.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED._artifact_keys(
+            "addresses", [{"artifact": identity("reduce/address/artifacts/sha256/a.av1")}],
+            {"shard_objects": [identity("serve/places-v1/head/sha256/c.plhd")]},
+        )
+    assert "no global head phase" in str(excinfo.value)
+
+
+def test_places_finalize_publishes_every_routed_object(tmp_path, binaries):
+    contract, _ = _derive(tmp_path)
+    store = tmp_path / "store"
+    markers_dir = tmp_path / "markers"
+    markers_dir.mkdir()
+    import pyarrow.parquet as pq
+
+    rows = [
+        {"id": str(uuid.UUID(int=7000 + i)),
+         "primary_name": f"Common Place {i}", "category": "library",
+         "locality": "Town", "country": "XX", "confidence": 1.0 - (i % 8) / 20,
+         "point": [0.0, 0.0], "source_row_index": i}
+        for i in range(60)
+    ]
+    source = tmp_path / "projected.parquet"
+    PLACES_TEST.write_fixture(source, rows, row_group_size=32)
+    (tmp_path / "source-limits.json").write_text(json.dumps({"objects": [
+        {"records": len(rows),
+         "row_groups": pq.ParquetFile(source).metadata.num_row_groups}]}) + "\n")
+    _run("run-map", "--contract", contract, "--store-root", store, "--family", "places",
+         "--task-id", "places-map-000", "--input", source,
+         "--source-limits", tmp_path / "source-limits.json",
+         "--transform-binary", binaries["places-transform-v1"],
+         "--proof-binary", binaries["places-proof-directory"],
+         "--scratch-dir", tmp_path / "map-scratch",
+         "--marker-out", markers_dir / "000.json")
+    plan = tmp_path / "plan.json"
+    _run("plan-reduce", "--contract", contract, "--store-root", store,
+         "--family", "places", "--markers-dir", markers_dir,
+         "--scratch-dir", tmp_path / "plan-scratch", "--output", plan)
+    reductions = tmp_path / "reductions"
+    reductions.mkdir()
+    partitions = json.loads(plan.read_text())["partitions"]
+    for batch in json.loads(plan.read_text())["reduce_execution"]["batches"]:
+        _run("run-reduce", "--contract", contract, "--store-root", store,
+             "--family", "places", "--plan", plan, "--markers-dir", markers_dir,
+             "--batch-index", batch["batch_index"],
+             "--encoder-binary", binaries["places-serving-encode-v1"],
+             "--verifier-binary", binaries["places-serving-verify-v1"],
+             "--scratch-dir", tmp_path / f"reduce-{batch['batch_index']}",
+             "--output-dir", reductions)
+    head = tmp_path / "head.json"
+    _run("run-head", "--contract", contract, "--store-root", store, "--family", "places",
+         "--markers-dir", markers_dir,
+         "--encoder-binary", binaries["places-serving-encode-v1"],
+         "--verifier-binary", binaries["places-serving-verify-v1"],
+         "--scratch-dir", tmp_path / "head-scratch", "--shard-bits", "4",
+         "--output", head)
+    remote = tmp_path / "remote"
+    final = tmp_path / "final.json"
+    _run("finalize", "--contract", contract, "--store-root", store, "--family", "places",
+         "--plan", plan, "--reductions-dir", reductions, "--markers-dir", markers_dir,
+         "--head", head, "--remote-root", remote,
+         "--work-root", tmp_path / "final-work", "--output", final)
+    result = json.loads(final.read_text())
+    head_result = json.loads(head.read_text())
+
+    # One routed `.plrv` per partition, plus one `.plhd` per populated head shard.
+    assert result["serving_object_key"] == "routed_object"
+    assert result["reduction_serving_objects"] == len(partitions)
+    assert result["serving_objects"] == len(partitions) + head_result["populated_shards"]
+    routed = sorted(path.name for path in remote.rglob("*.plrv"))
+    assert len(routed) == len(partitions) > 0
+    # Every published name is the digest the reducer recorded: registration, not
+    # just a count.
+    expected = sorted(
+        f"{json.loads(path.read_text())['routed_object']['sha256']}.plrv"
+        for path in sorted(reductions.glob("*.json"))
+    )
+    assert routed == expected
+    assert len(list(remote.rglob("*.plhd"))) == head_result["populated_shards"]
+    # The leaf is an intermediate and must NOT be in the slice.
+    assert not list(remote.rglob("*.parquet")) or all(
+        "/positions/" in str(path) for path in remote.rglob("*.parquet")
+    )
+    manifest = json.loads((tmp_path / "final-work/family-manifest.json").read_text())
+    assert len(manifest["artifacts"]) == result["serving_objects"]
+
+    # And wrong bytes under a right routed key abort rather than publish.
+    victim = json.loads((reductions / sorted(p.name for p in reductions.glob("*.json"))[0]).read_text())
+    planted = tmp_path / "store-planted"
+    (planted / victim["routed_object"]["key"]).parent.mkdir(parents=True, exist_ok=True)
+    for item in store.rglob("*"):
+        if item.is_file():
+            target = planted / item.relative_to(store)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(item.read_bytes())
+    (planted / victim["routed_object"]["key"]).write_bytes(
+        b"\x00" * victim["routed_object"]["bytes"]
+    )
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(planted),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions), "--markers-dir", str(markers_dir),
+                     "--head", str(head), "--remote-root", str(tmp_path / "remote-bad"),
+                     "--work-root", str(tmp_path / "final-work-bad"),
+                     "--output", str(tmp_path / "final-bad.json")])
+    assert "content-addressed key declares" in str(excinfo.value)
+    assert not (tmp_path / "remote-bad").exists()
+
+    # THE HEAD HALF, end to end and through the real CLI. Both shapes the review
+    # published a shard-free places slice with:
+    #   (a) --head omitted entirely
+    #   (b) a head.json reporting shard_count/populated_shards while handing over
+    #       no shard objects
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions), "--markers-dir", str(markers_dir),
+                     "--remote-root", str(tmp_path / "remote-nohead"),
+                     "--work-root", str(tmp_path / "final-work-nohead"),
+                     "--output", str(tmp_path / "final-nohead.json")])
+    assert "requires a --head result" in str(excinfo.value)
+    assert not (tmp_path / "remote-nohead").exists()
+
+    hollow = tmp_path / "head-hollow.json"
+    hollow.write_text(json.dumps({**head_result, "shard_objects": []}) + "\n")
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions), "--markers-dir", str(markers_dir),
+                     "--head", str(hollow),
+                     "--remote-root", str(tmp_path / "remote-hollow"),
+                     "--work-root", str(tmp_path / "final-work-hollow"),
+                     "--output", str(tmp_path / "final-hollow.json")])
+    assert "records no shard_objects" in str(excinfo.value)
+    assert f"shard_count={head_result['shard_count']}" in str(excinfo.value)
+    assert not (tmp_path / "remote-hollow").exists()
+
+
 def test_the_places_plan_phase_is_bounded_not_eagerly_hydrated(tmp_path):
     """The plan phase must never hold its whole pack fan-in.
 

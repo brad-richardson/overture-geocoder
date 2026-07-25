@@ -346,17 +346,33 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
 
     # The plan job reads pack BODIES, so it needs the same free-disk floor map and
     # reduce have. It is the job run 30113308268 actually died on.
-    doc_plan = jobs["plan"]
-    assert any(
-        'df -Pk / | awk' in str(step.get("run", "")) for step in doc_plan["steps"]
-    ), "the plan job has no free-disk gate"
-    assert value.count("df -Pk / | awk 'NR==2 {print $4}'") == 3
+    # EVERY data-plane job has a free-disk floor. head and finalize were the last
+    # two without one, and head cannot batch-and-evict its candidate fan-in, so the
+    # floor is its only guard.
+    for name in ("map", "plan", "reduce", "head", "finalize"):
+        assert any(
+            "df -Pk / | awk" in str(step.get("run", "")) for step in jobs[name]["steps"]
+        ), f"the {name} job has no free-disk gate"
+    assert value.count("df -Pk / | awk 'NR==2 {print $4}'") == 5
 
     # Peak resident hydrated bytes -- the number that decides whether a phase fits a
-    # runner -- is recorded by the two phases that read pack bodies.
+    # runner -- is recorded by every phase that reads store objects.
     assert "--staging-report plan/staging.json" in value
     assert '--staging-report "phase/staging-${BATCH_INDEX}.json"' in value
+    assert value.count("--staging-report head/staging.json") == 2  # places + addresses
     assert "staged_peak_resident_bytes" in value
+
+    # A published slice with no SERVING payload is the defect this gate exists for:
+    # places reductions record `routed_object`, not `artifact`, so finalize silently
+    # published no `.plrv` at all while every other number stayed non-zero.
+    assert 'SERVING="$(jq -r \'.serving_objects\' final-work/result.json)"' in value
+    # The EXACT set, not a lower bound. `-ge REDUCTIONS` would have accepted a slice
+    # that published every routed object and NO head shards -- the other half of the
+    # same permissive-get defect, which was demonstrated as publishable.
+    assert 'test "$SERVING" -ge "$REDUCTIONS"' not in value
+    assert "POP=\"$(jq -r '.populated_shards // 0' headdl/head/head.json)\"" in value
+    assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP ))"' in value
+    assert 'test "$SERVING" -gt 0' in value
 
 
 def test_needs_graph_is_connected():

@@ -153,10 +153,33 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
     # reducer's unbounded fan-in is stated rather than hidden.
     assert ".plan_staged_bytes_hydrated == 0" in value
     assert ".reduce_staged_bytes_hydrated > 0" in value
+    # Head hydration is measured, not bounded (one read_parquet over every
+    # candidate pack), so the figure must at least be produced.
+    assert ".head_staged_bytes_hydrated > 0" in value
+    assert ".head_staged_bytes_hydrated == 0" in value  # addresses have no head
     assert "NOT \"the address\n            # planet build is unblocked at reduce\"" in value
     # Still no credentials: the staging backend is a directory, not R2.
     assert "R2_ACCESS_KEY_ID" not in value
     assert "secrets." not in value
+
+
+def test_both_slices_assert_the_exact_published_serving_set():
+    """The count of SERVING objects, per family, as an equality.
+
+    A places finalize published head shards, positions packs and two manifests
+    while dropping every routed `.plrv`, because a places reduction records
+    `routed_object` and `_artifact_keys` read `artifact`. `objects`, `reconciles`
+    and `positions_objects` were all non-zero, so only an assertion on the serving
+    set itself can catch it.
+    """
+    value = text()
+    assert '.serving_object_key == "routed_object"' in value
+    assert '.serving_object_key == "artifact"' in value
+    assert ".reduction_serving_objects == .partitions" in value
+    # Places: one routed object per partition PLUS one shard per populated head
+    # shard. Addresses: partitions only, since they have no head phase.
+    assert ".serving_objects == .partitions + .head_populated_shards" in value
+    assert ".serving_objects == .partitions" in value
 
 
 def test_retry_preserves_every_attempt_and_shouts_when_it_retries():
