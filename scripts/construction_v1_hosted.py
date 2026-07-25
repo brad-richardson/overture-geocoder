@@ -200,10 +200,22 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # These exceed three declared hard caps in the frozen evidence spec
         # (partition_term_rows_hard_cap 1000000,
         # partition_distinct_tokens_hard_cap 250000,
-        # partition_estimated_uncompressed_bytes_hard_cap 268435456). Those keys
-        # are read by no code -- the byte limit already exceeded its declared cap
-        # before this change -- so nothing fails closed. Tracked as a follow-up:
-        # enforce them or delete them.
+        # partition_estimated_uncompressed_bytes_hard_cap 268435456), and that
+        # divergence is DELIBERATE and one-directional:
+        #
+        #   spec v2 -> rehearse_places_construction_v1.spec_partition_caps()
+        #           -> P.Limits -> adaptive_genesis_plan (subdivide, or fail at
+        #              maximum depth)
+        #
+        # so the spec's caps bind the REHEARSAL, which is what they were written
+        # for -- the spec is frozen against release 2026-06-17.0 and a 12-task
+        # candidate universe. The hosted planet build runs the raised caps above
+        # instead, on the measured justification in this comment.
+        # tests/test_construction_v1_preflight.py pins both sides, so neither can
+        # move without a test naming the other. Closing the gap means a places
+        # evidence spec v3 plus a rehearsal re-run (the spec's relaxation policy
+        # is "none"), not an edit here or there; see
+        # docs/plans/2026-07-24-construction-v1-follow-ups.md.
         "partition_term_rows": 2_000_000,
         "partition_estimated_bytes": 512 * 1024**2,
         "partition_distinct_tokens": 400_000,
@@ -781,36 +793,56 @@ def _committed_plan_partitions(path: Path | None) -> tuple[int, str]:
     return recorded, f"committed plan {plan_path.name} partitions"
 
 
-def _address_structural_partitions(
+def _address_uniform_partition_estimate(
     inventory: dict[str, Any], row_cap: int
 ) -> tuple[int, str]:
-    """Address genesis partition floor implied by the PLAN'S SHAPE, not its size.
+    """Address genesis partition count MODELLED from the plan's shape, not its size.
 
-    `ceil(records / row_cap)` is not an upper bound on the address partition
+    `ceil(total_records / row_cap)` is not an upper bound on the address partition
     count, for the same class of reason it was not one for Places (see the places
     branch below): the plan is not a flat division of rows.
     `address_construction_v1._plan_from_summaries` bisects EACH COUNTRY
     independently over `hash_bucket`, so two effects push the true count above the
-    row-derived figure and neither is visible in a total row count:
+    total-row figure and neither is visible in a total row count:
 
     * every country with any rows contributes at least one partition;
     * a country over the cap splits by HALVING, so its leaf count is a power of
-      two and overshoots `ceil(country_rows / row_cap)` by up to 2x.
+      two rather than `ceil(country_rows / row_cap)`.
 
-    `route_hash` is uniform, so modelling each country's split as an even
-    bisection is the right model rather than a convenience -- the same argument
-    the places bucket-range prediction uses. Skew can only make the real count
-    larger, so this stays a floor.
+    This is an ESTIMATE, not a bound in either direction, and its precondition is
+    that `route_hash` spreads a country's rows evenly across `hash_bucket`:
+
+    * it can OVERSHOOT under even spreading, because the real planner stops
+      bisecting a subtree as soon as that subtree fits: 4,000,003 rows spread over
+      8 even buckets at a 1,000,000 cap is model 8, real planner 5;
+    * it can UNDERSHOOT under in-country bucket skew, because each split isolates
+      light siblings that are already under the cap and each of those becomes a
+      leaf: a heavy adjacent pair plus ten scattered light buckets, 2,000,000 rows
+      total, is model 2, real planner 6.
+
+    Both figures are from running `address_construction_v1._plan_from_summaries`
+    itself on those inputs, not from reasoning about it.
+
+    `route_hash` IS uniform by construction (FNV-1a over 8 normalized fields,
+    high bits taken), which is why on the real planet inventory the model lands at
+    725 against a simulated real 725 -- but that is the model being well
+    conditioned on this data, not a guarantee.
+
+    The genuine per-country LOWER bound is `sum(ceil(country_rows / row_cap))` =
+    493 on the planet inventory, still above the 474 the total-row division gives.
+    It is recorded here for context and deliberately not used: it is a weaker
+    prediction than the uniform model on the data this actually runs against, and
+    the point of the prediction is to stop under-provisioning the reduce matrix.
 
     Fails closed when the inventory carries no per-country row counts, matching
-    `_committed_plan_partitions`: a silent fallback to the row-derived figure is
+    `_committed_plan_partitions`: a silent fallback to the total-row figure is
     exactly the optimism this exists to remove.
     """
     per_country = inventory.get("exact_country_rows")
     if not isinstance(per_country, dict) or not per_country:
         raise SystemExit(
             "address inventory records no exact_country_rows, so the per-country "
-            "partition floor cannot be derived; rebuild the inventory with "
+            "partition estimate cannot be derived; rebuild the inventory with "
             "scripts/inventory_address_rowgroups.py"
         )
     attributed = sum(int(rows) for rows in per_country.values())
@@ -819,20 +851,20 @@ def _address_structural_partitions(
     total = _inventory_total_records(inventory)
     # Rows in mixed-or-unknown-country row groups are not attributed to any
     # country. Spread them proportionally rather than dropping them: dropping
-    # them would make the floor optimistic again by exactly their share.
+    # them would make the estimate optimistic again by exactly their share.
     scale = max(1.0, total / attributed)
     # address_construction_v1 refuses to subdivide past 16 hash bits.
     maximum_leaves = 1 << 16
-    floor = 0
+    estimate = 0
     for rows in per_country.values():
         leaves = 1
         scaled = int(rows) * scale
         while scaled / leaves > row_cap and leaves < maximum_leaves:
             leaves *= 2
-        floor += leaves
-    return floor, (
-        f"per-country hash bisection over {len(per_country)} inventory countries "
-        f"(x{scale:.4f} for unattributed rows)"
+        estimate += leaves
+    return estimate, (
+        f"per-country uniform hash-bisection estimate over {len(per_country)} "
+        f"inventory countries (x{scale:.4f} for unattributed rows)"
     )
 
 
@@ -847,16 +879,18 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
 
     if args.family == "addresses":
         row_cap = args.row_cap or limits.max_pack_rows
-        # Each genesis partition holds at most ``row_cap`` records, so this is a
-        # lower bound -- but NOT an upper one, and it was the only term here, which
-        # is the same optimism the places branch had (PR #155). Floor it with the
-        # per-country bisection the address planner actually performs.
+        # Each genesis partition holds at most ``row_cap`` records, so the total-row
+        # division is a lower bound -- but NOT an upper one, and it was the only
+        # term here, which is the same optimism the places branch had (PR #155).
+        # Take the larger of it and the per-country uniform bisection ESTIMATE of
+        # the plan the address planner actually builds (see that function for what
+        # the estimate is and is not).
         by_rows = math.ceil(total_records / row_cap)
-        floor, floor_basis = _address_structural_partitions(inventory, row_cap)
-        predicted_partitions = max(by_rows, floor)
+        modelled, model_basis = _address_uniform_partition_estimate(inventory, row_cap)
+        predicted_partitions = max(by_rows, modelled)
         basis = (
             f"max(ceil({total_records} records / {row_cap} row cap) = {by_rows}, "
-            f"{floor_basis} = {floor})"
+            f"{model_basis} = {modelled})"
         )
     else:
         # Places reduces TERM rows (one output term batch per input feature batch,

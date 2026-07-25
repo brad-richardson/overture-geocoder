@@ -76,16 +76,22 @@ def spec_partition_caps(spec_path: Path = EVIDENCE_SPEC) -> dict[str, int]:
     refusing to rehearse.
     """
     gates = json.loads(spec_path.read_text())["acceptance_gates"]["map_reduce"]
-    caps = {
-        "partition_term_rows": gates["partition_term_rows_hard_cap"],
-        "partition_estimated_bytes": gates[
-            "partition_estimated_uncompressed_bytes_hard_cap"
-        ],
-        "partition_distinct_tokens": gates["partition_distinct_tokens_hard_cap"],
+    declared = {
+        "partition_term_rows": "partition_term_rows_hard_cap",
+        "partition_estimated_bytes": "partition_estimated_uncompressed_bytes_hard_cap",
+        "partition_distinct_tokens": "partition_distinct_tokens_hard_cap",
     }
-    for name, value in caps.items():
-        if not isinstance(value, int) or value <= 0:
-            raise ValueError(f"evidence spec declares no usable {name} hard cap")
+    caps: dict[str, int] = {}
+    for name, key in declared.items():
+        value = gates.get(key)
+        # `bool` is an `int` in Python, and a spec that declared `true` for a cap
+        # would otherwise become a cap of 1 -- fail on it explicitly.
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"evidence spec {spec_path.name} declares no usable {key} "
+                f"({name}); got {value!r}"
+            )
+        caps[name] = value
     return caps
 
 

@@ -1469,6 +1469,19 @@ def validate_complete_reduction(
     actual_ids = [item["partition"]["id"] for item in reductions]
     if len(actual_ids) != len(set(actual_ids)) or sorted(actual_ids) != sorted(expected_ids):
         raise ValueError("reduction has missing, extra, or duplicate partitions")
+    # Each reduction must carry the binding the PLAN recorded for ITS OWN
+    # partition, not merely a binding that sums correctly with the others: two
+    # partitions that published each other's rows leave the id set complete and
+    # the sum untouched, so the sum below cannot see them. Ported from the places
+    # validator, where the same hole was the reason `reconciles` was a literal.
+    planned = {partition["id"]: partition["binding"] for partition in plan["partitions"]}
+    for item in reductions:
+        partition_id = item["partition"]["id"]
+        if item["selected_binding"] != planned[partition_id]:
+            raise ValueError(
+                f"reduction binding for {partition_id} differs from the binding the "
+                "genesis plan recorded for that partition"
+            )
     binding = combine_bindings([item["selected_binding"] for item in reductions])
     if binding != plan["binding"]:
         raise ValueError("complete reduction binding differs from genesis plan")

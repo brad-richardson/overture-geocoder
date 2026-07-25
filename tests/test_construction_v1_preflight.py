@@ -80,10 +80,29 @@ def test_evidence_spec_partition_caps_are_read_by_the_rehearsal():
     assert declared["partition_distinct_tokens_hard_cap"] == 250_000
 
 
+@pytest.mark.parametrize("value", [None, True, 0, -1, "1000000", 1.5])
+def test_spec_partition_caps_fail_closed_on_an_unusable_declaration(tmp_path, value):
+    # A spec missing a cap, or declaring `true` for one (which is an `int` in
+    # Python and would silently become a cap of 1), must not produce a cap.
+    pytest.importorskip("pyarrow")
+    rehearse = _load("preflight_rehearse", "scripts/rehearse_places_construction_v1.py")
+    spec = json.loads(PLACES_SPEC.read_text())
+    gates = spec["acceptance_gates"]["map_reduce"]
+    if value is None:
+        del gates["partition_term_rows_hard_cap"]
+    else:
+        gates["partition_term_rows_hard_cap"] = value
+    tampered = tmp_path / "spec.json"
+    tampered.write_text(json.dumps(spec))
+    with pytest.raises(ValueError, match="partition_term_rows_hard_cap"):
+        rehearse.spec_partition_caps(tampered)
+
+
 def test_places_limits_defaults_are_the_hosted_production_caps():
     # The dataclass defaults were left behind when the hosted caps were raised, so
     # every caller that is not the hosted CLI planned at caps the planet build no
-    # longer uses. Defaults and hosted limits are now one value per cap.
+    # longer uses. They are still separate literals in separate files -- this test
+    # is what keeps them equal.
     limits = HOSTED.PLACES.Limits()
     for field in PARTITION_CAP_FIELDS:
         assert getattr(limits, field) == HOSTED_PARTITION_CAPS[field] == \
@@ -315,14 +334,14 @@ def test_predict_reduce_addresses_needs_batching_but_fits_budget(tmp_path, capsy
     assert timing["per_job_minutes"] <= timing["job_timeout_minutes"]
 
 
-def test_predict_reduce_addresses_floors_on_the_per_country_bisection(tmp_path, capsys):
-    # The addresses branch divided records by a row cap with NO structural floor --
+def test_predict_reduce_addresses_models_the_per_country_bisection(tmp_path, capsys):
+    # The addresses branch divided total records by a row cap and nothing else --
     # the same defect PR #155 fixed on the places branch. The address planner
     # bisects each country independently, so every country contributes at least one
     # partition and an over-cap country's leaf count is a power of two. On the
-    # planet inventory the row-derived figure is 474 and the real shape is 725, so
-    # the gate was ~1.5x optimistic (not 14x: the address floor is 34 countries,
-    # far below the row-derived figure, unlike Places' 16,633 cells).
+    # planet inventory the total-row figure is 474 and the modelled shape is 725,
+    # so the gate was ~1.5x optimistic (not 14x: the address per-country term is
+    # 34 countries, far below the total-row figure, unlike Places' 16,633 cells).
     contract = _contract(tmp_path)
     assert HOSTED.main([
         "predict-reduce", "--contract", str(contract), "--family", "addresses",
@@ -332,31 +351,71 @@ def test_predict_reduce_addresses_floors_on_the_per_country_bisection(tmp_path, 
     inventory = json.loads(ADDRESS_INVENTORY.read_text())
     row_cap = HOSTED.HOSTED_LIMITS["addresses"]["max_pack_rows"]
     by_rows = -(-HOSTED._inventory_total_records(inventory) // row_cap)
-    floor, _basis = HOSTED._address_structural_partitions(inventory, row_cap)
-    assert by_rows == 474 and floor == 725
-    assert out["predicted_partitions"] == floor > by_rows
-    assert "per-country hash bisection" in out["prediction_basis"]
+    modelled, _basis = HOSTED._address_uniform_partition_estimate(inventory, row_cap)
+    assert by_rows == 474 and modelled == 725
+    assert out["predicted_partitions"] == modelled > by_rows
+    assert "per-country uniform hash-bisection estimate" in out["prediction_basis"]
 
 
-def test_address_structural_floor_counts_every_country_and_rounds_to_powers_of_two():
-    # Both effects the row division misses, isolated. Two countries of one row each
-    # are two partitions, not one; a country at 3x the cap needs four leaves,
-    # not three, because the split halves.
-    floor, basis = HOSTED._address_structural_partitions(
+def test_address_estimate_counts_every_country_and_rounds_to_powers_of_two():
+    # Both effects the total-row division misses, isolated. Two countries of one row
+    # each are two partitions, not one; a country at 3x the cap is modelled at four
+    # leaves, not three, because the split halves.
+    #
+    # This is an ESTIMATE and not a bound: with even spreading the real planner
+    # stops as soon as a subtree fits and can land BELOW the model, and under
+    # in-country bucket skew it can land above. See the function's docstring; it is
+    # well conditioned here only because route_hash is uniform by construction.
+    modelled, basis = HOSTED._address_uniform_partition_estimate(
         {"exact_country_rows": {"AA": 1, "BB": 1}, "totals": {"records": 2}}, 1_000_000
     )
-    assert floor == 2 and "2 inventory countries" in basis
-    floor, _basis = HOSTED._address_structural_partitions(
+    assert modelled == 2 and "2 inventory countries" in basis
+    modelled, _basis = HOSTED._address_uniform_partition_estimate(
         {"exact_country_rows": {"AA": 3_000_000}, "totals": {"records": 3_000_000}},
         1_000_000,
     )
-    assert floor == 4
+    assert modelled == 4
 
 
-def test_address_structural_floor_fails_closed_without_per_country_rows():
-    # Falling back to the row-derived figure would silently restore the optimism.
+def _real_address_partitions(per_bucket: dict[int, int], row_cap: int) -> int:
+    """Partition count the REAL address planner produces for one country."""
+    address = HOSTED.ADDRESS
+
+    def binding(records: int) -> dict:
+        return {"records": records, "semantic_sum_a": f"{records:064x}",
+                "semantic_sum_b": f"{records * 3:064x}"}
+
+    summaries = {("AA", bucket): binding(rows)
+                 for bucket, rows in per_bucket.items() if rows}
+    expected = address.combine_bindings(list(summaries.values()))
+    plan = address._plan_from_summaries(summaries, expected, row_cap)
+    return len(plan["partitions"])
+
+
+def test_address_estimate_is_not_a_bound_in_either_direction():
+    # Pinned against the REAL planner so the docstring's honesty claim cannot rot.
+    # Even spreading: the planner stops bisecting a subtree as soon as that subtree
+    # fits, so the model OVERSHOOTS.
+    even = {bucket * (1 << 16) // 8: 500_000 + (3 if bucket == 7 else 0)
+            for bucket in range(8)}
+    assert _real_address_partitions(even, 1_000_000) == 5
+    assert HOSTED._address_uniform_partition_estimate(
+        {"exact_country_rows": {"AA": sum(even.values())},
+         "totals": {"records": sum(even.values())}}, 1_000_000)[0] == 8
+    # In-country bucket skew: every split isolates a light sibling that is already
+    # under the cap and each becomes its own leaf, so the model UNDERSHOOTS.
+    skewed = {0: 950_000, 1: 950_000}
+    skewed.update({bucket * (1 << 16) // 16: 10_000 for bucket in range(1, 11)})
+    assert _real_address_partitions(skewed, 1_000_000) == 6
+    assert HOSTED._address_uniform_partition_estimate(
+        {"exact_country_rows": {"AA": sum(skewed.values())},
+         "totals": {"records": sum(skewed.values())}}, 1_000_000)[0] == 2
+
+
+def test_address_estimate_fails_closed_without_per_country_rows():
+    # Falling back to the total-row figure would silently restore the optimism.
     with pytest.raises(SystemExit, match="exact_country_rows"):
-        HOSTED._address_structural_partitions({"totals": {"records": 10}}, 1_000_000)
+        HOSTED._address_uniform_partition_estimate({"totals": {"records": 10}}, 1_000_000)
 
 
 def test_predict_reduce_fails_closed_when_minutes_exceed_cap(tmp_path):

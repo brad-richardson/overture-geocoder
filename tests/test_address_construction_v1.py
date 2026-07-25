@@ -216,6 +216,22 @@ def test_local_vertical_slice_marker_resume_overlap_reduce_and_query(tmp_path, b
     with pytest.raises(ValueError, match="missing, extra, or duplicate"):
         CONSTRUCTION.validate_complete_reduction(plan, reductions + reductions[:1])
 
+    # Two partitions that published each other's rows: the id set is complete and
+    # the SUMMED binding is untouched, so only the per-partition comparison against
+    # the plan catches it. This mirrors the places validator, whose lack of this
+    # check was why places `reconciles` had to be a literal.
+    assert len(reductions) >= 2
+    swapped = copy.deepcopy(reductions)
+    swapped[0]["selected_binding"], swapped[1]["selected_binding"] = (
+        swapped[1]["selected_binding"], swapped[0]["selected_binding"],
+    )
+    assert CONSTRUCTION.combine_bindings(
+        [item["selected_binding"] for item in swapped]
+    ) == plan["binding"]
+    if swapped[0]["selected_binding"] != swapped[1]["selected_binding"]:
+        with pytest.raises(ValueError, match="differs from the binding the genesis"):
+            CONSTRUCTION.validate_complete_reduction(plan, swapped)
+
     mismatched = copy.deepcopy(marker)
     mismatched["packs"][0]["directory"]["row_groups"][0]["binding"]["records"] += 1
     with pytest.raises(ValueError, match="differs from its map proof"):

@@ -235,10 +235,11 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
 3. ~~**`Limits` dataclass defaults were not raised with the hosted limits.**~~
    **DONE 2026-07-25 for the dataclass; deliberately NOT done for the
    rehearsal.** `places_construction_v1.Limits` now defaults to 2,000,000 /
-   512 MiB / 400,000 — one value per cap, shared with
-   `HOSTED_LIMITS["places"]` and asserted equal by
+   512 MiB / 400,000, equal to `HOSTED_LIMITS["places"]` and asserted equal by
    `tests/test_construction_v1_preflight.py`, so every non-hosted caller plans at
-   the caps the planet build actually uses.
+   the caps the planet build actually uses. They remain four separate literal
+   sites (dataclass, `HOSTED_LIMITS`, and both pinned dicts in the test); the test
+   is the only thing keeping them equal, so this is not a single source of truth.
    The rehearsal pins stay at the spec's declared caps (now read from the spec
    rather than copied) for the reason in item 2: it produces evidence under frozen
    spec v2, whose relaxation policy is "none" and whose coverage gate requires
@@ -262,6 +263,18 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
    is **wrong** — `exact_country_rows` (34 countries, 434,397,621 of the
    473,576,753 records exactly attributed) is already there, and country skew can
    be read off it without a map run.
+   **Correction from the review of PR #166:** the per-country figure is a
+   uniformity-based ESTIMATE, not a floor, and the code, its docstring and the
+   tests now say so. Measured by running `_plan_from_summaries` itself: 4,000,003
+   rows over 8 even buckets at a 1,000,000 cap is model 8 vs real **5** (the
+   planner stops as soon as a subtree fits), and a heavy adjacent pair plus ten
+   scattered light buckets at 2,000,000 rows is model 2 vs real **6** (each split
+   isolates an under-cap sibling that becomes its own leaf). It is well conditioned
+   on the planet inventory only because `route_hash` is uniform by construction:
+   model 725 against a simulated real 725. The genuine per-country lower bound is
+   `sum(ceil(country_rows / cap))` = **493** — still above the 474 the total-row
+   division gave, recorded in the docstring, and deliberately not used as the
+   prediction because it under-provisions relative to the real shape.
 5. **The committed plan is only read by `predict-reduce` and the generator.**
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
@@ -323,6 +336,10 @@ branches or because the gap is about scope rather than a defect.
    both rejected, plus a misfiled reduction fails the real `finalize` in
    `tests/test_construction_v1_hosted.py`. The slice smoke job keeps its count
    assertions: an EMPTY run still reconciles.
+   The per-partition plan-binding check was ported to
+   `address_construction_v1.validate_complete_reduction` too (review of #166: it
+   had landed on the places copy only, leaving the swapped-partitions case
+   undetected for addresses), so both families now check the same three things.
 2. **The smoke job's assertions on head are counts, not identity.** `run-head`
    computes an `input_binding` (records + semantic sums) that nothing compares
    against the reduce output. Non-zero counts rule out an empty head; they do not
@@ -460,6 +477,36 @@ phases that have never run.
 > `--bbox -122.34 47.59 -122.30 47.63`) through all five phases in ~9 seconds
 > with no credentials. The address shuffle port above is still DEFERRED and
 > untouched: the harness runs the existing row-counter pack layout unchanged.
+
+## Added 2026-07-25, from the adversarial review of the hygiene bundle (#166)
+
+Recorded rather than fixed. None can lose data; each is a hardening or
+consistency item on surfaces the bundle touched.
+
+1. **The rehearsal hardcodes the spec path while `assemble` takes `--spec`.**
+   `rehearse … rehearse` reads its partition caps from the module-level
+   `EVIDENCE_SPEC` constant, but `rehearse … assemble` takes `--spec` and records
+   *that* file's sha256 into the evidence. Point them at different files and the
+   caps USED and the spec sha RECORDED diverge silently. The workflow comment at
+   `construction-v1.yml:305-309` demands the opposite convention (thread the spec
+   path, never hardcode it), and `run_slice_construction_v1.py` has the same
+   hardcode already recorded in item 5 of the #159 review section. Fix: thread one
+   spec path through both subcommands.
+2. **Five more spec gates are still dead declarations restated as rehearsal
+   literals.** `maximum_map_pack_rows` (500,000), `parquet_row_group_rows`
+   (131,072), `maximum_fan_in_map_tasks` (16), `maximum_fan_in_packs` (64) and
+   `adaptive_subdivision_max_depth` (8) are all declared by spec v2 and all
+   re-typed as literals or argparse defaults in
+   `rehearse_places_construction_v1.py`. The partition caps were fixed by reading
+   them from the spec; these five have exactly the same shape and were left out of
+   scope. Read them the same way.
+3. **Reconciliation binds identity to COUNTS, not bytes.** Both families now
+   compare each reduction's binding to the plan's binding for that partition, but
+   a binding is records plus two semantic sums — so two partitions whose bindings
+   are genuinely equal can still swap their published CONTENT undetected. The
+   places reducer's `emit_verification` already binds published bytes to the
+   partition's identity per partition; the finalize-side check does not, and this
+   is pre-existing for both families.
 
 ## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
 
