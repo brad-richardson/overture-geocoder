@@ -20,12 +20,15 @@ name — the same shape `build_id_index.py` already uses. **For PLACES** what
 remains before a planet dispatch is operational rather than structural: a scoped
 staging-only R2 token, and row-group range reads to tighten read amplification
 further. **For ADDRESSES the reduce phase is bounded too** as of 2026-07-25: it now
-releases each hydrated pack at its last use, so a job's resident input is about one
-pack instead of everything it ever opened. What remains for addresses is object
-amplification, not a partition that will not fit — tunable today with
-`--max-reduce-jobs` and to be closed by a range-owning reducer. Two earlier claims
-here ("there is no shuffle to narrow it", "an address reduce partition would still
-not fit a runner") were WRONG; see the corrections in the family caveat below.
+releases each hydrated pack at its last use and enforces the result against
+`max_scratch_bytes`, so a job holds one hash SLICE of packs — one per map task holding
+its country, single-digit GB at planet scale — instead of everything it ever opened.
+What remains for addresses is object amplification, not a partition that will not fit:
+tunable today with `--max-reduce-jobs` (which lowers R2 reads but NOT peak) and to be
+closed by a range-owning reducer. Two earlier claims here ("there is no shuffle to
+narrow it", "an address reduce partition would still not fit a runner") were WRONG, and
+so was a first draft of the correction ("peak flat at one pack") — see the family
+caveat below for all three and for the peak-resident law.
 
 ## Read the history this way
 
@@ -367,25 +370,78 @@ clean split of the cost:
 #### Correction 2: the hazard was an unbounded store, not a partition that will not fit.
 
 This doc previously said "at planet scale an address reduce partition would still
-not fit a runner". That is not supported. Worst-case per-job RESIDENT input is
-~4.2 GB, and only ~5.3 GB at batch_size 24, because a partition's pack set is
-dominated by the number of TASKS holding a country rather than by the width of its
-hash range — widening the batch adds tasks slowly.
+not fit a runner". That is not supported, but the *reason* matters and an earlier
+draft of this section got it wrong in the other direction — see the law below.
 
 The real hazard was that the hydrated store sat outside every declared cap.
-`reduce_partition` runs its `StageWatchdog([workspace], limits, connection)` over the
-temporary WORKSPACE (`scripts/address_construction_v1.py`, the watchdog around
-`export_filter`), not over `--store-root`, and nothing else bounded the local cache.
-Combined with a reducer that never released anything, a job's disk use grew
+`reduce_partition` ran its `StageWatchdog([workspace], limits, connection)` over the
+temporary WORKSPACE only, not over `--store-root`, and nothing else bounded the local
+cache. Combined with a reducer that never released anything, a job's disk use grew
 monotonically with everything it had ever opened, which is exactly what
 `reduce_staged_peak_resident_bytes == reduce_staged_bytes_hydrated` (10,886,477 for
 both on the Seattle slice) was reporting.
 
 **`release()` on the reduce path is what bounds it**, and it is now called: each pack
 is evicted at its last use, except those the later partitions of the same reducer job
-still need (`retain_keys`, computed by `construction_v1_hosted._batch_retention`). On
-a planet-shaped 32-partition / 14-pack slice that decouples peak from batch size
-entirely:
+still need (`retain_keys`, computed by `construction_v1_hosted._batch_retention`).
+
+#### The peak-resident LAW. Do not read the single-task table as the general case.
+
+An earlier version of this section claimed peak was "flat at one pack independently
+of batch size", from the table below. That table is measured on a **single map task**,
+which makes its packs one GLOBAL sort, so a partition touches at most 2 of them
+(measured: distinct packs per partition mean 1.41, max 2). The sort is **intra-task**,
+so that is not the planet shape and the "one pack" figure does not generalise.
+
+Re-measured with the same slice split across N round-robin map tasks, at fixed
+batch 8 — peak scales with the **task count**, exactly:
+
+| map tasks | distinct packs per partition (mean) | peak resident | peak, in largest packs |
+| --- | --- | --- | --- |
+| 1 | 1.41 | 887,478 | 1.00 |
+| 2 | 2.38 | 1,788,821 | 2.00 |
+| 4 | 4.38 | 3,598,884 | 4.00 |
+| 8 | 8.25 | 7,220,808 | 7.99 |
+| 16 | 16.00 | 11,955,459 | 15.99 (== the whole pack set) |
+
+**The law: `peak ≈ (map tasks holding this partition's country) × pack bytes`, and it
+is batch-INDEPENDENT for batch ≥ 2.** (At 8 tasks the peak is 7,220,808 at batch 4, 8
+and 32 alike; only batch 1 falls to one pack, because a one-partition job retains
+nothing — and it pays 264 hydrations instead of 16 to do so.) The mechanism: at any
+moment a job holds one *hash slice* of packs, one per task, and drops it when the
+range advances past it. The 16-task row is the degenerate end — each task emits a
+single pack, so there is no slice to drop and peak equals the entire pack set.
+
+Planet-sized from `benchmarks/address-construction-v1-data/inventory/addresses.json`
+(`plan.task_count` 127) and 103.8 forward-pack bytes/row measured on the slice at
+production `parquet_row_group_rows`:
+
+- a 1,000,000-row pack (the `max_pack_rows` cap) is ~104 MB; all forward packs are
+  ~49 GB over 473.6 M records;
+- the US is the worst country, held by **39** tasks by `exact_country_rows` →
+  **~4.05 GB** resident;
+- 77 tasks carry mixed-or-unknown-country rows (39.2 M rows, ~509 k each → one
+  sub-1M pack of ~53 MB). If every one of them is also selected, **~8.1 GB**.
+
+So: **~127 packs worst case, single-digit GB, batch-independent** — which is what the
+older "~4.2 GB, dominated by the number of TASKS holding a country" figure in this doc
+was reaching for (the 39-task derivation lands within 4% of it). The `~5.3 GB at
+batch_size 24` half of that pair was wrong in kind, not just in value: peak does not
+grow with batch size above batch 1. Both are replaced by the derivation above.
+
+That ~8.1 GB worst case sits inside the address `max_scratch_bytes` of 24 GiB, so the
+new check below does not refuse a legitimate planet plan — it refuses one whose
+partitioning or provisioning has drifted, which previously read as ENOSPC.
+
+Because that bound is emergent from a cache policy rather than enforced,
+`reduce_partition` now also checks hydrated resident bytes against
+`limits.max_scratch_bytes` after every fetch, and the hydrated cache is a
+`StageWatchdog` root. Lowering `--max-reduce-jobs`, which this doc recommends for R2
+reads, does NOT lower peak — so without that check an under-provisioned runner meets
+the law as ENOSPC mid-reduce, on a plan the plan phase certified.
+
+What the fix DOES buy, on the single-task table (kept because it is the before/after
+on identical inputs — **single map task, not the general case**):
 
 | reducer jobs | batch size | peak resident, before | peak resident, after | object amplification |
 | --- | --- | --- | --- | --- |
@@ -394,10 +450,12 @@ entirely:
 | 4 | 8 | 3,653,171 | 887,478 | 1.23x |
 | 1 | 32 | 11,622,309 (== total) | 887,478 | 1.00x |
 
-Peak is flat at one pack; object amplification is unchanged by the fix and falls with
-batch size, which is why `--max-reduce-jobs` is now a dispatch input on
-`construction-v1.yml` (planet: batch 3 = 12.7x / ~0.63 TB, batch 12 = 4.2x /
-~0.21 TB). Reduce output is byte-identical before and after, at every batch size.
+Before the fix, peak grew with batch size until it reached the entire pack set. After,
+it is the law above — one hash slice, independent of batch size. Object amplification
+is unchanged by the fix and falls with batch size, which is why `--max-reduce-jobs` is
+now a dispatch input on `construction-v1.yml` (planet: batch 3 = 12.7x / ~0.63 TB,
+batch 12 = 4.2x / ~0.21 TB). Reduce output is byte-identical before and after, at
+every batch size.
 
 A green address slice still means "the transport moves address map output durably"
 rather than "a planet address build has been executed" — no planet execute has run
@@ -496,8 +554,10 @@ would have built the same machinery twice:
   key is FROZEN;
 - **a bounded address reducer** (2026-07-25). `reduce_partition` releases each
   hydrated pack at its last use, retaining only what the later partitions of the same
-  reducer job still need. Reduce-side only: no map change, no partition-key change,
-  and reduce output is byte-identical. See the corrections above for the measurements;
+  reducer job still need, and enforces resident bytes against `max_scratch_bytes`.
+  Bounded means one hash slice — one pack per map task holding the partition's country,
+  batch-independent — NOT one pack; see the peak-resident law above. Reduce-side only:
+  no map change, no partition-key change, and reduce output is byte-identical;
 - the per-record map artifact and its one publication seam, below.
 
 - **The address map now emits a per-address, spatially keyed records artifact**

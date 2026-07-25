@@ -492,12 +492,25 @@ work.
 **Landed 2026-07-25 in the meantime (reduce-side, no map change):**
 `reduce_partition` now calls the staged store's `release()` at each pack's last use,
 retaining only what the later partitions of the same job still need
-(`construction_v1_hosted._batch_retention`). That bounds per-job resident input to
-about one pack independently of batch size (measured: peak flat at 887,478 bytes for
-batch 1, 4, 8 and 32 on a 32-partition / 14-pack slice, versus 1.77 MB / 2.66 MB /
-3.65 MB / 11.62 MB before), and `--max-reduce-jobs` is now a dispatch input on
-`construction-v1.yml` so batch size — and therefore object amplification — is tunable
-without a code change.
+(`construction_v1_hosted._batch_retention`), and enforces the result against
+`limits.max_scratch_bytes` after every fetch.
+
+Be precise about what that bounds, because a first draft of this note overstated it.
+It does NOT bound resident input to "about one pack": that figure came from a
+SINGLE-map-task fixture, whose packs are one global sort. The map-side sort is
+INTRA-task, so the law is
+**`peak ≈ (map tasks holding this partition's country) × pack bytes`, batch-INDEPENDENT
+above batch 1** — verified by splitting the same slice across 1/2/4/8/16 tasks and
+measuring peak at exactly 1.00/2.00/4.00/7.99/15.99 packs. Planet: ~39 tasks hold the
+US, so ~4.05 GB, or ~8.1 GB if all 77 mixed-country tasks are also selected. Single-
+digit GB, ~127 packs worst case. Derivation and the full tables are in
+`construction-v1-state.md`.
+
+What the release DOES fix is that peak previously grew with batch size until it reached
+the ENTIRE pack set (1.77 / 2.66 / 3.65 / 11.62 MB at batch 1 / 4 / 8 / 32 on the
+single-task slice, the last being 100% of it). `--max-reduce-jobs` is now a dispatch
+input on `construction-v1.yml` so object amplification is tunable without a code
+change — but note it does NOT reduce peak, which is why the scratch-cap check exists.
 
 **Country skew** can still be read off `exact_country_rows` in
 `benchmarks/address-construction-v1-data/inventory/addresses.json` (434,397,621 of

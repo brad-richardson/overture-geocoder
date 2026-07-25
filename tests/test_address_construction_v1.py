@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 import copy
+import dataclasses
 import json
 import shutil
 import subprocess
@@ -630,6 +631,60 @@ def test_reduce_partition_releases_packs_and_bounds_peak_resident(tmp_path, bina
     # A local-only run must not have deleted its own store.
     for pack in marker["packs"]:
         assert local_only.path(pack["object"]["key"]).is_file()
+
+
+def test_reduce_fails_closed_when_hydrated_packs_exceed_the_scratch_cap(
+    tmp_path, binaries
+):
+    """The hydrated cache is under a DECLARED cap, not merely under a cache policy.
+
+    `release()` bounds the peak, but that bound is emergent: peak resident is
+    `(map tasks holding the partition's country) x pack bytes` and is
+    batch-INDEPENDENT above batch 1, so lowering `--max-reduce-jobs` -- which the docs
+    recommend for R2 reads -- does NOT reduce it. Unenforced, an under-provisioned
+    runner meets that as ENOSPC with no diagnosis, on a plan the plan phase certified.
+    Here the cap is set below one pack, so the very first hydration must abort.
+    """
+    staging_root = tmp_path / "staging"
+    map_store = _staged_store(tmp_path, "local-map", staging_root)
+    marker, packed = _many_pack_map_output(tmp_path, binaries, map_store, rows=48)
+    plan = CONSTRUCTION.genesis_plan([marker], row_cap=8)
+    smallest = min(pack["object"]["bytes"] for pack in marker["packs"])
+
+    tiny = dataclasses.replace(packed, max_scratch_bytes=smallest - 1)
+    reduce_store = _staged_store(tmp_path, "local-reduce", staging_root)
+    with pytest.raises(ValueError, match="exceed the stage scratch cap"):
+        CONSTRUCTION.reduce_partition(
+            partition=plan["partitions"][0],
+            markers=[marker],
+            store=reduce_store,
+            scratch_root=tmp_path / "reduce-tiny",
+            directory_binary=binaries["directory"],
+            encoder_binary=binaries["encoder"],
+            verifier_binary=binaries["verifier"],
+            limits=tiny,
+        )
+
+    # A local-only store has no resident-bytes notion -- the directory IS the map
+    # output, not a cache -- so the same tiny cap must NOT abort it there. Counting the
+    # store against a scratch cap would fail a legitimate offline run.
+    local_root = tmp_path / "local-only"
+    shutil.copytree(staging_root / map_store.prefix, local_root)
+    for sidecar in local_root.rglob("*.metadata.json"):
+        sidecar.unlink()
+    local_only = CONSTRUCTION.LocalObjectStore(local_root)
+    assert not hasattr(local_only, "resident_bytes")
+    reduction = CONSTRUCTION.reduce_partition(
+        partition=plan["partitions"][0],
+        markers=[marker],
+        store=local_only,
+        scratch_root=tmp_path / "reduce-local-tiny",
+        directory_binary=binaries["directory"],
+        encoder_binary=binaries["encoder"],
+        verifier_binary=binaries["verifier"],
+        limits=packed,
+    )
+    assert reduction["selected_row_groups"] > 0
 
 
 def test_reduce_batch_retention_keeps_boundary_packs_without_changing_output(

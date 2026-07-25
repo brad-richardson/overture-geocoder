@@ -1079,6 +1079,153 @@ def test_batch_retention_is_the_suffix_union_of_what_a_job_still_needs():
     assert HOSTED._batch_retention("places", plan, markers, 0, 3) == [frozenset()] * 3
 
 
+def _small_pack_contract(tmp_path: Path, pack_rows: int) -> Path:
+    """A derived contract with a planet-SHAPED address pack size.
+
+    The production `max_pack_rows` is 1,000,000, so any fixture small enough for a
+    unit test emits ONE pack per task -- and a one-pack-per-task fixture cannot tell a
+    correctly-retaining reducer from an over-retaining one, because the peak is one
+    pack either way. Shrinking the cap in a TEST contract is what makes the retention
+    observable; the production contract is untouched.
+    """
+    contract, _ = _derive(tmp_path)
+    document = json.loads(contract.read_text())
+    document["limits"]["addresses"]["max_pack_rows"] = pack_rows
+    document["limits"]["addresses"]["parquet_row_group_rows"] = 2_048
+    small = tmp_path / "contract-small-packs.json"
+    small.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n")
+    return small
+
+
+def _address_multi_task_store(
+    tmp_path: Path, contract: Path, binaries, staging: Path, *, tasks: int, rows: int
+) -> tuple[Path, Path]:
+    """Map output from SEVERAL tasks, published to a filesystem staging root.
+
+    Rows are dealt ROUND-ROBIN across tasks so every task holds rows spread over the
+    whole `route_hash` space -- which is the planet shape, because the map-side sort is
+    INTRA-task. A partition therefore needs roughly one pack per task, and that is the
+    quantity the retention set has to hold without holding more.
+    """
+    store = tmp_path / "store-multi"
+    markers_dir = tmp_path / "markers-multi"
+    markers_dir.mkdir()
+    for task in range(tasks):
+        fixture = [
+            {"id": str(uuid.UUID(int=index + 1)),
+             # Vary the street so route_hash (FNV-1a over the normalized fields)
+             # spreads and the genesis plan can cut several partitions.
+             "street": f"{index % 7} Divided Street", "number": str(100 + index * 3),
+             "unit": "", "postcode": f"0{2000 + index}", "postal_city": "Stoneham",
+             "address_levels": ["MA", "Stoneham"], "country": "US",
+             "point": [-71.0, 42.0], "source_object_index": 0,
+             "source_row_group": 0, "source_row_index": index}
+            for index in range(rows) if index % tasks == task
+        ]
+        projected = tmp_path / f"projected-multi-{task}.parquet"
+        ADDR_SPIKE.write_fixture(projected, fixture)
+        source_limits = tmp_path / f"source-limits-multi-{task}.json"
+        source_limits.write_text(
+            json.dumps({"objects": [{"records": rows, "row_groups": 1}]}) + "\n"
+        )
+        _run("run-map", "--contract", contract, "--store-root", store,
+             "--staging-root", staging, "--family", "addresses",
+             "--task-id", f"addresses-map-{task:03d}",
+             "--input", projected, "--source-limits", source_limits,
+             "--transform-binary", binaries["address-transform-v1"],
+             "--proof-binary", binaries["address-proof-directory"],
+             "--scratch-dir", tmp_path / f"map-scratch-multi-{task}",
+             "--marker-out", markers_dir / f"{task:03d}.json",
+             "--output", tmp_path / f"map-multi-{task}.json")
+    return store, markers_dir
+
+
+def test_batched_address_reduce_fetches_each_pack_once_and_stays_bounded(
+    tmp_path, binaries
+):
+    """The hosted batch path, end to end: each pack fetched once, peak bounded.
+
+    This covers the WIRING, which no other test did. `test_address_construction_v1`
+    proves `reduce_partition` releases and `test_batch_retention_...` proves the
+    suffix union, but between them sat `cmd_run_reduce`, and both failure directions
+    passed CI: dropping `retain_keys` at the call site (back to per-partition
+    eviction, which triples R2 reads) and passing the maximal set (over-retention,
+    i.e. the original unbounded defect for every batched job). The address slice is one
+    partition in one job, so `_batch_retention` even early-returns on `count <= 1`
+    there and the suffix union never ran in ANY integration test.
+
+    `released > 0` cannot catch either mutation: the LAST partition of a job always
+    retains nothing, so it releases whatever it holds even under maximal
+    over-retention. The two assertions below are what discriminate -- hydration count
+    catches under-retention, peak catches over-retention.
+    """
+    tasks = 3
+    contract = _small_pack_contract(tmp_path, pack_rows=4)
+    staging = tmp_path / "staging"
+    store, markers_dir = _address_multi_task_store(
+        tmp_path, contract, binaries, staging, tasks=tasks, rows=36
+    )
+    markers = [json.loads(p.read_text()) for p in sorted(markers_dir.glob("*.json"))]
+    assert len(markers) == tasks
+    packs = {
+        pack["object"]["key"]: pack["object"]["bytes"]
+        for marker in markers for pack in marker["packs"]
+    }
+    # Several packs PER TASK, so over-retention has room to show up as a peak above
+    # the one-pack-per-task bound. Without this the test would pass vacuously.
+    assert len(packs) >= 2 * tasks, packs
+
+    plan_path = tmp_path / "plan-multi.json"
+    matrix_path = tmp_path / "matrix-multi.json"
+    _run("plan-reduce", "--contract", contract, "--store-root", tmp_path / "plan-cache",
+         "--staging-root", staging, "--family", "addresses",
+         "--markers-dir", markers_dir, "--row-cap", "4",
+         "--max-reduce-jobs", "1",
+         "--output", plan_path, "--matrix-out", matrix_path)
+    plan = json.loads(plan_path.read_text())
+    batches = plan["reduce_execution"]["batches"]
+    # ONE job over MANY partitions: the shape that exercises the suffix union rather
+    # than the `count <= 1` early return.
+    assert len(batches) == 1
+    assert batches[0]["partition_count"] >= 4, plan["reduce_execution"]
+
+    needed = set()
+    for partition in plan["partitions"]:
+        needed |= HOSTED.ADDRESS.partition_pack_keys(markers, partition)
+    assert needed, "fixture selected no packs"
+
+    # A FRESH empty local cache, as a hosted reduce runner has.
+    reduce_cache = tmp_path / "reduce-cache"
+    staging_report = tmp_path / "reduce-staging-multi.json"
+    _run("run-reduce", "--contract", contract, "--store-root", reduce_cache,
+         "--staging-root", staging, "--family", "addresses",
+         "--plan", plan_path, "--markers-dir", markers_dir,
+         "--batch-index", 0,
+         "--proof-binary", binaries["address-proof-directory"],
+         "--encoder-binary", binaries["address-serving-encode-v1"],
+         "--verifier-binary", binaries["address-serving-verify-v1"],
+         "--scratch-dir", tmp_path / "reduce-scratch-multi",
+         "--staging-report", staging_report,
+         "--output-dir", tmp_path / "reductions-multi")
+    evidence = json.loads(staging_report.read_text())
+
+    # Under-retention tripwire: with `retain_keys=None` at the call site, every
+    # partition re-fetches its packs and this count rises above the distinct set.
+    assert evidence["staged_objects_hydrated"] == len(needed), evidence
+    # Over-retention tripwire, and the reason peak is asserted against the DATA rather
+    # than against the total: peak resident is one pack per map task holding this
+    # partition's country, so it must not scale with the number of packs the job
+    # touches. `tasks + 1` leaves one pack of slack for a hash-range boundary.
+    assert evidence["staged_peak_resident_bytes"] <= (tasks + 1) * max(packs.values()), (
+        evidence, len(packs), max(packs.values()),
+    )
+    # And the job ends holding nothing.
+    assert evidence["staged_bytes_released"] == evidence["staged_bytes_hydrated"]
+
+    written = sorted(p.name for p in (tmp_path / "reductions-multi").glob("*.json"))
+    assert len(written) == batches[0]["partition_count"]
+
+
 def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binaries):
     contract, _ = _derive(tmp_path)
     store = tmp_path / "store"

@@ -76,14 +76,15 @@ REDUCE_TIMEOUT_MARGIN_FRACTION = 0.5
 #     rows/partition   3,279   14,990   52,464   104,928
 #     sec/partition     0.177   0.434    1.022     1.800
 #
-# which is linear in rows over a fixed floor: ~0.24 s of per-partition overhead
-# (three proof-directory spawns, the serving encoder, the Rust verifier, one DuckDB
-# connection) plus ~1.5e-5 s/row. A PLANET partition is capped at `max_pack_rows` =
-# 1,000,000 rows, so compute projects to 0.24 + 15 = ~15 s = ~0.25 min. Add
-# hydration, which the slice cannot measure because its staging backend is a local
-# filesystem: at reduce batch 12 the planet reduce phase reads ~0.21 TB over ~474
-# partitions, i.e. ~440 MB per partition, ~0.12 min at a conservative 60 MB/s from a
-# hosted runner. Honest planet projection: ~0.37 min per partition.
+# which is linear in rows over a fixed floor. Least squares over those four points:
+# 0.168 s of per-partition overhead (three proof-directory spawns, the serving encoder,
+# the Rust verifier, one DuckDB connection) plus 1.573e-5 s/row. A PLANET partition is
+# capped at `max_pack_rows` = 1,000,000 rows, so compute projects to 0.168 + 15.7 =
+# ~15.9 s = ~0.265 min. Add hydration, which the slice cannot measure because its
+# staging backend is a local filesystem: at reduce batch 12 the planet reduce phase
+# reads ~0.21 TB over ~474 partitions, i.e. ~440 MB per partition, ~0.12 min at a
+# conservative 60 MB/s from a hosted runner. Honest planet projection: ~0.39 min per
+# partition.
 #
 # 2.0 is KEPT as a ~5x margin over that, deliberately, for three reasons:
 #   * it is the same margin discipline as places 1.0 over 0.24 (>4x), and the address
@@ -92,10 +93,15 @@ REDUCE_TIMEOUT_MARGIN_FRACTION = 0.5
 #   * this constant also feeds `projected_reduce_minutes` and therefore the
 #     fail-closed ledger cost gate. Lowering it makes that gate LESS conservative on
 #     the strength of a slice measurement, which is the wrong direction;
-#   * it does not bind the batching anyway. At 2.0 the timeout gate admits
-#     floor(330 * 0.5 / 2.0) = 82 partitions per job, and the planet's ~474
-#     partitions need only batch 12 (job cap 40) for the object-amplification win, so
-#     `--max-reduce-jobs` has plenty of room without touching this number.
+#   * it never refuses a legitimate plan on COST: 474 x 2.0 = 948 runner-minutes
+#     against a 40,000-minute cap.
+# What 2.0 DOES constrain, and a reader tuning `--max-reduce-jobs` will hit: it caps
+# `_timeout_max_batch` at floor(330 * 0.5 / 2.0) = 82 partitions per job, where the
+# honest ~0.37 would admit 445. That is 6.8x more headroom than the planet plan needs
+# (~474 partitions at batch 12 / job cap 40), but a cap below ~6 jobs on a 474-partition
+# plan needs batch >= 79 and lands within sight of 82 -- and a cap of 5 (batch 95) exits
+# with the `_reduce_batches` SystemExit. That refusal is correct fail-closed behaviour,
+# not a bug; pass `--reduce-minutes-per-partition` with a justified figure to go lower.
 # A real planet reduce measurement should replace this;
 # `--reduce-minutes-per-partition` overrides it per dispatch in the meantime.
 MEASURED_REDUCE_MINUTES_PER_PARTITION = {"places": 1.0, "addresses": 2.0}
@@ -1184,11 +1190,17 @@ def _batch_retention(
     An address reduce job processes a contiguous partition range serially, and a pack
     that straddles a partition boundary is selected by both sides of it. Releasing
     purely per-partition would therefore re-fetch and re-verify such a pack once per
-    partition: measured on a planet-shaped 32-partition / 14-pack slice at batch 8,
-    per-partition release alone turned 14 object reads into 45 (11.6 MB -> 39.1 MB).
-    Suffix-unioning the future needs of the job keeps each pack for exactly as long as
-    the job still wants it -- so the peak stays bounded AND the per-job pack cache is
-    reused, which is the property the reduce job cap is tuned against.
+    partition: measured on a planet-shaped 32-partition / 14-pack slice at batch 32,
+    per-partition release alone turned 14 object reads into 45 (11.62 MB -> 39.08 MB).
+    (At batch 8 the same comparison is 17 reads / 14.28 MB against 45 / 39.08 MB --
+    same conclusion, different baseline.) Suffix-unioning the future needs of the job
+    keeps each pack for exactly as long as the job still wants it -- so R2 reads fall
+    with batch size, which is the property the reduce job cap is tuned against.
+
+    It does NOT make the peak batch-independent-and-small; it makes it
+    batch-independent at `(map tasks holding this partition's country) x pack bytes`,
+    because the map-side sort is INTRA-task. `address_construction_v1.reduce_partition`
+    enforces that against the scratch cap.
     ``entry[i]`` is the union over partitions ``i+1 ..``; the last is empty, so the
     final partition of a job releases everything.
 

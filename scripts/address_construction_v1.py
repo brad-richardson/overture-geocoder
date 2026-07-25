@@ -1388,6 +1388,33 @@ def reduce_partition(
         pack["object"]["key"]: index for index, (pack, _) in enumerate(selected_groups)
     }
     retained = frozenset(retain_keys or ())
+    # The hydrated cache is now under a DECLARED cap, not merely under a cache policy.
+    # `release()` bounds the peak, but that bound is EMERGENT: it depends on how the
+    # plan cut the partitions and on which packs a job's range happens to touch.
+    # Peak resident is `(map tasks holding this partition's country) x pack bytes` and
+    # is batch-INDEPENDENT above batch 1, so lowering `--max-reduce-jobs` -- which the
+    # docs now recommend -- does not reduce it. On a planet address plan that is ~39
+    # exact-US tasks (up to ~94 including mixed-country tasks) x ~104 MB, i.e. single-
+    # digit GB. Without an enforced cap that lands as ENOSPC mid-reduce with no
+    # diagnosis, on a run the plan phase certified.
+    #
+    # `resident_bytes` exists only on the staged store, where the local directory is a
+    # CACHE. On a local-only store the directory IS the map output, so there is
+    # nothing to cap and the check is correctly absent -- same discriminator as
+    # `release` above.
+    def resident_bytes() -> int | None:
+        return getattr(store, "resident_bytes", None)
+
+    def check_resident(stage: str) -> None:
+        resident = resident_bytes()
+        if resident is not None and resident > limits.max_scratch_bytes:
+            raise ValueError(
+                f"hydrated map packs resident on this runner ({resident} bytes) "
+                f"exceed the stage scratch cap ({limits.max_scratch_bytes} bytes) "
+                f"while {stage}. A reduce job holds one pack per map task holding "
+                "its country; lower the partition count or raise max_scratch_bytes."
+            )
+
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix=f"reduce-{partition['id']}-", dir=scratch_root) as name:
         workspace = Path(name)
@@ -1401,6 +1428,10 @@ def reduce_partition(
                 for fetch_index, (pack, group) in enumerate(selected_groups):
                     pack_key = pack["object"]["key"]
                     pack_path = store.path(pack_key)
+                    # Checked per fetch, not once at the end: the whole point is to
+                    # abort with a diagnosis BEFORE the disk fills, and hydration is
+                    # the only thing here that grows it.
+                    check_resident("hydrating map packs")
                     # Unchanged: every fetch re-verifies the body against the digest
                     # the marker recorded, whether the body was already local or was
                     # re-hydrated after a release.
@@ -1461,7 +1492,17 @@ def reduce_partition(
         )
         selected = workspace / "selected.arrow"
         discarded = workspace / "discarded.arrow"
-        with StageWatchdog([workspace], limits, connection) as watchdog:
+        # The hydrated pack CACHE is a watchdog root too, not just the workspace. It
+        # used to be outside every declared cap, so `peak_disk_bytes` under-reported
+        # the job's real disk footprint by however much input it was holding -- on the
+        # planet shape that is the larger of the two. Only when the store is a cache:
+        # on a local-only store this directory is the map output itself, and counting
+        # it would fail a legitimate run against a scratch cap it was never meant to
+        # bound.
+        watchdog_roots = [workspace]
+        if release is not None:
+            watchdog_roots.append(Path(store.root))
+        with StageWatchdog(watchdog_roots, limits, connection) as watchdog:
             selected_rows = export_filter(
                 connection, "fetched", predicate, selected, SERVING_ORDER
             )
