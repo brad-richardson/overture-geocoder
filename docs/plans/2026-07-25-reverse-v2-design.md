@@ -38,10 +38,13 @@ implicit in the pack (`EXCLUDE(pack_id)`).
 
 Three properties of #157 this design leans on directly:
 
-- The positions directory carries **per-row-group bindings and per-cell record
-  counts**, and `validate_positions` re-verifies them. So "one consumer holds a
-  cell's complete data" is no longer an argument from the shuffle's construction
-  — it is **proven by the directory's wrong-bucket check**.
+- The positions directory carries **per-row-group and per-cell record COUNTS**,
+  and `validate_positions` re-verifies them. It deliberately does **not** carry a
+  dual-lane binding — its docstring explicitly refuses to synthesize one — so
+  nothing in this design may claim a binding over positions. What the directory
+  does prove is the **cell -> bucket invariant** via its wrong-bucket check, so
+  "one consumer holds a cell's complete data" is no longer an argument from the
+  shuffle's construction.
 - Emission is **one row per admitted ROW with source-locator identity**
   (`source_object_index`, `source_row_group`, `source_row_index`), not one row per
   distinct `feature_id`. That is the duplicate-UUID gate's requirement, and it is
@@ -449,12 +452,16 @@ x enumeration is the whole row and the cell budget bites. The latitude bbox clam
 at ±90; since `route()` and `point_quadkey` both `clamp(0, 255)`, the polar row is
 a single leaf row and must not be enumerated as two.
 
-**Coordinate precision.** The positions artifact keeps `f64` (lossless, matches
-the transform). The serving encoder truncates to E7 (1.1 cm), matching
-`address-transform-v1`'s `longitude_e7`/`latitude_e7` `Int32`, and halves the
-coordinate bytes. Round once, in the encoder, before keying; sub-digits are then
-derived from the E7 value clamped into the authoritative cell, so encoder,
-verifier and worker cannot disagree.
+**Coordinate precision differs by family, and that is fine.** The Places positions
+artifact keeps `f64` (lossless, matching the Places transform) and the serving
+encoder truncates to E7 (1.1 cm). Addresses are E7 (`Int32`) from the transform
+onward — `address-transform-v1` emits `longitude_e7`/`latitude_e7` and there is no
+`f64` anywhere in that path — so the address records artifact is already E7 and
+nothing is truncated later. Either way, round once before keying and derive
+sub-digits from the E7 value clamped into the authoritative cell, so encoder,
+verifier and worker cannot disagree. The one consequence of the two families
+starting from different precisions is the sub-5 mm cell-assignment seam recorded
+in §3; it is accepted.
 
 ---
 
@@ -487,10 +494,11 @@ completeness invariant in the pipeline; the finalizer should enforce it before t
 reverse entrypoint is publishable.
 
 **The one map-blocking Places item is the rich display projection.** Both gaps the
-first draft listed — no proof directory/binding, and a row count only bounded
-above — are **closed by #157**: the positions directory carries per-row-group
-bindings and per-cell counts with a content-hashed `directory_object` re-verified
-by `validate_positions`, and the count is asserted equal to admitted rows. What
+first draft listed — no proof directory, and a row count only bounded above — are
+**closed by #157**: the positions directory carries per-row-group and per-cell
+record **counts** plus the cell -> bucket invariant, in a content-hashed
+`directory_object` re-verified by `validate_positions`, and the count is asserted
+equal to admitted rows. (Counts, not bindings — see above.) What
 remains is that positions must carry `primary_name`, `brand_name`, `category`,
 `locality`, `region`, `country`, `confidence_rank`. That is a **positions schema
 change**, so it must land before the planet map run; it must **not** re-add
@@ -527,29 +535,44 @@ least(greatest((latitude_e7  +  900000000) * 256 / 1800000000, 0), 255) AS cell_
 admissible only with a parity test, and that test is a gate on the artifact, not a
 nice-to-have.** `route()`'s only existing test is a single interior point
 (`route(0.0, 0.0)`, `places_transform_v1.rs` ~L722): no edges, no clamp coverage,
-no cross-implementation coverage. The gate is:
+no cross-implementation coverage. **The gate is an exhaustive parity test against
+the real Rust `route()`**, and the gate — not any particular helper — is the
+requirement:
 
-1. Add `route_e7(lon_e7, lat_e7)` to the Rust side as the **single reference
-   implementation** for E7 input.
-2. Prove the DuckDB SQL equals `route_e7` exactly over: all 256 x-boundaries and
-   256 y-boundaries and the E7 value either side of each; the four corners
-   (±180, ±90); out-of-range values exercising both `clamp` arms; and a large
-   pseudo-random interior sample.
-3. Prove `route_e7` agrees with `route()` on `f64` input except within one E7
-   quantum (~5 mm) of a boundary, and record that residual as accepted — §2's
-   clamp-into-the-authoritative-cell rule makes it unobservable in the leaf key.
+1. Drive the **actual `places-transform-v1` binary** and compare its
+   `partition_cell` against the DuckDB SQL at **all 257 cell boundaries on both
+   axes, at the E7 value either side of each**, plus the four corners (±180, ±90),
+   out-of-range values exercising both `clamp` arms, and a pseudo-random interior
+   sample. Driving the shipped binary is strictly stronger than comparing against
+   a Rust helper written for the test, because a helper can drift from `route()`
+   while the test stays green.
+2. Record the accepted residual: raw-`f64` `route()` and the E7-quantized SQL can
+   disagree **within ~5e-8° (~5 mm) of a cell boundary**, because E7 rounding can
+   cross a boundary the `f64` value sits just inside. Consequence, stated so it is
+   not rediscovered as a bug: **Places (keyed from `f64`) and addresses (keyed from
+   E7) have a sub-5 mm cell-assignment seam.** A record within 5 mm of a cell edge
+   can be assigned to different cells by the two families. This is harmless for
+   reverse accuracy — the query radius is 100-2,000 m, both cells are read for any
+   query near that edge, and §2's clamp-into-the-authoritative-cell rule keeps the
+   leaf key consistent with whichever cell owns the record — and it is accepted.
 
-The address implementation agent is already building this; the artifact spec names
-the parity test as its acceptance gate so the two land together.
+**Status: MET by #162.** The parity gate exists and drives the shipped binary.
 
-`overture-address-map-address-positions-v1`: one row per admitted address row,
+`overture-address-map-address-records-v1`: one row per admitted address row,
 columns `feature_id`, `longitude_e7`, `latitude_e7`, `partition_cell`,
 `source_object_index`, `source_row_group`, `source_row_index`, plus the display
 projection the transform already emits (`street`, `number`, `unit`, `postcode`,
-`postal_city`, `address_levels`, `display_country`). Written by one `COPY` from
-the already-materialised transform table, ordered
+`postal_city`, `address_levels`, `country`, `display_country`). **Both country
+columns are carried**: `country` is the normalized routing value the reverse
+serving record's §5 size model counts, and `display_country` is what the serving
+payload actually renders. Written by one `COPY` from the already-materialised
+transform table, ordered
 `(shuffle_bucket, partition_cell, feature_id, source_*)` using the **Places**
-`shuffle_bucket_sql`, with a positions directory by exact analogy with #157.
+`shuffle_bucket_sql`.
+
+Its companion is **`overture-address-map-address-records-directory-v1`**, mirroring
+Places: per-row-group and per-cell record **counts** plus the cell -> bucket
+invariant check, content-hashed, and no synthesized binding.
 
 **This is additive to forward addresses in the key, and — with option (b) — in the
 schema too.** It does not change `address_key_hash`, `route_hash`, `hash_bucket`,
@@ -567,13 +590,21 @@ not lose"), it does not start it, and it must not be used as a reason to start i
 Only these, because they are the only things whose absence forces a **map
 re-run**:
 
-1. **Places: the rich display projection on positions** (#157). A positions schema
-   change.
-2. **Addresses: `overture-address-map-address-positions-v1`**, plus its positions
-   directory.
-3. **The `route_e7` reference + DuckDB parity test**, because item 2's
-   `partition_cell` values are otherwise unproven and a mis-keyed planet artifact
-   is a re-run.
+1. **Places: the rich display projection on positions** — **IN FLIGHT on #157.** A
+   positions schema change.
+2. **Addresses: `overture-address-map-address-records-v1`** plus
+   `overture-address-map-address-records-directory-v1` — **MET by #161/#162**,
+   together with the address slice harness.
+3. **The exhaustive `route()`-vs-SQL parity gate** — **MET by #162**, because item
+   2's `partition_cell` values are otherwise unproven and a mis-keyed planet
+   artifact is a re-run.
+
+What remains open on the address side is only **durable publication wiring** —
+getting the records artifact and its directory into the finalize publication set
+and the family/slice manifests, the way #157 does for Places. That is being added
+to #162 after #157 merges. It is a publication change rather than a schema change,
+so it is not itself map-blocking, but it must land before the reverse reducer can
+consume the artifact from a published release rather than from build scratch.
 
 Everything else is additive after the fact: the encoder, verifier, reverse
 reducer, reverse catalog, manifest entrypoints, worker reader, endpoint.
@@ -750,11 +781,20 @@ refinement. Ship the inline version first — it is correct and provable on a sl
 
 ### Build-time cost
 
-Map cost is already paid: positions are one streaming aggregate over a table
-DuckDB has already ingested, and the address equivalent is one `COPY` from a table
-already materialised. The reverse reducer reads only positions packs (f64+ZSTD
-parquet, a few GB planet-wide, against ~34 GB of term fragments), applies no
-combiner and no token grouping, and does one sort per cell.
+Map cost is already paid: Places positions are one streaming aggregate over a
+table DuckDB has already ingested, and the address records artifact is one `COPY`
+from a table already materialised.
+
+The reverse reducer reads only the map records artifacts, and their compressed
+sizes are now measured rather than guessed. The address records artifact measures
+**28.3 B/record ZSTD parquet**, so planet-wide it is
+`473,576,753 x 28.3 = ~13.4 GB`. That is not "a few GB": it is the largest input
+the reverse path reads, and it is comparable to the 33.2 GB selected address
+source once compression is accounted for. The Places positions artifact is
+smaller by both record count and record width. Against ~34 GB of term fragments
+the reverse reducer's input is still the cheaper side, and it applies no combiner,
+no token grouping, and does one sort per cell — but capacity planning should carry
+13.4 GB, not "a few".
 
 One cost the first draft missed: **the depth `L` must be known before keying**,
 which naively means either two passes over the cell or buffering it whole (Tokyo
@@ -835,28 +875,35 @@ it as written:
 
 | # | increment | depends on | gate |
 |---|---|---|---|
-| **0** | **Restore the rich display projection to `overture-places-map-positions-v1`**: `primary_name`, `brand_name`, `category`, `locality`, `region`, `country`, `confidence_rank`, per admitted row with source-locator identity; do not re-add `shuffle_bucket`/`partition_key` columns. | #157 | Monaco positions carry all seven fields; positions directory + `validate_positions` still balance; forward digests unchanged |
-| **0b** | **`route_e7` reference + DuckDB SQL parity test** (all 512 boundaries, both clamp arms, four corners, random interior). | — | SQL == `route_e7` exactly; the f64/E7 residual is bounded at one E7 quantum and recorded |
-| **0c** | **`overture-address-map-address-positions-v1`** + its positions directory + an address slice harness (`build_slice_inventory_v1.py` / `run_slice_construction_v1.py` are Places-only). | 0b | address slice emits the artifact; forward address digests byte-identical |
+| **0** | **IN FLIGHT (#157).** Restore the rich display projection to `overture-places-map-positions-v1`: `primary_name`, `brand_name`, `category`, `locality`, `region`, `country`, `confidence_rank`, per admitted row with source-locator identity; do not re-add `shuffle_bucket`/`partition_key` columns. | #157 | Monaco positions carry all seven fields; positions directory + `validate_positions` still balance; forward digests unchanged |
+| **0b** | **MET (#162).** Exhaustive parity gate: the DuckDB SQL against the real `places-transform-v1` binary at all 257 boundaries ±1 E7 on both axes, both clamp arms, four corners, random interior. | — | SQL == shipped `route()` on the E7 grid; the ~5 mm f64/E7 boundary seam recorded as accepted |
+| **0c** | **MET (#161/#162).** `overture-address-map-address-records-v1` + `overture-address-map-address-records-directory-v1` + the address slice harness. | 0b | address slice emits both artifacts; forward address digests byte-identical |
+| **0d** | **OPEN.** Durable publication wiring for the address records artifact and its directory: finalize publication set + family/slice manifests, as #157 does for Places. Being added to #162 after #157 merges. | 0c, #157 | the artifact is referenced from a slice manifest and readable from a published release, not only from build scratch |
 | 1 | `.plrx` format + `places-reverse-encode-v1` / `-verify-v1`: leaf key = 4 hex + L base-4, sub-digits clamped into the authoritative cell, **row-major payload**, depth from the three ceilings, dual-lane digest. | 0 | verifier re-derives every leaf key from E7; size within 5% of the **96 B** model; a 3x3 leaf block resolves to exactly 3 payload runs |
 | 1b | The missing **cross-implementation cell-identifier test**: Rust `route()` / `point_quadkey()` / `cell_partition_key()` and their Python mirrors agree on a shared vector set including boundaries and clamps. | — | one vector file, three implementations, no skips |
 | 2 | `reduce_reverse_cell` in the bucket-range reducer, depth read from the positions directory's per-cell counts (single pass), `r-{cell}.plrx` per cell. | 1, bucket-range reduce (in flight), the harness change above | Monaco emits 1 shard; the boundary fixture emits `c085` and `c086` from **two** reducer invocations; `sum(records) == admitted rows` |
 | 3 | Worker `.plrx` range-read reader: header+index in one coalesced call, cell/leaf enumeration with budgets, nearest-first with the stated tie-breaks, antimeridian and polar clamps. Python oracle mirror. | 1, 1b | fuzz set (interior, cell boundary, antimeridian, 66°, 85°, 89.5°, poles) returns byte-identical result sets in Rust and Python |
 | 4 | Binary sharded `.rcat` (root + 16 shards, 52-byte entries, raw digests, `index_bytes`), family manifest `reverse` entrypoint, `v2_release_manifest.py` entrypoints, per-operation entrypoint validation in `v2.rs`, allowlist. | 2 | a release with `["forward","reverse"]` validates; a forward-only release still validates; the root fits in one read |
 | 5 | `handle_reverse` `poi` branch: `radius`/`limit`, response assembly, `metadata.reverse`, **503 semantics**, `benchmark_latency.py` entries. | 3, 4 | Monaco slice returns POIs with distances; a published release lacking the reverse entrypoint returns **503 `capability_unavailable`**, not 400; unknown `types` still 400 |
-| 6 | Address reverse: reverse reduce, shared encoder `--family addresses`, dictionary (offsets in the catalog entry), address `.rcat`, worker address branch. | 0c, 1-5 | address slice end to end; dictionary reaches the fixed-width ~40 B/row target |
+| 6 | Address reverse: reverse reduce, shared encoder `--family addresses`, dictionary (offsets in the catalog entry), address `.rcat`, worker address branch. | 0c, 0d, 1-5 | address slice end to end; dictionary reaches the fixed-width ~40 B/row target |
 | 7 | Planet: reverse reduce over the same map output; publish forward + reverse in one v2 release. | all, R2 staging | one release advertising `forward`+`reverse` for divisions, poi, address |
 
 Increments 1-7 are additive to a published or unpublished build. Only 0, 0b and 0c
-are ordering-critical.
+are ordering-critical, and **0b and 0c are now met** by #161/#162.
 
-**The single most important thing before the planet build:** the positions
+**The single most important thing before the planet build:** the map records
 artifacts must be complete in **schema**, because a schema change after the planet
-map run means re-running it. That is three items, not one — the Places rich
-projection (#157), the address positions artifact, and the `route_e7` parity test
-that makes the address artifact's `partition_cell` trustworthy. If exactly one
-thing gets done from this document before the planet build, it is increments 0, 0b
-and 0c.
+map run means re-running it. Three items, and two of them are done:
+
+| item | status |
+|---|---|
+| Places rich display projection on positions | **IN FLIGHT, #157** |
+| `overture-address-map-address-records-v1` + its directory + address slice harness | **MET, #161/#162** |
+| exhaustive `route()`-vs-SQL parity gate | **MET, #162** |
+
+So the remaining ordering-critical work is **#157 landing**, after which the only
+open address-side item is durable publication wiring (0d), which is a publication
+change rather than a schema change and therefore not map-blocking.
 
 ---
 
@@ -926,11 +973,16 @@ and 0c.
     cell budget is the real guard poleward of 89.27°.
 16. **Where does the address `partition_cell` come from?** Option **(b)**, a
     DuckDB SQL mirror of `route()` over the E7 integers (exact integer division, no
-    floats), gated on a `route_e7` reference implementation and an exhaustive parity
-    test covering all 512 cell boundaries, both `clamp` arms and the four corners.
-    Option (a) — adding columns to the frozen address transform schema — is
-    rejected because that schema is consumed by `address_serving_encode_v1.rs` and
-    the Worker's `address_construction_v1.rs`.
+    floats), gated on an exhaustive parity test that drives the **real
+    `places-transform-v1` binary** at all 257 boundaries ±1 E7 on both axes, both
+    `clamp` arms and the four corners. The gate is the requirement, not any
+    particular helper: comparing against the shipped binary is stronger than
+    comparing against a Rust helper written for the test, which could drift from
+    `route()` while the test stayed green. Option (a) — adding columns to the frozen
+    address transform schema — is rejected because that schema is consumed by
+    `address_serving_encode_v1.rs` and the Worker's `address_construction_v1.rs`.
+    **MET by #162**, with the sub-5 mm f64/E7 cell-assignment seam recorded as an
+    accepted residual.
 17. **Should divisions reverse move into this structure?** No. Containment is a
     different query and the existing shards are inside the gate. Leave
     `build_shards.py --reverse` alone.
