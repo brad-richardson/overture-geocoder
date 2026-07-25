@@ -184,6 +184,8 @@ jobs:
               and .head_total_records > 0
               and (.store_bytes_by_class["map/places-v1"] > 0)
               and (.store_bytes_by_class["serve/places-v1"] > 0)
+              and .positions_objects > 0
+              and .positions_records > 0
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2

@@ -462,11 +462,66 @@ def test_execute_sequence_places_end_to_end_with_head_no_network(tmp_path, binar
     final = tmp_path / "final.json"
     _run("finalize", "--contract", contract, "--store-root", store, "--family", "places",
          "--plan", plan, "--reductions-dir", reductions_dir, "--head", head,
+         "--markers-dir", markers_dir,
          "--remote-root", remote, "--work-root", tmp_path / "final-work", "--output", final)
     result = json.loads(final.read_text())
     assert result["reconciles"] is True
     assert result["marker_written_last"] is True
     assert (remote / result["marker_key"]).is_file()
+
+    # The map-phase per-place positions packs must be PUBLISHED, not merely
+    # produced: the store travels as a GitHub artifact with a 7-day retention, so
+    # anything not in the durable slice is gone a week after a planet run -- and
+    # then a spatial reverse index costs the full map re-run this artifact exists
+    # to avoid. Each pack and each directory lands under positions/ and is part
+    # of the single whole-slice verification.
+    manifest = json.loads((tmp_path / "final-work/family-manifest.json").read_text())
+    positions = manifest["positions"]
+    expected_records = sum(
+        json.loads(path.read_text())["positions"]["records"]
+        for path in sorted(markers_dir.glob("*.json"))
+    )
+    assert positions["records"] == expected_records > 0
+    assert result["positions_objects"] == len(positions["objects"]) > 0
+    assert result["positions_records"] == expected_records
+    slice_root = json.loads(contract.read_text())["namespaces"]["slice"].rstrip("/")
+    for item in positions["objects"]:
+        published = remote / f"{slice_root}/families/places/positions/{Path(item['key']).name}"
+        assert published.is_file()
+        assert published.stat().st_size == item["bytes"]
+    # The verified object count covers the serving set AND the positions set.
+    assert result["objects"] == 2 + len(manifest["artifacts"]) + len(positions["objects"])
+    assert json.loads((tmp_path / "final-work/slice-manifest.json").read_text())[
+        "positions_object_count"
+    ] == len(positions["objects"])
+
+    # Publishing them must not be skippable by omission: a workflow that forgets
+    # --markers-dir would otherwise ship a places slice with no per-place records,
+    # and the cost of noticing that is a full planet map re-run.
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions_dir), "--head", str(head),
+                     "--remote-root", str(tmp_path / "remote-b"),
+                     "--work-root", str(tmp_path / "final-work-b"),
+                     "--output", str(tmp_path / "final-b.json")])
+    assert "--markers-dir is required" in str(excinfo.value)
+    # A marker that predates the artifact is the same gap, one level in.
+    stale_markers = tmp_path / "stale-markers"
+    stale_markers.mkdir()
+    for path in sorted(markers_dir.glob("*.json")):
+        stale = json.loads(path.read_text())
+        stale.pop("positions")
+        (stale_markers / path.name).write_text(json.dumps(stale))
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions_dir), "--head", str(head),
+                     "--markers-dir", str(stale_markers),
+                     "--remote-root", str(tmp_path / "remote-c"),
+                     "--work-root", str(tmp_path / "final-work-c"),
+                     "--output", str(tmp_path / "final-c.json")])
+    assert "carries no positions artifact" in str(excinfo.value)
 
 
 def test_ledger_fails_closed_before_the_next_phase(tmp_path):

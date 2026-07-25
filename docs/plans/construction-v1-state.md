@@ -50,6 +50,11 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
 - **Map-side shuffle** — `pack_id` is now a hash bucket of `partition_key`, so a
   fragment holds a set of cells completely and nothing else. **This is the piece
   the whole architecture turns on.**
+- **Per-place positions artifact** — map emits one row per admitted place
+  RECORD, pre-combiner, self-sufficient, on the same shuffle as the term packs,
+  and finalize publishes it durably. 2026-07-25 decision, detailed under "Query
+  surface" below. This is what makes a spatial reverse index additive instead of
+  a planet map re-run.
 - **Slice harness** — `build_slice_inventory_v1.py`, `run_slice_construction_v1.py`.
 - **Partition plan v2** (`scripts/places_partition_plan_v1.json`) — regenerated
   from 2026-07-22.0 post-combiner. Consumed only by `predict-reduce`.
@@ -243,9 +248,84 @@ The remaining real work is a nearest-neighbour structure within a cell and
 Worker support, which the divisions reverse shards
 (`build_shards.py --reverse`) already demonstrate at smaller scale.
 
-### Decide BEFORE the planet build: does map emit a per-place artifact?
+### DECIDED 2026-07-25: map emits a per-place positions artifact
 
-This is the only part of reverse that is expensive to add late, so it is a
+**It is emitted.** Map writes per-place positions packs alongside the term
+fragments, so a spatial reverse index can be built later without re-running the
+planet map phase. The reasoning below is kept because it is the reason, not
+because the question is open.
+
+What it is, precisely:
+
+- one row per admitted **place RECORD**, not per distinct place. The key is
+  `feature_id` PLUS the source locator (`source_object_index`,
+  `source_row_group`, `source_row_index`) -- the same identity the serving path
+  uses. **Do not group by `feature_id`.** The frozen evidence spec requires every
+  copy of a repeated id to survive as a distinct candidate keyed by its
+  provenance (`tests/test_places_duplicate_uuid_gate.py`), so collapsing by id
+  would violate the contract AND abort a planet map job on data the contract
+  declares valid. Consumers that want one row per place dedupe by their own
+  policy; the artifact does not choose one for them;
+- **self-sufficient**: position plus `primary_name`, `brand_name`, `category`,
+  `locality`, `region`, `country`, `confidence_rank`. Forced by the reverse-v2
+  design -- the ID index returns no names and `/v2/features/:gers_id` is being
+  removed, so a positions-only row cannot render a reverse hit at all;
+- derived **pre-combiner**, by a projection with a `DISTINCT` that removes only
+  the per-token fan-out, which is the entire point (see below). No aggregation,
+  so no coordinate or name is ever synthesized across rows;
+- bucketed by the **same shuffle** as the term packs, one pack per present
+  bucket, ordered `(shuffle_bucket, partition_cell, feature_id, locator)` --
+  total, hence deterministic;
+- named `map/places-v1/positions` with `map/places-v1/position-directories`
+  beside it, distinct from the term `packs`/`directories` so nothing can confuse
+  the two;
+- **published by finalize** under `families/places/positions/`, listed in the
+  family and slice manifests and covered by the single whole-slice verification.
+  This is not optional: the store otherwise travels only as a GitHub artifact
+  with `retention-days: 7`, so an unpublished artifact expires a week after a
+  planet run and reverse costs the map re-run this whole thing exists to avoid.
+  Nor is it optional by omission -- `finalize --markers-dir` is REQUIRED for every
+  family in `POSITIONS_FAMILIES` (places today), and a marker set where any task
+  carries no positions is rejected, so a wiring mistake cannot quietly ship a
+  slice without per-place records;
+- fails closed if the row count is not exactly `admitted_features`, if a cell
+  lands in the wrong bucket, or if a resumed marker's positions artifact is
+  absent or does not reconcile. The slice-smoke CI job asserts
+  `positions_objects > 0` and `positions_records > 0` from the harness summary,
+  so a run that emits but fails to publish it is a red build.
+
+Measured on the Monaco slice (38,182 projected, 38,172 admitted): **38,172 rows
+in 4 packs, 1,718,410 bytes** -- 45.0 compressed bytes per record (63.5
+uncompressed), against 16.4 MB of term packs for the same task, so **10.5%** of
+the term packs. Straight-line planet projection is ~3.3 GB compressed / ~4.7 GB
+uncompressed; treat ~6.7 GB as the conservative bound, since a 38k-record slice
+repeats names far more than the planet does and therefore compresses better.
+Finalize published 8 objects (4 packs + 4 directories), 1.72 MB, verified.
+
+The positions packs get a content hash and a row-group directory (per-row-group
+and per-cell record counts, plus the assertion that every cell in a pack hashes
+to that pack's bucket). They deliberately do **not** get the term packs' exact
+two-lane binding: that binding is computed from `semantic_digest_a/_b` on TERM
+rows, and a positions row carries no such digest. Synthesizing one would produce
+a proof frame that looks exact and binds nothing that exists.
+
+**Resume note:** a `RESUME_FROM` of a run that predates this artifact aborts its
+map jobs by design -- an admitted marker with no positions is rejected rather
+than resumed, so one run can never mix tasks that have positions with tasks that
+do not. The error names the marker key to delete for a re-map.
+
+Nothing downstream of map CONSUMES it yet, and the boundary is structural: the
+positions packs live under `marker["positions"]["packs"]` and nowhere else, while
+`bucket_range_fragments` (the reducer's term-fragment selector), head and the
+genesis plan read `marker["packs"]`. The two key spaces are disjoint --
+`map/places-v1/positions/` versus `map/places-v1/packs/` -- so a positions pack
+cannot be mistaken for a term fragment. **Keep it that way**: putting positions
+into the top-level `packs` list would make the reducer ingest them as term rows.
+Only finalize touches them, to publish them.
+
+The sequencing argument that produced the decision:
+
+This was the only part of reverse that is expensive to add late, so it was a
 sequencing decision rather than a design one.
 
 Reverse must be built from **per-place records** (one row per place with a
@@ -257,25 +337,19 @@ position), not from term rows:
   groups can be dropped from the term store entirely. Harmless for forward
   search, **silently missing from reverse**.
 
-Map currently emits **no per-place artifact**. Term rows and head candidates
-(top-N per token) are both the wrong shape. So adding reverse later means
-**re-running the planet map phase** -- not redesigning it, but re-running it,
-plus a re-publish.
+Term rows and head candidates (top-N per token) are both the wrong shape, and
+nothing else in map enumerated places. So adding reverse without this artifact
+would have meant **re-running the planet map phase** -- not redesigning it, but
+re-running it, plus a re-publish.
 
-**The insurance is cheap.** Have map also emit a per-place, cell-keyed artifact
-alongside the term fragments: `feature_id`, longitude/latitude, and whatever
-reverse must return. At ~32 bytes for the minimal form that is roughly **2.4 GB
-planet-wide against a ~34 GB term store**, and it rides the same shuffle, the
-same staging, and the same proof frame.
+**The insurance is cheap.** The minimal form was estimated at ~32 bytes and
+~2.4 GB planet-wide; the self-sufficient form actually built measures 45.0
+compressed bytes per record, so a few GB against a ~34 GB term store. It rides
+the same shuffle and the same staging.
 
-- Emit it now -> reverse is purely additive later. New encoder, new index, no
-  map re-run.
+- Emit it -> reverse is purely additive later. New encoder, new index, no map
+  re-run.
 - Skip it -> the price of reverse is one full planet map re-run.
-
-Open question if we do it: whether the artifact carries only `feature_id`
-(cheapest, forces an `/id` round-trip to render a result) or also
-name/category/address fields (self-sufficient, larger). That choice does not
-block emitting the positions.
 
 **Everything else about reverse is additive.** Inventory, projection, the
 transform, contract/admission/ledger, the proof frame, the cell scheme, the
