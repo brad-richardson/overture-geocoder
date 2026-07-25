@@ -77,7 +77,7 @@ the planner subdivide when a task lands within some headroom fraction of them.
 
 ## Verification and test hygiene
 
-### 5. Dry-run does not exercise the execute data plane
+### 5. Dry-run does not exercise the execute data plane — ADDRESSED 2026-07-25
 
 The map job branches on `inputs.mode`: dry-run runs `--validate-only` plus
 `predict-reduce` and never touches `run-map`, the transform binary, the S3
@@ -96,6 +96,28 @@ Two fixes, either of which would have caught all three:
   throwaway namespace) that runs the real `run-map` end to end.
 - A CI job that installs `.github/requirements-hosted-rowgroup.txt` into a
   clean virtualenv and imports every hosted entrypoint module.
+
+**Both shipped** as `.github/workflows/slice-smoke.yml`, on `pull_request` and
+push to `main`, path-filtered to `scripts/`, `crates/geocoder-construction/`,
+the evidence spec, and the pinned requirements file:
+
+- `slice` builds the construction binaries, builds the Monaco slice inventory
+  from real row-group statistics, and runs the harness's five real phases
+  (S3 projection -> `run-map` with the transform binary -> `plan-reduce` ->
+  every `run-reduce` partition -> `run-head` -> `finalize`), then asserts
+  `reconciles == true` on the summary line. No credentials: the release parquet
+  is read anonymously and finalize publishes to a filesystem remote. ~20s of
+  real work; two attempts, fresh work dir each, so a transient S3 read does not
+  turn into a red build while a genuine data-plane failure still fails twice.
+- `hosted-imports` installs *only* the hash-pinned requirements and imports
+  every hosted entrypoint module (`scripts/check_hosted_imports.py`, module set
+  derived from the hosted workflows rather than hardcoded). This is the exact
+  shape of #150.
+
+The release (`2026-07-22.0`), bbox, and map task index are pinned in the
+workflow env with the reason: the task index is a property of that release's
+row-group layout, and the job fails with an explicit message if the bbox stops
+landing on the pinned task.
 
 ### 6. Rust verifier test does not isolate the independent-binding check
 
@@ -129,13 +151,18 @@ should be closed before anything serves publicly.
 
 ## Documentation drift
 
-- `PENDING_WORK.md` is dated 2026-07-19 and its "Next" section still describes
+Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
+
+- ~~`PENDING_WORK.md` is dated 2026-07-19 and its "Next" section still describes
   the abandoned `agent/global-v2-executor` path. It is the largest doc in the
-  repo and does not mention construction v1 at all.
-- `docs/plans/2026-07-24-places-global-scale-plan.md` and
+  repo and does not mention construction v1 at all.~~ Its stale planning
+  sections were deleted rather than rewritten, and it now points at
+  `docs/plans/construction-v1-state.md` as the living state doc.
+- ~~`docs/plans/2026-07-24-places-global-scale-plan.md` and
   `docs/plans/2026-07-24-places-digest-divergence-root-cause.md` both still
   carry `Status: LOCAL SPIKE — uncommitted, no PR, no workflow`, but they are
-  committed and their recommendations shipped the same day in #141/#142/#143.
+  committed and their recommendations shipped the same day in #141/#142/#143.~~
+  Status lines corrected.
 
 ## Already addressed
 
@@ -144,6 +171,11 @@ should be closed before anything serves publicly.
   thread — `__exit__` then reported success and `evidence()` reported zero
   peaks. Fixed to fail closed, with the `psutil` attach moved to the caller's
   thread so a missing dependency fails at the call site.
+- **Dry-run does not exercise the execute data plane** (item 5 above).
+  `.github/workflows/slice-smoke.yml` runs the real five-phase Places data plane
+  on the Monaco Overture slice on every relevant PR, and imports every hosted
+  entrypoint module under only the hash-pinned dependency set. Both fixes
+  proposed in item 5, in one workflow.
 
 ## Added 2026-07-25, from the adversarial review of PR #155
 
@@ -160,11 +192,18 @@ should be closed before anything serves publicly.
    no code; the byte one was already violated before this change. The spec ships
    a `.sha256` companion and is meant to be frozen. Either enforce them or
    delete them — a frozen spec stating caps the build ignores is a trap.
+   **Scheduled:** fixed immediately after the two in-flight PRs (per-place
+   artifact; reduce-by-bucket-range) merge, together with item 3 — both touch
+   the same limit values, so doing them separately guarantees a conflict.
 3. **`Limits` dataclass defaults were not raised with the hosted limits.**
    `places_construction_v1.Limits` still defaults to 1,000,000 / 250,000 /
    256 MiB, and `rehearse_places_construction_v1.py` explicitly pins
    1,000,000 / 250,000. Hosted overrides win so nothing breaks, but rehearsals
    now plan at caps the hosted build no longer uses and are not representative.
+   **Scheduled:** same slot as item 2 — right after the per-place-artifact and
+   reduce-by-bucket-range PRs merge. Deliberately not done before then:
+   `places_construction_v1.py` and its tests are being edited by both of those
+   PRs, and a defaults change now is a pure merge conflict.
 4. **`predict-reduce` was 14x optimistic and this change made it worse.** Fixed
    in PR #155 by flooring the prediction with the committed plan's partition
    count. Worth a follow-up: the addresses branch of the same function divides
@@ -172,6 +211,29 @@ should be closed before anything serves publicly.
 5. **The committed plan is only read by `predict-reduce` and the generator.**
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
+
+## Added 2026-07-25: scope down the R2 credentials used by construction-v1
+
+The map/reduce R2-staging work (in flight, 2026-07-25) needs R2 write access
+from the *map* jobs, which previously held no cloud credentials at all — the
+`CLOUDFLARE_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` secrets
+reached only the finalize job. It reuses those same workflow-level credentials,
+by owner decision, to avoid blocking the staging work on a token change.
+
+That is a real widening of blast radius and is tracked here, not hidden:
+
+- The reused key is the general-purpose R2 key. It can write anywhere in the
+  bucket, including keys the create-only finalize discipline is meant to protect.
+- It now reaches roughly **89 parallel map jobs** instead of one finalize job,
+  in a **public** repository. Exposure surface scales with fan-out.
+
+**The follow-up:** issue a staging-only scoped R2 token — write limited to the
+staging prefix, read-only (or no access) everywhere else — and give the map and
+reduce jobs that token, leaving the broad key with finalize where the promotion
+discipline lives.
+
+Owner: Brad. Deliberate deferral recorded 2026-07-25. Do this before the slice
+is promoted, and before any run dispatched from a fork-visible surface.
 
 ## DEFERRED, do not lose: port the shuffle to the address family
 

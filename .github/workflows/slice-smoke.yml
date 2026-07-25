@@ -1,0 +1,174 @@
+name: Construction v1 slice smoke
+
+# The construction-v1 execute data plane had ZERO automated coverage: the
+# workflow's dry-run mode runs planning arithmetic only, so three consecutive
+# planet dispatches each died in their first minutes on a one-line defect a
+# dry-run cannot see (#148 matrix key, #149 cargo manifest path, #150 missing
+# psutil). See item 5 of docs/plans/2026-07-24-construction-v1-follow-ups.md.
+#
+# This runs the REAL five-phase Places data plane on a real Overture slice
+# covering Monaco -- S3 projection, transform binary, store writes, reduce,
+# head, finalize -- in ~15 seconds of actual work, plus an import check of every
+# hosted entrypoint module under only the hash-pinned dependency set.
+#
+# It needs NO credentials: the Overture release parquet is read anonymously from
+# the public us-west-2 bucket, and finalize publishes to a filesystem remote.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scripts/**"
+      - "crates/geocoder-construction/**"
+      - "crates/Cargo.toml"
+      - "crates/Cargo.lock"
+      - "benchmarks/places-construction-v1-evidence-spec-v2.json"
+      - ".github/requirements-hosted-rowgroup.txt"
+      - ".github/workflows/slice-smoke.yml"
+  pull_request:
+    paths:
+      - "scripts/**"
+      - "crates/geocoder-construction/**"
+      - "crates/Cargo.toml"
+      - "crates/Cargo.lock"
+      - "benchmarks/places-construction-v1-evidence-spec-v2.json"
+      - ".github/requirements-hosted-rowgroup.txt"
+      - ".github/workflows/slice-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: slice-smoke-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PYTHONHASHSEED: "0"
+  LC_ALL: C.UTF-8
+  LANG: C.UTF-8
+  # Pinned deliberately. The slice inventory is built from real row-group
+  # statistics of a specific release, and the task index the harness runs is a
+  # property of that release's row-group layout, so a floating "latest" would
+  # make this job's subject change under it. Bump this together with the
+  # inventory/task assumptions when the planet release moves.
+  SLICE_RELEASE: "2026-07-22.0"
+  # Monaco: small enough to run in seconds, dense enough that the combiner,
+  # multi-partition reduce, and sharded head all actually do work.
+  SLICE_BBOX: "7.36 43.71 7.47 43.78"
+  SLICE_TASK_INDEX: "33"
+
+jobs:
+  hosted-imports:
+    name: Hosted entrypoints import under pinned deps
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Set up the exact hosted Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install ONLY the hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Import every hosted entrypoint module
+        run: python scripts/check_hosted_imports.py
+
+  slice:
+    name: Monaco slice, all five phases on real Overture data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Set up the exact hosted Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install the hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      # Same command the hosted map/reduce/head jobs run. The harness looks for
+      # the binaries at crates/target/release, so the release profile is required.
+      - name: Build the construction binaries
+        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
+
+      - name: Build the Monaco slice inventory from real row-group statistics
+        run: |
+          set -euo pipefail
+          mkdir -p slice
+          # Anonymous public read of the Overture release parquet footers; no
+          # credentials, no data download (bbox stats live in the footer).
+          # shellcheck disable=SC2086
+          python scripts/build_slice_inventory_v1.py \
+            --release "$SLICE_RELEASE" --bbox $SLICE_BBOX \
+            --output slice/inventory.json | tee slice/inventory-report.json
+          TASK="$(jq -r '.task_index' slice/inventory-report.json)"
+          if [ "$TASK" != "$SLICE_TASK_INDEX" ]; then
+            echo "The bbox now lands on map task $TASK, not the pinned $SLICE_TASK_INDEX." >&2
+            echo "Release $SLICE_RELEASE row-group layout changed; update SLICE_TASK_INDEX." >&2
+            exit 1
+          fi
+
+      - name: Run all five construction-v1 phases on the slice
+        run: |
+          set -uo pipefail
+          # The whole harness is ~15 seconds, so a transient S3 read is cheaper to
+          # absorb by rerunning it than by plumbing retries into the projector.
+          # Each attempt gets a FRESH work dir: the store is create-only and a
+          # half-written one would mask the real failure.
+          for ATTEMPT in 1 2; do
+            WORK="slice/work"
+            [ "$ATTEMPT" = 1 ] || WORK="slice/work-retry-${ATTEMPT}"
+            echo "::group::slice attempt ${ATTEMPT} (work=${WORK})"
+            if python scripts/run_slice_construction_v1.py \
+                --inventory slice/inventory.json \
+                --task-index "$SLICE_TASK_INDEX" \
+                --release "$SLICE_RELEASE" \
+                --work "$WORK" 2>&1 | tee slice/run.log; then
+              echo "::endgroup::"
+              cp -f "$WORK"/*.json slice/ 2>/dev/null || true
+              # The harness exits non-zero on any phase failure; assert the
+              # finalize reconciliation explicitly too, so a silent "ran but
+              # proved nothing" cannot pass. Its last line is the summary JSON.
+              if ! tail -1 slice/run.log | jq -e '.reconciles == true and .records > 0' >/dev/null; then
+                echo "The slice ran but did not reconcile; this is a data-plane defect, not flakiness." >&2
+                exit 1
+              fi
+              exit 0
+            fi
+            echo "::endgroup::"
+            echo "Slice attempt ${ATTEMPT} failed (see the phase output above)." >&2
+          done
+          echo "The Monaco slice failed twice; this is a real data-plane failure or a sustained S3 outage." >&2
+          exit 1
+
+      - name: Summarize the slice run
+        if: always()
+        run: |
+          {
+            echo "## Construction v1 slice smoke"
+            echo
+            echo "- Release: \`$SLICE_RELEASE\` | bbox: \`$SLICE_BBOX\` | map task: \`$SLICE_TASK_INDEX\`"
+            if [ -f slice/run.log ]; then
+              echo
+              echo '```'
+              cat slice/run.log
+              echo '```'
+            else
+              echo "- The slice run produced no log; see the failing step above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the slice inventory, reports, and log for diagnosis
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: slice-smoke-evidence
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            slice/*.json
+            slice/run.log

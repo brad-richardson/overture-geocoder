@@ -1,7 +1,9 @@
 # Places construction v1: plan to global scale
 
-Date: 2026-07-24. Status: LOCAL SPIKE — uncommitted, for owner review. No PR,
-no workflow, no remote writes. Produced from local measurement over the real
+Date: 2026-07-24. Status: SHIPPED — committed; the recommendations landed the
+same day in #141/#142/#143. Kept as the point-in-time analysis that motivated
+them; `docs/plans/construction-v1-state.md` is the living state document and
+supersedes this where they disagree. Produced from local measurement over the real
 2026-06-17.0 census data (12 projected map tasks, ~10.7M of 75.6M places) plus
 the merged readiness evidence in
 `benchmarks/places-construction-v1-data/evidence/`.

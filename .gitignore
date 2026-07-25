@@ -72,6 +72,10 @@ htmlcov/
 # Rust
 crates/target/
 
+# Construction v1 slice harness scratch (build_slice_inventory_v1 /
+# run_slice_construction_v1 default output dir)
+slice/
+
 # Shard outputs (generated, large)
 shards/
 data/
