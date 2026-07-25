@@ -172,3 +172,51 @@ should be closed before anything serves publicly.
 5. **The committed plan is only read by `predict-reduce` and the generator.**
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
+
+## DEFERRED, do not lose: port the shuffle to the address family
+
+Raised and deliberately deferred on 2026-07-25 so Places could be proven first.
+Nothing about it is started. Full reasoning in `construction-v1-state.md`.
+
+**Addresses have the same transport wall and are the bigger half of it:**
+473,576,753 records / 33.2 GB selected uncompressed, against Places'
+74,223,561 / 10.6 GB. They run through the identical workflow, so the store
+moves as GitHub artifacts exactly the same way, and reduce has never run.
+
+**Do NOT change the address partition key.** It is better than the Places one:
+
+- `address_partition.address_key_hash` is FNV-1a over 8 normalized fields, so
+  `route_hash` is effectively unique per address. There is **no indivisible
+  group**, unlike Places' `(cell, token)` -- which is the thing that forced the
+  combiner, the headroom policy, and the hard floor. Addresses subdivide to any
+  depth and each split genuinely halves the load.
+- `address_partition.hash_bucket` already takes the HIGH bits
+  (`value >> (64 - bits)`), which is exactly the mistake the Places shuffle
+  made and had to fix.
+
+**Do port the shuffle.** The natural key is `(country, top-K bits of
+route_hash)` -- the partition key at a fixed granularity. Easier than Places:
+
+- `route_hash` is already uniform, so buckets are even within a country with no
+  hash-of-a-hash.
+- Partitions map exactly either way. Prefix longer than K is a subset of one
+  shard; prefix shorter than K is the union of exactly `2^(K-L)` shards, all
+  within its own country, reading no foreign data.
+- The source is already largely country-clustered: `exact_country_row_groups`
+  8,023 of 8,704, only 681 mixed. The existing reduce already exploits this via
+  per-row-group routing summaries.
+
+**First concrete step: measure country skew.** It sets K and is currently
+unknown -- the address inventory records no per-country row counts. Measure it
+from one real map run, the same way Places cell skew was measured.
+
+**Related:** `MEASURED_REDUCE_MINUTES_PER_PARTITION["addresses"] = 2.0` is
+genuinely uncalibrated and the comment in `construction_v1_hosted.py` says so.
+The Places 1.0 **is** calibrated. Do not repeat the error of calling both
+uncalibrated.
+
+**Also unbuilt for addresses:** there is no slice harness. `build_slice_inventory_v1.py`
+and `run_slice_construction_v1.py` are Places-only, so addresses currently have
+no fast local loop. Building the address equivalent is probably the actual first
+task, since without it any address work repeats the pattern of designing against
+phases that have never run.
