@@ -1198,6 +1198,7 @@ def _reduce_bucket_range(
     markers: list[dict[str, Any]],
     bucket_start: int,
     bucket_end: int,
+    expected_partitions: list[int] | None = None,
 ) -> dict[str, Any]:
     """Reduce one INCLUSIVE shuffle-bucket range, writing one file per partition.
 
@@ -1205,6 +1206,15 @@ def _reduce_bucket_range(
     fragment in the range exactly once. Output paths are still keyed by PLAN
     partition index, so finalize, the marker keys, and the published object set
     are unchanged by how the ranges were cut.
+
+    ``expected_partitions`` is the partition range the PLAN assigned to this job.
+    It is checked before a single marker is written, because a completion marker
+    is a create-only OWNERSHIP CLAIM: once published to the run-scoped staging
+    prefix it can never be replaced, so a marker written for a partition this job
+    did not own leaves the run unresumable. Checking after publication -- which is
+    where this check used to live -- also hid the real diagnosis, since the first
+    thing to fail was an opaque "existing completion marker differs" from the
+    colliding marker rather than the ownership message below.
     """
     if args.family != "places":
         raise SystemExit("bucket-range reduce is Places-only; addresses batch by partition")
@@ -1221,6 +1231,17 @@ def _reduce_bucket_range(
         verifier_binary=Path(args.verifier_binary),
         limits=limits,
     )
+    emitted = result["partition_indexes"]
+    if expected_partitions is not None and emitted != expected_partitions:
+        assigned, produced = set(expected_partitions), set(emitted)
+        raise SystemExit(
+            "reduce bucket range emitted partitions the plan did not assign to "
+            "this batch; the plan and the reducer disagree about ownership. "
+            f"Reducer emitted {len(emitted)}, plan assigned "
+            f"{len(expected_partitions)}; emitted-but-unassigned "
+            f"{sorted(produced - assigned)[:8]}, assigned-but-missing "
+            f"{sorted(assigned - produced)[:8]}"
+        )
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     for partition_index, reduction in zip(
@@ -1278,15 +1299,14 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
             result = _reduce_bucket_range(
                 args, store=store, limits=limits, plan=plan, markers=markers,
                 bucket_start=batch["bucket_start"], bucket_end=batch["bucket_end"],
+                # Checked INSIDE, before any marker is published -- see the
+                # docstring. A create-only marker for a partition this job does not
+                # own cannot be taken back.
+                expected_partitions=list(
+                    range(batch["partition_start"],
+                          batch["partition_start"] + batch["partition_count"])
+                ),
             )
-            if result["partition_indexes"] != list(
-                range(batch["partition_start"],
-                      batch["partition_start"] + batch["partition_count"])
-            ):
-                raise SystemExit(
-                    "reduce bucket range emitted partitions the plan did not assign "
-                    "to this batch; the plan and the reducer disagree about ownership"
-                )
             print(json.dumps({"family": args.family, "batch_index": args.batch_index,
                               "bucket_start": result["bucket_start"],
                               "bucket_end": result["bucket_end"],
