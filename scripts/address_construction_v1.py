@@ -8,6 +8,7 @@ stages and validates compact manifests/proof directories only.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
@@ -504,8 +505,24 @@ class LocalObjectStore:
         try:
             os.link(temporary, target)
         except FileExistsError:
-            if target.read_bytes() != payload:
-                raise ValueError("existing completion marker differs")
+            existing = target.read_bytes()
+            if existing != payload:
+                # Name the key and BOTH payloads. A marker is a create-only
+                # completion claim, so this means one task slot was completed twice
+                # with different results -- and the two most common causes are told
+                # apart only by the payloads: a store reused across two producer
+                # revisions (the fields differ) versus two jobs claiming one slot
+                # (the artifact identity differs). The bare message forced that
+                # diagnosis to be done by re-running with a patched exception.
+                raise ValueError(
+                    f"existing completion marker differs at {key}: this slot was "
+                    "already completed with a different result. A marker is "
+                    f"create-only. Existing {len(existing)} bytes "
+                    f"sha256={hashlib.sha256(existing).hexdigest()}, new "
+                    f"{len(payload)} bytes "
+                    f"sha256={hashlib.sha256(payload).hexdigest()}. Existing "
+                    f"payload: {existing.decode('utf-8', 'replace').strip()[:512]}"
+                ) from None
         finally:
             temporary.unlink(missing_ok=True)
 

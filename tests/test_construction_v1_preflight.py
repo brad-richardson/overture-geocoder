@@ -546,6 +546,134 @@ def test_places_reduce_execution_rejects_a_plan_not_ordered_by_bucket():
     assert "ordered by shuffle bucket" in str(excinfo.value)
 
 
+class _RecordingStore:
+    """Records marker writes so a test can prove none were published."""
+
+    def __init__(self, root: Path):
+        self.root = root
+        self.markers: list[str] = []
+
+    def write_marker_last(self, key: str, value: dict) -> None:
+        self.markers.append(key)
+
+
+def _reduce_plan(tmp_path: Path, *, partition_count: int) -> Path:
+    plan = tmp_path / "plan.json"
+    plan.write_text(json.dumps({
+        "partitions": [],
+        "reduce_execution": {
+            "ownership": "shuffle-bucket-range",
+            "batches": [{"batch_index": 0, "bucket_start": 0, "bucket_end": 3,
+                         "partition_start": 0, "partition_count": partition_count}],
+        },
+    }) + "\n")
+    (tmp_path / "markers").mkdir(exist_ok=True)
+    (tmp_path / "markers" / "places-map-000.json").write_text("{}\n")
+    return plan
+
+
+def _run_reduce_batch_zero(tmp_path: Path) -> int:
+    return HOSTED.main([
+        "run-reduce", "--contract", str(_contract(tmp_path)), "--family", "places",
+        "--store-root", str(tmp_path / "store"), "--plan", str(tmp_path / "plan.json"),
+        "--markers-dir", str(tmp_path / "markers"), "--batch-index", "0",
+        "--encoder-binary", "/nonexistent", "--verifier-binary", "/nonexistent",
+        "--scratch-dir", str(tmp_path / "scratch"),
+        "--output-dir", str(tmp_path / "reductions"),
+    ])
+
+
+def test_bucket_range_reduce_checks_ownership_before_publishing_any_marker(
+    tmp_path, monkeypatch
+):
+    # A completion marker is a create-only OWNERSHIP CLAIM: published into the
+    # run-scoped staging prefix it can never be replaced, so a marker written for a
+    # partition this job does not own leaves the run unresumable. The plan-agreement
+    # check therefore has to run BEFORE the marker loop -- it used to run after it,
+    # in the caller, which meant an ownership disagreement first surfaced as an
+    # opaque "existing completion marker differs" from the colliding marker, or,
+    # with no collision, published the wrong claim and only then aborted.
+    reduction = {
+        "partition": {"id": "p-0000"},
+        "routed_object": {"key": "serve/places-v1/routed/sha256/" + "0" * 64 + ".plrv",
+                          "bytes": 1, "sha256": "0" * 64},
+    }
+    monkeypatch.setattr(
+        HOSTED.PLACES,
+        "reduce_bucket_range",
+        lambda **_kwargs: {
+            "bucket_start": 0, "bucket_end": 3, "fragments_opened": 1,
+            # The reducer claims partitions 7 and 8; the plan assigned 0 and 1.
+            "partition_indexes": [7, 8],
+            "reductions": [reduction, reduction],
+        },
+    )
+    store = _RecordingStore(tmp_path / "store")
+    monkeypatch.setattr(HOSTED, "_store", lambda *_args, **_kwargs: store)
+    _reduce_plan(tmp_path, partition_count=2)
+    with pytest.raises(SystemExit) as excinfo:
+        _run_reduce_batch_zero(tmp_path)
+    assert "disagree about ownership" in str(excinfo.value)
+    assert store.markers == []
+    # And no reduction JSON either: finalize globs that directory, so a file for an
+    # unowned partition would be read back as a real reduction.
+    assert not sorted((tmp_path / "reductions").glob("*.json"))
+
+
+def test_bucket_range_reduce_publishes_when_the_plan_agrees(tmp_path, monkeypatch):
+    # The same path with agreeing ownership still writes one marker and one
+    # reduction per partition, so the check above is a guard and not a blanket stop.
+    def _reduction(index: int) -> dict:
+        digest = f"{index:064x}"
+        return {"partition": {"id": f"p-{index:04d}"},
+                "routed_object": {"key": f"serve/places-v1/routed/sha256/{digest}.plrv",
+                                  "bytes": 1, "sha256": digest}}
+
+    monkeypatch.setattr(
+        HOSTED.PLACES,
+        "reduce_bucket_range",
+        lambda **_kwargs: {
+            "bucket_start": 0, "bucket_end": 3, "fragments_opened": 2,
+            "partition_indexes": [0, 1],
+            "reductions": [_reduction(0), _reduction(1)],
+        },
+    )
+    store = _RecordingStore(tmp_path / "store")
+    monkeypatch.setattr(HOSTED, "_store", lambda *_args, **_kwargs: store)
+    _reduce_plan(tmp_path, partition_count=2)
+    assert _run_reduce_batch_zero(tmp_path) == 0
+    assert store.markers == [
+        HOSTED._reduce_marker_key("places", 0),
+        HOSTED._reduce_marker_key("places", 1),
+    ]
+    assert [p.name for p in sorted((tmp_path / "reductions").glob("*.json"))] == [
+        "0000.json", "0001.json",
+    ]
+
+
+def test_create_only_marker_conflict_names_the_key_and_both_payloads(tmp_path):
+    # The guard is correct and must stay; what it says is the problem. Diagnosing a
+    # real conflict needed the KEY and both payloads, and the bare message carried
+    # neither -- the two causes (a store reused across producer revisions vs two
+    # jobs claiming one slot) are told apart only by what the payloads say.
+    store = HOSTED.ADDRESS.LocalObjectStore(tmp_path / "store")
+    key = HOSTED._reduce_marker_key("places", 0)
+    store.write_marker_last(key, {"partition_index": 0, "artifact": None})
+    # A byte-identical rewrite stays a no-op: that is what makes a retried job safe.
+    store.write_marker_last(key, {"partition_index": 0, "artifact": None})
+    with pytest.raises(ValueError) as excinfo:
+        store.write_marker_last(
+            key, {"partition_index": 0, "artifact": {"sha256": "a" * 64}}
+        )
+    message = str(excinfo.value)
+    assert message.startswith("existing completion marker differs")
+    assert key in message
+    # Both payloads are identified, and the existing one is quoted, so the reader
+    # can see WHICH field moved without re-running anything.
+    assert message.count("sha256=") == 2
+    assert '"artifact":null' in message
+
+
 def test_predict_reduce_places_plans_bucket_ranges(tmp_path, capsys):
     contract = _contract(tmp_path)
     assert HOSTED.main([
