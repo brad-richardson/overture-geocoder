@@ -403,12 +403,15 @@ jobs:
             echo "Deleting s3://$BUCKET/$target ..."
             RM "$target"
             base="${target%"$ADDRESSES_SUBTREE"}"
-            for keep in manifests reports inventory; do
-              count=$(S3 s3 ls "s3://$BUCKET/${base}immutable/$keep/" --recursive \
+            # Evidence layout as it actually exists in the 59f326dc run (verified
+            # 2026-07-25 against the live listing): inventory JSONs, the non-objects
+            # remainder of immutable/map/, and the completed/ markers.
+            for keep in "immutable/inventory/" "immutable/map/" "completed/"; do
+              count=$(S3 s3 ls "s3://$BUCKET/${base}${keep}" --recursive \
                         | grep -c . || true)
               [ "$count" -gt 0 ] \
-                || { echo "::error::evidence lost: ${base}immutable/$keep/ is empty"; exit 1; }
-              echo "retained ${base}immutable/$keep/  objects=$count"
+                || { echo "::error::evidence lost: ${base}${keep} is empty"; exit 1; }
+              echo "retained ${base}${keep}  objects=$count"
             done
           done < /tmp/delete-targets.txt
 
