@@ -368,8 +368,8 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
   planet distinct tokens that is 1.6–2.1M entries per shard, 6–8× over the cap,
   and the only thing that reported it was the encoder's `bail!` — raised after the
   whole map, reduce and head merge had been paid for. Fixed in the workflow and
-  wired to the constant in the CLI, with the head builder now measuring the worst
-  shard exactly and failing closed *before* any encode. **256 shards
+  wired to the constant in the CLI (PR #169), with the head builder now measuring
+  the worst shard exactly and failing closed *before* any encode. **256 shards
   (`shard_bits = 8`) is the viable cheaper alternative**: 97,656 entries/shard
   still clears the cap and it adds 240 objects to the finalize publish set instead
   of 4,080, which matters against the 100,000 remote-operation finalize budget.
