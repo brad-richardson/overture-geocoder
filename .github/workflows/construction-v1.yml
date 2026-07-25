@@ -509,13 +509,17 @@ jobs:
           if [ "$COUNT" -gt 256 ]; then echo "reduce matrix exceeds 256 cap" >&2; exit 1; fi
           PARTITIONS="$(jq -r '.reduce_execution.partition_count' plan/plan.json)"
           BATCH_SIZE="$(jq -r '.reduce_execution.batch_size' plan/plan.json)"
+          # Places jobs own a contiguous SHUFFLE-BUCKET range (each reads its own
+          # map fragments once); addresses still batch contiguous partitions.
+          OWNERSHIP="$(jq -r '.reduce_execution.ownership // "partition-batch"' plan/plan.json)"
+          STRIDE="$(jq -r '.reduce_execution.bucket_stride // "n/a"' plan/plan.json)"
           {
             echo "reduce_matrix=$MATRIX"
             echo "reduce_count=$COUNT"
           } >> "$GITHUB_OUTPUT"
           {
             echo "## Reducer plan"
-            echo "- Reduce partitions: $PARTITIONS across $COUNT batch jobs (batch size $BATCH_SIZE, matrix cap 256)"
+            echo "- Reduce partitions: $PARTITIONS across $COUNT jobs, owned by $OWNERSHIP (largest job $BATCH_SIZE partitions, bucket stride $STRIDE, matrix cap 256)"
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Publish the plan, merged store, and updated ledger
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
@@ -765,7 +769,7 @@ jobs:
             echo "## Construction v1 run result"
             echo
             echo "- Family: \`$FAMILY_KEY\` | Request: \`${{ needs.admit.outputs.request_sha256 }}\`"
-            echo "- Map tasks: ${{ needs.admit.outputs.map_task_count }} | Reduce partitions: ${{ needs.plan.outputs.reduce_count }}"
+            echo "- Map tasks: ${{ needs.admit.outputs.map_task_count }} | Reduce jobs: ${{ needs.plan.outputs.reduce_count }}"
             echo "- Max concurrency: ${{ needs.admit.outputs.max_parallel }} | Cap: ${{ needs.admit.outputs.max_total_runner_minutes }} runner-min | Prior: ${{ needs.admit.outputs.prior_runner_minutes }}"
             echo "- Consumed runner minutes (ledger): $(jq -r '(.prior_runner_minutes // 0) + ([.phases[].runner_minutes] | add // 0)' cv1plan/control/ledger.json 2>/dev/null || echo unavailable)"
             echo "- Slice: immutable, NON-PROMOTING; completion marker create-only and written last"

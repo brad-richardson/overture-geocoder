@@ -25,6 +25,13 @@ parser.add_argument("--inventory", type=Path, required=True,
 parser.add_argument("--task-index", type=int, required=True)
 parser.add_argument("--release", required=True)
 parser.add_argument("--work", type=Path, required=True)
+# The default plan gives every populated bucket its own job, which on a slice
+# this small means one partition per job -- the DEGENERATE shape. Lowering the
+# job cap widens the bucket stride, so a job owns several partitions and the fast
+# loop actually exercises multi-partition ranges.
+parser.add_argument("--max-reduce-jobs", type=int, default=None,
+                    help="Cap reduce jobs, widening the bucket stride "
+                         "(use 1 to force one job over the whole bucket space).")
 args = parser.parse_args()
 
 WORK = args.work
@@ -112,24 +119,34 @@ print(f"  term rows {comb['input_rows']:,} -> {comb['retained_rows']:,} retained
 # --- plan -----------------------------------------------------------------
 t = phase("plan-reduce")
 plan = WORK / "plan.json"
-hosted("plan-reduce", "--contract", contract, "--store-root", store,
-       "--family", "places", "--markers-dir", markers,
-       "--scratch-dir", WORK / "plan-scratch", "--output", plan,
-       "--matrix-out", WORK / "reduce-matrix.json")
-partitions = json.loads(plan.read_text())["partitions"]
-print(f"  {len(partitions)} partitions  {time.time()-t:.1f}s")
+plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store,
+             "--family", "places", "--markers-dir", markers,
+             "--scratch-dir", WORK / "plan-scratch", "--output", plan,
+             "--matrix-out", WORK / "reduce-matrix.json"]
+if args.max_reduce_jobs is not None:
+    plan_argv += ["--max-reduce-jobs", args.max_reduce_jobs]
+hosted(*plan_argv)
+plan_document = json.loads(plan.read_text())
+partitions = plan_document["partitions"]
+execution = plan_document["reduce_execution"]
+print(f"  {len(partitions)} partitions in {execution['job_count']} bucket-range jobs "
+      f"(stride {execution['bucket_stride']} of {execution['bucket_count']} buckets)"
+      f"  {time.time()-t:.1f}s")
 
 # --- reduce ---------------------------------------------------------------
-t = phase(f"run-reduce x{len(partitions)}")
+# One job per BUCKET RANGE, exactly as the hosted matrix dispatches it: the job
+# opens each map fragment in its range once and emits every partition whose cell
+# hashes into the range.
+t = phase(f"run-reduce x{execution['job_count']} bucket ranges")
 reductions = WORK / "reductions"; reductions.mkdir(exist_ok=True)
-for index in range(len(partitions)):
+for batch in execution["batches"]:
     hosted("run-reduce", "--contract", contract, "--store-root", store,
            "--family", "places", "--plan", plan, "--markers-dir", markers,
-           "--partition-index", index,
+           "--batch-index", batch["batch_index"],
            "--encoder-binary", BIN / "places-serving-encode-v1",
            "--verifier-binary", BIN / "places-serving-verify-v1",
-           "--scratch-dir", WORK / f"reduce-scratch-{index}",
-           "--output", reductions / f"{index:04d}.json")
+           "--scratch-dir", WORK / f"reduce-scratch-{batch['batch_index']}",
+           "--output-dir", reductions)
 elapsed = time.time() - t
 print(f"  {len(partitions)} partitions in {elapsed:.1f}s "
       f"({elapsed/max(1,len(partitions)):.2f}s/partition)")
@@ -190,7 +207,13 @@ summary = {"records": records, "partitions": len(partitions),
            "reconciles": result["reconciles"],
            "head_shard_count": head_result["shard_count"],
            "head_populated_shards": head_result["populated_shards"],
-           "head_total_records": head_result["total_records"]}
+           "head_total_records": head_result["total_records"],
+           # How the bucket space was cut. batch_size 1 is the degenerate shape;
+           # a run asserting anything about multi-partition ranges must be able
+           # to see that it got them.
+           "reduce_job_count": execution["job_count"],
+           "reduce_partitions_per_job": execution["batch_size"],
+           "reduce_bucket_stride": execution["bucket_stride"]}
 # Written as a file as well as printed: stdout can interleave with stderr, so
 # `tail -1` of a merged stream is not a reliable machine-readable surface.
 (WORK / "summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")

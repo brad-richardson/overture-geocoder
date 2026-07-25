@@ -403,6 +403,138 @@ def _reduce_batches(
     return batch_size, batches
 
 
+def _reduce_bucket_ranges(
+    partitions_per_bucket: list[int],
+    *,
+    job_cap: int,
+    timeout_max_batch: int | None = None,
+) -> tuple[int, list[dict[str, int]]]:
+    """Split the SHUFFLE-BUCKET space into at most ``job_cap`` contiguous ranges.
+
+    Places reduce jobs own a bucket range, not a partition range, because the map
+    fragments are keyed by bucket: a range consumer's input is the fragments in
+    its range, read once each. Ranges are contiguous strides over the whole
+    bucket space, inclusive on both ends, mirroring
+    ``build_id_index.py --prefix-start/--prefix-end``.
+
+    The returned cover is TOTAL and DISJOINT over ``0..len(partitions_per_bucket)-1``
+    whether or not every bucket is populated, which is what makes ownership exact:
+    a cell hashes to one bucket, a bucket lies in one range. Ranges with no
+    partitions are returned with ``partition_count`` 0 so the cover stays visible;
+    the caller drops them from the dispatch matrix because they would read nothing.
+
+    ``partition_start`` is valid because a Places plan is ORDERED by shuffle
+    bucket, so a bucket range is also a contiguous partition range.
+
+    A bucket is indivisible -- a cell never splits across buckets -- so unlike
+    partition batching there is no smaller stride to fall back on. When even a
+    single-bucket range holds more partitions than the job timeout admits, this
+    fails closed rather than dispatching a job that cannot finish.
+    """
+    bucket_count = len(partitions_per_bucket)
+    if bucket_count <= 0:
+        raise SystemExit("reduce bucket space must be non-empty")
+    if job_cap <= 0:
+        raise SystemExit("reduce job cap must be positive")
+    stride = max(1, math.ceil(bucket_count / job_cap))
+    ranges: list[dict[str, int]] = []
+    partition_start = 0
+    for index, start in enumerate(range(0, bucket_count, stride)):
+        end = min(start + stride, bucket_count) - 1
+        count = sum(partitions_per_bucket[start : end + 1])
+        if timeout_max_batch is not None and count > timeout_max_batch:
+            raise SystemExit(
+                f"reduce bucket range [{start},{end}] holds {count} partitions, but "
+                f"the measured per-partition reduce time only admits "
+                f"{timeout_max_batch} per {REDUCE_JOB_TIMEOUT_MINUTES}-min job"
+                + (
+                    "; a bucket is indivisible, so raise the job cap or the bucket "
+                    "count instead"
+                    if stride == 1
+                    else "; raise the job cap to shorten the stride"
+                )
+            )
+        ranges.append(
+            {
+                "batch_index": index,
+                "bucket_start": start,
+                "bucket_end": end,
+                "partition_start": partition_start,
+                "partition_count": count,
+            }
+        )
+        partition_start += count
+    if len(ranges) > job_cap:  # pragma: no cover - arithmetic guarantees this
+        raise SystemExit("reduce bucket ranges failed to fit the job cap")
+    return stride, ranges
+
+
+def _places_partitions_per_bucket(
+    partitions: list[dict[str, Any]], bits: int
+) -> list[int]:
+    """Per-bucket partition counts, asserting the plan is bucket-ordered."""
+    counts = [0] * (1 << bits)
+    previous = -1
+    for partition in partitions:
+        bucket = PLACES.partition_shuffle_bucket(partition, bits)
+        if bucket < previous:
+            raise SystemExit(
+                "places plan partitions are not ordered by shuffle bucket, so a "
+                "bucket range would not be a contiguous partition range; re-run "
+                "plan-reduce with a current plan"
+            )
+        previous = bucket
+        counts[bucket] += 1
+    return counts
+
+
+def _places_reduce_execution(
+    partitions: list[dict[str, Any]],
+    *,
+    bits: int,
+    job_cap: int,
+    timeout_max_batch: int | None,
+    fragment_buckets: set[int] | None = None,
+) -> tuple[int, list[dict[str, int]], dict[str, Any]]:
+    """Bucket-range reduce execution for a Places plan."""
+    if not partitions:
+        raise SystemExit("plan-reduce produced no partitions")
+    counts = _places_partitions_per_bucket(partitions, bits)
+    stride, cover = _reduce_bucket_ranges(
+        counts, job_cap=job_cap, timeout_max_batch=timeout_max_batch
+    )
+    dispatched = [dict(item) for item in cover if item["partition_count"]]
+    for index, item in enumerate(dispatched):
+        item["batch_index"] = index
+    if sum(item["partition_count"] for item in dispatched) != len(partitions):
+        raise SystemExit("reduce bucket ranges do not cover every partition once")
+    # Ranges with no partitions are NOT dispatched, so a bucket that holds map
+    # data but no plan partition would be silently skipped -- and the in-job
+    # "fragments but no partitions" guard would never run to catch it. Check it
+    # here, where the map markers are still in hand.
+    if fragment_buckets is not None:
+        covered = {
+            bucket
+            for item in dispatched
+            for bucket in range(item["bucket_start"], item["bucket_end"] + 1)
+        }
+        orphans = sorted(bucket for bucket in fragment_buckets if bucket not in covered)
+        if orphans:
+            raise SystemExit(
+                f"map fragments occupy shuffle buckets {orphans} that no dispatched "
+                "reduce range covers; the plan is missing those cells"
+            )
+    batch_size = max(item["partition_count"] for item in dispatched)
+    details = {
+        "shuffle_bucket_bits": bits,
+        "bucket_count": 1 << bits,
+        "bucket_stride": stride,
+        "bucket_ranges": len(cover),
+        "populated_bucket_ranges": len(dispatched),
+    }
+    return batch_size, dispatched, details
+
+
 def cmd_plan_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args.store_root)
@@ -431,9 +563,26 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
     timeout_max_batch = _timeout_max_batch(
         per_partition, job_timeout=args.job_timeout_minutes, margin=args.timeout_margin
     )
-    batch_size, batches = _reduce_batches(
-        partition_count, job_cap=job_cap, timeout_max_batch=timeout_max_batch
-    )
+    # Places reduce jobs own a bucket RANGE; the address family still batches
+    # contiguous partition indexes, because it has no shuffle yet (deferred, see
+    # docs/plans/2026-07-24-construction-v1-follow-ups.md).
+    details: dict[str, Any] = {}
+    if args.family == "places":
+        batch_size, batches, details = _places_reduce_execution(
+            plan["partitions"],
+            bits=int(limits.shuffle_bucket_bits),
+            job_cap=job_cap,
+            timeout_max_batch=timeout_max_batch,
+            fragment_buckets={
+                int(pack["shuffle_bucket"])
+                for marker in markers
+                for pack in marker["packs"]
+            },
+        )
+    else:
+        batch_size, batches = _reduce_batches(
+            partition_count, job_cap=job_cap, timeout_max_batch=timeout_max_batch
+        )
     job_count = len(batches)
     per_job_minutes = math.ceil(batch_size * per_partition)
     timing = {
@@ -444,7 +593,12 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         "per_job_minutes": per_job_minutes,
     }
     plan["reduce_execution"] = {
-        "schema": "construction-v1-reduce-execution-v1",
+        "schema": (
+            "construction-v1-reduce-execution-v2"
+            if args.family == "places"
+            else "construction-v1-reduce-execution-v1"
+        ),
+        "ownership": "shuffle-bucket-range" if args.family == "places" else "partition-batch",
         "partition_count": partition_count,
         "batch_size": batch_size,
         "job_count": job_count,
@@ -452,6 +606,7 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         "matrix_cap": REDUCE_MATRIX_CAP,
         "timing_assumption": timing,
         "batches": batches,
+        **details,
     }
     write_json(args.output, plan)
 
@@ -636,9 +791,40 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
     timeout_max_batch = _timeout_max_batch(
         per_partition, job_timeout=args.job_timeout_minutes, margin=args.timeout_margin
     )
-    batch_size, batches = _reduce_batches(
-        predicted_partitions, job_cap=job_cap, timeout_max_batch=timeout_max_batch
-    )
+    details: dict[str, Any] = {}
+    if args.family == "places":
+        # Places reduce jobs own bucket ranges, so predict the same way plan-reduce
+        # decides: spread the predicted partitions over the bucket space and cover
+        # it in contiguous strides. Uniform spreading is the right model rather
+        # than a convenience -- the bucket is a multiplicative hash of the cell,
+        # so cell COUNTS per bucket are uniform by construction (only the
+        # data-weighted distribution is skewed, and reduce is planned per
+        # partition). The structural partition floor from the committed plan is
+        # unchanged and still supplies `predicted_partitions`.
+        bits = int(limits.shuffle_bucket_bits)
+        buckets = 1 << bits
+        base, extra = divmod(predicted_partitions, buckets)
+        counts = [base + (1 if index < extra else 0) for index in range(buckets)]
+        stride, cover = _reduce_bucket_ranges(
+            counts, job_cap=job_cap, timeout_max_batch=timeout_max_batch
+        )
+        populated = [item for item in cover if item["partition_count"]]
+        if not populated:
+            raise SystemExit("predicted reduce has no populated bucket ranges")
+        batch_size = max(item["partition_count"] for item in populated)
+        batches = populated
+        details = {
+            "shuffle_bucket_bits": bits,
+            "bucket_count": buckets,
+            "bucket_stride": stride,
+            "bucket_ranges": len(cover),
+            "populated_bucket_ranges": len(populated),
+            "reduce_ownership": "shuffle-bucket-range",
+        }
+    else:
+        batch_size, batches = _reduce_batches(
+            predicted_partitions, job_cap=job_cap, timeout_max_batch=timeout_max_batch
+        )
     job_count = len(batches)
 
     projected_reduce = math.ceil(predicted_partitions * per_partition)
@@ -661,6 +847,7 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
         "projected_reduce_minutes": projected_reduce,
         "fits_matrix_cap": job_count <= REDUCE_MATRIX_CAP,
         "fits_reducer_cap": job_count <= max_reducers,
+        **details,
     }
     if job_count > REDUCE_MATRIX_CAP or job_count > max_reducers:
         raise SystemExit(
@@ -741,12 +928,72 @@ def _reduce_one_partition(
     return reduction
 
 
+def _reduce_bucket_range(
+    args: argparse.Namespace,
+    *,
+    store: Any,
+    limits: Any,
+    plan: dict[str, Any],
+    markers: list[dict[str, Any]],
+    bucket_start: int,
+    bucket_end: int,
+) -> dict[str, Any]:
+    """Reduce one INCLUSIVE shuffle-bucket range, writing one file per partition.
+
+    The range owns every partition whose cell hashes into it, and reads each map
+    fragment in the range exactly once. Output paths are still keyed by PLAN
+    partition index, so finalize, the marker keys, and the published object set
+    are unchanged by how the ranges were cut.
+    """
+    if args.family != "places":
+        raise SystemExit("bucket-range reduce is Places-only; addresses batch by partition")
+    if args.output_dir is None:
+        raise SystemExit("bucket-range reduce requires --output-dir")
+    result = PLACES.reduce_bucket_range(
+        bucket_start=bucket_start,
+        bucket_end=bucket_end,
+        plan=plan,
+        markers=markers,
+        store=store,
+        scratch_root=Path(args.scratch_dir),
+        encoder_binary=Path(args.encoder_binary),
+        verifier_binary=Path(args.verifier_binary),
+        limits=limits,
+    )
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for partition_index, reduction in zip(
+        result["partition_indexes"], result["reductions"], strict=True
+    ):
+        write_json(output_dir / f"{partition_index:04d}.json", reduction)
+        store.write_marker_last(
+            _reduce_marker_key(args.family, partition_index),
+            {"partition_index": partition_index, "artifact": reduction.get("artifact")},
+        )
+    return result
+
+
 def cmd_run_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args.store_root)
     limits = _limits_for(contract, args.family)
     plan = read_json(args.plan)
     markers = _load_markers(args.markers_dir)
+
+    # Bucket-range mode (Places): --bucket-start/--bucket-end directly, mirroring
+    # build_id_index.py --prefix-start/--prefix-end.
+    if args.bucket_start is not None or args.bucket_end is not None:
+        if args.bucket_start is None or args.bucket_end is None:
+            raise SystemExit("--bucket-start and --bucket-end must be given together")
+        result = _reduce_bucket_range(
+            args, store=store, limits=limits, plan=plan, markers=markers,
+            bucket_start=args.bucket_start, bucket_end=args.bucket_end,
+        )
+        print(json.dumps({"family": args.family, "bucket_start": result["bucket_start"],
+                          "bucket_end": result["bucket_end"],
+                          "partitions": result["partition_indexes"],
+                          "fragments_opened": result["fragments_opened"]}, sort_keys=True))
+        return 0
 
     # Batch mode: one reducer JOB processes a contiguous partition range serially
     # and writes one output per partition into --output-dir (0000.json ...). This
@@ -760,6 +1007,31 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
         if args.batch_index is None or not 0 <= args.batch_index < len(batches):
             raise SystemExit("reduce --batch-index is outside the plan")
         batch = batches[args.batch_index]
+        # A Places plan records each job as a bucket range; --batch-index selects
+        # one, so the workflow matrix stays a single key and the dispatch shape is
+        # unchanged. Addresses keep the partition-batch path.
+        if batch.get("bucket_start") is not None:
+            result = _reduce_bucket_range(
+                args, store=store, limits=limits, plan=plan, markers=markers,
+                bucket_start=batch["bucket_start"], bucket_end=batch["bucket_end"],
+            )
+            if result["partition_indexes"] != list(
+                range(batch["partition_start"],
+                      batch["partition_start"] + batch["partition_count"])
+            ):
+                raise SystemExit(
+                    "reduce bucket range emitted partitions the plan did not assign "
+                    "to this batch; the plan and the reducer disagree about ownership"
+                )
+            print(json.dumps({"family": args.family, "batch_index": args.batch_index,
+                              "bucket_start": result["bucket_start"],
+                              "bucket_end": result["bucket_end"],
+                              "partition_start": batch["partition_start"],
+                              "partition_count": batch["partition_count"],
+                              "partitions": result["partition_indexes"],
+                              "fragments_opened": result["fragments_opened"]},
+                             sort_keys=True))
+            return 0
         start = batch["partition_start"]
         count = batch["partition_count"]
         output_dir = Path(args.output_dir)
@@ -1057,7 +1329,12 @@ def build_parser() -> argparse.ArgumentParser:
     reduce.add_argument("--partition-index", type=int, default=None,
                         help="Legacy single-partition mode; one reducer job per partition.")
     reduce.add_argument("--batch-index", type=int, default=None,
-                        help="Batch mode: process the contiguous partition range of this batch serially.")
+                        help="Batch mode: process this batch of the plan -- a shuffle-bucket "
+                             "range for places, a contiguous partition range for addresses.")
+    reduce.add_argument("--bucket-start", type=int, default=None,
+                        help="Places bucket-range mode: first shuffle bucket owned (inclusive).")
+    reduce.add_argument("--bucket-end", type=int, default=None,
+                        help="Places bucket-range mode: last shuffle bucket owned (inclusive).")
     reduce.add_argument("--proof-binary", default="")
     reduce.add_argument("--encoder-binary", required=True)
     reduce.add_argument("--verifier-binary", required=True)

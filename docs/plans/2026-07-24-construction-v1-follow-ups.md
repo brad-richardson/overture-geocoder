@@ -196,15 +196,21 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
   proposed in item 5, in one workflow — but see the per-defect coverage table in
   item 5: #148's surface (the admission gate) is still test-only, and the import
   job is a top-level-import tripwire, not data-plane coverage.
+- **The reducer had no `StageWatchdog`** (item 1 of "Added 2026-07-25"). The
+  RSS/scratch/wall caps reached the encoder and verifier *subprocesses* through
+  `A.run_bounded`, but the Python + pyarrow + DuckDB ingest between them was
+  bounded by nothing at all — and raising `partition_term_rows` to 2,000,000
+  doubled the peak of exactly that phase. The ingest pass and the per-partition
+  serving encode are each now wrapped in the same watchdog the two `map_task`
+  stages use, with the same caps and the same fail-closed semantics, and every
+  reduction records `ingest_evidence` / `serving_evidence`. Landed alongside
+  bucket-range reduce, which is the code that made the reducer's ingest a single
+  bounded stage worth watching.
 
 ## Added 2026-07-25, from the adversarial review of PR #155
 
-1. **`reduce_partition` has no `StageWatchdog`.** `StageWatchdog` wraps only the
-   two `map_task` stages. In the reducer the RSS/scratch/wall caps reach the
-   encoder/verifier *subprocesses* via `A.run_bounded`, but the Python +
-   pyarrow + DuckDB ingest loop is unbounded. Pre-existing, but raising
-   `partition_term_rows` to 2,000,000 doubles the peak of exactly the phase
-   nothing is watching. **Fix before the first planet reduce.**
+1. ~~**`reduce_partition` has no `StageWatchdog`.**~~ ADDRESSED — see "Already
+   addressed" above.
 2. **Three evidence-spec hard caps are dead declarations that now disagree with
    the build.** `partition_term_rows_hard_cap` (1,000,000),
    `partition_distinct_tokens_hard_cap` (250,000) and
@@ -231,6 +237,19 @@ Both items below were fixed on 2026-07-25 in the same PR as the slice smoke job.
 5. **The committed plan is only read by `predict-reduce` and the generator.**
    Map-side partition assignment (the fail-closed gate) is still unbuilt, so the
    tree does not yet control anything.
+
+## Added 2026-07-25, from the adversarial review of PR #160
+
+1. **The Places routed serving objects never reach the published slice.**
+   Pre-existing, found while reviewing bucket-range reduce, and NOT fixed there.
+   `construction_v1_hosted._artifact_keys` collects `reduction["artifact"]`,
+   which the *address* reducer sets and the Places reducer does not — Places
+   records `leaf_object` and `routed_object` instead. So a Places finalize
+   publishes the head shards and the two manifests, and silently publishes no
+   `.plrv` at all. Every existing check still passes: the reconciliation compares
+   bindings, not the published object set. Whatever publishes routed objects must
+   also assert the published set is non-empty and covers every partition, or the
+   same hole reopens.
 
 ## Added 2026-07-25: scope down the R2 credentials used by construction-v1
 

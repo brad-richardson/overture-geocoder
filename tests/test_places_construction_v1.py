@@ -1192,3 +1192,586 @@ def test_map_shuffle_keeps_every_cell_in_exactly_one_fragment(
         # and the fragment it landed in is the one the Python mirror predicts
         expected = module.shuffle_bucket(module.cell_partition_key(cell))
         assert next(iter(buckets)) == expected
+
+
+# --------------------------------------------------------------------------- #
+# Reduce by shuffle-bucket range
+# --------------------------------------------------------------------------- #
+def _bucket_space_splits(bits: int) -> list[list[tuple[int, int]]]:
+    """Several different partitions of the INCLUSIVE bucket space into ranges."""
+    buckets = 1 << bits
+    splits = [[(0, buckets - 1)]]
+    for stride in (1, 2, 3, 7):
+        if stride > buckets:
+            continue
+        splits.append(
+            [
+                (start, min(start + stride, buckets) - 1)
+                for start in range(0, buckets, stride)
+            ]
+        )
+    # A deliberately uneven split: nothing may assume equal-width ranges.
+    if buckets >= 4:
+        splits.append([(0, 0), (1, 1), (2, buckets - 2), (buckets - 1, buckets - 1)])
+    return splits
+
+
+def test_bucket_ranges_own_every_cell_exactly_once(construction_module):
+    # The claim the whole bucket-range reducer rests on: for ANY partition of the
+    # bucket space into ranges, every cell is emitted by exactly one range and the
+    # union covers all of them. A cell hashes to one bucket and a bucket lies in
+    # one range, so this is structural -- but its violation is SILENT (a missing
+    # cell is an empty result, not an error), so assert it over the whole grid.
+    module = construction_module
+    for bits in (2, 4, 8):
+        plan = {
+            "partitions": [
+                {
+                    "id": f"p-{y:02x}{x:02x}",
+                    "partition_cell": f"{y:02x}{x:02x}",
+                    "shuffle_bucket": module.shuffle_bucket((y << 8) | x, bits),
+                }
+                for y in range(256)
+                for x in range(256)
+            ]
+        }
+        total = len(plan["partitions"])
+        for split in _bucket_space_splits(bits):
+            owners: dict[int, list[tuple[int, int]]] = collections.defaultdict(list)
+            for start, end in split:
+                for index, _partition in module.bucket_range_partitions(
+                    plan, bucket_start=start, bucket_end=end, bits=bits
+                ):
+                    owners[index].append((start, end))
+            assert len(owners) == total, f"bits={bits} split={split[:3]} dropped cells"
+            assert all(len(ranges) == 1 for ranges in owners.values()), (
+                f"bits={bits} split={split[:3]} emitted a cell more than once"
+            )
+
+
+def test_bucket_range_rejects_a_range_outside_the_bucket_space(construction_module):
+    module = construction_module
+    for start, end in ((-1, 4), (0, 256), (5, 4)):
+        with pytest.raises(ValueError, match="bucket range"):
+            module.validate_bucket_range(start, end, 8)
+
+
+def test_partition_shuffle_bucket_does_not_trust_the_recorded_value(construction_module):
+    module = construction_module
+    partition = {"partition_cell": "b2e3", "shuffle_bucket": 0}
+    with pytest.raises(ValueError, match="records shuffle bucket"):
+        module.partition_shuffle_bucket(partition)
+    partition["shuffle_bucket"] = module.shuffle_bucket(module.cell_partition_key("b2e3"))
+    assert module.partition_shuffle_bucket(partition) == partition["shuffle_bucket"]
+
+
+def _shuffled_slice(module, binaries, tmp_path, *, bits: int, task_id: str = "places-r"):
+    """A real map marker plus adaptive plan spanning several cells per bucket.
+
+    ``bits`` is deliberately small so a fragment holds MORE than one of the plan's
+    cells -- otherwise "reads each fragment once" is trivially true because a
+    fragment only ever feeds one partition.
+    """
+    points = [[0.0, 0.0], [-90.0, -45.0], [139.7, 35.7], [7.4, 43.7], [-58.4, -34.6]]
+    rows = [
+        {
+            "id": str(uuid.UUID(int=11_000 + index)),
+            "primary_name": f"Place {index}",
+            "category": "library",
+            "locality": "Town",
+            "country": "XX",
+            "confidence": 1.0 - (index % 10) / 20,
+            "point": points[index % len(points)],
+            "source_row_index": index,
+        }
+        for index in range(400)
+    ]
+    source = tmp_path / f"{task_id}.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    source_limits = tmp_path / f"{task_id}-limits.json"
+    source_limits.write_text(
+        json.dumps(
+            {
+                "objects": [
+                    {
+                        "records": len(rows),
+                        "row_groups": pq.ParquetFile(source).metadata.num_row_groups,
+                    }
+                ]
+            }
+        )
+    )
+    limits = module.Limits(
+        max_input_rows=500,
+        max_pack_rows=100_000,
+        parquet_row_group_rows=512,
+        max_rss_bytes=2 * 1024**3,
+        max_scratch_bytes=2 * 1024**3,
+        max_output_bytes=512 * 1024**2,
+        wall_seconds=180,
+        allow_unpinned_duckdb=True,
+        shuffle_bucket_bits=bits,
+    )
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker = module.map_task(
+        input_path=source,
+        source_limits=source_limits,
+        store=store,
+        scratch_root=tmp_path / f"{task_id}-scratch",
+        request_sha256="56" * 32,
+        task_id=task_id,
+        transform_binary=binaries["places-transform-v1"],
+        proof_binary=binaries["places-proof-directory"],
+        limits=limits,
+    )
+    plan = module.adaptive_genesis_plan(
+        [marker], store=store, scratch_root=tmp_path / f"{task_id}-plan", limits=limits
+    )
+    return store, marker, plan, limits
+
+
+def _count_parquet_opens(monkeypatch):
+    """Count ParquetFile opens by path, through the module the reducer imports."""
+    opens: collections.Counter = collections.Counter()
+    original = pq.ParquetFile
+
+    def counting(path, *args, **kwargs):
+        opens[str(path)] += 1
+        return original(path, *args, **kwargs)
+
+    monkeypatch.setattr(pq, "ParquetFile", counting)
+    return opens
+
+
+def test_bucket_range_reduce_reads_each_fragment_once_and_matches_per_partition(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    module = construction_module
+    bits = 2
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=bits
+    )
+    fragments = {store.path(pack["object"]["key"]) for pack in marker["packs"]}
+    cells = {item["partition_cell"] for item in plan["partitions"]}
+    assert len(cells) > len(fragments), (
+        "fixture must put several cells in one fragment, or 'once' is trivial"
+    )
+
+    # Per-partition reduce: the reference behaviour, and the open count to beat.
+    per_partition_opens = _count_parquet_opens(monkeypatch)
+    reference = [
+        module.reduce_partition(
+            partition=partition,
+            plan=plan,
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / "reduce-reference",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+        for partition in plan["partitions"]
+    ]
+    reference_fragment_opens = sum(
+        count for path, count in per_partition_opens.items() if Path(path) in fragments
+    )
+    monkeypatch.undo()
+
+    # Bucket-range reduce over the whole space: one job, each fragment once.
+    range_opens = _count_parquet_opens(monkeypatch)
+    result = module.reduce_bucket_range(
+        bucket_start=0,
+        bucket_end=(1 << bits) - 1,
+        plan=plan,
+        markers=[marker],
+        store=store,
+        scratch_root=tmp_path / "reduce-range",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=limits,
+    )
+    monkeypatch.undo()
+
+    assert result["schema"] == module.REDUCE_RANGE_SCHEMA
+    assert result["partition_indexes"] == list(range(len(plan["partitions"])))
+    for path in fragments:
+        assert range_opens[str(path)] == 1, f"fragment {path.name} opened twice"
+    assert result["fragments_opened"] == len(fragments)
+    # The point of the change: the per-partition reducer re-opened fragments.
+    assert reference_fragment_opens > len(fragments)
+
+    # Output equivalence: same partitions, same bindings, and byte-identical
+    # serving artifacts (the store is content-addressed, so an equal key IS an
+    # equal digest).
+    for expected, actual in zip(reference, result["reductions"], strict=True):
+        assert actual["partition"] == expected["partition"]
+        assert actual["binding"] == expected["binding"]
+        assert actual["leaf_object"] == expected["leaf_object"]
+        assert actual["routed_object"] == expected["routed_object"]
+        assert actual["serving_candidate_rows"] == expected["serving_candidate_rows"]
+        assert actual["reconciled_row_groups"] == expected["reconciled_row_groups"]
+
+    # Reduce is now watched: the caps reach the Python/pyarrow/DuckDB ingest, not
+    # only the encoder and verifier subprocesses, and the evidence proves it ran.
+    for evidence in (
+        result["ingest_evidence"],
+        result["reductions"][0]["serving_evidence"],
+    ):
+        assert evidence["peak_rss_bytes"] > 0
+        assert evidence["peak_scratch_and_output_bytes"] > 0
+        assert evidence["wall_seconds"] > 0
+    assert reference[0]["ingest_evidence"]["peak_rss_bytes"] > 0
+
+
+def test_bucket_range_splits_emit_every_partition_exactly_once(
+    tmp_path, construction_binaries, construction_module
+):
+    # However the planner cuts the bucket space, the union of the jobs is the
+    # whole plan, nothing twice, and every artifact is the same one.
+    module = construction_module
+    bits = 2
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=bits, task_id="places-split"
+    )
+    whole = module.reduce_bucket_range(
+        bucket_start=0,
+        bucket_end=(1 << bits) - 1,
+        plan=plan,
+        markers=[marker],
+        store=store,
+        scratch_root=tmp_path / "reduce-whole",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=limits,
+    )
+    by_index = dict(zip(whole["partition_indexes"], whole["reductions"], strict=True))
+
+    for split in _bucket_space_splits(bits):
+        emitted: list[int] = []
+        for start, end in split:
+            result = module.reduce_bucket_range(
+                bucket_start=start,
+                bucket_end=end,
+                plan=plan,
+                markers=[marker],
+                store=store,
+                scratch_root=tmp_path / f"reduce-{start}-{end}",
+                encoder_binary=construction_binaries["places-serving-encode-v1"],
+                verifier_binary=construction_binaries["places-serving-verify-v1"],
+                limits=limits,
+            )
+            assert result["bucket_start"] == start and result["bucket_end"] == end
+            # A range reads only fragments in its own range.
+            for pack in marker["packs"]:
+                inside = start <= pack["shuffle_bucket"] <= end
+                assert (pack["object"]["key"] in result["fragment_keys"]) == inside
+            for index, reduction in zip(
+                result["partition_indexes"], result["reductions"], strict=True
+            ):
+                emitted.append(index)
+                assert reduction["leaf_object"] == by_index[index]["leaf_object"]
+                assert reduction["routed_object"] == by_index[index]["routed_object"]
+        assert sorted(emitted) == list(range(len(plan["partitions"])))
+        assert len(emitted) == len(set(emitted)), f"split {split} emitted a partition twice"
+
+
+def test_bucket_range_reduce_fails_closed_when_the_watchdog_faults(
+    tmp_path, construction_binaries, construction_module
+):
+    # The reduce ingest is now the watchdog's to enforce, so a breach must abort
+    # the stage rather than produce a serving artifact nothing bounded.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-guard"
+    )
+    with pytest.raises(Exception) as error:
+        module.reduce_bucket_range(
+            bucket_start=0,
+            bucket_end=3,
+            plan=plan,
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / "reduce-capped",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=replace(limits, max_rss_bytes=1),
+        )
+    # Either the watchdog's own report or the DuckDB interrupt it raises -- both
+    # are the stage failing closed. A silent success is the failure mode.
+    message = str(error.value).lower()
+    assert "hard cap" in message or "interrupt" in message, message
+
+
+def test_bucket_range_with_no_partitions_reads_nothing(
+    tmp_path, construction_binaries, construction_module
+):
+    # Empty ranges are legal: the bucket space is covered whether or not every
+    # bucket is populated. An empty range must not fail and must not read.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=8, task_id="places-sparse"
+    )
+    occupied = {
+        module.shuffle_bucket(module.cell_partition_key(item["partition_cell"]))
+        for item in plan["partitions"]
+    }
+    empty = next(bucket for bucket in range(256) if bucket not in occupied)
+    result = module.reduce_bucket_range(
+        bucket_start=empty,
+        bucket_end=empty,
+        plan=plan,
+        markers=[marker],
+        store=store,
+        scratch_root=tmp_path / "reduce-empty",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=limits,
+    )
+    assert result["reductions"] == []
+    assert result["fragment_keys"] == []
+    assert result["fragments_opened"] == 0
+
+
+class _RewritingConnection:
+    """A DuckDB connection whose SQL is corrupted on the way through.
+
+    Stands in for the class of defect the emit step used to be blind to: the
+    published bytes come out of `WHERE __reduce_partition = <position>`, and
+    nothing measured what that predicate actually returned.
+    """
+
+    def __init__(self, connection, corrupt):
+        self._connection = connection
+        self._corrupt = corrupt
+
+    def __getattr__(self, name):
+        return getattr(self._connection, name)
+
+    def execute(self, sql, *args, **kwargs):
+        return self._connection.execute(self._corrupt(sql), *args, **kwargs)
+
+
+def _reduce_with_corrupted_sql(module, monkeypatch, corrupt):
+    original = module._reduce_connection
+
+    def wrapped(workspace, limits):
+        return _RewritingConnection(original(workspace, limits), corrupt)
+
+    monkeypatch.setattr(module, "_reduce_connection", wrapped)
+
+
+def test_emit_predicate_corruption_fails_closed(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    # The reviewer's repro. Rewrite the emit predicate so every partition
+    # publishes partition 0's rows. Every binding in the reducer is computed
+    # pyarrow-side and still matches the plan, and finalize's reconciliation sums
+    # those same bindings -- so before the emit checks existed, 15 of 16 serving
+    # artifacts were wrong and everything downstream said the run was good.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-corrupt"
+    )
+    assert len(plan["partitions"]) > 1, "the fixture needs partitions to confuse"
+    import re
+
+    _reduce_with_corrupted_sql(
+        module,
+        monkeypatch,
+        lambda sql: re.sub(rf"{module.PARTITION_INDEX_COLUMN}=\d+",
+                           f"{module.PARTITION_INDEX_COLUMN}=0", sql),
+    )
+    with pytest.raises(ValueError, match="emit predicate does not select this partition"):
+        module.reduce_bucket_range(
+            bucket_start=0, bucket_end=3, plan=plan, markers=[marker], store=store,
+            scratch_root=tmp_path / "reduce-corrupt",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_emitted_leaf_bytes_must_digest_back_to_the_plan(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    # The same corruption, but applied ONLY to the COPY that writes the leaf, so
+    # the SQL row-count/ownership check still measures the true set and passes.
+    # What catches it then is the digest of the bytes about to be published.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-bytes"
+    )
+    import re
+
+    def corrupt(sql: str) -> str:
+        if not sql.lstrip().upper().startswith("COPY"):
+            return sql
+        return re.sub(rf"{module.PARTITION_INDEX_COLUMN}=\d+",
+                      f"{module.PARTITION_INDEX_COLUMN}=0", sql)
+
+    _reduce_with_corrupted_sql(module, monkeypatch, corrupt)
+    with pytest.raises(ValueError, match="do not digest back to the plan binding"):
+        module.reduce_bucket_range(
+            bucket_start=0, bucket_end=3, plan=plan, markers=[marker], store=store,
+            scratch_root=tmp_path / "reduce-bytes",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_reduce_ingest_refuses_a_term_column_that_shadows_the_partition_tag(
+    tmp_path, construction_module
+):
+    # No code bug required: on the pinned DuckDB 1.5.1 a term column named
+    # __reduce_partition does NOT raise. The injected tag is renamed to
+    # __reduce_partition_1, so `* EXCLUDE(__reduce_partition)` drops the DATA
+    # column and the emit predicate filters on it -- silently publishing the
+    # wrong rows for every partition. Refuse the collision instead.
+    module = construction_module
+    duckdb = pytest.importorskip("duckdb")
+    fragment = tmp_path / "shadowed.parquet"
+    digests = [bytes(32), bytes(32)]
+    pq.write_table(
+        pa.table(
+            {
+                "partition_cell": pa.array(["0000", "0000"], pa.string()),
+                "token_hash": pa.array([1, 2], pa.uint64()),
+                "semantic_digest_a": pa.array(digests, pa.binary()),
+                "semantic_digest_b": pa.array(digests, pa.binary()),
+                module.PARTITION_INDEX_COLUMN: pa.array([7, 7], pa.int32()),
+            }
+        ),
+        fragment,
+    )
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    identity = store.put_content(fragment, "map/places-v1/packs", ".parquet")
+    pack = {
+        "pack_id": 0,
+        "shuffle_bucket": 0,
+        "object": identity,
+        "directory": {
+            "row_groups": [
+                {
+                    "index": 0,
+                    "routing_groups": [{"partition_cell": "0000"}],
+                    "binding": module.A.zero_binding(),
+                }
+            ]
+        },
+    }
+    connection = duckdb.connect()
+    try:
+        with pytest.raises(ValueError, match="collides with the reducer's partition tag"):
+            module._reduce_ingest(
+                connection=connection,
+                fragments=[pack],
+                partitions=[(0, {"id": "p-0000", "partition_cell": "0000"})],
+                store=store,
+                require_complete=False,
+            )
+    finally:
+        connection.close()
+
+
+def test_bucket_range_fragment_guards_fail_closed(
+    tmp_path, construction_binaries, construction_module
+):
+    # Every fragment-side precondition, each with its own failing case.
+    module = construction_module
+    _store, marker, _plan, _limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-fragments"
+    )
+    kwargs = {"bucket_start": 0, "bucket_end": 3, "bits": 2}
+
+    pre_shuffle = json.loads(json.dumps(marker))
+    del pre_shuffle["packs"][0]["shuffle_bucket"]
+    with pytest.raises(ValueError, match="predates the map-side shuffle"):
+        module.bucket_range_fragments([pre_shuffle], **kwargs)
+
+    mismatched = json.loads(json.dumps(marker))
+    mismatched["packs"][0]["pack_id"] = mismatched["packs"][0]["shuffle_bucket"] + 1
+    with pytest.raises(ValueError, match="pack id differs from its shuffle bucket"):
+        module.bucket_range_fragments([mismatched], **kwargs)
+
+    # A duplicated fragment would double-count every row it holds, and because
+    # bindings are additive sums the inflation is invisible until far downstream.
+    duplicated = json.loads(json.dumps(marker))
+    duplicated["packs"].append(json.loads(json.dumps(duplicated["packs"][0])))
+    with pytest.raises(ValueError, match="same map fragment twice"):
+        module.bucket_range_fragments([duplicated], **kwargs)
+
+
+def test_bucket_range_reduce_fails_closed_on_an_incomplete_plan(
+    tmp_path, construction_binaries, construction_module
+):
+    # The central exactness argument, tested by breaking it: drop one cell from
+    # the plan and the range's partitions no longer claim every row of every
+    # fragment they read. That must abort, not silently publish a short run.
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-incomplete"
+    )
+    assert len(plan["partitions"]) > 1
+    incomplete = json.loads(json.dumps(plan))
+    dropped = incomplete["partitions"].pop()
+    bucket = module.shuffle_bucket(
+        module.cell_partition_key(dropped["partition_cell"]), 2
+    )
+    with pytest.raises(ValueError, match="unclaimed"):
+        module.reduce_bucket_range(
+            bucket_start=bucket, bucket_end=bucket, plan=incomplete, markers=[marker],
+            store=store, scratch_root=tmp_path / "reduce-incomplete",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+    # And the degenerate version of the same break: a range whose buckets hold
+    # map fragments but whose plan has no partitions at all for them.
+    emptied = {**incomplete, "partitions": [
+        item for item in incomplete["partitions"]
+        if module.shuffle_bucket(module.cell_partition_key(item["partition_cell"]), 2)
+        != bucket
+    ]}
+    with pytest.raises(ValueError, match="fragments but no plan partitions"):
+        module.reduce_bucket_range(
+            bucket_start=bucket, bucket_end=bucket, plan=emptied, markers=[marker],
+            store=store, scratch_root=tmp_path / "reduce-orphan",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_bucket_range_reduce_fails_closed_when_a_partition_binding_is_wrong(
+    tmp_path, construction_binaries, construction_module
+):
+    module = construction_module
+    store, marker, plan, limits = _shuffled_slice(
+        module, construction_binaries, tmp_path, bits=2, task_id="places-binding"
+    )
+    tampered = json.loads(json.dumps(plan))
+    tampered["partitions"][0]["binding"]["records"] += 1
+    with pytest.raises(ValueError, match="binding differs from plan"):
+        module.reduce_bucket_range(
+            bucket_start=0, bucket_end=3, plan=tampered, markers=[marker], store=store,
+            scratch_root=tmp_path / "reduce-binding",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+        )
+
+
+def test_reduce_job_is_wall_bounded_not_only_each_serving_stage(
+    tmp_path, construction_binaries, construction_module
+):
+    # A bucket-range job runs one ingest and then a serving stage per partition.
+    # Giving each stage a fresh `wall_seconds` would leave the JOB unbounded --
+    # tens of partitions x the full budget against a hard Actions kill that
+    # produces no evidence. The budget is the job's, and it is spent down.
+    module = construction_module
+    started = module.time.monotonic() - 100.0
+    limits = module.Limits(wall_seconds=120)
+    assert 0 < module._remaining_wall(started, limits) <= 20
+    with pytest.raises(ValueError, match="exhausted its wall budget"):
+        module._remaining_wall(module.time.monotonic() - 121.0, limits)
