@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import collections
 import json
 import importlib.util
 import struct
@@ -527,11 +528,32 @@ def test_complete_local_places_slice_interrupt_resume_and_reconcile(
         module.A.combine_bindings([item["binding"] for item in reductions])
         == marker["binding"]
     )
-    assert any(
-        item["discarded"]["records"] > 0
-        for reduction in reductions
-        for item in reduction["reconciled_row_groups"]
-    )
+    # Before the map-side shuffle this asserted that SOME row group had
+    # discarded rows -- i.e. that the reducer necessarily read rows belonging to
+    # another partition. That is now the thing the design removes: fragments are
+    # keyed by a hash bucket of the cell, so a reducer opens only fragments whose
+    # bucket matches its own cell, and in this two-cell fixture each bucket holds
+    # exactly one cell, so nothing is discarded at all.
+    #
+    # Assert the properties that survive and matter: every row group the reducer
+    # touched reconciles selected+discarded against its recorded binding, and no
+    # reducer touched a fragment outside its cell's bucket.
+    for reduction in reductions:
+        cell = reduction["partition"]["partition_cell"]
+        bucket = module.shuffle_bucket(module.cell_partition_key(cell))
+        touched = {item["pack_sha256"] for item in reduction["reconciled_row_groups"]}
+        allowed = {
+            pack["object"]["sha256"]
+            for pack in marker["packs"]
+            if pack["shuffle_bucket"] == bucket
+        }
+        assert touched, "a reducer must read at least one fragment"
+        assert touched <= allowed, (
+            f"partition {cell} read fragments outside bucket {bucket}"
+        )
+        for item in reduction["reconciled_row_groups"]:
+            combined = module.A.combine_bindings([item["selected"], item["discarded"]])
+            assert combined["records"] > 0
 
     routed = []
     for reduction in reductions:
@@ -929,6 +951,18 @@ def test_map_combiner_discards_below_serving_rank_and_proves_additivity(
     assert combiner["discarded"]["records"] == shared * (len(rows) - cap)
     assert marker["binding"]["records"] == combiner["retained_rows"]
 
+    # The per-place artifact must survive the combiner untouched. This fixture
+    # saturates every shared token, so the combiner discards thousands of term
+    # rows -- and a place whose tokens ALL sit in saturated groups could vanish
+    # from the term set entirely. Anything that must enumerate places (a spatial
+    # reverse index above all) reads this artifact, so it is emitted before the
+    # combiner and must still hold exactly one row per admitted feature.
+    records = marker["place_records"]
+    assert records["schema"] == module.PLACE_RECORDS_SCHEMA
+    assert records["records"] == marker["transform"]["admitted_features"]
+    assert records["records"] == len(rows)
+    assert combiner["discarded"]["records"] > 0, "fixture must exercise discarding"
+
     # The proof the combiner rests on: kept + discarded reconstructs the
     # transform's binding exactly, over both digest lanes.
     reconstructed = module.A.combine_bindings(
@@ -1058,3 +1092,103 @@ def test_per_task_combining_then_global_topn_equals_a_single_global_topn():
 
     assert len(direct) == cap
     assert staged == direct
+
+
+def test_shuffle_bucket_python_mirror_matches_the_sql(construction_module):
+    # The bucket is computed in SQL during map and in Python everywhere else.
+    # If they disagree, a consumer looks in the wrong shard and silently sees no
+    # rows for a cell -- an empty result, not an error.
+    module = construction_module
+    duckdb = pytest.importorskip("duckdb")
+    keys = list(range(0, 65536, 97)) + [0, 1, 255, 256, 65535]
+    connection = duckdb.connect()
+    connection.execute(
+        "CREATE TABLE t AS SELECT unnest(?::INTEGER[]) AS partition_key", [keys]
+    )
+    for bits in (4, 8, 10):
+        rows = connection.execute(
+            f"SELECT partition_key, {module.shuffle_bucket_sql(bits)} FROM t"
+        ).fetchall()
+        assert rows, "no rows produced"
+        for key, sql_bucket in rows:
+            assert sql_bucket == module.shuffle_bucket(key, bits), (key, bits)
+            assert 0 <= sql_bucket < (1 << bits)
+    connection.close()
+
+
+def test_shuffle_bucket_depends_on_both_grid_axes(construction_module):
+    # Regression. partition_key is (y << 8) | x, so taking the LOW bits of the
+    # multiplicative hash (`% buckets`) yields a bucket that depends only on x:
+    # every cell in a longitude column lands together, a pole-to-pole meridian
+    # strip per consumer. Cell COUNTS stay perfectly uniform under that bug, so
+    # only a test that varies one axis at a time catches it.
+    module = construction_module
+    for x in (0, 7, 128, 255):
+        down_column = {module.shuffle_bucket((y << 8) | x) for y in range(256)}
+        assert len(down_column) > 32, f"x={x} collapses to {len(down_column)} buckets"
+    for y in (0, 7, 128, 255):
+        across_row = {module.shuffle_bucket((y << 8) | x) for x in range(256)}
+        assert len(across_row) > 32, f"y={y} collapses to {len(across_row)} buckets"
+    counts = collections.Counter(
+        module.shuffle_bucket((y << 8) | x) for y in range(256) for x in range(256)
+    )
+    assert len(counts) == module.SHUFFLE_BUCKETS
+    assert max(counts.values()) <= 2 * min(counts.values())
+
+
+def test_cell_partition_key_round_trips_the_transform_route(construction_module):
+    module = construction_module
+    for y, x in ((0, 0), (178, 227), (255, 255), (43, 7)):
+        assert module.cell_partition_key(f"{y:02x}{x:02x}") == (y << 8) | x
+    for bad in ("abc", "abcde", ""):
+        with pytest.raises(ValueError):
+            module.cell_partition_key(bad)
+
+
+def test_map_shuffle_keeps_every_cell_in_exactly_one_fragment(
+    tmp_path, construction_binaries, construction_module
+):
+    # The property the whole design rests on: a consumer that wants a cell reads
+    # ONE fragment per map task, so its input is bounded by the shuffle rather
+    # than by how the source happened to be ordered.
+    module = construction_module
+    points = [[0.0, 0.0], [-90.0, -45.0], [139.7, 35.7], [7.4, 43.7], [-58.4, -34.6]]
+    rows = [
+        {
+            "id": str(uuid.UUID(int=9_000 + index)),
+            "primary_name": f"Place {index}", "category": "library",
+            "locality": "Town", "country": "XX", "confidence": 0.5,
+            "point": points[index % len(points)], "source_row_index": index,
+        }
+        for index in range(400)
+    ]
+    source = tmp_path / "source.parquet"
+    write_fixture(source, rows, row_group_size=64)
+    limits_path = tmp_path / "source-limits.json"
+    limits_path.write_text(json.dumps({"objects": [
+        {"records": len(rows), "row_groups": pq.ParquetFile(source).metadata.num_row_groups}]}))
+    marker = module.map_task(
+        input_path=source, source_limits=limits_path,
+        store=module.A.LocalObjectStore(tmp_path / "store"),
+        scratch_root=tmp_path / "scratch", request_sha256="34" * 32,
+        task_id="places-shuffle", transform_binary=construction_binaries["places-transform-v1"],
+        proof_binary=construction_binaries["places-proof-directory"],
+        limits=module.Limits(
+            max_input_rows=500, max_pack_rows=100_000, parquet_row_group_rows=4_096,
+            max_rss_bytes=2 * 1024**3, max_scratch_bytes=2 * 1024**3,
+            max_output_bytes=512 * 1024**2, wall_seconds=180, allow_unpinned_duckdb=True),
+    )
+
+    buckets_of_cell = collections.defaultdict(set)
+    for pack in marker["packs"]:
+        assert pack["shuffle_bucket"] == pack["pack_id"]
+        for group in pack["directory"]["row_groups"]:
+            for routing in group["routing_groups"]:
+                buckets_of_cell[routing["partition_cell"]].add(pack["shuffle_bucket"])
+
+    assert len(buckets_of_cell) >= 4, "fixture must span several cells"
+    for cell, buckets in buckets_of_cell.items():
+        assert len(buckets) == 1, f"cell {cell} split across fragments {buckets}"
+        # and the fragment it landed in is the one the Python mirror predicts
+        expected = module.shuffle_bucket(module.cell_partition_key(cell))
+        assert next(iter(buckets)) == expected

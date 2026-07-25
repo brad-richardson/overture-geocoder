@@ -45,6 +45,21 @@ cd crates/geocoder-worker && wrangler dev
 python scripts/build_shards.py --countries US
 ```
 
+## construction-v1 (planet Places/Addresses build)
+
+**Read `docs/plans/construction-v1-state.md` before touching this.** It is the
+living state document; the dated docs in `docs/plans/` are point-in-time
+analyses and it supersedes them where they disagree.
+
+Two things that repeatedly get lost:
+
+- Use the fast loop. `scripts/build_slice_inventory_v1.py` +
+  `scripts/run_slice_construction_v1.py` run all five phases on real Overture
+  data in ~13 seconds with no credentials. Changes that cannot be shown on it
+  are usually design documents, not changes.
+- The address family shuffle is DEFERRED, not done. See the "DEFERRED, do not
+  lose" section of `docs/plans/2026-07-24-construction-v1-follow-ups.md`.
+
 ## Data Pipeline
 
 The `Rebuild R2 Shards` workflow runs monthly (25th) with two parallel jobs:

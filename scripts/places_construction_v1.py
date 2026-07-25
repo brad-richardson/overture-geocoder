@@ -69,7 +69,57 @@ SERVING_PARTITION = "PARTITION BY partition_cell, token"
 # Subdivision is by token hash, so every row of a token shares a prefix at every
 # depth and the group is indivisible. reduce_partition asserts this.
 SERVING_GROUP_SAFE_OWNERSHIP = "token-sha256-nibble-prefix-v1"
+
+# --- shuffle -------------------------------------------------------------
+# Map tasks are row-group ranges of the SOURCE, so without a shuffle every
+# partition_cell is scattered across every task and any consumer of one cell has
+# to reach into all of them. That scatter -- not size -- is why the whole store
+# had to travel between phases.
+#
+# So map emits its output keyed by a bucket of the cell, exactly as the ID index
+# stages by UUID prefix (build_id_index.py). Two properties matter:
+#
+#   a cell never splits across buckets, so one consumer holds a cell's COMPLETE
+#   data and every per-cell decision (top-N, subdivision, cap checks) is local;
+#
+#   buckets are hash-uniform, so per-consumer input is bounded by construction
+#   at total/SHUFFLE_BUCKETS rather than by how the data happens to be shaped.
+#
+# The bucket is a Knuth multiplicative hash of `partition_key` -- the (y<<8)|x
+# grid index the transform already emits -- so it needs no new column and no
+# DuckDB hash function whose value could drift across versions.
+SHUFFLE_BUCKET_BITS = 8
+SHUFFLE_BUCKETS = 1 << SHUFFLE_BUCKET_BITS
+SHUFFLE_MULTIPLIER = 2_654_435_761  # Knuth, floor(2^32 / phi), odd
+
+
+def shuffle_bucket_sql(bits: int = SHUFFLE_BUCKET_BITS) -> str:
+    return (
+        f"((((partition_key::UBIGINT * {SHUFFLE_MULTIPLIER}) % 4294967296) "
+        f">> {32 - bits}))::UINTEGER"
+    )
+
+
+def shuffle_bucket(partition_key: int, bits: int = SHUFFLE_BUCKET_BITS) -> int:
+    """Python mirror of shuffle_bucket_sql; the two must never disagree.
+
+    Takes the HIGH bits of the multiplicative hash. Taking the low bits instead
+    (``% buckets``) silently degenerates: partition_key is ``(y << 8) | x``, so
+    the low 8 bits of the product depend only on x, and every cell in a
+    longitude column would land in one bucket -- a pole-to-pole meridian strip
+    per consumer. Cell counts stay perfectly even, so only a data-weighted test
+    catches it.
+    """
+    return ((partition_key * SHUFFLE_MULTIPLIER) % 4294967296) >> (32 - bits)
+
+
+def cell_partition_key(cell: str) -> int:
+    """(y<<8)|x for a `{y:02x}{x:02x}` partition cell, matching route()."""
+    if len(cell) != 4:
+        raise ValueError(f"Places partition cell is malformed: {cell!r}")
+    return (int(cell[:2], 16) << 8) | int(cell[2:], 16)
 COMBINER_SCHEMA = "overture-places-map-combiner-v1"
+PLACE_RECORDS_SCHEMA = "overture-places-map-place-records-v1"
 
 # Single source of truth for the IPC batch-row cap. It mirrors the frozen
 # evidence-spec `acceptance_gates.resources.maximum_ipc_batch_rows`; the
@@ -111,6 +161,10 @@ class Limits:
     partition_distinct_tokens: int = 250_000
     adaptive_subdivision_depth: int = 8
     maximum_serving_candidates: int = 256
+    # Number of shuffle buckets map keys its output by. Raising it lowers
+    # per-consumer input proportionally at the cost of more objects; it is
+    # the single knob that bounds reduce input independently of data shape.
+    shuffle_bucket_bits: int = SHUFFLE_BUCKET_BITS
     head_result_cap: int = 10
     max_head_candidate_rows: int = 5_000_000
     require_bound_projection: bool = False
@@ -135,6 +189,7 @@ class Limits:
                     self.maximum_serving_candidates,
                     self.head_result_cap,
                     self.max_head_candidate_rows,
+                    self.shuffle_bucket_bits,
                 )
             )
             or self.wall_seconds <= 0
@@ -433,6 +488,59 @@ def map_task(
         # ingested it into the `terms` table. Drop it before any pack export so
         # the ~3 GiB IPC copy never coexists with the pack files.
         transformed.unlink(missing_ok=True)
+
+        # --- per-place artifact -------------------------------------------
+        # One row per PLACE, emitted here and nowhere else, for two reasons.
+        #
+        # It must come BEFORE the combiner. The combiner keeps only the top
+        # `maximum_serving_candidates` rows per (partition_cell, token), so a
+        # place whose tokens all sit in saturated groups can vanish from the
+        # term set entirely. That is harmless for forward search and fatal for
+        # anything that must enumerate places -- a spatial reverse index above
+        # all. Deriving it from the combined set would silently lose places.
+        #
+        # And it is derived by a GROUP BY rather than a window or a DISTINCT ON:
+        # every column below is per-FEATURE (only token, token_hash, field_mask
+        # and the digests vary across a feature's term rows), so min() is exact
+        # and deterministic, and a hash aggregate is one streaming pass with no
+        # sort. The result is written straight to parquet -- there is no arrow
+        # round trip and no second copy of the term table.
+        #
+        # Ordered by (shuffle bucket, cell, feature_id) so a consumer that wants
+        # one bucket reads a contiguous run and can skip row groups on
+        # statistics, the same access pattern the term fragments give it.
+        places_path = workspace / "places.parquet"
+        connection.execute(
+            "COPY (SELECT feature_id, "
+            f"  min({shuffle_bucket_sql(limits.shuffle_bucket_bits)}) shuffle_bucket, "
+            "  min(partition_cell) partition_cell, min(partition_key) partition_key, "
+            "  min(longitude) longitude, min(latitude) latitude, "
+            "  min(primary_name) primary_name, min(brand_name) brand_name, "
+            "  min(category) category, min(locality) locality, "
+            "  min(region) region, min(country) country, "
+            "  min(confidence_rank) confidence_rank "
+            "FROM terms GROUP BY feature_id "
+            "ORDER BY shuffle_bucket, partition_cell, feature_id) "
+            f"TO '{places_path}' (FORMAT PARQUET, COMPRESSION ZSTD, "
+            f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
+            "PARQUET_VERSION V2, PRESERVE_ORDER true)"
+        )
+        place_rows = pq.ParquetFile(places_path).metadata.num_rows
+        if place_rows > parquet.metadata.num_rows:
+            raise ValueError("Places per-place artifact exceeds the input feature count")
+        if place_rows > limits.max_input_rows:
+            raise ValueError("Places per-place artifact exceeds the input row cap")
+        if places_path.stat().st_size > limits.max_output_bytes:
+            raise ValueError("Places per-place artifact exceeds output cap")
+        place_records = {
+            "schema": PLACE_RECORDS_SCHEMA,
+            "records": place_rows,
+            "admitted_features": transform["admitted_features"],
+            "object": store.put_content(
+                places_path, "map/places-v1/place-records", ".parquet"
+            ),
+        }
+        places_path.unlink(missing_ok=True)
         head_candidates_path = workspace / "head-candidates.parquet"
         connection.execute(
             f"COPY (SELECT * FROM terms QUALIFY row_number() OVER (PARTITION BY token "
@@ -541,9 +649,13 @@ def map_task(
             # reduce reconciles against would break.
             connection.execute("SET threads=1")
             packed_parquet = workspace / "packed.parquet"
+            # pack_id is the SHUFFLE BUCKET, not a row counter. This is the
+            # whole change: a pack now holds every row this task has for a set
+            # of cells, and holds nothing for any other cell, so a consumer of
+            # those cells reads this one file instead of scanning for its rows.
             connection.execute(
-                f"COPY (SELECT *, ((row_number() OVER (ORDER BY {TOTAL_ORDER})-1) "
-                f"// {limits.max_pack_rows})::UINTEGER pack_id FROM terms) "
+                f"COPY (SELECT *, {shuffle_bucket_sql(limits.shuffle_bucket_bits)} "
+                f"pack_id FROM terms) "
                 f"TO '{packed_parquet}' (FORMAT PARQUET, COMPRESSION ZSTD, "
                 f"COMPRESSION_LEVEL 6, ROW_GROUP_SIZE {limits.parquet_row_group_rows}, "
                 "PARQUET_VERSION V2)"
@@ -554,10 +666,15 @@ def map_task(
             connection.execute("DROP TABLE terms")
             connection.execute("CHECKPOINT")
             packed_source = f"read_parquet('{packed_parquet}')"
-            pack_count = connection.execute(
-                f"SELECT coalesce(max(pack_id)+1,0)::UINTEGER FROM {packed_source}"
-            ).fetchone()[0]
-            for pack_id in range(pack_count):
+            # Only buckets this task actually produced. A sparse task (few
+            # cells) writes few fragments; nothing emits empty objects.
+            present = [
+                int(row[0])
+                for row in connection.execute(
+                    f"SELECT DISTINCT pack_id FROM {packed_source} ORDER BY pack_id"
+                ).fetchall()
+            ]
+            for pack_id in present:
                 pack = workspace / f"pack-{pack_id:06d}.parquet"
                 connection.execute(
                     f"COPY (SELECT * EXCLUDE(pack_id) FROM {packed_source} WHERE pack_id={pack_id} "
@@ -583,6 +700,7 @@ def map_task(
                 packs.append(
                     {
                         "pack_id": pack_id,
+                        "shuffle_bucket": pack_id,
                         "object": store.put_content(
                             pack, "map/places-v1/packs", ".parquet"
                         ),
@@ -646,6 +764,7 @@ def map_task(
             "packs": packs,
             "head_candidates": head_candidates,
             "combiner": combiner,
+            "place_records": place_records,
             "binding": binding,
         }
         store.write_marker_last(marker_key(task_id), marker)
@@ -792,6 +911,13 @@ def adaptive_genesis_plan(
                         "id": f"p-{cell}{suffix}",
                         "execution_group": cell[:2],
                         "partition_cell": cell,
+                        # The shuffle bucket map wrote this cell's rows into.
+                        # Recorded on the partition so the plan can be ORDERED by
+                        # it below, which is what turns the existing contiguous
+                        # batching into bucket-clustered batching.
+                        "shuffle_bucket": shuffle_bucket(
+                            cell_partition_key(cell), limits.shuffle_bucket_bits
+                        ),
                         "ownership": {
                             "kind": "token-sha256-nibble-prefix-v1",
                             "depth": depth,
@@ -876,6 +1002,27 @@ def adaptive_genesis_plan(
             }
             if partition["binding"]["records"] != partition["term_rows"]:
                 raise ValueError("Places adaptive partition proof row count differs")
+        # Order partitions by SHUFFLE BUCKET, not by cell.
+        #
+        # Reduce batches are contiguous ranges of partition index
+        # (construction_v1_hosted._reduce_batches). Ordered by cell, a 140-
+        # partition batch spans ~140 unrelated buckets and therefore needs a
+        # fragment from every bucket -- which is to say, the whole store. Ordered
+        # by bucket, a batch covers a contiguous BUCKET range, so it needs only
+        # the fragments in that range. That is the property R2 staging then turns
+        # into "fetch only your own shards"; without it, staging would still have
+        # every reducer pulling everything.
+        #
+        # (cell, depth, prefix) stays as the tiebreak so the order is total and
+        # the plan remains byte-reproducible.
+        partitions.sort(
+            key=lambda item: (
+                item["shuffle_bucket"],
+                item["partition_cell"],
+                item["ownership"]["depth"],
+                item["ownership"]["prefix"],
+            )
+        )
         plan = {
             "schema": "overture-places-adaptive-genesis-plan-v1",
             "predecessor": None,
