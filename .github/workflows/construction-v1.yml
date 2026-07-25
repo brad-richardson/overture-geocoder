@@ -519,6 +519,7 @@ jobs:
         id: plan
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
+          MAP_TASK_COUNT: ${{ needs.admit.outputs.map_task_count }}
           # Read access to the run-scoped staging prefix: the plan phase reads map
           # packs by key to size partitions. Same reused workflow credentials as
           # map and finalize; scoping is a tracked follow-up.
@@ -527,6 +528,10 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
+          # This job reads pack BODIES (bounded to max_fan_in_packs at a time, then
+          # evicted), so it needs the same free-disk floor map and reduce have. It
+          # is the job run 30113308268 died on, when it downloaded a 63 GB artifact.
+          test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
           # Fold every map job's actual minutes into the ledger, then FAIL CLOSED
           # before provisioning the reduce matrix if the total would exceed cap.
           for FRAG in mapdl/phase/ledger-fragment-*.json; do
@@ -540,6 +545,14 @@ jobs:
             --ledger control/ledger.json --next-phase-minutes "$PART_ESTIMATE" \
             --output control/plan-ledger-check.json
           mkdir -p plan-scratch plan store
+          # With the store out of the artifacts, a missing MARKER is the only way a
+          # map task can silently vanish from the plan -- so count them against the
+          # admitted task count instead of trusting the download.
+          MARKERS="$(find mapdl/markers -maxdepth 1 -name '*.json' | wc -l)"
+          if [ "$MARKERS" -ne "$MAP_TASK_COUNT" ]; then
+            echo "::error::fanned in $MARKERS map markers but admission dispatched $MAP_TASK_COUNT tasks" >&2
+            exit 1
+          fi
           # P0-3: the reducer plan batches partitions into <=256 matrix JOBS and
           # fails closed here if the BATCHED reduce projection (job_count x the
           # per-job estimate + head/finalize tails) would exceed the ledger cap.
@@ -552,7 +565,13 @@ jobs:
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
             --markers-dir mapdl/markers --scratch-dir plan-scratch \
             --ledger control/ledger.json --tail-minutes "$TAIL_MINUTES" \
+            --staging-report plan/staging.json \
             --output plan/plan.json --matrix-out plan/reduce-matrix.json
+          # The bound that decides whether this job fits a runner: peak HYDRATED
+          # input resident at once, not the total it streamed through.
+          PEAK="$(jq -r '.staged_peak_resident_bytes' plan/staging.json)"
+          TOTAL="$(jq -r '.staged_bytes_hydrated' plan/staging.json)"
+          echo "PLAN staging: hydrated $TOTAL bytes, peak resident $PEAK bytes"
           MATRIX="$(jq -c '.' plan/reduce-matrix.json)"
           COUNT="$(jq '.include | length' <<<"$MATRIX")"
           if [ "$COUNT" -gt 256 ]; then echo "reduce matrix exceeds 256 cap" >&2; exit 1; fi
@@ -645,7 +664,9 @@ jobs:
             --plan cv1/plan/plan.json --markers-dir cv1/mapdl/markers \
             --batch-index "$BATCH_INDEX" --proof-binary "$PROOF" \
             --encoder-binary "$ENC" --verifier-binary "$VER" --scratch-dir reduce-scratch \
+            --staging-report "phase/staging-${BATCH_INDEX}.json" \
             --output-dir reductions
+          echo "REDUCE staging: $(jq -c '{staged_bytes_hydrated,staged_peak_resident_bytes}' "phase/staging-${BATCH_INDEX}.json")"
           echo "REDUCE END $FAMILY_KEY batch=$BATCH_INDEX elapsed=$(( SECONDS - START ))s marker_written_last=true"
           ELAPSED_MIN=$(( (SECONDS - START + 59) / 60 ))
           jq -n --arg phase "reduce-batch-${BATCH_INDEX}" --argjson m "$ELAPSED_MIN" \

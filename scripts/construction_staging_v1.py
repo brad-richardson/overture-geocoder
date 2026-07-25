@@ -117,6 +117,28 @@ def staging_prefix(request_sha256: str, family: str) -> str:
     return f"{STAGING_ROOT}/{request_sha256}/{STAGING_SEGMENT}/{family}"
 
 
+def validate_staging_prefix(prefix: str) -> str:
+    """Return ``prefix`` normalized, or raise if it is not a legal staging root.
+
+    Legal means exactly what `staging_prefix` produces:
+    ``staging/global-v2/<64-lowercase-hex>/construction-v1/<family>``. This exists
+    because the docstring above is a claim and `StagedObjectStore` needs an
+    enforcement — a prefix outside this shape writes objects that `r2-cleanup.yml`
+    cannot target and therefore can never expire.
+    """
+    if not isinstance(prefix, str):
+        raise ValueError("staging prefix must be a string")
+    parts = PurePosixPath(prefix.strip("/")).parts
+    if len(parts) != 5:
+        raise ValueError(f"staging prefix is not a construction-v1 root: {prefix!r}")
+    root, version, digest, segment, family = parts
+    if f"{root}/{version}" != STAGING_ROOT or segment != STAGING_SEGMENT:
+        raise ValueError(f"staging prefix is not a construction-v1 root: {prefix!r}")
+    # Re-derive through the single legal producer, so the digest and family checks
+    # can never drift from the ones `staging_prefix` applies.
+    return staging_prefix(digest, family)
+
+
 def content_addressed_digest(key: str) -> str | None:
     """The digest a construction store key asserts about its own bytes.
 
@@ -145,15 +167,26 @@ class StagedObjectStore:
     def __init__(self, local: Any, store: Any, prefix: str):
         self.local = local
         self.store = store
-        self.prefix = prefix.strip("/")
-        if not self.prefix:
-            raise ValueError("staging prefix must be non-empty")
+        # Enforce the shape rather than merely document it. An object written under
+        # any other prefix is one `r2-cleanup.yml`'s phase-2 guard
+        # (`^staging/global-v2/[0-9a-f]{64}/$`) can never target, so it becomes
+        # permanent debris. `staging_prefix` is the only legal producer, and this
+        # re-derives from its own parse so a hand-built prefix cannot slip past.
+        self.prefix = validate_staging_prefix(prefix)
         # Counters, not evidence of correctness -- but a run that hydrates nothing
         # when it should have is visible here, and the slice summary reports them.
         self.published = 0
         self.published_bytes = 0
         self.hydrated = 0
         self.hydrated_bytes = 0
+        self.released = 0
+        self.released_bytes = 0
+        # Bytes of HYDRATED input resident in the local cache, and the high-water
+        # mark. This is the number the transport exists to bound, so it is measured
+        # rather than argued: a consumer whose peak equals its total hydrated bytes
+        # is holding its whole fan-in and is not bounded by anything.
+        self.resident_bytes = 0
+        self.peak_resident_bytes = 0
 
     @property
     def root(self) -> Path:
@@ -225,7 +258,35 @@ class StagedObjectStore:
         )
         self.hydrated += 1
         self.hydrated_bytes += int(info.bytes)
+        self.resident_bytes += int(info.bytes)
+        self.peak_resident_bytes = max(self.peak_resident_bytes, self.resident_bytes)
         return path
+
+    def release(self, key: str) -> None:
+        """Drop a hydrated object from the LOCAL cache; staging keeps the record.
+
+        This is what makes a batched consumer actually bounded. Without it, a phase
+        that fetches N batches of packs ends holding all N -- which is how the plan
+        phase silently hydrated the entire term store despite batching its reads.
+        Safe by construction: the object is content-addressed and still in staging,
+        so a later `path()` re-fetches and re-verifies it.
+
+        Deliberately NOT present on `LocalObjectStore`: there the local directory IS
+        the store, and callers reach it through `getattr(store, "release", None)` so
+        a local-only run never deletes anything.
+        """
+        path = self.local.path(key)
+        if content_addressed_digest(key) is None:
+            # Markers are the durable record of completion within a phase; nothing
+            # asks to evict one, and doing so would make a later read look like a
+            # fresh task.
+            raise ValueError(f"refusing to evict a non-content-addressed key: {key}")
+        if path.is_file():
+            size = path.stat().st_size
+            self.released += 1
+            self.released_bytes += size
+            self.resident_bytes = max(0, self.resident_bytes - size)
+            path.unlink()
 
     def read_json(self, key: str) -> dict[str, Any] | None:
         local = self.local.read_json(key)
@@ -255,6 +316,8 @@ class StagedObjectStore:
         )
         self.hydrated += 1
         self.hydrated_bytes += int(info.bytes)
+        self.resident_bytes += int(info.bytes)
+        self.peak_resident_bytes = max(self.peak_resident_bytes, self.resident_bytes)
         return json.loads(destination.read_text())
 
     # -- reporting ---------------------------------------------------------- #
@@ -265,6 +328,12 @@ class StagedObjectStore:
             "staged_bytes_published": self.published_bytes,
             "staged_objects_hydrated": self.hydrated,
             "staged_bytes_hydrated": self.hydrated_bytes,
+            "staged_objects_released": self.released,
+            "staged_bytes_released": self.released_bytes,
+            # The bound that matters: high-water mark of hydrated input resident on
+            # this runner at once. A batched consumer keeps this far below
+            # `staged_bytes_hydrated`; an eagerly-hydrating one makes them equal.
+            "staged_peak_resident_bytes": self.peak_resident_bytes,
         }
 
 

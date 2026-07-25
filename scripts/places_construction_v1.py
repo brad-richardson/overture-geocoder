@@ -1191,7 +1191,14 @@ def adaptive_genesis_plan(
     packs = [pack for marker in markers for pack in marker["packs"]]
     if not packs:
         raise ValueError("Places adaptive genesis contains no packs")
-    paths = [store.path(pack["object"]["key"]) for pack in packs]
+    # Pack bodies are fetched in BATCHES and released after each batch, never all
+    # at once. The eager `[store.path(k) for k in packs]` this replaced defeated
+    # `max_fan_in_packs` entirely: with the store in R2 staging every pack was
+    # hydrated onto the plan runner before DuckDB read the first one, which at
+    # planet scale is the whole ~34 GB term store on the very job that killed run
+    # 30113308268. `release` is present only on the staged store, so a local-only
+    # store is untouched -- evicting there would delete the store itself.
+    release = getattr(store, "release", None)
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix="places-genesis-", dir=scratch_root
@@ -1202,8 +1209,9 @@ def adaptive_genesis_plan(
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{workspace}'")
         byte_expression = _term_bytes_sql()
-        for start in range(0, len(paths), limits.max_fan_in_packs):
-            batch_paths = paths[start : start + limits.max_fan_in_packs]
+        for start in range(0, len(packs), limits.max_fan_in_packs):
+            batch = packs[start : start + limits.max_fan_in_packs]
+            batch_paths = [store.path(pack["object"]["key"]) for pack in batch]
             statement = (
                 "CREATE TABLE planning AS" if start == 0 else "INSERT INTO planning"
             )
@@ -1212,6 +1220,12 @@ def adaptive_genesis_plan(
                 f"({byte_expression})::UBIGINT estimated_bytes FROM "
                 f"read_parquet([{_sql_paths(batch_paths)}])"
             )
+            # The batch is now inside DuckDB's own bounded table; the pack bodies
+            # are not needed again until the binding pass below, which re-fetches
+            # one at a time.
+            if release is not None:
+                for pack in batch:
+                    release(pack["object"]["key"])
         source = "planning"
         byte_sql = "estimated_bytes"
         cells = connection.execute(
@@ -1290,7 +1304,12 @@ def adaptive_genesis_plan(
         by_cell: dict[str, list[int]] = {}
         for index, partition in enumerate(partitions):
             by_cell.setdefault(partition["partition_cell"], []).append(index)
-        for path in paths:
+        # Second pass over the same packs, ONE at a time: this reads four columns
+        # per pack and accumulates per-partition bindings, so nothing needs a
+        # second pack resident. Peak local bytes for the whole plan phase is
+        # therefore max(max_fan_in_packs packs, one pack).
+        for pack in packs:
+            path = store.path(pack["object"]["key"])
             parquet = pq.ParquetFile(path)
             for batch in parquet.iter_batches(
                 batch_size=MAX_IPC_BATCH_ROWS,
@@ -1319,6 +1338,9 @@ def adaptive_genesis_plan(
                             accumulator["semantic_sum_b"]
                             + int(binding["semantic_sum_b"], 16)
                         ) % A.UINT256
+            del parquet
+            if release is not None:
+                release(pack["object"]["key"])
         for partition, accumulator in zip(partitions, accumulators, strict=True):
             partition["binding"] = {
                 "records": accumulator["records"],
@@ -2451,6 +2473,7 @@ def build_sharded_global_head_from_markers(
                     "shard_id": shard_id,
                     "path": str(store.path(stored["key"])),
                     "key": stored["key"],
+                    "sha256": stored["sha256"],
                     "bytes": artifact.stat().st_size,
                     "records": digest["records"],
                     "index_entries": digest["index_entries"],
@@ -2529,8 +2552,18 @@ def build_sharded_global_head_from_markers(
             "merged_head_binding": merged_head_binding,
             "input_binding": input_binding,
             "manifest_object": manifest_object,
+            # `sha256`/`bytes` are carried so finalize can check the file it is
+            # about to publish against the identity THIS phase recorded, the same
+            # way it already can for reduce artifacts and per-record packs. Without
+            # them a head shard was publishable on the strength of its filename
+            # alone.
             "shard_objects": [
-                {"shard_id": entry["shard_id"], "key": entry["key"]}
+                {
+                    "shard_id": entry["shard_id"],
+                    "key": entry["key"],
+                    "sha256": entry["sha256"],
+                    "bytes": entry["bytes"],
+                }
                 for entry in shard_entries
             ],
             "verify_evidence": verify,

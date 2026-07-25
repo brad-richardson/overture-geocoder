@@ -141,6 +141,19 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
         ), family
     assert value.count(".map_staged_objects_published > 0") == 2
     assert value.count(".finalize_staged_objects_hydrated > 0") == 2
+    # The plan phase used to hydrate its whole pack fan-in eagerly. Peak below total
+    # is the assertable form of "batched and evicted", so this is the tripwire on a
+    # regression that no count-based assertion would notice.
+    assert (
+        ".plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated" in value
+    )
+    assert ".plan_staged_objects_released > 0" in value
+    # Addresses plan from marker JSON alone, so zero is the CORRECT plan-phase
+    # figure there -- asserted as zero rather than skipped, and the address
+    # reducer's unbounded fan-in is stated rather than hidden.
+    assert ".plan_staged_bytes_hydrated == 0" in value
+    assert ".reduce_staged_bytes_hydrated > 0" in value
+    assert "NOT \"the address\n            # planet build is unblocked at reduce\"" in value
     # Still no credentials: the staging backend is a directory, not R2.
     assert "R2_ACCESS_KEY_ID" not in value
     assert "secrets." not in value

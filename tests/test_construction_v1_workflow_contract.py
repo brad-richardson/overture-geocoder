@@ -344,6 +344,20 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     assert '--marker-out "markers/${TASK_INDEX}.json"' in value
     assert 'test -s "markers/${TASK_INDEX}.json"' in value
 
+    # The plan job reads pack BODIES, so it needs the same free-disk floor map and
+    # reduce have. It is the job run 30113308268 actually died on.
+    doc_plan = jobs["plan"]
+    assert any(
+        'df -Pk / | awk' in str(step.get("run", "")) for step in doc_plan["steps"]
+    ), "the plan job has no free-disk gate"
+    assert value.count("df -Pk / | awk 'NR==2 {print $4}'") == 3
+
+    # Peak resident hydrated bytes -- the number that decides whether a phase fits a
+    # runner -- is recorded by the two phases that read pack bodies.
+    assert "--staging-report plan/staging.json" in value
+    assert '--staging-report "phase/staging-${BATCH_INDEX}.json"' in value
+    assert "staged_peak_resident_bytes" in value
+
 
 def test_needs_graph_is_connected():
     doc = parsed()

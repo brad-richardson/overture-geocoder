@@ -83,6 +83,38 @@ def test_an_unknown_family_is_refused():
         STAGING.staging_prefix(DIGEST, "divisions")
 
 
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "wherever/i/like",
+        "staging/global-v2/abc/construction-v1/places",          # short digest
+        f"staging/global-v2/{DIGEST.upper()}/construction-v1/places",  # uppercase
+        f"staging/global-v2/{DIGEST}/construction-v1/divisions",  # unknown family
+        f"staging/global-v2/{DIGEST}/construction-v1",            # no family
+        f"staging/global-v2/{DIGEST}/other/places",               # wrong segment
+        f"staging/other/{DIGEST}/construction-v1/places",         # wrong root
+        f"staging/global-v2/{DIGEST}/construction-v1/places/extra",
+        "",
+    ],
+)
+def test_the_store_refuses_a_prefix_r2_cleanup_could_never_target(tmp_path, prefix):
+    # The docstring claiming the shape is not an enforcement. An object written
+    # outside `staging/global-v2/<64-hex>/` is one r2-cleanup.yml's phase-2 guard
+    # can never name, so it becomes permanent debris.
+    local = ADDRESS.LocalObjectStore(tmp_path / "local")
+    backend = STAGING.staging_backend(store_root=tmp_path / "staging")
+    with pytest.raises(ValueError):
+        STAGING.StagedObjectStore(local, backend, prefix)
+
+
+def test_a_legal_prefix_is_normalized_through_its_only_producer(tmp_path):
+    local = ADDRESS.LocalObjectStore(tmp_path / "local")
+    backend = STAGING.staging_backend(store_root=tmp_path / "staging")
+    expected = STAGING.staging_prefix(DIGEST, "places")
+    for given in (expected, f"/{expected}", f"{expected}/"):
+        assert STAGING.StagedObjectStore(local, backend, given).prefix == expected
+
+
 def test_only_content_addressed_keys_carry_a_verifiable_digest():
     packs = f"map/places-v1/packs/sha256/{DIGEST}.parquet"
     assert STAGING.content_addressed_digest(packs) == DIGEST
@@ -201,6 +233,77 @@ def test_a_key_with_no_digest_to_verify_against_is_never_hydrated(tmp_path):
     staged, _ = _store(tmp_path)
     with pytest.raises(ValueError, match="not content-addressed"):
         staged.path("map/places-v1/tasks/places-map-000/complete.json")
+
+
+# --------------------------------------------------------------------------- #
+# eviction: what makes a batched consumer actually bounded
+# --------------------------------------------------------------------------- #
+def test_release_evicts_the_local_copy_and_a_later_read_refetches(tmp_path):
+    staged, _ = _store(tmp_path)
+    source = tmp_path / "pack.parquet"
+    source.write_bytes(b"term rows" * 500)
+    key = staged.put_content(source, "map/places-v1/packs", ".parquet")["key"]
+
+    consumer = _fresh_cache(staged, tmp_path, "consumer")
+    path = consumer.path(key)
+    assert path.is_file()
+    peak = consumer.evidence()["staged_peak_resident_bytes"]
+    assert peak == source.stat().st_size
+
+    consumer.release(key)
+    assert not path.exists()
+    assert consumer.evidence()["staged_objects_released"] == 1
+    # Safe because the object is content-addressed and still staged.
+    assert consumer.path(key).read_bytes() == source.read_bytes()
+    # The high-water mark does not fall when bytes are released, which is the
+    # whole point of reporting it.
+    assert consumer.evidence()["staged_peak_resident_bytes"] == peak
+
+
+def test_the_resident_high_water_mark_shows_batching(tmp_path):
+    """Two packs held together peak higher than two held one at a time."""
+    staged, _ = _store(tmp_path)
+    keys = []
+    for index in range(2):
+        source = tmp_path / f"pack-{index}.parquet"
+        source.write_bytes(bytes([index]) * 4096)
+        keys.append(staged.put_content(source, "map/places-v1/packs", ".parquet")["key"])
+
+    eager = _fresh_cache(staged, tmp_path, "eager")
+    for key in keys:
+        eager.path(key)
+    assert eager.evidence()["staged_peak_resident_bytes"] == 8192
+
+    bounded = _fresh_cache(staged, tmp_path, "bounded")
+    for key in keys:
+        bounded.path(key)
+        bounded.release(key)
+    assert bounded.evidence()["staged_bytes_hydrated"] == 8192
+    assert bounded.evidence()["staged_peak_resident_bytes"] == 4096
+
+
+def test_a_marker_is_never_evictable(tmp_path):
+    # A marker is the durable record of completion; evicting one would make a
+    # later read look like a fresh task.
+    staged, _ = _store(tmp_path)
+    key = "map/places-v1/tasks/places-map-000/complete.json"
+    staged.write_marker_last(key, {"records": 1})
+    with pytest.raises(ValueError, match="non-content-addressed"):
+        staged.release(key)
+    assert staged.local.path(key).is_file()
+
+
+def test_releasing_an_absent_object_is_a_no_op(tmp_path):
+    staged, _ = _store(tmp_path)
+    staged.release(f"map/places-v1/packs/sha256/{DIGEST}.parquet")
+    assert staged.evidence()["staged_objects_released"] == 0
+
+
+def test_the_local_only_store_has_no_release_so_nothing_deletes_the_store(tmp_path):
+    # Callers reach eviction through getattr(store, "release", None). If
+    # LocalObjectStore ever grew a `release`, a --no-staging run would delete the
+    # store it is reading.
+    assert not hasattr(ADDRESS.LocalObjectStore(tmp_path), "release")
 
 
 # --------------------------------------------------------------------------- #

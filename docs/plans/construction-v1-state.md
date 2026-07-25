@@ -16,9 +16,13 @@ head and by finalize. It does not fit on a runner, so reduce never started. That
 transport is now **replaced**: map writes the store into a run-scoped R2 staging
 prefix through the `ObjectStore` seam, every inter-job artifact carries markers
 and JSON only, and each consumer fetches by key exactly the objects its markers
-name — the same shape `build_id_index.py` already uses. What remains before a
-planet dispatch is operational rather than structural: a scoped staging-only R2
-token, and row-group range reads to tighten read amplification further.
+name — the same shape `build_id_index.py` already uses. **For PLACES** what
+remains before a planet dispatch is operational rather than structural: a scoped
+staging-only R2 token, and row-group range reads to tighten read amplification
+further. **For ADDRESSES the reduce phase is still transport-blocked**, because it
+has no shuffle to narrow its fan-in — deliberately deferred, and the reason a green
+address slice is not an unblocked address planet build. See the family caveat
+below.
 
 ## Read the history this way
 
@@ -169,25 +173,93 @@ as such; issuing a scoped staging-only token is the tracked next step. The
 workflow is still `workflow_dispatch`-only and never runs on `pull_request`, and
 every credentialed step is execute-mode-gated.
 
+**What each phase actually downloads, stated honestly.** "The store stops
+travelling between phases" is true of the *artifact*; it is not true that no phase
+reads pack bodies. Two do, and their bound is the **peak resident hydrated bytes**
+— the high-water mark of fan-in on the runner at once, not the total streamed
+through. Every phase reports both (`--staging-report`, and in the slice summary):
+
+| phase | reads | bound |
+|---|---|---|
+| map | nothing (it writes) | — |
+| plan (places) | **every pack body, twice** | `max_fan_in_packs` (256) packs at once in the DuckDB pass, then ONE at a time in the binding pass, released after each. ~390 MB planet, against ~34 GB eager |
+| plan (addresses) | marker JSON only | zero pack bytes |
+| reduce (places) | the fragments in its own bucket range | ~1 GB post-combiner (the bucket-range measurement above) |
+| reduce (addresses) | packs from essentially every map task | **unbounded — see the family caveat below** |
+| head | per-task head candidates (already bounded top-N) | small |
+| finalize | exactly the published set | small |
+
+The plan phase's eager `[store.path(k) for k in packs]` defeated its own
+`max_fan_in_packs` batching completely and would have put the whole planet term
+store on the one job run 30113308268 died on. It now hydrates per batch and
+evicts (`StagedObjectStore.release`), and the slice smoke asserts
+`peak_resident < bytes_hydrated`, which is false under eager hydration.
+
 **Evidence, on the fast loop, no credentials.** Both slice-smoke jobs run the
 whole transport with a filesystem staging backend and each phase on its own empty
 store:
 
 | | Monaco Places | Seattle addresses |
 |---|---|---|
-| harness wall time | 13.6 s | 9.3 s |
+| harness wall time | 13.3 s | 12.2 s |
 | records | 38,182 | 104,928 |
 | map published to staging | 18 objects / 25.53 MB | 7 objects / 90.73 MB |
+| plan hydrated / peak resident | 32.88 MB / **16.44 MB** (8 released) | 0 / 0 |
+| reduce hydrated / worst job peak | 16.44 MB / **8.30 MB** | 10.89 MB / 10.89 MB |
 | finalize hydrated from staging | 24 objects / 11.84 MB | 5 objects / 32.14 MB |
 
 The published slice is **byte-identical** to a `--no-staging` run of the same
-slice — same content-addressed names, same sizes, 27 files each. (The `map/`
-store class total differs by a few bytes run to run in both modes: the proof
-directories inline per-run wall-time/RSS evidence. Pre-existing, unrelated to
-transport.)
+slice — same content-addressed names, same sizes; 27 files for Places, 8 for
+addresses.
+
+Two byte totals in `store_bytes_by_class` do wobble, and neither is about
+transport:
+
+- `map/` drifts a few bytes run to run in **both** modes, because the pack proof
+  directories inline per-run wall-time and RSS evidence;
+- `serve/` differs by 96 bytes between a staged and a `--no-staging` run because
+  the head **manifest** embeds each shard's absolute local path, which contains
+  the `--store-root` directory name. That manifest is not part of the published
+  slice (`_artifact_keys` collects `shard_objects`, not `manifest_object`), which
+  is why the published trees are still identical. It is a real wart — a digest
+  that depends on a runner's directory layout — and is tracked as a follow-up.
+
+**Publication is verified against identity now, not just against itself.**
+`verify_whole_slice_once` derives what it expects from the same files it
+publishes, and the reconciliation compares bindings out of the reduction JSON, so
+a local store carrying wrong bytes under a right key published them and reported
+`reconciles: true`. Finalize now compares every file to the digest in its
+content-addressed key AND to the size/digest its producing phase recorded, before
+anything is uploaded. Head shard entries carry `sha256`/`bytes` for that reason.
+
+### The transport unblocks PLACES at planet scale. It does not unblock addresses.
+
+Be precise about this, because two green slice jobs read as if both families were
+done and they are not:
+
+- **Places** is transport-clear end to end. Map writes to staging, plan is bounded
+  and evicts, a reduce job owns a shuffle-bucket range and fetches only the
+  fragments in it (~1 GB post-combiner), head reads bounded candidates, finalize
+  reads exactly the published set.
+- **Addresses** are transport-clear for map, plan, and finalize, and still
+  **blocked at reduce**. `address_construction_v1.reduce_partition` selects row
+  groups by `(country, route_hash)` routing summaries across *every* map marker,
+  so a partition hydrates packs from essentially every map task — there is no
+  shuffle to narrow it, deliberately (the port is DEFERRED and the forward
+  partition key is FROZEN). On the Seattle slice that shows up as
+  `reduce_staged_peak_resident_bytes == reduce_staged_bytes_hydrated`, and the
+  smoke job asserts the shape rather than hiding it. At planet scale (473.6 M
+  records / 33.2 GB selected) an address reduce partition would still not fit a
+  runner. **A green address slice means "the transport moves address map output
+  durably", not "the address planet build is unblocked."** Fixing it is the
+  deferred shuffle port, not this change.
 
 ## The next increment, precisely
 
+0. **Port the shuffle to the address family** if an address planet build is
+   wanted — it is the remaining transport blocker for that family, and only for
+   it. See the DEFERRED section of the follow-ups doc; the partition key is FROZEN
+   and the first step is measuring country skew.
 1. Scoped **staging-only** R2 token for the map/reduce/plan/head jobs, leaving
    the broad key with finalize where the promotion discipline lives. This is now
    the only credential item between here and a planet dispatch.

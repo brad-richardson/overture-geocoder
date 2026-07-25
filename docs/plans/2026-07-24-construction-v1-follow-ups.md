@@ -548,6 +548,15 @@ fail-closed rules are already in place.
    `selective_read_amplification_max` 4.0. **That bound is enforced by nothing at
    run time**, only by `validate_places_planet_readiness.py` against the
    rehearsal. Range reads and the run-time gate belong together.
+   **Related, and specific to the plan phase:** it now hydrates every pack body
+   TWICE (a DuckDB planning pass batched at `max_fan_in_packs` with eviction
+   between batches, then a one-at-a-time binding pass). Bounded, but it still
+   streams the whole term store through the plan runner. The pack proof
+   DIRECTORIES already in the markers carry per-row-group routing and record
+   counts, so planning from directories alone — never touching a pack body — is the
+   real fix. It is not surgical: `adaptive_genesis_plan` needs per-cell
+   `count(DISTINCT token)` and a per-partition two-lane binding, and a directory
+   carries neither. Deliberately deferred to keep this change to transport.
 2. **`ensure_uploaded` reads every uploaded object back.** That is the create-only
    verification contract and it is why the transport is trustworthy, but it means
    map downloads what it just uploaded: ~34 GB of extra planet GETs, ~380 MB per
@@ -563,18 +572,70 @@ fail-closed rules are already in place.
    family, which is trivially cheap; row-group range reads would take it to
    10^5–10^6. Estimate it before the first planet dispatch, not in a bill.
 5. **A locally-cached object is not re-verified on read.** `path()` verifies
-   everything it HYDRATES against the digest in the key, and callers
-   (`validate_marker`, `validate_positions`, the reducer's per-pack SHA check)
-   re-digest what they read anyway, so nothing is unchecked in practice. But
-   `path()` itself trusts a local file that already exists, exactly as
-   `LocalObjectStore.path` always did. Unchanged behaviour, written down because
-   the staging seam is where someone will look for it.
-6. **Nothing expires an abandoned construction-v1 staging prefix yet.**
-   `r2-cleanup.yml` can delete one by hand (its phase-2 guard matches the prefix
-   shape this transport writes, deliberately), but there is no lifecycle rule and
-   no failure-path wipe. A failed planet run now leaves up to ~34 GB of staging
-   debris per family. Same class as item (a) below for the rebuild workflow, and
-   it should probably be fixed the same way.
+   everything it HYDRATES against the digest in the key, but it trusts a local file
+   that already exists, exactly as `LocalObjectStore.path` always did. An earlier
+   draft of this item justified that with "callers re-digest what they read
+   anyway"; **that was wrong at the publication point**, and the review
+   demonstrated it — a pre-planted wrong-bytes file at a right key was published
+   with `reconciles: true`. Finalize now checks every file against the digest in
+   its key and against the identity its producing phase recorded, so the
+   publication hole is closed. The remaining gap is narrower and stated
+   accurately: a consumer that only READS a cached object (the reducer, head)
+   relies on its own per-pack SHA check, and `path()` itself still does not
+   re-verify.
+6. **Nothing expires an abandoned construction-v1 staging prefix yet, and it is
+   now load-bearing.** `r2-cleanup.yml` can delete one by hand — its phase-2 guard
+   matches the prefix shape this transport writes, deliberately, and it now REFUSES
+   a prefix containing `construction-v1/` unless `allow_construction_staging=true`,
+   so a one-input dispatch cannot destroy a live multi-hour run. But there is still
+   no lifecycle rule and no failure-path wipe, and a failed planet run leaves up to
+   ~34 GB of staging debris per family. Same class as item (a) below for the rebuild
+   workflow, and it should probably be fixed the same way.
+7. **The head manifest bakes the absolute `--store-root` path into its own
+   digest.** `shard_entries` carries `path` (`str(store.path(key))`) and the
+   manifest embeds every field except `key`, so the manifest's bytes depend on the
+   runner's directory layout. It is why a staged and a `--no-staging` slice run
+   differ by 96 bytes in the `serve/` store class. Harmless today only because
+   `_artifact_keys` publishes `shard_objects` and not `manifest_object`, so the
+   manifest never reaches the slice — which is itself worth a look, since the head
+   manifest is the only thing that disambiguates PLHD shards (item 7 of the "test
+   hygiene" section). Fix: drop `path` from the manifest projection, or key it
+   relatively.
+8. **`FilesystemStore.upload` has a crash window between `os.link` and the sidecar
+   write.** The object is published create-only and atomically, then its
+   `.metadata.json` is written; a crash in between leaves an object whose `head()`
+   reports `sha256: None`. Content-addressed keys survive it (`path()` verifies
+   against the digest in the key), but a MARKER would then abort forever, since
+   `read_json` fails closed on missing digest metadata and the object cannot be
+   rewritten. Test-and-rehearsal backend only; R2's `put-object --metadata` is one
+   atomic operation. Fix: write the sidecar first, or hold the digest in the object
+   name.
+9. **A second dispatch under a DIFFERENT confirmation but the same
+   `request_sha256` hard-fails rather than degrading.** Two concurrent runs share a
+   staging prefix by design (that is what makes resume free), and create-only means
+   the second one's `ensure_uploaded` raises on any object whose bytes differ. That
+   is the correct direction, but the failure surfaces as a mid-run
+   `ValueError: existing object identity differs` on an arbitrary map task rather
+   than as an admission-time refusal. Worth an explicit up-front check.
+10. **`admit-task --remote-root` plus `--marker-out` is a trap.** Completion
+    observed only through the `FilesystemRemote` HEAD path carries no payload, so
+    `--marker-out` raises `SystemExit` rather than silently dropping the task from
+    the fan-in. Correct, but it means the two flags cannot be combined; the hosted
+    workflow uses `--marker-out` and not `--remote-root`, so nothing hits it today.
+11. ~~**The plan job does not assert it received every map marker.**~~ FIXED in the
+    same change: the plan job now counts the fanned-in markers against
+    `admit.outputs.map_task_count` and fails closed on a mismatch. With the store
+    out of the artifacts, a missing marker was the only remaining way a map task
+    could silently vanish from the plan.
+12. **PRE-PLANET CHECK: verify head-candidate volume fits.**
+    `Limits.max_head_candidate_rows` is 5,000,000 and the Monaco slice produced
+    69,069 head candidates from 38,182 places — about 1.8 candidates per place. A
+    straight-line planet projection over 74.2 M places is ~134 M candidates, ~27x
+    the cap. The relationship is certainly sublinear (candidates are top-N per
+    token and the planet shares tokens far more than a 38k slice does), which is
+    exactly why it must be MEASURED from a real planet map run rather than
+    projected. Do this before dispatching a planet head phase; it is a fail-closed
+    cap, so the failure mode is a clean abort late in an expensive run.
 
 ## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
 

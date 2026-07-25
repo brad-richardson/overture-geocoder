@@ -297,6 +297,18 @@ def _staging_evidence(store: Any) -> dict[str, Any]:
     return evidence() if callable(evidence) else {}
 
 
+def _write_staging_report(args: argparse.Namespace, store: Any) -> None:
+    """Persist the staging counters when --staging-report was given.
+
+    stdout interleaves with stderr under `/usr/bin/time -v`, so a phase whose only
+    machine-readable surface is a printed line is not assertable. The reduce and
+    plan phases have no result FILE of their own, so they get one here.
+    """
+    report = getattr(args, "staging_report", None)
+    if report:
+        write_json(report, _staging_evidence(store))
+
+
 def _add_staging_arguments(parser: argparse.ArgumentParser) -> None:
     """Flags selecting the R2 staging transport for the intermediate store.
 
@@ -321,6 +333,13 @@ def _add_staging_arguments(parser: argparse.ArgumentParser) -> None:
         "--staging-endpoint-url",
         default=None,
         help="R2 S3-compatible endpoint URL for --staging-bucket.",
+    )
+    parser.add_argument(
+        "--staging-report",
+        type=Path,
+        default=None,
+        help="Write this phase's staging transport counters here, including the "
+             "peak resident hydrated bytes that decide whether it fits a runner.",
     )
 
 
@@ -811,6 +830,10 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
     }
     if ledger_check is not None:
         summary["ledger_check"] = ledger_check
+    # The plan phase reads pack BODIES, so its resident high-water mark is the
+    # number that decides whether this job fits a runner. Reported, not assumed.
+    summary.update(_staging_evidence(store))
+    _write_staging_report(args, store)
     print(json.dumps(summary, sort_keys=True))
     return 0
 
@@ -1229,7 +1252,9 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
         print(json.dumps({"family": args.family, "bucket_start": result["bucket_start"],
                           "bucket_end": result["bucket_end"],
                           "partitions": result["partition_indexes"],
-                          "fragments_opened": result["fragments_opened"]}, sort_keys=True))
+                          "fragments_opened": result["fragments_opened"],
+                          **_staging_evidence(store)}, sort_keys=True))
+        _write_staging_report(args, store)
         return 0
 
     # Batch mode: one reducer JOB processes a contiguous partition range serially
@@ -1266,8 +1291,10 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
                               "partition_start": batch["partition_start"],
                               "partition_count": batch["partition_count"],
                               "partitions": result["partition_indexes"],
-                              "fragments_opened": result["fragments_opened"]},
+                              "fragments_opened": result["fragments_opened"],
+                              **_staging_evidence(store)},
                              sort_keys=True))
+            _write_staging_report(args, store)
             return 0
         start = batch["partition_start"]
         count = batch["partition_count"]
@@ -1283,8 +1310,9 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
             processed.append(partition_index)
         result = {"family": args.family, "batch_index": args.batch_index,
                   "partition_start": start, "partition_count": count,
-                  "partitions": processed}
+                  "partitions": processed, **_staging_evidence(store)}
         print(json.dumps(result, sort_keys=True))
+        _write_staging_report(args, store)
         return 0
 
     # Legacy single-partition mode (one job per partition).
@@ -1296,7 +1324,9 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
     )
     write_json(args.output, reduction)
     print(json.dumps({"family": args.family, "partition_index": args.partition_index,
-                      "artifact": reduction.get("artifact")}, sort_keys=True))
+                      "artifact": reduction.get("artifact"),
+                      **_staging_evidence(store)}, sort_keys=True))
+    _write_staging_report(args, store)
     return 0
 
 
@@ -1483,19 +1513,68 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         (f"{slice_root}/families/{args.family}/family-manifest.json", family_manifest_path),
         (f"{slice_root}/families/{args.family}/slice-manifest.json", slice_manifest_path),
     ]
+    # Recorded identity per published key, so the pre-publication check below can
+    # compare the bytes on disk to what the PRODUCING phase wrote down, not just to
+    # the digest in the filename.
+    recorded: dict[str, dict[str, Any]] = {}
     for artifact in artifacts:
-        exact_set.append((f"{slice_root}/families/{args.family}/objects/{Path(artifact['key']).name}",
-                          store.path(artifact["key"])))
+        source = f"{slice_root}/families/{args.family}/objects/{Path(artifact['key']).name}"
+        recorded[source] = artifact
+        exact_set.append((source, store.path(artifact["key"])))
     # Per-family sub-prefix: `positions/` for places, `records/` for addresses --
     # so the published tree names the artifact it holds instead of calling address
     # records "positions". Both go through the same exact-set publisher and the
     # same verify_whole_slice_once below.
     for artifact in positions:
-        exact_set.append((
+        source = (
             f"{slice_root}/families/{args.family}/{per_record_spec['prefix']}/"
-            f"{Path(artifact['key']).name}",
-            store.path(artifact["key"]),
-        ))
+            f"{Path(artifact['key']).name}"
+        )
+        recorded[source] = artifact
+        exact_set.append((source, store.path(artifact["key"])))
+    # Every published object is content-addressed, so its NAME states its bytes --
+    # and until now nothing checked that the bytes at the local key matched. The
+    # verification below derives `expected` from the same files it publishes, so a
+    # local store carrying wrong bytes under a right key published them and reported
+    # `reconciles: true`: the reconciliation compares BINDINGS from the reduction
+    # JSON, which a substituted file does not touch. Compare each file to the digest
+    # in its own key before publication. This is free -- `file_identity` digests
+    # every one of them anyway -- and it is the last point at which a wrong byte can
+    # still be caught.
+    identities = {key: REMOTE.file_identity(path) for key, path in exact_set}
+    manifests = {
+        f"{slice_root}/families/{args.family}/family-manifest.json",
+        f"{slice_root}/families/{args.family}/slice-manifest.json",
+    }
+    for source, path in exact_set:
+        if source in manifests:
+            # The only non-content-addressed members, and both were written from
+            # memory a few lines above.
+            continue
+        artifact = recorded[source]
+        declared = STAGING.content_addressed_digest(artifact["key"])
+        if declared is None:
+            raise SystemExit(
+                f"refusing to publish an object with no verifiable identity: {source}"
+            )
+        actual = identities[source]
+        # Two independent checks. `declared` proves the bytes match the digest the
+        # store key ASSERTS about them; `artifact` proves they also match the size
+        # and digest the PRODUCING phase recorded in its reduction / head result /
+        # map marker. Either alone would have caught the pre-planted shard; both
+        # together mean the file, its name, and its provenance all agree.
+        if actual["sha256"] != declared:
+            raise SystemExit(
+                f"refusing to publish {source}: the bytes at {path} hash to "
+                f"{actual['sha256']} but their content-addressed key declares "
+                f"{declared}. The local store is not the store that produced this "
+                "slice."
+            )
+        if actual["sha256"] != artifact["sha256"] or actual["bytes"] != artifact["bytes"]:
+            raise SystemExit(
+                f"published object {source} differs from the identity its producing "
+                "phase recorded"
+            )
     marker_key = f"{contract['namespaces']['markers'].rstrip('/')}/finalize/{args.family}.json"
     marker = REMOTE.publish_exact_set(
         remote,
@@ -1504,8 +1583,8 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         request_sha256=request_sha256,
         fail_after_upload=args.fail_after_upload,
     )
-    expected = [{"key": key, "sha256": REMOTE.file_identity(path)["sha256"],
-                 "bytes": REMOTE.file_identity(path)["bytes"]} for key, path in exact_set]
+    expected = [{"key": key, "sha256": identities[key]["sha256"],
+                 "bytes": identities[key]["bytes"]} for key, _path in exact_set]
     verification = REMOTE.verify_whole_slice_once(
         remote, prefix=f"{slice_root}/families/{args.family}/", expected=expected
     )

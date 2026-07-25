@@ -556,6 +556,92 @@ def test_a_missing_or_tampered_staged_object_aborts_the_consumer(tmp_path, binar
     assert reduce("restored") == 0
 
 
+def test_finalize_refuses_to_publish_bytes_that_are_not_the_bytes(tmp_path, binaries):
+    """A right key over wrong bytes was publishable, and reported reconciles: true.
+
+    `verify_whole_slice_once` derives what it expects from the very files it
+    publishes, and the reconciliation compares BINDINGS out of the reduction JSON,
+    which substituted file content does not touch. So every check passed on bytes
+    nothing had ever produced. Finalize now compares each file to the digest in its
+    content-addressed key AND to the identity its producing phase recorded.
+    """
+    contract, _ = _derive(tmp_path)
+    staging = tmp_path / "staging"
+    _store_dir, markers_dir = _address_map_store(
+        tmp_path, contract, binaries, "tamper", staging=staging
+    )
+    plan_path = tmp_path / "plan-tamper.json"
+    _run("plan-reduce", "--contract", contract, "--store-root", tmp_path / "store-plan-t",
+         "--staging-root", staging, "--family", "addresses",
+         "--markers-dir", markers_dir, "--row-cap", "2", "--output", plan_path)
+    reductions = tmp_path / "reductions-tamper"
+    reductions.mkdir()
+    partitions = json.loads(plan_path.read_text())["partitions"]
+    reduce_store = tmp_path / "store-reduce-t"
+    for index in range(len(partitions)):
+        _run("run-reduce", "--contract", contract, "--store-root", reduce_store,
+             "--staging-root", staging, "--family", "addresses", "--plan", plan_path,
+             "--markers-dir", markers_dir, "--partition-index", index,
+             "--proof-binary", binaries["address-proof-directory"],
+             "--encoder-binary", binaries["address-serving-encode-v1"],
+             "--verifier-binary", binaries["address-serving-verify-v1"],
+             "--scratch-dir", tmp_path / f"reduce-t-{index}",
+             "--output", reductions / f"{index:04d}.json")
+
+    # Pre-plant wrong bytes at a right key in the finalize runner's local cache, so
+    # the store already "has" the object and nothing hydrates it from staging.
+    finalize_store = tmp_path / "store-finalize-t"
+    victim = json.loads((reductions / "0000.json").read_text())["artifact"]
+    planted = finalize_store / victim["key"]
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_bytes(b"\x00" * victim["bytes"])  # same length, wrong bytes
+
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract),
+                     "--store-root", str(finalize_store), "--staging-root", str(staging),
+                     "--family", "addresses", "--plan", str(plan_path),
+                     "--reductions-dir", str(reductions), "--markers-dir", str(markers_dir),
+                     "--remote-root", str(tmp_path / "remote-tamper"),
+                     "--work-root", str(tmp_path / "final-work-tamper"),
+                     "--output", str(tmp_path / "final-tamper.json")])
+    assert "content-addressed key declares" in str(excinfo.value)
+    # Nothing was published: the check runs BEFORE publish_exact_set.
+    assert not (tmp_path / "remote-tamper").exists()
+
+    # Remove the planted file and the same finalize succeeds from staging.
+    planted.unlink()
+    _run("finalize", "--contract", contract, "--store-root", finalize_store,
+         "--staging-root", staging, "--family", "addresses", "--plan", plan_path,
+         "--reductions-dir", reductions, "--markers-dir", markers_dir,
+         "--remote-root", tmp_path / "remote-clean",
+         "--work-root", tmp_path / "final-work-clean",
+         "--output", tmp_path / "final-clean.json")
+    assert json.loads((tmp_path / "final-clean.json").read_text())["reconciles"] is True
+
+
+def test_the_places_plan_phase_is_bounded_not_eagerly_hydrated(tmp_path):
+    """The plan phase must never hold its whole pack fan-in.
+
+    `adaptive_genesis_plan` batches its DuckDB reads by `max_fan_in_packs`, but the
+    paths were resolved EAGERLY in one list comprehension, so with the store in
+    staging every pack was hydrated before the first read -- the entire planet term
+    store on the one job run 30113308268 died on. Eviction between batches is what
+    makes the batching real, and peak-below-total is how you can tell.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "hosted_plan_bound_places", ROOT / "scripts/places_construction_v1.py"
+    )
+    source = spec.loader.get_source("hosted_plan_bound_places")
+    # The eager form must not come back: it is a one-line regression that no
+    # functional test on a small slice would notice.
+    assert 'paths = [store.path(pack["object"]["key"]) for pack in packs]' not in source
+    assert 'release = getattr(store, "release", None)' in source
+    # Both passes over the packs release what they fetched.
+    assert source.count('release(pack["object"]["key"])') == 2
+
+
 def test_staging_without_a_contract_fails_closed(tmp_path):
     """The staging prefix is derived from the contract, never guessed."""
     with pytest.raises(SystemExit) as excinfo:

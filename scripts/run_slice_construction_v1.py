@@ -265,6 +265,7 @@ plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store_for("p
              *staging_argv(),
              "--family", FAMILY, "--markers-dir", markers,
              "--scratch-dir", WORK / "plan-scratch", "--output", plan,
+             *(("--staging-report", WORK / "plan-staging.json") if STAGED else ()),
              "--matrix-out", WORK / "reduce-matrix.json"]
 if args.max_reduce_jobs is not None:
     plan_argv += ["--max-reduce-jobs", args.max_reduce_jobs]
@@ -283,6 +284,15 @@ else:
     print(f"  {len(partitions)} partitions in {execution['job_count']} "
           f"{execution['ownership']} jobs (batch size {execution['batch_size']})"
           f"  {time.time()-t:.1f}s")
+plan_staged = json.loads((WORK / "plan-staging.json").read_text()) if STAGED else {}
+if STAGED:
+    # The plan phase reads pack BODIES, so its PEAK resident bytes -- not its total
+    # -- decides whether the job fits a runner. It used to hydrate every pack
+    # eagerly, which made peak == total and put the whole planet term store on this
+    # one runner: the very job run 30113308268 died on.
+    print(f"  staging: hydrated {plan_staged['staged_bytes_hydrated']/1e6:.2f} MB, "
+          f"peak resident {plan_staged['staged_peak_resident_bytes']/1e6:.2f} MB, "
+          f"released {plan_staged['staged_objects_released']} objects")
 
 # --- reduce ---------------------------------------------------------------
 # One job per reduce BATCH, exactly as the hosted matrix dispatches it. For
@@ -303,10 +313,23 @@ for batch in execution["batches"]:
            "--encoder-binary", ENCODER,
            "--verifier-binary", VERIFIER,
            "--scratch-dir", WORK / f"reduce-scratch-{batch['batch_index']}",
+           *(("--staging-report",
+              WORK / f"reduce-staging-{batch['batch_index']}.json") if STAGED else ()),
            "--output-dir", reductions)
 elapsed = time.time() - t
 print(f"  {len(partitions)} partitions in {elapsed:.1f}s "
       f"({elapsed/max(1,len(partitions)):.2f}s/partition)")
+reduce_staged: dict = {}
+if STAGED:
+    reports = [json.loads((WORK / f"reduce-staging-{b['batch_index']}.json").read_text())
+               for b in execution["batches"]]
+    reduce_staged = {
+        "staged_bytes_hydrated": sum(r["staged_bytes_hydrated"] for r in reports),
+        "staged_peak_resident_bytes": max(r["staged_peak_resident_bytes"] for r in reports),
+    }
+    print(f"  staging: hydrated {reduce_staged['staged_bytes_hydrated']/1e6:.2f} MB "
+          f"across {len(reports)} jobs, worst job peak resident "
+          f"{reduce_staged['staged_peak_resident_bytes']/1e6:.2f} MB")
 
 # --- head -----------------------------------------------------------------
 t = phase("run-head")
@@ -438,6 +461,16 @@ if STAGED:
     summary["map_staged_bytes_published"] = map_staged["staged_bytes_published"]
     summary["finalize_staged_objects_hydrated"] = result["staged_objects_hydrated"]
     summary["finalize_staged_bytes_hydrated"] = result["staged_bytes_hydrated"]
+    # The plan phase is the one that used to hydrate its whole fan-in eagerly.
+    # Peak-below-total is the assertable form of "batched and evicted", and the
+    # smoke job checks it, so a regression to eager hydration is a red build.
+    summary["plan_staged_bytes_hydrated"] = plan_staged["staged_bytes_hydrated"]
+    summary["plan_staged_peak_resident_bytes"] = plan_staged["staged_peak_resident_bytes"]
+    summary["plan_staged_objects_released"] = plan_staged["staged_objects_released"]
+    summary["reduce_staged_bytes_hydrated"] = reduce_staged["staged_bytes_hydrated"]
+    summary["reduce_staged_peak_resident_bytes"] = reduce_staged[
+        "staged_peak_resident_bytes"
+    ]
 if head_result.get("head", "absent") is not None:
     summary["head_shard_count"] = head_result["shard_count"]
     summary["head_populated_shards"] = head_result["populated_shards"]

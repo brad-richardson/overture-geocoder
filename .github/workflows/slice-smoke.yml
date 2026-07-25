@@ -192,6 +192,12 @@ jobs:
               echo "::warning title=Slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/run-attempt-1.log in the slice-smoke-evidence artifact."
               echo "SLICE_RETRIED=true" >> "$GITHUB_ENV"
             fi
+            # `plan_staged_peak_resident_bytes < plan_staged_bytes_hydrated` is the
+            # assertable form of "the plan phase batches and EVICTS". It used to
+            # hydrate its whole pack fan-in eagerly, which at planet scale is the
+            # entire ~34 GB term store on the one job run 30113308268 died on;
+            # eager hydration makes peak == total, so this is the tripwire.
+            #
             # `reconciles` alone is NOT evidence the run produced anything: it is
             # now a real validator result for both families, but an EMPTY run
             # reconciles too. Assert real counts, from
@@ -212,6 +218,10 @@ jobs:
               and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/places$"))
               and .map_staged_objects_published > 0
               and .finalize_staged_objects_hydrated > 0
+              and .plan_staged_bytes_hydrated > 0
+              and .plan_staged_objects_released > 0
+              and (.plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated)
+              and (.reduce_staged_peak_resident_bytes <= .reduce_staged_bytes_hydrated)
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2
@@ -362,6 +372,16 @@ jobs:
               echo "::warning title=Address slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/address-run-attempt-1.log in the slice-smoke-address-evidence artifact."
               echo "ADDRESS_SLICE_RETRIED=true" >> "$GITHUB_ENV"
             fi
+            # `plan_staged_bytes_hydrated == 0` is not a bug: the ADDRESS genesis
+            # plan is built from marker JSON alone, so the plan phase reads no pack
+            # bodies at all. `reduce_staged_bytes_hydrated > 0` is where the address
+            # family's remaining transport problem lives, and it is asserted rather
+            # than hidden: the address reducer has no shuffle (deliberately
+            # deferred), so it hydrates packs from essentially every map task and its
+            # peak equals its total. A GREEN address slice therefore means
+            # "the transport moves address map output durably", NOT "the address
+            # planet build is unblocked at reduce" -- it is not.
+            #
             # Unlike places, `reconciles` for addresses is a REAL check
             # (validate_complete_reduction over the genesis plan), but it still
             # says nothing about volume, so assert counts the same way. The
@@ -399,6 +419,8 @@ jobs:
               and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/addresses$"))
               and .map_staged_objects_published > 0
               and .finalize_staged_objects_hydrated > 0
+              and .plan_staged_bytes_hydrated == 0
+              and .reduce_staged_bytes_hydrated > 0
             ' "${WORK}/summary.json" >/dev/null || {
               echo "The address slice ran but its summary does not prove it produced data:" >&2
               cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2
