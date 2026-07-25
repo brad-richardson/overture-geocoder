@@ -6,17 +6,24 @@ name: Construction v1 slice smoke
 # dry-run cannot see. See item 5 of
 # docs/plans/2026-07-24-construction-v1-follow-ups.md.
 #
-# This runs the REAL five-phase Places data plane on a real Overture slice
-# covering Monaco -- S3 projection, transform binary, store writes, reduce,
-# head, finalize -- in ~13 seconds of harness time (~20s including the
-# inventory), plus an import check of every hosted entrypoint module under only
-# the hash-pinned dependency set.
+# This runs the REAL construction-v1 data plane on real Overture slices -- S3
+# projection, transform binary, store writes, reduce, head, finalize -- for BOTH
+# families, plus an import check of every hosted entrypoint module under only the
+# hash-pinned dependency set:
+#
+#   slice          five phases over Monaco Places, ~13s of harness time (~20s
+#                  including the inventory).
+#   address-slice  every address phase over a Seattle slice, ~10s. Before it
+#                  existed the address family had NO data-plane coverage at all:
+#                  its projector, transform, proof binary, genesis plan,
+#                  selective reducer and finalize adapter ran only on fixtures.
 #
 # What this actually covers, per defect, stated honestly:
 #   #149 (cargo manifest path)  -> the build step below; byte-identical command.
-#   #150 (missing psutil)       -> the SLICE job. psutil is imported inside
-#                                  run_bounded, so only executing the map phase
-#                                  reaches it. hosted-imports does NOT catch it.
+#   #150 (missing psutil)       -> the SLICE job (either family). psutil is
+#                                  imported inside run_bounded, so only executing
+#                                  the map phase reaches it. hosted-imports does
+#                                  NOT catch it.
 #   #148 (admit matrix key)     -> NEITHER job. The admission gate, its request
 #                                  regeneration, and matrix generation are not
 #                                  run here; only tests/test_construction_v1_-
@@ -75,6 +82,13 @@ env:
   # multi-partition reduce, and sharded head all actually do work.
   SLICE_BBOX: "7.36 43.71 7.47 43.78"
   SLICE_TASK_INDEX: "33"
+  # Seattle addresses. Pinned for the same reason and with the same drift gate:
+  # the task index is a property of the release's row-group layout. The box sits
+  # east of longitude -122.34375, which IS a level-8 cell boundary, so the
+  # covering row group straddles it and the slice spans cells c328 and c329 in
+  # two different shuffle buckets -- the only cross-cell fixture in the repo.
+  ADDRESS_SLICE_BBOX: "-122.34 47.59 -122.30 47.63"
+  ADDRESS_SLICE_TASK_INDEX: "54"
 
 jobs:
   hosted-imports:
@@ -245,3 +259,173 @@ jobs:
           path: |
             slice/*.json
             slice/run-attempt-*.log
+
+  address-slice:
+    # A SEPARATE job rather than a matrix over the places one, deliberately: the
+    # two families assert on different keys (addresses have no global head and no
+    # shuffle-bucket reduce ownership; places have no `map/address` store class),
+    # and folding them into one parameterised block would have meant editing the
+    # places assertions -- the exact class of silent change that the integration
+    # of this branch was reviewed for. The retry/log/evidence discipline is
+    # deliberately identical.
+    #
+    # Until this job existed the address family had NO data-plane coverage at all:
+    # its projector, transform, proof binary, genesis plan, selective reducer and
+    # finalize adapter were exercised only by fixtures.
+    name: Seattle address slice, all phases on real Overture data
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Set up the exact hosted Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install the hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+
+      # Same command the hosted map/reduce jobs run. The harness looks for the
+      # binaries at crates/target/release, so the release profile is required.
+      - name: Build the construction binaries
+        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
+
+      - name: Build the Seattle address slice inventory from real row-group statistics
+        run: |
+          set -euo pipefail
+          mkdir -p slice
+          # Anonymous public read of the Overture release parquet footers; no
+          # credentials, no data download (bbox stats live in the footer).
+          # shellcheck disable=SC2086
+          python scripts/build_slice_inventory_v1.py --family addresses \
+            --release "$SLICE_RELEASE" --bbox $ADDRESS_SLICE_BBOX \
+            --output slice/address-inventory.json | tee slice/address-inventory-report.json
+          TASK="$(jq -r '.task_index' slice/address-inventory-report.json)"
+          if [ "$TASK" != "$ADDRESS_SLICE_TASK_INDEX" ]; then
+            echo "The bbox now lands on map task $TASK, not the pinned $ADDRESS_SLICE_TASK_INDEX." >&2
+            echo "Release $SLICE_RELEASE row-group layout changed; update ADDRESS_SLICE_TASK_INDEX." >&2
+            exit 1
+          fi
+          # The slice's whole value as a spatial fixture is that it spans two
+          # level-8 cells. A layout change that kept the task index but moved the
+          # cell boundary out of the row group would silently reduce it to a
+          # single-cell slice, so the row group and its object are pinned too.
+          jq -e '.object_index == 8 and .row_group == 108 and .task_records == 104928' \
+            slice/address-inventory-report.json >/dev/null || {
+            echo "The address slice no longer resolves to object 8 / row group 108 / 104,928 rows." >&2
+            cat slice/address-inventory-report.json >&2
+            exit 1
+          }
+
+      - name: Run every address construction-v1 phase on the slice
+        run: |
+          set -uo pipefail
+          # Same two-attempt policy and rationale as the places job: a transient
+          # anonymous S3 read is cheaper to absorb by rerunning than by plumbing
+          # retries into the projector, each attempt gets a FRESH work dir because
+          # the store is create-only, and every attempt's log is uploaded so a
+          # pass-on-retry cannot hide an intermittent data-plane defect.
+          for ATTEMPT in 1 2; do
+            WORK="slice/address-work"
+            [ "$ATTEMPT" = 1 ] || WORK="slice/address-work-attempt-${ATTEMPT}"
+            LOG="slice/address-run-attempt-${ATTEMPT}.log"
+            echo "::group::address slice attempt ${ATTEMPT} (work=${WORK})"
+            python scripts/run_slice_construction_v1.py --family addresses \
+              --inventory slice/address-inventory.json \
+              --task-index "$ADDRESS_SLICE_TASK_INDEX" \
+              --release "$SLICE_RELEASE" \
+              --work "$WORK" 2>&1 | tee "$LOG"
+            STATUS=$?
+            echo "::endgroup::"
+            for FILE in "$WORK"/*.json; do
+              [ -f "$FILE" ] || continue
+              cp -f "$FILE" "slice/address-attempt-${ATTEMPT}-$(basename "$FILE")"
+            done
+            if [ "$STATUS" -ne 0 ]; then
+              echo "Address slice attempt ${ATTEMPT} failed with status ${STATUS} (see the phase output above)." >&2
+              continue
+            fi
+            if [ "$ATTEMPT" != 1 ]; then
+              echo "::warning title=Address slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/address-run-attempt-1.log in the slice-smoke-address-evidence artifact."
+              echo "ADDRESS_SLICE_RETRIED=true" >> "$GITHUB_ENV"
+            fi
+            # Unlike places, `reconciles` for addresses is a REAL check
+            # (validate_complete_reduction over the genesis plan), but it still
+            # says nothing about volume, so assert counts the same way. The
+            # address family has no global head, so there are no head_* keys to
+            # assert -- which is why the reduce-ownership key is asserted instead:
+            # it proves the run went through the batch dispatch, not the legacy
+            # one-job-per-partition path.
+            jq -e '
+              .family == "addresses"
+              and .reconciles == true
+              and .records > 0
+              and .partitions > 0
+              and .admitted_rows > 0
+              and .map_packs > 0
+              and .reduce_ownership == "partition-batch"
+              and .reduce_job_count > 0
+              and (.store_bytes_by_class["map/address"] > 0)
+              and (.store_bytes_by_class["reduce/address"] > 0)
+            ' "${WORK}/summary.json" >/dev/null || {
+              echo "The address slice ran but its summary does not prove it produced data:" >&2
+              cat "${WORK}/summary.json" >&2 || echo "(no summary.json written)" >&2
+              echo "This is a data-plane defect, not flakiness." >&2
+              exit 1
+            }
+            # Addresses have no head phase, so run-head must report exactly that
+            # rather than an empty head that looks like a successful one.
+            jq -e '.family == "addresses" and .head == null' "${WORK}/head.json" >/dev/null || {
+              echo "run-head did not report the documented address no-op." >&2
+              cat "${WORK}/head.json" >&2
+              exit 1
+            }
+            cp -f "${WORK}/summary.json" slice/address-summary.json
+            exit 0
+          done
+          echo "The Seattle address slice failed twice; this is a real data-plane failure or a sustained S3 outage." >&2
+          exit 1
+
+      - name: Summarize the address slice run
+        if: always()
+        run: |
+          {
+            echo "## Construction v1 address slice smoke"
+            echo
+            echo "- Release: \`$SLICE_RELEASE\` | bbox: \`$ADDRESS_SLICE_BBOX\` | map task: \`$ADDRESS_SLICE_TASK_INDEX\`"
+            if [ "${ADDRESS_SLICE_RETRIED:-false}" = true ]; then
+              echo "- **Attempt 1 FAILED; this run passed only on attempt 2.** Not a clean build — see \`slice/address-run-attempt-1.log\`."
+            fi
+            if [ -f slice/address-summary.json ]; then
+              echo
+              echo "\`\`\`json"
+              jq -S '.' slice/address-summary.json
+              echo "\`\`\`"
+            fi
+            for LOG in slice/address-run-attempt-*.log; do
+              [ -f "$LOG" ] || continue
+              echo
+              echo "<details><summary>$LOG</summary>"
+              echo
+              echo '```'
+              cat "$LOG"
+              echo '```'
+              echo
+              echo "</details>"
+            done
+            if ! ls slice/address-run-attempt-*.log >/dev/null 2>&1; then
+              echo "- The address slice run produced no log; see the failing step above."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish every attempt's inventory, reports, and logs for diagnosis
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: slice-smoke-address-evidence
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            slice/*.json
+            slice/address-run-attempt-*.log

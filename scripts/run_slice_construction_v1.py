@@ -1,12 +1,40 @@
 #!/usr/bin/env python3
-"""Drive construction-v1 end to end on a REAL Overture slice covering Monaco.
+"""Drive construction-v1 end to end on a REAL Overture slice, no credentials.
 
 Differs from tests/test_construction_v1_hosted.py in the one way that matters:
 the map input is produced by the real S3 projection from a real inventory, not
 by a hand-written fixture. Everything after that is the hosted CLI.
 
-Phases: derive-contract -> run-map -> plan-reduce -> run-reduce (all partitions)
--> run-head -> finalize (filesystem remote, no credentials).
+Phases: derive-contract -> run-map -> plan-reduce -> run-reduce (every reduce
+job the plan dispatches) -> run-head -> finalize (filesystem remote).
+
+Both families run the same five phases through the same hosted CLI, each with
+its own projector, transform, proof, encoder and verifier. Two documented
+asymmetries, both of them properties of the pipeline rather than of this script:
+
+* `run-head` is a no-op for addresses (there is no global address head), so the
+  address head.json is `{"family", "head": null, "note"}` and finalize takes no
+  `--head`. Every head assertion below is therefore family-guarded.
+* reduce ownership differs. A Places job owns a shuffle-bucket RANGE (#160); an
+  address job owns a contiguous PARTITION range, because the address shuffle is
+  deliberately deferred (docs/plans/2026-07-24-construction-v1-follow-ups.md).
+  Both are dispatched here by `--batch-index`/`--output-dir`, which is exactly
+  how the hosted reduce matrix dispatches them, so this loop exercises the real
+  dispatch path for each family rather than the legacy per-partition one.
+
+    # Places, Monaco: 38,182 places
+    python scripts/build_slice_inventory_v1.py --release 2026-07-22.0 \\
+      --bbox 7.36 43.71 7.47 43.78 --output slice/inventory.json
+    python scripts/run_slice_construction_v1.py --inventory slice/inventory.json \\
+      --task-index 33 --release 2026-07-22.0 --work slice/work
+
+    # Addresses, Seattle: 104,928 addresses across two level-8 cells
+    python scripts/build_slice_inventory_v1.py --family addresses \\
+      --release 2026-07-22.0 --bbox -122.34 47.59 -122.30 47.63 \\
+      --output slice/address-inventory.json
+    python scripts/run_slice_construction_v1.py --family addresses \\
+      --inventory slice/address-inventory.json --task-index 54 \\
+      --release 2026-07-22.0 --work slice/address-work
 """
 import argparse
 import json
@@ -32,12 +60,27 @@ parser.add_argument("--work", type=Path, required=True)
 parser.add_argument("--max-reduce-jobs", type=int, default=None,
                     help="Cap reduce jobs, widening the bucket stride "
                          "(use 1 to force one job over the whole bucket space).")
+parser.add_argument("--family", choices=("addresses", "places"), default="places")
 args = parser.parse_args()
 
 WORK = args.work
 RELEASE = args.release
+FAMILY = args.family
 TASK_INDEX = args.task_index
-TASK_ID = f"places-map-{TASK_INDEX:03d}"
+ADDRESSES = FAMILY == "addresses"
+# The hosted workflow derives the map task ID from the family key and the task
+# index; `construction_v1_control.py` builds `addresses-map-NNN` for the address
+# matrix. Anything matching `marker_key`'s charset works, and the harness only
+# needs the ID to be family-distinct so the two families never collide in one
+# store.
+TASK_ID = f"{FAMILY}-map-{TASK_INDEX:03d}"
+PREFIX = "address" if ADDRESSES else "places"
+TRANSFORM = BIN / f"{PREFIX}-transform-v1"
+PROOF = BIN / f"{PREFIX}-proof-directory"
+ENCODER = BIN / f"{PREFIX}-serving-encode-v1"
+VERIFIER = BIN / f"{PREFIX}-serving-verify-v1"
+# The store class prefix each family writes under, asserted on by the CI smoke.
+MAP_CLASS = "map/address" if ADDRESSES else "map/places-v1"
 
 
 def run(*argv, capture=False):
@@ -74,10 +117,14 @@ request.write_text(json.dumps({
                  "python": "3.12.3", "rustc": "local"},
     "caps": {"max_remote_operations": 100000,
              "max_remote_write_bytes": 1_000_000_000_000},
+    # Namespaced per family so the two slices never publish into one another's
+    # create-only prefixes. Changing these changes `request_sha256`, so a work
+    # directory from an older harness revision fails closed with a digest
+    # mismatch rather than resuming into a different contract.
     "namespaces": {
-        "immutable_root": "construction-v1/monaco",
-        "slice": "construction-v1/monaco/slice/monaco-1/",
-        "markers": "construction-v1/monaco/markers/",
+        "immutable_root": f"construction-v1/slice-{FAMILY}",
+        "slice": f"construction-v1/slice-{FAMILY}/slice/slice-1/",
+        "markers": f"construction-v1/slice-{FAMILY}/markers/",
     },
 }) + "\n")
 contract = WORK / "contract.json"
@@ -89,38 +136,68 @@ print(f"  ok {time.time()-t:.1f}s")
 t = phase(f"project task {TASK_INDEX} from S3")
 projected = WORK / "projected.parquet"
 report = WORK / "projection.json"
-run(VENV, "scripts/project_places_construction_v1.py",
-    "--inventory", args.inventory,
-    "--evidence-spec", ROOT / "benchmarks/places-construction-v1-evidence-spec-v2.json",
-    "--task-index", TASK_INDEX, "--output", projected, "--report", report,
-    "--max-rows", 4_000_000, "--max-groups", 72,
-    "--max-selected-compressed-bytes", 536_870_912,
-    "--max-selected-uncompressed-bytes", 1_000_000_000,
-    "--max-output-bytes", 500_000_000)
-records = json.loads(report.read_text())["output"]["records"]
-hosted("source-limits", "--report", report, "--family", "places",
+if ADDRESSES:
+    # The address family has its own S3 projector keyed on its own canonical
+    # row-group inventory; there is no Places code path in it and vice versa.
+    # Same flags and caps the hosted address map job uses.
+    run(VENV, "scripts/experiment_hosted_rowgroups.py",
+        "--release", RELEASE, "--family", "addresses",
+        "--inventory-report", args.inventory, "--task-index", TASK_INDEX,
+        "--output", projected, "--json-out", report,
+        "--target-rowgroup-uncompressed-bytes", 400_000_000,
+        "--max-rows", 4_000_000, "--max-groups", 72,
+        "--max-output-bytes", 500_000_000)
+    records = json.loads(report.read_text())["output"]["rows"]
+else:
+    run(VENV, "scripts/project_places_construction_v1.py",
+        "--inventory", args.inventory,
+        "--evidence-spec", ROOT / "benchmarks/places-construction-v1-evidence-spec-v2.json",
+        "--task-index", TASK_INDEX, "--output", projected, "--report", report,
+        "--max-rows", 4_000_000, "--max-groups", 72,
+        "--max-selected-compressed-bytes", 536_870_912,
+        "--max-selected-uncompressed-bytes", 1_000_000_000,
+        "--max-output-bytes", 500_000_000)
+    records = json.loads(report.read_text())["output"]["records"]
+hosted("source-limits", "--report", report, "--family", FAMILY,
        "--output", WORK / "source-limits.json")
-print(f"  projected {records:,} real Overture places  {time.time()-t:.1f}s")
+print(f"  projected {records:,} real Overture {FAMILY}  {time.time()-t:.1f}s")
 
 # --- map ------------------------------------------------------------------
 t = phase("run-map")
 hosted("run-map", "--contract", contract, "--store-root", store,
-       "--family", "places", "--task-id", TASK_ID, "--input", projected,
+       "--family", FAMILY, "--task-id", TASK_ID, "--input", projected,
        "--source-limits", WORK / "source-limits.json",
-       "--transform-binary", BIN / "places-transform-v1",
-       "--proof-binary", BIN / "places-proof-directory",
+       "--transform-binary", TRANSFORM,
+       "--proof-binary", PROOF,
        "--scratch-dir", WORK / "map-scratch",
        "--marker-out", markers / f"{TASK_ID}.json")
 marker = json.loads((markers / f"{TASK_ID}.json").read_text())
-comb = marker["combiner"]
-print(f"  term rows {comb['input_rows']:,} -> {comb['retained_rows']:,} retained "
-      f"({comb['discarded']['records']:,} combined away)  {time.time()-t:.1f}s")
+map_summary: dict = {}
+if ADDRESSES:
+    transform_report = marker["transform"]
+    map_summary = {
+        "admitted_rows": transform_report["admitted_rows"],
+        "rejected_rows": transform_report["rejected_rows"],
+        "map_packs": len(marker["packs"]),
+    }
+    print(f"  admitted {map_summary['admitted_rows']:,} / rejected "
+          f"{map_summary['rejected_rows']:,} -> {map_summary['map_packs']} packs"
+          f"  {time.time()-t:.1f}s")
+else:
+    comb = marker["combiner"]
+    map_summary = {
+        "term_rows_in": comb["input_rows"],
+        "term_rows_retained": comb["retained_rows"],
+        "term_rows_combined_away": comb["discarded"]["records"],
+    }
+    print(f"  term rows {comb['input_rows']:,} -> {comb['retained_rows']:,} retained "
+          f"({comb['discarded']['records']:,} combined away)  {time.time()-t:.1f}s")
 
 # --- plan -----------------------------------------------------------------
 t = phase("plan-reduce")
 plan = WORK / "plan.json"
 plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store,
-             "--family", "places", "--markers-dir", markers,
+             "--family", FAMILY, "--markers-dir", markers,
              "--scratch-dir", WORK / "plan-scratch", "--output", plan,
              "--matrix-out", WORK / "reduce-matrix.json"]
 if args.max_reduce_jobs is not None:
@@ -129,22 +206,35 @@ hosted(*plan_argv)
 plan_document = json.loads(plan.read_text())
 partitions = plan_document["partitions"]
 execution = plan_document["reduce_execution"]
-print(f"  {len(partitions)} partitions in {execution['job_count']} bucket-range jobs "
-      f"(stride {execution['bucket_stride']} of {execution['bucket_count']} buckets)"
-      f"  {time.time()-t:.1f}s")
+# Places records a bucket stride (ownership "shuffle-bucket-range"); addresses
+# record a partition batch size and carry no bucket keys at all, so reading them
+# unguarded would KeyError on the address path.
+if execution.get("bucket_stride") is not None:
+    print(f"  {len(partitions)} partitions in {execution['job_count']} bucket-range jobs "
+          f"(stride {execution['bucket_stride']} of {execution['bucket_count']} buckets)"
+          f"  {time.time()-t:.1f}s")
+else:
+    print(f"  {len(partitions)} partitions in {execution['job_count']} "
+          f"{execution['ownership']} jobs (batch size {execution['batch_size']})"
+          f"  {time.time()-t:.1f}s")
 
 # --- reduce ---------------------------------------------------------------
-# One job per BUCKET RANGE, exactly as the hosted matrix dispatches it: the job
-# opens each map fragment in its range once and emits every partition whose cell
-# hashes into the range.
-t = phase(f"run-reduce x{execution['job_count']} bucket ranges")
+# One job per reduce BATCH, exactly as the hosted matrix dispatches it. For
+# places a batch is a bucket RANGE and the job opens each map fragment in its
+# range once, emitting every partition whose cell hashes into the range; for
+# addresses a batch is a contiguous partition range. Either way this is
+# --batch-index/--output-dir, never the legacy one-job-per-partition path.
+t = phase(f"run-reduce x{execution['job_count']} {execution['ownership']} jobs")
 reductions = WORK / "reductions"; reductions.mkdir(exist_ok=True)
 for batch in execution["batches"]:
     hosted("run-reduce", "--contract", contract, "--store-root", store,
-           "--family", "places", "--plan", plan, "--markers-dir", markers,
+           "--family", FAMILY, "--plan", plan, "--markers-dir", markers,
            "--batch-index", batch["batch_index"],
-           "--encoder-binary", BIN / "places-serving-encode-v1",
-           "--verifier-binary", BIN / "places-serving-verify-v1",
+           # Addresses re-prove every fetched row group inside reduce, so the
+           # reducer needs the proof binary as well as the encoder/verifier.
+           *(("--proof-binary", PROOF) if ADDRESSES else ()),
+           "--encoder-binary", ENCODER,
+           "--verifier-binary", VERIFIER,
            "--scratch-dir", WORK / f"reduce-scratch-{batch['batch_index']}",
            "--output-dir", reductions)
 elapsed = time.time() - t
@@ -154,27 +244,41 @@ print(f"  {len(partitions)} partitions in {elapsed:.1f}s "
 # --- head -----------------------------------------------------------------
 t = phase("run-head")
 head = WORK / "head.json"
+head_args = () if ADDRESSES else (
+    "--encoder-binary", ENCODER, "--verifier-binary", VERIFIER,
+    "--scratch-dir", WORK / "head-scratch", "--shard-bits", "4",
+)
 hosted("run-head", "--contract", contract, "--store-root", store,
-       "--family", "places", "--markers-dir", markers,
-       "--encoder-binary", BIN / "places-serving-encode-v1",
-       "--verifier-binary", BIN / "places-serving-verify-v1",
-       "--scratch-dir", WORK / "head-scratch", "--shard-bits", "4",
+       "--family", FAMILY, "--markers-dir", markers, *head_args,
        "--output", head)
 head_result = json.loads(head.read_text())
-print(f"  shards {head_result['shard_count']}  {time.time()-t:.1f}s")
+# Addresses have no global head phase; run-head writes {"head": null} for them,
+# so every head key below is guarded rather than assumed.
+if head_result.get("head", "absent") is None:
+    print(f"  no global head phase for {FAMILY}  {time.time()-t:.1f}s")
+else:
+    print(f"  shards {head_result['shard_count']}  {time.time()-t:.1f}s")
 
 # --- finalize -------------------------------------------------------------
 t = phase("finalize (filesystem remote)")
 final = WORK / "final.json"
 hosted("finalize", "--contract", contract, "--store-root", store,
-       "--family", "places", "--plan", plan, "--reductions-dir", reductions,
+       "--family", FAMILY, "--plan", plan, "--reductions-dir", reductions,
+       # Threaded for BOTH families. Finalize publishes the map phase's
+       # per-record artifact from the markers, and for a family that carries one
+       # it fails closed without this flag rather than silently publishing a
+       # slice whose per-record packs expire with the map artifact retention.
        "--markers-dir", markers,
-       "--head", head, "--remote-root", WORK / "remote",
+       # The address head result carries `head: null`; passing it would make
+       # finalize read shard fields that do not exist. Matches the hosted
+       # workflow, which only threads --head for places.
+       *(() if ADDRESSES else ("--head", head)),
+       "--remote-root", WORK / "remote",
        "--work-root", WORK / "final-work", "--output", final)
 result = json.loads(final.read_text())
 print(f"  reconciles={result['reconciles']} marker_written_last={result['marker_written_last']}"
       f"  {time.time()-t:.1f}s")
-print(f"  positions published: {result['positions_objects']} objects, "
+print(f"  per-record artifact published: {result['positions_objects']} objects, "
       f"{result['positions_records']:,} records, {result['positions_bytes']/1e6:.2f} MB "
       f"(verified as part of the whole-slice check)")
 
@@ -194,7 +298,7 @@ print("\nstore by artifact class:")
 for name, size in sorted(classes.items(), key=lambda kv: -kv[1]):
     if size:
         print(f"  {size/1e6:8.2f} MB  {name}")
-print(f"  {tree_bytes(store)/1e6:8.2f} MB  TOTAL for {records:,} places")
+print(f"  {tree_bytes(store)/1e6:8.2f} MB  TOTAL for {records:,} {FAMILY}")
 print(f"  {tree_bytes(WORK / 'remote')/1e6:8.2f} MB  published slice")
 print(
     "\nNOTE: do not extrapolate these linearly to planet scale. Only the map/\n"
@@ -205,25 +309,37 @@ print(
 # it is a hardcoded literal in the finalize adapter, and an EMPTY head (zero
 # populated shards, zero records) satisfies every other check. A caller that
 # wants to know the run produced something must be able to assert on counts.
-summary = {"records": records, "partitions": len(partitions),
+summary = {"family": FAMILY,
+           "records": records, "partitions": len(partitions),
            "reduce_seconds_per_partition": round(elapsed/max(1,len(partitions)), 3),
            "store_bytes_by_class": classes,
+           "map_store_class": MAP_CLASS,
            "reconciles": result["reconciles"],
-           "head_shard_count": head_result["shard_count"],
-           "head_populated_shards": head_result["populated_shards"],
-           "head_total_records": head_result["total_records"],
-           # How the bucket space was cut. batch_size 1 is the degenerate shape;
+           # How the reduce space was cut. batch_size 1 is the degenerate shape;
            # a run asserting anything about multi-partition ranges must be able
            # to see that it got them.
+           "reduce_ownership": execution["ownership"],
            "reduce_job_count": execution["job_count"],
            "reduce_partitions_per_job": execution["batch_size"],
-           "reduce_bucket_stride": execution["bucket_stride"],
-           # Same reasoning for the positions artifact: it is the insurance
+           # Same reasoning for the per-record artifact: it is the insurance
            # against a planet map re-run, and a run that emitted it but failed to
-           # PUBLISH it looks identical from every other key here.
+           # PUBLISH it looks identical from every other key here. The key names
+           # stay `positions_*` for both families because they are already the
+           # published shape of the finalize result; the mechanism is generic.
            "positions_objects": result["positions_objects"],
            "positions_records": result["positions_records"],
-           "positions_bytes": result["positions_bytes"]}
+           "positions_bytes": result["positions_bytes"],
+           **map_summary}
+# Places-only keys stay Places-only rather than being emitted as nulls, so a
+# consumer's `jq -e` on them is a real assertion and not vacuously true. The
+# address family has no global head and no shuffle-bucket reduce ownership.
+if execution.get("bucket_stride") is not None:
+    summary["reduce_bucket_stride"] = execution["bucket_stride"]
+    summary["reduce_bucket_count"] = execution["bucket_count"]
+if head_result.get("head", "absent") is not None:
+    summary["head_shard_count"] = head_result["shard_count"]
+    summary["head_populated_shards"] = head_result["populated_shards"]
+    summary["head_total_records"] = head_result["total_records"]
 # Written as a file as well as printed: stdout can interleave with stderr, so
 # `tail -1` of a merged stream is not a reliable machine-readable surface.
 (WORK / "summary.json").write_text(json.dumps(summary, sort_keys=True) + "\n")
