@@ -7,9 +7,12 @@ prediction, and the fail-closed remote-marker resume skip.
 
 from __future__ import annotations
 
+import dataclasses
 import importlib.util
+import inspect
 import io
 import json
+import re
 import sys
 import urllib.error
 from pathlib import Path
@@ -137,6 +140,237 @@ def test_hosted_partition_caps_exceed_the_frozen_spec_caps_by_declaration():
     assert set(PARTITION_CAP_FIELDS) - set(SPEC_DIVERGENT_CAP_FIELDS) == {
         "partition_distinct_tokens"
     }
+
+
+# --------------------------------------------------------------------------- #
+# Head-merge caps: the same three surfaces, one phase later
+# --------------------------------------------------------------------------- #
+# The frozen spec's head declarations, and the values the hosted build runs. The spec
+# declares ONE candidate-row cap and the code has two enforcement sites, so the rehearsal
+# applies the spec's value to both.
+SPEC_V2_HEAD_CAPS = {
+    "max_head_candidate_rows": 5_000_000,
+    "max_task_head_candidate_rows": 5_000_000,
+    "head_merge_fan_in": 16,
+}
+HOSTED_HEAD_CAPS = {
+    # Raised off MEASURED Europe volume: 26,168,687 candidate rows for 43.9% of the
+    # planet, i.e. 5.2x the spec's 5,000,000, so that value does not admit a planet head.
+    "max_head_candidate_rows": 200_000_000,
+    "max_task_head_candidate_rows": 6_000_000,
+    # Diverges DOWNWARD: a fan-in at or above the map task count gives the tree one
+    # stage, which is the merge it was introduced to replace.
+    "head_merge_fan_in": 8,
+    "head_shard_copy_batch": 256,
+}
+# Europe, 43.9% of the planet, 36 map tasks at production per-task granularity. These are
+# MEASURED and they are what the caps are sized against; the Monaco-linear 134.3M figure
+# they refute is recorded in the docs as refuted.
+EUROPE_CANDIDATE_ROWS = 26_168_687
+EUROPE_CANDIDATE_ROWS_PER_PLACE = 0.8045
+PLANET_CANDIDATE_ROWS_FLOOR = 59_700_000
+PLANET_CANDIDATE_ROWS_UPPER = 120_000_000
+
+
+def test_evidence_spec_head_caps_are_read_by_the_rehearsal():
+    # `maximum_head_candidate_rows` and `maximum_merge_fan_in` were satisfied by
+    # COINCIDENCE, not by reading: the rehearsal inherited the 5,000,000 dataclass
+    # default and the tree merge was called with `max_fan_in_tasks`, which the
+    # rehearsal happened to set to 16. The second coincidence is gone now that the
+    # hosted build runs a fan-in of 8, so the rehearsal reads the spec.
+    pytest.importorskip("pyarrow")
+    rehearse = _load("preflight_rehearse", "scripts/rehearse_places_construction_v1.py")
+    assert rehearse.spec_head_caps() == SPEC_V2_HEAD_CAPS
+    declared = json.loads(PLACES_SPEC.read_text())["acceptance_gates"]["head"]
+    assert declared["maximum_head_candidate_rows"] == 5_000_000
+    assert declared["maximum_merge_fan_in"] == 16
+
+
+@pytest.mark.parametrize("value", [None, True, 0, -1, "5000000", 1.5])
+def test_spec_head_caps_fail_closed_on_an_unusable_declaration(tmp_path, value):
+    pytest.importorskip("pyarrow")
+    rehearse = _load("preflight_rehearse", "scripts/rehearse_places_construction_v1.py")
+    spec = json.loads(PLACES_SPEC.read_text())
+    gates = spec["acceptance_gates"]["head"]
+    if value is None:
+        del gates["maximum_merge_fan_in"]
+    else:
+        gates["maximum_merge_fan_in"] = value
+    tampered = tmp_path / "spec.json"
+    tampered.write_text(json.dumps(spec))
+    with pytest.raises(ValueError, match="maximum_merge_fan_in"):
+        rehearse.spec_head_caps(tampered)
+
+
+def test_places_head_limits_defaults_are_the_hosted_production_caps():
+    # Same reason as the partition caps: these are separate literals in separate
+    # files, and every caller that is not the hosted CLI plans at the dataclass
+    # default. This test is what keeps the two equal.
+    limits = HOSTED.PLACES.Limits()
+    for field in HOSTED_HEAD_CAPS:
+        assert getattr(limits, field) == HOSTED_HEAD_CAPS[field] == \
+            HOSTED.HOSTED_LIMITS["places"][field], field
+    # And the contract really does carry every one of them through to a phase, which is
+    # the only path a hosted run's limits travel.
+    contract = {"limits": {"places": dict(HOSTED.HOSTED_LIMITS["places"])}}
+    resolved = HOSTED._limits_for(contract, "places")
+    for field, expected in HOSTED_HEAD_CAPS.items():
+        assert getattr(resolved, field) == expected, field
+
+
+def test_hosted_head_caps_diverge_from_the_frozen_spec_by_declaration():
+    # The fan-in diverges DOWNWARD -- smaller than the spec's maximum, because a
+    # fan-in at or above the map task count gives the tree a single stage.
+    assert (
+        HOSTED_HEAD_CAPS["head_merge_fan_in"] < SPEC_V2_HEAD_CAPS["head_merge_fan_in"]
+    )
+    # Both candidate-row caps diverge UPWARD, and the global one has to: the spec's
+    # 5,000,000 is 5.2x BELOW the Europe candidate set alone, so it does not admit a
+    # planet head phase at all -- main would have refused that run at admission.
+    for field in ("max_head_candidate_rows", "max_task_head_candidate_rows"):
+        assert HOSTED_HEAD_CAPS[field] > SPEC_V2_HEAD_CAPS[field], field
+    assert EUROPE_CANDIDATE_ROWS > 5 * SPEC_V2_HEAD_CAPS["max_head_candidate_rows"]
+    # The global cap admits the measured planet floor and the CJK-inclusive upper end.
+    assert HOSTED_HEAD_CAPS["max_head_candidate_rows"] > PLANET_CANDIDATE_ROWS_UPPER
+    assert HOSTED_HEAD_CAPS["max_head_candidate_rows"] > PLANET_CANDIDATE_ROWS_FLOOR
+    # And it stays a GUARD: within 2x of the upper end, not an arbitrary number.
+    assert HOSTED_HEAD_CAPS["max_head_candidate_rows"] < 2 * PLANET_CANDIDATE_ROWS_UPPER
+    # The floor is Europe's MEASURED rate over the planet place count, not a projection
+    # from a 38k slice -- recomputed here so the two cannot drift apart.
+    assert round(74_223_561 * EUROPE_CANDIDATE_ROWS_PER_PLACE) == pytest.approx(
+        PLANET_CANDIDATE_ROWS_FLOOR, rel=0.01
+    )
+    # The per-task cap must stay far below the global one, or it is a restatement of it
+    # rather than a bound on a single pathological task.
+    assert HOSTED_HEAD_CAPS["max_head_candidate_rows"] >= 30 * HOSTED_HEAD_CAPS[
+        "max_task_head_candidate_rows"
+    ]
+    # ... and it must still admit the worst planet task: ~671k mean, ~1.34M for a CJK
+    # task at 2x term fan-out, ~2.7M pessimistic.
+    assert HOSTED_HEAD_CAPS["max_task_head_candidate_rows"] > 2 * 1_340_000
+    with pytest.raises(ValueError, match="fan-in must be at least 2"):
+        dataclasses.replace(HOSTED.PLACES.Limits(), head_merge_fan_in=1).validate()
+    with pytest.raises(ValueError, match="below the per-task cap"):
+        dataclasses.replace(
+            HOSTED.PLACES.Limits(), max_head_candidate_rows=1_000
+        ).validate()
+
+
+def test_every_production_duckdb_connection_caps_its_temp_directory():
+    """`temp_directory` without `max_temp_directory_size` is an uncapped spill.
+
+    DuckDB's default for `max_temp_directory_size` is **90% of available disk**, so a
+    spilling query is licensed to fill the runner to within 10% -- outside every cap
+    this pipeline declares, and inside the same workspace the stage's inputs and outputs
+    live in. Measured on a partial planet head probe: 3.5 GB across 10
+    `duckdb_temp_storage_*.tmp` files at 26% completion, a term no projection carried.
+
+    Asserted as a PAIRING over both family modules, by source, because this is the
+    per-family-parity defect class: a fix landing on places while addresses silently
+    keeps the hole is the failure this test exists to prevent. Every `SET
+    temp_directory` must be accompanied by a `SET max_temp_directory_size`, and the size
+    must come from the shared derivation rather than a fresh literal.
+    """
+    for relative in (
+        "scripts/places_construction_v1.py",
+        "scripts/address_construction_v1.py",
+    ):
+        source = (ROOT / relative).read_text()
+        # Only lines that EXECUTE the setting, so prose about it does not count. The
+        # first version of this test counted substrings and was fooled by its own
+        # explanatory comment.
+        statements = [
+            line
+            for line in source.splitlines()
+            if "SET temp_directory" in line or "SET max_temp_directory_size" in line
+            if "connection.execute" in line or line.strip().startswith('f"SET ')
+        ]
+        directories = sum("SET temp_directory" in line for line in statements)
+        caps = sum("SET max_temp_directory_size" in line for line in statements)
+        assert directories > 0, relative
+        assert caps == directories, (
+            f"{relative}: {directories} `SET temp_directory` against {caps} "
+            "`SET max_temp_directory_size` -- every spill directory needs a cap"
+        )
+        # Derived, not a literal: the only legal size is the shared helper's.
+        assert "duckdb_temp_limit(limits.max_scratch_bytes)" in source, relative
+
+    # And the derivation itself: a declared share of the stage's disk budget.
+    address = _load("preflight_address", "scripts/address_construction_v1.py")
+    cap = HOSTED.HOSTED_LIMITS["places"]["max_scratch_bytes"]
+    assert address.duckdb_temp_limit(cap) == f"{cap // address.DUCKDB_TEMP_SHARE}B"
+    # Spill is ONE term inside the scratch budget, so it must be a fraction of it.
+    assert address.DUCKDB_TEMP_SHARE >= 2
+    with pytest.raises(ValueError):
+        address.duckdb_temp_limit(0)
+
+
+def test_stage_watchdog_poll_is_bounded_by_its_own_sweep_cost():
+    """The watchdog must not spend unbounded time measuring the thing it guards.
+
+    `disk_bytes` is an rglob + stat over the whole tree, so its cost scales with the
+    file count: 1.51 s per sweep over a 4,096-partition head workspace holding ~1.7M
+    files, against a 10 ms intended interval. That burns hours of stat() AND makes the
+    guard blind -- a subprocess can start and exit inside one sweep. The poll now waits
+    at least as long as the worst sweep took, capping the duty cycle at ~50%.
+    """
+    address = _load("preflight_address", "scripts/address_construction_v1.py")
+    source = inspect.getsource(address.StageWatchdog._run)
+    assert "self.stop.wait(" in source
+    # The interval is derived from the observed sweep cost, not a constant.
+    assert "peak_sweep_seconds" in source, source
+    assert "self.stop.wait(0.01)" not in source, source
+    # And the achieved resolution is REPORTED rather than assumed, so a guard that
+    # observed almost nothing is visible in the evidence instead of reading as coverage.
+    reported = set(
+        re.findall(r'"(\w+)":', inspect.getsource(address.StageWatchdog.evidence))
+    )
+    assert {"observations", "peak_sweep_seconds"} <= reported, reported
+
+    # `run_bounded` has the SAME loop and it is the one that runs 4,096 times in the
+    # Places head phase -- once per encoder subprocess -- so it gets the same treatment.
+    # A fixed 5 ms sleep against a 1.51 s sweep is a 100% duty cycle on stat() AND a
+    # 1.5 s blind window per check.
+    bounded = inspect.getsource(address.run_bounded)
+    assert "time.sleep(0.005)" not in bounded, bounded
+    assert "peak_sweep" in bounded, bounded
+    assert '"peak_sweep_seconds": peak_sweep' in bounded, bounded
+
+
+def test_scratch_cap_is_below_the_job_free_disk_floor_for_both_families():
+    """A scratch cap ABOVE the disk the job guarantees cannot fire before ENOSPC.
+
+    24 GiB (25,769,803,776 B) sat 170 MB above the 25,600,000,000-byte floor every
+    non-reduce job asserts, so every scratch guard built on it -- the head phase's and
+    address reduce's alike -- was unreachable: the filesystem filled first and the
+    failure surfaced as ENOSPC or as `run_bounded`'s bare "child scratch exceeded its
+    hard cap" from whichever subprocess was running, naming no phase and no knob.
+
+    Pinned against the floor PARSED OUT OF THE WORKFLOW, not a restated literal, so
+    raising one without the other breaks this test.
+    """
+    workflow = (ROOT / ".github/workflows/construction-v1.yml").read_text()
+    floors = sorted(
+        {
+            int(value) * 1024
+            for value in re.findall(
+                r"df -Pk / \| awk 'NR==2 \{print \$4\}'\)\" -ge (\d+)", workflow
+            )
+        }
+    )
+    assert floors, "no free-disk floor found in construction-v1.yml"
+    assert HOSTED.JOB_FREE_DISK_FLOOR_BYTES == floors[0]
+    for family in ("addresses", "places"):
+        cap = HOSTED.HOSTED_LIMITS[family]["max_scratch_bytes"]
+        assert cap == HOSTED.HOSTED_MAX_SCRATCH_BYTES, family
+        assert cap < HOSTED.JOB_FREE_DISK_FLOOR_BYTES, family
+        # And with real headroom: the frozen spec declares a minimum headroom
+        # fraction, and a cap one byte under the floor would satisfy `<` while still
+        # leaving nothing for the filesystem's own overhead.
+        headroom = json.loads(PLACES_SPEC.read_text())["acceptance_gates"]["resources"][
+            "resource_headroom_min_fraction"
+        ]
+        assert cap <= HOSTED.JOB_FREE_DISK_FLOOR_BYTES * (1 - headroom), family
 
 
 # --------------------------------------------------------------------------- #

@@ -210,6 +210,31 @@ def _per_record_artifact(marker: dict[str, Any], family: str) -> dict[str, Any] 
     value = marker.get(spec["marker_key"])
     return value if isinstance(value, dict) else None
 
+# The FREE-DISK FLOOR every construction-v1 job asserts before doing work, in bytes:
+# `test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000` in
+# .github/workflows/construction-v1.yml, i.e. 25,000,000 KiB. The reduce job asserts
+# 30,000,000 KiB; this is the floor the OTHER four (map, plan, head, finalize) hold to,
+# so it is the one a family-wide scratch cap has to fit under.
+JOB_FREE_DISK_FLOOR_BYTES = 25_000_000 * 1024
+# The scratch cap, and WHY it is not 24 GiB any more.
+#
+# 24 GiB is 25,769,803,776 bytes against a 25,600,000,000-byte floor -- 170 MB ABOVE
+# the disk the job guarantees. A cap above the floor is a guard that provably cannot
+# fire: the filesystem fills first, so every scratch overrun surfaces as ENOSPC or as
+# `run_bounded`'s bare "child scratch exceeded its hard cap" from inside whichever
+# subprocess happened to be running, with no phase, no knob and no diagnosis. That was
+# demonstrated on the head phase, and it applied equally to address reduce, whose
+# `check_resident` compared against the same unreachable value.
+#
+# 17 GiB = 18,253,611,008 bytes leaves 7.35 GB (28.7% of the floor) of headroom, which
+# clears the frozen evidence spec's `resource_headroom_min_fraction` of 0.25. Every
+# measured phase peak sits far below it: Places map dense-task ~4.5-5.5 GiB, plan
+# ~390 MB, bucket-range reduce ~1 GB of fragments, address reduce ~4.05-8.1 GB of
+# retained packs, and the head phase's post-fix peak is the merged head plus the shard
+# set. tests/test_construction_v1_preflight.py pins cap < floor so a future raise has
+# to move the workflow's floor with it.
+HOSTED_MAX_SCRATCH_BYTES = 17 * 1024**3
+
 # Conservative bounded hosted limits. They stay well under a 330-minute job and
 # are overridable per run through the contract so a rehearsal can shrink them.
 HOSTED_LIMITS: dict[str, dict[str, Any]] = {
@@ -218,7 +243,7 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         "max_pack_rows": 1_000_000,
         "parquet_row_group_rows": 65_536,
         "max_rss_bytes": 12 * 1024**3,
-        "max_scratch_bytes": 24 * 1024**3,
+        "max_scratch_bytes": HOSTED_MAX_SCRATCH_BYTES,
         "max_output_bytes": 8 * 1024**3,
         "max_serving_bytes": 2 * 1024**3,
         "wall_seconds": 18_000,
@@ -231,7 +256,7 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         "max_pack_rows": 1_500_000,
         "parquet_row_group_rows": 65_536,
         "max_rss_bytes": 12 * 1024**3,
-        "max_scratch_bytes": 24 * 1024**3,
+        "max_scratch_bytes": HOSTED_MAX_SCRATCH_BYTES,
         "max_output_bytes": 8 * 1024**3,
         "wall_seconds": 18_000,
         "allow_unpinned_duckdb": False,
@@ -252,6 +277,35 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # each planning read while keeping the number of INSERT batches small.
         "max_fan_in_tasks": 128,
         "max_fan_in_packs": 256,
+        # P0-3: the head tree-merge's own fan-in, decoupled from max_fan_in_tasks.
+        # It was called with max_fan_in_tasks, and since 89 <= 128 the merge ran
+        # `range(0, 89, 128)` -- ONE group, ONE stage -- so at planet scale the
+        # bounded-fan-in tree never engaged and nothing bounded the merge. These two
+        # knobs pull in opposite directions: max_fan_in_tasks must be >= 89 for the
+        # marker fan-in gate to admit the planet, while the merge wants a SMALL
+        # fan-in so the tree has stages and only a few candidate packs are resident.
+        # The arithmetic behind 8 (89 -> 12 -> 2 -> 1, and the FULL peak bound, whose
+        # dominant term is the tree levels rather than the candidate cache) is at the
+        # places_construction_v1.Limits site.
+        "head_merge_fan_in": 8,
+        # How many head shards one `COPY ... PARTITION_BY` pass may open. DuckDB pins a
+        # write buffer per OPEN partition and never spills it, so the cost is
+        # shard-count-driven: one COPY over 4,096 shards refuses before its first flush
+        # (0 bytes written, 0 spilled) at ~1.94 MB pinned per partition. 4096/256 = 16
+        # passes at ~0.5 GB pinned. Reproduced both shapes; evidence at the Limits site.
+        "head_shard_copy_batch": 256,
+        # Head candidate admission, raised off MEASURED Europe volume (43.9% of the
+        # planet): 26,168,687 candidate rows, i.e. 5.2x the old 5,000,000, which
+        # therefore did not admit a planet head at all. Europe's 0.8045 candidate
+        # rows/place gives a ~59.7M planet floor and ~120M including the CJK tasks it
+        # excludes. Per-task 6,000,000 bounds ONE pack (and so the head cache, which is
+        # head_merge_fan_in of them); global 200,000,000 bounds the merged sum. The raise
+        # is ordered after head_shard_copy_batch on purpose -- it is what lets a run
+        # reach the sharding region. Derivations at the places_construction_v1.Limits
+        # site; the FROZEN evidence spec keeps declaring 5,000,000 for the REHEARSAL,
+        # which reads it, and tests/test_construction_v1_preflight.py pins every side.
+        "max_task_head_candidate_rows": 6_000_000,
+        "max_head_candidate_rows": 200_000_000,
         # Raised from 1,000,000 / 200,000 after the 2026-07-22.0 growth test
         # (docs/plans/2026-07-24-growth-test-and-path-to-planet.md, appendix A).
         # Two independent reasons, one per cap:
@@ -354,6 +408,13 @@ def _limits_for(contract: dict[str, Any], family: str):
     fields = {field.name for field in dataclasses.fields(module.Limits)}
     filtered = {key: value for key, value in values.items() if key in fields}
     limits = module.Limits(**filtered)
+    # Validate the CONTRACT's limits here, where every phase gets them, rather than
+    # relying on the two phases that happened to call `validate()` themselves. A
+    # contract is a per-run override and this function silently drops keys it does not
+    # recognise, so an internally inconsistent set (a head merge fan-in of 1, a
+    # non-positive cap) otherwise reached whichever phase read it and failed there --
+    # or, for the head phase, did not fail at all.
+    limits.validate()
     # THE bound check on the routed serving lane, placed here because this is the
     # only path a partition cap actually travels: `contract["limits"]` is a per-run
     # override (derive-contract copies HOSTED_LIMITS, but a rehearsal or hand-built
@@ -1836,10 +1897,12 @@ def cmd_run_head(args: argparse.Namespace) -> int:
         write_json(args.output, {**result, **_staging_evidence(store)})
         summary = {"family": "places", "shard_count": result["shard_count"],
                    "populated_shards": result["populated_shards"]}
-    # ONE report site for both branches. The head phase hydrates EVERY task's
-    # head-candidate pack, and `build_sharded_global_head_from_markers` hands them
-    # all to a single `read_parquet([...])`, so unlike plan it cannot batch-and-evict
-    # without a restructure. Measured rather than bounded -- see the follow-up.
+    # ONE report site for both branches. The head phase used to hydrate EVERY task's
+    # head-candidate pack up front and hand them all to a single `read_parquet`,
+    # which made peak resident equal total hydrated. It now hydrates
+    # `head_merge_fan_in` packs per tree-merge stage group and releases each at its
+    # last use, so `staged_objects_released > 0` and peak is bounded by the fan-in
+    # rather than by the task count.
     _write_staging_report(args, store)
     print(json.dumps({**summary, **_staging_evidence(store)}, sort_keys=True))
     return 0

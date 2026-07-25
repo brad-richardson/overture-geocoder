@@ -495,8 +495,10 @@ retaining only what the later partitions of the same job still need
 (`construction_v1_hosted._batch_retention`), and enforces the result against
 `limits.max_scratch_bytes` after every fetch. **Note the knob's scope changed:** for the
 address reduce stage `max_scratch_bytes` governed the temporary workspace alone and now
-governs workspace + the hydrated pack cache. No default changed; planet fit is ~9.2 GB
-against 24 GiB.
+governs workspace + the hydrated pack cache. Planet fit is ~9.2 GB against the cap,
+which was 24 GiB then and is **17 GiB now**: 24 GiB (25.77 GB) sat 170 MB above the
+25.6 GB free-disk floor the job asserts, so this guard could not fire before ENOSPC
+either. Lowered while bounding the head phase; see `construction-v1-state.md`.
 
 Be precise about what that bounds, because a first draft of this note overstated it.
 It does NOT bound resident input to "about one pack": that figure came from a
@@ -701,26 +703,105 @@ fail-closed rules are already in place.
     `admit.outputs.map_task_count` and fails closed on a mismatch. With the store
     out of the artifacts, a missing marker was the only remaining way a map task
     could silently vanish from the plan.
-12. **PRE-PLANET CHECK: verify head-candidate volume fits.**
-    `Limits.max_head_candidate_rows` is 5,000,000 and the Monaco slice produced
-    69,069 head candidates from 38,182 places — about 1.8 candidates per place. A
-    straight-line planet projection over 74.2 M places is ~134 M candidates, ~27x
-    the cap. The relationship is certainly sublinear (candidates are top-N per
-    token and the planet shares tokens far more than a 38k slice does), which is
-    exactly why it must be MEASURED from a real planet map run rather than
-    projected. Do this before dispatching a planet head phase; it is a fail-closed
-    cap, so the failure mode is a clean abort late in an expensive run.
-13. **The head phase's candidate hydration is MEASURED, not bounded.**
-    `build_sharded_global_head_from_markers` hands every task's head-candidate pack
-    to a single `read_parquet([...])`, so unlike the plan phase it cannot
-    batch-and-evict without restructuring how DuckDB reads them, and its peak
-    resident bytes equal its total by construction. Monaco measures 7.35 MB from one
-    map task; at 89 planet tasks the straight-line figure is on the order of 10 GB
-    on one runner. `run-head --staging-report` now records it and the job carries the
-    same 25 GB free-disk floor as every other phase, so the number comes from a run
-    rather than an estimate — but it is a measurement and a floor, not a bound.
-    Batching it (per-shard candidate ranges, or an incremental INSERT loop like the
-    plan phase's) is the fix, and it is a restructure rather than a flag.
+12. ~~**PRE-PLANET CHECK: verify head-candidate volume fits.**~~ MEASURED and RAISED.
+    A Europe-scale run (43.9% of the planet, 36 map tasks at production per-task
+    granularity) supplied the measurement this item had been asking for since it was
+    written, and it settled the question in the direction nobody had projected:
+
+    * Europe's candidate set is **26,168,687 rows — 5.2x the 5,000,000 cap — for 43.9%
+      of the planet.** So the old cap did not merely under-provision a planet head; it
+      would have **refused this Europe run at admission.**
+    * Europe measured **0.8045 candidate rows per admitted place**, which REFUTES the
+      1.809 the 38k Monaco slice suggested and with it the 134.3M Monaco-linear planet
+      figure. Over 74.2M planet places that is a measured **floor of ~59.7M rows**.
+    * Caveat, stated because it is the whole uncertainty: the Europe object set
+      **excludes the CJK tasks**, which roughly double term fan-out, so ~59.7M is a
+      floor and **~120M** is the plausible upper end.
+
+    `max_head_candidate_rows` is now **200,000,000** (1.67x the upper end, 3.35x the
+    floor) and the per-task site is a separate `max_task_head_candidate_rows` at
+    **6,000,000**, because one constant cannot bound two things 33x apart: a planet task
+    is ~671k candidate rows, ~1.34M for a CJK task, ~2.7M pessimistic, and the per-task
+    value also bounds the head cache at `head_merge_fan_in` packs.
+
+    **Why the raise is safe now, having twice been held back.** The objection was
+    sequencing: raising the cap converts a cheap admission-time abort into a late,
+    expensive one. Europe executed that late failure and it is **cheap** — 37 s,
+    deterministic 3/3, 0 bytes written, no ENOSPC and no disk pressure. And the
+    post-merge disk region priced at 44.2 GB against a 25.6 GB floor turned out to be
+    **unreachable and therefore unmeasured**: the phase dies on that region's first
+    statement, the shard COPY. Disk was never the binding constraint; memory was. The
+    raise is ordered AFTER `head_shard_copy_batch` in the same change, so the region the
+    cap admits a run into is bounded before the cap admits it.
+
+    **RESIDUAL, tracked here rather than blocking.** The disk projection is now ~18.5 GB
+    against a 17 GiB (18.25 GB) `max_scratch_bytes` — the filesystem total falls from
+    44.2 GB (1.73x the floor) to 0.72x, but the self-imposed cap is still marginally
+    exceeded, so a planet head would abort at `check_head_disk` with a diagnosis. The
+    binding peak is the COPY stage: pre-sharded 7.0 GB + `shard_dir` ~7.2 GB + spill
+    <=4.25 GB. Closing it means reordering the independent binding before the shard COPY
+    (which undoes #169's "the shard-count guard precedes the 6-8 minute binding pass"
+    ordering), lowering the spill share, or giving the head job more disk than the floor
+    guarantees. All three are decisions rather than tuning. Note also that the merge's
+    own peak is `fan_in x pack` PLUS two adjacent tree levels and the tree term dominates
+    (Europe measured the cache at 27.7% of a 3.09 GB total, against 73% for the levels),
+    so budget from the whole bound and not from the cache term -- an earlier revision got
+    that wrong by ~3x and used the wrong number to justify this very raise.
+
+    The FROZEN evidence spec v2 declares 5,000,000 (relaxation policy "none") and
+    `rehearse_places_construction_v1.spec_head_caps()` reads it, so a raise is a
+    hosted-only divergence and needs the preflight test that pins both sides updated
+    with the measurement in hand.
+13. ~~**The head phase's candidate hydration is MEASURED, not bounded.**~~ FIXED,
+    and the diagnosis in the original note was incomplete in a way worth recording:
+    the eager `candidate_paths = [store.path(...) for ...]` was the symptom, but the
+    reason nothing bounded it was that `_tree_merge_head_candidates` was called with
+    `limits.max_fan_in_tasks`. That knob must stay at or above the planet map task
+    count (128 ≥ 89) for the marker fan-in gate to pass, so the merge ran
+    `range(0, 89, 128)` — one group, one stage, the whole fan-in at once. The tree
+    was there; it never had more than one level at planet scale.
+    `head_merge_fan_in` (8) is now a separate knob: 89 → 12 → 2 → 1, three stages,
+    each group's packs released once its stage output is written, and each stage's
+    inputs unlinked once its output exists (the second half is required — this phase
+    batches into parquet files on the same disk, not into a bounded DuckDB table like
+    the plan phase, so releasing without unlinking only moves the bytes).
+
+    Peak resident candidate bytes are `sum of the head_merge_fan_in largest packs`,
+    which is `≤ fan_in × largest pack`. Measured at 1/2/4/8/16 map tasks × fan-ins
+    2/3/4/8/16/128 with the merged head invariant across all of them; on a UNIFORM
+    fixture the two coincide exactly, and under skew (`[94444, 21692×7]`, fan-in 4)
+    the observed peak was 159,520 rather than 4 × 94,444 — so the product is the
+    conservative bound and the sum is the law. It is also the OPPOSITE character to
+    the address reduce law (`#map tasks × pack`), which is emergent from how the plan
+    cut partitions: here the multiplier is a declared knob, so the peak is chosen.
+
+    **The region an earlier revision declared out of scope was 2.79x the region it
+    bounded, and that is now fixed too.** Measured on a real 12-task run: guarded
+    merge peak 91,648,680 B, post-merge peak 255,645,926 B, and 5.46x the final merged
+    parquet (5.71x and 6.32x on two other fixtures). Four full copies of the head
+    payload were live at once with none released — `merged` (never unlinked), the
+    `shard_dir` parquets (never unlinked per shard), `verify_dir/*.plhd` (the sharded
+    verifier needs all at once), and the store's `put_content` copy of every `.plhd`,
+    which is two copies by construction because `put_content` copies bytes and the
+    original was then moved into `verify_dir`. Scaled at 65.8M × 106.4 B = 7.0 GB that
+    is a workspace of 25.9–30.2 GB and a filesystem of 37.8–42.1 GB against a 25.6 GB
+    floor (1.48–1.64x). All four now release: `merged` is unlinked as soon as the
+    pre-sharded intermediate exists, the pre-sharded intermediate as soon as the
+    shard-count guard and the independent binding have read it, each shard's parquets
+    once its `ordered` arrow is written, and the store copy is HARDLINKED into
+    `verify_dir` so an encoded shard exists once on disk under two names.
+
+    Enforcement is `check_head_disk`, which measures workspace + hydrated cache
+    against `max_scratch_bytes` at every point either can grow — per candidate fetch,
+    per shard COPY pass, per encode — and names which term blew the budget. It
+    replaced a check that compared the cache ALONE against the whole cap and therefore
+    sat ~7x from ever firing, which made the only message naming `head_merge_fan_in`
+    the one message that could not appear. The merge additionally runs under a
+    `StageWatchdog` over the same roots, which is what bounds RSS and wall time there.
+
+    Still not covered, stated so it is not mistaken for covered: DuckDB's own RAM,
+    the Python RSS of `_independent_merged_head_binding`'s token set, and the encoder
+    subprocesses' RSS (bounded individually by `run_bounded`, not in aggregate).
 14. **A staging prefix written before the routed-publication fix cannot be resumed
     for reduce, and that is the intended outcome.** The per-partition reduce
     completion marker's payload changed: it recorded
@@ -1236,6 +1317,65 @@ the 4096-vs-256 tradeoff open, and this is the evidence that reopens it.
   gained the `head_staged_objects_released > 0` gate. **The actual planet dispatch has
   no such gate.**
 
+#### Status of the head-phase blockers above, after PR #176
+
+**Also closed by the same change, both found later by probes:** DuckDB's spill was
+**uncapped** (`temp_directory` set, `max_temp_directory_size` defaulting to "90% of
+available disk space") — now derived from `max_scratch_bytes` at every production
+connection in BOTH families, with a preflight test pinning the pairing by source. Note the
+3.5 GB spill figure comes from a 65.8M-row probe, **not** from the Europe run, which
+spilled **zero** bytes; the hazard is the uncapped default, not an observed overrun. And
+the partitioned write's **113 files per partition** (~1.7M files, a 1.51 s `disk_bytes`
+sweep against a 10 ms interval, so the guard could observe a short encoder **zero** times)
+— batching pins it at the thread count, 13.9x fewer files and 3.20x fewer `shard_dir`
+bytes, and the poll is now adaptive.
+
+**`DEFAULT_HEAD_SHARD_BITS` stays at 12, and the data closed that question in the OPPOSITE
+direction from the report that raised it.** The Europe run concluded 4,096 over-provisions
+by 64–128x because 5,781,747 distinct tokens give 1,412 index entries per shard against
+`SERVING_MAX_INDEX_ENTRIES` 250,000 and `minimum_head_shard_bits` returns 5–6. That uses
+only the encoder cap, which is a correctness **floor** on shard count, not the target: what
+sets 4,096 is serving fetch granularity, since `lookup_head_shard` fetches the single shard
+a token names, so shard bytes are the per-request fetch size — ~976 KB/shard at 4,096
+(Europe measured 427 KB), ~15.6 MB at 256, ~62 MB at 64, the last unusable in a Worker. So
+#169 stands and this is no longer an owner call. The RAM cost that prompted it is fixed by
+batching the COPY, not by coarsening a published layout.
+
+**CLOSED.** The post-merge region (all four unreleased payload copies; post/merge is
+now 1.46–1.77x and post/payload 3.13–3.84x, from 2.79x and 5.46x); the unbounded
+`COPY ... PARTITION_BY` (batched over `head_shard_copy_batch` = 256 shard ranges off a
+pre-sharded intermediate, so the 4,096 serving layout is kept and the `shard_bits = 8`
+fallback was NOT needed); `max_scratch_bytes` above the disk floor (24 GiB → **17 GiB**
+for both families, which also un-breaks address reduce's `check_resident`); the closed
+pre-planet gate (item 12 is reinstated as OPEN and the cap raise is REVERTED — the cap
+is back to 5,000,000 at both sites, so a planet head still aborts at admission in
+seconds); both unguarded call sites plus the missing `limits.validate()` on the head
+path and in `_limits_for`; the bound that quoted only its cheap term; the peak-law
+equality claim (softened to `sum of the fan_in largest`); the un-fireable diagnosis
+(`check_head_disk` measures workspace + cache and names which term blew it); and the
+stale `construction-v1.yml` comment.
+
+**STILL OPEN.** The planet dispatch still has no released-objects gate (only
+`slice-smoke.yml` does); the rehearsal still exercises no multi-stage tree — now stated
+in `spec_head_caps`'s own docstring, and fixing it needs a spec v3; the
+`_independent_merged_head_binding` token-set RSS; and the `disk_bytes()` monitoring tax.
+Those four are carried forward as items (a)–(d) of the head-phase section below.
+
+**And one residual the fixes did not remove:** the post-merge disk projection is ~18.5 GB
+against the 18.25 GB cap, so a planet head would abort at `check_head_disk` — correctly,
+with a diagnosis, but still abort. It is a residual rather than a blocker, because Europe
+showed the phase dies on that region's FIRST statement, so the region's disk cost was
+never the binding constraint. Sizing it is part of item 12.
+
+**Out of scope here, recorded so it is not lost: places reduce releases nothing.** The
+Europe run measured `reduce_staged_objects_released = 0` for places, because
+`_batch_retention` is addresses-only, so a places reducer job's peak resident equals its
+total hydrated: worst job 300 MB at stride 2, but it would be the full **12.28 GB** at
+`job_cap` 1. That makes `max_reducers_per_family = 128` load-bearing for MEMORY SAFETY and
+not merely for cost — lowering the reduce job cap raises the per-job peak, the same
+inversion #171 documented for addresses. Tracked separately; deliberately not fixed in the
+head-phase change.
+
 ### Added later on 2026-07-25: publish-set object count, researched and mostly dismissed
 
 Per-record artifacts are 53% of the Places publish set and ~99% of the address one, at
@@ -1301,3 +1441,60 @@ inventory), so a task populates only the buckets its country's cells hash into.
 Modelling per-country extent gives **~20,600 packs / ~41,200 objects**, putting
 addresses nearer **33%** of the operation cap than 66%. PROJECTED — and it falls out
 for free from the single planet-shaped map task already listed as a prerequisite.
+## Added 2026-07-25, from bounding the head phase's candidate hydration
+
+Recorded, deliberately not built in that change. Items 12 and 13 above carry the
+head phase's two headline outcomes; these are the residuals the review surfaced.
+
+(a) ~~**`StageWatchdog.disk_bytes()` is a real monitoring tax at 4,096 shards.**~~
+    LARGELY CLOSED, and it was worse than 97.7 ms: on the real planet tree (~1.7M
+    parquet files, 113 per partition) a sweep measured **1.51 s against a 10 ms
+    intended interval**, which did not merely burn CPU — it made the guard BLIND, since
+    an encoder subprocess could start and exit inside one sweep and be observed zero
+    times. Fixed at the root by batching the shard COPY, which pins files per partition
+    at the thread count (measured 3–4, flat in row volume, against 34 at 16.8M rows and
+    113 at planet scale) for a 13.9x file-count cut and a ~13 ms planet sweep; and
+    bounded directly by making the poll wait at least as long as the worst sweep took,
+    capping the watchdog at ~50% duty cycle whatever the tree looks like.
+    `observations` / `peak_sweep_seconds` are now in the evidence, so a guard that saw
+    almost nothing is visible rather than reading as coverage.
+
+    Found while fixing it: `run_bounded` has the SAME loop and it is the one that runs
+    4,096 times in the head phase, once per encoder subprocess. Its `time.sleep(0.005)`
+    against a 1.51 s sweep was a 100% duty cycle on `stat()` and a 1.5 s blind window
+    for all three of its checks (RSS, scratch, wall). Same adaptive fix, same reported
+    `peak_sweep_seconds`.
+
+    RESIDUAL: the cost is bounded as a FRACTION of wall time, not in absolute terms, so
+    a pathological tree still costs resolution. An accounted figure (track bytes
+    written/unlinked, verify with an occasional sweep) or a per-subprocess root would
+    remove the sweep entirely. Not done: it trades exactness for cost, and after the
+    file-count fix the sweep is ~13 ms, so there is no longer a forcing reason.
+
+(b) **`_independent_merged_head_binding` holds an unmeasured Python token set.** It
+    accumulates every distinct token in a `set[str]` to count index entries:
+    ~2.7–3.7 GB of Python RSS at the planet token universe, concurrent with DuckDB's
+    8 GB `duckdb_memory_limit` on a 16 GB runner, and counted by no cap — the phase's
+    `max_rss_bytes` bounds subprocesses, not this loop. A `count(DISTINCT token)` is
+    already computed in SQL against the same file, so the set could be replaced by a
+    cross-check against that number instead of a second independent count. Care: the
+    point of this pass is INDEPENDENCE from DuckDB, so the replacement must not just
+    read DuckDB's answer back.
+
+(c) **The rehearsal never exercises a multi-stage head tree.**
+    `spec_head_caps()` reads `acceptance_gates.head.maximum_merge_fan_in` — a
+    MAXIMUM — as the value to run with, so the rehearsal folds its 7 task markers at
+    fan-in 16: one group, one stage. The multi-stage tree that the hosted build now
+    runs is therefore covered by `tests/test_places_construction_v1.py` and by the
+    fast loop, and not by the evidence spec at all. Fixing it means choosing a fan-in
+    below the task count, which changes the rehearsal's run set and so needs a places
+    evidence spec v3 (v2's relaxation policy is "none").
+
+(d) **The planet dispatch has no released-objects gate; only the slice smoke does.**
+    `slice-smoke.yml` asserts `head_staged_objects_released > 0` and
+    `peak <= hydrated` for places, and zero for addresses. `construction-v1.yml` —
+    the workflow that would run an actual planet head — asserts neither, so a
+    regression to eager hydration would be caught on the 38k-place slice and not on
+    the run where it costs money. Its head-job comment was also stale ("it cannot
+    batch-and-evict the way plan does; the floor is the only guard it has"); the
+    comment is corrected in this change, the gate is not added.

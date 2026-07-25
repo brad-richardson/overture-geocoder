@@ -235,9 +235,12 @@ def test_map_matrix_lookup_uses_the_singular_dispatch_family_key():
 # MAX_INDEX_ENTRIES distinct tokens. The workflow shipped `--shard-bits 4` (16
 # shards) against a committed design of 4096, which at the measured planet token
 # universe is 6-8x OVER the cap -- and the only thing that reported it was the
-# encoder's `bail!`, at encode time. (Ordering, stated precisely: today
-# `max_head_candidate_rows = 5_000_000` aborts a ~65M-row planet head phase before
-# either check runs, so the sizing has to be right for when that cap is raised.)
+# encoder's `bail!`, at encode time. (Ordering, stated precisely: `max_head_candidate_rows`
+# used to abort a planet head at admission before either check ran; it has since been
+# raised to 200,000,000 off MEASURED Europe volume, so a planet head now reaches the
+# sharding guard and the encoder -- which is what makes this sizing load-bearing rather
+# than hypothetical. Note the shard COUNT is set by serving fetch size, not by the encoder
+# cap: the cap is a floor on shard count, not the target.)
 # These tests exist so that literal can never silently drift below the design again.
 
 ENCODER_SOURCE = (

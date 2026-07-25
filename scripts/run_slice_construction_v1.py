@@ -375,12 +375,15 @@ hosted("run-head", "--contract", contract, "--store-root", store_for("head"),
 head_result = json.loads(head.read_text())
 head_staged = json.loads((WORK / "head-staging.json").read_text()) if STAGED else {}
 if STAGED and head_staged["staged_bytes_hydrated"]:
-    # Head hydrates EVERY task's head-candidate pack and hands them all to one
-    # read_parquet, so its peak EQUALS its total: measured, not bounded. Recorded
-    # so the planet figure is a number rather than an assumption.
+    # Head used to hydrate EVERY task's head-candidate pack and hand them all to one
+    # read_parquet, which made peak EQUAL total. It now hydrates one tree-merge
+    # stage group at a time and releases each pack at its last use, so on a
+    # multi-task fan-in peak falls to `head_merge_fan_in` packs. On a ONE-task slice
+    # peak necessarily equals total -- there is one pack -- so the assertable
+    # signature here is the release count, exactly as it is for address reduce.
     print(f"  staging: hydrated {head_staged['staged_bytes_hydrated']/1e6:.2f} MB, "
-          f"peak resident {head_staged['staged_peak_resident_bytes']/1e6:.2f} MB "
-          "(unbatched by design -- see the follow-up)")
+          f"peak resident {head_staged['staged_peak_resident_bytes']/1e6:.2f} MB, "
+          f"released {head_staged['staged_objects_released']} objects")
 # Addresses have no global head phase; run-head writes {"head": null} for them,
 # so every head key below is guarded rather than assumed.
 if head_result.get("head", "absent") is None:
@@ -546,13 +549,20 @@ if STAGED:
     # not assertable there. A zero release count is, and zero is exactly what the
     # address reducer reported before it called `release()` at all.
     summary["reduce_staged_objects_released"] = reduce_staged["staged_objects_released"]
-    # Head is MEASURED, not bounded: it hands every head-candidate pack to one
-    # read_parquet, so peak == total by construction. Recorded so the planet figure
-    # comes from a run rather than an estimate.
     summary["head_staged_bytes_hydrated"] = head_staged["staged_bytes_hydrated"]
     summary["head_staged_peak_resident_bytes"] = head_staged[
         "staged_peak_resident_bytes"
     ]
+    # The head phase's tripwire, and a separate key from peak/total for the same
+    # reason as the reduce one: this slice's whole head fan-in is ONE candidate
+    # pack, so peak EQUALS total however promptly the merge evicts, and a strict
+    # inequality here would be unsatisfiable rather than strict. Zero releases is
+    # the regression -- it is exactly what the eager
+    # `[store.path(k) for k in candidates]` reported -- and no other key here can
+    # see it. The strict multi-task bound lives in
+    # tests/test_places_construction_v1.py::
+    # test_head_merge_releases_candidate_packs_and_bounds_peak_resident.
+    summary["head_staged_objects_released"] = head_staged["staged_objects_released"]
 if head_result.get("head", "absent") is not None:
     summary["head_shard_count"] = head_result["shard_count"]
     summary["head_populated_shards"] = head_result["populated_shards"]

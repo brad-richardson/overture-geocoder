@@ -788,9 +788,14 @@ jobs:
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          # The last phase without a free-disk floor. Head hydrates EVERY task's
-          # head-candidate pack and hands them to one read_parquet, so it cannot
-          # batch-and-evict the way plan does; the floor is the only guard it has.
+          # Head hydrates head-candidate packs `head_merge_fan_in` at a time and
+          # releases each at its last use, and its workspace + cache is checked
+          # against max_scratch_bytes at every growth point -- so this floor is no
+          # longer the only guard it has. The floor still has to be asserted, and it
+          # has to stay ABOVE max_scratch_bytes (17 GiB): a scratch cap above the disk
+          # the job guarantees is a guard that cannot fire before ENOSPC, which is
+          # what 24 GiB against this 25,000,000 KiB was.
+          # tests/test_construction_v1_preflight.py pins the two together.
           test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
           mkdir -p head head-scratch store
           if [ "$FAMILY_KEY" = places ]; then

@@ -117,9 +117,49 @@ scratch cap before any `.plhd` file exists.
 Note the spill term is a floor, not a bound: uncapped, it can grow to 90% of free
 disk on its own.
 
-**This is why the `max_head_candidate_rows` -> 200,000,000 raise must stay
+~~**This is why the `max_head_candidate_rows` -> 200,000,000 raise must stay
 dropped.** The merge-bounding work is sound and byte-identical; the cap raise is
-precisely what converts a cheap admission-time abort into a late ENOSPC.
+precisely what converts a cheap admission-time abort into a late ENOSPC.~~
+
+**SUPERSEDED. Every term in that table has since moved, and the conclusion reversed —
+the raise has landed.** Three things changed the argument, in order of importance:
+
+1. **This region is not where the phase dies, so its cost was never binding.** A
+   Europe-scale run (43.9% of the planet, 36 map tasks) reached the sharding region and
+   refused on its FIRST statement, the `COPY ... PARTITION_BY`, 3/3 deterministically at
+   14,026,510 rows — having written **0 bytes, 0 shard directories, 0 files** and spilled
+   **0**. Memory was the binding constraint, not disk. The 44.2 GB above prices a region
+   the phase never enters, which is also why it stayed unmeasured.
+2. **The feared failure mode is cheap, which was the whole objection.** "A late ENOSPC"
+   was the reason to hold the cap; the actual late failure is 37 s, deterministic, zero
+   bytes written, no ENOSPC and no disk pressure at all.
+3. **The old cap did not admit a planet head in the first place.** Europe's candidate set
+   is 26,168,687 rows — **5.2x the 5,000,000 cap** — for 43.9% of the planet, so
+   `max_head_candidate_rows = 5_000_000` would have refused that very run at admission.
+   Europe also measured 0.8045 candidate rows/place, refuting the 1.809 Monaco figure and
+   the 134.3M planet projection built on it; the measured floor is ~59.7M with ~120M as
+   the plausible upper end once the CJK tasks Europe excludes are counted.
+
+The table's terms, revised — every one of them was a copy that is now released at its
+last use, plus the spill term this doc's own §1 asked to cap:
+
+| term | this doc | now |
+|---|---|---|
+| un-partitioned payload | `merged` 7.0, never unlinked | pre-sharded 7.0; `merged` unlinked |
+| `shard_dir` @ 1.41x | 9.9 | ~7.2 (≈1.03x — derived, applying the measured 13.9x file-count cut to the overhead half of 1.41x) |
+| DuckDB spill | >=3.5, **uncapped** | <=4.25, **declared** (17 GiB / 4) |
+| `verify_dir/*.plhd` | 11.9 | 11.9, hardlinked to the store copy |
+| store `.plhd` copy | 11.9 | **0 additional** — same inode |
+| **filesystem `/`** vs the 25.6 GB floor | **44.2 — 1.73x** | **~18.5 — 0.72x** |
+
+`max_scratch_bytes` is also 17 GiB now, not 25.77 GB: 24 GiB sat 170 MB **above** the
+floor this table measures against, so every guard built on it was unreachable.
+
+RESIDUAL, and it is a residual rather than a blocker: ~18.5 GB still marginally exceeds
+the 18.25 GB cap, so a planet head aborts at `check_head_disk` with a diagnosis naming
+both terms and the knobs. Closing that last ~1% means reordering the independent binding
+ahead of the shard COPY (undoing #169's guard-before-binding ordering), lowering the
+spill share, or giving the head job more disk than the floor guarantees.
 
 ## 4. PR #178: an R2 publication backend, under review, NOT merged
 
@@ -255,13 +295,61 @@ peak resident is **not** flat — the law is
 `peak ~= (map tasks holding the country) x pack bytes`, ~127 packs / ~8.1 GB at
 planet scale.
 
+**Corrections made to THIS table by the Europe-scale run and the head-bounding change**
+(the rows above are what the 65.8M-row probe supported; these supersede them):
+
+| claim | recorded above | corrected to |
+|---|---|---|
+| head workspace vs the floor | 1.73x (44.2 GB) | **0.72x (~18.5 GB)** once all four payload copies release, the spill is capped and the COPY is batched (§3) |
+| `shard_dir` vs `merged` | 1.41x, climbing to 1.61x | **≈1.03x** — the 0.41 was mostly per-file overhead, and batching cuts the file count 13.9x |
+| DuckDB temp spill | >=3.5 GB uncapped | **<=4.25 GB declared**; and the Europe run spilled **0**, so 3.5 GB is this probe's figure, not evidence the phase spills |
+| files per head partition | 113 | **3 (max 4)**, pinned at the thread count and flat in row volume once batched (§7.3) |
+| the COPY OOM's driver | rows (+1.07 GiB per doubling) | **shard count** — ~1.94 MB pinned per open partition; it refuses at 14.0M rows, 4.7x fewer than projected, before its first flush |
+| candidate rows per place | 1.809 (Monaco-linear) | **0.8045 measured** over Europe ⇒ planet floor ~59.7M, upper ~120M, not 134.3M |
+| `max_head_candidate_rows` | must stay 5,000,000 | **200,000,000** — 5,000,000 is 5.2x below Europe's candidate set alone and would have refused that run at admission (§3) |
+| `shard_bits` = 12 | over-provisioned 64-128x | **correct** — the encoder cap is a floor on shard count; serving FETCH SIZE sets it (~976 KB/shard vs ~62 MB at 6 bits) (§7.3) |
+| `max_scratch_bytes` | 25.77 GB (24 GiB) | **17 GiB** — 24 GiB sat 170 MB *above* the very floor this table measures against, so no guard built on it could fire |
+
 ## 7. Open TODOs created by this round
 
-1. Cap DuckDB temp at all seven production sites, both families, derived from the
-   scratch budget. (§1)
-2. Bound `StageWatchdog.disk_bytes()`; verify both family call sites. (§2)
-3. Measure files-per-partition after shard-range batching; then `FILE_SIZE_BYTES`;
-   `shard_bits = 8` only as an owner decision. (§2)
+1. ~~Cap DuckDB temp at all seven production sites, both families, derived from the
+   scratch budget. (§1)~~ **DONE.** All seven derive it from `max_scratch_bytes`
+   through one shared helper (`DUCKDB_TEMP_SHARE`, a quarter), and a preflight test
+   pins the `SET temp_directory` / `SET max_temp_directory_size` pairing **per
+   module**, so the parity gap cannot reopen on one family. Mutation-tested by
+   dropping the cap from the address reducer alone. Note §1's 3.5 GB is this probe's
+   figure; the Europe run spilled **zero**, so the hazard closed is the uncapped
+   default rather than an observed overrun.
+2. ~~Bound `StageWatchdog.disk_bytes()`; verify both family call sites. (§2)~~
+   **DONE**, and the sweep is one of two loops, not one. Both `StageWatchdog._run`
+   and `run_bounded` now wait at least as long as their own worst sweep (1 s
+   ceiling), capping the watchdog at ~50% duty cycle whatever the tree looks like,
+   and both report `peak_sweep_seconds` so the resolution achieved is visible
+   instead of assumed. `run_bounded` is the one that matters most: it runs once per
+   encoder subprocess, 4,096 times in the head phase, and its fixed
+   `time.sleep(0.005)` against a 1.51 s sweep was a 100% duty cycle on `stat()` AND
+   a 1.5 s blind window for all three of its checks.
+3. ~~Measure files-per-partition after shard-range batching; then `FILE_SIZE_BYTES`;
+   `shard_bits = 8` only as an owner decision. (§2)~~ **MEASURED, and the first step
+   was sufficient.** Files per partition is driven by flush pressure across OPEN
+   partitions, so batching pins it at the thread count and it stops growing with
+   volume:
+
+   | rows | one COPY (4,096 open) | batched (256 open) |
+   |---|---|---|
+   | 4.2M | 10 files/partition, 39,705 files | 3 (max 4), 10,317 |
+   | 16.8M | **34** files/partition, 135,736 files | **3** (max 4), **10,156** |
+
+   Planet projection ~12–16k files against the 1.7M §2 measured, a ~100x cut taking
+   the sweep from 1.51 s to ~13 ms; it also cuts `shard_dir` BYTES by 3.20x, since
+   per-file overhead was most of that term. So **`FILE_SIZE_BYTES` was not needed and
+   `shard_bits` stays at 12** — and §2's suggestion that 4,096 over-provisions by
+   64–128x is wrong, because it reasons only from `SERVING_MAX_INDEX_ENTRIES`, which
+   is a correctness FLOOR on shard count rather than the target. What sets 4,096 is
+   serving fetch granularity: `lookup_head_shard` fetches the single shard a token
+   names, so shard bytes are the per-request fetch size — ~976 KB/shard at 4,096
+   (this probe measured 427 KB), ~15.6 MB at 256, ~62 MB at 64, the last unusable in
+   a Worker. #169 stands and this is not an owner call.
 4. Derive `PUBLISH_CONCURRENCY` from the disk budget if 16 x object size exceeds
    the finalize floor. (§4)
 5. One-object R2 probe for `x-amz-checksum-sha256`, then upgrade the content
