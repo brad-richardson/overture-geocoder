@@ -298,9 +298,21 @@ class Limits:
     allow_unpinned_duckdb: bool = False
     max_fan_in_tasks: int = 16
     max_fan_in_packs: int = 64
-    partition_term_rows: int = 1_000_000
-    partition_estimated_bytes: int = 268_435_456
-    partition_distinct_tokens: int = 250_000
+    # PRODUCTION partition caps, kept equal to `construction_v1_hosted
+    # .HOSTED_LIMITS["places"]` (asserted by
+    # tests/test_construction_v1_preflight.py). They were raised from
+    # 1,000,000 / 256 MiB / 250,000 after the 2026-07-22.0 growth test; the
+    # measured justification per cap lives at the HOSTED_LIMITS site. Anything
+    # that plans on these defaults -- every caller that is not the hosted CLI --
+    # now plans at the caps the planet build actually uses.
+    #
+    # The one deliberate exception is `rehearse_places_construction_v1.py`: it
+    # produces evidence under the FROZEN places evidence spec v2, whose
+    # relaxation policy is "none", so it pins the three caps that spec declares
+    # instead of these. See docs/plans/2026-07-24-construction-v1-follow-ups.md.
+    partition_term_rows: int = 2_000_000
+    partition_estimated_bytes: int = 512 * 1024**2
+    partition_distinct_tokens: int = 400_000
     adaptive_subdivision_depth: int = 8
     maximum_serving_candidates: int = 256
     # Number of shuffle buckets map keys its output by. Raising it lowers
@@ -1973,6 +1985,53 @@ def reduce_bucket_range(
         "binding": binding,
         "ingest_evidence": {**ingest_evidence, "scope": "bucket-range-job"},
     }
+
+
+def validate_complete_reduction(
+    plan: dict[str, Any], reductions: list[dict[str, Any]]
+) -> dict[str, Any]:
+    """Reconcile a COMPLETE set of Places reductions against the genesis plan.
+
+    The Places counterpart of `address_construction_v1.validate_complete_reduction`,
+    and the reason finalize no longer reports `reconciles: true` from a literal.
+    Three independent things are checked, because the total binding alone does not
+    imply any of them:
+
+    * the partition ID set matches the plan's exactly -- no missing, extra, or
+      duplicated partition. A duplicate that replaces a missing partition of the
+      same size leaves the summed binding untouched, so the sum cannot see it.
+    * each reduction's binding equals the binding the PLAN recorded for that
+      partition, so two partitions cannot swap their outputs.
+    * the combined binding equals the plan's, which is what the previous check
+      did on its own.
+
+    Raises `ValueError` (as the address version does) rather than returning a
+    flag: a reduction set that does not reconcile must not be publishable.
+    """
+    expected_ids = [partition["id"] for partition in plan["partitions"]]
+    actual_ids = [item["partition"]["id"] for item in reductions]
+    if len(actual_ids) != len(set(actual_ids)) or sorted(actual_ids) != sorted(
+        expected_ids
+    ):
+        raise ValueError(
+            "Places reduction has missing, extra, or duplicate partitions"
+        )
+    planned = {
+        partition["id"]: partition["binding"] for partition in plan["partitions"]
+    }
+    for item in reductions:
+        partition_id = item["partition"]["id"]
+        if item["binding"] != planned[partition_id]:
+            raise ValueError(
+                f"Places reduction binding for {partition_id} differs from the "
+                "binding the genesis plan recorded for that partition"
+            )
+    binding = A.combine_bindings([item["binding"] for item in reductions])
+    if binding != plan["binding"]:
+        raise ValueError(
+            "Places complete reduction binding differs from the genesis plan"
+        )
+    return {"partitions": len(reductions), "binding": binding, "reconciles": True}
 
 
 def build_global_head(

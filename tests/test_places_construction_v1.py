@@ -2061,3 +2061,89 @@ def test_resume_fails_closed_on_a_marker_without_positions(
         **marker["positions"], "records": marker["positions"]["records"] + 1}}
     with pytest.raises(ValueError, match="positions"):
         module.validate_marker(tampered, "56" * 32, "places-resume", store)
+
+
+# --------------------------------------------------------------------------- #
+# Complete-reduction reconciliation (finalize's `reconciles` flag)
+# --------------------------------------------------------------------------- #
+def _reconciliation_fixture(module):
+    """A two-partition plan and the reductions that reconcile against it.
+
+    Bindings are hand-written rather than reduced: this validator is pure, and the
+    cases below need a reduction set whose SUM is right while its shape is wrong,
+    which real reductions cannot produce.
+    """
+    def binding(records: int, a: str, b: str) -> dict:
+        return {"records": records, "semantic_sum_a": a * 64, "semantic_sum_b": b * 64}
+
+    first = binding(3, "1", "2")
+    second = binding(3, "1", "2")
+    plan = {
+        "partitions": [
+            {"id": "p-0000", "partition_cell": "0000", "binding": first},
+            {"id": "p-1111", "partition_cell": "1111", "binding": second},
+        ],
+        "binding": module.A.combine_bindings([first, second]),
+    }
+    reductions = [
+        {"partition": plan["partitions"][0], "binding": first},
+        {"partition": plan["partitions"][1], "binding": second},
+    ]
+    return plan, reductions
+
+
+def test_places_complete_reduction_reconciles_the_plan(construction_module):
+    module = construction_module
+    plan, reductions = _reconciliation_fixture(module)
+    assert module.validate_complete_reduction(plan, reductions) == {
+        "partitions": 2,
+        "binding": plan["binding"],
+        "reconciles": True,
+    }
+
+
+def test_places_complete_reduction_rejects_a_duplicate_the_sum_cannot_see(
+    construction_module,
+):
+    module = construction_module
+    plan, reductions = _reconciliation_fixture(module)
+    # The exact case the old hardcoded `reconciles: true` accepted: partition
+    # p-0000 reduced twice, p-1111 never, and because the two partitions carry
+    # equal bindings the SUM still equals the plan's. Binding equality alone --
+    # all finalize used to check for places -- passes here.
+    duplicated = [reductions[0], dict(reductions[0])]
+    assert module.A.combine_bindings(
+        [item["binding"] for item in duplicated]
+    ) == plan["binding"]
+    with pytest.raises(ValueError, match="missing, extra, or duplicate"):
+        module.validate_complete_reduction(plan, duplicated)
+
+
+def test_places_complete_reduction_rejects_swapped_partition_outputs(
+    construction_module,
+):
+    module = construction_module
+    plan, reductions = _reconciliation_fixture(module)
+    # Two partitions that published the wrong rows for their own identity. The id
+    # set is complete and the SUM is unchanged; only the per-partition comparison
+    # against the plan catches it.
+    swapped = [
+        {"partition": plan["partitions"][0],
+         "binding": {**reductions[1]["binding"],
+                     "records": reductions[1]["binding"]["records"] + 1}},
+        {"partition": plan["partitions"][1],
+         "binding": {**reductions[0]["binding"],
+                     "records": reductions[0]["binding"]["records"] - 1}},
+    ]
+    assert module.A.combine_bindings(
+        [item["binding"] for item in swapped]
+    ) == plan["binding"]
+    with pytest.raises(ValueError, match="differs from the binding the genesis plan"):
+        module.validate_complete_reduction(plan, swapped)
+
+
+def test_places_complete_reduction_rejects_a_missing_partition(construction_module):
+    module = construction_module
+    plan, reductions = _reconciliation_fixture(module)
+    with pytest.raises(ValueError, match="missing, extra, or duplicate"):
+        module.validate_complete_reduction(plan, reductions[:-1])

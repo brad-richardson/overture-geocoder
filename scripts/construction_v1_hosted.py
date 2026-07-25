@@ -200,10 +200,22 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # These exceed three declared hard caps in the frozen evidence spec
         # (partition_term_rows_hard_cap 1000000,
         # partition_distinct_tokens_hard_cap 250000,
-        # partition_estimated_uncompressed_bytes_hard_cap 268435456). Those keys
-        # are read by no code -- the byte limit already exceeded its declared cap
-        # before this change -- so nothing fails closed. Tracked as a follow-up:
-        # enforce them or delete them.
+        # partition_estimated_uncompressed_bytes_hard_cap 268435456), and that
+        # divergence is DELIBERATE and one-directional:
+        #
+        #   spec v2 -> rehearse_places_construction_v1.spec_partition_caps()
+        #           -> P.Limits -> adaptive_genesis_plan (subdivide, or fail at
+        #              maximum depth)
+        #
+        # so the spec's caps bind the REHEARSAL, which is what they were written
+        # for -- the spec is frozen against release 2026-06-17.0 and a 12-task
+        # candidate universe. The hosted planet build runs the raised caps above
+        # instead, on the measured justification in this comment.
+        # tests/test_construction_v1_preflight.py pins both sides, so neither can
+        # move without a test naming the other. Closing the gap means a places
+        # evidence spec v3 plus a rehearsal re-run (the spec's relaxation policy
+        # is "none"), not an edit here or there; see
+        # docs/plans/2026-07-24-construction-v1-follow-ups.md.
         "partition_term_rows": 2_000_000,
         "partition_estimated_bytes": 512 * 1024**2,
         "partition_distinct_tokens": 400_000,
@@ -781,6 +793,81 @@ def _committed_plan_partitions(path: Path | None) -> tuple[int, str]:
     return recorded, f"committed plan {plan_path.name} partitions"
 
 
+def _address_uniform_partition_estimate(
+    inventory: dict[str, Any], row_cap: int
+) -> tuple[int, str]:
+    """Address genesis partition count MODELLED from the plan's shape, not its size.
+
+    `ceil(total_records / row_cap)` is not an upper bound on the address partition
+    count, for the same class of reason it was not one for Places (see the places
+    branch below): the plan is not a flat division of rows.
+    `address_construction_v1._plan_from_summaries` bisects EACH COUNTRY
+    independently over `hash_bucket`, so two effects push the true count above the
+    total-row figure and neither is visible in a total row count:
+
+    * every country with any rows contributes at least one partition;
+    * a country over the cap splits by HALVING, so its leaf count is a power of
+      two rather than `ceil(country_rows / row_cap)`.
+
+    This is an ESTIMATE, not a bound in either direction, and its precondition is
+    that `route_hash` spreads a country's rows evenly across `hash_bucket`:
+
+    * it can OVERSHOOT under even spreading, because the real planner stops
+      bisecting a subtree as soon as that subtree fits: 4,000,003 rows spread over
+      8 even buckets at a 1,000,000 cap is model 8, real planner 5;
+    * it can UNDERSHOOT under in-country bucket skew, because each split isolates
+      light siblings that are already under the cap and each of those becomes a
+      leaf: a heavy adjacent pair plus ten scattered light buckets, 2,000,000 rows
+      total, is model 2, real planner 6.
+
+    Both figures are from running `address_construction_v1._plan_from_summaries`
+    itself on those inputs, not from reasoning about it.
+
+    `route_hash` IS uniform by construction (FNV-1a over 8 normalized fields,
+    high bits taken), which is why on the real planet inventory the model lands at
+    725 against a simulated real 725 -- but that is the model being well
+    conditioned on this data, not a guarantee.
+
+    The genuine per-country LOWER bound is `sum(ceil(country_rows / row_cap))` =
+    493 on the planet inventory, still above the 474 the total-row division gives.
+    It is recorded here for context and deliberately not used: it is a weaker
+    prediction than the uniform model on the data this actually runs against, and
+    the point of the prediction is to stop under-provisioning the reduce matrix.
+
+    Fails closed when the inventory carries no per-country row counts, matching
+    `_committed_plan_partitions`: a silent fallback to the total-row figure is
+    exactly the optimism this exists to remove.
+    """
+    per_country = inventory.get("exact_country_rows")
+    if not isinstance(per_country, dict) or not per_country:
+        raise SystemExit(
+            "address inventory records no exact_country_rows, so the per-country "
+            "partition estimate cannot be derived; rebuild the inventory with "
+            "scripts/inventory_address_rowgroups.py"
+        )
+    attributed = sum(int(rows) for rows in per_country.values())
+    if attributed <= 0:
+        raise SystemExit("address inventory exact_country_rows are all zero")
+    total = _inventory_total_records(inventory)
+    # Rows in mixed-or-unknown-country row groups are not attributed to any
+    # country. Spread them proportionally rather than dropping them: dropping
+    # them would make the estimate optimistic again by exactly their share.
+    scale = max(1.0, total / attributed)
+    # address_construction_v1 refuses to subdivide past 16 hash bits.
+    maximum_leaves = 1 << 16
+    estimate = 0
+    for rows in per_country.values():
+        leaves = 1
+        scaled = int(rows) * scale
+        while scaled / leaves > row_cap and leaves < maximum_leaves:
+            leaves *= 2
+        estimate += leaves
+    return estimate, (
+        f"per-country uniform hash-bisection estimate over {len(per_country)} "
+        f"inventory countries (x{scale:.4f} for unattributed rows)"
+    )
+
+
 def cmd_predict_reduce(args: argparse.Namespace) -> int:
     """Predict the reduce partition/batch/minute demand from committed inventory
     statistics, with no map run and no network, so a dry-run fails closed when a
@@ -792,10 +879,19 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
 
     if args.family == "addresses":
         row_cap = args.row_cap or limits.max_pack_rows
-        # Each genesis partition holds at most ``row_cap`` records, so the minimum
-        # partition count is a tight lower bound on the reduce demand.
-        predicted_partitions = math.ceil(total_records / row_cap)
-        basis = f"ceil({total_records} records / {row_cap} row cap)"
+        # Each genesis partition holds at most ``row_cap`` records, so the total-row
+        # division is a lower bound -- but NOT an upper one, and it was the only
+        # term here, which is the same optimism the places branch had (PR #155).
+        # Take the larger of it and the per-country uniform bisection ESTIMATE of
+        # the plan the address planner actually builds (see that function for what
+        # the estimate is and is not).
+        by_rows = math.ceil(total_records / row_cap)
+        modelled, model_basis = _address_uniform_partition_estimate(inventory, row_cap)
+        predicted_partitions = max(by_rows, modelled)
+        basis = (
+            f"max(ceil({total_records} records / {row_cap} row cap) = {by_rows}, "
+            f"{model_basis} = {modelled})"
+        )
     else:
         # Places reduces TERM rows (one output term batch per input feature batch,
         # up to MAX_TERMS_PER_FEATURE terms/feature); use that conservative upper
@@ -1192,13 +1288,13 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         raise SystemExit("finalize requires at least one reduction")
     head = read_json(args.head) if args.head and Path(args.head).exists() else None
 
-    if args.family == "addresses":
-        reconciliation = ADDRESS.validate_complete_reduction(plan, reductions)
-    else:
-        binding = ADDRESS.combine_bindings([item["binding"] for item in reductions])
-        if binding != plan["binding"]:
-            raise SystemExit("places reduction binding differs from the genesis plan")
-        reconciliation = {"partitions": len(reductions), "binding": binding, "reconciles": True}
+    # `reconciles` is REPORTED BY THE VALIDATOR for both families now. It used to
+    # be a constant on the places branch, checked only against the summed binding,
+    # so a duplicated partition standing in for a missing one -- or two partitions
+    # that swapped their outputs -- reported `reconciles: true`.
+    reconciliation = _family_module(args.family).validate_complete_reduction(
+        plan, reductions
+    )
 
     request_sha256 = contract["request_sha256"]
     slice_root = contract["namespaces"]["slice"].rstrip("/")

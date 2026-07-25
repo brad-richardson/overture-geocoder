@@ -44,6 +44,11 @@ BASELINE = load(
 A = P.A
 
 DATA = ROOT / "benchmarks/places-construction-v1-data"
+# The frozen evidence spec this rehearsal produces evidence under. Its
+# `acceptance_gates.map_reduce` block declares the three partition hard caps
+# below, and its relaxation policy is "none": a rehearsal that planned above
+# them would not be evidence under this spec at all.
+EVIDENCE_SPEC = ROOT / "benchmarks/places-construction-v1-evidence-spec-v2.json"
 PROJECTED = DATA / "projected"
 EVIDENCE = DATA / "evidence"
 INVENTORY = DATA / "inventory/places.json"
@@ -59,6 +64,35 @@ def projected_path(index: int) -> Path:
 
 def sha256_file(path: Path) -> str:
     return A.sha256_file(path)
+
+
+def spec_partition_caps(spec_path: Path = EVIDENCE_SPEC) -> dict[str, int]:
+    """The three partition hard caps the frozen evidence spec declares.
+
+    Read rather than copied. These values used to be duplicated here as literals,
+    which made the spec's declarations dead text that nothing checked -- and the
+    rehearsal was free to drift away from the spec it claims conformance under.
+    Fail closed on a missing or non-integer cap: guessing a cap is worse than
+    refusing to rehearse.
+    """
+    gates = json.loads(spec_path.read_text())["acceptance_gates"]["map_reduce"]
+    declared = {
+        "partition_term_rows": "partition_term_rows_hard_cap",
+        "partition_estimated_bytes": "partition_estimated_uncompressed_bytes_hard_cap",
+        "partition_distinct_tokens": "partition_distinct_tokens_hard_cap",
+    }
+    caps: dict[str, int] = {}
+    for name, key in declared.items():
+        value = gates.get(key)
+        # `bool` is an `int` in Python, and a spec that declared `true` for a cap
+        # would otherwise become a cap of 1 -- fail on it explicitly.
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"evidence spec {spec_path.name} declares no usable {key} "
+                f"({name}); got {value!r}"
+            )
+        caps[name] = value
+    return caps
 
 
 # ---------------------------------------------------------------------------
@@ -484,10 +518,15 @@ def run_rehearse(args: argparse.Namespace) -> None:
         duckdb_threads=args.threads,
         max_fan_in_tasks=16,
         max_fan_in_packs=64,
-        # frozen partition caps -> guarantee genuine adaptive subdivision
-        partition_term_rows=1_000_000,
-        partition_estimated_bytes=268_435_456,
-        partition_distinct_tokens=250_000,
+        # The partition caps DECLARED BY THE FROZEN EVIDENCE SPEC, read from it
+        # rather than restated here. They are deliberately NOT the raised hosted
+        # production caps (2,000,000 / 512 MiB / 400,000, now the `P.Limits`
+        # defaults): this rehearsal is the evidence for spec v2, whose relaxation
+        # policy is "none", and its coverage gate requires genuine adaptive
+        # subdivision. Raising these needs a places evidence spec v3 plus a
+        # re-run, not an edit here -- see
+        # docs/plans/2026-07-24-construction-v1-follow-ups.md.
+        **spec_partition_caps(),
         adaptive_subdivision_depth=8,
         head_result_cap=10,
     )

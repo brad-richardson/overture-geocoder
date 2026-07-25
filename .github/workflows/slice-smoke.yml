@@ -183,9 +183,9 @@ jobs:
               echo "::warning title=Slice smoke passed only on retry::Attempt 1 FAILED and attempt 2 passed. Treat this as an intermittent data-plane defect until proven to be an S3 transport failure; see slice/run-attempt-1.log in the slice-smoke-evidence artifact."
               echo "SLICE_RETRIED=true" >> "$GITHUB_ENV"
             fi
-            # `reconciles` alone is NOT evidence the run produced anything: for
-            # places it is a hardcoded literal in the finalize adapter, and an
-            # empty head satisfies every other check. Assert real counts, from
+            # `reconciles` alone is NOT evidence the run produced anything: it is
+            # now a real validator result for both families, but an EMPTY run
+            # reconciles too. Assert real counts, from
             # FILES the harness wrote (the last line of a merged stdout/stderr
             # stream is not a reliable machine surface), and require the two
             # artifact classes that carry the data to be non-empty.

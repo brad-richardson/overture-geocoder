@@ -97,8 +97,11 @@ def test_pins_the_release_bbox_and_task_index_with_a_drift_check():
 
 def test_asserts_real_counts_not_just_the_reconciles_literal():
     value = text()
-    # `reconciles` is a hardcoded literal for places in the finalize adapter, so
-    # the job must assert counts that an empty run cannot satisfy.
+    # `reconciles` is now reported by `places_construction_v1
+    # .validate_complete_reduction` rather than a literal, but it still says
+    # nothing about whether the run produced DATA -- an empty head and a zero-row
+    # partition set reconcile perfectly -- so the job must keep asserting counts
+    # an empty run cannot satisfy.
     for assertion in (
         ".reconciles == true",
         ".records > 0",
