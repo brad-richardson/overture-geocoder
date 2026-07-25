@@ -708,3 +708,50 @@ tracked items fall out of it:
     currently a no-op** because `vars.ENABLE_SCHEDULED_REBUILD` is unset. That
     is recorded, not fixed — enabling it is the owner's call, and it changes when
     new versions (and new staging debris) appear.
+
+## Added 2026-07-25, from bounding the finalize/publication phase
+
+The eager-hydration defect #167 fixed in the plan phase was also present in
+finalize, in both dimensions, and is now fixed there too (see the hydration table
+in `construction-v1-state.md`): `publish_exact_set` held every artifact's full
+bytes in one `payloads` dict, and `cmd_finalize` built its exact set out of
+`store.path(...)` calls with no `release()` anywhere in the phase. Peak is now one
+object in RAM and one object on disk, and both slice-smoke jobs assert
+`finalize_staged_peak_resident_bytes < finalize_staged_bytes_hydrated` and
+`finalize_staged_objects_released > 0`. What was deliberately NOT done:
+
+1. **Finalize reads each published object from staging TWICE.** Admission streams
+   every file to compute its identity (and to run the content-addressed and
+   provenance gates), then the upload loop re-reads the payload it publishes. That
+   is what preserves "the whole admitted set is fixed, gated and sorted before any
+   upload" while holding only one object, but it doubles finalize's GET volume:
+   ~13–18 GB becomes ~26–36 GB of planet reads. The one-read version is available
+   — every object's `sha256` and `bytes` are ALREADY recorded by the producing
+   phase (that is what the #168 gate compares against) and its digest is in its
+   own content-addressed key, so admission could be built from provenance with no
+   hydration at all, leaving a single read that verifies the payload it uploads
+   against the pre-admitted identity. Not done here because it changes
+   `publish_exact_set` from "hash the file" to "verify against a declared
+   identity", which is a contract change in the publication path and deserves its
+   own review rather than riding along with a residency fix.
+2. **The hosted workflow's `finalize` job asserts the bound nowhere.** Both
+   slice-smoke jobs do, so a regression is a red build on every PR, but
+   `construction-v1.yml` — the workflow that actually runs planet, where 13–18 GB
+   is the difference between a finished run and an OOM at hour four — only echoes
+   `staged_objects_hydrated`. `final-work/result.json` already carries
+   `staged_peak_resident_bytes`, `staged_bytes_hydrated` and
+   `staged_objects_released`, so the gate is three `test` lines next to the
+   existing `SERVING`/`REDUCTIONS` equality. Deliberately left out of this change:
+   `construction-v1.yml` is the credentialed workflow and editing it was out of
+   scope here. Add it with `test_construction_v1_workflow_contract.py` coverage,
+   the way the free-disk floors are asserted.
+3. **The `publish/` mirror tree is still the whole slice on local disk.** Finalize
+   writes the published set into `--remote-root publish` and a separate
+   `aws s3api` step mirrors it to R2 object by object, so the phase's real disk
+   floor is the full slice (13–18 GB at planet scale) plus the one object it holds
+   resident — not the "twice the slice" it was, but not one object either.
+   Streaming each object straight from staging to R2 in the publisher would remove
+   the tree entirely; that means giving `publish_exact_set` a real R2 backend
+   instead of `FilesystemRemote` plus a shell mirror, which is the same
+   restructure item (1) above touches. The 25 GB free-disk floor on the finalize
+   job is what stands in for it today.

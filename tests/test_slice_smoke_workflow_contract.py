@@ -148,6 +148,15 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
         ".plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated" in value
     )
     assert ".plan_staged_objects_released > 0" in value
+    # The identical tripwire on FINALIZE, for the identical defect in the last phase
+    # of the run: it built its whole exact set out of `store.path(...)` calls, so
+    # every published object was hydrated before the first upload and none was
+    # released -- 13-18 GB at planet scale. Asserted for BOTH families, because
+    # finalize's fan-in is the published set regardless of family.
+    assert value.count(
+        ".finalize_staged_peak_resident_bytes < .finalize_staged_bytes_hydrated"
+    ) == 2
+    assert value.count(".finalize_staged_objects_released > 0") == 2
     # Addresses plan from marker JSON alone, so zero is the CORRECT plan-phase
     # figure there -- asserted as zero rather than skipped, and the address
     # reducer's unbounded fan-in is stated rather than hidden.

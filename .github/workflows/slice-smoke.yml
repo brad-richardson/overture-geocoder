@@ -206,6 +206,15 @@ jobs:
             # entire ~34 GB term store on the one job run 30113308268 died on;
             # eager hydration makes peak == total, so this is the tripwire.
             #
+            # The same pair on `finalize_*` is the same tripwire for the same defect
+            # in the LAST phase, where it is most expensive: finalize used to build
+            # its whole exact set as a list of `store.path(...)` results, hydrating
+            # every published object before the first upload and releasing none. At
+            # planet scale that is 13-18 GB of disk, and the publisher then held all
+            # of the same bytes in RAM at once as well. It now hydrates, verifies,
+            # uploads and EVICTS one object at a time, so a regression to eager
+            # hydration makes peak == total and fails here.
+            #
             # `reconciles` alone is NOT evidence the run produced anything: it is
             # now a real validator result for both families, but an EMPTY run
             # reconciles too. Assert real counts, from
@@ -226,6 +235,8 @@ jobs:
               and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/places$"))
               and .map_staged_objects_published > 0
               and .finalize_staged_objects_hydrated > 0
+              and .finalize_staged_objects_released > 0
+              and (.finalize_staged_peak_resident_bytes < .finalize_staged_bytes_hydrated)
               and .plan_staged_bytes_hydrated > 0
               and .plan_staged_objects_released > 0
               and (.plan_staged_peak_resident_bytes < .plan_staged_bytes_hydrated)
@@ -399,6 +410,13 @@ jobs:
             # "the transport moves address map output durably", NOT "the address
             # planet build is unblocked at reduce" -- it is not.
             #
+            # The `finalize_*` peak/released pair is asserted for BOTH families, for
+            # the same reason and against the same defect (finalize hydrated its
+            # whole published set before the first upload and released none of it).
+            # Unlike the reduce bound above, this one is a real bound on the address
+            # side too: finalize's fan-in is the published set, and it is now read
+            # one object at a time regardless of family.
+            #
             # Unlike places, `reconciles` for addresses is a REAL check
             # (validate_complete_reduction over the genesis plan), but it still
             # says nothing about volume, so assert counts the same way. The
@@ -436,6 +454,8 @@ jobs:
               and (.staging_prefix | test("^staging/global-v2/[0-9a-f]{64}/construction-v1/addresses$"))
               and .map_staged_objects_published > 0
               and .finalize_staged_objects_hydrated > 0
+              and .finalize_staged_objects_released > 0
+              and (.finalize_staged_peak_resident_bytes < .finalize_staged_bytes_hydrated)
               and .plan_staged_bytes_hydrated == 0
               and .reduce_staged_bytes_hydrated > 0
               and .head_staged_bytes_hydrated == 0
