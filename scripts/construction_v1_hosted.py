@@ -1624,9 +1624,32 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         max_read_bytes=int(contract["caps"].get("max_remote_write_bytes", 1_000_000_000_000)),
     )
     remote = REMOTE.FilesystemRemote(Path(args.remote_root), budget)
-    exact_set: list[tuple[str, Path]] = [
-        (f"{slice_root}/families/{args.family}/family-manifest.json", family_manifest_path),
-        (f"{slice_root}/families/{args.family}/slice-manifest.json", slice_manifest_path),
+    # Every published object is hydrated ONE AT A TIME and evicted as soon as the
+    # publisher is done reading it, rather than assembling a list of paths -- which
+    # hydrated the whole published set onto this runner before the first upload.
+    # That is 13-18 GB at planet scale (a ~10-11 GB head payload plus 3.3-6.7 GB of
+    # positions packs, before the routed lane), on the last job of a multi-hour run.
+    # This is the same defect the plan phase carried (#167): batching that hydrates
+    # eagerly is not batching. `release` exists only on the staged store, so a
+    # local-only run evicts nothing -- there the local directory IS the store.
+    release = getattr(store, "release", None)
+
+    def member(published_key: str, store_key: str) -> Any:
+        return REMOTE.Member(
+            key=published_key,
+            hydrate=lambda: store.path(store_key),
+            release=(lambda: release(store_key)) if release is not None else (lambda: None),
+        )
+
+    manifests = {
+        f"{slice_root}/families/{args.family}/family-manifest.json": family_manifest_path,
+        f"{slice_root}/families/{args.family}/slice-manifest.json": slice_manifest_path,
+    }
+    # The manifests are the only members that are not store objects: finalize wrote
+    # them into its own work root a few lines above, so they are already local and
+    # nothing may evict them.
+    exact_set: list[Any] = [
+        REMOTE.local_member(key, path) for key, path in manifests.items()
     ]
     # Recorded identity per published key, so the pre-publication check below can
     # compare the bytes on disk to what the PRODUCING phase wrote down, not just to
@@ -1635,7 +1658,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     for artifact in artifacts:
         source = f"{slice_root}/families/{args.family}/objects/{Path(artifact['key']).name}"
         recorded[source] = artifact
-        exact_set.append((source, store.path(artifact["key"])))
+        exact_set.append(member(source, artifact["key"]))
     # Per-family sub-prefix: `positions/` for places, `records/` for addresses --
     # so the published tree names the artifact it holds instead of calling address
     # records "positions". Both go through the same exact-set publisher and the
@@ -1646,33 +1669,34 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             f"{Path(artifact['key']).name}"
         )
         recorded[source] = artifact
-        exact_set.append((source, store.path(artifact["key"])))
-    # Every published object is content-addressed, so its NAME states its bytes --
-    # and until now nothing checked that the bytes at the local key matched. The
-    # verification below derives `expected` from the same files it publishes, so a
-    # local store carrying wrong bytes under a right key published them and reported
-    # `reconciles: true`: the reconciliation compares BINDINGS from the reduction
-    # JSON, which a substituted file does not touch. Compare each file to the digest
-    # in its own key before publication. This is free -- `file_identity` digests
-    # every one of them anyway -- and it is the last point at which a wrong byte can
-    # still be caught.
-    identities = {key: REMOTE.file_identity(path) for key, path in exact_set}
-    manifests = {
-        f"{slice_root}/families/{args.family}/family-manifest.json",
-        f"{slice_root}/families/{args.family}/slice-manifest.json",
-    }
-    for source, path in exact_set:
+        exact_set.append(member(source, artifact["key"]))
+
+    def verify_identity(source: str, actual: dict[str, Any]) -> None:
+        """Pre-publication identity gate, run during admission.
+
+        Every published object is content-addressed, so its NAME states its bytes
+        -- and nothing used to check that the bytes at the local key matched. The
+        whole-slice verification derives `expected` from the same files it
+        publishes, so a local store carrying wrong bytes under a right key
+        published them and reported `reconciles: true`: the reconciliation compares
+        BINDINGS from the reduction JSON, which a substituted file does not touch.
+
+        This runs as `publish_exact_set`'s admission hook rather than as a pass of
+        its own, so the object is hashed once per residency instead of being
+        hydrated a third time. It is still strictly before ANY upload -- admission
+        completes before the publisher writes a byte -- which is the property that
+        makes it a gate and not a report.
+        """
         if source in manifests:
             # The only non-content-addressed members, and both were written from
             # memory a few lines above.
-            continue
+            return
         artifact = recorded[source]
         declared = STAGING.content_addressed_digest(artifact["key"])
         if declared is None:
             raise SystemExit(
                 f"refusing to publish an object with no verifiable identity: {source}"
             )
-        actual = identities[source]
         # Two independent checks. `declared` proves the bytes match the digest the
         # store key ASSERTS about them; `artifact` proves they also match the size
         # and digest the PRODUCING phase recorded in its reduction / head result /
@@ -1680,7 +1704,8 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         # together mean the file, its name, and its provenance all agree.
         if actual["sha256"] != declared:
             raise SystemExit(
-                f"refusing to publish {source}: the bytes at {path} hash to "
+                f"refusing to publish {source}: the bytes at "
+                f"{store.path(artifact['key'])} hash to "
                 f"{actual['sha256']} but their content-addressed key declares "
                 f"{declared}. The local store is not the store that produced this "
                 "slice."
@@ -1690,6 +1715,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
                 f"published object {source} differs from the identity its producing "
                 "phase recorded"
             )
+
     marker_key = f"{contract['namespaces']['markers'].rstrip('/')}/finalize/{args.family}.json"
     marker = REMOTE.publish_exact_set(
         remote,
@@ -1697,9 +1723,14 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         marker_key=marker_key,
         request_sha256=request_sha256,
         fail_after_upload=args.fail_after_upload,
+        verify=verify_identity,
     )
-    expected = [{"key": key, "sha256": identities[key]["sha256"],
-                 "bytes": identities[key]["bytes"]} for key, _path in exact_set]
+    # The admitted set IS the expected set: `publish_exact_set` computed each
+    # identity by streaming the same file it uploaded, and `verify_identity` gated
+    # every one of them. Reusing it here (rather than a second dict of identities
+    # built from paths held open across the whole phase) is what lets nothing but
+    # the marker outlive the upload loop.
+    expected = marker["artifacts"]
     verification = REMOTE.verify_whole_slice_once(
         remote, prefix=f"{slice_root}/families/{args.family}/", expected=expected
     )

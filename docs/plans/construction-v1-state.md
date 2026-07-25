@@ -175,7 +175,7 @@ every credentialed step is execute-mode-gated.
 
 **What each phase actually downloads, stated honestly.** "The store stops
 travelling between phases" is true of the *artifact*; it is not true that no phase
-reads pack bodies. Two do, and their bound is the **peak resident hydrated bytes**
+reads pack bodies. Three do, and their bound is the **peak resident hydrated bytes**
 — the high-water mark of fan-in on the runner at once, not the total streamed
 through. Every phase reports both (`--staging-report`, and in the slice summary):
 
@@ -187,13 +187,56 @@ through. Every phase reports both (`--staging-report`, and in the slice summary)
 | reduce (places) | the fragments in its own bucket range | ~1 GB post-combiner (the bucket-range measurement above) |
 | reduce (addresses) | packs from essentially every map task | **unbounded — see the family caveat below** |
 | head | EVERY task's head-candidate pack, in one `read_parquet` | **MEASURED, not bounded** — 7.35 MB from one Monaco task, order 10 GB at 89 planet tasks. `run-head --staging-report` records it and the job now carries the 25 GB free-disk floor; batching it is a restructure, tracked as a follow-up |
-| finalize | exactly the published set | small; it holds the slice twice (hydrated + mirrored), so it carries the same floor |
+| finalize | exactly the published set, **twice** (hash, then upload) | **ONE OBJECT at a time** — hydrate, verify, upload, `release()`. Peak resident = **exactly the largest single published object**, measured as such in both families (12.09 MB on Monaco, 29.17 MB on Seattle — the latter is one 29.17 MB serving artifact). NOT the partition cap: that bounds only the routed lane, and at `--shard-bits 4` the biggest object is a head shard at ~625–690 MB. It still writes the whole slice into its local `publish/` tree for the R2 mirror step, so the phase's disk floor is *that* tree plus one object, not twice the slice |
 
-The plan phase's eager `[store.path(k) for k in packs]` defeated its own
+Two eager-hydration defects of the same class, both now fixed and both now
+asserted. The plan phase's eager `[store.path(k) for k in packs]` defeated its own
 `max_fan_in_packs` batching completely and would have put the whole planet term
-store on the one job run 30113308268 died on. It now hydrates per batch and
-evicts (`StagedObjectStore.release`), and the slice smoke asserts
-`peak_resident < bytes_hydrated`, which is false under eager hydration.
+store on the one job run 30113308268 died on. **Finalize had the identical defect,
+in the last phase of the run**: it built its whole exact set as a list of
+`store.path(...)` results — every published object hydrated before the first
+upload, with no `release()` anywhere in the phase — which is 13–18 GB at planet
+scale (a ~10–11 GB head payload plus 3.3–6.7 GB of positions packs, before the
+routed lane). Both now hydrate and evict, and both slice-smoke jobs assert
+`peak_resident < bytes_hydrated` and `objects_released > 0`, which are false under
+eager hydration.
+
+**The RAM bound, which used to appear nowhere.** `publish_exact_set` read EVERY
+artifact's full bytes into one `payloads` dict during admission and consumed them
+from that dict in the upload loop, so the entire published set was resident in
+process memory as well as on disk — the same 13–18 GB, on a 16 GB runner, at the
+very end of a multi-hour run. It now computes each identity by STREAMING the file
+(`file_identity`, 1 MiB chunks) and re-reads each payload inside the upload loop
+where it is needed. **Peak RAM is exactly the largest single published object** —
+measured as such, in both families — which makes it predictable rather than merely
+bounded: 1.6 MB while publishing a 12.6 MB set of 24 objects, against 12.6 MB
+(100% of the set) before. It is **not** the partition cap (512 MiB estimated
+uncompressed); that bounds only the routed lane, and at `--shard-bits 4` the
+largest published object is a head shard at **~625–690 MB** (a 10–11 GB planet head
+payload over 16 shards), which exceeds it. Comfortable on a 16 GB runner either
+way, and the two bounds interact favourably with #169: at 4,096 head shards the
+largest head shard drops to roughly 2.7 MB, shrinking this bound by ~250x.
+
+The two-phase contract is unchanged: every identity is admitted, gated and sorted
+before any upload, and the marker is committed last. Splitting one read into two
+did lose one invariant that used to hold by construction — *the admitted identity
+and the uploaded payload are the same bytes* — so the upload loop now re-hashes the
+payload it is about to publish and compares it to the pre-admitted digest. Nothing
+else covered it: a `local_member` (the two manifests) is digest-verified on neither
+read, a staged member's re-hydration hits `StagedObjectStore.path()`'s
+`if path.is_file(): return path` short-circuit so the second read is not
+digest-checked, and the per-upload HEAD compares only `bytes`, so a same-length
+swap passed. The failure it prevents is the expensive kind: a marker committed
+recording the GOOD identity over BAD bytes, caught only by
+`verify_whole_slice_once` — which runs after the marker.
+
+The cost of that fix, stated: finalize now reads each published object from
+staging **twice** — once to hash it into the admitted set (where the
+content-addressed and provenance gates run), once to read the payload it uploads.
+That is bounded extra GET volume, not extra residency, and it is the price of
+keeping "the whole admitted set is fixed before any upload" while holding one
+object. Planning admission from the identities the producing phases already
+recorded would make it one read; tracked as a follow-up.
 
 **Evidence, on the fast loop, no credentials.** Both slice-smoke jobs run the
 whole transport with a filesystem staging backend and each phase on its own empty
@@ -207,8 +250,16 @@ store:
 | plan hydrated / peak resident | 32.88 MB / **16.44 MB** (8 released) | 0 / 0 |
 | reduce hydrated / worst job peak | 16.44 MB / **8.30 MB** | 10.89 MB / 10.89 MB |
 | head hydrated / peak resident | 7.35 MB / 7.35 MB (unbatched) | 0 / 0 (no head phase) |
-| finalize hydrated from staging | 28 objects / 35.94 MB | 5 objects / 32.14 MB |
+| finalize hydrated from staging | 56 objects / 71.88 MB (28 objects, twice) | 10 objects / 64.29 MB (5 objects, twice) |
+| finalize peak resident / released | **12.09 MB** / 56 objects | **29.17 MB** / 10 objects |
 | serving objects published | 20 (4 `.plrv` + 16 `.plhd`) | 1 `.av1` |
+
+Finalize's `hydrated` doubled and its `peak resident` fell, in the same change:
+28 → 56 hydrations is the same 28 objects fetched once per pass, and 35.94 MB →
+12.09 MB peak is the whole point — before, `peak == hydrated` because nothing was
+ever released. The published byte set is unchanged by it: `set_sha256`
+`48c895cd…` for Places (31 files, 35,953,036 bytes) and `73a0e76f…` for
+addresses (8 files, 32,147,481 bytes), identical before and after.
 
 The published slice is **byte-identical** to a `--no-staging` run of the same
 slice — same content-addressed names, same sizes; 31 files for Places, 8 for

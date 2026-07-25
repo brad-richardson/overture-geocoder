@@ -9,9 +9,9 @@ from __future__ import annotations
 
 import hashlib
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
-from typing import BinaryIO, Iterable
+from typing import BinaryIO, Callable, Iterable, Sequence
 
 
 def canonical(value: object) -> bytes:
@@ -117,34 +117,132 @@ def _stream_identity(remote: FilesystemRemote, key: str) -> dict[str, object]:
     return {"sha256": digest.hexdigest(), "bytes": size}
 
 
+def _noop() -> None:
+    return None
+
+
+@dataclass(frozen=True)
+class Member:
+    """One member of an admitted set, plus how to make its bytes locally readable.
+
+    `publish_exact_set` touches every member's file exactly twice -- once to hash
+    it into the admitted set, once to read the payload it uploads -- and must not
+    hold more than one member at a time in RAM or on disk. At planet scale the set
+    is 13-18 GB (a ~10-11 GB head payload plus 3.3-6.7 GB of positions packs) on a
+    16 GB runner with a bounded disk, so "hold them all" is an unconditional OOM.
+
+    `hydrate` returns the local path, fetching the object if it is not resident;
+    `release` drops the local copy. The publisher brackets each of its two reads
+    with the pair, so a member whose bytes live in a remote staging tree is
+    resident only while it is being read. `local_member` builds the degenerate
+    case -- a file already on local disk, released never -- which is what a plain
+    `(key, path)` tuple is normalized to.
+    """
+
+    key: str
+    hydrate: Callable[[], Path]
+    release: Callable[[], None] = field(default=_noop)
+
+
+def local_member(key: str, path: Path) -> Member:
+    """A member that is already on local disk and must never be evicted."""
+    return Member(key=key, hydrate=lambda: path, release=_noop)
+
+
+def _members(artifacts: Sequence[Member | tuple[str, Path]]) -> list[Member]:
+    return [
+        item if isinstance(item, Member) else local_member(item[0], item[1])
+        for item in artifacts
+    ]
+
+
 def publish_exact_set(
     remote: FilesystemRemote,
     *,
-    artifacts: list[tuple[str, Path]],
+    artifacts: Sequence[Member | tuple[str, Path]],
     marker_key: str,
     request_sha256: str,
     fail_after_upload: int | None = None,
+    verify: Callable[[str, dict[str, object]], None] | None = None,
 ) -> dict[str, object]:
-    """Upload an admitted set, HEAD each upload, and commit its marker last."""
+    """Upload an admitted set, HEAD each upload, and commit its marker last.
+
+    Two phases, in this order and for this reason: EVERY member's identity is
+    admitted before ANY upload starts, so the admitted set -- and therefore the
+    marker that describes it and the byte-exact identity a conflicting retry is
+    allowed to accept -- is fixed and sorted before a single byte is published.
+
+    Identities are computed by STREAMING each file (`file_identity`), never by
+    retaining its bytes: holding all payloads simultaneously to reuse them in the
+    upload loop was a 13-18 GB dict at planet scale. Each payload is re-read
+    inside the upload loop instead, so **peak RAM is exactly the LARGEST SINGLE
+    PUBLISHED OBJECT**, not the set. That is the honest bound and it is a
+    predictable one -- not the partition cap, which bounds only the routed lane: at
+    `--shard-bits 4` the biggest object is a head shard at ~625-690 MB (a 10-11 GB
+    planet head payload over 16 shards). Fine on a 16 GB runner, and once the head
+    goes to 4,096 shards (#169) the largest head shard drops to roughly 2.7 MB,
+    shrinking this bound by ~250x.
+
+    `verify`, if given, is called as `verify(key, identity)` during admission with
+    the identity just computed from the file. It runs strictly before any upload,
+    which is what lets a caller reject an object on grounds the publisher knows
+    nothing about (provenance, content-addressed key) without hydrating it a third
+    time.
+    """
+    members = _members(artifacts)
+    by_key = {member.key: member for member in members}
     admitted = []
-    payloads: dict[str, bytes] = {}
-    for key, path in artifacts:
-        payload = path.read_bytes()
-        identity = {"key": key, "sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
+    for member in members:
+        # Resident only for the hash. `file_identity` streams in 1 MiB chunks, so
+        # nothing here scales with the object's size either.
+        path = member.hydrate()
+        identity = {"key": member.key, **file_identity(path)}
+        if verify is not None:
+            verify(member.key, identity)
+        # Released on the SUCCESS path only. An object that failed its admission
+        # gate stays on disk for a human to look at -- the run is aborting anyway,
+        # and evicting the offending bytes would destroy the only evidence of them.
+        member.release()
         admitted.append(identity)
-        payloads[key] = payload
     admitted.sort(key=lambda item: str(item["key"]))
     if len({item["key"] for item in admitted}) != len(admitted):
         raise ValueError("duplicate artifact key")
 
     for index, item in enumerate(admitted, 1):
         key = str(item["key"])
+        member = by_key[key]
+        # Re-read the payload HERE, where it is needed, instead of carrying every
+        # payload down from admission in a dict. This read is the whole RAM bound.
+        path = member.hydrate()
+        payload = path.read_bytes()
+        # RESTORES "the identity and the payload are the same bytes". Before this
+        # function was split into two passes that was true by construction -- one
+        # `read_bytes()` produced both the admitted digest and the uploaded bytes.
+        # Two passes means two reads, and NOTHING else re-checks the second one:
+        #   * a plain-tuple / `local_member` member (the two manifests) is never
+        #     digest-verified on either read;
+        #   * a staged member's re-hydration hits `StagedObjectStore.path()`'s
+        #     `if path.is_file(): return path` short-circuit, so the second read is
+        #     not digest-checked either -- and `release()` opens a window in which
+        #     the cache slot is unverified-writable that did not exist before;
+        #   * the per-upload HEAD below compares only `bytes`, so a SAME-LENGTH swap
+        #     passes it.
+        # Without this check the marker would be committed recording the GOOD
+        # identity over BAD bytes, with the admission gate having passed on the good
+        # bytes it read first. `verify_whole_slice_once` does catch it, but that runs
+        # AFTER the marker. Free: the payload is already in RAM.
+        if hashlib.sha256(payload).hexdigest() != item["sha256"]:
+            raise RuntimeError(f"payload changed between admission and upload: {key}")
         try:
-            remote.put_create_only(key, payloads[key])
+            remote.put_create_only(key, payload)
         except ConflictError:
             # A retry may accept only the byte-exact object pre-admitted above.
             if _stream_identity(remote, key) != {"sha256": item["sha256"], "bytes": item["bytes"]}:
                 raise RuntimeError(f"conflicting immutable object: {key}")
+        # One object's bytes at a time: drop this payload before the next iteration
+        # hydrates and reads its own, so peak RAM is one object rather than the set.
+        del payload
+        member.release()
         head = remote.head(key)
         if head != {"bytes": item["bytes"]}:
             raise RuntimeError(f"per-upload HEAD verification failed: {key}")

@@ -443,6 +443,17 @@ def test_the_staging_transport_carries_the_store_and_outputs_are_unchanged(
     # had to be hydrated and digest-verified.
     assert staged_final["staged_objects_hydrated"] > 0
     assert staged_final["staged_bytes_hydrated"] > 0
+    # ...and BOUNDED while doing it. Finalize used to build its exact set out of
+    # `store.path(...)` calls, so every published object was hydrated onto this
+    # runner before the first upload and NOTHING was released anywhere in the
+    # phase -- 13-18 GB at planet scale, on the last job of a multi-hour run. It
+    # now hydrates, verifies, uploads and evicts one object at a time, so peak
+    # below total is how you can tell (eager hydration makes them equal).
+    assert staged_final["staged_objects_released"] > 0
+    assert (
+        staged_final["staged_peak_resident_bytes"]
+        < staged_final["staged_bytes_hydrated"]
+    )
 
     # Transport only. Identical content-addressed keys means identical bytes.
     names = sorted(path.name for path in legacy_reductions.glob("*.json"))
@@ -607,6 +618,14 @@ def test_finalize_refuses_to_publish_bytes_that_are_not_the_bytes(tmp_path, bina
     assert "content-addressed key declares" in str(excinfo.value)
     # Nothing was published: the check runs BEFORE publish_exact_set.
     assert not (tmp_path / "remote-tamper").exists()
+    # And the OFFENDING BYTES SURVIVE. Finalize now evicts each object once it has
+    # been read, but only on the success path: an early draft released in a
+    # `finally`, which deleted the planted file as the run aborted and destroyed the
+    # only evidence of what was published-and-refused. A failing identity gate must
+    # leave its input on disk for a human -- the run is aborting anyway, so there is
+    # nothing to reclaim.
+    assert planted.is_file(), "the object that failed its identity gate was evicted"
+    assert planted.read_bytes() == b"\x00" * victim["bytes"]
 
     # Remove the planted file and the same finalize succeeds from staging.
     planted.unlink()
@@ -888,6 +907,30 @@ def test_the_places_plan_phase_is_bounded_not_eagerly_hydrated(tmp_path):
     assert 'release = getattr(store, "release", None)' in source
     # Both passes over the packs release what they fetched.
     assert source.count('release(pack["object"]["key"])') == 2
+
+
+def test_the_finalize_phase_is_bounded_not_eagerly_hydrated():
+    """The same source-level guard the plan phase has, for the same defect.
+
+    Finalize was the only phase left that hydrated its whole input with no
+    eviction: `exact_set.append((source, store.path(artifact["key"])))` resolved
+    every published object's path up front, and `release` appeared nowhere in the
+    module. The published set is small on a slice and 13-18 GB on the planet, so no
+    functional test on Monaco would ever notice the difference -- which is exactly
+    why the eager form is asserted absent here as well as measured in the smoke.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "hosted_finalize_bound", ROOT / "scripts/construction_v1_hosted.py"
+    )
+    source = spec.loader.get_source("hosted_finalize_bound")
+    assert 'exact_set.append((source, store.path(artifact["key"])))' not in source
+    # `getattr`, not `store.release`: `release` is deliberately absent from
+    # `LocalObjectStore` (there the local directory IS the store), so a local or
+    # offline finalize must evict nothing rather than delete its own inputs.
+    assert 'release = getattr(store, "release", None)' in source
+    assert "release(store_key)" in source
 
 
 def test_staging_without_a_contract_fails_closed(tmp_path):

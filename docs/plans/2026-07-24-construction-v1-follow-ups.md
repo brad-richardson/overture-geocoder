@@ -708,3 +708,101 @@ tracked items fall out of it:
     currently a no-op** because `vars.ENABLE_SCHEDULED_REBUILD` is unset. That
     is recorded, not fixed — enabling it is the owner's call, and it changes when
     new versions (and new staging debris) appear.
+
+## Added 2026-07-25, from bounding the finalize/publication phase
+
+The eager-hydration defect #167 fixed in the plan phase was also present in
+finalize, in both dimensions, and is now fixed there too (see the hydration table
+in `construction-v1-state.md`): `publish_exact_set` held every artifact's full
+bytes in one `payloads` dict, and `cmd_finalize` built its exact set out of
+`store.path(...)` calls with no `release()` anywhere in the phase. Peak is now one
+object in RAM and one object on disk, and both slice-smoke jobs assert
+`finalize_staged_peak_resident_bytes < finalize_staged_bytes_hydrated` and
+`finalize_staged_objects_released > 0`, **and so does the hosted
+`construction-v1.yml` finalize job** — on `staged_objects_hydrated > 0`,
+`staged_objects_released > 0` and
+`staged_peak_resident_bytes < staged_bytes_hydrated`, fail-closed through
+`| numbers` so a missing or non-numeric key exits non-zero instead of defaulting
+to a value that passes. Every staging assert in `slice-smoke.yml` was converted to
+the same shape: a bare comparison is NOT fail-closed, because jq orders `null`
+below numbers (a MISSING peak satisfies `peak < hydrated`) and numbers below
+strings (a STRING count satisfies `> 0`). Both holes were reproduced against real
+jq before the change and are closed after it; the contract test greps for any
+surviving bare `.*staged*` comparison so the old shape cannot be copied back in.
+
+Splitting `publish_exact_set` into an admission pass and an upload pass also lost
+an invariant that had held **by construction** — *the admitted identity and the
+uploaded payload are the same bytes*, previously guaranteed because one
+`read_bytes()` produced both. Nothing else covered the second read: a
+`local_member` (the two manifests) is digest-checked on neither read; a staged
+member's re-hydration hits `StagedObjectStore.path()`'s `if path.is_file(): return
+path` short-circuit, so it is not digest-checked either, and `release()` opens a
+window in which that cache slot is unverified-writable which did not exist before;
+and the per-upload HEAD compares only `bytes`, so a same-length swap passes it. The
+upload loop now re-hashes the payload against the pre-admitted digest — free, since
+the payload is already in RAM — and all three attack shapes are pinned by tests
+that were each confirmed to fail without it. What was deliberately NOT done:
+
+1. **Finalize reads each published object from staging TWICE.** Admission streams
+   every file to compute its identity (and to run the content-addressed and
+   provenance gates), then the upload loop re-reads the payload it publishes. That
+   is what preserves "the whole admitted set is fixed, gated and sorted before any
+   upload" while holding only one object, but it doubles finalize's GET volume:
+   ~13–18 GB becomes ~26–36 GB of planet reads. The one-read version is available
+   — every object's `sha256` and `bytes` are ALREADY recorded by the producing
+   phase (that is what the #168 gate compares against) and its digest is in its
+   own content-addressed key, so admission could be built from provenance with no
+   hydration at all, leaving a single read that verifies the payload it uploads
+   against the pre-admitted identity. Not done here because it changes
+   `publish_exact_set` from "hash the file" to "verify against a declared
+   identity", which is a contract change in the publication path and deserves its
+   own review rather than riding along with a residency fix.
+2. **There is no `max_remote_read_bytes` cap, and there never was.** `Budget` takes
+   three independent limits, but `construction_v1_hosted.py` populates
+   `max_read_bytes` from the contract's **`max_remote_write_bytes`** in both places
+   it builds one (`:416` and `:1624`), and no `max_remote_read_bytes` key exists
+   anywhere in the repo — not in `construction_v1_control.py`'s caps, not in the
+   contract derivation, not in a test fixture. So the remote read budget cannot be
+   tightened without also tightening writes, and the 1 TB default is doing double
+   duty. Both quantities are ~1.3–1.8% of it at planet scale, so nothing is close
+   to tripping; this is a shape problem, not a live one. Fix it by adding the key
+   with its own default rather than by widening the write cap.
+
+   Related and worth stating precisely, because it is easy to get backwards: the
+   doubled reads in item (1) are **STAGING** GETs, and `Budget` does not govern
+   them at all. It wraps only `FilesystemRemote`, i.e. the publication target;
+   `StagedObjectStore` and `r2_verified_store` charge nothing. Measured on a
+   10-object fixture: `budget.read_bytes` is **0** after `publish_exact_set`
+   (20 hydrations for 10 objects) and exactly 1× the set after
+   `verify_whole_slice_once`. So the transport that moves tens of GB per phase has
+   no byte budget of any kind, while the publication path has one it shares with
+   writes. That asymmetry is the thing to fix, and it is bigger than finalize.
+3. **The `publish/` mirror tree is still the whole slice on local disk.** Finalize
+   writes the published set into `--remote-root publish` and a separate
+   `aws s3api` step mirrors it to R2 object by object, so the phase's real disk
+   floor is the full slice (13–18 GB at planet scale) plus the one object it holds
+   resident — not the "twice the slice" it was, but not one object either.
+   Streaming each object straight from staging to R2 in the publisher would remove
+   the tree entirely; that means giving `publish_exact_set` a real R2 backend
+   instead of `FilesystemRemote` plus a shell mirror, which is the same
+   restructure item (1) above touches. The 25 GB free-disk floor on the finalize
+   job is what stands in for it today.
+4. **`StagedObjectStore.path()` does not re-verify a cached object, and eviction
+   now makes that reachable.** This is the pre-existing item (5) of the R2-staging
+   list above, but the two-pass publisher changes its exposure rather than merely
+   inheriting it: `release()` unlinks a cache slot, and until the next `path()` runs
+   there is a path on disk that the store will hand back on `is_file()` alone with
+   no digest check. Contained at the publication point — the upload loop re-hashes
+   the payload against its pre-admitted digest, which is what closed it — but the
+   general fix is for `path()` to verify what it returns from cache, not just what
+   it hydrates. Worth doing because the reducer and head phase read cached objects
+   through the same short-circuit and rely on their own per-pack checks instead.
+5. **The R2 mirror's conflict fallback accepts a pre-existing object on existence
+   alone** (`construction-v1.yml`, the `aws s3api put-object … || head-object`
+   pairs). For a content-addressed key that is nearly harmless, since the name
+   proves the bytes; for the three keys that are NOT content-addressed —
+   `family-manifest.json`, `slice-manifest.json` and the completion marker — it
+   means a differing pre-existing object is accepted as a successful publish. This
+   is outside the present change (the mirror is a separate shell step, and
+   `publish_exact_set`'s own `ConflictError` path DOES compare bytes), and it is
+   logged rather than fixed here.
