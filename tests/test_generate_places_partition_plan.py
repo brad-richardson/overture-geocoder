@@ -37,19 +37,46 @@ def test_generator_caps_match_the_caps_the_hosted_build_enforces():
     )
 
 
-def test_committed_plan_records_the_caps_the_hosted_build_enforces():
+def test_committed_plan_is_admissible_under_the_caps_the_hosted_build_enforces():
     # The test above pins the GENERATOR's defaults to the build. This pins the
-    # committed artefact itself: a plan generated under looser caps than the
-    # build enforces places partitions the reducer then rejects. Without this,
-    # the plan silently goes stale on the next cap change.
+    # committed artefact itself: a plan whose leaves the build would reject places
+    # partitions the reducer then has to re-subdivide, and without a check here the
+    # plan silently goes stale on the next cap change.
+    #
+    # The property is ADMISSIBILITY, not equality. `partition_contract.caps` records
+    # the caps the tree was GENERATED against (2026-07-24-committed-partition-plan
+    # -design.md), and `headroom.threshold` bounds every unsplit leaf at
+    # `threshold x caps`: at 0.5 of 400,000 no leaf exceeds 200,000 tokens, which the
+    # build's 250,000 admits. Demanding equality instead would force the recorded
+    # caps to be edited whenever the build's caps move -- which falsifies the
+    # artefact's own provenance and breaks `generate_places_partition_plan.py
+    # --check`, the byte-for-byte reproduction proof, since the tree was not
+    # generated under the edited numbers.
     sys.path.insert(0, str(ROOT / "scripts"))
     import construction_v1_hosted as HOSTED
 
     places = HOSTED.HOSTED_LIMITS["places"]
-    caps = json.loads(COMMITTED.read_text())["partition_contract"]["caps"]
-    assert caps["term_rows"] == places["partition_term_rows"]
-    assert caps["distinct_tokens"] == places["partition_distinct_tokens"]
-    assert caps["estimated_uncompressed_bytes"] == places["partition_estimated_bytes"]
+    plan = json.loads(COMMITTED.read_text())
+    caps = plan["partition_contract"]["caps"]
+    headroom = plan["headroom"]
+    # An unbuffered plan (`policy: "none"`) has no threshold to lean on, so its
+    # recorded caps must themselves fit the build's.
+    threshold = headroom["threshold"] if headroom.get("policy") == "threshold" else 1.0
+    assert isinstance(threshold, (int, float)) and 0 < threshold <= 1.0
+    for recorded, enforced in (
+        ("term_rows", "partition_term_rows"),
+        ("distinct_tokens", "partition_distinct_tokens"),
+        ("estimated_uncompressed_bytes", "partition_estimated_bytes"),
+    ):
+        bound = caps[recorded] * threshold
+        assert bound <= places[enforced], (
+            f"committed plan leaves reach {bound} {recorded} "
+            f"(recorded cap {caps[recorded]} x headroom {threshold}), over the "
+            f"build's {places[enforced]}"
+        )
+    # The one that moved: 0.5 x 400,000 = 200,000 tokens per leaf, under 250,000.
+    assert caps["distinct_tokens"] * threshold == 200_000
+    assert places["partition_distinct_tokens"] == 250_000
 
 
 def plan_with(partitions):

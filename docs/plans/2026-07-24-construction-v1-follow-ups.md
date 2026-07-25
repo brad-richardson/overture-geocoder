@@ -897,3 +897,64 @@ the review confirmed them by construction, not by guess.
    validates `shard_objects`, `populated_shards` and `manifest_object`, so a places
    head result missing either reaches `head_block` construction and dies with a
    `KeyError` instead of a message naming the field. Same class as (2).
+
+## Added 2026-07-25: the finalize publication budget, and what it left open
+
+`max_remote_operations` was 100,000 against a planet publication of ~133,000
+operations on a first attempt and ~177,000 on a resume, and it is enforced by a
+running counter inside finalize — specifically inside `verify_whole_slice_once`, so
+it tripped after every object was already published, leaving no verification
+evidence and no result file. Fixed by projecting the publication at PLAN time (and
+in the dry run) and raising the cap to 400,000 on the retry-inclusive structural
+ceiling — see `construction_v1_control.CAPS` for the arithmetic and
+`tests/test_construction_v1_publication_budget.py` for the executable version.
+Six things fall out of it and are NOT done:
+
+(a) **The routed serving lane still has no fail-fast index-entry guard.** The head
+    lane measures its worst shard before any encode; the routed lane discovers an
+    over-cap partition only as the Rust encoder's `bail!`. Lowering
+    `partition_distinct_tokens` to the encoder's `MAX_INDEX_ENTRIES` (250,000)
+    means the planner subdivides instead of ever admitting such a partition, so
+    the guard is no longer the only thing standing between a plan and a late
+    abort — but it is still the difference between "cannot happen by construction"
+    and "cannot happen, and is checked". Port the head lane's pre-encode
+    measurement (`build_sharded_global_head_from_markers`) onto `reduce_partition`.
+
+(b) **Regenerating the committed partition plan will change the tree.**
+    `scripts/places_partition_plan_v1.json` was generated against `distinct_tokens`
+    400,000 with `--headroom-fraction 0.5`, and it still RECORDS 400,000, because
+    `partition_contract.caps` is provenance — the caps the tree was generated under
+    — and editing it would falsify the `--check` byte-for-byte reproduction proof.
+    It remains admissible under the build's tightened 250,000, because 0.5 x 400,000
+    leaves every unsplit leaf at <=200,000 tokens; that inequality, not equality
+    with the build's caps, is what
+    `tests/test_generate_places_partition_plan.py` now asserts. A regeneration at
+    0.5 of 250,000 pre-splits every leaf over 125,000 tokens instead, so the tree
+    will differ and be more buffered. Fold it into the next regeneration — it needs
+    a full local offline map to measure from.
+
+(c) **The publication projection's head term assumes the production shard count.**
+    The plan phase projects `1 << DEFAULT_HEAD_SHARD_BITS` head shards because it
+    does not know what `run-head --shard-bits` the head phase will be handed. That
+    is the safe direction (a smaller head publishes fewer objects), but it means
+    the slice harness is projected as if it published 4,096 head shards. Threading
+    the real value through the plan phase would make the projection exact.
+
+(d) **`predict-reduce` can under-project the partition term.** Its Places partition
+    count is `max(row-derived, committed plan)`, which is not an upper bound: a
+    release needing more subdivision than the committed tree has produces more
+    partitions than the dry run predicted. `plan-reduce` catches it on exact counts,
+    so nothing publishes over cap — but it weakens the "refuses before map is paid
+    for" property to "refuses before map for today's distribution".
+
+(e) **The `plan-reduce` gate runs after the plan and matrix are written.** It aborts
+    with a non-zero exit, so the workflow step fails before the matrix is emitted to
+    `GITHUB_OUTPUT` and nothing is provisioned — the claim holds, but it holds
+    because of the step's exit code rather than because the gate precedes the write.
+    Moving it above `write_json` would make the ordering structural.
+
+(f) **The operation cap bounds only the published-remote surface.** The staging
+    transport #170 made explicit (58 hydrations for 29 store objects on the Monaco
+    slice) is charged to no budget at all, so "remote operations" in the cap means
+    "operations against the published slice prefix", not "operations this run
+    performs". Either name that in the cap or give staging its own counter.

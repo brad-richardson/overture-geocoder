@@ -71,7 +71,60 @@ CAPS = {
     "prior_runner_minutes": 0,
     "max_cost_usd": "1200.00",
     "max_reducers_per_family": 128,
-    "max_remote_operations": 100_000,
+    # Raised from 100_000 after projecting what a planet finalize actually charges.
+    #
+    # The unit cost is fixed by the publication primitives, not chosen. A FIRST
+    # attempt costs 3 operations per published object (create-only put + per-upload
+    # HEAD in construction_v1_remote.publish_exact_set, plus one streaming read in
+    # verify_whole_slice_once) and 3 for the slice (marker put, marker HEAD, one
+    # exact-prefix listing). A RESUMED finalize costs 4 and 4: `put_create_only`
+    # still charges its attempt, raises ConflictError, and the byte-exactness check
+    # on that path streams the already-published object a second time. Resuming is a
+    # first-class path -- create-only publication exists so an interrupted finalize
+    # can be re-run -- so the BUDGET is the retry: ops = 4N + 4 in the published
+    # object count N. Pricing the first attempt only would let the gate pass a run
+    # whose retry aborts inside Budget.charge, which is the failure being removed.
+    #
+    # Planet N, per family, from committed artifacts:
+    #
+    #   places       16,888 routed serving objects (scripts/places_partition_plan
+    #                _v1.json generated_from.partitions, one per partition)
+    #              +  4,096 head shards (1 << DEFAULT_HEAD_SHARD_BITS)
+    #              +      1 head routing manifest (published since PR #169)
+    #              +      2 slice/family manifests
+    #              +  2 objects (pack + row-group directory) per per-record pack,
+    #                 and map emits one pack per PRESENT shuffle bucket per task:
+    #                 89 map tasks (places inventory map_plan.task_count) x up to
+    #                 256 buckets. MEASURED on release 2026-06-17.0, the four
+    #                 planet tasks inside source object 0 occupy 107/149/160/109
+    #                 buckets, so ~131/task => ~23,300 objects; the structural
+    #                 bound is 89 x 256 x 2 = 45,568.
+    #                 => N 44,305 measured (132,918 first / 177,224 retry)
+    #                    N 66,555 bound    (199,668 first / 266,224 retry)
+    #
+    #   addresses      725 serving objects (per-country bisection estimate)
+    #              +      2 manifests, no head phase
+    #              +  127 tasks x <=256 buckets x 2 = <=65,024 record objects
+    #                 => N <= 65,751 (197,256 first / 263,008 retry)
+    #
+    # Both families are therefore OVER 100_000 at planet scale on a FIRST attempt,
+    # and the old cap tripped inside finalize's running counter -- specifically
+    # inside verify_whole_slice_once, after every object was already published, so
+    # the run produced no verification evidence and no result file.
+    #
+    # 400_000 is sized off the RETRY-INCLUSIVE STRUCTURAL CEILING, not the
+    # measurement: at the inventory gate's max_tasks 128 (both families' plan
+    # limits), all 256 buckets occupied in every task, 4,096 head shards + manifest
+    # and the committed 16,888 partitions, places is 86,523 objects = 346,096
+    # operations on a resumed finalize. 400_000 clears that by 1.16x, which is
+    # 53,904 spare operations = room for 13,476 more partitions than the committed
+    # plan; it is ~2.3x the measured planet places retry. The margin is deliberately
+    # modest because the cap no longer stands alone: predict-reduce and plan-reduce
+    # both refuse a run whose projection exceeds it, so an inventory that outgrows
+    # this cap fails in the dry run instead of at publication. R2 charges ~$4.50 per
+    # million class-A operations, so the whole budget is under $2 either way; the
+    # byte caps below, not this one, are what bound a runaway's cost.
+    "max_remote_operations": 400_000,
     "max_remote_write_bytes": 1_000_000_000_000,
     "max_cleanup_objects": 20_000,
     "max_cleanup_bytes": 250_000_000_000,

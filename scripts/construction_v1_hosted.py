@@ -113,6 +113,48 @@ def _timeout_max_batch(per_partition_minutes: float, *, job_timeout: int, margin
     return max(1, int(usable // per_partition_minutes))
 
 
+# What ONE published object costs finalize in remote operations. Read off the
+# publication primitives (scripts/construction_v1_remote.py), never guessed.
+#
+# FIRST attempt, 3 per object + 3 for the slice:
+#
+#   publish_exact_set        put_create_only + the per-upload HEAD   2 per object
+#   verify_whole_slice_once  one streaming read per final object     1 per object
+#   fixed                    marker put, marker HEAD, one listing    3 per slice
+#
+# RETRY -- a resumed finalize over an already-published prefix -- costs 4 per
+# object + 4, and that is the number the budget must carry. `put_create_only`
+# still charges its attempt, then raises `ConflictError`, and the byte-exactness
+# check on the conflict path (`_stream_identity`) charges a second READ of the
+# object that is already there. Same for the marker. Resuming is not an exotic
+# path: create-only publication exists precisely so an interrupted finalize can be
+# re-run, so pricing only the first attempt would let the gate pass a run whose
+# RETRY aborts inside `Budget.charge` -- exactly the failure this gate removes.
+#
+# The two-phase publish from PR #170 (admit every identity, THEN upload) changes
+# when a member's bytes are resident, not how many operations it costs, so this
+# arithmetic holds on either side of it.
+# tests/test_construction_v1_publication_budget.py pins every number here against
+# the real primitives, on both a first pass and a retry, so a change to the
+# publication shape breaks a test rather than a planet run at object 33,000.
+FINALIZE_OPERATIONS_PER_OBJECT = 3
+FINALIZE_FIXED_OPERATIONS = 3
+FINALIZE_RETRY_OPERATIONS_PER_OBJECT = 4
+FINALIZE_RETRY_FIXED_OPERATIONS = 4
+# The two manifests finalize writes itself (family-manifest, slice-manifest) and
+# publishes in the same exact set as everything else.
+FINALIZE_MANIFEST_OBJECTS = 2
+# The head routing manifest, published alongside the shards for a HEAD family
+# (`_artifact_keys` appends `head["manifest_object"]`, PR #169). One object, but it
+# is a MEMBER of the published set, and the projection has to enumerate the set
+# exactly or its "this is not an estimate" claim is false.
+HEAD_MANIFEST_OBJECTS = 1
+# Two published objects per per-record pack: the pack and its row-group directory
+# (places_construction_v1.emit_positions / address_construction_v1
+# .emit_address_records, both read by _positions_objects).
+PER_RECORD_OBJECTS_PER_PACK = 2
+
+
 def _load(name: str, relative: str):
     spec = importlib.util.spec_from_file_location(name, ROOT / relative)
     assert spec and spec.loader
@@ -237,11 +279,30 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # would sit at 94% of the OLD cap -- but the 'jp' figure is the
         # pre-combiner motivation, not the current one.
         #
-        # These exceed three declared hard caps in the frozen evidence spec
-        # (partition_term_rows_hard_cap 1000000,
-        # partition_distinct_tokens_hard_cap 250000,
-        # partition_estimated_uncompressed_bytes_hard_cap 268435456), and that
-        # divergence is DELIBERATE and one-directional:
+        # `distinct_tokens` was raised to 400,000 in that same change, and that was
+        # a MISTAKE this comment did not catch: the frozen spec's 250,000 is not the
+        # only 250,000 in play. The Rust routed/head encoder fail-closes at
+        # MAX_INDEX_ENTRIES = 250_000
+        # (crates/geocoder-construction/src/bin/places_serving_encode_v1.rs), a
+        # routed index key is `cell\0token` with the cell constant per partition, so
+        # a routed artifact's index-entry count IS the partition's
+        # `count(DISTINCT token)`. A partition admitted at 400,000 tokens would
+        # therefore `bail!` in the routed encode -- and unlike the head lane the
+        # routed lane has no fail-fast guard, so the failure lands after map, plan
+        # and part of reduce are spent. The 400,000 was never REACHED only by
+        # accident: `apply_headroom --headroom-fraction 0.5` pre-splits any leaf over
+        # half a cap, so every unsplit leaf in the committed plan holds <=200,000
+        # tokens -- but the headroom policy is optional ("none" is supported) and
+        # `adaptive_genesis_plan` admits the cap directly. The cap is now the encoder
+        # constant, which converts that future late `bail!` into a plan-time
+        # subdivision. It changes nothing about today's plan: the worst measured real
+        # cell (a1d5, 201,568 tokens) still fits.
+        #
+        # The two remaining raised caps exceed two declared hard caps in the frozen
+        # evidence spec (partition_term_rows_hard_cap 1000000,
+        # partition_estimated_uncompressed_bytes_hard_cap 268435456;
+        # partition_distinct_tokens_hard_cap 250000 is now MATCHED, not exceeded),
+        # and that divergence is DELIBERATE and one-directional:
         #
         #   spec v2 -> rehearse_places_construction_v1.spec_partition_caps()
         #           -> P.Limits -> adaptive_genesis_plan (subdivide, or fail at
@@ -258,9 +319,16 @@ HOSTED_LIMITS: dict[str, dict[str, Any]] = {
         # docs/plans/2026-07-24-construction-v1-follow-ups.md.
         "partition_term_rows": 2_000_000,
         "partition_estimated_bytes": 512 * 1024**2,
-        "partition_distinct_tokens": 400_000,
+        # The encoder constant itself, not a re-typed 250_000: the whole defect
+        # class here is a literal drifting away from the limit that enforces it.
+        "partition_distinct_tokens": PLACES.SERVING_MAX_INDEX_ENTRIES,
     },
 }
+
+# The bound check on this cap lives in `_limits_for`, NOT here: the value above is
+# the encoder constant itself, so a check against it would be unreachable by
+# construction, while `contract["limits"]` -- the per-run override that actually
+# reaches `adaptive_genesis_plan` -- can carry anything.
 
 
 def canonical(value: Any) -> bytes:
@@ -285,7 +353,32 @@ def _limits_for(contract: dict[str, Any], family: str):
     values = dict(contract["limits"][family])
     fields = {field.name for field in dataclasses.fields(module.Limits)}
     filtered = {key: value for key, value in values.items() if key in fields}
-    return module.Limits(**filtered)
+    limits = module.Limits(**filtered)
+    # THE bound check on the routed serving lane, placed here because this is the
+    # only path a partition cap actually travels: `contract["limits"]` is a per-run
+    # override (derive-contract copies HOSTED_LIMITS, but a rehearsal or hand-built
+    # contract may carry anything), and whatever it says is what reaches
+    # `adaptive_genesis_plan`. Checking the HOSTED_LIMITS literal instead would be
+    # unreachable by construction -- that value IS the encoder constant.
+    #
+    # A routed index key is `cell\0token` with the cell constant per partition, so a
+    # routed artifact's index-entry count is exactly the partition's
+    # `count(DISTINCT token)`. Admitting a partition above the encoder's
+    # MAX_INDEX_ENTRIES produces a partition that cannot be encoded at all, and the
+    # routed lane has no fail-fast guard, so the `bail!` lands after map, plan and
+    # part of reduce are spent. Fail closed on the contract instead.
+    cap = getattr(limits, "partition_distinct_tokens", None)
+    if cap is not None and cap > PLACES.SERVING_MAX_INDEX_ENTRIES:
+        raise SystemExit(
+            f"contract limit {family}.partition_distinct_tokens={cap} exceeds the "
+            "Places serving encoder's MAX_INDEX_ENTRIES "
+            f"({PLACES.SERVING_MAX_INDEX_ENTRIES}); a partition admitted at that "
+            "size cannot be encoded, and the routed encode would only discover it "
+            "after map and part of reduce were paid for. Lower the contract limit "
+            "(construction_v1_hosted.HOSTED_LIMITS) so the planner subdivides "
+            "instead."
+        )
+    return limits
 
 
 def _store(args: argparse.Namespace, *, request_sha256: str | None = None):
@@ -437,6 +530,42 @@ def cmd_derive_contract(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # admit-task
 # --------------------------------------------------------------------------- #
+def _admitted_remote_operation_cap(contract: dict[str, Any]) -> int:
+    """The contract's remote-operation cap, defaulting to the ADMITTED cap.
+
+    The default is `construction_v1_control.CAPS` -- the value `prepare` binds into
+    every request -- and never a re-typed literal. Two sites here used to default to
+    100,000, which is the figure this module's own gate now refuses as insufficient
+    for a planet publication: a stale copy of a limit, drifting from the limit, is
+    exactly the class both the gate and the token-cap check exist to remove.
+
+    Defaulting at all is only for `admit-task`, whose `--contract` is optional (a
+    purely local marker check). `cmd_finalize` uses `_required_remote_operation_cap`.
+    """
+    value = (contract.get("caps") or {}).get("max_remote_operations")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        return int(CONTROL.CAPS["max_remote_operations"])
+    return value
+
+
+def _required_remote_operation_cap(contract: dict[str, Any]) -> int:
+    """The cap for a phase that MUST have one, matching the plan-time gate.
+
+    Finalize is handed a contract unconditionally, and it is the phase that spends
+    the budget, so a missing or unusable cap here is a broken contract rather than a
+    default to fill in. The gate refuses to PLAN without a usable cap; refusing to
+    PUBLISH without one is the same rule at the other end.
+    """
+    value = (contract.get("caps") or {}).get("max_remote_operations")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SystemExit(
+            "contract cap max_remote_operations is missing or is not a positive "
+            f"integer ({value!r}); refusing to publish against an unknown operation "
+            "budget"
+        )
+    return value
+
+
 def _remote_marker_completed(remote_root: str, key: str, contract: dict[str, Any]) -> bool:
     """Read-only HEAD of a durable create-only marker in the remote store.
 
@@ -446,7 +575,7 @@ def _remote_marker_completed(remote_root: str, key: str, contract: dict[str, Any
     never silently drop create-only discipline by masquerading as absence.
     """
     budget = REMOTE.Budget(
-        max_operations=int(contract.get("caps", {}).get("max_remote_operations", 100_000)),
+        max_operations=_admitted_remote_operation_cap(contract),
         max_write_bytes=0,
         max_read_bytes=int(contract.get("caps", {}).get("max_remote_write_bytes", 1_000_000_000_000)),
     )
@@ -742,6 +871,184 @@ def _places_reduce_execution(
     return batch_size, dispatched, details
 
 
+def _budget_integer(value: Any, *, what: str) -> int:
+    """A non-negative integer input to the publication projection, or abort.
+
+    Fail-closed on purpose. Every term of the projection is a COUNT the producing
+    phase already wrote down; a missing key, a `null`, a string, or a bool (which
+    is an `int` in Python and would silently become 0 or 1) means the projection
+    would be built on a number nobody computed, and an under-projection is exactly
+    the outcome this gate exists to prevent.
+    """
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        raise SystemExit(f"{what} is not a usable non-negative integer: {value!r}")
+    return value
+
+
+def finalize_remote_operations(objects: int, *, retried: bool = True) -> int:
+    """Remote operations one finalize charges to publish and verify ``objects``.
+
+    ``retried`` defaults to TRUE because that is the case the budget has to cover:
+    a resumed finalize re-attempts every put, and each conflict costs an extra
+    identity read on top of the first attempt's put + HEAD + verify stream. Pass
+    ``retried=False`` only to state the first-attempt cost (the tests do, to pin
+    both against the real primitives).
+    """
+    return (
+        _budget_integer(objects, what="published object count")
+        * (
+            FINALIZE_RETRY_OPERATIONS_PER_OBJECT
+            if retried
+            else FINALIZE_OPERATIONS_PER_OBJECT
+        )
+        + (
+            FINALIZE_RETRY_FIXED_OPERATIONS
+            if retried
+            else FINALIZE_FIXED_OPERATIONS
+        )
+    )
+
+
+def _per_record_object_count(markers: list[dict[str, Any]], family: str) -> int:
+    """EXACT published per-record object count for a marker set.
+
+    Deliberately `_positions_objects` itself rather than `2 x packs`: finalize
+    deduplicates by content-addressed key, so the only way for the projection to
+    equal what finalize publishes is to run the same derivation.
+
+    A marker carrying no per-record artifact is the same GAP finalize aborts on
+    (`cmd_finalize`), and it is fatal here too -- both because the projection would
+    silently undercount, and because failing at plan time costs one plan phase
+    instead of a whole run.
+    """
+    spec = PER_RECORD_ARTIFACTS.get(family)
+    if spec is None:
+        return 0
+    missing = [
+        str(marker.get("task_id", "<unknown task>"))
+        for marker in markers
+        if _per_record_artifact(marker, family) is None
+    ]
+    if missing:
+        raise SystemExit(
+            f"{len(missing)} {family} map marker(s) carry no "
+            f"{spec['marker_key']!r} artifact ({', '.join(missing[:5])}): their "
+            "per-record packs cannot be published, so the slice would be "
+            "incomplete and this projection would undercount it. Markers are "
+            "write-once: delete those tasks' markers and re-run their map tasks."
+        )
+    return len(_positions_objects(markers, family))
+
+
+def _finalize_publication_projection(
+    family: str, *, partitions: int, per_record_objects: int, basis: str
+) -> dict[str, Any]:
+    """Objects and remote operations one family's finalize will charge.
+
+    Five terms, and every one of them is known before reduce runs. The term SET has
+    to match `_artifact_keys` + `_positions_objects` + the manifests exactly -- a
+    missing term is what makes a projection an estimate:
+      * one serving object per partition (`_artifact_keys`, fail-closed per
+        reduction, so this is an equality and not an estimate);
+      * the global head shards for a HEAD family. `1 << DEFAULT_HEAD_SHARD_BITS`
+        is used rather than the value some later `run-head --shard-bits` will
+        carry, because that is the production count and an over-projection is the
+        safe direction for a gate (a slice harness passing fewer only publishes
+        fewer);
+      * the head ROUTING MANIFEST for a HEAD family (PR #169). Small, but it is a
+        member of the published set;
+      * two objects per per-record pack, deduplicated;
+      * the two manifests finalize writes itself.
+    """
+    partitions = _budget_integer(partitions, what=f"{family} partition count")
+    if partitions < 1:
+        raise SystemExit(f"{family} publication projection needs at least one partition")
+    per_record_objects = _budget_integer(
+        per_record_objects, what=f"{family} per-record object count"
+    )
+    head_family = family in HEAD_FAMILIES
+    head_shards = 1 << int(PLACES.DEFAULT_HEAD_SHARD_BITS) if head_family else 0
+    head_manifests = HEAD_MANIFEST_OBJECTS if head_family else 0
+    objects = (
+        FINALIZE_MANIFEST_OBJECTS
+        + partitions
+        + head_shards
+        + head_manifests
+        + per_record_objects
+    )
+    return {
+        "basis": basis,
+        "manifest_objects": FINALIZE_MANIFEST_OBJECTS,
+        "serving_objects": partitions,
+        "head_shard_objects": head_shards,
+        "head_manifest_objects": head_manifests,
+        "per_record_objects": per_record_objects,
+        "published_objects": objects,
+        "operations_per_object": FINALIZE_RETRY_OPERATIONS_PER_OBJECT,
+        "fixed_operations": FINALIZE_RETRY_FIXED_OPERATIONS,
+        "first_attempt_remote_operations": finalize_remote_operations(
+            objects, retried=False
+        ),
+        # The BUDGETED figure: a resumed finalize is the expensive case and the one
+        # the cap has to cover.
+        "projected_remote_operations": finalize_remote_operations(objects),
+    }
+
+
+def _gate_finalize_publication(
+    contract: dict[str, Any], family: str, *, projection: dict[str, Any]
+) -> dict[str, Any]:
+    """Fail closed NOW when finalize's publication would exceed the operation cap.
+
+    The cap is enforced by a running counter inside finalize
+    (`construction_v1_remote.Budget.charge`), so without this gate a planet slice
+    that is 30% over budget discovers it part-way through publishing tens of
+    thousands of objects, at the very end of a multi-hour run. Create-only
+    publication makes the retry byte-safe and completely pointless: it trips again
+    at the same object -- and the retry is DEARER than the first attempt (4 ops per
+    object, not 3), which is what the projection prices. Every term of the
+    projection is known before reduce is provisioned, so the honest place to refuse
+    is here.
+    """
+    caps = contract.get("caps")
+    if not isinstance(caps, dict):
+        raise SystemExit(
+            "contract carries no caps, so the finalize publication budget cannot "
+            "be checked; re-derive the contract from the reviewed request"
+        )
+    cap = caps.get("max_remote_operations")
+    if isinstance(cap, bool) or not isinstance(cap, int) or cap < 1:
+        raise SystemExit(
+            "contract cap max_remote_operations is missing or is not a positive "
+            f"integer ({cap!r}); refusing to plan a publication whose operation "
+            "budget is unknown"
+        )
+    projected = int(projection["projected_remote_operations"])
+    checked = {**projection, "max_remote_operations": cap, "within_cap": projected <= cap}
+    if projected > cap:
+        raise SystemExit(
+            f"projected {projected} remote operations for the {family} finalize "
+            f"exceed the admitted cap max_remote_operations={cap}. That is "
+            f"{projection['published_objects']} published objects "
+            f"({projection['serving_objects']} serving + "
+            f"{projection['head_shard_objects']} head shards + "
+            f"{projection['head_manifest_objects']} head manifest + "
+            f"{projection['per_record_objects']} per-record + "
+            f"{projection['manifest_objects']} manifests) at "
+            f"{FINALIZE_RETRY_OPERATIONS_PER_OBJECT} operations each plus "
+            f"{FINALIZE_RETRY_FIXED_OPERATIONS} fixed on a RESUMED finalize "
+            f"({projection['first_attempt_remote_operations']} on a first "
+            f"attempt), from {projection['basis']}. "
+            "Failing closed HERE, before reduce is provisioned, rather than "
+            "part-way through finalize's publication after map, reduce and head "
+            "have been paid for. Either raise CAPS['max_remote_operations'] in "
+            "scripts/construction_v1_control.py and re-run prepare for a fresh "
+            "request + typed confirmation, or publish fewer objects (fewer head "
+            "shards, fewer partitions, fewer map tasks)."
+        )
+    return checked
+
+
 def cmd_plan_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args, request_sha256=contract["request_sha256"])
@@ -854,6 +1161,24 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
                 "failing closed before provisioning the reduce matrix"
             )
 
+    # The publication budget, gated on EXACT counts: the partition count this plan
+    # just produced is one serving object each, and the markers in hand record the
+    # per-record packs finalize will publish. Nothing here has to be estimated, and
+    # nothing downstream of this point makes the set smaller.
+    publication = _gate_finalize_publication(
+        contract,
+        args.family,
+        projection=_finalize_publication_projection(
+            args.family,
+            partitions=partition_count,
+            per_record_objects=_per_record_object_count(markers, args.family),
+            basis=(
+                f"{partition_count} planned partitions and {len(markers)} map "
+                "markers' per-record packs"
+            ),
+        ),
+    )
+
     summary = {
         "family": args.family,
         "partitions": partition_count,
@@ -861,6 +1186,7 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         "reduce_job_count": job_count,
         "reduce_job_cap": job_cap,
         "timing_assumption": timing,
+        "publication_budget": publication,
         "binding": plan["binding"],
     }
     if ledger_check is not None:
@@ -926,6 +1252,26 @@ def _inventory_total_records(inventory: dict[str, Any]) -> int:
     if not tasks:
         raise SystemExit("inventory has neither totals.records nor map-plan tasks")
     return sum(int(task.get("rows", task.get("expected_input_records", 0))) for task in tasks)
+
+
+def _inventory_task_count(inventory: dict[str, Any]) -> int:
+    """Map task count an inventory plans, for the pre-map publication projection.
+
+    Fails closed rather than defaulting to one task: the per-record publication
+    term is `tasks x buckets x 2`, so a silently missing task count would make the
+    dry-run projection arbitrarily optimistic.
+    """
+    plan = inventory.get("map_plan") or inventory.get("plan") or {}
+    count = plan.get("task_count")
+    if isinstance(count, bool) or not isinstance(count, int):
+        tasks = plan.get("tasks")
+        count = len(tasks) if isinstance(tasks, list) else None
+    if not isinstance(count, int) or count < 1:
+        raise SystemExit(
+            "inventory records no map task count, so the per-record publication "
+            "term cannot be bounded; rebuild the inventory"
+        )
+    return count
 
 
 COMMITTED_PLACES_PARTITION_PLAN = ROOT / "scripts/places_partition_plan_v1.json"
@@ -1149,6 +1495,34 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
             f"predicted reduce needs {job_count} jobs; exceeds matrix cap "
             f"{REDUCE_MATRIX_CAP} / reducer cap {max_reducers}"
         )
+    # The finalize publication budget, one phase EARLIER than plan-reduce: this
+    # command runs in the dry run, so a slice whose publication cannot fit the
+    # admitted operation cap is refused before a single map task is paid for.
+    #
+    # The per-record term is a STRUCTURAL upper bound, not a measurement: map emits
+    # one pack per PRESENT shuffle bucket per task, so `tasks x buckets` bounds the
+    # pack count from above whatever the spatial distribution does, and each pack
+    # publishes a pack object plus a directory object. (Measured on release
+    # 2026-06-17.0, the four planet Places tasks in source object 0 occupy 107-160
+    # of the 256 buckets, so the real count is roughly half this bound.)
+    task_count = _inventory_task_count(inventory)
+    buckets = 1 << int(limits.shuffle_bucket_bits)
+    result["publication_budget"] = _gate_finalize_publication(
+        contract,
+        args.family,
+        projection=_finalize_publication_projection(
+            args.family,
+            partitions=predicted_partitions,
+            per_record_objects=PER_RECORD_OBJECTS_PER_PACK * task_count * buckets
+            if args.family in PER_RECORD_ARTIFACTS
+            else 0,
+            basis=(
+                f"{predicted_partitions} predicted partitions and the structural "
+                f"bound of {task_count} map tasks x {buckets} shuffle buckets x "
+                f"{PER_RECORD_OBJECTS_PER_PACK} objects per per-record pack"
+            ),
+        ),
+    )
     if args.ledger is not None:
         ledger = read_json(args.ledger)
         prior = int(ledger.get("prior_runner_minutes", 0))
@@ -1757,7 +2131,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 
     # Create-only publication of the exact final set, marker last.
     budget = REMOTE.Budget(
-        max_operations=int(contract["caps"].get("max_remote_operations", 100_000)),
+        max_operations=_required_remote_operation_cap(contract),
         max_write_bytes=int(contract["caps"].get("max_remote_write_bytes", 1_000_000_000_000)),
         max_read_bytes=int(contract["caps"].get("max_remote_write_bytes", 1_000_000_000_000)),
     )
