@@ -369,13 +369,26 @@ removes 46.3% of the rows that cost would have been paid on.
 requires 30 GB free) and is still ~4.4 TB across 128 reduce downloads. R2
 staging (§6 step 2) remains mandatory before any planet attempt.
 
-### The committed plan is now stale by construction
+### Plan v2 is committed
 
-`scripts/places_partition_plan_v1.json` was generated against the old caps
-(1M/200k) and pre-combiner data. It is currently **inert** -- map-side partition
-assignment (§6 step 3) is not implemented, so nothing reads it -- but it MUST be
-regenerated from a post-combiner map run before step 3 lands. It was
-deliberately not regenerated now: the saved local packs do not retain the
-ordering columns the combiner needs (`confidence_rank`, `feature_id`,
-`source_*`), so any plan produced from them would be an approximation, and an
-approximate committed plan defeats the point of `--check` reproducibility.
+`scripts/places_partition_plan_v1.json` was regenerated from a full local map
+run of `2026-07-22.0` **with the combiner applied and the new caps**, at
+`--headroom-fraction 0.5`, and reproduces byte for byte from the generator.
+
+| | v1 (2026-06-17.0, pre-A/C) | v2 (2026-07-22.0, post-A/C) |
+|---|---|---|
+| term rows | 554,814,222 | 286,494,538 |
+| partitions | 17,816 | **16,888** |
+| cells in the tree | 83 | **17** |
+| branches | 1,388 | **272** |
+| file size | 10,154 bytes | **2,422 bytes** |
+| pre-split for headroom | 0 | 12 |
+| worst utilisation, measured | **1.008 (BREACH)** | **0.472** |
+| partitions above 50% of a cap | 158 | **0** |
+
+The tree expands over the real data with rows conserved (286,494,538) and
+reconstructs exactly 16,888 partitions, matching the recorded count.
+
+Nothing is above half of any cap now, against 158 before. That margin is the
+combined effect of A and C, and it is why the next regeneration should be
+driven by the fail-closed gate rather than by a calendar.

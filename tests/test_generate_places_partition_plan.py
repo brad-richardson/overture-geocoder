@@ -81,10 +81,10 @@ def test_committed_plan_reconstructs_its_recorded_partition_count():
     # cell contributes exactly one depth-0 partition.
     subdivided_cells = len(committed["cells"])
     recorded = committed["generated_from"]["partitions"]
-    assert branches == 1_388
-    assert subdivided_cells == 83
-    assert recorded == 17_816
-    assert recorded - branches + subdivided_cells == 16_511  # populated cells
+    assert branches == 272
+    assert subdivided_cells == 17
+    assert recorded == 16_888
+    assert recorded - branches + subdivided_cells == 16_633  # populated cells
 
 
 def test_headroom_splits_only_leaves_over_the_threshold():
