@@ -657,6 +657,31 @@ fail-closed rules are already in place.
     rather than an estimate — but it is a measurement and a floor, not a bound.
     Batching it (per-shard candidate ranges, or an incremental INSERT loop like the
     plan phase's) is the fix, and it is a restructure rather than a flag.
+14. **A staging prefix written before the routed-publication fix cannot be resumed
+    for reduce, and that is the intended outcome.** The per-partition reduce
+    completion marker's payload changed: it recorded
+    `{"partition_index": n, "artifact": null}` for places and now records the real
+    `routed_object` identity. Markers are create-only and refuse an overwrite with
+    different bytes, so a resumed run over a pre-fix prefix hard-fails on every
+    reduce batch. **Remediation is to abandon that prefix and dispatch a fresh
+    request (a new `request_sha256` gives a new staging root).** Do NOT make the
+    marker key-compatible or loosen the create-only rule to paper over it: the old
+    payload recorded `artifact: null` precisely because the object was not being
+    published, so accepting it would mean resuming a run whose serving set was
+    wrong. No planet execute has ever run, so today this affects local work
+    directories only.
+15. **`leaf_object` is produced, proven, staged with a full readback -- and read by
+    nothing on the hosted path.** The reducer digests the leaf against the plan
+    binding (that check is load-bearing and stays), then `put_content` uploads it to
+    staging and `ensure_uploaded` downloads it again to verify. Monaco: 16.44 MB,
+    **46% of the slice's serving volume**, scaling ~linearly to the planet. The only
+    readers are `build_global_head` (superseded by
+    `build_sharded_global_head_from_markers`, which reads head-candidate packs
+    instead) and the rehearsal oracle. So on the hosted path it is pure transport
+    cost. Either stop uploading it (keep the local proof, skip the staging write) or
+    record why it is kept -- an unpublished intermediate that nothing reads is worth
+    a deliberate decision. Deliberately NOT changed alongside the routed-publication
+    fix: that PR is about what gets published, and this is about what gets staged.
 
 ## Added 2026-07-25: R2 cleanup approved, plus its recurrence fixes
 

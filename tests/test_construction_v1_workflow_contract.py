@@ -366,7 +366,12 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # places reductions record `routed_object`, not `artifact`, so finalize silently
     # published no `.plrv` at all while every other number stayed non-zero.
     assert 'SERVING="$(jq -r \'.serving_objects\' final-work/result.json)"' in value
-    assert 'test "$SERVING" -ge "$REDUCTIONS"' in value
+    # The EXACT set, not a lower bound. `-ge REDUCTIONS` would have accepted a slice
+    # that published every routed object and NO head shards -- the other half of the
+    # same permissive-get defect, which was demonstrated as publishable.
+    assert 'test "$SERVING" -ge "$REDUCTIONS"' not in value
+    assert "POP=\"$(jq -r '.populated_shards // 0' headdl/head/head.json)\"" in value
+    assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP ))"' in value
     assert 'test "$SERVING" -gt 0' in value
 
 

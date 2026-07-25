@@ -240,6 +240,27 @@ set — Monaco publishes 4 `.plrv` (one per partition, names matching the reduce
 recorded digests exactly) plus 16 `.plhd`, and the slice grew from 11.86 MB to
 35.95 MB, which is the routed payload that was previously being lost.
 
+**The head half had the identical defect and is closed the same way.**
+`head.get("shard_objects", [])` was the same permissive get one line down: a places
+slice with ZERO `.plhd` shards published cleanly, exit 0, `reconciles: true`,
+satisfying the routed gate — including the shape where head.json claims
+`shard_count: 16` while the tree holds none. `--head` is now REQUIRED for every
+family in `HEAD_FAMILIES`, `shard_objects` must be non-empty, and its length must
+equal the `populated_shards` the head phase itself reported. Every serving identity
+(routed, head shard, address artifact) must carry `key`/`sha256`/`bytes` or abort
+naming itself, so a truthy-but-malformed entry can no longer reach the publication
+verification and die in a traceback. The workflow gate is now the same EQUALITY the
+slice jobs assert (`serving == reductions + populated_shards`) rather than a lower
+bound, since `-ge` accepted exactly the shard-free slice above.
+
+**Two consequences worth knowing before a dispatch**, both recorded as follow-ups
+rather than changed here: a staging prefix written before this fix cannot be resumed
+for reduce (the reduce marker payload changed from `artifact: null` to the real
+identity, and markers are create-only), so such a prefix must be **abandoned for a
+fresh `request_sha256`** — no planet execute has run, so this is local only. And
+`leaf_object` is still staged with a full readback while nothing on the hosted path
+reads it: 16.44 MB on Monaco, 46% of the serving volume.
+
 **Publication is verified against identity now, not just against itself.**
 `verify_whole_slice_once` derives what it expects from the same files it
 publishes, and the reconciliation compares bindings out of the reduction JSON, so

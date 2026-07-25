@@ -1341,31 +1341,30 @@ def cmd_run_head(args: argparse.Namespace) -> int:
     store = _store(args, request_sha256=contract["request_sha256"])
     if args.family != "places":
         write_json(args.output, {"family": args.family, "head": None, "note": "no global head phase"})
-        _write_staging_report(args, store)
-        print(json.dumps({"family": args.family, "head": None}, sort_keys=True))
-        return 0
-    limits = _limits_for(contract, "places")
-    markers = _load_markers(args.markers_dir)
-    result = PLACES.build_sharded_global_head_from_markers(
-        markers=markers,
-        store=store,
-        scratch_root=Path(args.scratch_dir),
-        encoder_binary=Path(args.encoder_binary),
-        verifier_binary=Path(args.verifier_binary),
-        limits=limits,
-        shard_bits=args.shard_bits,
-    )
-    store.write_marker_last(_head_marker_key(), {"shard_count": result["shard_count"],
-                                                 "total_records": result["total_records"]})
-    write_json(args.output, {**result, **_staging_evidence(store)})
-    # The head phase hydrates EVERY task's head-candidate pack, and
-    # `build_sharded_global_head_from_markers` hands them all to a single
-    # `read_parquet([...])`, so unlike plan it cannot batch-and-evict without a
-    # restructure. Measured rather than bounded, deliberately -- see the follow-up.
+        summary: dict[str, Any] = {"family": args.family, "head": None}
+    else:
+        limits = _limits_for(contract, "places")
+        markers = _load_markers(args.markers_dir)
+        result = PLACES.build_sharded_global_head_from_markers(
+            markers=markers,
+            store=store,
+            scratch_root=Path(args.scratch_dir),
+            encoder_binary=Path(args.encoder_binary),
+            verifier_binary=Path(args.verifier_binary),
+            limits=limits,
+            shard_bits=args.shard_bits,
+        )
+        store.write_marker_last(_head_marker_key(), {"shard_count": result["shard_count"],
+                                                     "total_records": result["total_records"]})
+        write_json(args.output, {**result, **_staging_evidence(store)})
+        summary = {"family": "places", "shard_count": result["shard_count"],
+                   "populated_shards": result["populated_shards"]}
+    # ONE report site for both branches. The head phase hydrates EVERY task's
+    # head-candidate pack, and `build_sharded_global_head_from_markers` hands them
+    # all to a single `read_parquet([...])`, so unlike plan it cannot batch-and-evict
+    # without a restructure. Measured rather than bounded -- see the follow-up.
     _write_staging_report(args, store)
-    print(json.dumps({"family": "places", "shard_count": result["shard_count"],
-                      "populated_shards": result["populated_shards"],
-                      **_staging_evidence(store)}, sort_keys=True))
+    print(json.dumps({**summary, **_staging_evidence(store)}, sort_keys=True))
     return 0
 
 
@@ -1392,34 +1391,100 @@ REDUCTION_SERVING_OBJECTS: dict[str, str] = {
 }
 
 
+# Families whose finalize MUST publish a global head. Places builds a sharded head
+# in `run-head`; addresses have no head phase at all and their `run-head` writes
+# `{"head": null}`. A table rather than a truthiness test on `head`, because
+# `head.get("shard_objects", [])` defaulting to empty is the same permissive-get
+# pattern that lost the routed objects -- it published a places slice with ZERO
+# `.plhd` shards, exit 0, including the shape where head.json claims
+# `shard_count: 16` while the tree holds none.
+HEAD_FAMILIES = ("places",)
+
+
+def _serving_identity(value: Any, *, what: str) -> dict[str, Any]:
+    """A publishable object identity, or abort naming what was wrong.
+
+    Requires the three fields finalize's pre-publication verification consumes
+    (`key` to locate it, `sha256`/`bytes` to prove it is what its producer
+    recorded). A truthy-but-malformed entry used to reach that check and die with a
+    raw KeyError/TypeError traceback instead of saying which object was broken.
+    """
+    if not isinstance(value, dict) or not all(
+        isinstance(value.get(field), expected)
+        for field, expected in (("key", str), ("sha256", str), ("bytes", int))
+    ):
+        raise SystemExit(
+            f"{what} is not a publishable object identity (need key/sha256/bytes): "
+            f"{value!r}"
+        )
+    return value
+
+
 def _artifact_keys(family: str, reductions: list[dict[str, Any]], head: dict[str, Any] | None) -> list[dict[str, Any]]:
     """Every serving object the slice must publish, one per reduction plus the head.
 
-    FAIL CLOSED on a reduction that names no serving object. The previous `if
-    artifact:` skip is exactly how the Places routed objects went missing without a
-    single check firing, so a missing object is now an abort that names the key it
-    expected rather than a silently shorter published set.
+    FAIL CLOSED on BOTH halves. The previous `if artifact:` skip is how the Places
+    routed objects went missing without a single check firing, and the
+    `head.get("shard_objects", [])` default is the identical defect one line down --
+    a places slice with no head shards at all published cleanly, reported
+    `reconciles: true`, and satisfied the workflow's own gates. A missing object is
+    now an abort that names what it expected.
     """
     key = REDUCTION_SERVING_OBJECTS[family]
     objects: list[dict[str, Any]] = []
     for reduction in reductions:
         artifact = reduction.get(key)
+        partition = (reduction.get("partition") or {}).get("id", "<unknown>")
         if not artifact:
-            partition = (reduction.get("partition") or {}).get("id", "<unknown>")
             raise SystemExit(
                 f"{family} reduction for partition {partition} records no "
                 f"{key!r}; its serving object cannot be published, so the slice "
                 "would be missing that partition's payload entirely"
             )
-        objects.append(artifact)
+        objects.append(
+            _serving_identity(artifact, what=f"{family} {key} for partition {partition}")
+        )
     # One serving object per partition, and at least one overall: the published set
     # must COVER the reduction set, which is the property that was violated.
     if len(objects) != len(reductions) or not objects:
         raise SystemExit(  # pragma: no cover - the loop above guarantees this
             f"{family} serving object set does not cover every reduction"
         )
-    if head:
-        objects.extend(head.get("shard_objects", []))
+
+    if family in HEAD_FAMILIES:
+        # `--head` omitted entirely, or pointing at an address-shaped result.
+        if not head or head.get("head", "present") is None:
+            raise SystemExit(
+                f"finalize for the {family} family requires a --head result: its "
+                "global head shards are half the serving surface, and publishing "
+                "the slice without them would ship routed shards with no head"
+            )
+        shards = head.get("shard_objects")
+        populated = head.get("populated_shards")
+        if not isinstance(shards, list) or not shards:
+            raise SystemExit(
+                f"{family} head result records no shard_objects; a head that "
+                "produced no shards is not publishable. head.json says "
+                f"shard_count={head.get('shard_count')!r} "
+                f"populated_shards={populated!r}"
+            )
+        # The count the head phase REPORTED must equal the objects it handed over,
+        # which is the shape the review published: shard_count 16, zero shards.
+        if not isinstance(populated, int) or len(shards) != populated:
+            raise SystemExit(
+                f"{family} head result lists {len(shards)} shard objects but "
+                f"reports populated_shards={populated!r}; the head phase and its "
+                "published set disagree"
+            )
+        objects.extend(
+            _serving_identity(shard, what=f"{family} head shard {index}")
+            for index, shard in enumerate(shards)
+        )
+    elif head and head.get("shard_objects"):
+        raise SystemExit(
+            f"the {family} family has no global head phase, but its head result "
+            "carries shard objects; refusing to publish them"
+        )
     return objects
 
 
