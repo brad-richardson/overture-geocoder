@@ -45,6 +45,9 @@ WORKFLOWS = (
 EXTRA_MODULES = (
     "address_construction_v1",
     "address_partition",
+    # The R2 staging transport for the intermediate store. Loaded by
+    # construction_v1_hosted via importlib, so the workflow grep never names it.
+    "construction_staging_v1",
     "construction_v1_remote",
     "pack_schemas_v1",
     "places_construction_v1",

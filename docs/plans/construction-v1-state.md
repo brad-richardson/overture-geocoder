@@ -8,14 +8,21 @@ Last updated 2026-07-25.
 
 ## The one-paragraph version
 
-The pipeline works end to end on real data at small scale and cannot run at
-planet scale, for exactly one reason: **intermediate data moves between phases
-as GitHub Actions artifacts.** The 63.5 GB Places store gets downloaded by every
-reduce batch, re-uploaded by each, downloaded again whole by head and by
-finalize. It does not fit on a runner, so reduce has never started. The fix is
-not a better cache or a smarter plan — it is to shuffle map output by key into
-R2 and let each consumer read only its own keys, exactly as
-`build_id_index.py` already does.
+The pipeline works end to end on real data at small scale, and until 2026-07-25
+it could not run at planet scale for exactly one reason: **intermediate data
+moved between phases as GitHub Actions artifacts.** The 63.5 GB Places store got
+downloaded by every reduce batch, re-uploaded by each, downloaded again whole by
+head and by finalize. It does not fit on a runner, so reduce never started. That
+transport is now **replaced**: map writes the store into a run-scoped R2 staging
+prefix through the `ObjectStore` seam, every inter-job artifact carries markers
+and JSON only, and each consumer fetches by key exactly the objects its markers
+name — the same shape `build_id_index.py` already uses. **For PLACES** what
+remains before a planet dispatch is operational rather than structural: a scoped
+staging-only R2 token, and row-group range reads to tighten read amplification
+further. **For ADDRESSES the reduce phase is still transport-blocked**, because it
+has no shuffle to narrow its fan-in — deliberately deferred, and the reason a green
+address slice is not an unblocked address planet build. See the family caveat
+below.
 
 ## Read the history this way
 
@@ -89,23 +96,182 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
   pyarrow + DuckDB ingest and its serving encode, with the same caps and the
   same fail-closed semantics as the two `map_task` stages. It was the one phase
   nothing bounded.
+- **The intermediate store lives in R2 staging, for BOTH families**
+  (2026-07-25). This was "the next increment" and it has landed; details below.
+
+## The store transport (2026-07-25) — what the old "next increment" became
+
+`scripts/construction_staging_v1.py` adds `StagedObjectStore`: the exact
+four-method surface the construction code already uses
+(`path`/`put_content`/`read_json`/`write_marker_last`, defined by
+`address_construction_v1.LocalObjectStore`), mirroring every object into a
+run-scoped R2 staging prefix through the existing `ObjectStore` seam
+(`scripts/r2_verified_store.py`: `FilesystemStore` credential-free, `S3Store` for
+real R2, both create-only and content-addressed).
+
+**Staging key layout**, chosen to stay inside the convention
+`.github/workflows/r2-cleanup.yml` can guard and expire:
+
+```
+staging/global-v2/<request_sha256>/construction-v1/<family>/<construction store key>
+```
+
+Run-scoped (`request_sha256`), so concurrent or retried dispatches never collide
+and a resumed run finds its own objects already present — create-only plus
+content-addressing is what makes resume free. Family-scoped below that, so the
+two families never write into one another's create-only key space. The construction
+key shape underneath is **unchanged** (`{class}/sha256/{digest}{suffix}`), because
+markers already record those keys. A prefix outside
+`staging/global-v2/<64-lowercase-hex>/…` is refused in code, since r2-cleanup's
+phase-2 guard is literally `^staging/global-v2/[0-9a-f]{64}/$`.
+
+**How consumers discover objects: they derive, they never list.** A phase already
+holds the keys it needs — in the map markers, the plan, and the reduction JSON —
+so it computes `staging_prefix(request_sha256, family) + key` and fetches that.
+No LIST, no side manifest, no directory object, therefore no listing cost and no
+listing race. `--store-root` becomes an EMPTY local cache on every phase after
+map.
+
+**Fail-closed, everywhere, with failing tests for each case**
+(`tests/test_construction_staging_v1.py`, plus CLI-level cases in
+`tests/test_construction_v1_hosted.py`):
+
+- an absent staged object aborts. **There is no fallback to the artifact path** —
+  a silent fallback is how a partial store becomes a wrong slice;
+- a short object aborts, and a same-length object with different bytes aborts.
+  The digest is IN the key, so verification needs no side table;
+- a key that is NOT content-addressed can never be hydrated as an object
+  (`path()` refuses it) because nothing would verify it. Markers travel through
+  `read_json` and are verified against the store's recorded `sha256` metadata; a
+  staged marker with no such metadata aborts rather than being trusted;
+- rewriting a marker with different bytes aborts (create-only, first writer wins);
+  rewriting it with identical bytes is a verified no-op.
+
+**Resume became real, and that needed one more fix.** `admit-task` reads the
+marker through the same store, so a fresh dispatch now genuinely skips completed
+map tasks — which it never did before, because a fresh runner had no local store
+and `--remote-root` was not wired. But the artifacts carry markers only, so a task
+that skipped and emitted no marker would have silently dropped itself from
+`plan-reduce`'s fan-in. `admit-task --marker-out` republishes the completed task's
+marker on the skip path, fails closed if completion was observed without a
+readable payload, and the workflow asserts the file is non-empty.
+
+**What the workflow carries now.** `cv1-map-*`, `cv1-plan`, `cv1-reduce-*` and
+`cv1-head` are markers, plan, reductions, head result and ledger fragments —
+single-digit MB. The store directory is in none of them, and
+`tests/test_construction_v1_workflow_contract.py` asserts it, because adding it
+back is the one regression that reopens the blocker. The finalize job's local
+publish tree was renamed `staging/` → `publish/`, since `staging/` now
+unambiguously means the R2 intermediate prefix.
+
+**Credentials.** Map, plan, reduce, head and finalize now all receive
+`CLOUDFLARE_ACCOUNT_ID`/`R2_ACCESS_KEY_ID`/`R2_SECRET_ACCESS_KEY` — the SAME
+workflow secrets finalize already used, by owner decision, so the transport was
+not blocked on a token change. That is a real widening of blast radius (~89
+parallel map jobs on a public repo instead of one finalize job) and it is recorded
+as such; issuing a scoped staging-only token is the tracked next step. The
+workflow is still `workflow_dispatch`-only and never runs on `pull_request`, and
+every credentialed step is execute-mode-gated.
+
+**What each phase actually downloads, stated honestly.** "The store stops
+travelling between phases" is true of the *artifact*; it is not true that no phase
+reads pack bodies. Two do, and their bound is the **peak resident hydrated bytes**
+— the high-water mark of fan-in on the runner at once, not the total streamed
+through. Every phase reports both (`--staging-report`, and in the slice summary):
+
+| phase | reads | bound |
+|---|---|---|
+| map | nothing (it writes) | — |
+| plan (places) | **every pack body, twice** | `max_fan_in_packs` (256) packs at once in the DuckDB pass, then ONE at a time in the binding pass, released after each. ~390 MB planet, against ~34 GB eager |
+| plan (addresses) | marker JSON only | zero pack bytes |
+| reduce (places) | the fragments in its own bucket range | ~1 GB post-combiner (the bucket-range measurement above) |
+| reduce (addresses) | packs from essentially every map task | **unbounded — see the family caveat below** |
+| head | per-task head candidates (already bounded top-N) | small |
+| finalize | exactly the published set | small |
+
+The plan phase's eager `[store.path(k) for k in packs]` defeated its own
+`max_fan_in_packs` batching completely and would have put the whole planet term
+store on the one job run 30113308268 died on. It now hydrates per batch and
+evicts (`StagedObjectStore.release`), and the slice smoke asserts
+`peak_resident < bytes_hydrated`, which is false under eager hydration.
+
+**Evidence, on the fast loop, no credentials.** Both slice-smoke jobs run the
+whole transport with a filesystem staging backend and each phase on its own empty
+store:
+
+| | Monaco Places | Seattle addresses |
+|---|---|---|
+| harness wall time | 13.3 s | 12.2 s |
+| records | 38,182 | 104,928 |
+| map published to staging | 18 objects / 25.53 MB | 7 objects / 90.73 MB |
+| plan hydrated / peak resident | 32.88 MB / **16.44 MB** (8 released) | 0 / 0 |
+| reduce hydrated / worst job peak | 16.44 MB / **8.30 MB** | 10.89 MB / 10.89 MB |
+| finalize hydrated from staging | 24 objects / 11.84 MB | 5 objects / 32.14 MB |
+
+The published slice is **byte-identical** to a `--no-staging` run of the same
+slice — same content-addressed names, same sizes; 27 files for Places, 8 for
+addresses.
+
+Two byte totals in `store_bytes_by_class` do wobble, and neither is about
+transport:
+
+- `map/` drifts a few bytes run to run in **both** modes, because the pack proof
+  directories inline per-run wall-time and RSS evidence;
+- `serve/` differs by 96 bytes between a staged and a `--no-staging` run because
+  the head **manifest** embeds each shard's absolute local path, which contains
+  the `--store-root` directory name. That manifest is not part of the published
+  slice (`_artifact_keys` collects `shard_objects`, not `manifest_object`), which
+  is why the published trees are still identical. It is a real wart — a digest
+  that depends on a runner's directory layout — and is tracked as a follow-up.
+
+**Publication is verified against identity now, not just against itself.**
+`verify_whole_slice_once` derives what it expects from the same files it
+publishes, and the reconciliation compares bindings out of the reduction JSON, so
+a local store carrying wrong bytes under a right key published them and reported
+`reconciles: true`. Finalize now compares every file to the digest in its
+content-addressed key AND to the size/digest its producing phase recorded, before
+anything is uploaded. Head shard entries carry `sha256`/`bytes` for that reason.
+
+### The transport unblocks PLACES at planet scale. It does not unblock addresses.
+
+Be precise about this, because two green slice jobs read as if both families were
+done and they are not:
+
+- **Places** is transport-clear end to end. Map writes to staging, plan is bounded
+  and evicts, a reduce job owns a shuffle-bucket range and fetches only the
+  fragments in it (~1 GB post-combiner), head reads bounded candidates, finalize
+  reads exactly the published set.
+- **Addresses** are transport-clear for map, plan, and finalize, and still
+  **blocked at reduce**. `address_construction_v1.reduce_partition` selects row
+  groups by `(country, route_hash)` routing summaries across *every* map marker,
+  so a partition hydrates packs from essentially every map task — there is no
+  shuffle to narrow it, deliberately (the port is DEFERRED and the forward
+  partition key is FROZEN). On the Seattle slice that shows up as
+  `reduce_staged_peak_resident_bytes == reduce_staged_bytes_hydrated`, and the
+  smoke job asserts the shape rather than hiding it. At planet scale (473.6 M
+  records / 33.2 GB selected) an address reduce partition would still not fit a
+  runner. **A green address slice means "the transport moves address map output
+  durably", not "the address planet build is unblocked."** Fixing it is the
+  deferred shuffle port, not this change.
 
 ## The next increment, precisely
 
-**Map writes its fragments to R2 staging instead of the artifact store**, through
-the existing `ObjectStore` seam (`scripts/r2_verified_store.py` already has
-`FilesystemStore` and `S3Store`, create-only, content-addressed, tested). Reduce
-now reads exactly the fragments in its own bucket range, so this is the change
-that turns that from "reads less of a store it downloaded whole" into "fetches
-only its own keys" — and it is the reason the 63.5 GB store no longer has to
-travel between phases.
-
-Then, in order:
-
-1. Reduce/head/finalize read their own keys from R2. Artifacts carry markers and
-   JSON only.
-2. Scoped **staging-only** R2 token for map/reduce — today only `finalize` has
-   credentials, and this is a public repo with ~89 parallel map jobs.
+0. **Port the shuffle to the address family** if an address planet build is
+   wanted — it is the remaining transport blocker for that family, and only for
+   it. See the DEFERRED section of the follow-ups doc; the partition key is FROZEN
+   and the first step is measuring country skew.
+1. Scoped **staging-only** R2 token for the map/reduce/plan/head jobs, leaving
+   the broad key with finalize where the promotion discipline lives. This is now
+   the only credential item between here and a planet dispatch.
+2. **Row-group range reads** in the reducer, with the read-amplification gate the
+   frozen evidence spec already declares (`selective_read_amplification_max` 4.0,
+   enforced today only by the rehearsal validator). `path()` currently hydrates a
+   WHOLE object; that is sufficient because the map-side shuffle makes a fragment
+   hold a complete set of cells and nothing else, so a bucket-range reduce job
+   already fetches only its own fragments. Range reads tighten it further and are
+   step 2 of `2026-07-24-r2-staging-design.md` §7.
+3. Estimate R2 Class B request volume before the first planet dispatch rather
+   than discovering it in a bill.
 
 ## Numbers worth not re-deriving
 
@@ -160,7 +326,20 @@ each `(cell, token)` group intact, and it is already the subdivision scheme.
 
 ## Addresses
 
-Not started, deliberately — Places first, proven, then port.
+Not started, deliberately — Places first, proven, then port. Two things HAVE been
+done for both families at once, because doing them per family would have built the
+same machinery twice:
+
+- **the R2 staging transport** (2026-07-25). It is transport, not routing: the
+  address family's forward packs are unchanged, and every marker records the same
+  keys it always did. Addresses are the bigger half of the build-time transport
+  problem (473,576,753 records / 33.2 GB selected against Places' 74.2M / 10.6 GB),
+  so excluding them would have left the wall standing for the larger family.
+  **This is NOT the deferred address shuffle port** — `address_key_hash`,
+  `route_hash`, `hash_bucket`, TOTAL_ORDER, SERVING_ORDER, the forward pack layout
+  and the genesis partition plan are untouched, and the address forward partition
+  key is FROZEN;
+- the per-record map artifact and its one publication seam, below.
 
 - **The address map now emits a per-address, spatially keyed records artifact**
   (2026-07-25). `overture-address-map-address-records-v1`: one row per admitted

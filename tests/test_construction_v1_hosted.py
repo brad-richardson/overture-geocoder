@@ -339,8 +339,14 @@ def test_high_noncontiguous_source_row_groups_survive_correct_limits_and_fail_cl
     assert marker["binding"]["records"] == 3  # every row survived, none dropped
 
 
-def _address_map_store(tmp_path: Path, contract: Path, binaries, tag: str) -> tuple[Path, Path]:
-    """Build a store + markers dir with one address map task from a tiny fixture."""
+def _address_map_store(
+    tmp_path: Path, contract: Path, binaries, tag: str, staging: Path | None = None
+) -> tuple[Path, Path]:
+    """Build a store + markers dir with one address map task from a tiny fixture.
+
+    With ``staging`` the map output is mirrored into a filesystem R2 staging root,
+    which is the hosted shape: the artifacts between jobs carry markers only.
+    """
     store = tmp_path / f"store-{tag}"
     markers_dir = tmp_path / f"markers-{tag}"
     markers_dir.mkdir()
@@ -356,12 +362,295 @@ def _address_map_store(tmp_path: Path, contract: Path, binaries, tag: str) -> tu
     source_limits = tmp_path / f"source-limits-{tag}.json"
     source_limits.write_text(json.dumps({"objects": [{"records": len(rows), "row_groups": 1}]}) + "\n")
     _run("run-map", "--contract", contract, "--store-root", store, "--family", "addresses",
+         *(("--staging-root", staging) if staging else ()),
          "--task-id", "addresses-map-000", "--input", projected, "--source-limits", source_limits,
          "--transform-binary", binaries["address-transform-v1"],
          "--proof-binary", binaries["address-proof-directory"],
          "--scratch-dir", tmp_path / f"map-scratch-{tag}",
-         "--marker-out", markers_dir / "000.json")
+         "--marker-out", markers_dir / "000.json",
+         "--output", tmp_path / f"map-{tag}.json")
     return store, markers_dir
+
+
+def test_the_staging_transport_carries_the_store_and_outputs_are_unchanged(
+    tmp_path, binaries
+):
+    """The planet blocker, closed: no phase needs the previous phase's store dir.
+
+    Every phase after map runs with its OWN EMPTY local store and fetches by key
+    from the run-scoped staging prefix, exactly as the hosted jobs now do (the
+    inter-job artifacts carry markers and JSON only). The serving artifacts are
+    then compared to a legacy shared-store run of the same fixture: this is a
+    TRANSPORT change, so a single byte of difference in the published objects would
+    mean it is not.
+    """
+    contract, _ = _derive(tmp_path)
+    request_sha256 = json.loads(contract.read_text())["request_sha256"]
+    staging = tmp_path / "staging"
+
+    def plan_reduce_finalize(store_of, markers_dir, tag, staged):
+        plan = tmp_path / f"plan-{tag}.json"
+        argv = ["plan-reduce", "--contract", contract, "--store-root", store_of("plan"),
+                "--family", "addresses", "--markers-dir", markers_dir, "--row-cap", "2",
+                "--output", plan]
+        _run(*argv, *staged)
+        reductions = tmp_path / f"reductions-{tag}"
+        reductions.mkdir()
+        partitions = json.loads(plan.read_text())["partitions"]
+        for index in range(len(partitions)):
+            _run("run-reduce", "--contract", contract, "--store-root", store_of("reduce"),
+                 *staged, "--family", "addresses", "--plan", plan,
+                 "--markers-dir", markers_dir, "--partition-index", index,
+                 "--proof-binary", binaries["address-proof-directory"],
+                 "--encoder-binary", binaries["address-serving-encode-v1"],
+                 "--verifier-binary", binaries["address-serving-verify-v1"],
+                 "--scratch-dir", tmp_path / f"reduce-{tag}-{index}",
+                 "--output", reductions / f"{index:04d}.json")
+        final = tmp_path / f"final-{tag}.json"
+        _run("finalize", "--contract", contract, "--store-root", store_of("finalize"),
+             *staged, "--family", "addresses", "--plan", plan,
+             "--reductions-dir", reductions, "--markers-dir", markers_dir,
+             "--remote-root", tmp_path / f"remote-{tag}",
+             "--work-root", tmp_path / f"final-work-{tag}", "--output", final)
+        return plan, reductions, json.loads(final.read_text())
+
+    # Legacy: one store shared by every phase, as a merged artifact provided.
+    shared, shared_markers = _address_map_store(tmp_path, contract, binaries, "legacy")
+    _, legacy_reductions, legacy_final = plan_reduce_finalize(
+        lambda _phase: shared, shared_markers, "legacy", ()
+    )
+
+    # Staged: map publishes to staging; every later phase starts from nothing.
+    staged_store, staged_markers = _address_map_store(
+        tmp_path, contract, binaries, "staged", staging=staging
+    )
+    map_summary = json.loads((tmp_path / "map-staged.json").read_text())
+    assert map_summary["staged_objects_published"] > 0
+    assert map_summary["staging_prefix"] == HOSTED.STAGING.staging_prefix(
+        request_sha256, "addresses"
+    )
+    # The prefix the objects actually landed under is the one r2-cleanup.yml guards.
+    assert (staging / "staging" / "global-v2" / request_sha256).is_dir()
+
+    _, staged_reductions, staged_final = plan_reduce_finalize(
+        lambda phase: tmp_path / f"store-staged-{phase}",
+        staged_markers,
+        "staged",
+        ("--staging-root", str(staging)),
+    )
+    # Proof the consumers really read from staging rather than a store they
+    # inherited: finalize's local cache started EMPTY, so every published object
+    # had to be hydrated and digest-verified.
+    assert staged_final["staged_objects_hydrated"] > 0
+    assert staged_final["staged_bytes_hydrated"] > 0
+
+    # Transport only. Identical content-addressed keys means identical bytes.
+    names = sorted(path.name for path in legacy_reductions.glob("*.json"))
+    assert names == sorted(path.name for path in staged_reductions.glob("*.json"))
+    for name in names:
+        legacy = json.loads((legacy_reductions / name).read_text())
+        staged = json.loads((staged_reductions / name).read_text())
+        assert legacy["artifact"] == staged["artifact"], name
+        assert legacy["partition"] == staged["partition"], name
+        assert legacy["selected_binding"] == staged["selected_binding"], name
+    assert staged_final["reconciles"] is True
+    assert staged_final["objects"] == legacy_final["objects"]
+    assert staged_final["positions_records"] == legacy_final["positions_records"]
+    legacy_tree = sorted(
+        (path.relative_to(tmp_path / "remote-legacy").as_posix(), path.stat().st_size)
+        for path in (tmp_path / "remote-legacy").rglob("*") if path.is_file()
+    )
+    staged_tree = sorted(
+        (path.relative_to(tmp_path / "remote-staged").as_posix(), path.stat().st_size)
+        for path in (tmp_path / "remote-staged").rglob("*") if path.is_file()
+    )
+    assert legacy_tree == staged_tree
+
+    # And the durable marker makes resume work with NO local store at all, which
+    # is what the artifact-carried store used to provide.
+    fresh = tmp_path / "store-resume"
+    resumed_marker = tmp_path / "resumed-marker.json"
+    assert _admit_completed(
+        fresh, "addresses", "map", task_id="addresses-map-000",
+        contract=str(contract), staging_root=str(staging),
+        marker_out=str(resumed_marker),
+    ) is True
+    # A SKIPPED task must still contribute its marker to the fan-in: the artifacts
+    # now carry markers only, so a skip that emitted nothing would silently drop
+    # this task from plan-reduce.
+    original_marker = json.loads((staged_markers / "000.json").read_text())
+    # `admitted_existing` is run-map's report about ITS invocation, not part of the
+    # stored marker; everything the plan phase reads is identical.
+    original_marker.pop("admitted_existing")
+    assert json.loads(resumed_marker.read_text()) == original_marker
+    # A task that is NOT complete writes no marker and does not fail.
+    absent = tmp_path / "absent-marker.json"
+    assert _admit_completed(
+        tmp_path / "store-resume-b", "addresses", "map", task_id="addresses-map-999",
+        contract=str(contract), staging_root=str(staging), marker_out=str(absent),
+    ) is False
+    assert not absent.exists()
+
+
+def test_a_missing_or_tampered_staged_object_aborts_the_consumer(tmp_path, binaries):
+    """No fallback path exists any more, so a gap must abort rather than degrade.
+
+    Before this transport a missing store object meant a missing artifact and the
+    job simply failed. Now the failure is per-OBJECT, and a silent skip would
+    publish a slice that is short by whole partitions while every binding check
+    still passed on what it did read.
+    """
+    contract, _ = _derive(tmp_path)
+    staging = tmp_path / "staging"
+    _store_dir, markers_dir = _address_map_store(
+        tmp_path, contract, binaries, "gap", staging=staging
+    )
+    marker = json.loads((markers_dir / "000.json").read_text())
+    prefix = HOSTED.STAGING.staging_prefix(
+        json.loads(contract.read_text())["request_sha256"], "addresses"
+    )
+    pack_key = marker["packs"][0]["object"]["key"]
+    staged_pack = staging / prefix / pack_key
+
+    # The address plan phase reads marker JSON only; the REDUCER is what reads the
+    # map packs by key, so it is the consumer under test here.
+    plan_path = tmp_path / "plan-gap.json"
+    _run("plan-reduce", "--contract", contract, "--store-root", tmp_path / "store-plan-gap",
+         "--staging-root", staging, "--family", "addresses",
+         "--markers-dir", markers_dir, "--row-cap", "2", "--output", plan_path)
+
+    def reduce(tag):
+        return HOSTED.main([
+            "run-reduce", "--contract", str(contract),
+            "--store-root", str(tmp_path / f"store-{tag}"),
+            "--staging-root", str(staging), "--family", "addresses",
+            "--plan", str(plan_path), "--markers-dir", str(markers_dir),
+            "--partition-index", "0",
+            "--proof-binary", str(binaries["address-proof-directory"]),
+            "--encoder-binary", str(binaries["address-serving-encode-v1"]),
+            "--verifier-binary", str(binaries["address-serving-verify-v1"]),
+            "--scratch-dir", str(tmp_path / f"reduce-scratch-{tag}"),
+            "--output", str(tmp_path / f"reduction-{tag}.json"),
+        ])
+
+    # Absent: the consumer aborts naming the key it could not fetch.
+    original = staged_pack.read_bytes()
+    staged_pack.unlink()
+    with pytest.raises(FileNotFoundError) as excinfo:
+        reduce("absent")
+    assert "staged object is absent" in str(excinfo.value)
+
+    # Short: the digest in the key is the only thing that catches a truncation.
+    staged_pack.write_bytes(original[:-16])
+    with pytest.raises(ValueError):
+        reduce("short")
+
+    # Same length, different bytes: size checks cannot see this at all.
+    staged_pack.write_bytes(b"\x00" * len(original))
+    with pytest.raises(ValueError):
+        reduce("swapped")
+
+    # Restored: the same phase now succeeds, so the aborts above were about the
+    # object and not about the wiring.
+    staged_pack.write_bytes(original)
+    assert reduce("restored") == 0
+
+
+def test_finalize_refuses_to_publish_bytes_that_are_not_the_bytes(tmp_path, binaries):
+    """A right key over wrong bytes was publishable, and reported reconciles: true.
+
+    `verify_whole_slice_once` derives what it expects from the very files it
+    publishes, and the reconciliation compares BINDINGS out of the reduction JSON,
+    which substituted file content does not touch. So every check passed on bytes
+    nothing had ever produced. Finalize now compares each file to the digest in its
+    content-addressed key AND to the identity its producing phase recorded.
+    """
+    contract, _ = _derive(tmp_path)
+    staging = tmp_path / "staging"
+    _store_dir, markers_dir = _address_map_store(
+        tmp_path, contract, binaries, "tamper", staging=staging
+    )
+    plan_path = tmp_path / "plan-tamper.json"
+    _run("plan-reduce", "--contract", contract, "--store-root", tmp_path / "store-plan-t",
+         "--staging-root", staging, "--family", "addresses",
+         "--markers-dir", markers_dir, "--row-cap", "2", "--output", plan_path)
+    reductions = tmp_path / "reductions-tamper"
+    reductions.mkdir()
+    partitions = json.loads(plan_path.read_text())["partitions"]
+    reduce_store = tmp_path / "store-reduce-t"
+    for index in range(len(partitions)):
+        _run("run-reduce", "--contract", contract, "--store-root", reduce_store,
+             "--staging-root", staging, "--family", "addresses", "--plan", plan_path,
+             "--markers-dir", markers_dir, "--partition-index", index,
+             "--proof-binary", binaries["address-proof-directory"],
+             "--encoder-binary", binaries["address-serving-encode-v1"],
+             "--verifier-binary", binaries["address-serving-verify-v1"],
+             "--scratch-dir", tmp_path / f"reduce-t-{index}",
+             "--output", reductions / f"{index:04d}.json")
+
+    # Pre-plant wrong bytes at a right key in the finalize runner's local cache, so
+    # the store already "has" the object and nothing hydrates it from staging.
+    finalize_store = tmp_path / "store-finalize-t"
+    victim = json.loads((reductions / "0000.json").read_text())["artifact"]
+    planted = finalize_store / victim["key"]
+    planted.parent.mkdir(parents=True, exist_ok=True)
+    planted.write_bytes(b"\x00" * victim["bytes"])  # same length, wrong bytes
+
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract),
+                     "--store-root", str(finalize_store), "--staging-root", str(staging),
+                     "--family", "addresses", "--plan", str(plan_path),
+                     "--reductions-dir", str(reductions), "--markers-dir", str(markers_dir),
+                     "--remote-root", str(tmp_path / "remote-tamper"),
+                     "--work-root", str(tmp_path / "final-work-tamper"),
+                     "--output", str(tmp_path / "final-tamper.json")])
+    assert "content-addressed key declares" in str(excinfo.value)
+    # Nothing was published: the check runs BEFORE publish_exact_set.
+    assert not (tmp_path / "remote-tamper").exists()
+
+    # Remove the planted file and the same finalize succeeds from staging.
+    planted.unlink()
+    _run("finalize", "--contract", contract, "--store-root", finalize_store,
+         "--staging-root", staging, "--family", "addresses", "--plan", plan_path,
+         "--reductions-dir", reductions, "--markers-dir", markers_dir,
+         "--remote-root", tmp_path / "remote-clean",
+         "--work-root", tmp_path / "final-work-clean",
+         "--output", tmp_path / "final-clean.json")
+    assert json.loads((tmp_path / "final-clean.json").read_text())["reconciles"] is True
+
+
+def test_the_places_plan_phase_is_bounded_not_eagerly_hydrated(tmp_path):
+    """The plan phase must never hold its whole pack fan-in.
+
+    `adaptive_genesis_plan` batches its DuckDB reads by `max_fan_in_packs`, but the
+    paths were resolved EAGERLY in one list comprehension, so with the store in
+    staging every pack was hydrated before the first read -- the entire planet term
+    store on the one job run 30113308268 died on. Eviction between batches is what
+    makes the batching real, and peak-below-total is how you can tell.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "hosted_plan_bound_places", ROOT / "scripts/places_construction_v1.py"
+    )
+    source = spec.loader.get_source("hosted_plan_bound_places")
+    # The eager form must not come back: it is a one-line regression that no
+    # functional test on a small slice would notice.
+    assert 'paths = [store.path(pack["object"]["key"]) for pack in packs]' not in source
+    assert 'release = getattr(store, "release", None)' in source
+    # Both passes over the packs release what they fetched.
+    assert source.count('release(pack["object"]["key"])') == 2
+
+
+def test_staging_without_a_contract_fails_closed(tmp_path):
+    """The staging prefix is derived from the contract, never guessed."""
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main([
+            "admit-task", "--store-root", str(tmp_path / "store"),
+            "--family", "places", "--phase", "map", "--task-id", "places-map-000",
+            "--staging-root", str(tmp_path / "staging"),
+        ])
+    assert "request_sha256" in str(excinfo.value)
 
 
 def test_reduce_batching_matches_the_unbatched_plan(tmp_path, binaries):

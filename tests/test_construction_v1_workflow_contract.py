@@ -299,6 +299,66 @@ def test_marker_written_last_and_fresh_dispatch_resume_are_pinned():
     assert "construction-v1-run-ledger-v1" in value
 
 
+def _upload_paths(job: dict, name_fragment: str) -> str:
+    for step in job["steps"]:
+        if "upload-artifact" in str(step.get("uses", "")):
+            with_block = step.get("with", {}) or {}
+            if name_fragment in str(with_block.get("name", "")):
+                return str(with_block.get("path", ""))
+    raise AssertionError(f"no upload-artifact step named like {name_fragment}")
+
+
+def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
+    # THE planet blocker. The map store is 63.5 GB for planet Places (34 GB after
+    # the combiner) and does not fit on a runner, so run 30113308268 died on a
+    # 63 GB plan artifact and reduce has never started. Every inter-job artifact
+    # must therefore carry markers and JSON only, and every phase must be pointed
+    # at the run-scoped R2 staging prefix instead.
+    value = text()
+    doc = parsed()
+    jobs = doc["jobs"]
+
+    # Not one artifact carries the store directory.
+    assert "store" not in _upload_paths(jobs["map"], "cv1-map-").split()
+    assert "mapdl/store" not in _upload_paths(jobs["plan"], "cv1-plan")
+    assert "cv1/mapdl/store" not in _upload_paths(jobs["reduce"], "cv1-reduce-")
+    assert "cv1/cv1/mapdl/store" not in _upload_paths(jobs["head"], "cv1-head")
+
+    # And every phase that touches the store is given the staging prefix.
+    assert value.count(
+        '--staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT"'
+    ) == 7  # admit-task, run-map, plan-reduce, run-reduce, run-head x2, finalize
+    for command in ("run-map", "plan-reduce", "run-reduce", "run-head", "finalize"):
+        block_start = value.index(f"construction_v1_hosted.py {command}")
+        block = value[block_start : block_start + 900]
+        assert "--staging-bucket" in block, command
+
+    # A map task that staged nothing wrote its fragments nowhere durable, and the
+    # artifact no longer carries them.
+    assert 'STAGED="$(jq -r \'.staged_objects_published\' phase/map.json)"' in value
+    assert 'test "$STAGED" -gt 0' in value
+
+    # The staged marker makes resume REAL (a fresh runner now sees completed
+    # tasks), so the skip path has to republish the marker it is skipping on --
+    # otherwise the plan phase silently plans without that task.
+    assert '--marker-out "markers/${TASK_INDEX}.json"' in value
+    assert 'test -s "markers/${TASK_INDEX}.json"' in value
+
+    # The plan job reads pack BODIES, so it needs the same free-disk floor map and
+    # reduce have. It is the job run 30113308268 actually died on.
+    doc_plan = jobs["plan"]
+    assert any(
+        'df -Pk / | awk' in str(step.get("run", "")) for step in doc_plan["steps"]
+    ), "the plan job has no free-disk gate"
+    assert value.count("df -Pk / | awk 'NR==2 {print $4}'") == 3
+
+    # Peak resident hydrated bytes -- the number that decides whether a phase fits a
+    # runner -- is recorded by the two phases that read pack bodies.
+    assert "--staging-report plan/staging.json" in value
+    assert '--staging-report "phase/staging-${BATCH_INDEX}.json"' in value
+    assert "staged_peak_resident_bytes" in value
+
+
 def test_needs_graph_is_connected():
     doc = parsed()
     jobs = doc["jobs"]

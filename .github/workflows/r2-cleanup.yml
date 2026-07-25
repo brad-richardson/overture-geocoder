@@ -37,6 +37,10 @@ on:
         description: 'Phase 2 only: full staging/global-v2/<64-hex>/ prefix to delete entirely'
         required: false
         default: ''
+      allow_construction_staging:
+        description: 'Phase 2 only: permit deleting a prefix that contains construction-v1/ (a construction-v1 run stages its intermediate store there; a LIVE multi-hour run would be destroyed). Confirm the run is finished or abandoned first.'
+        type: boolean
+        default: false
       global_v2_evidence_prefix:
         description: 'Phase 4 only: full staging/global-v2/<64-hex>/ prefix whose immutable/map/addresses/objects/ subtree is deleted (manifests/reports/inventory are kept)'
         required: false
@@ -344,6 +348,8 @@ jobs:
 
       - name: Phase 2 - delete orphaned global-v2 staging prefix
         if: steps.plan.outputs.phase2 == 'true'
+        env:
+          ALLOW_CONSTRUCTION_STAGING: ${{ inputs.allow_construction_staging }}
         run: |
           set -euo pipefail
           # exported for the sourced helper below
@@ -356,6 +362,19 @@ jobs:
             [ "$phase" = "2" ] || continue
             printf '%s' "$target" | grep -Eq '^staging/global-v2/[0-9a-f]{64}/$' \
               || { echo "::error::phase 2 target failed re-validation: $target"; exit 1; }
+            # construction-v1 stages its intermediate map/reduce store under
+            # <prefix>/construction-v1/. A run in flight holds hours of work there,
+            # and this workflow is a one-input dispatch, so refuse unless the
+            # operator has explicitly said the run is finished or abandoned.
+            if S3 s3api list-objects-v2 --bucket "$BUCKET" \
+                 --prefix "${target}construction-v1/" --max-keys 1 \
+                 --output json | grep -q '"Key"'; then
+              if [ "${ALLOW_CONSTRUCTION_STAGING}" != "true" ]; then
+                echo "::error::$target contains construction-v1/ staging data. If a construction-v1 run is in flight this would destroy it. Re-dispatch with allow_construction_staging=true once the run is finished or abandoned."
+                exit 1
+              fi
+              echo "::warning::$target contains construction-v1/ staging data; deleting it because allow_construction_staging=true."
+            fi
             echo "Deleting s3://$BUCKET/$target ..."
             RM "$target"
           done < /tmp/delete-targets.txt
