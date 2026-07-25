@@ -374,6 +374,32 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     assert 'test "$SERVING" -eq "$(( REDUCTIONS + POP ))"' in value
     assert 'test "$SERVING" -gt 0' in value
 
+    # And the finalize job asserts its RESIDENCY bound, not just its output set.
+    # Finalize used to hydrate the whole published set before its first upload with
+    # no eviction -- 13-18 GB at planet scale, on the last job of a multi-hour run.
+    # This is the planet workflow, so this is where that bound decides whether the
+    # run finishes; the slice-smoke jobs assert the same three facts on the fast
+    # loop. Eager hydration makes peak == hydrated with nothing released, so all
+    # three are false under a regression.
+    assert "(.staged_objects_hydrated | numbers) > 0" in value
+    assert "(.staged_objects_released | numbers) > 0" in value
+    assert (
+        "((.staged_peak_resident_bytes | numbers) < (.staged_bytes_hydrated | numbers))"
+        in value
+    )
+    # `| numbers` rather than a `// 0` default, deliberately: it yields empty for a
+    # missing or non-numeric key, so `jq -e` exits non-zero instead of comparing a
+    # fabricated value. A permissive default here would turn an ABSENT bound into a
+    # passing one, which is the failure mode the gate exists to prevent -- so assert
+    # that shape is NOT used for any of the three.
+    for key in (
+        "staged_objects_hydrated",
+        "staged_objects_released",
+        "staged_peak_resident_bytes",
+        "staged_bytes_hydrated",
+    ):
+        assert f".{key} // 0" not in value, key
+
 
 def test_needs_graph_is_connected():
     doc = parsed()

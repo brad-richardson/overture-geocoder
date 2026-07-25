@@ -618,6 +618,14 @@ def test_finalize_refuses_to_publish_bytes_that_are_not_the_bytes(tmp_path, bina
     assert "content-addressed key declares" in str(excinfo.value)
     # Nothing was published: the check runs BEFORE publish_exact_set.
     assert not (tmp_path / "remote-tamper").exists()
+    # And the OFFENDING BYTES SURVIVE. Finalize now evicts each object once it has
+    # been read, but only on the success path: an early draft released in a
+    # `finally`, which deleted the planted file as the run aborted and destroyed the
+    # only evidence of what was published-and-refused. A failing identity gate must
+    # leave its input on disk for a human -- the run is aborting anyway, so there is
+    # nothing to reclaim.
+    assert planted.is_file(), "the object that failed its identity gate was evicted"
+    assert planted.read_bytes() == b"\x00" * victim["bytes"]
 
     # Remove the planted file and the same finalize succeeds from staging.
     planted.unlink()

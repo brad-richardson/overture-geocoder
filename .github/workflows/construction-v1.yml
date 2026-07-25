@@ -854,6 +854,40 @@ jobs:
           fi
           test "$SERVING" -eq "$(( REDUCTIONS + POP ))"
           test "$SERVING" -gt 0
+          # The residency bound, asserted where it actually decides whether a planet
+          # run finishes. Finalize used to build its exact set out of
+          # `store.path(...)` calls, so every published object was hydrated onto this
+          # runner before the first upload and NOTHING was released anywhere in the
+          # phase -- 13-18 GB at planet scale (a ~10-11 GB head payload plus 3.3-6.7
+          # GB of positions packs), on the last job of a multi-hour run. It now
+          # hydrates, verifies, uploads and evicts one object at a time.
+          #
+          # Three keys, each covering a different way the bound can silently go:
+          #   hydrated  > 0 -- finalize really read its inputs from R2 staging. Its
+          #                    --store-root is an EMPTY cache, so 0 would mean it
+          #                    found a store it should not have had.
+          #   released  > 0 -- it EVICTED them. Hydrating and never releasing is
+          #                    precisely the old behaviour, and it is invisible in
+          #                    every other number here.
+          #   peak < hydrated -- the assertable form of "one object at a time".
+          #                    Eager hydration makes peak == hydrated exactly.
+          #
+          # FAIL CLOSED on a missing or non-numeric key: `| numbers` yields empty for
+          # anything that is not a JSON number, so `jq -e` exits 4 (no output) rather
+          # than comparing. Deliberately NOT the `// 0` shape used for POP above -- a
+          # permissive default turns an ABSENT key into a passing bound, which is the
+          # exact failure mode this gate exists to prevent.
+          jq -e '
+            (.staged_objects_hydrated | numbers) > 0
+            and (.staged_objects_released | numbers) > 0
+            and ((.staged_peak_resident_bytes | numbers) < (.staged_bytes_hydrated | numbers))
+          ' final-work/result.json >/dev/null || {
+            echo "Finalize is not bounded: it did not hydrate, evict and publish one object at a time." >&2
+            jq -c '{staged_objects_hydrated,staged_objects_released,staged_peak_resident_bytes,staged_bytes_hydrated}' \
+              final-work/result.json >&2 || echo "(no staging evidence in final-work/result.json)" >&2
+            echo "peak == hydrated with nothing released is eager hydration, which OOMs the planet finalize job." >&2
+            exit 1
+          }
       - name: Mirror the exact staged slice to R2 create-only, marker written last
         env:
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com

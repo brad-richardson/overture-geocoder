@@ -718,7 +718,12 @@ bytes in one `payloads` dict, and `cmd_finalize` built its exact set out of
 `store.path(...)` calls with no `release()` anywhere in the phase. Peak is now one
 object in RAM and one object on disk, and both slice-smoke jobs assert
 `finalize_staged_peak_resident_bytes < finalize_staged_bytes_hydrated` and
-`finalize_staged_objects_released > 0`. What was deliberately NOT done:
+`finalize_staged_objects_released > 0`, **and so does the hosted
+`construction-v1.yml` finalize job** — on `staged_objects_hydrated > 0`,
+`staged_objects_released > 0` and
+`staged_peak_resident_bytes < staged_bytes_hydrated`, fail-closed through
+`| numbers` so a missing or non-numeric key exits non-zero instead of defaulting
+to a value that passes. What was deliberately NOT done:
 
 1. **Finalize reads each published object from staging TWICE.** Admission streams
    every file to compute its identity (and to run the content-addressed and
@@ -734,17 +739,26 @@ object in RAM and one object on disk, and both slice-smoke jobs assert
    `publish_exact_set` from "hash the file" to "verify against a declared
    identity", which is a contract change in the publication path and deserves its
    own review rather than riding along with a residency fix.
-2. **The hosted workflow's `finalize` job asserts the bound nowhere.** Both
-   slice-smoke jobs do, so a regression is a red build on every PR, but
-   `construction-v1.yml` — the workflow that actually runs planet, where 13–18 GB
-   is the difference between a finished run and an OOM at hour four — only echoes
-   `staged_objects_hydrated`. `final-work/result.json` already carries
-   `staged_peak_resident_bytes`, `staged_bytes_hydrated` and
-   `staged_objects_released`, so the gate is three `test` lines next to the
-   existing `SERVING`/`REDUCTIONS` equality. Deliberately left out of this change:
-   `construction-v1.yml` is the credentialed workflow and editing it was out of
-   scope here. Add it with `test_construction_v1_workflow_contract.py` coverage,
-   the way the free-disk floors are asserted.
+2. **There is no `max_remote_read_bytes` cap, and there never was.** `Budget` takes
+   three independent limits, but `construction_v1_hosted.py` populates
+   `max_read_bytes` from the contract's **`max_remote_write_bytes`** in both places
+   it builds one (`:416` and `:1624`), and no `max_remote_read_bytes` key exists
+   anywhere in the repo — not in `construction_v1_control.py`'s caps, not in the
+   contract derivation, not in a test fixture. So the remote read budget cannot be
+   tightened without also tightening writes, and the 1 TB default is doing double
+   duty. Both quantities are ~1.3–1.8% of it at planet scale, so nothing is close
+   to tripping; this is a shape problem, not a live one. Fix it by adding the key
+   with its own default rather than by widening the write cap.
+
+   Related and worth stating precisely, because it is easy to get backwards: the
+   doubled reads in item (1) are **STAGING** GETs, and `Budget` does not govern
+   them at all. It wraps only `FilesystemRemote`, i.e. the publication target;
+   `StagedObjectStore` and `r2_verified_store` charge nothing. Measured on a
+   10-object fixture: `budget.read_bytes` is **0** after `publish_exact_set`
+   (20 hydrations for 10 objects) and exactly 1× the set after
+   `verify_whole_slice_once`. So the transport that moves tens of GB per phase has
+   no byte budget of any kind, while the publication path has one it shares with
+   writes. That asymmetry is the thing to fix, and it is bigger than finalize.
 3. **The `publish/` mirror tree is still the whole slice on local disk.** Finalize
    writes the published set into `--remote-root publish` and a separate
    `aws s3api` step mirrors it to R2 object by object, so the phase's real disk
