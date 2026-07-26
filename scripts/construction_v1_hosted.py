@@ -34,6 +34,7 @@ import importlib.util
 import json
 import math
 import platform
+import sqlite3
 import sys
 from pathlib import Path, PurePosixPath
 from typing import Any
@@ -50,6 +51,17 @@ ROOT = Path(__file__).resolve().parents[1]
 # contiguous BATCH of partitions serially, so the job COUNT stays under the cap
 # while per-partition markers and serving outputs are unchanged.
 REDUCE_MATRIX_CAP = 256
+
+# Address map markers are ~17 GB / ~29 GB decoded at planet scale because they
+# repeat one proof binding per populated maximum-hash bucket. The hosted
+# projection below collapses those entries to one exact country envelope per
+# row group and keeps them in a query-only SQLite index. These are artifact
+# admission caps, checked before cv1-plan can be published.
+ADDRESS_REDUCE_PROJECTION_MAX_BYTES = 512 * 1024**2
+ADDRESS_FINALIZE_PROJECTION_MAX_BYTES = 64 * 1024**2
+ADDRESS_PLAN_ARTIFACT_MAX_BYTES = 640 * 1024**2
+ADDRESS_REDUCE_PROJECTION_SCHEMA = "construction-v1-address-reduce-projection-v1"
+ADDRESS_FINALIZE_PROJECTION_SCHEMA = "construction-v1-address-finalize-projection-v1"
 
 # The reduce matrix runs under this per-JOB timeout (construction-v1.yml reduce
 # job timeout-minutes). A batch job reduces its partitions serially, so its wall
@@ -817,6 +829,349 @@ def _load_markers(markers_dir: str) -> list[dict[str, Any]]:
     return [json.loads(path.read_text()) for path in paths]
 
 
+def _marker_paths(markers_dir: str) -> list[Path]:
+    paths = sorted(Path(markers_dir).glob("*.json"))
+    if not paths:
+        raise SystemExit(f"no map markers found under {markers_dir}")
+    return paths
+
+
+def _unsigned_sqlite(value: int) -> int:
+    """Order-preserving uint64 -> SQLite signed INTEGER projection."""
+    if not 0 <= value < 1 << 64:
+        raise ValueError(f"route hash is outside uint64: {value}")
+    return value - (1 << 63)
+
+
+class _AddressProjectionWriter:
+    """Stream full address markers into reduce/finalize-only projections."""
+
+    def __init__(
+        self,
+        *,
+        request_sha256: str,
+        reduce_path: Path,
+        finalize_path: Path,
+    ):
+        self.request_sha256 = request_sha256
+        self.reduce_path = reduce_path
+        self.finalize_path = finalize_path
+        reduce_path.parent.mkdir(parents=True, exist_ok=True)
+        finalize_path.parent.mkdir(parents=True, exist_ok=True)
+        reduce_path.unlink(missing_ok=True)
+        self.connection = sqlite3.connect(reduce_path)
+        self.connection.executescript(
+            """
+            PRAGMA journal_mode=OFF;
+            PRAGMA synchronous=OFF;
+            PRAGMA temp_store=FILE;
+            PRAGMA cache_size=-65536;
+            CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+            CREATE TABLE packs (
+                pack_key INTEGER PRIMARY KEY,
+                task_order INTEGER NOT NULL,
+                pack_order INTEGER NOT NULL,
+                task_id TEXT NOT NULL,
+                pack_id INTEGER NOT NULL,
+                object_key TEXT NOT NULL,
+                object_sha256 TEXT NOT NULL,
+                object_bytes INTEGER NOT NULL,
+                UNIQUE(task_order, pack_order)
+            );
+            CREATE TABLE row_groups (
+                pack_key INTEGER NOT NULL,
+                group_index INTEGER NOT NULL,
+                binding_records INTEGER NOT NULL,
+                semantic_sum_a TEXT NOT NULL,
+                semantic_sum_b TEXT NOT NULL,
+                PRIMARY KEY(pack_key, group_index)
+            );
+            CREATE TABLE country_envelopes (
+                pack_key INTEGER NOT NULL,
+                group_index INTEGER NOT NULL,
+                country TEXT NOT NULL,
+                minimum_route_hash INTEGER NOT NULL,
+                maximum_route_hash INTEGER NOT NULL,
+                PRIMARY KEY(pack_key, group_index, country)
+            );
+            """
+        )
+        self.task_order = 0
+        self.pack_key = 0
+        self.task_ids: set[str] = set()
+        self.per_record_records = 0
+        self.per_record_objects: dict[str, dict[str, Any]] = {}
+        self.envelopes = 0
+        self.groups = 0
+
+    def __call__(self, marker: dict[str, Any]) -> None:
+        task_id = marker.get("task_id")
+        if (
+            marker.get("schema") != ADDRESS.MARKER_SCHEMA
+            or marker.get("request_sha256") != self.request_sha256
+            or not isinstance(task_id, str)
+            or task_id in self.task_ids
+        ):
+            raise SystemExit("address map marker identity is invalid or duplicated")
+        self.task_ids.add(task_id)
+        for pack_order, pack in enumerate(marker["packs"]):
+            identity = _serving_identity(
+                pack.get("object"),
+                what=f"address map task {task_id} pack {pack_order}",
+            )
+            pack_key = self.pack_key
+            self.pack_key += 1
+            self.connection.execute(
+                "INSERT INTO packs VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    pack_key,
+                    self.task_order,
+                    pack_order,
+                    task_id,
+                    int(pack["pack_id"]),
+                    identity["key"],
+                    identity["sha256"],
+                    identity["bytes"],
+                ),
+            )
+            for group in pack["directory"]["row_groups"]:
+                binding = ADDRESS.validate_binding(group["binding"])
+                group_index = int(group["index"])
+                self.connection.execute(
+                    "INSERT INTO row_groups VALUES (?, ?, ?, ?, ?)",
+                    (
+                        pack_key,
+                        group_index,
+                        binding["records"],
+                        binding["semantic_sum_a"],
+                        binding["semantic_sum_b"],
+                    ),
+                )
+                envelopes: dict[str, list[int]] = {}
+                for route in group["routing_groups"]:
+                    country = str(route["country"])
+                    minimum = int(route["minimum_route_hash"])
+                    maximum = int(route["maximum_route_hash"])
+                    envelope = envelopes.setdefault(country, [minimum, maximum])
+                    envelope[0] = min(envelope[0], minimum)
+                    envelope[1] = max(envelope[1], maximum)
+                for country, (minimum, maximum) in sorted(envelopes.items()):
+                    self.connection.execute(
+                        "INSERT INTO country_envelopes VALUES (?, ?, ?, ?, ?)",
+                        (
+                            pack_key,
+                            group_index,
+                            country,
+                            _unsigned_sqlite(minimum),
+                            _unsigned_sqlite(maximum),
+                        ),
+                    )
+                    self.envelopes += 1
+                self.groups += 1
+
+        per_record = _per_record_artifact(marker, "addresses")
+        if per_record is None:
+            raise SystemExit(
+                f"address map marker {task_id} carries no address_records artifact; "
+                "refusing to emit an incomplete finalize projection"
+            )
+        self.per_record_records += int(per_record["records"])
+        for pack in per_record["packs"]:
+            for field in ("object", "directory_object"):
+                identity = _serving_identity(
+                    pack.get(field),
+                    what=f"address map task {task_id} per-record {field}",
+                )
+                previous = self.per_record_objects.get(identity["key"])
+                if previous is not None and previous != identity:
+                    raise SystemExit(
+                        f"address per-record identity disagrees for {identity['key']}"
+                    )
+                self.per_record_objects[identity["key"]] = identity
+        self.task_order += 1
+
+    def finish(self, plan: dict[str, Any]) -> dict[str, Any]:
+        binding = ADDRESS.validate_binding(plan["binding"])
+        if (
+            self.task_order < 1
+            or self.pack_key < 1
+            or self.groups < 1
+            or self.envelopes < 1
+        ):
+            raise SystemExit("address reduce projection is structurally empty")
+        if self.per_record_records != binding["records"]:
+            raise SystemExit(
+                "address finalize projection record count differs from the "
+                "forward plan binding"
+            )
+        meta = {
+            "schema": ADDRESS_REDUCE_PROJECTION_SCHEMA,
+            "request_sha256": self.request_sha256,
+            "plan_binding": json.dumps(binding, sort_keys=True, separators=(",", ":")),
+            "map_tasks": str(self.task_order),
+            "packs": str(self.pack_key),
+            "row_groups": str(self.groups),
+            "country_envelopes": str(self.envelopes),
+        }
+        self.connection.executemany(
+            "INSERT INTO meta(key, value) VALUES (?, ?)", meta.items()
+        )
+        self.connection.execute(
+            "CREATE INDEX envelope_route ON country_envelopes "
+            "(country, minimum_route_hash, maximum_route_hash)"
+        )
+        self.connection.commit()
+        self.connection.close()
+
+        finalize = {
+            "schema": ADDRESS_FINALIZE_PROJECTION_SCHEMA,
+            "request_sha256": self.request_sha256,
+            "plan_binding": binding,
+            "map_tasks": self.task_order,
+            "records": self.per_record_records,
+            "objects": sorted(
+                self.per_record_objects.values(), key=lambda item: item["key"]
+            ),
+        }
+        write_json(self.finalize_path, finalize)
+        reduce_bytes = self.reduce_path.stat().st_size
+        finalize_bytes = self.finalize_path.stat().st_size
+        if reduce_bytes > ADDRESS_REDUCE_PROJECTION_MAX_BYTES:
+            raise SystemExit(
+                f"address reduce projection is {reduce_bytes} bytes, above its "
+                f"{ADDRESS_REDUCE_PROJECTION_MAX_BYTES}-byte artifact cap"
+            )
+        if finalize_bytes > ADDRESS_FINALIZE_PROJECTION_MAX_BYTES:
+            raise SystemExit(
+                f"address finalize projection is {finalize_bytes} bytes, above its "
+                f"{ADDRESS_FINALIZE_PROJECTION_MAX_BYTES}-byte artifact cap"
+            )
+        return {
+            "reduce_projection_bytes": reduce_bytes,
+            "finalize_projection_bytes": finalize_bytes,
+            "map_tasks": self.task_order,
+            "packs": self.pack_key,
+            "row_groups": self.groups,
+            "country_envelopes": self.envelopes,
+            "per_record_objects": len(self.per_record_objects),
+            "per_record_records": self.per_record_records,
+        }
+
+
+def _address_projection_markers(
+    projection_path: Path,
+    *,
+    request_sha256: str,
+    plan: dict[str, Any],
+    partition: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Query only one partition's compact row-group view from the projection."""
+    connection = sqlite3.connect(f"file:{projection_path}?mode=ro", uri=True)
+    try:
+        meta = dict(connection.execute("SELECT key, value FROM meta"))
+        if (
+            meta.get("schema") != ADDRESS_REDUCE_PROJECTION_SCHEMA
+            or meta.get("request_sha256") != request_sha256
+            or meta.get("plan_binding")
+            != json.dumps(plan["binding"], sort_keys=True, separators=(",", ":"))
+        ):
+            raise SystemExit(
+                "address reduce projection does not match this request and plan"
+            )
+        rows = connection.execute(
+            """
+            SELECT p.task_order, p.pack_order, p.task_id, p.pack_id,
+                   p.object_key, p.object_sha256, p.object_bytes,
+                   g.group_index, g.binding_records,
+                   g.semantic_sum_a, g.semantic_sum_b,
+                   e.country, e.minimum_route_hash, e.maximum_route_hash
+            FROM country_envelopes e
+            JOIN row_groups g
+              ON g.pack_key = e.pack_key AND g.group_index = e.group_index
+            JOIN packs p ON p.pack_key = e.pack_key
+            WHERE e.country = ?
+              AND e.maximum_route_hash >= ?
+              AND e.minimum_route_hash <= ?
+            ORDER BY p.task_order, p.pack_order, g.group_index
+            """,
+            (
+                partition["country"],
+                _unsigned_sqlite(int(partition["hash_start"])),
+                _unsigned_sqlite(int(partition["hash_end"])),
+            ),
+        )
+        markers: list[dict[str, Any]] = []
+        marker_by_order: dict[int, dict[str, Any]] = {}
+        pack_by_order: dict[tuple[int, int], dict[str, Any]] = {}
+        for row in rows:
+            (
+                task_order,
+                pack_order,
+                task_id,
+                pack_id,
+                object_key,
+                object_sha256,
+                object_bytes,
+                group_index,
+                binding_records,
+                semantic_sum_a,
+                semantic_sum_b,
+                country,
+                minimum,
+                maximum,
+            ) = row
+            marker = marker_by_order.get(task_order)
+            if marker is None:
+                marker = {"task_id": task_id, "packs": []}
+                marker_by_order[task_order] = marker
+                markers.append(marker)
+            pack_key = (task_order, pack_order)
+            pack = pack_by_order.get(pack_key)
+            if pack is None:
+                pack = {
+                    "pack_id": pack_id,
+                    "object": {
+                        "key": object_key,
+                        "sha256": object_sha256,
+                        "bytes": object_bytes,
+                    },
+                    "directory": {"row_groups": []},
+                }
+                pack_by_order[pack_key] = pack
+                marker["packs"].append(pack)
+            pack["directory"]["row_groups"].append(
+                {
+                    "index": group_index,
+                    "binding": {
+                        "records": binding_records,
+                        "semantic_sum_a": semantic_sum_a,
+                        "semantic_sum_b": semantic_sum_b,
+                    },
+                    "routing_projection": "country-envelope-v1",
+                    "routing_groups": [
+                        {
+                            "country": country,
+                            "minimum_route_hash": minimum + (1 << 63),
+                            "maximum_route_hash": maximum + (1 << 63),
+                        }
+                    ],
+                }
+            )
+        return markers
+    finally:
+        connection.close()
+
+
+def _required_reducer_cap(contract: dict[str, Any]) -> int:
+    value = (contract.get("caps") or {}).get("max_reducers_per_family")
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise SystemExit(
+            "contract cap max_reducers_per_family is missing or is not a positive "
+            f"integer ({value!r}); refusing to plan against an unknown reducer cap"
+        )
+    return value
+
+
 def _reduce_batches(
     partition_count: int, *, job_cap: int, timeout_max_batch: int | None = None
 ) -> tuple[int, list[dict[str, int]]]:
@@ -1177,11 +1532,32 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args, request_sha256=contract["request_sha256"])
     limits = _limits_for(contract, args.family)
-    markers = _load_markers(args.markers_dir)
+    max_reducers = _required_reducer_cap(contract)
+    projection_evidence: dict[str, Any] | None = None
     if args.family == "addresses":
+        reduce_projection_out = (
+            args.address_reduce_projection_out
+            or args.output.with_name(f"{args.output.stem}.address-reduce.sqlite")
+        )
+        finalize_projection_out = (
+            args.address_finalize_projection_out
+            or args.output.with_name(f"{args.output.stem}.address-finalize.json")
+        )
+        paths = _marker_paths(args.markers_dir)
+        projector = _AddressProjectionWriter(
+            request_sha256=contract["request_sha256"],
+            reduce_path=reduce_projection_out,
+            finalize_path=finalize_projection_out,
+        )
         row_cap = args.row_cap or limits.max_pack_rows
-        plan = ADDRESS.genesis_plan(markers, row_cap=row_cap)
+        plan = ADDRESS.genesis_plan_streaming(
+            paths, row_cap=row_cap, visit_marker=projector
+        )
+        marker_count = len(paths)
+        markers: list[dict[str, Any]] = []
     else:
+        markers = _load_markers(args.markers_dir)
+        marker_count = len(markers)
         plan = PLACES.adaptive_genesis_plan(
             markers, store=store, scratch_root=Path(args.scratch_dir), limits=limits
         )
@@ -1189,7 +1565,6 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
     partition_count = len(plan["partitions"])
     # The cap on reducer JOBS is the tighter of the workflow matrix cap and the
     # admitted ``max_reducers_per_family`` budget the cost model is built on.
-    max_reducers = int(contract.get("caps", {}).get("max_reducers_per_family", REDUCE_MATRIX_CAP))
     job_cap = min(REDUCE_MATRIX_CAP, max_reducers)
     if args.max_reduce_jobs is not None:
         job_cap = min(job_cap, args.max_reduce_jobs)
@@ -1247,12 +1622,27 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         **details,
     }
     write_json(args.output, plan)
+    if args.family == "addresses":
+        projection_evidence = projector.finish(plan)
 
     # The matrix has ONE entry per reducer JOB (batch), never per partition, so a
     # family with more partitions than the cap still dispatches a legal matrix.
     matrix = {"include": batches}
     if args.matrix_out:
         write_json(args.matrix_out, matrix)
+    if projection_evidence is not None:
+        plan_artifact_bytes = (
+            args.output.stat().st_size
+            + projection_evidence["reduce_projection_bytes"]
+            + projection_evidence["finalize_projection_bytes"]
+            + (args.matrix_out.stat().st_size if args.matrix_out else 0)
+        )
+        if plan_artifact_bytes > ADDRESS_PLAN_ARTIFACT_MAX_BYTES:
+            raise SystemExit(
+                f"address cv1-plan core payload is {plan_artifact_bytes} bytes, "
+                f"above its {ADDRESS_PLAN_ARTIFACT_MAX_BYTES}-byte cap"
+            )
+        projection_evidence["plan_artifact_bytes"] = plan_artifact_bytes
 
     # P0-3 + measured economics: gate the ledger on the honest total reduce
     # minutes (partitions x measured per-partition time, batching-invariant),
@@ -1295,9 +1685,13 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         projection=_finalize_publication_projection(
             args.family,
             partitions=partition_count,
-            per_record_objects=_per_record_object_count(markers, args.family),
+            per_record_objects=(
+                projection_evidence["per_record_objects"]
+                if projection_evidence is not None
+                else _per_record_object_count(markers, args.family)
+            ),
             basis=(
-                f"{partition_count} planned partitions and {len(markers)} map "
+                f"{partition_count} planned partitions and {marker_count} map "
                 "markers' per-record packs"
             ),
         ),
@@ -1313,6 +1707,8 @@ def cmd_plan_reduce(args: argparse.Namespace) -> int:
         "publication_budget": publication,
         "binding": plan["binding"],
     }
+    if projection_evidence is not None:
+        summary["address_marker_projection"] = projection_evidence
     if ledger_check is not None:
         summary["ledger_check"] = ledger_check
     # The plan phase reads pack BODIES, so its resident high-water mark is the
@@ -1544,7 +1940,7 @@ def cmd_predict_reduce(args: argparse.Namespace) -> int:
         )
     predicted_partitions = max(1, predicted_partitions)
 
-    max_reducers = int(contract.get("caps", {}).get("max_reducers_per_family", REDUCE_MATRIX_CAP))
+    max_reducers = _required_reducer_cap(contract)
     job_cap = min(REDUCE_MATRIX_CAP, max_reducers)
     if args.max_reduce_jobs is not None:
         job_cap = min(job_cap, args.max_reduce_jobs)
@@ -1840,7 +2236,32 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
     store = _store(args, request_sha256=contract["request_sha256"])
     limits = _limits_for(contract, args.family)
     plan = read_json(args.plan)
-    markers = _load_markers(args.markers_dir)
+    if args.family == "addresses" and args.address_reduce_projection:
+        projection_path = Path(args.address_reduce_projection)
+
+        def markers_for(partition_index: int) -> list[dict[str, Any]]:
+            return _address_projection_markers(
+                projection_path,
+                request_sha256=contract["request_sha256"],
+                plan=plan,
+                partition=plan["partitions"][partition_index],
+            )
+
+        markers: list[dict[str, Any]] = []
+    else:
+        if not args.markers_dir:
+            raise SystemExit(
+                f"{args.family} run-reduce requires --markers-dir"
+                + (
+                    " or --address-reduce-projection"
+                    if args.family == "addresses"
+                    else ""
+                )
+            )
+        markers = _load_markers(args.markers_dir)
+
+        def markers_for(partition_index: int) -> list[dict[str, Any]]:
+            return markers
 
     # Bucket-range mode (Places): --bucket-start/--bucket-end directly, mirroring
     # build_id_index.py --prefix-start/--prefix-end.
@@ -1902,11 +2323,27 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
         output_dir = Path(args.output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
         processed = []
-        retain = _batch_retention(args.family, plan, markers, start, count)
+        partition_markers = [
+            markers_for(index) for index in range(start, start + count)
+        ]
+        if args.family == "addresses":
+            needs = [
+                ADDRESS.partition_pack_keys(view, plan["partitions"][index])
+                for view, index in zip(
+                    partition_markers, range(start, start + count), strict=True
+                )
+            ]
+            retain: list[frozenset[str]] = [frozenset()] * count
+            future: set[str] = set()
+            for offset in range(count - 2, -1, -1):
+                future |= needs[offset + 1]
+                retain[offset] = frozenset(future)
+        else:
+            retain = _batch_retention(args.family, plan, markers, start, count)
         for offset, partition_index in enumerate(range(start, start + count)):
             reduction = _reduce_one_partition(
                 args, store=store, limits=limits, plan=plan,
-                markers=markers, partition_index=partition_index,
+                markers=partition_markers[offset], partition_index=partition_index,
                 retain_keys=retain[offset],
             )
             write_json(output_dir / f"{partition_index:04d}.json", reduction)
@@ -1923,7 +2360,7 @@ def cmd_run_reduce(args: argparse.Namespace) -> int:
         raise SystemExit("single-partition reduce requires --partition-index and --output")
     reduction = _reduce_one_partition(
         args, store=store, limits=limits, plan=plan,
-        markers=markers, partition_index=args.partition_index,
+        markers=markers_for(args.partition_index), partition_index=args.partition_index,
     )
     write_json(args.output, reduction)
     print(json.dumps({"family": args.family, "partition_index": args.partition_index,
@@ -2134,6 +2571,41 @@ def _positions_objects(
     return sorted(unique.values(), key=lambda item: item["key"])
 
 
+def _address_finalize_projection(
+    path: Path, *, request_sha256: str, plan: dict[str, Any]
+) -> tuple[list[dict[str, Any]], int]:
+    projection = read_json(path)
+    if (
+        projection.get("schema") != ADDRESS_FINALIZE_PROJECTION_SCHEMA
+        or projection.get("request_sha256") != request_sha256
+        or projection.get("plan_binding") != plan.get("binding")
+    ):
+        raise SystemExit(
+            "address finalize projection does not match this request and plan"
+        )
+    records = projection.get("records")
+    map_tasks = projection.get("map_tasks")
+    objects = projection.get("objects")
+    if (
+        isinstance(records, bool)
+        or not isinstance(records, int)
+        or records < 1
+        or isinstance(map_tasks, bool)
+        or not isinstance(map_tasks, int)
+        or map_tasks < 1
+        or not isinstance(objects, list)
+        or not objects
+    ):
+        raise SystemExit("address finalize projection has invalid counts or objects")
+    identities = [
+        _serving_identity(value, what=f"address per-record projection object {index}")
+        for index, value in enumerate(objects)
+    ]
+    if len({item["key"] for item in identities}) != len(identities):
+        raise SystemExit("address finalize projection repeats an object key")
+    return identities, records
+
+
 def cmd_finalize(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args, request_sha256=contract["request_sha256"])
@@ -2169,17 +2641,37 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     # slice with no per-record packs, and the cost of noticing is a full planet
     # map re-run. BOTH families are in the table, so neither gets a free pass.
     per_record_spec = PER_RECORD_ARTIFACTS.get(args.family)
-    if per_record_spec is not None and not args.markers_dir:
+    if (
+        per_record_spec is not None
+        and not args.markers_dir
+        and not (args.family == "addresses" and args.address_finalize_projection)
+    ):
+        if args.family == "places":
+            raise SystemExit(
+                "finalize --markers-dir is required for the places family: its "
+                f"map phase emits {per_record_spec['schema']} packs, and they must "
+                "be published durably rather than expiring with map artifacts"
+            )
         raise SystemExit(
-            f"finalize --markers-dir is required for the {args.family} family: its "
+            f"finalize needs its map projection for the {args.family} family: its "
             f"map phase emits {per_record_spec['schema']} packs, and they must be "
             "published durably rather than expiring with the map artifact retention"
         )
-    positions_markers = (
-        _load_markers(args.markers_dir)
-        if args.markers_dir and per_record_spec is not None
-        else []
-    )
+    positions_markers: list[dict[str, Any]] = []
+    if args.family == "addresses" and args.address_finalize_projection:
+        positions, positions_records = (
+            _address_finalize_projection(
+                Path(args.address_finalize_projection),
+                request_sha256=request_sha256,
+                plan=plan,
+            )
+        )
+    else:
+        positions_markers = (
+            _load_markers(args.markers_dir)
+            if args.markers_dir and per_record_spec is not None
+            else []
+        )
     # And a marker that carries no per-record artifact is a gap too: it means one
     # map task in this slice predates the artifact, so the published set would be
     # missing exactly that task's records.
@@ -2194,11 +2686,12 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             "before the artifact existed cannot be upgraded in place (markers are "
             "write-once): delete that task's marker and re-run its map task."
         )
-    positions = _positions_objects(positions_markers, args.family)
-    positions_records = sum(
-        _per_record_artifact(marker, args.family)["records"]
-        for marker in positions_markers
-    )
+    if not (args.family == "addresses" and args.address_finalize_projection):
+        positions = _positions_objects(positions_markers, args.family)
+        positions_records = sum(
+            _per_record_artifact(marker, args.family)["records"]
+            for marker in positions_markers
+        )
     if {item["key"] for item in positions} & {item["key"] for item in artifacts}:
         raise SystemExit("per-record object collides with a serving artifact key")
 
@@ -2527,6 +3020,8 @@ def build_parser() -> argparse.ArgumentParser:
     plan.add_argument("--row-cap", type=int, default=None)
     plan.add_argument("--output", type=Path, required=True)
     plan.add_argument("--matrix-out", type=Path)
+    plan.add_argument("--address-reduce-projection-out", type=Path, default=None)
+    plan.add_argument("--address-finalize-projection-out", type=Path, default=None)
     plan.add_argument("--max-reduce-jobs", type=int, default=None,
                       help="Override the reduce job cap (default min(256, caps.max_reducers_per_family)).")
     plan.add_argument("--ledger", type=Path, default=None,
@@ -2570,7 +3065,8 @@ def build_parser() -> argparse.ArgumentParser:
     reduce.add_argument("--store-root", required=True)
     reduce.add_argument("--family", choices=FAMILIES, required=True)
     reduce.add_argument("--plan", type=Path, required=True)
-    reduce.add_argument("--markers-dir", required=True)
+    reduce.add_argument("--markers-dir", default=None)
+    reduce.add_argument("--address-reduce-projection", type=Path, default=None)
     reduce.add_argument("--partition-index", type=int, default=None,
                         help="Legacy single-partition mode; one reducer job per partition.")
     reduce.add_argument("--batch-index", type=int, default=None,
@@ -2620,6 +3116,7 @@ def build_parser() -> argparse.ArgumentParser:
                            "instead of expiring with the 7-day artifact retention. "
                            "REQUIRED for every family in PER_RECORD_ARTIFACTS, which is "
                            "both of them (places positions, address records).")
+    final.add_argument("--address-finalize-projection", type=Path, default=None)
     # Publication target: a local tree OR R2 directly. `_publication_remote` refuses
     # both and refuses neither, so this is not a permissive default -- argparse just
     # cannot express "exactly one of one flag and a pair".

@@ -486,7 +486,6 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # otherwise the plan phase silently plans without that task.
     assert '--marker-out "markers/${TASK_INDEX}.json"' in value
     assert 'test -s "markers/${TASK_INDEX}.json"' in value
-
     # The plan job reads pack BODIES, so it needs the same free-disk floor map and
     # reduce have. It is the job run 30113308268 actually died on.
     # EVERY data-plane job has a free-disk floor. head and finalize were the last
@@ -554,6 +553,33 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
         "staged_bytes_hydrated",
     ):
         assert f".{key} // 0" not in value, key
+
+
+def test_address_consumers_use_compact_projections_not_full_map_markers():
+    value = text()
+    jobs = parsed()["jobs"]
+    plan_paths = _upload_paths(jobs["plan"], "cv1-plan")
+    assert "mapdl/markers" not in plan_paths
+    assert "plan" in plan_paths
+    assert (
+        "--address-reduce-projection-out "
+        "plan/address-reduce-projection.sqlite"
+    ) in value
+    assert (
+        "--address-finalize-projection-out "
+        "plan/address-finalize-projection.json"
+    ) in value
+    assert (
+        "--address-reduce-projection "
+        "cv1/plan/address-reduce-projection.sqlite"
+    ) in value
+    assert (
+        "--address-finalize-projection "
+        "cv1plan/plan/address-finalize-projection.json"
+    ) in value
+    # Places keeps its existing marker payload and data-plane behavior.
+    assert "mv mapdl/markers plan/map-markers" in value
+    assert "--markers-dir cv1/plan/map-markers" in value
 
 
 def test_needs_graph_is_connected():

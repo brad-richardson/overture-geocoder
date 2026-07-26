@@ -170,6 +170,7 @@ request.write_text(json.dumps({
     "versions": {"duckdb": "1.5.1", "pyarrow": "25.0.0", "numpy": "2.3.5",
                  "python": "3.12.3", "rustc": "local"},
     "caps": {"max_remote_operations": CONTROL.CAPS["max_remote_operations"],
+             "max_reducers_per_family": CONTROL.CAPS["max_reducers_per_family"],
              "max_remote_write_bytes": 1_000_000_000_000},
     # Namespaced per family so the two slices never publish into one another's
     # create-only prefixes. Changing these changes `request_sha256`, so a work
@@ -281,10 +282,15 @@ else:
 # --- plan -----------------------------------------------------------------
 t = phase("plan-reduce")
 plan = WORK / "plan.json"
+address_reduce_projection = WORK / "address-reduce-projection.sqlite"
+address_finalize_projection = WORK / "address-finalize-projection.json"
 plan_argv = ["plan-reduce", "--contract", contract, "--store-root", store_for("plan"),
              *staging_argv(),
              "--family", FAMILY, "--markers-dir", markers,
              "--scratch-dir", WORK / "plan-scratch", "--output", plan,
+             *((("--address-reduce-projection-out", address_reduce_projection,
+                 "--address-finalize-projection-out", address_finalize_projection)
+                if ADDRESSES else ())),
              *(("--staging-report", WORK / "plan-staging.json") if STAGED else ()),
              "--matrix-out", WORK / "reduce-matrix.json"]
 if args.max_reduce_jobs is not None:
@@ -325,7 +331,9 @@ reductions = WORK / "reductions"; reductions.mkdir(exist_ok=True)
 for batch in execution["batches"]:
     hosted("run-reduce", "--contract", contract, "--store-root", store_for("reduce"),
            *staging_argv(),
-           "--family", FAMILY, "--plan", plan, "--markers-dir", markers,
+           "--family", FAMILY, "--plan", plan,
+           *((("--address-reduce-projection", address_reduce_projection)
+              if ADDRESSES else ("--markers-dir", markers))),
            "--batch-index", batch["batch_index"],
            # Addresses re-prove every fetched row group inside reduce, so the
            # reducer needs the proof binary as well as the encoder/verifier.
@@ -397,11 +405,12 @@ final = WORK / "final.json"
 hosted("finalize", "--contract", contract, "--store-root", store_for("finalize"),
        *staging_argv(),
        "--family", FAMILY, "--plan", plan, "--reductions-dir", reductions,
-       # Threaded for BOTH families. Finalize publishes the map phase's
-       # per-record artifact from the markers, and for a family that carries one
-       # it fails closed without this flag rather than silently publishing a
-       # slice whose per-record packs expire with the map artifact retention.
-       "--markers-dir", markers,
+       # Threaded for BOTH families. Addresses carry the compact finalize
+       # projection; Places keeps its already-small markers. Finalize fails
+       # closed without the family-appropriate input rather than silently
+       # publishing a slice whose per-record packs expire with map artifacts.
+       *((("--address-finalize-projection", address_finalize_projection)
+          if ADDRESSES else ("--markers-dir", markers))),
        # The address head result carries `head: null`; passing it would make
        # finalize read shard fields that do not exist. Matches the hosted
        # workflow, which only threads --head for places.
