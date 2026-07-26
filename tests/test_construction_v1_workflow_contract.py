@@ -370,7 +370,22 @@ def test_r2_writes_are_execute_mode_only_and_create_only():
             env = step.get("env", {}) or {}
             if any("secrets." in str(v) for v in env.values()):
                 assert step.get("if") == "inputs.mode == 'execute'", (name, step.get("name"))
-    assert "--if-none-match '*'" in value
+    # Create-only publication is no longer a shell literal in this workflow, and the
+    # assertion had to move with it rather than be deleted. It used to be a serial
+    # `aws s3api put-object --if-none-match '*'` mirror loop; the exact set is now
+    # published by `construction_v1_remote.publish_exact_set` through the R2 backend
+    # this workflow selects. So assert the WIRING -- that finalize publishes to the
+    # bucket instead of to a local tree the workflow then mirrors -- and let
+    # tests/test_construction_v1_remote.py own the create-only behaviour itself.
+    assert "--remote-bucket" in value
+    assert "--remote-endpoint-url" in value
+    # And the mirror really is gone: no `aws s3api` write of any kind survives in
+    # this workflow. A resurrected loop is 12.4 hours of process startup for a planet
+    # address slice against finalize's 360-minute timeout.
+    assert "aws s3api put-object" not in value
+    assert "--if-none-match" not in value
+    for step in jobs["finalize"]["steps"]:
+        assert "aws s3api" not in str(step.get("run", "")), step.get("name")
     assert "marker written last" in value.lower()
 
 

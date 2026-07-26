@@ -85,7 +85,7 @@ def _publish_and_verify(tmp_path: Path, remote_root: Path, objects: int):
 
 
 def test_the_per_object_multiplier_is_what_the_publication_primitives_charge(tmp_path):
-    """3 per object + 3 fixed on a first attempt, proven against the real primitives.
+    """3 per object + 2 fixed + the listing, proven against the real primitives.
 
     The projection is only as good as these constants, and they are only honest if
     they track `publish_exact_set` + `verify_whole_slice_once`. Run them for real
@@ -96,33 +96,67 @@ def test_the_per_object_multiplier_is_what_the_publication_primitives_charge(tmp
     budget, published = _publish_and_verify(tmp_path, tmp_path / "remote", objects)
     # Publication alone: put + HEAD per object, plus the marker's put + HEAD.
     assert published == objects * 2 + 2
-    # And verification adds one listing plus one streaming read per object.
-    assert budget.operations == objects * 3 + 3
+    # And verification adds the listing plus one streaming read per object. Five
+    # objects is one listing page, so the total is unchanged from when a listing was
+    # priced as a single operation -- the difference only appears at planet scale.
+    assert budget.operations == objects * 3 + 2 + 1
     assert budget.operations == HOSTED.finalize_remote_operations(objects, retried=False)
     assert HOSTED.FINALIZE_OPERATIONS_PER_OBJECT == 3
-    assert HOSTED.FINALIZE_FIXED_OPERATIONS == 3
+    assert HOSTED.FINALIZE_FIXED_OPERATIONS == 2
+
+
+def test_the_exact_prefix_listing_is_priced_by_page_not_as_one_request(tmp_path):
+    """A listing of N objects is ceil(N/1000) billed requests, and both sides agree.
+
+    `verify_whole_slice_once` makes ONE call, and the projection used to charge one
+    operation for it. A planet address slice is 65,751 objects = 66 requests. It is
+    ~0.02% of the budget, so this is not about dollars: the gate's entire claim is
+    that the projection EQUALS what the phase charges, and a real R2 backend is where
+    "one listing" stops being a defensible fiction. The reference backend therefore
+    prices the same pages, which is what lets the assertion above be a measurement.
+    """
+    page = HOSTED.FINALIZE_LISTING_PAGE_KEYS
+    assert page == 1000
+    assert HOSTED.REMOTE.listing_operations(0) == 1
+    assert HOSTED.REMOTE.listing_operations(page) == 1
+    assert HOSTED.REMOTE.listing_operations(page + 1) == 2
+    assert HOSTED.REMOTE.listing_operations(65_751) == 66
+    # And the reference backend really charges it, which is the only reason the
+    # primitive-versus-projection comparisons in this file mean anything.
+    budget = REMOTE.Budget(max_operations=10, max_write_bytes=10**6, max_read_bytes=10**6)
+    remote = REMOTE.FilesystemRemote(tmp_path / "listing", budget)
+    remote.put_create_only("slice/objects/a", b"a")
+    before = budget.operations
+    remote.list("slice/objects/")
+    assert budget.operations - before == 1
+    # The projection's per-object multiplier is untouched by this; only the fixed
+    # terms moved, by exactly the one operation the listing used to be.
+    for objects in (1, 999, 1000, 1001, 65_751):
+        assert HOSTED.finalize_remote_operations(objects, retried=False) == (
+            objects * 3 + 2 + HOSTED.REMOTE.listing_operations(objects)
+        )
 
 
 def test_a_resumed_finalize_costs_four_per_object_and_that_is_what_is_budgeted(tmp_path):
     """The retry is DEARER, and the budget must price the retry, not the first pass.
 
     Create-only publication exists so an interrupted finalize can be re-run, so a
-    resume is a first-class path -- and on it `put_create_only` still charges its
+    resume is a first-class path -- and on it the create-only put still charges its
     attempt, raises `ConflictError`, and the byte-exactness check on that path
-    streams the already-published object a second time. Pricing 3N+3 would let the
-    gate pass a run whose RESUME aborts inside `Budget.charge`, which is exactly the
-    failure this whole change removes.
+    streams the already-published object a second time. Pricing the first attempt
+    would let the gate pass a run whose RESUME aborts inside `Budget.charge`, which
+    is exactly the failure this whole change removes.
     """
     objects = 5
     remote_root = tmp_path / "remote"
     first, _ = _publish_and_verify(tmp_path, remote_root, objects)
-    assert first.operations == objects * 3 + 3
+    assert first.operations == objects * 3 + 2 + 1
     # Same remote, same bytes: every put now conflicts and re-reads.
     retry, _ = _publish_and_verify(tmp_path, remote_root, objects)
-    assert retry.operations == objects * 4 + 4 == 24
+    assert retry.operations == objects * 4 + 3 + 1 == 24
     assert retry.operations == HOSTED.finalize_remote_operations(objects)
     assert HOSTED.FINALIZE_RETRY_OPERATIONS_PER_OBJECT == 4
-    assert HOSTED.FINALIZE_RETRY_FIXED_OPERATIONS == 4
+    assert HOSTED.FINALIZE_RETRY_FIXED_OPERATIONS == 3
     # The default is the retry, because that is the case the cap has to cover.
     assert HOSTED.finalize_remote_operations(objects) > HOSTED.finalize_remote_operations(
         objects, retried=False
@@ -158,8 +192,10 @@ def test_the_projection_counts_every_term_finalize_publishes():
     assert projection["manifest_objects"] == 2
     assert projection["published_objects"] == 10 + 4096 + 1 + 6 + 2
     total = 10 + 4096 + 1 + 6 + 2
-    assert projection["projected_remote_operations"] == total * 4 + 4
-    assert projection["first_attempt_remote_operations"] == total * 3 + 3
+    pages = REMOTE.listing_operations(total)
+    assert (projection["listing_operations"], pages) == (5, 5)
+    assert projection["projected_remote_operations"] == total * 4 + 3 + pages
+    assert projection["first_attempt_remote_operations"] == total * 3 + 2 + pages
     # Addresses have no head phase at all, so no head shards and no head manifest.
     assert HOSTED.HEAD_FAMILIES == ("places",)
     addresses = _projection("addresses", partitions=10, per_record_objects=6)
@@ -477,8 +513,8 @@ def _predict(contract: Path, family: str, inventory: Path, capsys):
 # release 2026-06-17.0, the four planet Places tasks inside source object 0 occupy
 # 107/149/160/109 buckets, so the real Places figures are ~132,900 first attempt /
 # ~177,200 retry.)
-PLANET_PROJECTED_OPERATIONS = {"places": 266_224, "addresses": 263_008}
-PLANET_FIRST_ATTEMPT_OPERATIONS = {"places": 199_668, "addresses": 197_256}
+PLANET_PROJECTED_OPERATIONS = {"places": 266_290, "addresses": 263_073}
+PLANET_FIRST_ATTEMPT_OPERATIONS = {"places": 199_734, "addresses": 197_321}
 OLD_REMOTE_OPERATION_CAP = 100_000
 
 
@@ -540,7 +576,7 @@ def test_the_admitted_cap_clears_the_retry_inclusive_structural_ceiling():
     first_attempt_ceiling = max(
         item["first_attempt_remote_operations"] for item in projections
     )
-    assert (first_attempt_ceiling, ceiling) == (259_572, 346_096)
+    assert (first_attempt_ceiling, ceiling) == (259_658, 346_182)
     assert CONTROL.CAPS["max_remote_operations"] >= ceiling
     # The margin is deliberately modest, because the gate -- not the size of this
     # number -- is what makes an outgrown cap cheap to discover. And it must NOT be

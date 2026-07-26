@@ -76,14 +76,24 @@ CAPS = {
     # The unit cost is fixed by the publication primitives, not chosen. A FIRST
     # attempt costs 3 operations per published object (create-only put + per-upload
     # HEAD in construction_v1_remote.publish_exact_set, plus one streaming read in
-    # verify_whole_slice_once) and 3 for the slice (marker put, marker HEAD, one
-    # exact-prefix listing). A RESUMED finalize costs 4 and 4: `put_create_only`
+    # verify_whole_slice_once), 2 for the slice (marker put, marker HEAD), and the
+    # exact-prefix listing. A RESUMED finalize costs 4 and 3: the create-only put
     # still charges its attempt, raises ConflictError, and the byte-exactness check
     # on that path streams the already-published object a second time. Resuming is a
     # first-class path -- create-only publication exists so an interrupted finalize
-    # can be re-run -- so the BUDGET is the retry: ops = 4N + 4 in the published
-    # object count N. Pricing the first attempt only would let the gate pass a run
-    # whose retry aborts inside Budget.charge, which is the failure being removed.
+    # can be re-run -- so the BUDGET is the retry. Pricing the first attempt only
+    # would let the gate pass a run whose retry aborts inside Budget.charge, which is
+    # the failure being removed.
+    #
+    # The LISTING is paginated and is priced by page: ceil(N / 1000) requests, from
+    # r2_verified_store.LIST_PAGE_KEYS. It used to be counted as one operation, which
+    # understated every planet slice by 60-90 requests -- immaterial in dollars, but
+    # the whole point of this gate is that the projection equals what the phase
+    # charges. So the retry cost is
+    #
+    #     ops = 4N + 3 + ceil(N / 1000)
+    #
+    # and the first attempt 3N + 2 + ceil(N / 1000).
     #
     # Planet N, per family, from committed artifacts:
     #
@@ -99,13 +109,13 @@ CAPS = {
     #                 planet tasks inside source object 0 occupy 107/149/160/109
     #                 buckets, so ~131/task => ~23,300 objects; the structural
     #                 bound is 89 x 256 x 2 = 45,568.
-    #                 => N 44,305 measured (132,918 first / 177,224 retry)
-    #                    N 66,555 bound    (199,668 first / 266,224 retry)
+    #                 => N 44,305 measured (132,962 first / 177,268 retry)
+    #                    N 66,555 bound    (199,734 first / 266,290 retry)
     #
     #   addresses      725 serving objects (per-country bisection estimate)
     #              +      2 manifests, no head phase
     #              +  127 tasks x <=256 buckets x 2 = <=65,024 record objects
-    #                 => N <= 65,751 (197,256 first / 263,008 retry)
+    #                 => N <= 65,751 (197,321 first / 263,073 retry)
     #
     # Both families are therefore OVER 100_000 at planet scale on a FIRST attempt,
     # and the old cap tripped inside finalize's running counter -- specifically
@@ -115,9 +125,9 @@ CAPS = {
     # 400_000 is sized off the RETRY-INCLUSIVE STRUCTURAL CEILING, not the
     # measurement: at the inventory gate's max_tasks 128 (both families' plan
     # limits), all 256 buckets occupied in every task, 4,096 head shards + manifest
-    # and the committed 16,888 partitions, places is 86,523 objects = 346,096
+    # and the committed 16,888 partitions, places is 86,523 objects = 346,182
     # operations on a resumed finalize. 400_000 clears that by 1.16x, which is
-    # 53,904 spare operations = room for 13,476 more partitions than the committed
+    # 53,818 spare operations = room for 13,454 more partitions than the committed
     # plan; it is ~2.3x the measured planet places retry. The margin is deliberately
     # modest because the cap no longer stands alone: predict-reduce and plan-reduce
     # both refuse a run whose projection exceeds it, so an inventory that outgrows

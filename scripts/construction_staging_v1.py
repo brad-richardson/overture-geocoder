@@ -59,6 +59,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import sys
+import threading
 from pathlib import Path, PurePosixPath
 from typing import Any
 
@@ -173,6 +174,14 @@ class StagedObjectStore:
         # permanent debris. `staging_prefix` is the only legal producer, and this
         # re-derives from its own parse so a hand-built prefix cannot slip past.
         self.prefix = validate_staging_prefix(prefix)
+        # These counters are read by a fail-closed gate, not just printed: both
+        # slice-smoke jobs and the hosted finalize job assert
+        # `staged_peak_resident_bytes < staged_bytes_hydrated` and
+        # `staged_objects_released > 0` on them. Finalize's upload pass now runs
+        # PUBLISH_CONCURRENCY threads through `path()` and `release()`, and
+        # `x += 1` is not atomic under the GIL for a read-modify-write pair, so a
+        # lost update would silently soften the very bound the gate checks.
+        self._lock = threading.Lock()
         # Counters, not evidence of correctness -- but a run that hydrates nothing
         # when it should have is visible here, and the slice summary reports them.
         self.published = 0
@@ -187,6 +196,26 @@ class StagedObjectStore:
         # is holding its whole fan-in and is not bounded by anything.
         self.resident_bytes = 0
         self.peak_resident_bytes = 0
+
+    def _account_hydrated(self, size: int) -> None:
+        with self._lock:
+            self.hydrated += 1
+            self.hydrated_bytes += size
+            self.resident_bytes += size
+            self.peak_resident_bytes = max(
+                self.peak_resident_bytes, self.resident_bytes
+            )
+
+    def _account_released(self, size: int) -> None:
+        with self._lock:
+            self.released += 1
+            self.released_bytes += size
+            self.resident_bytes = max(0, self.resident_bytes - size)
+
+    def _account_published(self, size: int) -> None:
+        with self._lock:
+            self.published += 1
+            self.published_bytes += size
 
     @property
     def root(self) -> Path:
@@ -210,8 +239,7 @@ class StagedObjectStore:
             raise ValueError(
                 f"staged object bytes do not hash to the digest in its key: {key}"
             )
-        self.published += 1
-        self.published_bytes += int(report["bytes"])
+        self._account_published(int(report["bytes"]))
         return report
 
     def put_content(self, source: Path, prefix: str, suffix: str) -> dict[str, Any]:
@@ -256,10 +284,7 @@ class StagedObjectStore:
             expected_bytes=info.bytes,
             expected_sha256=digest,
         )
-        self.hydrated += 1
-        self.hydrated_bytes += int(info.bytes)
-        self.resident_bytes += int(info.bytes)
-        self.peak_resident_bytes = max(self.peak_resident_bytes, self.resident_bytes)
+        self._account_hydrated(int(info.bytes))
         return path
 
     def release(self, key: str) -> None:
@@ -283,9 +308,7 @@ class StagedObjectStore:
             raise ValueError(f"refusing to evict a non-content-addressed key: {key}")
         if path.is_file():
             size = path.stat().st_size
-            self.released += 1
-            self.released_bytes += size
-            self.resident_bytes = max(0, self.resident_bytes - size)
+            self._account_released(size)
             path.unlink()
 
     def read_json(self, key: str) -> dict[str, Any] | None:
@@ -314,10 +337,7 @@ class StagedObjectStore:
             expected_bytes=info.bytes,
             expected_sha256=info.sha256,
         )
-        self.hydrated += 1
-        self.hydrated_bytes += int(info.bytes)
-        self.resident_bytes += int(info.bytes)
-        self.peak_resident_bytes = max(self.peak_resident_bytes, self.resident_bytes)
+        self._account_hydrated(int(info.bytes))
         return json.loads(destination.read_text())
 
     # -- reporting ---------------------------------------------------------- #
@@ -361,4 +381,8 @@ def staging_backend(
             "R2 staging requires a bucket and an endpoint URL (or a filesystem "
             "staging root for credential-free runs)"
         )
-    return R2.S3Store(bucket, endpoint_url)
+    # The persistent-client backend, not `S3Store`. Finalize hydrates its whole
+    # published set through this store -- 65,751 objects for a planet address slice
+    # -- and one `aws` process per object is 0.339 s of CPU each, i.e. 6.2 hours of
+    # startup before a byte moves. See `r2_verified_store.s3_object_store`.
+    return R2.s3_object_store(bucket, endpoint_url)

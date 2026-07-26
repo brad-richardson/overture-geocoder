@@ -26,15 +26,23 @@ Read this before believing anything below about how close a planet dispatch is.
 Eight PRs on 2026-07-25 closed every blocker known at the time; a dedicated
 address-family readiness pass then found three more, one of which stops Places too:
 
-- **The R2 mirror cannot finish inside its job timeout, in BOTH families.** Its
+- ~~**The R2 mirror cannot finish inside its job timeout, in BOTH families.** Its
   serial `aws s3api` loop costs a MEASURED 0.34 s per invocation: 8.4 h for Places
   (44,305 objects), 12.4 h for addresses (65,751), against a 360-minute timeout and a
-  `FINALIZE_PHASE_ESTIMATE_MINUTES` of 120 — before any bytes move.
+  `FINALIZE_PHASE_ESTIMATE_MINUTES` of 120 — before any bytes move.~~
+  **CLOSED 2026-07-26.** Finalize publishes straight to R2 through
+  `VerifiedStoreRemote` over a persistent client, 16 workers deep, and the shell
+  mirror is deleted. Projected ~12-43 min (Places) / ~48-208 min (addresses) — a
+  PROJECTION, not a measurement; validate on the first dispatch, and note the
+  pessimistic address end exceeds the 120-minute ledger estimate (not the timeout).
 - **The address marker fan-in is 14.6 GB of JSON / 23.9 GB RSS on a 16 GB runner**,
-  loaded whole by `plan-reduce`, by all 121 reduce jobs, and by finalize.
-- **Address finalize's local publish tree is ~100-145 GB against a 25 GB floor.**
+  loaded whole by `plan-reduce`, by all 121 reduce jobs, and by finalize. **STILL
+  OPEN — this is now the only remaining hard blocker.**
+- ~~**Address finalize's local publish tree is ~100-145 GB against a 25 GB floor.**~~
+  **CLOSED 2026-07-26** by the same change: there is no publish tree, and peak local
+  disk is 16 × the largest single object (~2-4.5 GB).
 
-All three are in the finalize/mirror path, which has never executed at scale.
+All three were in the finalize/mirror path, which has never executed at scale.
 Everything upstream of head is in good shape. Full detail, the measurements, the
 same-class gaps found alongside, a "why none of this was caught earlier" section, and
 the ordered dispatch prerequisites are in the **"planet dispatch readiness"** section
@@ -106,16 +114,37 @@ This exact loop also runs in CI on every relevant PR as `.github/workflows/slice
   bound is enforced in `_limits_for`, on the CONTRACT limit that actually reaches
   the planner, because a check against the constant itself cannot fire.
 - **The finalize publication is projected before it is paid for.** A published object
-  costs 3 remote operations + 3 fixed on a first attempt and **4 + 4 on a resume**
-  (the create-only conflict path re-reads each existing object to prove byte
-  equality); the budget prices the resume. Planet places is ~44,300 objects (16,888
-  routed + 4,096 head shards + 1 head manifest + ~23,300 positions objects + 2
-  manifests) = ~133,000 first attempt / ~177,000 resumed, against an old cap of
-  100,000 — enforced by a running counter inside `verify_whole_slice_once`, so it
-  tripped after every object was already published and left no verification
-  evidence. `predict-reduce` and `plan-reduce` now both fail closed on the
-  projection, and `max_remote_operations` is 400,000, sized off the retry-inclusive
-  ceiling (`construction_v1_control.CAPS`).
+  costs 3 remote operations on a first attempt and **4 on a resume** (the create-only
+  conflict path re-reads each existing object to prove byte equality), plus 2 fixed
+  (3 on a resume) and **one request per LISTING PAGE** — `ceil(N/1000)`, because
+  ListObjectsV2 pages at 1,000 keys and a planet slice's "one listing" is 66 billed
+  requests. So `4N + 3 + ceil(N/1000)` is the budgeted figure. Planet places is
+  ~44,300 objects (16,888 routed + 4,096 head shards + 1 head manifest + ~23,300
+  positions objects + 2 manifests) = ~133,000 first attempt / ~177,000 resumed,
+  against an old cap of 100,000 — enforced by a running counter inside
+  `verify_whole_slice_once`, so it tripped after every object was already published
+  and left no verification evidence. `predict-reduce` and `plan-reduce` now both fail
+  closed on the projection, and `max_remote_operations` is 400,000, sized off the
+  retry-inclusive ceiling of 346,182 (`construction_v1_control.CAPS`). The counter
+  now wraps the REAL R2 backend, so it measures R2 rather than pricing local file
+  operations as a proxy for it.
+- **Finalize publishes straight to R2, under a bounded pool.** 2026-07-25. The
+  publication used to be a local `publish/` tree plus a serial `aws s3api` mirror
+  loop in `construction-v1.yml` — 12.4 h of process startup for a planet address
+  slice (0.339 s of CPU per aws-cli invocation, measured, × 2 per object × 65,751)
+  against a 360-minute job timeout, and ~100-145 GB of local disk against a 25 GB
+  floor, which is why the address family could not land at all. `publish_exact_set`
+  now writes into `VerifiedStoreRemote` over a persistent-client
+  `r2_verified_store.Boto3Store`, `PUBLISH_CONCURRENCY = 16` workers deep, marker
+  still strictly last. Peak local disk is 16 × the largest single object (~2-3 GB at
+  the planet address shape); peak RAM is 16 × the 1 MiB streaming chunk and does not
+  depend on object size. Whole-slice verification is metadata-based on the R2
+  backend (single-part ETag against the MD5 of the bytes sent) rather than a full
+  re-download, with a streaming fallback whenever there is no local proof — see
+  items (a)-(f) of the last section of
+  `docs/plans/2026-07-24-construction-v1-follow-ups.md` for what that does and does
+  not cover, and for the throughput model, which is a PROJECTION awaiting the first
+  real dispatch.
 - **Map-side combiner** — keeps only the top `maximum_serving_candidates` (256)
   rows per `(partition_cell, token)`. Exact, because top-N under a total order
   is decomposable. Removes 46% of planet term rows.
@@ -302,6 +331,18 @@ That is bounded extra GET volume, not extra residency, and it is the price of
 keeping "the whole admitted set is fixed before any upload" while holding one
 object. Planning admission from the identities the producing phases already
 recorded would make it one read; tracked as a follow-up.
+
+**Superseded in part, 2026-07-25.** The upload pass no longer reads a payload whole
+at all: it opens each member once, digests it from that handle and hands the SAME
+descriptor to the backend, so the re-check is a streamed digest rather than
+`sha256(read_bytes())` and peak RAM stopped depending on object size. That is what
+made a bounded worker pool affordable — 16 workers over ~180 MB planet address
+objects would be ~3 GB of RAM if the payload were materialised, and is ~16 MiB
+streamed. The bound is therefore `PUBLISH_CONCURRENCY × CHUNK_BYTES` in RAM and
+`PUBLISH_CONCURRENCY ×` the largest single object on disk, not one object of each;
+`tests/test_construction_v1_remote.py` measures the RAM bound at two object sizes
+(1× and 8× the chunk) precisely so "independent of object size" is asserted rather
+than claimed. The three attack shapes above are unchanged and still pinned.
 
 **Evidence, on the fast loop, no credentials.** Both slice-smoke jobs run the
 whole transport with a filesystem staging backend and each phase on its own empty

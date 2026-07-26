@@ -851,6 +851,11 @@ that were each confirmed to fail without it. What was deliberately NOT done:
    instead of `FilesystemRemote` plus a shell mirror, which is the same
    restructure item (1) above touches. The 25 GB free-disk floor on the finalize
    job is what stands in for it today.
+
+   **DONE 2026-07-25** (see the section below): `publish_exact_set` has a real R2
+   backend (`VerifiedStoreRemote` over `r2_verified_store`), the `publish/` tree
+   and the shell mirror are gone, and peak local disk in finalize is
+   `PUBLISH_CONCURRENCY` × the largest single object.
 4. **`StagedObjectStore.path()` does not re-verify a cached object, and eviction
    now makes that reachable.** This is the pre-existing item (5) of the R2-staging
    list above, but the two-pass publisher changes its exposure rather than merely
@@ -870,6 +875,12 @@ that were each confirmed to fail without it. What was deliberately NOT done:
    is outside the present change (the mirror is a separate shell step, and
    `publish_exact_set`'s own `ConflictError` path DOES compare bytes), and it is
    logged rather than fixed here.
+
+   **DONE 2026-07-25**: the mirror is deleted, so the only conflict path left is
+   `publish_exact_set`'s, which compares bytes for every key.
+   `test_a_conflicting_non_content_addressed_object_is_refused_on_bytes` and
+   `test_a_conflicting_marker_with_different_bytes_is_refused` cover exactly the
+   three keys the existence-only fallback was unsafe for.
 
 ## Added 2026-07-25, from the review of the head shard count and its manifest (#169)
 
@@ -972,7 +983,7 @@ is not durable.
 is in good shape. The remaining blockers are all in the finalize/mirror path, which
 has never executed at scale.
 
-### BLOCKER A — the R2 mirror cannot finish inside its job timeout (BOTH families)
+### BLOCKER A — the R2 mirror cannot finish inside its job timeout (BOTH families) — CLOSED 2026-07-26
 
 `construction-v1.yml`'s mirror step is a **serial** `find | while read` loop invoking
 `aws s3api` at least twice per object (`put-object --if-none-match '*'` then an
@@ -993,6 +1004,16 @@ Fix direction: publish to R2 directly from Python with a bounded worker pool and
 persistent client, and delete the local tree plus the shell loop. This is the same
 restructure as items (1) and (3) of "from bounding the finalize/publication phase"
 above, and it closes BLOCKER C at the same time.
+
+**CLOSED 2026-07-26**, exactly that way — see "from giving finalize a real R2
+publication backend" at the end of this file for the design, the surviving items and
+the throughput model. Two numbers here are refined by it: startup is **0.339 s** and
+is **all CPU** (user 3.11 s + sys 0.28 s of a 3.39 s wall over ten invocations), which
+is why concurrency over aws-cli would have capped out at the vCPU count rather than
+fixing it; and the projected replacement is ~12-43 min for places and ~48-208 min for
+addresses, against the 360-minute timeout. That projection is NOT measured — validate
+it on the first real dispatch, and see item (b) there about
+`FINALIZE_PHASE_ESTIMATE_MINUTES`.
 
 ### BLOCKER B — the address marker fan-in is 14.6 GB of JSON / 23.9 GB RSS (addresses)
 
@@ -1029,7 +1050,7 @@ a **marker projection** rather than the marker — reduce needs only
 per-record pack identities. Both are <=2% of the marker. Then assert marker bytes per
 task in the slice smoke so it cannot regress.
 
-### BLOCKER C — address finalize's local publish tree is ~100-145 GB (addresses)
+### BLOCKER C — address finalize's local publish tree is ~100-145 GB (addresses) — CLOSED 2026-07-26
 
 MEASURED: the `.av1` is **278.0 B/record**, entirely uncompressed, with an 8-byte
 length prefix on every text field and both normalized *and* display text stored
@@ -1045,6 +1066,13 @@ fine (largest `.av1` ~278 MB vs `max_serving_bytes` 2 GiB) — the **aggregate**
 land. Item (3) of "from bounding the finalize/publication phase" records "13-18 GB at
 planet scale"; that is the **Places** figure, and addresses are 6-8x the floor it
 stands behind.
+
+**CLOSED 2026-07-26** by the same change as BLOCKER A: there is no publish tree. Each
+worker hydrates one staged object, streams it to R2 and evicts it, so peak local disk
+is `PUBLISH_CONCURRENCY` (16) × the largest single object — **~2-3 GB** at the numbers
+measured above, or ~4.5 GB using the 278 MB largest `.av1`, inside the 25 GB floor.
+`verify_whole_slice_once` no longer streams the slice back on the R2 backend either,
+so the second pass over those 100-145 GB is gone as well.
 
 ### Same-class gaps found alongside, not dispatch-blocking on their own
 
@@ -1301,3 +1329,75 @@ inventory), so a task populates only the buckets its country's cells hash into.
 Modelling per-country extent gives **~20,600 packs / ~41,200 objects**, putting
 addresses nearer **33%** of the operation cap than 66%. PROJECTED — and it falls out
 for free from the single planet-shaped map task already listed as a prerequisite.
+## Added 2026-07-25, from giving finalize a real R2 publication backend
+
+The serial shell mirror in `construction-v1.yml` was the top blocker for a planet
+dispatch, and the arithmetic is worth keeping written down. It invoked `aws s3api`
+at least twice per published object; aws-cli v2 startup is **0.339 s and
+effectively all CPU** (measured, ten runs of `aws --version`: wall 3.39 s, user
+3.11 s + sys 0.28 s), so concurrency cannot amortize it past the runner's vCPU
+count:
+
+| family | objects | invocations | serial | 4 concurrent, 4 vCPU |
+|---|---|---|---|---|
+| addresses | 65,751 | 131,502 | **12.4 h** | 3.1 h |
+| places | 44,305 | 88,610 | **8.4 h** | 2.1 h |
+
+against `timeout-minutes: 360`, before a byte moved. `publish_exact_set` now
+publishes straight into R2 through `VerifiedStoreRemote` over a persistent-client
+`r2_verified_store.Boto3Store`, under a bounded pool of `PUBLISH_CONCURRENCY = 16`
+workers, with the marker still strictly last. The `publish/` tree and the mirror
+step are gone. Six things fall out and are NOT done:
+
+(a) **The admission pass is still serial, and for addresses it is now the largest
+    remaining term.** It is deliberate — admission runs the fail-closed
+    content-addressed and provenance gates, so serial keeps the abort deterministic
+    (first offending member in set order) and residency at exactly one object — but
+    it is a full GET of the slice: 100–145 GB for planet addresses, 21–80 min at a
+    30–80 MB/s single stream. Running it through the same `_run_bounded` pool would
+    cut it to ~5–20 min at the cost of a non-deterministic abort and residency of
+    `PUBLISH_CONCURRENCY` rather than one. Worth doing; worth doing on its own.
+
+(b) **`FINALIZE_PHASE_ESTIMATE_MINUTES` is still 120 and the address projection can
+    exceed it.** The projected phase is ~48–208 min for addresses (round trips
+    10.3–30.8 min, bytes 38–177 min) and ~12–43 min for places. 208 min is inside
+    the 360-minute job timeout but outside the 120-minute figure `ledger-check`
+    projects, and under-projecting the next phase weakens the runner-minute cost
+    gate. It is NOT raised here because the whole model is a projection: raising a
+    cost estimate on unvalidated numbers is a different guess, not a better one.
+    **Measure it on the first real dispatch and set it from the measurement.**
+
+(c) **Whole-slice verification is now MD5-based on the fast path.** Streaming every
+    final object was a full re-download of the published slice (~145 GB for
+    addresses) on top of the hydration and the upload.
+    `VerifiedStoreRemote.read_back_identity` instead compares the store's own
+    content digest — the single-part ETag — to the MD5 of the bytes this process
+    sent. Server-computed, over immutable create-only objects, and the SHA-256 of
+    those same bytes was checked against the admitted identity immediately before
+    the PUT. What it does not cover is an adversary who can delete and recreate an
+    object in this bucket AND craft an MD5 collision for it.
+    `x-amz-checksum-sha256` would close that and is deliberately unused: **R2's
+    support for it is unverified**, and depending on an unverified header for a
+    fail-closed check is how a planet run dies at its last step. Verify it against
+    R2 (a one-object probe), then switch the comparison and delete this item.
+    `FilesystemRemote` still streams and digests, so every offline test and every
+    slice run keeps the SHA-256 read-back.
+
+(d) **Publication must stay single-part for (c) to mean anything.** A multipart
+    ETag is the digest of the part digests plus `-<count>`, not a content MD5.
+    Everything goes through `put_object`, which is always single-part, and
+    `single_part_etag_md5` fails closed on a dashed ETag rather than comparing
+    something that is not a content digest. Anyone introducing `upload_fileobj` on
+    the s3transfer manager for large objects must handle this explicitly.
+
+(e) **Finalize still reads each published object from staging twice** — item (1) of
+    the section above is unchanged. Admission hashes it (where the gates run), the
+    upload pass streams it again. That is two of the three passes over the slice's
+    bytes; verification is now the third only on a resume.
+
+(f) **The standalone `r2_verified_store.py` CLI is still on the aws CLI.**
+    `store_from_args` returns `S3Store`, because `build-places-region.yml` drives it
+    and installs only `duckdb`. That path moves a handful of objects per region, so
+    per-invocation startup is immaterial there — but it does mean two S3 clients
+    coexist in one module. `s3_object_store` is the only producer construction-v1
+    uses, and a test asserts that.

@@ -58,7 +58,20 @@ def test_workflow_pins_actions_and_dependency():
     # implementations; unicodedata2 supplies it independently of the
     # interpreter's own tables (CPython 3.11 embeds 14.0, Rust carries 17.0).
     assert "unicodedata2==17.0.0" in requirements
-    assert requirements.count("--hash=sha256:") == 12
+    # The persistent-client S3/R2 backend, plus its transitive closure. It is pinned
+    # here rather than left to the `aws` CLI because `aws` v2 spends 0.339 s of CPU
+    # per invocation before doing any work, and finalize makes two calls per
+    # published object -- 12.4 hours for a planet address slice.
+    for pin in (
+        "boto3==1.43.56", "botocore==1.43.56", "jmespath==1.1.0",
+        "python-dateutil==2.9.0.post0", "s3transfer==0.19.2", "six==1.17.0",
+        "urllib3==2.7.0",
+    ):
+        assert pin in requirements, pin
+    # 12 for the numeric/data stack, one universal wheel each for the seven boto3
+    # packages. A count, not a floor: an unpinned transitive dependency slipping in
+    # is exactly what --require-hashes exists to stop.
+    assert requirements.count("--hash=sha256:") == 12 + 7
     # CPython 3.11 manylinux x86_64 + aarch64 wheels used by the hosted
     # rowgroup and ARM Worker workflows.
     assert (

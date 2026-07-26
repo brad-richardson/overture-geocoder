@@ -5,25 +5,51 @@ The object identity includes the content digest. An existing object is never
 overwritten: it is downloaded and verified before being accepted as completed.
 Downloads likewise land in a temporary file and replace a stale destination
 only after verification. The filesystem backend makes the restart contract
-testable without credentials; the S3 backend targets Cloudflare R2 via ``aws``.
+testable without credentials; the S3 backends target Cloudflare R2.
+
+There are two S3 backends and the difference is throughput, not discipline.
+``S3Store`` shells out to ``aws s3api`` once per operation; ``Boto3Store`` holds
+one persistent client. Both apply the same create-only (``If-None-Match: '*'``),
+sha256-metadata and paginated-listing rules, and the listing validation is
+literally the same function, so a fail-closed rule cannot hold on one and not the
+other. ``s3_object_store`` is the only producer construction-v1 uses and it
+returns the persistent one; see its docstring for the measurement that forces it.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import json
+import math
 import os
 import shutil
 import subprocess
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from typing import Any, Protocol
+from typing import Any, BinaryIO, Iterator, Protocol
 
 
 SCHEMA = "overture-verified-shuffle-manifest-v1"
 SHA_METADATA_KEY = "sha256"
+# Keys per ListObjectsV2 page. Both S3 backends request exactly this, so a
+# listing's class-A operation count is a function of the key count and nothing
+# else -- which is what lets construction_v1_remote price a listing honestly
+# instead of calling it one operation.
+LIST_PAGE_KEYS = 1000
+
+
+def listing_pages(keys: int) -> int:
+    """ListObjectsV2 pages one exact-prefix listing of ``keys`` objects costs.
+
+    A planet address slice is 65,751 objects, so its single "one listing" is 66
+    billed requests. Charging one would understate the finalize operation budget,
+    and #173 exists precisely because that budget was not what the phase spends.
+    An empty prefix still costs the one request that discovers it is empty.
+    """
+    return max(1, math.ceil(max(0, int(keys)) / LIST_PAGE_KEYS))
 
 
 def sha256_file(path: Path) -> str:
@@ -72,7 +98,112 @@ class ObjectStore(Protocol):
         """Create ``key`` atomically, raising FileExistsError if it exists."""
         ...
 
+    def upload_fileobj(
+        self, source: BinaryIO, key: str, sha256: str, *, size: int
+    ) -> None:
+        """Create ``key`` from an already-open reader positioned at its start.
+
+        Same create-only contract as ``upload``. It exists so a publisher can hash
+        an object and upload it through ONE file handle: two ``open()`` calls on the
+        same path are two different inodes if something unlinks and recreates the
+        file in between, and that is exactly the cache-refill window
+        ``construction_v1_remote.publish_exact_set`` has to close.
+        """
+        ...
+
     def download(self, key: str, destination: Path) -> None: ...
+
+    def open_stream(self, key: str) -> tuple[int, BinaryIO]:
+        """``(content_length, reader)`` for one whole-object read.
+
+        Returned rather than downloaded to a path so a verifier can stream tens of
+        GB through a digest without ever holding an object on local disk.
+        """
+        ...
+
+    def head_proof(self, key: str) -> dict[str, Any] | None:
+        """Everything one metadata request can say about the STORED bytes.
+
+        ``{"bytes", "content_md5", "sha256_metadata"}``, or None if the object is
+        definitively absent. ``content_md5`` is computed BY THE STORE over the bytes
+        it holds -- the single-part ETag on S3/R2, the file's own digest on the
+        filesystem -- which is what makes it evidence rather than an echo of what the
+        client claimed. ``sha256_metadata`` IS such an echo and is labelled so.
+
+        This exists so whole-slice verification does not have to re-download the
+        slice. See ``construction_v1_remote.verify_whole_slice_once``.
+        """
+        ...
+
+
+def _validate_list_page(
+    payload: dict[str, Any],
+    prefix: str,
+    keys: list[str],
+    seen_keys: set[str],
+    seen_tokens: set[str],
+) -> str | None:
+    """Validate one ListObjectsV2 page, append its keys, return the next token.
+
+    Shared by both S3 backends deliberately. These are fail-closed rules -- a page
+    that escaped its prefix, repeated a key, or claimed truncation without a fresh
+    token is a broken listing, and a broken listing feeds
+    ``verify_whole_slice_once``'s exact-set equality. Two copies of them would be
+    two chances for one copy to rot.
+    """
+    contents = payload.get("Contents", [])
+    truncated = payload.get("IsTruncated")
+    if not isinstance(contents, list) or type(truncated) is not bool:
+        raise ValueError("R2 list page has invalid contents/truncation fields")
+    for item in contents:
+        key = item.get("Key") if isinstance(item, dict) else None
+        if not isinstance(key, str) or not key.startswith(prefix):
+            raise ValueError("R2 list result escaped its requested prefix")
+        if key in seen_keys:
+            raise ValueError("R2 paginated listing contains a duplicate key")
+        seen_keys.add(key)
+        keys.append(key)
+    token = payload.get("NextContinuationToken")
+    if not truncated:
+        if token not in (None, ""):
+            raise ValueError("R2 terminal list page unexpectedly has a token")
+        return None
+    if not isinstance(token, str) or not token or token in seen_tokens:
+        raise ValueError("R2 truncated list page has no fresh continuation token")
+    seen_tokens.add(token)
+    return token
+
+
+def _require_relative_prefix(prefix: str) -> None:
+    if not isinstance(prefix, str) or not prefix or prefix.startswith("/"):
+        raise ValueError("R2 list prefix must be a non-empty relative key prefix")
+
+
+def single_part_etag_md5(key: str, etag: Any) -> str:
+    """The MD5 an S3/R2 ETag states about a SINGLE-PART object's stored bytes.
+
+    Fails closed on a multipart ETag. A multipart ETag is the digest of the part
+    digests plus ``-<part count>``, so it is NOT the MD5 of the content -- comparing
+    it to a content MD5 would never match, and comparing it to nothing would be a
+    verification that silently stopped verifying. Everything this module publishes
+    goes through ``put_object``, which is always single-part (``upload_fileobj`` on
+    the s3transfer manager is what multiparts, and is deliberately not used), so a
+    dashed ETag here means the publication path changed and the check must be
+    revisited rather than skipped.
+    """
+    if not isinstance(etag, str) or not etag:
+        raise RuntimeError(f"object {key} has no ETag to verify its stored bytes")
+    digest = etag.strip().strip('"')
+    if "-" in digest:
+        raise RuntimeError(
+            f"object {key} has a MULTIPART ETag ({etag}), which is not the MD5 of "
+            "its content. Whole-slice verification compares the ETag to a content "
+            "digest, so a multipart publication needs an explicit verification "
+            "strategy rather than a comparison that cannot pass."
+        )
+    if len(digest) != 32 or any(character not in "0123456789abcdef" for character in digest):
+        raise RuntimeError(f"object {key} has a non-MD5 ETag ({etag})")
+    return digest
 
 
 class FilesystemStore:
@@ -105,6 +236,12 @@ class FilesystemStore:
         )
 
     def upload(self, source: Path, key: str, sha256: str) -> None:
+        with source.open("rb") as handle:
+            self.upload_fileobj(handle, key, sha256, size=source.stat().st_size)
+
+    def upload_fileobj(
+        self, source: BinaryIO, key: str, sha256: str, *, size: int
+    ) -> None:
         destination = self._path(key)
         if destination.exists():
             raise FileExistsError(f"refusing to overwrite object: {key}")
@@ -113,8 +250,7 @@ class FilesystemStore:
             dir=destination.parent, delete=False
         ) as temporary:
             temporary_path = Path(temporary.name)
-            with source.open("rb") as input_file:
-                shutil.copyfileobj(input_file, temporary)
+            shutil.copyfileobj(source, temporary)
         metadata_path = destination.with_name(f"{destination.name}.metadata.json")
         try:
             # link(2) is an atomic create-only publication: unlike replace(), it
@@ -131,6 +267,32 @@ class FilesystemStore:
         if not source.is_file():
             raise FileNotFoundError(key)
         shutil.copyfile(source, destination)
+
+    def open_stream(self, key: str) -> tuple[int, BinaryIO]:
+        source = self._path(key)
+        if not source.is_file():
+            raise FileNotFoundError(key)
+        return source.stat().st_size, source.open("rb")
+
+    def head_proof(self, key: str) -> dict[str, Any] | None:
+        path = self._path(key)
+        if not path.is_file():
+            return None
+        info = self.head(key)
+        assert info is not None
+        # Digested from the STORED file, which is this backend's honest analogue of
+        # the single-part ETag: a value the store computes over its own bytes rather
+        # than one the client asserted. It costs a local read, which is the point --
+        # the offline tests then exercise the same verification path R2 takes.
+        digest = hashlib.md5(usedforsecurity=False)
+        with path.open("rb") as source:
+            for chunk in iter(lambda: source.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return {
+            "bytes": info.bytes,
+            "content_md5": digest.hexdigest(),
+            "sha256_metadata": info.sha256,
+        }
 
 
 class S3Store:
@@ -185,8 +347,7 @@ class S3Store:
         return ObjectInfo(int(payload["ContentLength"]), metadata.get(SHA_METADATA_KEY))
 
     def list_prefix(self, prefix: str) -> list[str]:
-        if not isinstance(prefix, str) or not prefix or prefix.startswith("/"):
-            raise ValueError("R2 list prefix must be a non-empty relative key prefix")
+        _require_relative_prefix(prefix)
         keys: list[str] = []
         seen_keys: set[str] = set()
         seen_tokens: set[str] = set()
@@ -199,7 +360,7 @@ class S3Store:
                 "--prefix",
                 prefix,
                 "--max-keys",
-                "1000",
+                str(LIST_PAGE_KEYS),
                 "--output",
                 "json",
                 "--no-paginate",
@@ -211,28 +372,64 @@ class S3Store:
                 payload = json.loads(result.stdout)
             except json.JSONDecodeError as exc:
                 raise ValueError("R2 list page is not JSON") from exc
-            contents = payload.get("Contents", [])
-            truncated = payload.get("IsTruncated")
-            if not isinstance(contents, list) or type(truncated) is not bool:
-                raise ValueError("R2 list page has invalid contents/truncation fields")
-            for item in contents:
-                key = item.get("Key") if isinstance(item, dict) else None
-                if not isinstance(key, str) or not key.startswith(prefix):
-                    raise ValueError("R2 list result escaped its requested prefix")
-                if key in seen_keys:
-                    raise ValueError("R2 paginated listing contains a duplicate key")
-                seen_keys.add(key)
-                keys.append(key)
-            token = payload.get("NextContinuationToken")
-            if not truncated:
-                if token not in (None, ""):
-                    raise ValueError("R2 terminal list page unexpectedly has a token")
+            continuation = _validate_list_page(
+                payload, prefix, keys, seen_keys, seen_tokens
+            )
+            if continuation is None:
                 break
-            if not isinstance(token, str) or not token or token in seen_tokens:
-                raise ValueError("R2 truncated list page has no fresh continuation token")
-            seen_tokens.add(token)
-            continuation = token
         return sorted(keys)
+
+    def open_stream(self, key: str) -> tuple[int, BinaryIO]:
+        """One whole-object read, via a temporary file the reader owns.
+
+        ``aws s3api get-object`` writes to a path, so unlike ``Boto3Store`` this
+        cannot hand back a live socket. The temporary is unlinked as soon as it is
+        opened, so closing the reader releases the space even on an abort.
+        """
+        with tempfile.NamedTemporaryFile(
+            prefix=".s3store-stream.", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+        try:
+            self.download(key, temporary_path)
+            size = temporary_path.stat().st_size
+            handle = temporary_path.open("rb")
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return size, handle
+
+    def upload_fileobj(
+        self, source: BinaryIO, key: str, sha256: str, *, size: int
+    ) -> None:
+        with tempfile.NamedTemporaryFile(
+            prefix=".s3store-upload.", delete=False
+        ) as temporary:
+            temporary_path = Path(temporary.name)
+            shutil.copyfileobj(source, temporary)
+        try:
+            self.upload(temporary_path, key, sha256)
+        finally:
+            temporary_path.unlink(missing_ok=True)
+
+    def head_proof(self, key: str) -> dict[str, Any] | None:
+        command = [
+            "aws", "s3api", "head-object", "--bucket", self.bucket, "--key", key,
+            "--endpoint-url", self.endpoint_url, "--region", "auto",
+            "--output", "json",
+        ]
+        result = subprocess.run(command, text=True, capture_output=True)
+        if result.returncode != 0:
+            combined = f"{result.stdout}\n{result.stderr}"
+            if "404" in combined or "Not Found" in combined or "NoSuchKey" in combined:
+                return None
+            raise RuntimeError(f"head-object failed for {key}: {result.stderr.strip()}")
+        payload = json.loads(result.stdout)
+        metadata = payload.get("Metadata") or {}
+        return {
+            "bytes": int(payload["ContentLength"]),
+            "content_md5": single_part_etag_md5(key, payload.get("ETag")),
+            "sha256_metadata": metadata.get(SHA_METADATA_KEY),
+        }
 
     def upload(self, source: Path, key: str, sha256: str) -> None:
         command = [
@@ -273,6 +470,214 @@ class S3Store:
                 str(destination),
             ]
         )
+
+
+# Connection-pool size for the persistent client. It must be at least the
+# publisher's worker count (construction_v1_remote.PUBLISH_CONCURRENCY) or threads
+# block on the pool instead of on the network, which silently caps throughput at
+# the pool size and looks like R2 being slow.
+DEFAULT_MAX_POOL_CONNECTIONS = 32
+# Retries for a transient 5xx/throttle. `standard` mode, unlike `legacy`, retries
+# on the modelled throttling and transient errors and honours a retry budget, so a
+# 65,751-object publication does not abort on one blip. It is NOT a substitute for
+# create-only: a retried PUT that already landed comes back 412 and takes the
+# byte-exactness path, which is the same path a resumed finalize takes.
+MAX_ATTEMPTS = 5
+
+_ABSENT_ERROR_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+_CONFLICT_ERROR_CODES = frozenset({"412", "PreconditionFailed"})
+
+
+class Boto3Store:
+    """Persistent-client S3/R2 adapter: ``S3Store``'s discipline without the process.
+
+    Why this exists rather than just using ``S3Store``. ``aws`` v2 costs 0.339 s of
+    CPU per invocation before it does any work -- measured on this repo's dev host,
+    ten runs of ``aws --version``: wall 3.39 s, user 3.11 s + sys 0.28 s. It is CPU,
+    not latency, so concurrency cannot amortize it past the runner's vCPU count.
+    Finalize charges 2 remote operations per published object, so a planet address
+    slice at 65,751 objects is 131,502 invocations:
+
+        serial                    131,502 x 0.339 s = 12.4 hours
+        4 concurrent, 4 vCPU      131,502 x 0.339 s / 4 = 3.1 hours
+
+    against a 360-minute job timeout, and that is before a byte moves. A persistent
+    client removes the term completely; what is left is network latency, which
+    concurrency DOES amortize.
+
+    Everything else is deliberately identical to ``S3Store``: create-only through
+    ``If-None-Match: '*'``, the sha256 recorded as object metadata, and the same
+    ``_validate_list_page`` on every listing page.
+    """
+
+    def __init__(
+        self,
+        bucket: str,
+        endpoint_url: str,
+        *,
+        max_pool_connections: int = DEFAULT_MAX_POOL_CONNECTIONS,
+    ):
+        try:
+            import boto3
+            from botocore.config import Config
+            from botocore.exceptions import ClientError
+        except ImportError as error:  # pragma: no cover - covered by the pin test
+            raise SystemExit(
+                "the construction-v1 R2 transport needs boto3, which is pinned in "
+                ".github/requirements-hosted-rowgroup.txt. Refusing to fall back to "
+                "the aws CLI: at 0.339 s of CPU per invocation a planet finalize is "
+                "12.4 hours of process startup, which is the blocker this backend "
+                "exists to remove."
+            ) from error
+        self._client_error = ClientError
+        self.bucket = bucket
+        self.endpoint_url = endpoint_url
+        # One client, shared by every publisher thread. botocore clients are
+        # thread-safe for these calls; the connection pool is what makes them
+        # concurrent, hence max_pool_connections above.
+        self.client = boto3.client(
+            "s3",
+            endpoint_url=endpoint_url,
+            region_name="auto",
+            config=Config(
+                retries={"max_attempts": MAX_ATTEMPTS, "mode": "standard"},
+                max_pool_connections=max_pool_connections,
+            ),
+        )
+
+    def _codes(self, error: Any) -> set[str]:
+        response = getattr(error, "response", None) or {}
+        metadata = response.get("ResponseMetadata") or {}
+        return {
+            str((response.get("Error") or {}).get("Code", "")),
+            str(metadata.get("HTTPStatusCode", "")),
+        }
+
+    def head(self, key: str) -> ObjectInfo | None:
+        try:
+            payload = self.client.head_object(Bucket=self.bucket, Key=key)
+        except self._client_error as error:
+            # Only a DEFINITIVE absence is absence. Any other failure raises, so a
+            # flaky transport can never read as "not published yet" -- the same
+            # fail-closed direction as S3Store.head and
+            # construction_v1_hosted._remote_marker_completed.
+            if self._codes(error) & _ABSENT_ERROR_CODES:
+                return None
+            raise RuntimeError(f"head-object failed for {key}: {error}") from error
+        metadata = payload.get("Metadata") or {}
+        return ObjectInfo(int(payload["ContentLength"]), metadata.get(SHA_METADATA_KEY))
+
+    def list_prefix(self, prefix: str) -> list[str]:
+        _require_relative_prefix(prefix)
+        keys: list[str] = []
+        seen_keys: set[str] = set()
+        seen_tokens: set[str] = set()
+        continuation: str | None = None
+        while True:
+            arguments: dict[str, Any] = {
+                "Bucket": self.bucket,
+                "Prefix": prefix,
+                "MaxKeys": LIST_PAGE_KEYS,
+            }
+            if continuation is not None:
+                arguments["ContinuationToken"] = continuation
+            continuation = _validate_list_page(
+                self.client.list_objects_v2(**arguments),
+                prefix,
+                keys,
+                seen_keys,
+                seen_tokens,
+            )
+            if continuation is None:
+                break
+        return sorted(keys)
+
+    def upload(self, source: Path, key: str, sha256: str) -> None:
+        with source.open("rb") as handle:
+            self.upload_fileobj(handle, key, sha256, size=source.stat().st_size)
+
+    def upload_fileobj(
+        self, source: BinaryIO, key: str, sha256: str, *, size: int
+    ) -> None:
+        try:
+            self.client.put_object(
+                Bucket=self.bucket,
+                Key=key,
+                Body=source,
+                ContentLength=size,
+                Metadata={SHA_METADATA_KEY: sha256},
+                IfNoneMatch="*",
+            )
+        except self._client_error as error:
+            if self._codes(error) & _CONFLICT_ERROR_CODES:
+                raise FileExistsError(
+                    f"object appeared during create-only upload: {key}"
+                ) from error
+            raise RuntimeError(f"put-object failed for {key}: {error}") from error
+
+    def open_stream(self, key: str) -> tuple[int, BinaryIO]:
+        try:
+            payload = self.client.get_object(Bucket=self.bucket, Key=key)
+        except self._client_error as error:
+            if self._codes(error) & _ABSENT_ERROR_CODES:
+                raise FileNotFoundError(key) from error
+            raise RuntimeError(f"get-object failed for {key}: {error}") from error
+        return int(payload["ContentLength"]), payload["Body"]
+
+    def head_proof(self, key: str) -> dict[str, Any] | None:
+        try:
+            payload = self.client.head_object(Bucket=self.bucket, Key=key)
+        except self._client_error as error:
+            if self._codes(error) & _ABSENT_ERROR_CODES:
+                return None
+            raise RuntimeError(f"head-object failed for {key}: {error}") from error
+        metadata = payload.get("Metadata") or {}
+        return {
+            "bytes": int(payload["ContentLength"]),
+            "content_md5": single_part_etag_md5(key, payload.get("ETag")),
+            "sha256_metadata": metadata.get(SHA_METADATA_KEY),
+        }
+
+    def download(self, key: str, destination: Path) -> None:
+        size, body = self.open_stream(key)
+        with contextlib.closing(body), destination.open("wb") as output:
+            written = shutil.copyfileobj(body, output)
+        del written
+        if destination.stat().st_size != size:
+            raise RuntimeError(
+                f"get-object for {key} delivered "
+                f"{destination.stat().st_size} of {size} bytes"
+            )
+
+
+def s3_object_store(
+    bucket: str,
+    endpoint_url: str,
+    *,
+    max_pool_connections: int = DEFAULT_MAX_POOL_CONNECTIONS,
+) -> ObjectStore:
+    """The S3/R2 backend construction-v1 uses: one persistent client.
+
+    A single producer so no construction phase can end up on the per-invocation
+    ``aws`` path by accident. See ``Boto3Store`` for the arithmetic; the short
+    version is that ``aws`` v2 startup is 0.339 s of CPU and finalize makes two
+    calls per published object.
+    """
+    if not bucket or not endpoint_url:
+        raise ValueError("an S3/R2 object store needs a bucket and an endpoint URL")
+    return Boto3Store(
+        bucket, endpoint_url, max_pool_connections=max_pool_connections
+    )
+
+
+@contextlib.contextmanager
+def streamed_object(store: ObjectStore, key: str) -> Iterator[tuple[int, BinaryIO]]:
+    """``open_stream`` as a context manager, so no reader is leaked on an abort."""
+    size, handle = store.open_stream(key)
+    try:
+        yield size, handle
+    finally:
+        handle.close()
 
 
 def verify_file(path: Path, *, expected_bytes: int, expected_sha256: str) -> None:
@@ -430,6 +835,15 @@ def build_manifest(paths: list[Path], prefix: str) -> dict[str, Any]:
 
 
 def store_from_args(args: argparse.Namespace) -> ObjectStore:
+    """Backend for the standalone verified-shuffle CLI.
+
+    Deliberately ``S3Store``, not ``s3_object_store``. This CLI moves a handful of
+    objects per invocation (``build-places-region.yml`` uploads one region's shards
+    and a family manifest), so per-invocation ``aws`` startup is immaterial here --
+    and that workflow installs only duckdb, so requiring boto3 would break it for no
+    gain. ``s3_object_store`` stays the only producer construction-v1 uses, where the
+    object count is 44,000-66,000 and the startup cost is the blocker.
+    """
     if args.store_root is not None:
         return FilesystemStore(args.store_root)
     if not args.bucket or not args.endpoint_url:
