@@ -671,3 +671,36 @@ commands are in §5 and in the per-run reports; the address run additionally hol
 `watchdog-abort.jsonl` (the captured diagnosis), `planet-inventory-2026-07-22.0.json`
 (the real 126-task planet plan) and all 26 reduce tracebacks under
 `/home/brad/dev/wt-176-europe-addr-logs/`.
+
+## F. Post-merge Europe Places rerun — head passes completely
+
+Added after PR #176 merged as `1500e30`. The preserved worktree was advanced to
+that exact commit and the harness ran `--phases contract,head`. Re-deriving the
+contract retained request SHA
+`d555b55a2cb427c6477453050a734f04b4ce708b3a0b9d305456b54f913f77ed`,
+so all existing staging and reductions were reused.
+
+Head completed through the batched write, all 4,096 encodes and all verifications:
+
+| measurement | result |
+|---|---:|
+| return code | **0** |
+| populated / configured shards | **4,096 / 4,096** |
+| wall time | **2,022.27 s (33.70 min)** |
+| peak RSS | **8,179,167,232 B** |
+| peak sampled runner disk | **5,399,313,835 B** |
+| peak head scratch | **5,399,313,835 B** |
+| peak local staged cache | **855,605,976 B** |
+| staged input hydrated / released | **3,088,544,880 / 3,088,544,880 B** |
+| staged objects published | **4,098** |
+| staged bytes published | **2,134,262,243 B** |
+
+No RAM, disk, timeout or cap guard fired. The original 36-second DuckDB OOM is
+closed by execution at Europe scale. The earlier "~40 s" rerun estimate described
+only the formerly failing statement; the complete 4,096-shard encode/verify tail
+makes the full head a ~34-minute phase at this scale.
+
+The run does not by itself prove the planet's projected ~18.5 GB filesystem peak
+fits the 17 GiB contract cap. It does remove the measured Europe blocker and makes
+that residual a planet-preparation/authorized-run gate rather than a reason for
+another design or review cycle.

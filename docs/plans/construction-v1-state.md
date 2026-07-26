@@ -1,6 +1,6 @@
 # construction-v1: current state
 
-Last updated 2026-07-26 after PR #180.
+Last updated 2026-07-26 after PR #176 and its post-merge Europe rerun.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -19,36 +19,39 @@ encodes cost and runner limits and must be supplied by the operator.
 
 ## Current snapshot
 
-The last construction-v1 code/evidence checkpoint on `main` is `5f86096` /
-PR #180. This policy and state consolidation follows that checkpoint.
+The current construction-v1 code/evidence checkpoint on `main` is `1500e30` /
+PR #176.
 
-Two code PRs are open and green:
+One code PR is open and green:
 
 | PR | Purpose | Current disposition |
 |---|---|---|
-| #176 | Bound Places head disk/RAM, batch the 4,096-shard DuckDB write, and raise the head candidate cap | One final scoped verification of the last-push blocker claims, then merge. Re-run the preserved Europe head immediately afterward. |
 | #178 | Publish finalize's exact set directly to R2 under a bounded pool | One final scoped verification of the real botocore path and pool bounds, then merge. A one-object live R2 probe remains required before planet dispatch. |
 
 Neither family is ready for a planet dispatch.
 
 ### Places
 
-The Europe run covered 43.9% of the planet and completed admit, map, reduce, and
-finalize without breaching a RAM limit, disk floor, or timeout. Head failed in
-the 4,096-way DuckDB `COPY ... PARTITION_BY`.
+The Europe run covered 43.9% of the planet. After PR #176 merged, all five
+phases completed and head produced all 4,096 populated shards. The full head
+measured 2,022.27 seconds wall time, 8,179,167,232 bytes peak RSS and
+5,399,313,835 bytes peak sampled runner disk. It hydrated and released all
+3,088,544,880 input bytes, with 855,605,976 bytes peak staged-cache residency,
+and published 4,098 staged objects / 2,134,262,243 bytes.
 
-The failure is driven by shard fan-out, not candidate row count. Batching the
-write at 256 shard ranges completed at an 8x smaller DuckDB memory limit and
-reduced files per partition from 113 to 3, maximum 4. PR #176 carries that fix
-and the related resource bounds.
+The old failure was driven by shard fan-out, not candidate row count. Batching
+the write at 256 shard ranges completed at an 8x smaller DuckDB memory limit
+and reduced files per partition from 113 to 3, maximum 4. The post-merge Europe
+run proves the fix through encode and verify, not only through the former
+failing statement.
 
 `DEFAULT_HEAD_SHARD_BITS = 12` remains frozen. The encoder entry cap is a floor
 on shard count and serving fetch granularity is the deciding constraint.
 
-PR #176 still projects roughly 18.5 GB for the head filesystem against an
-18.25 GB cap. Treat that as a possible remaining blocker, not as a reason to do
-more design review: the preserved Europe head rerun is the next arbiter and
-costs about 40 seconds.
+The earlier "~40 seconds" rerun estimate covered only the former failing
+DuckDB statement. A full 4,096-shard head takes about 34 minutes at Europe
+scale. The old projected ~1% planet disk residual remains a planet-preparation
+gate, but Europe exercised the complete phase without approaching it.
 
 ### Addresses
 
@@ -92,29 +95,19 @@ Before a planet dispatch, run one live create-only object probe that verifies:
 Follow this sequence. Do not interleave hygiene, reverse implementation, or
 unrelated hardening.
 
-1. **Reconcile and close PR #176 with one bounded verification.** Its only
-   conflict after this state consolidation is documentation; keep this file as
-   the canonical current snapshot and retain #176's dated probe evidence. Check
-   only that the batched COPY experiment supports the claim, the bounded
-   filesystem accounting is wired at the production call sites, and published
-   bytes remain identical. Merge when those claims and required CI are green.
-2. **Re-run the preserved Europe Places head.** If it passes, record the
-   measured peak and prepare the non-promoting planet request. If the remaining
-   ~1% disk projection trips, fix only that measured cap/accounting mismatch and
-   rerun.
-3. **Reconcile and close PR #178 with one bounded verification.** Rebase it
+1. **Reconcile and close PR #178 with one bounded verification.** Rebase it
    after #176 because both touch the hosted workflow and publication path; keep
    this file as the canonical current snapshot. Check only the real botocore
    non-empty upload path, pool draining/bounds, and the Places publication byte
    bound. Merge when those claims and required CI are green.
-4. **Run the live one-object R2 probe.** It is cheap and can falsify the remote
+2. **Run the live one-object R2 probe.** It is cheap and can falsify the remote
    create-only/checksum assumptions before more build work depends on them.
-5. **Implement compact or streaming address markers.** Keep this PR limited to
+3. **Implement compact or streaming address markers.** Keep this PR limited to
    making the marker fan-in fit and making its measurement trustworthy.
-6. **Resume the preserved Europe address reduce and finalize.** Measure the
+4. **Resume the preserved Europe address reduce and finalize.** Measure the
    reducer residency and aggregate publication behavior. Fix the next observed
    blocker only.
-7. **Prepare the non-promoting planet workflow inputs.** Hand the exact
+5. **Prepare the non-promoting planet workflow inputs.** Hand the exact
    confirmation string, projected cost, runner ceilings, and known residuals to
    the operator. The operator decides whether to dispatch.
 
@@ -122,8 +115,7 @@ unrelated hardening.
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
-| 4,096-way head write | Places | Europe hard failure; batching succeeds under much less RAM | #176 merged and preserved Europe head completes |
-| Possible ~1% head disk residual | Places | PR #176 projection, not an observed failure after batching | Europe head measurement, then planet preparation gate |
+| Possible ~1% planet head disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet remains a projection | Planet preparation gate, then the authorized non-promoting run |
 | Marker fan-in | Addresses | 13.45 GB Europe load; ~29 GB planet projection vs 16 GB runner | Compact/streaming representation and completed Europe reduce |
 | Address publication aggregate | Addresses | Old 100–145 GB projection; currently hidden behind marker failure | Completed Europe finalize with direct R2 backend |
 | Direct R2 semantics and throughput | Both | Local real-botocore integration; no live R2 result | #178 merged plus one-object live probe |
@@ -143,6 +135,8 @@ not separate review programs.
 - Places term rows are combined before shuffle, removing about 46% at planet
   scale.
 - Places head is routed through 4,096 shards with a published routing manifest.
+- The complete 43.9%-of-planet Europe Places head passes under merged #176:
+  4,096 populated shards, 8.18 GB peak RSS, 5.40 GB peak sampled disk.
 - Both families emit and durably publish per-record artifacts needed by a later
   spatial reverse index.
 - Finalize verifies an exact publication set and has a projected remote
