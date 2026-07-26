@@ -1,6 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-26 after PR #176 and its post-merge Europe rerun.
+Last updated 2026-07-26 after PR #178, PR #181, and the live R2 publication
+probe.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -19,14 +20,9 @@ encodes cost and runner limits and must be supplied by the operator.
 
 ## Current snapshot
 
-The current construction-v1 code/evidence checkpoint on `main` is `1500e30` /
-PR #176.
-
-One code PR is open and green:
-
-| PR | Purpose | Current disposition |
-|---|---|---|
-| #178 | Publish finalize's exact set directly to R2 under a bounded pool | One final scoped verification of the real botocore path and pool bounds, then merge. A one-object live R2 probe remains required before planet dispatch. |
+The current construction-v1 code/evidence checkpoint on `main` is `82b4731`:
+PR #178's direct bounded R2 publication backend plus PR #181's live probe.
+There are no open construction-v1 code PRs.
 
 Neither family is ready for a planet dispatch.
 
@@ -74,40 +70,42 @@ fixed. The old ordering "publication first, marker fan-in second" is retired.
 
 ### Publication
 
-The serial `aws s3api` mirror cannot complete inside the hosted timeout for
-either family. PR #178 replaces it with direct bounded R2 publication.
+PR #178 replaced the serial `aws s3api` mirror with direct bounded R2
+publication through one persistent botocore client. Publication concurrency is
+derived from the contract's enforced per-object cap and the 25.6 GB runner
+floor: Places admits 5 workers at its 5 GB single-PUT ceiling; Addresses admits
+11 at its 2 GiB serving-object cap. Every member, including finalizer-created
+manifests, is checked against the effective cap before any upload.
 
-The original implementation could not upload a non-empty body through a real
-botocore client because the reader did not satisfy botocore seek/checksum
-semantics. The current PR includes the corrected reader and a real-client
-integration harness. Throughput remains a projection until exercised against
-R2, so call this blocker mitigated rather than measured closed.
+The live R2 half of the contract is now execution-proven. PR #181 added a
+manual, main-only, one-object probe, and Actions run `30203859256` passed against
+`geocoder-shards` at main SHA `82b4731`:
 
-Before a planet dispatch, run one live create-only object probe that verifies:
+- the non-empty object was created through the production persistent-client
+  selector with `IfNoneMatch: "*"`;
+- R2's single-part ETag equalled the content MD5 and the recorded SHA-256
+  metadata equalled the admitted identity;
+- a fresh identical retry received the create-only conflict and was accepted
+  only after byte-exact read-back;
+- same-length different bytes under the same key were rejected; and
+- the unconditional cleanup deleted the exact key and proved it absent.
 
-- `IfNoneMatch: "*"` has the expected R2 behavior;
-- the returned ETag/content digest matches the bytes under the SDK's actual
-  framing; and
-- a retry accepts identical bytes and rejects different bytes.
+Remote create-only/checksum semantics are therefore closed. Fleet throughput
+remains a scale measurement, not a reason for another unit/review loop; the
+resumed Europe Addresses finalize will exercise it after marker fan-in is fixed.
 
 ## Fastest path
 
 Follow this sequence. Do not interleave hygiene, reverse implementation, or
-unrelated hardening.
+unrelated hardening. Direct publication and its live remote-semantics probe are
+complete.
 
-1. **Reconcile and close PR #178 with one bounded verification.** Rebase it
-   after #176 because both touch the hosted workflow and publication path; keep
-   this file as the canonical current snapshot. Check only the real botocore
-   non-empty upload path, pool draining/bounds, and the Places publication byte
-   bound. Merge when those claims and required CI are green.
-2. **Run the live one-object R2 probe.** It is cheap and can falsify the remote
-   create-only/checksum assumptions before more build work depends on them.
-3. **Implement compact or streaming address markers.** Keep this PR limited to
+1. **Implement compact or streaming address markers.** Keep this PR limited to
    making the marker fan-in fit and making its measurement trustworthy.
-4. **Resume the preserved Europe address reduce and finalize.** Measure the
+2. **Resume the preserved Europe address reduce and finalize.** Measure the
    reducer residency and aggregate publication behavior. Fix the next observed
    blocker only.
-5. **Prepare the non-promoting planet workflow inputs.** Hand the exact
+3. **Prepare the non-promoting planet workflow inputs.** Hand the exact
    confirmation string, projected cost, runner ceilings, and known residuals to
    the operator. The operator decides whether to dispatch.
 
@@ -118,7 +116,6 @@ unrelated hardening.
 | Possible ~1% planet head disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet remains a projection | Planet preparation gate, then the authorized non-promoting run |
 | Marker fan-in | Addresses | 13.45 GB Europe load; ~29 GB planet projection vs 16 GB runner | Compact/streaming representation and completed Europe reduce |
 | Address publication aggregate | Addresses | Old 100–145 GB projection; currently hidden behind marker failure | Completed Europe finalize with direct R2 backend |
-| Direct R2 semantics and throughput | Both | Local real-botocore integration; no live R2 result | #178 merged plus one-object live probe |
 | Watchdog loses the useful diagnosis | Addresses | Observed on Europe abort | Fix alongside marker work if needed to trust the rerun |
 | Reducer cap fails open when absent | Addresses | `predict-reduce` accepted 242 jobs against its own default | Fail closed before planet request preparation |
 
@@ -141,6 +138,9 @@ not separate review programs.
   spatial reverse index.
 - Finalize verifies an exact publication set and has a projected remote
   operation budget.
+- Finalize publishes that exact set directly through a bounded persistent R2
+  client. Live R2 create-only, ETag/content, identical-resume, conflicting-byte,
+  and cleanup semantics pass.
 - The address forward partition key and serving layout have not changed.
 
 ## Frozen decisions

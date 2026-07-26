@@ -704,3 +704,42 @@ The run does not by itself prove the planet's projected ~18.5 GB filesystem peak
 fits the 17 GiB contract cap. It does remove the measured Europe blocker and makes
 that residual a planet-preparation/authorized-run gate rather than a reason for
 another design or review cycle.
+
+## G. Live R2 publication probe — remote semantics pass
+
+Added after PR #178 merged as `0089145` and PR #181 added the manual probe as
+`82b4731`. GitHub Actions run
+[`30203859256`](https://github.com/brad-richardson/overture-geocoder/actions/runs/30203859256)
+completed successfully in 29 seconds on `ubuntu-24.04`.
+
+The workflow selected the same persistent botocore backend that hosted finalize
+uses and touched one run-unique key:
+
+```
+construction-v1/probes/r2-publication/30203859256-1.bin
+```
+
+The payload was non-empty and larger than the publisher's 1 MiB streaming chunk:
+
+| measurement | value |
+|---|---:|
+| bytes | **1,054,237** |
+| SHA-256 | `e0bd1876e92481eb2b5d423733b79f05ab1f2e9bbc71079d63a0c35e249545b4` |
+| content MD5 / R2 single-part ETag | `fab1e003082949d5194bb964294041a3` |
+
+The live assertions all passed:
+
+1. `PutObject` with `IfNoneMatch: "*"` created the absent key.
+2. `HeadObject` returned the admitted length and SHA-256 metadata, and its
+   single-part ETag equalled the MD5 of the bytes sent.
+3. A fresh identical retry received the create-only conflict and was accepted
+   only after a full byte-exact read-back.
+4. A same-length, one-byte-different retry received the conflict and was
+   rejected as a conflicting immutable object.
+5. The unconditional cleanup deleted that exact key; a subsequent exact-prefix
+   listing returned zero objects.
+
+This closes the remote create-only, framing, ETag/content, and resume-conflict
+questions that the local real-botocore stand-in could not answer. It does not
+measure many-object throughput; that remains part of the resumed Europe
+Addresses finalize after marker fan-in is fixed.
