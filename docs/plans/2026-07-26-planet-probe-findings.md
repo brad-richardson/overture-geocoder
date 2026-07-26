@@ -932,6 +932,6 @@ These are not blockers for the active Places run:
 After the Address evidence reconciled, the already-authorized Places planet run
 `30226086949` was dispatched from main workflow SHA `40a7682`. Fail-closed
 admission passed for the same request with prior runner minutes 0 and projected
-the next phase at 60/40,000 minutes. The run created 54 map jobs at concurrency
+the next phase at 60/40,000 minutes. The run created 89 map jobs at concurrency
 4. Its remaining measured gates are the planet global head disk residual and
 Places R2 fleet throughput.

@@ -39,7 +39,7 @@ Address blocker; fix Places only if that active run produces a measured blocker.
 
 Planet run `30226086949` was admitted at main workflow SHA `40a7682` for the
 request above, with prior runner minutes 0 and the next-phase projection at
-60/40,000 minutes. It created 54 map jobs at concurrency 4. This is the active
+60/40,000 minutes. It created 89 map jobs at concurrency 4. This is the active
 execution; do not start a parallel construction workstream while it runs.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
