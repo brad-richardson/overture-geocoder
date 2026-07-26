@@ -92,23 +92,28 @@ Before a planet dispatch, run one live create-only object probe that verifies:
 Follow this sequence. Do not interleave hygiene, reverse implementation, or
 unrelated hardening.
 
-1. **Close PR #176 with one bounded verification.** Check only that the batched
-   COPY experiment supports the claim, the bounded filesystem accounting is
-   wired at the production call sites, and published bytes remain identical.
-   Merge when those claims and required CI are green.
+1. **Reconcile and close PR #176 with one bounded verification.** Its only
+   conflict after this state consolidation is documentation; keep this file as
+   the canonical current snapshot and retain #176's dated probe evidence. Check
+   only that the batched COPY experiment supports the claim, the bounded
+   filesystem accounting is wired at the production call sites, and published
+   bytes remain identical. Merge when those claims and required CI are green.
 2. **Re-run the preserved Europe Places head.** If it passes, record the
    measured peak and prepare the non-promoting planet request. If the remaining
    ~1% disk projection trips, fix only that measured cap/accounting mismatch and
    rerun.
-3. **Close PR #178 with one bounded verification.** Check only the real botocore
+3. **Reconcile and close PR #178 with one bounded verification.** Rebase it
+   after #176 because both touch the hosted workflow and publication path; keep
+   this file as the canonical current snapshot. Check only the real botocore
    non-empty upload path, pool draining/bounds, and the Places publication byte
    bound. Merge when those claims and required CI are green.
-4. **Implement compact or streaming address markers.** Keep this PR limited to
+4. **Run the live one-object R2 probe.** It is cheap and can falsify the remote
+   create-only/checksum assumptions before more build work depends on them.
+5. **Implement compact or streaming address markers.** Keep this PR limited to
    making the marker fan-in fit and making its measurement trustworthy.
-5. **Resume the preserved Europe address reduce and finalize.** Measure the
+6. **Resume the preserved Europe address reduce and finalize.** Measure the
    reducer residency and aggregate publication behavior. Fix the next observed
    blocker only.
-6. **Run the live one-object R2 probe.**
 7. **Prepare the non-promoting planet workflow inputs.** Hand the exact
    confirmation string, projected cost, runner ceilings, and known residuals to
    the operator. The operator decides whether to dispatch.
