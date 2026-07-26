@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-26 after PR #182 and the successful preserved Europe
-Places and Addresses end-to-end completions.
+Last updated 2026-07-26 after the first successful non-promoting planet Address
+completion and the admitted Places planet dispatch.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -11,26 +11,36 @@ here.
 
 ## Current milestone
 
-Reach the first non-promoting planet-scale build attempt for both Places and
-Addresses by removing only the blockers that prevent the next measured
-execution rung.
+Complete the first non-promoting planet-scale build for both Places and
+Addresses by removing only blockers measured on the active execution rung.
 
-Do not dispatch a planet build from an agent session. The workflow confirmation
-encodes cost and runner limits and must be supplied by the operator.
+Do not dispatch a planet build without the exact operator-supplied workflow
+confirmation. The operator supplied authorization for request
+`88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`
+with max parallel 4 and a 40,000 runner-minute ceiling. Address completed under
+that authorization; Places run `30226086949` is now executing under the same
+request.
 
 ## Current snapshot
 
-The current construction-v1 code/evidence checkpoint on `main` is `94eae08`:
-PR #178's bounded R2 publisher, PR #181's live R2 probe, and PR #182's compact
-Address consumer projections.
+The current construction-v1 workflow checkpoint on `main` is `40a7682`: PR
+#178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
+consumer projections, and PR #183's authenticated same-request resume plus the
+missing plan contract artifact.
 There are no open construction-v1 code PRs.
 
-Both families have passed the preserved Europe execution rung through
-publication and marker-last completion. There is no remaining measured
-Europe-scale code blocker. Planet request preparation and explicit operator
-authorization are still required; agents must not dispatch the planet workflow.
+Both families passed the preserved Europe execution rung through publication
+and marker-last completion. Address has now also passed the hosted planet rung
+through marker-last R2 publication. Places planet run `30226086949` passed
+fail-closed admission and is in its map phase. There is no remaining measured
+Address blocker; fix Places only if that active run produces a measured blocker.
 
 ### Places
+
+Planet run `30226086949` was admitted at main workflow SHA `40a7682` for the
+request above, with prior runner minutes 0 and the next-phase projection at
+60/40,000 minutes. It created 54 map jobs at concurrency 4. This is the active
+execution; do not start a parallel construction workstream while it runs.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
 phases completed and head produced all 4,096 populated shards. The full head
@@ -60,6 +70,26 @@ positions, 2 manifests), wrote the marker last, and produced 20,568 local files
 41,130 staged reads / 42,060,324,048 bytes.
 
 ### Addresses
+
+The first execute run, `30207544725`, completed all 127 map tasks but exposed a
+workflow transport defect before useful reduce work: `cv1-plan` omitted
+`control/contract.json`. PR #183 added the contract and made a fresh dispatch
+resume from an authenticated prior plan ledger without changing the request
+hash or R2 staging namespace.
+
+Resume run `30215529919` then completed successfully in 17,441 seconds wall
+time. All 127 map markers were reused from immutable R2 staging, the compact
+plan emitted 117 reducer jobs, all 117 reducers passed, the Address head no-op
+passed, and finalize completed in 4,029 seconds. Finalize reconciled and verified
+10,931 objects (581 serving, 10,348 per-record positions, and two finalizer
+manifests) and wrote
+`construction-v1/86558218e2b67db0e0249abbee0c6d17650dea43467ed14c59789bc60c7bacb0/markers/finalize/addresses.json`
+last. The slice is immutable and non-promoting.
+
+The reducers hydrated 314,240,107,255 bytes (292.66 GiB) from staging across
+117 jobs; the largest job hydrated 6,519,238,407 bytes and peak staged-cache
+residency was 4,462,286,106 bytes. This closes the Address planet R2 fleet
+throughput and bounded-residency gates for this release.
 
 PR #182 removed full Address markers from every hosted consumer. The plan phase
 streams each full marker once and emits a query-only SQLite reduce projection
@@ -115,30 +145,28 @@ manual, main-only, one-object probe, and Actions run `30203859256` passed agains
 Remote create-only/checksum semantics are therefore closed. The two local
 Europe finalizers also proved bounded streaming and exact-set reconciliation at
 21.04 GB Places and 47.11 GB Addresses. R2 fleet throughput remains a planet-run
-measurement, not a reason for another unit/review loop.
+measurement for Places. Address measured it successfully in run `30215529919`:
+292.66 GiB of reducer hydration plus marker-last publication and whole-slice
+verification of 10,931 objects.
 
 ## Fastest path
 
-Follow this sequence. Europe execution, direct publication, and the live
-remote-semantics probe are complete.
+Follow this sequence. Address planet execution is complete and Places is active.
 
-1. **Prepare the non-promoting planet workflow inputs.** Re-run the committed
-   prediction/admission commands at `94eae08`; record the exact confirmation
-   string, family order, projected cost, runner ceilings, and Places head disk
-   residual.
-2. **Hand the run sheet to the operator.** The operator decides whether and when
-   to dispatch. Run one family at a time so failures and cost remain attributable.
-3. **Begin reverse R1 as the fast follow.** The per-record prerequisites are now
-   durably publication-proven for both families. Keep reverse implementation
-   separate from planet-forward execution and consume these existing artifacts.
+1. **Monitor Places run `30226086949` through all five phases.** Fix only a
+   measured blocker that prevents or invalidates that run, using fresh-dispatch
+   resume rather than GitHub's Re-run action.
+2. **Record the complete Places evidence.** Preserve map/reduce/head/finalize
+   timing, residency, R2 traffic, exact-set counts, and marker identity.
+3. **Begin reverse R1 as the fast follow.** Consume the already published
+   per-record artifacts; do not rerun either forward map.
 
 ## Open blockers and gates
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
-| Possible ~1% planet head disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet remains a projection | Planet preparation gate, then the authorized non-promoting run |
-| Planet R2 fleet throughput | Both | Live semantics pass; local Europe publication passes at 21.04 GB / 47.11 GB | Measure in the authorized non-promoting run |
-| Planet authorization and cost | Both | Europe rung complete; planet has not been dispatched | Exact run sheet and operator confirmation |
+| Possible ~1% planet head disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet run `30226086949` is active | Active run's global head |
+| Planet R2 fleet throughput | Places | Live semantics and Europe publication pass; Address planet passed | Active run's reduce/finalize phases |
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful
@@ -161,6 +189,9 @@ Europe execution. Do not reopen them without contradictory measured evidence.
 - Europe Addresses completes projected plan plus all 204 reduce partitions and
   finalize under merged `94eae08`: 2,672 exact-set members, 47.11 GB including
   marker, reconciles true, marker written last.
+- Planet Addresses completes under request `88b7f...32614`: 127 reused maps,
+  117 reducers, 10,931 verified exact-set members, reconciles true, marker
+  written last.
 - Both families emit and durably publish per-record artifacts needed by a later
   spatial reverse index.
 - Finalize verifies an exact publication set and has a projected remote
@@ -258,6 +289,23 @@ These remain useful but do not block the next measured milestone:
 - a narrower staging-only R2 credential;
 - cleanup of dead evidence-spec hard-cap declarations;
 - request-count and storage-cost optimizations;
+- skip checkout/dependency cleanup/Rust build before a durable map-marker reuse
+  check (the resumed Address map command took five seconds, while 127 complete
+  jobs consumed 296 runner-minutes);
+- build the pinned Rust binaries once per workflow and distribute an
+  architecture-specific artifact rather than rebuilding them in every map and
+  reduce job;
+- reduce Address job fan-out after a bounded probe of the existing
+  `max_reduce_jobs` knob: 117 jobs hydrated 292.66 GiB and had a median total
+  duration of only 255 seconds, leaving substantial per-job timeout headroom;
+- make the runner-minute ledger include setup/build, plan, head, and finalize.
+  The successful resume's GitHub job durations sum to about 917 runner-minutes,
+  while its ledger appended 613; this did not threaten the 40,000-minute
+  authorization but is not complete accounting;
+- profile whether finalize's two staged hydrations per published input can share
+  a verified digest without weakening whole-slice read-back. Address hydrated
+  21,858 staged objects for 10,929 staged exact-set inputs and still completed
+  within its projection;
 - general review findings that do not corrupt output or prevent the next probe;
 - reverse implementation beyond R0 while the forward long pole is open.
 

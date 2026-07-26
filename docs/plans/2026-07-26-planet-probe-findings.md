@@ -825,3 +825,113 @@ measured Europe-scale code blocker. The next forward action is a planet run
 sheet—fresh prediction/admission output, exact confirmation, cost and runner
 ceilings, family order, and the Places head residual—followed by an explicit
 operator decision. Agents must not dispatch it themselves.
+
+## I. First hosted planet Address completion
+
+The operator supplied the exact execute confirmation for request
+`88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`,
+max parallel 4, and a 40,000 runner-minute ceiling. Both runs below used the
+request-pinned producer `63b7f71398eb4f50cfbe937314eb2abc6cb342bd` and a
+non-promoting, request-derived R2 namespace.
+
+### I1. The first execute measured one workflow transport defect
+
+Run `30207544725` completed all 127 Address map tasks and the stable plan, then
+every reducer failed before data work because the downloaded `cv1-plan`
+artifact did not contain `control/contract.json`. The plan artifact did contain
+the authenticated ledger, compact projections, and plan. It recorded 451
+consumed runner-minutes for the same request and family.
+
+PR #183 (`40a7682`) fixed only that measured boundary:
+
+- `cv1-plan` now carries `control/contract.json`;
+- a fresh dispatch can resume from either a final ledger or an exact-name
+  `cv1-plan` artifact;
+- admission verifies the prior ledger's request and family before carrying its
+  consumed total forward; and
+- the request hash remains unchanged, so the immutable R2 staging prefix and
+  completed map outputs remain reusable.
+
+### I2. Resume run `30215529919` completed
+
+The fresh dispatch admitted the same request and family, carried forward exactly
+451 runner-minutes, and completed in 17,441 seconds wall time:
+
+| stage | result | measured duration |
+|---|---:|---:|
+| admission | passed | 26 s |
+| map | 127/127 reused, no failure | 83–267 s/job; median 142 s |
+| plan | 117 reducer jobs | 537 s |
+| reduce | 117/117, no failure | 83–662 s/job; median 255 s; p90 385 s |
+| Address head | expected no-op, passed | 30 s |
+| finalize | passed | 4,029 s |
+
+Map task 0 proved the resume behavior directly:
+`already-completed=true marker_republished=true elapsed=5s`. The job still
+performed checkout, dependency setup, disk cleanup, and a release Rust build
+before that five-second check.
+
+Reducer transport and residency were bounded:
+
+| reducer measurement | planet result |
+|---|---:|
+| staging bytes hydrated, all jobs | **314,240,107,255 B (292.66 GiB)** |
+| largest job hydration | **6,519,238,407 B** |
+| largest staged-cache residency | **4,462,286,106 B** |
+| total GitHub job duration | **544 runner-minutes** |
+
+Finalize then hydrated 21,858 staged objects, reconciled the exact set, verified
+the published binding, and wrote the marker last:
+
+| Address publication | result |
+|---|---:|
+| serving objects | **581** |
+| per-record position objects | **10,348** |
+| finalizer manifests | **2** |
+| verified objects | **10,931** |
+| reconciles | **true** |
+| completion marker | `construction-v1/86558218e2b67db0e0249abbee0c6d17650dea43467ed14c59789bc60c7bacb0/markers/finalize/addresses.json` |
+
+This is the first complete hosted, non-promoting planet Address build. It closes
+the planet Address marker fan-in, selective reducer transport, R2 fleet
+throughput, bounded finalization, exact-set verification, and marker-last gates
+for this release.
+
+### I3. Measured follow-ups, deferred until both planet families complete
+
+These are not blockers for the active Places run:
+
+1. **Check durable map markers before expensive setup/build.** The resume map
+   command took five seconds, but 127 complete jobs consumed 296 runner-minutes
+   because the check follows setup, disk cleanup, and compilation.
+2. **Build the pinned Rust binaries once per architecture.** Maps and reducers
+   rebuild the same release binaries on every fresh runner. A verified workflow
+   artifact would remove repeated compilation while preserving the
+   request-pinned producer.
+3. **Use fewer, larger Address reducer jobs.** The existing `max_reduce_jobs`
+   knob can lower fan-out without loosening caps. The 117-job run hydrated
+   292.66 GiB while the median total job duration was only 255 seconds, leaving
+   substantial room under the 90-minute reduce bound. A bounded probe near 60
+   jobs should measure the expected reduction in overlapping pack reads before
+   changing a default.
+4. **Make runner-minute accounting complete.** GitHub job durations for the
+   resumed run sum to about 917 runner-minutes, while its ledger appended 613.
+   The fragments time map/reduce command bodies, and plan, head, finalize, plus
+   setup/build are absent. The final ledger reports 1,064 only after adding the
+   prior ledger's 451. This did not approach the operator's 40,000-minute cap,
+   but it is not the whole runner cost a future tight authorization would need.
+5. **Profile finalization's deliberate second read.** The 10,929 staged
+   serving/position inputs were hydrated exactly twice (21,858 reads) before
+   10,931 objects including manifests were verified. The phase completed inside
+   its 48–208 minute projection. Any optimization must retain independent
+   whole-slice identity verification rather than merely removing the second
+   pass.
+
+### I4. Places dispatched
+
+After the Address evidence reconciled, the already-authorized Places planet run
+`30226086949` was dispatched from main workflow SHA `40a7682`. Fail-closed
+admission passed for the same request with prior runner minutes 0 and projected
+the next phase at 60/40,000 minutes. The run created 54 map jobs at concurrency
+4. Its remaining measured gates are the planet global head disk residual and
+Places R2 fleet throughput.
