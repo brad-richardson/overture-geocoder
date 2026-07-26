@@ -116,31 +116,43 @@ def _timeout_max_batch(per_partition_minutes: float, *, job_timeout: int, margin
 # What ONE published object costs finalize in remote operations. Read off the
 # publication primitives (scripts/construction_v1_remote.py), never guessed.
 #
-# FIRST attempt, 3 per object + 3 for the slice:
+# FIRST attempt, 3 per object + 2 for the slice + the listing:
 #
-#   publish_exact_set        put_create_only + the per-upload HEAD   2 per object
+#   publish_exact_set        create-only put + the per-upload HEAD   2 per object
 #   verify_whole_slice_once  one streaming read per final object     1 per object
-#   fixed                    marker put, marker HEAD, one listing    3 per slice
+#   fixed                    marker put, marker HEAD                 2 per slice
+#   listing                  one request per LISTING PAGE            see below
 #
 # RETRY -- a resumed finalize over an already-published prefix -- costs 4 per
-# object + 4, and that is the number the budget must carry. `put_create_only`
-# still charges its attempt, then raises `ConflictError`, and the byte-exactness
-# check on the conflict path (`_stream_identity`) charges a second READ of the
-# object that is already there. Same for the marker. Resuming is not an exotic
-# path: create-only publication exists precisely so an interrupted finalize can be
-# re-run, so pricing only the first attempt would let the gate pass a run whose
-# RETRY aborts inside `Budget.charge` -- exactly the failure this gate removes.
+# object + 3 + the listing, and that is the number the budget must carry. The
+# create-only put still charges its attempt, then raises `ConflictError`, and the
+# byte-exactness check on the conflict path (`_stream_identity`) charges a second
+# READ of the object that is already there. Same for the marker. Resuming is not an
+# exotic path: create-only publication exists precisely so an interrupted finalize
+# can be re-run, so pricing only the first attempt would let the gate pass a run
+# whose RETRY aborts inside `Budget.charge` -- exactly the failure this gate
+# removes.
 #
-# The two-phase publish from PR #170 (admit every identity, THEN upload) changes
-# when a member's bytes are resident, not how many operations it costs, so this
-# arithmetic holds on either side of it.
+# THE LISTING IS PAGINATED, and this used to be priced as a single operation.
+# `verify_whole_slice_once` makes one exact-prefix listing, but a listing of N
+# objects is `ceil(N / LIST_PAGE_KEYS)` billed requests -- 66 of them for a planet
+# address slice, not one. The fixed terms below therefore dropped by one each and
+# the page count is added separately by `finalize_remote_operations`. It moved when
+# the real R2 backend arrived, because that is when "one listing" stopped being a
+# reasonable fiction: `FilesystemRemote` now prices the same pages so the tests
+# that pin these constants against the primitives pin the cost R2 actually charges.
+#
+# The two-phase publish from PR #170 (admit every identity, THEN upload) and the
+# bounded upload pool that replaced the shell mirror both change WHEN a member's
+# bytes move, not how many operations it costs, so this arithmetic holds across
+# both.
 # tests/test_construction_v1_publication_budget.py pins every number here against
 # the real primitives, on both a first pass and a retry, so a change to the
 # publication shape breaks a test rather than a planet run at object 33,000.
 FINALIZE_OPERATIONS_PER_OBJECT = 3
-FINALIZE_FIXED_OPERATIONS = 3
+FINALIZE_FIXED_OPERATIONS = 2
 FINALIZE_RETRY_OPERATIONS_PER_OBJECT = 4
-FINALIZE_RETRY_FIXED_OPERATIONS = 4
+FINALIZE_RETRY_FIXED_OPERATIONS = 3
 # The two manifests finalize writes itself (family-manifest, slice-manifest) and
 # publishes in the same exact set as everything else.
 FINALIZE_MANIFEST_OBJECTS = 2
@@ -169,6 +181,11 @@ PLACES = _load("construction_v1_hosted_places", "scripts/places_construction_v1.
 REMOTE = _load("construction_v1_hosted_remote", "scripts/construction_v1_remote.py")
 CONTROL = _load("construction_v1_hosted_control", "scripts/construction_v1_control.py")
 STAGING = _load("construction_v1_hosted_staging", "scripts/construction_staging_v1.py")
+
+# Objects per listing page, taken from the publication primitives rather than
+# re-typed, so the projection and the backend can never disagree about what one
+# exact-prefix listing costs. See FINALIZE_FIXED_OPERATIONS above.
+FINALIZE_LISTING_PAGE_KEYS = REMOTE.LIST_PAGE_KEYS
 
 FAMILIES = ("addresses", "places")
 
@@ -627,6 +644,42 @@ def _required_remote_operation_cap(contract: dict[str, Any]) -> int:
     return value
 
 
+def _publication_remote(args: argparse.Namespace, budget: Any) -> Any:
+    """The create-only publication target: a local tree, or R2 itself.
+
+    Exactly one of the two, and never a default. `--remote-root` is a filesystem
+    tree (the slice harness and every test publish there, credential-free);
+    `--remote-bucket` plus `--remote-endpoint-url` publishes STRAIGHT into R2
+    through the persistent-client store.
+
+    Publishing straight to R2 is what removed the two blockers this phase had. It
+    used to write the whole slice into a local `--remote-root publish` tree and
+    then a shell step mirrored that tree object by object with two `aws s3api`
+    invocations each -- 12.4 hours of process startup for a planet address slice
+    against a 360-minute timeout, and ~100-145 GB of local disk against a 25 GB
+    floor, so the address family could not land at all.
+    """
+    root = getattr(args, "remote_root", None)
+    bucket = getattr(args, "remote_bucket", None)
+    endpoint_url = getattr(args, "remote_endpoint_url", None)
+    if root and (bucket or endpoint_url):
+        raise SystemExit(
+            "finalize takes EITHER --remote-root (a local publication tree) OR "
+            "--remote-bucket plus --remote-endpoint-url (publish directly to R2), "
+            "not both; refusing to guess which one is the real publication target"
+        )
+    if root:
+        return REMOTE.FilesystemRemote(Path(root), budget)
+    if not bucket or not endpoint_url:
+        raise SystemExit(
+            "finalize needs a publication target: --remote-root for a local tree, "
+            "or --remote-bucket with --remote-endpoint-url to publish to R2"
+        )
+    return REMOTE.VerifiedStoreRemote(
+        STAGING.R2.s3_object_store(bucket, endpoint_url), budget
+    )
+
+
 def _remote_marker_completed(remote_root: str, key: str, contract: dict[str, Any]) -> bool:
     """Read-only HEAD of a durable create-only marker in the remote store.
 
@@ -954,9 +1007,14 @@ def finalize_remote_operations(objects: int, *, retried: bool = True) -> int:
     identity read on top of the first attempt's put + HEAD + verify stream. Pass
     ``retried=False`` only to state the first-attempt cost (the tests do, to pin
     both against the real primitives).
+
+    The last term is the exact-prefix listing, priced by PAGE. It is one call and
+    was priced as one operation, which is wrong for any slice over
+    ``FINALIZE_LISTING_PAGE_KEYS`` objects -- i.e. for every planet slice.
     """
+    count = _budget_integer(objects, what="published object count")
     return (
-        _budget_integer(objects, what="published object count")
+        count
         * (
             FINALIZE_RETRY_OPERATIONS_PER_OBJECT
             if retried
@@ -967,6 +1025,7 @@ def finalize_remote_operations(objects: int, *, retried: bool = True) -> int:
             if retried
             else FINALIZE_FIXED_OPERATIONS
         )
+        + REMOTE.listing_operations(count)
     )
 
 
@@ -1047,6 +1106,8 @@ def _finalize_publication_projection(
         "published_objects": objects,
         "operations_per_object": FINALIZE_RETRY_OPERATIONS_PER_OBJECT,
         "fixed_operations": FINALIZE_RETRY_FIXED_OPERATIONS,
+        # The exact-prefix listing, priced by page rather than as one request.
+        "listing_operations": REMOTE.listing_operations(objects),
         "first_attempt_remote_operations": finalize_remote_operations(
             objects, retried=False
         ),
@@ -1097,7 +1158,9 @@ def _gate_finalize_publication(
             f"{projection['per_record_objects']} per-record + "
             f"{projection['manifest_objects']} manifests) at "
             f"{FINALIZE_RETRY_OPERATIONS_PER_OBJECT} operations each plus "
-            f"{FINALIZE_RETRY_FIXED_OPERATIONS} fixed on a RESUMED finalize "
+            f"{FINALIZE_RETRY_FIXED_OPERATIONS} fixed and "
+            f"{projection['listing_operations']} listing page(s) on a RESUMED "
+            f"finalize "
             f"({projection['first_attempt_remote_operations']} on a first "
             f"attempt), from {projection['basis']}. "
             "Failing closed HERE, before reduce is provisioned, rather than "
@@ -2074,6 +2137,9 @@ def _positions_objects(
 def cmd_finalize(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args, request_sha256=contract["request_sha256"])
+    # Read for one reason: the largest object this contract admits, which is what
+    # bounds how many workers can be resident at once against the job's disk floor.
+    limits = _limits_for(contract, args.family)
     plan = read_json(args.plan)
     reductions = [read_json(path) for path in sorted(Path(args.reductions_dir).glob("*.json"))]
     if not reductions:
@@ -2198,15 +2264,15 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         max_write_bytes=int(contract["caps"].get("max_remote_write_bytes", 1_000_000_000_000)),
         max_read_bytes=int(contract["caps"].get("max_remote_write_bytes", 1_000_000_000_000)),
     )
-    remote = REMOTE.FilesystemRemote(Path(args.remote_root), budget)
-    # Every published object is hydrated ONE AT A TIME and evicted as soon as the
-    # publisher is done reading it, rather than assembling a list of paths -- which
-    # hydrated the whole published set onto this runner before the first upload.
-    # That is 13-18 GB at planet scale (a ~10-11 GB head payload plus 3.3-6.7 GB of
-    # positions packs, before the routed lane), on the last job of a multi-hour run.
-    # This is the same defect the plan phase carried (#167): batching that hydrates
-    # eagerly is not batching. `release` exists only on the staged store, so a
-    # local-only run evicts nothing -- there the local directory IS the store.
+    remote = _publication_remote(args, budget)
+    # Every published object is hydrated one at a time PER WORKER and evicted as soon
+    # as that worker is done reading it, rather than assembling a list of paths --
+    # which hydrated the whole published set onto this runner before the first upload.
+    # That is 13-18 GB at planet scale for places and ~100-145 GB for addresses, on
+    # the last job of a multi-hour run. This is the same defect the plan phase carried
+    # (#167): batching that hydrates eagerly is not batching. `release` exists only on
+    # the staged store, so a local-only run evicts nothing -- there the local
+    # directory IS the store.
     release = getattr(store, "release", None)
 
     def member(published_key: str, store_key: str) -> Any:
@@ -2262,6 +2328,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         completes before the publisher writes a byte -- which is the property that
         makes it a gate and not a report.
         """
+        if actual["bytes"] > max_publication_object_bytes:
+            raise SystemExit(
+                f"refusing to publish {source}: {actual['bytes']} bytes exceeds the "
+                f"single-object publication cap {max_publication_object_bytes}"
+            )
         if source in manifests:
             # The only non-content-addressed members, and both were written from
             # memory a few lines above.
@@ -2292,6 +2363,22 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             )
 
     marker_key = f"{contract['namespaces']['markers'].rstrip('/')}/finalize/{args.family}.json"
+    # DERIVED from the disk floor and the largest object this contract admits, not the
+    # module ceiling: local-disk peak is `concurrency` x the largest resident object, so
+    # the two are only jointly safe. At the address family's 2 GiB `max_serving_bytes`,
+    # 16 workers would be 32 GiB against a 25.6 GB floor. `publication_concurrency`
+    # resolves it from the CONTRACT's limits, which is the value that actually governs
+    # this run rather than the default someone read once.
+    # Addresses declares a serving-specific cap. Places applies `max_output_bytes`
+    # to its emitted artifacts. The direct R2 backend has the narrower single-PUT cap,
+    # so take the minimum and enforce it during admission above for EVERY member,
+    # including finalize's own manifests. Do not pass None for a family with no
+    # serving-specific cap: the old fallback silently meant 16 x unknown residency.
+    max_publication_object_bytes = min(
+        getattr(limits, "max_serving_bytes", limits.max_output_bytes),
+        REMOTE.SINGLE_PUT_MAX_BYTES,
+    )
+    concurrency = REMOTE.publication_concurrency(max_publication_object_bytes)
     marker = REMOTE.publish_exact_set(
         remote,
         artifacts=exact_set,
@@ -2299,6 +2386,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         request_sha256=request_sha256,
         fail_after_upload=args.fail_after_upload,
         verify=verify_identity,
+        concurrency=concurrency,
     )
     # The admitted set IS the expected set: `publish_exact_set` computed each
     # identity by streaming the same file it uploaded, and `verify_identity` gated
@@ -2307,7 +2395,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     # the marker outlive the upload loop.
     expected = marker["artifacts"]
     verification = REMOTE.verify_whole_slice_once(
-        remote, prefix=f"{slice_root}/families/{args.family}/", expected=expected
+        remote,
+        prefix=f"{slice_root}/families/{args.family}/",
+        expected=expected,
+        # Same bound: the streaming fallback (a resume) holds an object per worker.
+        concurrency=concurrency,
     )
     result = {
         "family": args.family,
@@ -2528,7 +2620,18 @@ def build_parser() -> argparse.ArgumentParser:
                            "instead of expiring with the 7-day artifact retention. "
                            "REQUIRED for every family in PER_RECORD_ARTIFACTS, which is "
                            "both of them (places positions, address records).")
-    final.add_argument("--remote-root", required=True)
+    # Publication target: a local tree OR R2 directly. `_publication_remote` refuses
+    # both and refuses neither, so this is not a permissive default -- argparse just
+    # cannot express "exactly one of one flag and a pair".
+    final.add_argument("--remote-root", default=None,
+                      help="Publish into this local directory tree (credential-free; "
+                           "the slice harness and the tests use it).")
+    final.add_argument("--remote-bucket", default=None,
+                      help="Publish the exact set straight into this R2 bucket, "
+                           "create-only, marker last. Requires "
+                           "--remote-endpoint-url and excludes --remote-root.")
+    final.add_argument("--remote-endpoint-url", default=None,
+                      help="R2 S3-compatible endpoint URL for --remote-bucket.")
     final.add_argument("--work-root", required=True)
     final.add_argument("--fail-after-upload", type=int, default=None)
     final.add_argument("--output", type=Path, required=True)

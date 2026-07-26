@@ -15,3 +15,29 @@ psutil==7.2.2 \
 unicodedata2==17.0.0 \
     --hash=sha256:50036b14ac5c53b607b0b98c67e0dfab5b1029e03735a7c2a0db6e563e0b0375 \
     --hash=sha256:95443d08ef6e6daf8d749f187d16c6ed90ab8bb47ad6f2fb616517fad0e6d5bf
+# The S3/R2 client construction-v1 publishes and hydrates through
+# (scripts/r2_verified_store.py Boto3Store). It is here rather than left to the
+# `aws` CLI because `aws` v2 costs 0.339 s of CPU per invocation before it does
+# any work -- measured, ten runs of `aws --version`: wall 3.39 s, user 3.11 s +
+# sys 0.28 s. Finalize makes two calls per published object, so a planet address
+# slice at 65,751 objects is 131,502 invocations = 12.4 hours serial and still
+# ~3.1 hours at a 4-vCPU ceiling, against a 360-minute job timeout. That was the
+# top blocker for a planet dispatch.
+#
+# Every wheel below is `py3-none-any`, so these hashes are platform- and
+# interpreter-independent -- unlike numpy's above, which is why a local venv on
+# 3.12 has to skip --require-hashes while hosted runners on 3.11.14 do not.
+boto3==1.43.56 \
+    --hash=sha256:feb699d4ab241ef5c1b80bb58277be2aaad365cd4b672d7817e0bc59ee45131b
+botocore==1.43.56 \
+    --hash=sha256:aafc741f1b10f6fd63253eaf6ea029680c1ff436d87e1b8969d62aefa0c76976
+jmespath==1.1.0 \
+    --hash=sha256:a5663118de4908c91729bea0acadca56526eb2698e83de10cd116ae0f4e97c64
+python-dateutil==2.9.0.post0 \
+    --hash=sha256:a8b2bc7bffae282281c8140a97d3aa9c14da0b136dfe83f850eea9a5f7470427
+s3transfer==0.19.2 \
+    --hash=sha256:d8168eccca828cbb2cd573675333f3bddd254313a9c42494b84c76b539e8ba25
+six==1.17.0 \
+    --hash=sha256:4721f391ed90541fddacab5acf947aa0d3dc7d27b2e1e8eda2be8970586c3274
+urllib3==2.7.0 \
+    --hash=sha256:9fb4c81ebbb1ce9531cce37674bbc6f1360472bc18ca9a553ede278ef7276897

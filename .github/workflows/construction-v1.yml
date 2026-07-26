@@ -104,7 +104,20 @@ env:
   MAP_PHASE_ESTIMATE_MINUTES: "60"
   REDUCE_PHASE_ESTIMATE_MINUTES: "90"
   HEAD_PHASE_ESTIMATE_MINUTES: "90"
-  FINALIZE_PHASE_ESTIMATE_MINUTES: "120"
+  # The PESSIMISTIC end of the projected finalize phase, not the middle. `ledger-check`
+  # is a fail-closed COST gate: it refuses to start the phase when prior + projected
+  # runner-minutes exceed the confirmed cap. Under-projecting therefore fails OPEN --
+  # it lets a run begin a phase it cannot afford -- so given a range and no
+  # measurement, the conservative input is the top of the range. Over-projecting can
+  # only refuse a dispatch, never admit a bad one.
+  #
+  # 210 covers the projected address finalize (~48-208 min: round trips 10-31 min,
+  # bytes 38-177 min over three passes of a 100-145 GB slice), which is the expensive
+  # family. Places projects to ~12-43 min. Both sit under the job's own
+  # `timeout-minutes: 360`. PROJECTED, not measured -- replace with the first real
+  # dispatch's figure. A RESUMED address finalize can approach the timeout (it adds two
+  # full GETs of every object); see the follow-ups doc.
+  FINALIZE_PHASE_ESTIMATE_MINUTES: "210"
 
 jobs:
   admit:
@@ -865,20 +878,23 @@ jobs:
         with:
           name: cv1-plan
           path: cv1plan
-      - name: Fan in reduce minutes, gate, finalize locally, verify the whole slice once
+      - name: Fan in reduce minutes, gate, publish the exact set to R2, verify the whole slice once
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
           # Finalize hydrates the exact published set by key from the run-scoped
-          # staging prefix (serving objects, head shards, per-record packs) and
-          # verifies each against the digest in its key before mirroring it.
+          # staging prefix (serving objects, head shards, per-record packs), verifies
+          # each against the digest in its key, and publishes it straight to R2.
           R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
         run: |
           set -euo pipefail
-          # Finalize hydrates the whole published set (routed shards, head shards,
-          # per-record packs) and then mirrors it, so it holds two copies of the
-          # slice at once. Same free-disk floor as every other phase.
+          # Finalize no longer materialises the slice locally. It streams each object
+          # from staging to R2 and evicts it, so peak local disk is
+          # PUBLISH_CONCURRENCY (16) x the largest single object -- ~2-3 GB at the
+          # planet address shape, not the ~100-145 GB whole-slice `publish/` tree
+          # that made the address family unable to land here at all. The floor is kept
+          # unchanged as headroom for the work root and the runner image.
           test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
           for FRAG in red/phase/ledger-fragment-*.json; do
             [ -f "$FRAG" ] || continue
@@ -888,22 +904,28 @@ jobs:
           done
           python scripts/construction_v1_hosted.py ledger-check \
             --ledger cv1plan/control/ledger.json --next-phase-minutes "$FINALIZE_PHASE_ESTIMATE_MINUTES"
-          mkdir -p final-work publish store
+          mkdir -p final-work store
           HEAD_ARG=""
           if [ "$FAMILY_KEY" = places ]; then HEAD_ARG="--head headdl/head/head.json"; fi
           # --store-root is an EMPTY local cache. Every object in the published set
           # is named by key in the reductions, head result and map markers, and is
           # hydrated from the run-scoped R2 staging prefix and verified against the
-          # digest in its key. --remote-root is the LOCAL publish tree the next step
-          # mirrors to R2; it is deliberately not called "staging" any more, because
-          # `staging/` now means the R2 intermediate prefix.
+          # digest in its key. --remote-bucket is the PUBLICATION target: the exact
+          # set goes straight into R2, create-only, marker last, with the whole-slice
+          # read-back in the same process. There is no local publish tree and no
+          # shell mirror step any more -- that mirror was a serial `find | while
+          # read` loop at two aws-cli invocations per object, 0.339 s of CPU startup
+          # each, i.e. 12.4 h for a planet address slice against this job's
+          # 360-minute timeout. Its conflict fallback also accepted a pre-existing
+          # object on EXISTENCE alone; the Python path compares bytes.
           python scripts/construction_v1_hosted.py finalize \
             --contract cv1plan/control/contract.json --store-root store \
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
             --family "$FAMILY_KEY" --plan cv1plan/plan/plan.json --reductions-dir red/reductions \
             --markers-dir cv1plan/mapdl/markers \
-            $HEAD_ARG --remote-root publish --work-root final-work --output final-work/result.json
-          echo "FINALIZE local staging complete: $(jq -c '{objects,reconciles,marker_key,serving_objects,positions_objects,staged_objects_hydrated}' final-work/result.json)"
+            $HEAD_ARG --remote-bucket "$R2_BUCKET" --remote-endpoint-url "$R2_ENDPOINT" \
+            --work-root final-work --output final-work/result.json
+          echo "FINALIZE publication complete: $(jq -c '{objects,reconciles,marker_key,serving_objects,positions_objects,staged_objects_hydrated}' final-work/result.json)"
           # A published slice with no SERVING payload is the defect this gate
           # exists for: places reductions record `routed_object`, not `artifact`,
           # so finalize used to drop every .plrv while `objects`, `reconciles` and
@@ -933,9 +955,11 @@ jobs:
           # run finishes. Finalize used to build its exact set out of
           # `store.path(...)` calls, so every published object was hydrated onto this
           # runner before the first upload and NOTHING was released anywhere in the
-          # phase -- 13-18 GB at planet scale (a ~10-11 GB head payload plus 3.3-6.7
-          # GB of positions packs), on the last job of a multi-hour run. It now
-          # hydrates, verifies, uploads and evicts one object at a time.
+          # phase -- 13-18 GB at planet scale for places and ~100-145 GB for
+          # addresses, on the last job of a multi-hour run. It now hydrates, verifies,
+          # publishes and evicts one object at a time PER WORKER, so the bound is
+          # PUBLISH_CONCURRENCY objects rather than one -- still a constant, and still
+          # nothing like the set.
           #
           # Three keys, each covering a different way the bound can silently go:
           #   hydrated  > 0 -- finalize really read its inputs from R2 staging. Its
@@ -944,7 +968,7 @@ jobs:
           #   released  > 0 -- it EVICTED them. Hydrating and never releasing is
           #                    precisely the old behaviour, and it is invisible in
           #                    every other number here.
-          #   peak < hydrated -- the assertable form of "one object at a time".
+          #   peak < hydrated -- the assertable form of "a bounded number at a time".
           #                    Eager hydration makes peak == hydrated exactly.
           #
           # FAIL CLOSED on a missing or non-numeric key: `| numbers` yields empty for
@@ -963,33 +987,32 @@ jobs:
             echo "peak == hydrated with nothing released is eager hydration, which OOMs the planet finalize job." >&2
             exit 1
           }
-      - name: Mirror the exact staged slice to R2 create-only, marker written last
-        env:
-          R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
-          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
-        run: |
-          set -euo pipefail
-          MARKER_KEY="$(jq -r '.marker_key' final-work/result.json)"
-          # Upload every non-marker object create-only (If-None-Match '*'),
-          # HEAD-verify, then the completion marker LAST.
-          find publish -type f ! -path "publish/${MARKER_KEY}" | sort | while read -r FILE; do
-            KEY="${FILE#publish/}"
-            aws s3api put-object --bucket "$R2_BUCKET" --key "$KEY" --body "$FILE" \
-              --if-none-match '*' --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null \
-              || aws s3api head-object --bucket "$R2_BUCKET" --key "$KEY" \
-                   --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
-            aws s3api head-object --bucket "$R2_BUCKET" --key "$KEY" \
-              --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
-          done
-          aws s3api put-object --bucket "$R2_BUCKET" --key "$MARKER_KEY" \
-            --body "publish/${MARKER_KEY}" --if-none-match '*' \
-            --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null \
-            || aws s3api head-object --bucket "$R2_BUCKET" --key "$MARKER_KEY" \
-                 --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
-          aws s3api head-object --bucket "$R2_BUCKET" --key "$MARKER_KEY" \
-            --endpoint-url "$R2_ENDPOINT" --region auto >/dev/null
-          echo "R2 create-only mirror complete; marker written last: $MARKER_KEY"
+          # The publication itself, asserted from the SAME result file rather than by a
+          # second pass over R2: `objects` and `bytes` are what `verify_whole_slice_once`
+          # listed and verified against the bucket, and `binding_sha256` is a digest
+          # over those per-object identities.
+          #
+          # Deliberately NOT `marker_written_last`: that key is a hardcoded `True`
+          # literal in `cmd_finalize`, so asserting it asserts a constant. It reads
+          # like a check and is worth nothing, which is the same permissive-shape
+          # problem as a `// 0` default. `binding_sha256` is DERIVED from the
+          # verification, so it exists only if the verification ran.
+          #
+          # `| numbers` / `| strings` for the same fail-closed reason as above: a
+          # missing or wrong-typed key must exit non-zero rather than default to
+          # something that passes.
+          jq -e '
+            (.objects | numbers) > 0
+            and (.bytes | numbers) > 0
+            and ((.verification.binding_sha256 | strings) | test("^[0-9a-f]{64}$"))
+            and (.verification.objects | numbers) == (.objects | numbers)
+          ' final-work/result.json >/dev/null || {
+            echo "Finalize did not publish and verify a non-empty slice to R2." >&2
+            jq -c '{objects,bytes,verification}' final-work/result.json >&2 \
+              || echo "(no verification evidence in final-work/result.json)" >&2
+            exit 1
+          }
+          echo "R2 create-only publication complete; marker written last: $(jq -r '.marker_key' final-work/result.json)"
       - name: Publish the final ledger for future resume accounting
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
