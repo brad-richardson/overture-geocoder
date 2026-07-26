@@ -20,6 +20,28 @@ Europe-scale local stress runs with their resume commands, and a table of every
 figure corrected so far. Read it alongside this file; where they disagree it is
 newer.
 
+**Both Europe runs have since executed to a hard failure, and the addendum to
+that file records them.** Headlines, because they change what to work on next:
+
+- **Places passed 4 of 5 phases** at 43.9% of the planet and breached no RAM
+  limit, no disk floor and no timeout anywhere. Head dies in the 4,096-way
+  `COPY ... PARTITION_BY`, and the cause is **shard count, not row count** —
+  batching it at 256 completes at an 8x smaller memory limit than the one that
+  fails unbatched. `DEFAULT_HEAD_SHARD_BITS` stays at 12: the encoder cap is a
+  floor on shard count, and serving fetch granularity is what sets it.
+- **BLOCKER B is what stopped the addresses run**, in `run-reduce`, on the
+  watchdog's first observation **0.95 ms in** — `_load_markers` (13.45 GB) runs
+  OUTSIDE the guarded region, so all 102 jobs die before doing any work. Marker
+  size is a function of **countries, not rows**, and the planet marker set is
+  **29 GB = 1.8x a 16 GB runner**, worse than the 23.94 GB previously recorded.
+- **BLOCKER C sits behind BLOCKER B and cannot be measured until B is fixed**, so
+  the "A+C first, then B" ordering in the follow-ups doc is wrong.
+- Two production defects found by execution: `StageWatchdog.__exit__` **discards
+  the diagnosis** that names the breached knob, and the reducer-cap gate is
+  compared against its own default so **`predict-reduce` accepts 242 jobs and
+  reports the cap gate as passing**. The claim elsewhere that it refuses 242 is
+  false.
+
 ## DISPATCH READINESS: NEITHER FAMILY IS READY (2026-07-25, still true 2026-07-26)
 
 Read this before believing anything below about how close a planet dispatch is.
