@@ -1,0 +1,186 @@
+name: R2 Publication Probe
+
+# Live, one-object proof for construction-v1's direct publication backend.
+# This is intentionally manual and main-only: it exercises the real R2 half of
+# the contract that a local S3 stand-in cannot settle, then removes the exact
+# run-unique key in an unconditional cleanup step.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: r2-publication-probe
+  cancel-in-progress: false
+
+env:
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+  R2_BUCKET: geocoder-shards
+  R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+  PROBE_KEY: construction-v1/probes/r2-publication/${{ github.run_id }}-${{ github.run_attempt }}.bin
+
+jobs:
+  probe:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out the merged publication backend
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Prove create-only publication and byte-exact conflicts
+        run: |
+          python - <<'PY'
+          import argparse
+          import hashlib
+          import os
+          import tempfile
+          from pathlib import Path
+
+          from scripts import construction_v1_hosted as hosted
+
+          remote_module = hosted.REMOTE
+          key = os.environ["PROBE_KEY"]
+          endpoint = os.environ["R2_ENDPOINT"]
+          bucket = os.environ["R2_BUCKET"]
+
+          def publication_remote():
+              budget = remote_module.Budget(
+                  max_operations=32,
+                  max_write_bytes=16 * 1024 * 1024,
+                  max_read_bytes=16 * 1024 * 1024,
+              )
+              args = argparse.Namespace(
+                  remote_root=None,
+                  remote_bucket=bucket,
+                  remote_endpoint_url=endpoint,
+              )
+              return hosted._publication_remote(args, budget)
+
+          def identity(path):
+              return {"key": key, **remote_module.file_identity(path)}
+
+          def create_only_or_compare(remote, path, expected):
+              with path.open("rb") as source:
+                  try:
+                      remote.put_create_only_stream(
+                          key,
+                          source,
+                          size=expected["bytes"],
+                          sha256=expected["sha256"],
+                      )
+                  except remote_module.ConflictError:
+                      stored = remote_module._stream_identity(remote, key)
+                      if stored != {
+                          "bytes": expected["bytes"],
+                          "sha256": expected["sha256"],
+                      }:
+                          raise RuntimeError(f"conflicting immutable object: {key}")
+                      return "identical-conflict-accepted"
+              return "created"
+
+          with tempfile.TemporaryDirectory() as directory:
+              root = Path(directory)
+              original = root / "original.bin"
+              # Non-empty and larger than one streaming chunk, with an uneven tail.
+              original.write_bytes(
+                  b"construction-v1-r2-publication-probe\n"
+                  + bytes(range(251)) * 4_200
+              )
+              expected = identity(original)
+
+              first = publication_remote()
+              assert create_only_or_compare(first, original, expected) == "created"
+              assert first.head(key) == {
+                  "bytes": expected["bytes"],
+                  "sha256": expected["sha256"],
+              }
+
+              # This calls Boto3Store.head_proof: the content_md5 comes from R2's
+              # single-part ETag, while sha256_metadata is the client-recorded identity.
+              proof = first.store.head_proof(key)
+              assert proof == {
+                  "bytes": expected["bytes"],
+                  "content_md5": hashlib.md5(
+                      original.read_bytes(), usedforsecurity=False
+                  ).hexdigest(),
+                  "sha256_metadata": expected["sha256"],
+              }
+
+              # A fresh process has no remembered sent digest. Its create-only PUT
+              # must 412, then the exact read-back must accept identical bytes.
+              resumed = publication_remote()
+              assert (
+                  create_only_or_compare(resumed, original, expected)
+                  == "identical-conflict-accepted"
+              )
+
+              # Same key and same length, different bytes: existence alone is not
+              # success. This must take the conflict path and reject the stored body.
+              different = root / "different.bin"
+              payload = bytearray(original.read_bytes())
+              payload[len(payload) // 2] ^= 0xFF
+              different.write_bytes(payload)
+              try:
+                  create_only_or_compare(
+                      publication_remote(), different, identity(different)
+                  )
+              except RuntimeError as error:
+                  assert "conflicting immutable object" in str(error)
+              else:
+                  raise AssertionError("different bytes were accepted under an existing key")
+
+              with Path(os.environ["GITHUB_STEP_SUMMARY"]).open("a") as summary:
+                  summary.write("## Live R2 publication proof\n\n")
+                  summary.write(f"- Key: `{key}`\n")
+                  summary.write(f"- Bytes: {expected['bytes']}\n")
+                  summary.write(f"- SHA-256: `{expected['sha256']}`\n")
+                  summary.write(f"- R2 ETag/content MD5: `{proof['content_md5']}`\n")
+                  summary.write("- Initial create: passed\n")
+                  summary.write("- Identical conflict accepted byte-exactly: passed\n")
+                  summary.write("- Different same-length conflict rejected: passed\n")
+          PY
+
+      - name: Delete the exact probe key and prove absence
+        if: always()
+        run: |
+          set -euo pipefail
+          REMAINING=unknown
+          for ATTEMPT in 1 2 3; do
+            aws s3api delete-object \
+              --bucket "$R2_BUCKET" \
+              --key "$PROBE_KEY" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --region auto
+            REMAINING="$(aws s3api list-objects-v2 \
+              --bucket "$R2_BUCKET" \
+              --prefix "$PROBE_KEY" \
+              --max-keys 1 \
+              --query 'KeyCount' \
+              --output text \
+              --endpoint-url "$R2_ENDPOINT" \
+              --region auto)"
+            if [ "$REMAINING" = "0" ]; then
+              echo "Deleted and verified absent: $PROBE_KEY"
+              exit 0
+            fi
+            sleep $(( ATTEMPT * 2 ))
+          done
+          echo "::error::Cleanup left an object at the exact probe key $PROBE_KEY"
+          exit 1
