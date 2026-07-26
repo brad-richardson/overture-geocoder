@@ -178,10 +178,26 @@ def test_both_slices_prove_the_r2_staging_transport_credential_free():
         "(.reduce_staged_bytes_hydrated | numbers)" in value
     )
     assert "test_reduce_partition_releases_packs_and_bounds_peak_resident" in value
-    # Head hydration is measured, not bounded (one read_parquet over every
-    # candidate pack), so the figure must at least be produced.
     assert "(.head_staged_bytes_hydrated | numbers) > 0" in value
     assert "(.head_staged_bytes_hydrated | numbers) == 0" in value  # no address head
+    # The HEAD tripwire, the same defect one phase later than reduce's and with the
+    # same shape: `build_sharded_global_head_from_markers` built
+    # `[store.path(k) for k in candidates]` eagerly, so every map task's candidate
+    # pack was hydrated before DuckDB read the first one and none was ever released.
+    # It is `> 0` rather than `peak < total` for the same reason as reduce: this
+    # slice's head fan-in is a SINGLE pack. The strict multi-task bound lives in
+    # tests/test_places_construction_v1.py; the workflow comment says so.
+    assert "(.head_staged_objects_released | numbers) > 0" in value
+    assert (
+        "(.head_staged_peak_resident_bytes | numbers) <= "
+        "(.head_staged_bytes_hydrated | numbers)" in value
+    )
+    assert (
+        "test_head_merge_releases_candidate_packs_and_bounds_peak_resident" in value
+    )
+    # Addresses have no head phase, so BOTH head keys are asserted at zero there --
+    # not skipped. A head phase silently hydrating on the address path would fail.
+    assert "(.head_staged_objects_released | numbers) == 0" in value
 
     # EVERY staging comparison is `| numbers`-guarded, because a bare one is not
     # fail-closed: jq orders null below numbers (so a MISSING peak satisfies

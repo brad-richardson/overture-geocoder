@@ -6,6 +6,7 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import os
 import sys
 import tempfile
 import time
@@ -365,7 +366,96 @@ class Limits:
     # the single knob that bounds reduce input independently of data shape.
     shuffle_bucket_bits: int = SHUFFLE_BUCKET_BITS
     head_result_cap: int = 10
-    max_head_candidate_rows: int = 5_000_000
+    # Fan-in of ONE head tree-merge stage, deliberately NOT `max_fan_in_tasks`.
+    #
+    # These were the same value and that made the tree-merge a no-op. The head
+    # phase fans in EVERY map marker at once, so `max_fan_in_tasks` must stay at
+    # or above the planet task count (128 >= 89 at HOSTED_LIMITS) for the marker
+    # gate to pass -- and `_tree_merge_head_candidates` was called with that same
+    # 128, so `range(0, 89, 128)` produced ONE group, one stage, and the design's
+    # "bounded fan-in stages replace the single 5M-row-capped merge"
+    # (docs/plans/2026-07-24-places-global-scale-plan.md) never engaged at planet
+    # scale. The merge wants a SMALLER fan-in than the marker gate; that is why
+    # this is its own knob.
+    #
+    # 8, from the disk arithmetic. 89 planet map tasks
+    # (benchmarks/places-construction-v1-data/inventory/places.json
+    # map_plan.task_count) fold 89 -> 12 -> 2 -> 1: THREE stages. Candidate packs
+    # measure 106.4 bytes/candidate row (Monaco: 7,347,178 bytes / 69,069 rows),
+    # and the planet candidate set is 59.7-120M rows (MEASURED off Europe; see
+    # `max_head_candidate_rows`), so a mean pack is 71-143 MB and the dense CJK tasks
+    # (86/87, ~2x the term fan-out of any other task) put the worst pack near 286 MB.
+    # Only `head_merge_fan_in` packs are resident at once, so the candidate cache is
+    # 8 x 286 MB = 2.29 GB. Europe measured 856 MB over 36 tasks, 27.7% of its 3.09 GB
+    # total hydrated -- within a point of the 27.1% cache share the 12-task fixture gave.
+    #
+    # State the WHOLE bound, not just this term. The merge's peak is
+    # `fan_in x pack` (cache) PLUS two adjacent tree levels, and the tree term
+    # dominates: measured on a real 12-task fixture the cache is 27.1% of the
+    # merge peak and the tree levels are 73%. At planet scale the merge's own
+    # transient peak is ~16-19 GB, i.e. 60-74% of a 24 GiB `max_scratch_bytes` --
+    # NOT the "10.7%, leaving ~21 GiB" an earlier revision of this comment
+    # claimed off the cache term alone. That number was wrong by ~3x and it was
+    # the number a candidate-row cap raise got justified on; see
+    # docs/plans/2026-07-24-construction-v1-follow-ups.md item 12.
+    #
+    # Why not 16 (2 stages, 5.1 GB cache) or 4 (4 stages, 1.28 GB)? Each extra
+    # stage rewrites the whole merged head once more, so depth is the wall-clock
+    # cost and fan-in is the disk cost. 8 halves 16's cache for one extra pass.
+    head_merge_fan_in: int = 8
+    # How many head shards ONE `COPY ... PARTITION_BY` pass may open at a time.
+    #
+    # THE mechanism, measured on a Europe-scale run (43.9% of the planet, 36 map tasks)
+    # rather than projected: `PARTITION_BY` holds per-partition write buffers as
+    # UN-EVICTABLE allocations, so the cost is driven by the SHARD COUNT and not by the
+    # row count. That run refused deterministically (3/3) ~4.6 s in with
+    # `could not allocate block of size 256.0 KiB (7.4 GiB/7.4 GiB used)` at
+    # 14,026,510 rows on a 1.75 GB input -- 4.7x FEWER rows than the earlier projection
+    # assumed -- having written 0 bytes, 0 shard directories and 0 files, and having
+    # spilled 0 bytes with `temp_directory` set. A refusal before the first flush, which
+    # is exactly why raising `memory_limit` buys nothing on a 16 GB runner and why the
+    # spill never engages. 7.4 GiB / 4,096 partitions is about 1.94 MB pinned per open
+    # partition writer.
+    #
+    # So the knob that matters is concurrently-open partitions. 256 gives 4,096 / 256 =
+    # 16 passes at ~0.5 GB of pinned buffer, comfortably under the 8 GB
+    # `duckdb_memory_limit` even with the merge's residency still in the pool (that run
+    # entered the COPY at 8.088 GB RSS). Passes read a pre-sharded intermediate and
+    # never re-derive the shard, so the Python hash UDF is still paid exactly once.
+    head_shard_copy_batch: int = 256
+    # Head candidate admission, checked in TWO places: per map task in `map_task`
+    # (that task's `head-candidates.parquet`) and globally in
+    # `build_sharded_global_head_from_markers` (the sum over every task). They are
+    # SEPARATE caps because they bound different things, 33x apart.
+    #
+    # A planet task holds 74.2M/89 = 834k places. Europe measured 0.8045 candidate rows
+    # per admitted place -- which REFUTES the 1.809 the Monaco slice suggested, and with
+    # it the 134.3M Monaco-linear planet figure -- so a mean planet task is ~671k
+    # candidate rows. The Europe object set excludes the CJK tasks, which roughly double
+    # term fan-out, so the worst task is ~1.34M and a pessimistic upper end is ~2.7M.
+    # 6,000,000 is 2.2x that upper end while staying 33x below the global cap, so it
+    # remains a real guard on a single pathological task rather than a restatement of
+    # the global one. It also bounds the head phase's candidate cache, which is
+    # `head_merge_fan_in` packs: 6M rows x 106.4 B/row x 8 = 5.1 GB worst case.
+    max_task_head_candidate_rows: int = 6_000_000
+    # GLOBAL head-merge admission, and the last cap standing between this pipeline and
+    # a planet head run.
+    #
+    # RAISED from 5,000,000, which does not admit a planet head at all: Europe's
+    # candidate set measured 26,168,687 rows for 43.9% of the planet -- 5.2x that cap --
+    # so main would have refused that run at admission. Scaling Europe's measured
+    # 0.8045 candidate rows/place over 74.2M planet places gives a measured FLOOR of
+    # ~59.7M rows; the CJK tasks Europe excludes put a plausible upper end near ~120M.
+    # 200,000,000 is 1.67x that upper end and 3.35x the floor.
+    #
+    # The raise is ordered AFTER `head_shard_copy_batch`, deliberately and in that
+    # order: raising the cap is what lets a run reach the sharding region, so the region
+    # has to be bounded first. It was held back for exactly that reason until the Europe
+    # run showed the failure it would expose is CHEAP -- 37 s, deterministic, 0 bytes
+    # written, no ENOSPC and no disk pressure -- and that the post-merge disk region
+    # priced at 44.2 GB against a 25.6 GB floor is unreachable, because the phase dies
+    # on that region's first statement. Memory was the binding constraint, not disk.
+    max_head_candidate_rows: int = 200_000_000
     require_bound_projection: bool = False
 
     def validate(self) -> None:
@@ -387,6 +477,9 @@ class Limits:
                     self.adaptive_subdivision_depth,
                     self.maximum_serving_candidates,
                     self.head_result_cap,
+                    self.head_merge_fan_in,
+                    self.head_shard_copy_batch,
+                    self.max_task_head_candidate_rows,
                     self.max_head_candidate_rows,
                     self.shuffle_bucket_bits,
                 )
@@ -394,6 +487,19 @@ class Limits:
             or self.wall_seconds <= 0
         ):
             raise ValueError("Places construction limits must be positive")
+        # A fan-in of 1 never reduces the candidate list, so the tree-merge loop
+        # would spin forever; `_tree_merge_head_candidates` also refuses it, and
+        # this catches the same misconfiguration at admission instead of mid-phase.
+        if self.head_merge_fan_in < 2:
+            raise ValueError("Places head merge fan-in must be at least 2")
+        # The global cap admits the SUM over every task, so a global cap below the
+        # per-task cap is unsatisfiable for any run whose largest task is admitted:
+        # the task would pass its own check and then be refused by the merge.
+        if self.max_head_candidate_rows < self.max_task_head_candidate_rows:
+            raise ValueError(
+                "Places global head candidate cap is below the per-task cap, so a "
+                "task this build admits could never be merged"
+            )
 
 
 def marker_key(task_id: str) -> str:
@@ -898,6 +1004,10 @@ def map_task(
         connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{spill}'")
+        connection.execute(
+            f"SET max_temp_directory_size='"
+            f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+        )
         ingestion = ingest(connection, transformed, "terms")
         # Staged deletion (2/4): the term IPC stream is dead once DuckDB has
         # ingested it into the `terms` table. Drop it before any pack export so
@@ -920,9 +1030,21 @@ def map_task(
             f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2, PRESERVE_ORDER true)"
         )
         head_candidate_rows = pq.ParquetFile(head_candidates_path).metadata.num_rows
-        if head_candidate_rows > limits.max_head_candidate_rows:
+        # The PER-TASK cap, not the global merge cap: one constant serving both sites
+        # forced one value to bound two things 33x apart in scale. This one bounds a
+        # single task's pack -- and therefore the head phase's per-pack hydration, which
+        # is `head_merge_fan_in` of these at once -- while `max_head_candidate_rows`
+        # bounds the sum the merge admits.
+        if head_candidate_rows > limits.max_task_head_candidate_rows:
             connection.close()
-            raise ValueError("Places task head candidates exceed row cap")
+            raise ValueError(
+                f"Places task head candidates ({head_candidate_rows} rows) exceed "
+                f"max_task_head_candidate_rows "
+                f"({limits.max_task_head_candidate_rows}); a task this large means "
+                "either a token universe far above the measured planet shape or a map "
+                "plan with too few tasks -- split the task rather than raising the "
+                "cap, because the head phase hydrates whole packs"
+            )
         # Combiner. reduce_partition only ever serves the top
         # `maximum_serving_candidates` rows per (partition_cell, token); every
         # row below that rank is carried across the whole pipeline and then
@@ -1253,6 +1375,10 @@ def adaptive_genesis_plan(
         connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{workspace}'")
+        connection.execute(
+            f"SET max_temp_directory_size='"
+            f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+        )
         byte_expression = _term_bytes_sql()
         for start in range(0, len(packs), limits.max_fan_in_packs):
             batch = packs[start : start + limits.max_fan_in_packs]
@@ -1471,6 +1597,10 @@ def _reduce_connection(workspace: Path, limits: Limits) -> Any:
     connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
     connection.execute(f"SET threads={limits.duckdb_threads}")
     connection.execute(f"SET temp_directory='{spill}'")
+    connection.execute(
+        f"SET max_temp_directory_size='"
+        f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+    )
     return connection
 
 
@@ -2207,6 +2337,10 @@ def build_global_head_from_markers(
         connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{workspace}'")
+        connection.execute(
+            f"SET max_temp_directory_size='"
+            f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+        )
         arrow = workspace / "head.arrow"
         output_rows = A.write_arrow_query(
             connection,
@@ -2364,28 +2498,181 @@ def _independent_merged_head_binding(merged_path: Path) -> dict[str, Any]:
 
 def _tree_merge_head_candidates(
     connection: Any,
-    candidate_paths: list[Path],
+    candidates: list[dict[str, Any]],
+    store: Any,
     workspace: Path,
     result_cap: int,
     fan_in: int,
+    check_resident: Any = None,
 ) -> Path:
-    """Reduce per-task head candidates to one merged parquet via log-depth stages."""
+    """Reduce per-task head candidates to one merged parquet via log-depth stages.
+
+    Candidate pack bodies are hydrated ONE STAGE-GROUP AT A TIME and released as
+    soon as that group's stage output exists, and each stage's inputs are unlinked
+    once its output is written. Both halves are required for the bound to be real:
+
+    * Releasing alone is what the plan phase does, and it works there because the
+      plan phase batches into a DuckDB TABLE -- the evicted bytes are replaced by
+      bounded in-database state. This phase batches into intermediate PARQUET files
+      on the SAME disk, so releasing a pack while its stage output survives just
+      moves the bytes; without the unlink the workspace grows monotonically with
+      the whole candidate set and the bound is illusory.
+    * Unlinking alone leaves every candidate pack resident, which is the defect:
+      `candidate_paths = [store.path(...) for ...]` hydrated all 89 planet packs
+      before DuckDB read the first one, and `head_staged_bytes_hydrated ==
+      head_staged_peak_resident_bytes` exactly (7,347,178 both, Monaco).
+
+    Resulting peak, stated explicitly and covering BOTH halves:
+
+        peak local head bytes <= fan_in x (largest candidate pack)     [cache]
+                               + |level k| + |level k+1|              [tree]
+
+    where level sizes are non-increasing, because a top-`result_cap`-per-token
+    merge can only shrink its input. The first term is what `check_resident`
+    enforces per fetch and what `staged_peak_resident_bytes` measures; the second
+    is workspace scratch, which the caller's `StageWatchdog` enforces over the
+    workspace AND the hydrated cache together. Nothing here bounds the sharded COPY
+    output or the per-shard encodes that follow; those are the caller's.
+
+    `release` is present only on the staged store. A local-only store has no such
+    method and must never be evicted, because there the local directory IS the map
+    output -- so the `getattr` guard is the whole idiom, not defensive style
+    (construction_staging_v1.py:265-296).
+    """
     if fan_in < 2:
         raise ValueError("head tree-merge fan-in must be at least 2")
+    if not candidates:
+        raise ValueError("head tree-merge received no candidates")
+    release = getattr(store, "release", None)
+    keys = [item["object"]["key"] for item in candidates]
     stage = 0
-    current = list(candidate_paths)
+    # Stage 0 reads STORE objects; every later stage reads workspace parquets. The
+    # two differ in how their inputs are disposed of -- release vs unlink -- which
+    # is why the first pass is written out rather than folded into the loop.
+    current: list[Path] = []
+    for group in range(0, len(keys), fan_in):
+        chunk = keys[group : group + fan_in]
+        paths = []
+        for key in chunk:
+            paths.append(store.path(key))
+            # Per FETCH, not per group: the point is to abort with a diagnosis
+            # before the disk fills, and hydration is the only thing growing it.
+            if check_resident is not None:
+                check_resident("hydrating head candidate packs")
+        merged = workspace / f"merge-s0-g{group // fan_in:04d}.parquet"
+        _head_merge_stage(connection, paths, merged, result_cap)
+        current.append(merged)
+        # The group's rows are now in `merged`, so these pack bodies are dead
+        # weight on the runner. Content-addressed and still in staging, so a later
+        # `path()` would re-fetch and re-verify them against the digest in the key.
+        if release is not None:
+            for key in chunk:
+                release(key)
+    # A single candidate still goes through stage 0. The old code returned the
+    # store path itself, which meant the one-task shape (every slice run, and any
+    # small caller) held its candidate pack resident through the shard COPY, the
+    # per-shard encodes and the pure-Python binding pass -- the expensive part --
+    # and released nothing at all. One extra top-N pass over an already top-N set
+    # is a no-op on the row set and on HEAD_ORDER, so the merged bytes are
+    # unchanged; what changes is that no staged pack survives the merge.
     while len(current) > 1:
+        stage += 1
         outputs: list[Path] = []
         for group in range(0, len(current), fan_in):
-            chunk = current[group : group + fan_in]
+            chunk_paths = current[group : group + fan_in]
             merged = workspace / f"merge-s{stage}-g{group // fan_in:04d}.parquet"
-            _head_merge_stage(connection, chunk, merged, result_cap)
+            _head_merge_stage(connection, chunk_paths, merged, result_cap)
             outputs.append(merged)
+            # Unlink THIS group's inputs now rather than the whole level after the
+            # level completes: the level being consumed shrinks as the level being
+            # produced grows, which is what keeps the tree term at
+            # |level k| + |level k+1| instead of the sum over all levels.
+            for spent in chunk_paths:
+                spent.unlink()
         current = outputs
-        stage += 1
-    if not current:
-        raise ValueError("head tree-merge received no candidates")
     return current[0]
+
+
+def _write_head_shards(
+    connection: Any,
+    merged: Path,
+    workspace: Path,
+    *,
+    shard_bits: int,
+    batch: int,
+    check_disk: Any = None,
+) -> tuple[Path, dict[int, list[Path]]]:
+    """Partition the merged head into per-shard parquets in BOUNDED COPY passes.
+
+    Replaces one `COPY ... PARTITION_BY (__shard)` over every shard, which is
+    unbounded in RAM and OOMs rather than spilling: DuckDB's partitioned writer
+    holds a write buffer per OPEN partition and does not spill it, so at 4,096
+    shards the single COPY raised `OutOfMemoryException` WITH `temp_directory` set.
+    See `Limits.head_shard_copy_batch` for the measured growth curve.
+
+    Two properties make the batching cheap and safe:
+
+    * the shard id is derived ONCE, into a pre-sharded intermediate. `head_shard` is
+      a per-row Python UDF that serializes on the GIL (25.71 s/1M rows), so filtering
+      `WHERE head_shard(token) BETWEEN ...` per pass would pay it once per pass. The
+      passes read the materialized `__shard` column instead.
+    * each pass writes into its OWN directory. Shard ranges are disjoint, so no pass
+      can touch another's output -- disjointness is structural rather than a property
+      of `APPEND`/`OVERWRITE_OR_IGNORE` semantics, and the file names stay the
+      deterministic `data_0.parquet` (with `APPEND` DuckDB names them by UUID).
+
+    What batching does NOT change is the shard ROW SETS: verified identical to the
+    single-COPY output shard by shard. The parquet CONTAINER bytes can differ on a
+    few shards (writer nondeterminism), which is immaterial -- these are workspace
+    intermediates, and each shard's `.plhd` is encoded from its rows under an
+    explicit `ORDER BY HEAD_ORDER`, so the PUBLISHED bytes are unaffected.
+
+    Returns the pre-sharded intermediate (the caller unlinks it once the shard-count
+    guard and the independent binding have read it) and shard id -> parquet files.
+    """
+    if batch < 1:
+        raise ValueError("head shard COPY batch must be at least 1")
+    shard_count = 1 << shard_bits
+    options = (
+        "FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, PARQUET_VERSION V2"
+    )
+    # Pass 1: derive `__shard` once. Row ORDER is irrelevant downstream (each shard's
+    # arrow is built with an explicit ORDER BY, the binding digest is additive and the
+    # guard is a GROUP BY), but PRESERVE_ORDER keeps this intermediate deterministic
+    # for the same cost, since the input is a single already-ordered file.
+    pre_sharded = workspace / "pre-sharded.parquet"
+    connection.execute(
+        f"COPY (SELECT *, head_shard(token) AS __shard FROM read_parquet('{merged}')) "
+        f"TO '{pre_sharded}' ({options}, PRESERVE_ORDER true)"
+    )
+    if check_disk is not None:
+        check_disk("deriving head shard ids")
+    shard_root = workspace / "shards"
+    shard_root.mkdir()
+    for index, low in enumerate(range(0, shard_count, batch)):
+        high = min(low + batch, shard_count) - 1
+        connection.execute(
+            f"COPY (SELECT * FROM read_parquet('{pre_sharded}') WHERE __shard "
+            f"BETWEEN {low} AND {high}) TO '{shard_root}/b{index:04d}' "
+            f"({options}, PARTITION_BY (__shard))"
+        )
+        if check_disk is not None:
+            check_disk(f"writing head shards {low}-{high}")
+    files: dict[int, list[Path]] = {}
+    for shard_path in sorted(shard_root.glob("b*/__shard=*")):
+        shard_id = int(shard_path.name.split("=", 1)[1])
+        if not 0 <= shard_id < shard_count:
+            raise ValueError("head shard id out of range")
+        found = sorted(shard_path.glob("*.parquet"))
+        if not found:
+            continue
+        if shard_id in files:
+            # Unreachable while the ranges are disjoint, which they are by
+            # construction -- asserted rather than assumed, because a shard split
+            # across two batch directories would be silently encoded twice.
+            raise ValueError(f"head shard {shard_id} written by two COPY passes")
+        files[shard_id] = found
+    return pre_sharded, files
 
 
 def build_sharded_global_head_from_markers(
@@ -2419,15 +2706,57 @@ def build_sharded_global_head_from_markers(
     shard count is a per-build manifest field, not a format constant -- as long as
     their token universe fits.
 
-    Scope of that guard, stated honestly: `limits.max_head_candidate_rows`
-    (5,000,000) is enforced above, BEFORE the tree merge, and the planet head
-    candidate set is ~65M rows. So a planet run today aborts cleanly at that
-    admission cap and never reaches this guard at all. The guard is load-bearing
-    once that cap is raised (tracked separately) -- and the shard_bits defect it
-    covers is real either way, because the cap says nothing about shard sizing.
+    Scope of that guard, stated honestly: `limits.max_head_candidate_rows` is enforced
+    above, BEFORE the tree merge. It was 5,000,000, which is 5.2x BELOW the measured
+    Europe candidate set alone, so a planet run aborted at admission and this guard was
+    unreachable. It is now 200,000,000, so both are load-bearing: the row cap admits the
+    measured planet candidate set and this guard is what fails a shard_bits too small for
+    the token universe that set produces. `shard_bits` itself stays at 12 -- the shard
+    count is set by SERVING FETCH SIZE (`lookup_head_shard` fetches the one shard a token
+    names, ~976 KB/shard at planet scale against ~62 MB at 6 bits), not by this cap.
+
+    What is bounded here, and how -- the WHOLE phase, not just the merge. An earlier
+    revision guarded the merge and declared everything after it out of scope; that
+    out-of-scope region measured 2.79x the guarded one (255,645,926 B against
+    91,648,680 B on a real 12-task run) because four full copies of the head payload
+    were live at once and none was released.
+
+    * the hydrated candidate CACHE is bounded at `head_merge_fan_in` packs by
+      `_tree_merge_head_candidates`;
+    * the tree intermediates are bounded at two adjacent levels by the
+      unlink-as-consumed discipline in the same function;
+    * `merged` is unlinked as soon as the pre-sharded intermediate exists, and the
+      pre-sharded intermediate as soon as the shard-count guard and the independent
+      binding have read it. Neither survives into the encode loop;
+    * each shard's parquets are unlinked once its `ordered` arrow is written, so the
+      shard set shrinks monotonically through the encode loop;
+    * an encoded shard exists ONCE on disk, not twice: the store copy is HARDLINKED
+      into the verifier's directory instead of being a second copy;
+    * `check_head_disk` measures workspace + hydrated cache against
+      `max_scratch_bytes` at every point either can grow -- per candidate fetch, per
+      shard COPY pass, and per encode -- and names which term blew the budget. The
+      merge additionally runs under a `StageWatchdog` over the same roots, which is
+      what also bounds RSS and wall time there.
+
+    `max_scratch_bytes` therefore governs workspace + cache for the whole phase (the
+    same scope change #171 made for address reduce, extended past the merge). It is
+    17 GiB against the head job's 25.6 GB free-disk floor: a cap ABOVE the floor --
+    24 GiB was 170 MB above it -- is a guard that provably cannot fire before ENOSPC.
+
+    Still NOT bounded here, stated so it is not mistaken for covered: DuckDB's own
+    RAM (`duckdb_memory_limit`), the Python RSS of `_independent_merged_head_binding`'s
+    token set, and the encoder subprocesses' RSS (bounded individually by
+    `run_bounded`, not in aggregate).
     """
     import duckdb
 
+    # The head path never validated its limits at all: only `map_task` and
+    # `adaptive_genesis_plan` called this, so every consistency rule `validate`
+    # enforces -- a merge fan-in of 1, a non-positive cap -- was unchecked on the one
+    # phase that reads `head_merge_fan_in` and `head_shard_copy_batch`. A hosted run
+    # reaches here through `_limits_for`, which builds `Limits(**filtered)` and
+    # silently drops unknown contract keys, so this is the only place it can be caught.
+    limits.validate()
     if not 1 <= shard_bits <= 24:
         raise ValueError("head shard bits out of range")
     if not markers or len(markers) > limits.max_fan_in_tasks:
@@ -2440,9 +2769,18 @@ def build_sharded_global_head_from_markers(
         raise ValueError("Places task head cap differs")
     input_rows = sum(item["records"] for item in candidates)
     if input_rows > limits.max_head_candidate_rows:
-        raise ValueError("Places merged head candidates exceed row cap")
+        raise ValueError(
+            f"Places merged head candidates ({input_rows} rows) exceed "
+            f"max_head_candidate_rows ({limits.max_head_candidate_rows})"
+        )
     shard_count = 1 << shard_bits
-    candidate_paths = [store.path(item["object"]["key"]) for item in candidates]
+    # NO eager `[store.path(k) for k in candidates]` here. That single line was the
+    # whole of follow-up 13: it hydrated every task's pack before DuckDB read the
+    # first one, so peak resident equalled total hydrated exactly and the planet
+    # figure was 7-14 GB of candidate packs on one runner, simultaneously with the
+    # tree intermediates, DuckDB temp, the shard parquets and the .plhd outputs,
+    # against a 25.6 GB free-disk floor. `_tree_merge_head_candidates` now hydrates
+    # `head_merge_fan_in` packs at a time and releases each one at its last use.
     scratch_root.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(
         prefix="places-head-sharded-", dir=scratch_root
@@ -2452,30 +2790,100 @@ def build_sharded_global_head_from_markers(
         connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{workspace}'")
+        connection.execute(
+            f"SET max_temp_directory_size='"
+            f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+        )
         connection.create_function(
             "head_shard",
             lambda token: head_shard_of(token, shard_bits),
             ["VARCHAR"],
             "BIGINT",
         )
-        merged = _tree_merge_head_candidates(
-            connection,
-            candidate_paths,
-            workspace,
-            limits.head_result_cap,
-            limits.max_fan_in_tasks,
+        # The hydrated cache is a scratch root, not just the workspace. On a
+        # local-only store the directory IS the map output, so counting it would fail
+        # a legitimate offline run against a cap it was never meant to bound;
+        # `release` exists only on `StagedObjectStore`, so it is the discriminator.
+        cache_roots = (
+            [Path(store.root)] if getattr(store, "release", None) is not None else []
         )
+        scratch_roots = [workspace, *cache_roots]
+
+        def check_head_disk(stage: str) -> None:
+            """Fail closed on workspace + hydrated cache against `max_scratch_bytes`.
+
+            Scoped to something that CAN fire. The predecessor compared the hydrated
+            cache ALONE against the whole cap, so at planet scale (a ~2.56 GB cache
+            against 17 GiB) it sat ~7x from ever firing -- which made the only message
+            naming `head_merge_fan_in` the one message that could not appear. What
+            actually approaches the cap is workspace + cache together, so that is what
+            is measured, and both terms are reported so the operator knows which one
+            blew the budget and therefore which knob to turn.
+
+            One `disk_bytes` sweep per call, at points where either term can GROW: per
+            candidate fetch, per shard COPY pass, per encode. It is not a polling loop
+            -- `run_bounded` already polls per encoder subprocess, and adding a second
+            poller over a multi-thousand-entry workspace is a cost the phase does not
+            need to pay twice.
+            """
+            cache = A.StageWatchdog.disk_bytes(cache_roots) if cache_roots else 0
+            total = A.StageWatchdog.disk_bytes([workspace]) + cache
+            if total > limits.max_scratch_bytes:
+                raise ValueError(
+                    f"Places head phase scratch ({total} bytes: workspace "
+                    f"{total - cache} + hydrated candidate cache {cache}) exceeds "
+                    f"max_scratch_bytes ({limits.max_scratch_bytes} bytes) while "
+                    f"{stage}. The cache term is head_merge_fan_in "
+                    f"({limits.head_merge_fan_in}) candidate packs; the workspace "
+                    f"term is the merged head plus the shard set at shard_bits="
+                    f"{shard_bits} ({shard_count} shards), written "
+                    f"{limits.head_shard_copy_batch} shards per COPY pass. Lower "
+                    "head_merge_fan_in, lower shard_bits, or raise max_scratch_bytes "
+                    "-- but note max_scratch_bytes above the job's free-disk floor "
+                    "makes this check unable to fire before ENOSPC."
+                )
+
+        # The merge additionally runs under a whole-stage watchdog, which is what
+        # bounds its RSS and wall time; `check_head_disk` is what bounds disk, there
+        # and everywhere after it.
+        with A.StageWatchdog(
+            scratch_roots,
+            A.Limits(
+                max_rss_bytes=limits.max_rss_bytes,
+                max_scratch_bytes=limits.max_scratch_bytes,
+                wall_seconds=limits.wall_seconds,
+            ),
+            connection,
+        ):
+            merged = _tree_merge_head_candidates(
+                connection,
+                candidates,
+                store,
+                workspace,
+                limits.head_result_cap,
+                limits.head_merge_fan_in,
+                check_head_disk,
+            )
         total_records, total_index_entries = connection.execute(
             f"SELECT count(*), count(DISTINCT token) FROM read_parquet('{merged}')"
         ).fetchone()
-        shard_dir = workspace / "shards"
         # PARTITION_BY encodes the shard in the path and omits it from the data
-        # files, so each shard parquet carries only the serving columns.
-        connection.execute(
-            f"COPY (SELECT *, head_shard(token) AS __shard FROM read_parquet('{merged}')) "
-            f"TO '{shard_dir}' (FORMAT PARQUET, PARTITION_BY (__shard), COMPRESSION ZSTD, "
-            f"COMPRESSION_LEVEL 6, PARQUET_VERSION V2)"
+        # files, so each shard parquet carries only the serving columns. The write is
+        # BATCHED over shard ranges, because one COPY over 4,096 partitions is
+        # unbounded in RAM and OOMs rather than spilling -- see `_write_head_shards`.
+        pre_sharded, shard_files = _write_head_shards(
+            connection,
+            merged,
+            workspace,
+            shard_bits=shard_bits,
+            batch=limits.head_shard_copy_batch,
+            check_disk=check_head_disk,
         )
+        shard_dir = workspace / "shards"
+        # `merged` is dead: `pre_sharded` carries the same rows plus `__shard`, and
+        # everything below reads that. Holding both was one of the four simultaneous
+        # copies of the head payload that made the post-merge region 2.79x the merge.
+        merged.unlink()
         # Fail-fast on the shard_bits precondition, EXACTLY and before any encode.
         # A head index key is the token alone, so a shard's index-entry count is
         # its distinct-token count -- the same number the Rust encoder counts and
@@ -2491,7 +2899,9 @@ def build_sharded_global_head_from_markers(
         #
         # Placed here, the guard precedes BOTH every encode and
         # `_independent_merged_head_binding` below, which is a pure-Python per-row
-        # loop measured at 7.84 us/record (6-8 min at planet scale).
+        # loop measured at 7.84 us/record (6-8 min at planet scale). That ordering is
+        # why `merged` cannot simply be digested before the COPY and dropped: doing so
+        # would pay those 6-8 minutes on a run this guard is about to fail.
         (worst_shard_entries,) = connection.execute(
             "SELECT coalesce(max(entries), 0) FROM ("
             "  SELECT count(DISTINCT token) AS entries FROM read_parquet("
@@ -2513,7 +2923,12 @@ def build_sharded_global_head_from_markers(
         # standalone Python re-encoder before sharding. The sharded verifier
         # reconciles the shard bytes against this, so a shard encoder that
         # consistently drops a token cannot pass (disclosed MAJOR closure).
-        merged_head_binding = _independent_merged_head_binding(merged)
+        #
+        # Read off `pre_sharded`, which is `merged` plus a `__shard` column. The
+        # binding reads an explicit column list and its digest is additive over rows,
+        # so the extra column and the row order are both immaterial -- and this is
+        # what lets `merged` be unlinked above instead of held for this pass.
+        merged_head_binding = _independent_merged_head_binding(pre_sharded)
         if (
             merged_head_binding["records"] != total_records
             or merged_head_binding["index_entries"] != total_index_entries
@@ -2521,6 +2936,10 @@ def build_sharded_global_head_from_markers(
             raise ValueError(
                 "Places independent merged-head binding disagrees with the merged head"
             )
+        # Last reader of the un-partitioned payload. From here the only copy of the
+        # head rows on disk is the shard set, which shrinks as the encode loop goes.
+        pre_sharded.unlink()
+        check_head_disk("entering the head shard encode loop")
         shard_entries: list[dict[str, Any]] = []
         sum_a = 0
         sum_b = 0
@@ -2537,13 +2956,20 @@ def build_sharded_global_head_from_markers(
         # manifest was unpublished; it is not, now that it is the routing table.
         verify_dir = workspace / "verify-shards"
         verify_dir.mkdir()
-        for shard_path in sorted(shard_dir.glob("__shard=*")):
-            shard_id = int(shard_path.name.split("=", 1)[1])
-            if not 0 <= shard_id < shard_count:
-                raise ValueError("head shard id out of range")
-            files = sorted(shard_path.glob("*.parquet"))
-            if not files:
-                continue
+        # Iterated in the LEXICOGRAPHIC order of the hive directory names -- 0, 1, 10,
+        # 11, ... 15, 2, 3 -- because that is the order `sorted(glob("__shard=*"))`
+        # produced, and the manifest's `shards` array is emitted in iteration order and
+        # is PUBLISHED. Sorting numerically here (which is what a dict of shard ids
+        # naturally gives) changes no shard's bytes and no digest, but it reorders that
+        # array and so changes the manifest object's own bytes -- verified: on the
+        # Monaco slice every one of the 16 `.plhd` objects and every non-`shards` field
+        # were identical, and only the array order and therefore the manifest digest
+        # moved. Numeric order is arguably the better routing table at 4,096 shards;
+        # making that change is a deliberate published-bytes change, not a side effect
+        # of bounding the phase's disk, so it is NOT taken here.
+        for shard_id, files in sorted(
+            shard_files.items(), key=lambda item: f"__shard={item[0]}"
+        ):
             ordered = workspace / f"shard-{shard_id:06d}.arrow"
             A.write_arrow_query(
                 connection,
@@ -2551,6 +2977,12 @@ def build_sharded_global_head_from_markers(
                 ordered,
                 65_536,
             )
+            # This shard's parquets are dead once its ordered arrow exists, and they
+            # are the term that used to keep the WHOLE shard set live through all
+            # 4,096 encodes. Unlinking here makes the shard set shrink monotonically
+            # across the loop instead of surviving to the end of the phase.
+            for spent in files:
+                spent.unlink()
             artifact = workspace / f"shard-{shard_id:06d}.plhd"
             sidecar = workspace / f"shard-{shard_id:06d}.digest.json"
             A.run_bounded(
@@ -2577,11 +3009,29 @@ def build_sharded_global_head_from_markers(
                 raise ValueError("Places head shard exceeds output cap")
             digest = json.loads(sidecar.read_text())
             stored = store.put_content(artifact, "serve/places-v1/head", ".plhd")
-            # `put_content` proved the store copy matches these bytes, so moving the
-            # encoder's own output under the object name loses nothing and gives the
-            # verifier a directory of shards named exactly as they are published.
+            # ONE copy of the shard bytes on disk, under TWO names.
+            #
+            # `put_content` COPIES bytes into the store, and this used to then MOVE the
+            # encoder's original into `verify_dir` -- so every encoded shard existed
+            # twice, by construction, and the verifier needs all of them at once. A
+            # hardlink gives the verifier a directory of shards named exactly as they
+            # are published while the bytes stay single. `put_content` already proved
+            # the store copy matches these bytes, so linking from it is not a weaker
+            # check than linking from the encoder's output.
+            #
+            # `disk_bytes` counts a hardlink under each name, so `check_head_disk` now
+            # OVER-counts these shards. That is the safe direction for a guard (it
+            # fires earlier, never later) and it is why the accounting is not adjusted.
+            #
+            # Cross-device or a filesystem without hardlinks falls back to the move,
+            # which is exactly the previous behaviour: correct, just not deduplicated.
             object_name = PurePosixPath(stored["key"]).name
-            artifact.replace(verify_dir / object_name)
+            try:
+                os.link(store.path(stored["key"]), verify_dir / object_name)
+            except OSError:
+                artifact.replace(verify_dir / object_name)
+            else:
+                artifact.unlink()
             shard_entries.append(
                 {
                     "shard_id": shard_id,
@@ -2600,6 +3050,13 @@ def build_sharded_global_head_from_markers(
             summed_records += digest["records"]
             summed_index_entries += digest["index_entries"]
             ordered.unlink()
+            sidecar.unlink()
+            # Per ENCODE, not per batch of them: this is the only point in the loop
+            # where the workspace grows (one arrow, one .plhd, one store copy), and
+            # the reviewer's reproduction of the unguarded shape died exactly here,
+            # inside this loop, with a bare `child scratch exceeded its hard cap` from
+            # `run_bounded` -- no phase, no knob, no diagnosis.
+            check_head_disk(f"encoding head shard {shard_id}")
         connection.close()
         if summed_records != total_records or summed_index_entries != total_index_entries:
             raise ValueError("Places head sharding dropped or duplicated rows")

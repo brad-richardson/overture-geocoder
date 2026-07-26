@@ -66,32 +66,78 @@ def sha256_file(path: Path) -> str:
     return A.sha256_file(path)
 
 
+def _declared_caps(
+    gates: dict, declared: dict[str, str], spec_name: str
+) -> dict[str, int]:
+    """Map `P.Limits` field -> spec-declared cap, failing closed on anything unusable.
+
+    Guessing a cap is worse than refusing to rehearse, so a missing, non-integer or
+    non-positive declaration raises. `bool` is an `int` in Python, and a spec that
+    declared `true` for a cap would otherwise become a cap of 1.
+    """
+    caps: dict[str, int] = {}
+    for name, key in declared.items():
+        value = gates.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ValueError(
+                f"evidence spec {spec_name} declares no usable {key} "
+                f"({name}); got {value!r}"
+            )
+        caps[name] = value
+    return caps
+
+
 def spec_partition_caps(spec_path: Path = EVIDENCE_SPEC) -> dict[str, int]:
     """The three partition hard caps the frozen evidence spec declares.
 
     Read rather than copied. These values used to be duplicated here as literals,
     which made the spec's declarations dead text that nothing checked -- and the
     rehearsal was free to drift away from the spec it claims conformance under.
-    Fail closed on a missing or non-integer cap: guessing a cap is worse than
-    refusing to rehearse.
     """
-    gates = json.loads(spec_path.read_text())["acceptance_gates"]["map_reduce"]
-    declared = {
-        "partition_term_rows": "partition_term_rows_hard_cap",
-        "partition_estimated_bytes": "partition_estimated_uncompressed_bytes_hard_cap",
-        "partition_distinct_tokens": "partition_distinct_tokens_hard_cap",
-    }
-    caps: dict[str, int] = {}
-    for name, key in declared.items():
-        value = gates.get(key)
-        # `bool` is an `int` in Python, and a spec that declared `true` for a cap
-        # would otherwise become a cap of 1 -- fail on it explicitly.
-        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-            raise ValueError(
-                f"evidence spec {spec_path.name} declares no usable {key} "
-                f"({name}); got {value!r}"
-            )
-        caps[name] = value
+    return _declared_caps(
+        json.loads(spec_path.read_text())["acceptance_gates"]["map_reduce"],
+        {
+            "partition_term_rows": "partition_term_rows_hard_cap",
+            "partition_estimated_bytes": "partition_estimated_uncompressed_bytes_hard_cap",
+            "partition_distinct_tokens": "partition_distinct_tokens_hard_cap",
+        },
+        spec_path.name,
+    )
+
+
+def spec_head_caps(spec_path: Path = EVIDENCE_SPEC) -> dict[str, int]:
+    """The head caps the frozen evidence spec declares, for the same reason.
+
+    `acceptance_gates.head.maximum_head_candidate_rows` (5,000,000) and
+    `maximum_merge_fan_in` (16) were satisfied only by coincidence: the rehearsal
+    inherited the 5,000,000 `P.Limits` default and the tree merge was called with
+    `max_fan_in_tasks`, which the rehearsal happened to set to 16. The second
+    coincidence is gone -- the hosted build now runs a merge fan-in of 8 through its
+    own knob -- so the rehearsal reads the spec's values rather than relying on
+    defaults it does not control.
+
+    KNOWN GAP, recorded rather than papered over: `maximum_merge_fan_in` is a
+    MAXIMUM, and reading it as the value to run means the rehearsal folds its 7 task
+    markers with a fan-in of 16, i.e. one group and one stage. So the rehearsal does
+    NOT exercise a multi-stage tree, which is the thing the hosted build changed.
+    Making it do so means choosing a fan-in below the task count, and any such choice
+    changes the rehearsal's run set -- a spec v3 decision, since v2's relaxation
+    policy is "none". Tracked as a follow-up; the multi-stage coverage lives in
+    tests/test_places_construction_v1.py meanwhile.
+    """
+    caps = _declared_caps(
+        json.loads(spec_path.read_text())["acceptance_gates"]["head"],
+        {
+            "max_head_candidate_rows": "maximum_head_candidate_rows",
+            "head_merge_fan_in": "maximum_merge_fan_in",
+        },
+        spec_path.name,
+    )
+    # The spec declares ONE candidate-row cap and the code now has two enforcement
+    # sites, so the spec's value is applied to both -- which is exactly what the single
+    # shared constant used to do, leaving the rehearsal's behaviour unchanged while the
+    # hosted build runs 6,000,000 / 200,000,000.
+    caps["max_task_head_candidate_rows"] = caps["max_head_candidate_rows"]
     return caps
 
 
@@ -527,6 +573,10 @@ def run_rehearse(args: argparse.Namespace) -> None:
         # re-run, not an edit here -- see
         # docs/plans/2026-07-24-construction-v1-follow-ups.md.
         **spec_partition_caps(),
+        # The head caps the same spec declares, read for the same reason. The hosted
+        # build runs a merge fan-in of 8; spec v2 froze 16, and its relaxation policy
+        # is "none". See spec_head_caps for the coverage gap that leaves.
+        **spec_head_caps(),
         adaptive_subdivision_depth=8,
         head_result_cap=10,
     )

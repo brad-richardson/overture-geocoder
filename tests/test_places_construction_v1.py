@@ -3,6 +3,8 @@ from __future__ import annotations
 import collections
 import json
 import importlib.util
+import re
+import shutil
 import struct
 import subprocess
 import sys
@@ -21,6 +23,14 @@ pytest.importorskip("pyarrow.compute")  # register pa.compute; not auto-imported
 ROOT = Path(__file__).parents[1]
 FIXTURE = ROOT / "tests/fixtures/places_construction_v1.json"
 GOLDEN_FIXTURE = ROOT / "tests/fixtures/places_tokenizer_v4_golden.json"
+
+_STAGING_SPEC = importlib.util.spec_from_file_location(
+    "places_construction_staging_v1", ROOT / "scripts/construction_staging_v1.py"
+)
+assert _STAGING_SPEC and _STAGING_SPEC.loader
+STAGING = importlib.util.module_from_spec(_STAGING_SPEC)
+sys.modules[_STAGING_SPEC.name] = STAGING
+_STAGING_SPEC.loader.exec_module(STAGING)
 
 
 def geometry(row: dict) -> bytes:
@@ -630,7 +640,9 @@ _VOCAB = [
 ]
 
 
-def _sharded_head_marker(module, binaries, tmp_path, store, task_id, seed, count):
+def _sharded_head_marker(
+    module, binaries, tmp_path, store, task_id, seed, count, limits=None
+):
     rows = []
     for index in range(count):
         words = " ".join(
@@ -663,7 +675,7 @@ def _sharded_head_marker(module, binaries, tmp_path, store, task_id, seed, count
             }
         )
     )
-    limits = module.Limits(
+    limits = limits or module.Limits(
         max_input_rows=1_000,
         max_pack_rows=2_000,
         parquet_row_group_rows=700,
@@ -821,6 +833,633 @@ def test_sharded_global_head_merge_is_order_independent(
         "head_sum_b",
     ):
         assert forward[field] == reverse[field]
+
+
+# --------------------------------------------------------------------------- #
+# Bounded candidate hydration on the head path
+# --------------------------------------------------------------------------- #
+HEAD_REQUEST = "e" * 64
+
+
+def _staged_store(module, tmp_path, local_name: str, staging_root: Path):
+    """A `StagedObjectStore` over a filesystem staging backend, no credentials."""
+    local = module.A.LocalObjectStore(tmp_path / local_name)
+    backend = STAGING.staging_backend(store_root=staging_root)
+    return STAGING.StagedObjectStore(
+        local, backend, STAGING.staging_prefix(HEAD_REQUEST, "places")
+    )
+
+
+def _instrument_tree_merge(module, monkeypatch):
+    """Record every tree-merge stage call and the live intermediate bytes after it.
+
+    Two independent properties need observing and neither is visible from the head
+    result, which is why both mutations this test exists for used to pass the whole
+    suite:
+
+    * the stage NAMES prove the tree has more than one level. Called with
+      `max_fan_in_tasks` (128 hosted) against 89 planet tasks the loop ran
+      `range(0, 89, 128)` -- one group, one stage, `merge-s0-g0000` and nothing else.
+    * the live intermediate BYTES prove each stage's inputs are unlinked once its
+      output exists. Releasing the store packs without unlinking the stage files just
+      moves the bytes to the same disk, so peak-resident would look bounded while the
+      workspace grew with the whole candidate set.
+    """
+    real = module._head_merge_stage
+    record: dict[str, list] = {"outputs": [], "live_bytes": [], "written_bytes": []}
+
+    def spy(connection, inputs, output, result_cap):
+        real(connection, inputs, output, result_cap)
+        output = Path(output)
+        record["outputs"].append(output.name)
+        record["written_bytes"].append(output.stat().st_size)
+        # Measured with this stage's output written and its inputs not yet disposed
+        # of, which is the true high-water mark for the tree.
+        record["live_bytes"].append(
+            sum(
+                path.stat().st_size
+                for path in output.parent.glob("merge-s*.parquet")
+            )
+        )
+
+    monkeypatch.setattr(module, "_head_merge_stage", spy)
+    return record
+
+
+def _head_identity(result):
+    """The parts of a head that must not depend on hydration or cache behaviour."""
+    return {
+        "total_records": result["total_records"],
+        "total_index_entries": result["total_index_entries"],
+        "populated_shards": result["populated_shards"],
+        "head_sum_a": result["head_sum_a"],
+        "head_sum_b": result["head_sum_b"],
+        "merged_head_binding": result["merged_head_binding"],
+        "input_binding": result["input_binding"],
+        "input_candidate_rows": result["input_candidate_rows"],
+        "shards": [
+            (item["shard_id"], item["sha256"], item["bytes"])
+            for item in result["shard_objects"]
+        ],
+    }
+
+
+def test_head_merge_releases_candidate_packs_and_bounds_peak_resident(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    """Peak hydrated input stays at `head_merge_fan_in` packs while many are merged.
+
+    This is the test the eager-hydration defect needed and did not have. Every
+    existing head test asserts on OUTPUT, and the output was always right: the head
+    phase produced byte-identical shards while holding every candidate pack it had
+    ever opened, so `staged_peak_resident_bytes` equalled `staged_bytes_hydrated`
+    exactly (measured: 14,787,923 both, on a 16-task Monaco split). On the old code
+    the peak and release assertions below fail while every binding, shard and
+    verification assertion still passes.
+
+    Deliberately MULTI-TASK. #171 learned this the hard way one phase earlier: its
+    first measurement used a single-task fixture, where peak equals total however
+    promptly the consumer evicts, and the "flat at one input" law it inferred was an
+    artifact of that fixture. Six tasks at fan-in 2 is the smallest shape that has a
+    three-level tree and a peak strictly below both the total and the task count.
+    """
+    module = construction_module
+    staging_root = tmp_path / "staging"
+    map_store = _staged_store(module, tmp_path, "local-map", staging_root)
+    markers = []
+    limits = None
+    for index in range(6):
+        marker, limits = _sharded_head_marker(
+            module,
+            construction_binaries,
+            tmp_path,
+            map_store,
+            f"places-t{index}",
+            f"{index}f",
+            90 + index * 7,
+        )
+        markers.append(marker)
+    pack_sizes = [marker["head_candidates"]["object"]["bytes"] for marker in markers]
+    keys = {marker["head_candidates"]["object"]["key"] for marker in markers}
+    # Fail closed on a degenerate fixture rather than passing vacuously: the packs
+    # are content-addressed, so identical bytes would collapse to ONE object and
+    # there would be nothing to bound.
+    assert len(keys) == 6, keys
+
+    fan_in = 2
+    bounded = replace(limits, head_merge_fan_in=fan_in)
+    record = _instrument_tree_merge(module, monkeypatch)
+    # A FRESH local cache: the head job runs on a runner that has never seen the map
+    # output, exactly as a hosted run-head does, so every pack must be hydrated.
+    head_store = _staged_store(module, tmp_path, "local-head", staging_root)
+    result = module.build_sharded_global_head_from_markers(
+        markers=markers,
+        store=head_store,
+        scratch_root=tmp_path / "head-scratch",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=bounded,
+        shard_bits=4,
+    )
+    evidence = head_store.evidence()
+
+    assert evidence["staged_bytes_hydrated"] > 0
+    # The fix: something was actually evicted.
+    assert evidence["staged_objects_released"] > 0
+    # The bound, asserted strictly. This is the line that fails on the old code.
+    assert (
+        evidence["staged_peak_resident_bytes"] < evidence["staged_bytes_hydrated"]
+    ), evidence
+    # And bounded by the DECLARED fan-in, not merely smaller than the total: a merge
+    # that released only its last group would satisfy a `<` alone.
+    assert evidence["staged_peak_resident_bytes"] <= fan_in * max(pack_sizes), evidence
+    # Nothing is left resident when the phase ends.
+    assert evidence["staged_bytes_released"] == evidence["staged_bytes_hydrated"]
+
+    # The tree has REAL stages: 6 candidates at fan-in 2 fold 6 -> 3 -> 2 -> 1, so
+    # stage 0 runs three groups and stages 1 and 2 run two and one. Called with
+    # `max_fan_in_tasks` this is a single `merge-s0-g0000` and nothing else, which is
+    # exactly what the planet configuration produced.
+    stages = sorted({name.split("-")[1] for name in record["outputs"]})
+    assert stages == ["s0", "s1", "s2"], record["outputs"]
+    assert len(record["outputs"]) == 6, record["outputs"]
+    # Each stage's inputs are unlinked once its output exists, so the live
+    # intermediate bytes never reach the sum of everything the tree wrote. Without
+    # the unlink the final measurement IS that sum.
+    assert max(record["live_bytes"]) < sum(record["written_bytes"]), record
+
+    # The SAME candidates merged through a plain LocalObjectStore, which has no
+    # `release` method at all -- that absence is precisely why the merge reaches it
+    # through `getattr`, since there the local directory IS the map output and
+    # evicting would delete it. Objects are copied out of the staging tree by key so
+    # the inputs are bit-identical, and every binding, digest and published shard
+    # must come out identical too.
+    local_root = tmp_path / "local-only"
+    shutil.copytree(staging_root / map_store.prefix, local_root)
+    for sidecar in local_root.rglob("*.metadata.json"):
+        sidecar.unlink()
+    local_only = module.A.LocalObjectStore(local_root)
+    assert not hasattr(local_only, "release")
+    assert not hasattr(local_only, "resident_bytes")
+    local_result = module.build_sharded_global_head_from_markers(
+        markers=markers,
+        store=local_only,
+        scratch_root=tmp_path / "head-scratch-local",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=bounded,
+        shard_bits=4,
+    )
+    assert _head_identity(local_result) == _head_identity(result)
+    # A local-only run must not have deleted its own store.
+    for marker in markers:
+        assert local_only.path(marker["head_candidates"]["object"]["key"]).is_file()
+
+    # And the fan-in is a knob on RESIDENCY ONLY: merging the same candidates in one
+    # group -- the degenerate shape the planet configuration used to take -- produces
+    # the identical head and a peak equal to the total.
+    eager_store = _staged_store(module, tmp_path, "local-eager", staging_root)
+    eager_result = module.build_sharded_global_head_from_markers(
+        markers=markers,
+        store=eager_store,
+        scratch_root=tmp_path / "head-scratch-eager",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=replace(limits, head_merge_fan_in=len(markers)),
+        shard_bits=4,
+    )
+    assert _head_identity(eager_result) == _head_identity(result)
+    eager_evidence = eager_store.evidence()
+    assert (
+        eager_evidence["staged_peak_resident_bytes"]
+        == eager_evidence["staged_bytes_hydrated"]
+        > evidence["staged_peak_resident_bytes"]
+    ), eager_evidence
+
+
+def test_head_phase_fails_closed_when_scratch_exceeds_the_cap_and_names_both_terms(
+    tmp_path, construction_binaries, construction_module
+):
+    """The head phase's disk is under a DECLARED cap, and the cap can actually fire.
+
+    Two things this pins, both of which were broken:
+
+    * the guard used to compare the hydrated cache ALONE against the whole scratch
+      cap, which at planet scale sat ~7x from firing -- so the only message naming
+      `head_merge_fan_in` was one that could not appear. It now measures workspace +
+      cache, which is what actually approaches the cap.
+    * the CACHE has to be counted. If the store root were dropped from the measured
+      roots, the reported cache term would be 0, the total would be workspace-only,
+      and this cap would not fire at all -- so the term split is asserted, not just
+      the fact of an abort. That wiring had no coverage on either the watchdog or the
+      explicit check.
+    """
+    module = construction_module
+    staging_root = tmp_path / "staging"
+    map_store = _staged_store(module, tmp_path, "local-map", staging_root)
+    marker_a, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, map_store, "places-a", "ab", 120
+    )
+    marker_b, _ = _sharded_head_marker(
+        module, construction_binaries, tmp_path, map_store, "places-b", "cd", 140
+    )
+    smallest = min(
+        marker["head_candidates"]["object"]["bytes"] for marker in (marker_a, marker_b)
+    )
+    tiny = replace(limits, max_scratch_bytes=smallest - 1, head_merge_fan_in=2)
+    head_store = _staged_store(module, tmp_path, "local-head", staging_root)
+    with pytest.raises(ValueError, match="exceeds max_scratch_bytes") as raised:
+        module.build_sharded_global_head_from_markers(
+            markers=[marker_a, marker_b],
+            store=head_store,
+            # Absent binaries: reaching either would raise FileNotFoundError, so the
+            # ValueError proves the cap fires before any encode.
+            encoder_binary=tmp_path / "no-such-encoder",
+            verifier_binary=tmp_path / "no-such-verifier",
+            scratch_root=tmp_path / "head-scratch",
+            limits=tiny,
+            shard_bits=4,
+        )
+    message = str(raised.value)
+    # The cache term is counted and non-zero. `cache = 0` is exactly what dropping
+    # the store root from the measured roots produces.
+    cache = int(re.search(r"hydrated candidate cache (\d+)", message).group(1))
+    workspace = int(re.search(r"workspace (\d+)", message).group(1))
+    total = int(re.search(r"scratch \((\d+) bytes", message).group(1))
+    assert cache >= smallest > 0, message
+    assert total == workspace + cache, message
+    assert total > tiny.max_scratch_bytes, message
+    # Both knobs are named, so the operator learns which term to act on.
+    assert "head_merge_fan_in (2)" in message
+    assert "shard_bits=4" in message
+    # And the message says why raising the cap is not always the answer.
+    assert "free-disk floor" in message
+    # Fail-closed, not advisory: nothing was published under the serving prefix.
+    assert not list((tmp_path / "local-head").rglob("*.plhd"))
+
+
+def test_head_phase_holds_one_copy_of_the_payload_through_the_encode_loop(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    """No two full copies of the head payload are ever live at once.
+
+    The merge was bounded and everything after it was declared out of scope, and that
+    out-of-scope region measured 2.79x the guarded one: `merged` was never unlinked,
+    the shard parquets were never unlinked per shard, and every encoded shard existed
+    TWICE by construction (the store's `put_content` copy plus the `verify_dir` copy
+    the sharded verifier needs). Four simultaneous copies of the payload, none
+    released.
+
+    Sampled from inside the encode loop, which is the only place all four could be
+    seen. Each assertion below fails on exactly one of the fixes being removed, so
+    none of them is carried by the others.
+    """
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    markers = []
+    limits = None
+    for index in range(4):
+        marker, limits = _sharded_head_marker(
+            module, construction_binaries, tmp_path, store,
+            f"places-c{index}", f"{index}a", 110 + index * 5,
+        )
+        markers.append(marker)
+
+    samples: list[dict[str, Any]] = []
+    real_write = module.A.write_arrow_query
+
+    def spy(connection, sql, output, batch_rows):
+        workspace = Path(output).parent
+        shards = workspace / "shards"
+        verify = workspace / "verify-shards"
+        samples.append(
+            {
+                # Un-partitioned payload copies still on disk.
+                "payload_files": sorted(
+                    p.name
+                    for p in workspace.glob("*.parquet")
+                ),
+                # Shard parquets still to be consumed.
+                "live_shard_parquets": len(list(shards.rglob("*.parquet"))),
+                # Link counts of the shards already encoded: 1 means a second full
+                # copy of those bytes exists, 2+ means store and verifier share one.
+                "verify_links": sorted(
+                    p.stat().st_nlink for p in verify.glob("*.plhd")
+                ) if verify.is_dir() else [],
+            }
+        )
+        return real_write(connection, sql, output, batch_rows)
+
+    monkeypatch.setattr(module.A, "write_arrow_query", spy)
+    result = module.build_sharded_global_head_from_markers(
+        markers=markers,
+        store=store,
+        scratch_root=tmp_path / "head-scratch",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=replace(limits, head_merge_fan_in=2),
+        shard_bits=4,
+    )
+    assert result["populated_shards"] >= 3, result
+    # The spy fires once per shard, at the top of each encode iteration.
+    assert len(samples) == result["populated_shards"], samples
+
+    for index, sample in enumerate(samples):
+        # `merged` and the pre-sharded intermediate are both gone before the first
+        # encode. Removing either unlink puts one of them in this list.
+        assert sample["payload_files"] == [], (index, sample)
+    # The shard set shrinks monotonically: each shard's parquets are unlinked once its
+    # arrow exists. Without that they all survive to the end of the phase.
+    counts = [sample["live_shard_parquets"] for sample in samples]
+    assert counts == sorted(counts, reverse=True), counts
+    assert counts[0] > counts[-1], counts
+    # Every already-encoded shard is a hardlink, not a second copy. `st_nlink == 1`
+    # anywhere here is the two-copies-per-shard shape.
+    encoded_links = [link for sample in samples for link in sample["verify_links"]]
+    assert encoded_links, samples
+    assert min(encoded_links) >= 2, samples
+
+
+def test_head_scratch_guard_counts_the_workspace_and_not_only_the_cache(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    """The guard's WORKSPACE term is load-bearing, past the merge.
+
+    The predecessor measured the hydrated cache alone, which is why it could not fire:
+    the cache is the smaller half of the merge's peak (27.1% measured) and it is EMPTY
+    after the merge, while the workspace goes on to hold the pre-sharded intermediate
+    and the whole shard set. A cache-only guard reports 0 for a local-only store and
+    therefore never fires at all -- which is the shape this pins.
+
+    Driven by inflating the measured workspace ONCE the shard directory exists, so the
+    failure lands after the merge (where the old guard had no coverage) rather than
+    inside it (where the merge's own watchdog would answer first).
+    """
+    module = construction_module
+    # A local-only store: no `release`, so `cache_roots` is empty and the cache term
+    # is structurally 0. If the workspace is not counted, nothing is.
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-w", "ab", 120
+    )
+    real_disk_bytes = module.A.StageWatchdog.disk_bytes
+
+    def inflate(roots):
+        actual = real_disk_bytes(roots)
+        # Only after `_write_head_shards` has created the shard root, i.e. only after
+        # the merge and its watchdog are done.
+        if any(Path(root).joinpath("shards").is_dir() for root in roots):
+            return limits.max_scratch_bytes + 1
+        return actual
+
+    monkeypatch.setattr(module.A.StageWatchdog, "disk_bytes", staticmethod(inflate))
+    with pytest.raises(ValueError, match="exceeds max_scratch_bytes") as raised:
+        module.build_sharded_global_head_from_markers(
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / "head-scratch",
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=limits,
+            shard_bits=4,
+        )
+    message = str(raised.value)
+    # The cache term is 0 (local-only store) and the workspace term is what tripped
+    # it. A cache-only guard cannot produce this message.
+    assert "hydrated candidate cache 0" in message, message
+    assert f"workspace {limits.max_scratch_bytes + 1}" in message, message
+
+
+def test_head_shard_copy_is_batched_over_shard_ranges(
+    tmp_path, construction_binaries, construction_module, monkeypatch
+):
+    """The 4,096-shard COPY is split into `head_shard_copy_batch` passes.
+
+    One `COPY ... PARTITION_BY` over every shard is unbounded in RAM and OOMs rather
+    than spilling -- DuckDB buffers per OPEN partition and does not spill it -- so the
+    pass count is the property that bounds it, and nothing else in the suite can see
+    it: the head output is identical either way, which is exactly why this needs its
+    own assertion.
+
+    Observed structurally, through the per-batch directories, and paired with an
+    equality on the published shard set so the batching is shown to be free.
+    """
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-b", "ab", 150
+    )
+    seen: dict[str, list[str]] = {}
+    real_write = module.A.write_arrow_query
+
+    def spy(connection, sql, output, batch_rows):
+        shards = Path(output).parent / "shards"
+        seen.setdefault(
+            "batch_dirs", sorted(p.name for p in shards.iterdir() if p.is_dir())
+        )
+        return real_write(connection, sql, output, batch_rows)
+
+    monkeypatch.setattr(module.A, "write_arrow_query", spy)
+
+    def build(batch: int, name: str):
+        seen.clear()
+        result = module.build_sharded_global_head_from_markers(
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / name,
+            encoder_binary=construction_binaries["places-serving-encode-v1"],
+            verifier_binary=construction_binaries["places-serving-verify-v1"],
+            limits=replace(limits, head_shard_copy_batch=batch),
+            shard_bits=4,
+        )
+        return result, list(seen["batch_dirs"])
+
+    # 16 shards in batches of 4 => four COPY passes, four batch directories.
+    batched, dirs = build(4, "head-batched")
+    assert dirs == ["b0000", "b0001", "b0002", "b0003"], dirs
+    # One pass covering every shard is the unbounded shape, and it is distinguishable.
+    whole, whole_dirs = build(16, "head-whole")
+    assert whole_dirs == ["b0000"], whole_dirs
+    # Same shard ROW SETS either way, so the published bytes are identical: the batch
+    # size is a RAM knob with no effect on output.
+    assert _head_identity(batched) == _head_identity(whole)
+
+
+def test_head_manifest_shard_order_is_the_published_lexicographic_one(
+    tmp_path, construction_binaries, construction_module
+):
+    """The manifest's `shards` array order is PUBLISHED bytes, and it is a quirk.
+
+    The shard loop used to iterate `sorted(shard_dir.glob("__shard=*"))`, i.e. the
+    LEXICOGRAPHIC order of the hive directory names -- 0, 1, 10, 11, ... 15, 2, 3 --
+    and the manifest is emitted in iteration order. Restructuring the loop over a dict
+    of shard ids naturally produces NUMERIC order, which changes no shard's bytes and
+    no digest but reorders that array and so changes the manifest object's own digest.
+    It was caught only by diffing the published tree against `origin/main`; nothing in
+    the suite could see it, which is why this test exists.
+
+    Pinning the existing order, not the better one. Numeric order is arguably the
+    better routing table at 4,096 shards, and changing to it is a deliberate
+    published-bytes change that should be made on its own.
+    """
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-m", "ab", 150
+    )
+    result = module.build_sharded_global_head_from_markers(
+        markers=[marker],
+        store=store,
+        scratch_root=tmp_path / "head-scratch",
+        encoder_binary=construction_binaries["places-serving-encode-v1"],
+        verifier_binary=construction_binaries["places-serving-verify-v1"],
+        limits=limits,
+        # 16 shards is the smallest count where lexicographic and numeric differ.
+        shard_bits=4,
+    )
+    ids = [entry["shard_id"] for entry in result["shard_objects"]]
+    assert ids == sorted(ids, key=lambda value: f"__shard={value}"), ids
+    # And that really is not the numeric order, so the assertion above has teeth.
+    assert ids != sorted(ids), ids
+
+
+def test_head_phase_validates_the_limits_it_was_handed(
+    tmp_path, construction_binaries, construction_module
+):
+    """The head path validates its limits; it used to validate nothing at all.
+
+    Only `map_task` and `adaptive_genesis_plan` called `Limits.validate`, so every
+    consistency rule it enforces was unchecked on the one phase that reads
+    `head_merge_fan_in` and `head_shard_copy_batch` -- and a hosted run reaches here
+    through `_limits_for`, which builds `Limits(**filtered)` and silently drops
+    contract keys it does not recognise.
+
+    `max_input_rows` is the discriminator ON PURPOSE: the head phase never reads it,
+    so nothing but `validate()` can object to it, and without the call the phase
+    completes normally.
+    """
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-v", "ab", 110
+    )
+    with pytest.raises(ValueError, match="limits must be positive"):
+        module.build_sharded_global_head_from_markers(
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / "head-scratch",
+            # Absent binaries: the abort must precede every encode.
+            encoder_binary=tmp_path / "no-such-encoder",
+            verifier_binary=tmp_path / "no-such-verifier",
+            limits=replace(limits, max_input_rows=0),
+            shard_bits=4,
+        )
+    # And the head merge fan-in rule reaches the head phase through the same call,
+    # with `validate`'s message rather than the tree merge's later one.
+    with pytest.raises(ValueError, match="Places head merge fan-in must be at least 2"):
+        module.build_sharded_global_head_from_markers(
+            markers=[marker],
+            store=store,
+            scratch_root=tmp_path / "head-scratch",
+            encoder_binary=tmp_path / "no-such-encoder",
+            verifier_binary=tmp_path / "no-such-verifier",
+            limits=replace(limits, head_merge_fan_in=1),
+            shard_bits=4,
+        )
+
+
+def test_map_task_fails_closed_on_the_head_candidate_row_cap(
+    tmp_path, construction_binaries, construction_module
+):
+    """`max_task_head_candidate_rows`, exercised rather than declared.
+
+    The per-task check in `map_task` had no execution coverage at all: it appeared in the
+    dataclass, in `HOSTED_LIMITS` and in preflight dict comparisons, and nowhere a run
+    could reach — so swapping it for the global cap passed the whole suite. It is a
+    SEPARATE cap for a reason (6,000,000 against the global 200,000,000), and the reason
+    is only load-bearing if the site is actually reached.
+    """
+    module = construction_module
+    store = module.A.LocalObjectStore(tmp_path / "store")
+    # First find out how many candidates this fixture really produces, then set the
+    # cap one below it -- so the test cannot pass by the fixture being empty.
+    marker, limits = _sharded_head_marker(
+        module, construction_binaries, tmp_path, store, "places-ok", "ab", 130
+    )
+    produced = marker["head_candidates"]["records"]
+    assert produced > 1
+
+    # Same seed and count, so the candidate row count is EXACTLY `produced`; only the
+    # task id and the store differ, because a marker in the store would resume.
+    #
+    # Only the PER-TASK cap is squeezed. The global cap stays where it is, so a run that
+    # swapped this site to `max_head_candidate_rows` would sail through -- which is the
+    # mutation this test exists to kill.
+    squeezed = replace(limits, max_task_head_candidate_rows=produced - 1)
+    with pytest.raises(ValueError, match="max_task_head_candidate_rows") as raised:
+        _sharded_head_marker(
+            module,
+            construction_binaries,
+            tmp_path,
+            module.A.LocalObjectStore(tmp_path / "store-squeezed"),
+            "places-squeezed",
+            "ab",
+            130,
+            limits=squeezed,
+        )
+    message = str(raised.value)
+    assert str(produced - 1) in message, message
+    # It names the count as well as the cap, and says what to do about it.
+    assert "split the task" in message, message
+
+
+def test_head_merge_fan_in_gives_the_planet_task_count_real_stages(
+    construction_module,
+):
+    """The knob must be small enough that the planet fan-in actually forms a tree.
+
+    Pure arithmetic over the two committed numbers, because the defect was pure
+    arithmetic: `head_merge_fan_in` was `max_fan_in_tasks`, and since the planet's 89
+    map tasks are below the 128 the marker gate needs, `range(0, 89, 128)` produced
+    one group. A single stage over the whole fan-in is not a bounded merge -- it is
+    the merge the tree was introduced to replace.
+    """
+    import importlib.util
+
+    spec = importlib.util.spec_from_file_location(
+        "hosted_for_head_fan_in", ROOT / "scripts/construction_v1_hosted.py"
+    )
+    hosted = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = hosted
+    spec.loader.exec_module(hosted)
+    places = hosted.HOSTED_LIMITS["places"]
+    inventory = json.loads(
+        (ROOT / "benchmarks/places-construction-v1-data/inventory/places.json").read_text()
+    )
+    tasks = inventory["map_plan"]["task_count"]
+    assert tasks == 89
+
+    # The two knobs pull in opposite directions and must stay decoupled: the marker
+    # gate has to admit every task, the merge has to be smaller than that.
+    assert places["max_fan_in_tasks"] >= tasks
+    assert places["head_merge_fan_in"] < places["max_fan_in_tasks"]
+    # Pinned equal to the dataclass default, like every other production cap, so a
+    # caller that is not the hosted CLI plans at the value the planet build uses.
+    assert (
+        construction_module.Limits().head_merge_fan_in == places["head_merge_fan_in"]
+    )
+
+    def stages(count: int, fan_in: int) -> list[int]:
+        levels = []
+        while count > 1:
+            count = -(-count // fan_in)
+            levels.append(count)
+        return levels
+
+    # 89 -> 12 -> 2 -> 1: three stages, which is what the committed value buys.
+    assert stages(tasks, places["head_merge_fan_in"]) == [12, 2, 1]
+    # The defect, stated as the assertion that would have caught it.
+    assert stages(tasks, places["max_fan_in_tasks"]) == [1]
 
 
 def test_sharded_head_manifest_tamper_fails_closed(
