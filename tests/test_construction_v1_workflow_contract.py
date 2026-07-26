@@ -411,13 +411,26 @@ def test_runner_minute_ledger_is_enforced_not_decorative():
 def test_resume_carries_the_prior_ledger_or_fails_closed():
     value = text()
     doc = parsed()
-    # MAJOR-3: resume downloads the prior run's ledger read-only and refuses to
-    # start on a mismatch, so a fresh dispatch cannot silently reset prior spend.
+    # Resume downloads the prior run's final ledger, or the plan ledger when the
+    # run failed in reduce. It accepts only the SAME request and family, then
+    # carries the authenticated consumed total into the fresh dispatch's ledger.
+    # Keeping the request hash unchanged is what makes the R2 staging namespace
+    # reusable; changing the request to encode prior minutes would strand it.
     assert doc["permissions"]["actions"] == "read"
     assert "actions/runs/${RESUME_FROM}/artifacts" in value
     assert "resume failed closed" in value
     assert "construction-v1-ledger-" in value
-    assert "!= confirmation PRIOR_RUNNER_MINUTES" in value
+    assert 'select(.name == "cv1-plan")' in value
+    assert 'LEDGER=resume/control/ledger.json' in value
+    assert 'LEDGER_REQUEST="$(jq -er' in value
+    assert 'LEDGER_FAMILY="$(jq -er' in value
+    assert '"$LEDGER_REQUEST" != "$REQUEST_SHA256"' in value
+    assert '"$LEDGER_FAMILY" != "$FAMILY_KEY"' in value
+    assert "effective_prior_runner_minutes=$PRIOR_CONSUMED" in value
+    assert (
+        "steps.resume.outputs.effective_prior_runner_minutes "
+        "|| steps.gate.outputs.prior_runner_minutes"
+    ) in value
 
 
 def test_workflow_pins_actions_and_hash_locked_dependencies():
@@ -561,6 +574,11 @@ def test_address_consumers_use_compact_projections_not_full_map_markers():
     plan_paths = _upload_paths(jobs["plan"], "cv1-plan")
     assert "mapdl/markers" not in plan_paths
     assert "plan" in plan_paths
+    # Every downstream consumer invokes cv1plan/control/contract.json. The first
+    # planet reduce run proved that carrying only the ledger makes every reducer
+    # fail before touching R2.
+    assert "control/contract.json" in plan_paths
+    assert "control/ledger.json" in plan_paths
     assert (
         "--address-reduce-projection-out "
         "plan/address-reduce-projection.sqlite"
