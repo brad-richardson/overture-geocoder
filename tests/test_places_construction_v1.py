@@ -1038,7 +1038,7 @@ def test_head_merge_releases_candidate_packs_and_bounds_peak_resident(
 
 
 def test_head_phase_fails_closed_when_scratch_exceeds_the_cap_and_names_both_terms(
-    tmp_path, construction_binaries, construction_module
+    tmp_path, construction_binaries, construction_module, monkeypatch
 ):
     """The head phase's disk is under a DECLARED cap, and the cap can actually fire.
 
@@ -1068,6 +1068,17 @@ def test_head_phase_fails_closed_when_scratch_exceeds_the_cap_and_names_both_ter
     )
     tiny = replace(limits, max_scratch_bytes=smallest - 1, head_merge_fan_in=2)
     head_store = _staged_store(module, tmp_path, "local-head", staging_root)
+
+    # Isolate the synchronous, term-by-term guard this test targets. With such a
+    # deliberately tiny cap the asynchronous whole-stage watchdog can also fire,
+    # nondeterministically replacing the detailed ValueError with its umbrella
+    # RuntimeError. The watchdog's fail-closed and hard-cap behavior has dedicated
+    # coverage in test_address_construction_v1.py.
+    monkeypatch.setattr(module.A.StageWatchdog, "__enter__", lambda self: self)
+    monkeypatch.setattr(
+        module.A.StageWatchdog, "__exit__", lambda self, *unused: False
+    )
+
     with pytest.raises(ValueError, match="exceeds max_scratch_bytes") as raised:
         module.build_sharded_global_head_from_markers(
             markers=[marker_a, marker_b],
