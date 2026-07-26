@@ -429,8 +429,12 @@ class StageWatchdog:
         )
         if self.failure is None and not self.finished:
             self.failure = "stage watchdog exited without recording an observation"
-        if exc_type is None and self.failure:
-            raise RuntimeError(self.failure)
+        if self.failure:
+            # `_abort()` interrupts DuckDB, which raises inside the guarded
+            # statement. Always surface the watchdog's recorded cap diagnosis
+            # and chain that interrupt instead of letting the generic
+            # "Interrupted!" exception discard the useful phase failure.
+            raise RuntimeError(self.failure) from exc
 
     def evidence(self) -> dict[str, Any]:
         return {
@@ -1326,7 +1330,9 @@ def genesis_plan(markers: list[dict[str, Any]], *, row_cap: int) -> dict[str, An
     return _plan_from_summaries(summaries, expected, row_cap)
 
 
-def genesis_plan_streaming(marker_paths, *, row_cap: int) -> dict[str, Any]:
+def genesis_plan_streaming(
+    marker_paths, *, row_cap: int, visit_marker=None
+) -> dict[str, Any]:
     """Plan from marker files read one at a time, never holding them all at once.
 
     Produces output byte-identical to ``genesis_plan`` on the same markers, but
@@ -1342,6 +1348,8 @@ def genesis_plan_streaming(marker_paths, *, row_cap: int) -> dict[str, Any]:
         marker = json.loads(Path(path).read_text())
         _accumulate_bucket_summaries(marker, summaries)
         expected = combine_bindings([expected, marker["binding"]])
+        if visit_marker is not None:
+            visit_marker(marker)
         del marker
     return _plan_from_summaries(summaries, expected, row_cap)
 
@@ -1547,9 +1555,48 @@ def reduce_partition(
         for actual, (_, expected) in zip(
             actual_directory["row_groups"], selected_groups, strict=True
         ):
-            if actual["binding"] != expected["binding"] or actual["routing_groups"] != expected[
-                "routing_groups"
-            ]:
+            expected_routing = expected["routing_groups"]
+            if expected.get("routing_projection") == "country-envelope-v1":
+                # The hosted address projection stores one exact envelope per
+                # (task, pack, row-group, country), not the tens of thousands of
+                # maximum-bucket summaries inside it. Selection may therefore
+                # fetch a row group whose country has an internal empty-bucket
+                # gap, but it may never miss one. Recompute the same envelope
+                # from the fetched proof and compare it before trusting the
+                # projected selection; the partition predicate below still
+                # selects the exact rows and its binding remains the final proof.
+                countries = {item["country"] for item in expected_routing}
+                actual_routing = []
+                for country in sorted(countries):
+                    routes = [
+                        item
+                        for item in actual["routing_groups"]
+                        if item["country"] == country
+                    ]
+                    if not routes:
+                        raise ValueError(
+                            "projected row-group country is absent from fetched proof"
+                        )
+                    actual_routing.append(
+                        {
+                            "country": country,
+                            "minimum_route_hash": min(
+                                item["minimum_route_hash"] for item in routes
+                            ),
+                            "maximum_route_hash": max(
+                                item["maximum_route_hash"] for item in routes
+                            ),
+                        }
+                    )
+                expected_routing = sorted(
+                    expected_routing, key=lambda item: item["country"]
+                )
+            else:
+                actual_routing = actual["routing_groups"]
+            if (
+                actual["binding"] != expected["binding"]
+                or actual_routing != expected_routing
+            ):
                 raise ValueError("selected row group differs from its map proof")
         connection = duckdb.connect(str(workspace / "reduce.duckdb"))
         connection.execute(f"SET memory_limit = '{limits.duckdb_memory_limit}'")

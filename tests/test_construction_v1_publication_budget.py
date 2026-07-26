@@ -349,18 +349,41 @@ def _binding(records: int) -> dict:
     }
 
 
-def _address_marker(index: int, *, record_packs: int, records: int = 4) -> dict:
+def _address_marker(
+    index: int, *, record_packs: int, request_sha256: str, records: int = 4
+) -> dict:
     """A minimal address map marker: one forward pack, ``record_packs`` per-record packs."""
     binding = _binding(records)
     return {
+        "schema": HOSTED.ADDRESS.MARKER_SCHEMA,
+        "request_sha256": request_sha256,
         "task_id": f"addresses-map-{index:03d}",
         "binding": binding,
         "packs": [
             {
+                "pack_id": 0,
+                "object": {
+                    "key": f"forward-{index}",
+                    "sha256": f"{index + 100:064x}",
+                    "bytes": 1,
+                },
                 "directory": {
                     "bucket_summaries": [
                         {"country": "US", "maximum_bucket": index, "binding": binding}
-                    ]
+                    ],
+                    "row_groups": [
+                        {
+                            "index": 0,
+                            "binding": binding,
+                            "routing_groups": [
+                                {
+                                    "country": "US",
+                                    "minimum_route_hash": index << 48,
+                                    "maximum_route_hash": ((index + 1) << 48) - 1,
+                                }
+                            ],
+                        }
+                    ],
                 }
             }
         ],
@@ -383,9 +406,13 @@ def _address_marker(index: int, *, record_packs: int, records: int = 4) -> dict:
 def _plan_reduce_addresses(tmp_path: Path, *, cap: int, record_packs: int, tag: str):
     markers_dir = tmp_path / f"markers-{tag}"
     markers_dir.mkdir()
-    marker = _address_marker(0, record_packs=record_packs)
-    (markers_dir / "000.json").write_text(json.dumps(marker) + "\n")
     contract = _contract(tmp_path / tag, max_remote_operations=cap)
+    marker = _address_marker(
+        0,
+        record_packs=record_packs,
+        request_sha256=json.loads(contract.read_text())["request_sha256"],
+    )
+    (markers_dir / "000.json").write_text(json.dumps(marker) + "\n")
     return HOSTED.main([
         "plan-reduce", "--contract", str(contract),
         "--store-root", str(tmp_path / f"store-{tag}"),
@@ -431,12 +458,13 @@ def test_plan_reduce_fails_closed_on_a_marker_with_no_per_record_artifact(tmp_pa
     # is the same gap finalize aborts on -- moved to where it costs one plan phase.
     markers_dir = tmp_path / "markers-gap"
     markers_dir.mkdir()
-    good = _address_marker(0, record_packs=2)
-    gap = _address_marker(1, record_packs=2)
+    contract = _contract(tmp_path / "gap", max_remote_operations=100_000)
+    request_sha256 = json.loads(contract.read_text())["request_sha256"]
+    good = _address_marker(0, record_packs=2, request_sha256=request_sha256)
+    gap = _address_marker(1, record_packs=2, request_sha256=request_sha256)
     del gap["address_records"]
     (markers_dir / "000.json").write_text(json.dumps(good) + "\n")
     (markers_dir / "001.json").write_text(json.dumps(gap) + "\n")
-    contract = _contract(tmp_path / "gap", max_remote_operations=100_000)
     with pytest.raises(SystemExit) as excinfo:
         HOSTED.main([
             "plan-reduce", "--contract", str(contract),
@@ -453,10 +481,16 @@ def test_plan_reduce_fails_closed_when_the_contract_carries_no_cap(tmp_path):
     # abort rather than let the phase invent one.
     markers_dir = tmp_path / "markers-nocap"
     markers_dir.mkdir()
-    (markers_dir / "000.json").write_text(
-        json.dumps(_address_marker(0, record_packs=2)) + "\n"
-    )
     contract = _contract(tmp_path / "nocap", max_remote_operations=1000)
+    request_sha256 = json.loads(contract.read_text())["request_sha256"]
+    (markers_dir / "000.json").write_text(
+        json.dumps(
+            _address_marker(
+                0, record_packs=2, request_sha256=request_sha256
+            )
+        )
+        + "\n"
+    )
     payload = json.loads(contract.read_text())
     del payload["caps"]["max_remote_operations"]
     contract.write_text(json.dumps(payload) + "\n")
@@ -467,6 +501,55 @@ def test_plan_reduce_fails_closed_when_the_contract_carries_no_cap(tmp_path):
             "--family", "addresses", "--markers-dir", str(markers_dir),
             "--row-cap", "1000", "--output", str(tmp_path / "plan-nocap.json"),
         ])
+
+
+def test_plan_and_predict_require_the_admitted_reducer_cap(tmp_path):
+    contract = _contract(tmp_path / "reducers", max_remote_operations=400_000)
+    request_sha256 = json.loads(contract.read_text())["request_sha256"]
+    payload = json.loads(contract.read_text())
+    del payload["caps"]["max_reducers_per_family"]
+    contract.write_text(json.dumps(payload) + "\n")
+
+    markers_dir = tmp_path / "reducers-markers"
+    markers_dir.mkdir()
+    (markers_dir / "000.json").write_text(
+        json.dumps(
+            _address_marker(
+                0, record_packs=2, request_sha256=request_sha256
+            )
+        )
+        + "\n"
+    )
+    with pytest.raises(SystemExit, match="max_reducers_per_family"):
+        HOSTED.main(
+            [
+                "plan-reduce",
+                "--contract",
+                str(contract),
+                "--store-root",
+                str(tmp_path / "reducers-store"),
+                "--family",
+                "addresses",
+                "--markers-dir",
+                str(markers_dir),
+                "--row-cap",
+                "1000",
+                "--output",
+                str(tmp_path / "reducers-plan.json"),
+            ]
+        )
+    with pytest.raises(SystemExit, match="max_reducers_per_family"):
+        HOSTED.main(
+            [
+                "predict-reduce",
+                "--contract",
+                str(contract),
+                "--family",
+                "addresses",
+                "--inventory",
+                str(ADDRESS_INVENTORY),
+            ]
+        )
 
 
 # --------------------------------------------------------------------------- #

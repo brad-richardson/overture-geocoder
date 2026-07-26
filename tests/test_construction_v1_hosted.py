@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import importlib.util
 import json
+import math
 import subprocess
 import sys
 import uuid
@@ -65,7 +66,11 @@ def _request(tmp_path: Path) -> Path:
         "families": {"addresses": {}, "places": {}},
         "versions": {"duckdb": "1.5.1", "pyarrow": "25.0.0", "numpy": "2.3.5",
                      "python": "3.12.12", "rustc": "test"},
-        "caps": {"max_remote_operations": 100000, "max_remote_write_bytes": 1_000_000_000_000},
+        "caps": {
+            "max_remote_operations": 100000,
+            "max_remote_write_bytes": 1_000_000_000_000,
+            "max_reducers_per_family": 128,
+        },
         "namespaces": {
             "immutable_root": "construction-v1/deadbeef",
             "slice": "construction-v1/deadbeef/slice/slice-x/",
@@ -160,8 +165,12 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
     assert json.loads(out2.read_text())["completed"] is False
 
     plan = tmp_path / "plan.json"
+    reduce_projection = tmp_path / "address-reduce.sqlite"
+    finalize_projection = tmp_path / "address-finalize.json"
     _run("plan-reduce", "--contract", contract, "--store-root", store, "--family", "addresses",
          "--markers-dir", markers_dir, "--row-cap", "2", "--output", plan,
+         "--address-reduce-projection-out", reduce_projection,
+         "--address-finalize-projection-out", finalize_projection,
          "--matrix-out", tmp_path / "reduce-matrix.json")
     partitions = json.loads(plan.read_text())["partitions"]
     assert len(partitions) == 2
@@ -170,7 +179,8 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
     reductions_dir.mkdir()
     for index in range(len(partitions)):
         _run("run-reduce", "--contract", contract, "--store-root", store, "--family", "addresses",
-             "--plan", plan, "--markers-dir", markers_dir, "--partition-index", index,
+             "--plan", plan, "--address-reduce-projection", reduce_projection,
+             "--partition-index", index,
              "--proof-binary", binaries["address-proof-directory"],
              "--encoder-binary", binaries["address-serving-encode-v1"],
              "--verifier-binary", binaries["address-serving-verify-v1"],
@@ -186,7 +196,8 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
     remote = tmp_path / "remote"
     final = tmp_path / "final.json"
     _run("finalize", "--contract", contract, "--store-root", store, "--family", "addresses",
-         "--plan", plan, "--reductions-dir", reductions_dir, "--markers-dir", markers_dir,
+         "--plan", plan, "--reductions-dir", reductions_dir,
+         "--address-finalize-projection", finalize_projection,
          "--remote-root", remote,
          "--work-root", tmp_path / "final-work", "--output", final)
     result = json.loads(final.read_text())
@@ -238,7 +249,7 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
                      "--remote-root", str(tmp_path / "remote-b"),
                      "--work-root", str(tmp_path / "final-work-b"),
                      "--output", str(tmp_path / "final-b.json")])
-    assert "--markers-dir is required" in str(excinfo.value)
+    assert "needs its map projection" in str(excinfo.value)
     assert HOSTED.ADDRESS.ADDRESS_RECORDS_SCHEMA in str(excinfo.value)
 
     # A marker that predates the artifact is the same gap one level in, and the
@@ -259,6 +270,91 @@ def test_execute_sequence_addresses_end_to_end_no_network(tmp_path, binaries):
                      "--output", str(tmp_path / "final-c.json")])
     assert "carries no address_records artifact" in str(excinfo.value)
     assert "re-run its map task" in str(excinfo.value)
+
+
+def test_planet_shaped_address_projection_is_structurally_bounded(tmp_path):
+    """Pin the compact artifact against the measured planet marker shape.
+
+    The 2026-07-22 survey projects 38,533,990 original routing entries and
+    16.88 GB of marker JSON. Reduce consumes only one country envelope per
+    row-group. At the admitted shape (126 tasks, <=4 packs/task, <=16
+    row-groups/pack, three countries/task rounded above the measured 2.33),
+    that is 24,192 envelope rows, independent of the 38.5M bucket entries.
+    """
+    request_sha256 = "a" * 64
+    writer = HOSTED._AddressProjectionWriter(
+        request_sha256=request_sha256,
+        reduce_path=tmp_path / "reduce.sqlite",
+        finalize_path=tmp_path / "finalize.json",
+    )
+    binding = {**HOSTED.ADDRESS.zero_binding(), "records": 126}
+    identity_index = 0
+
+    def identity(prefix: str) -> dict:
+        nonlocal identity_index
+        digest = f"{identity_index:064x}"
+        identity_index += 1
+        return {"key": f"{prefix}/sha256/{digest}", "sha256": digest, "bytes": 1}
+
+    tasks = 126
+    packs_per_task = 4
+    groups_per_pack = 16
+    countries = ("de", "fr", "us")
+    # 25,000 is the measured upper end of the address publication-object band.
+    per_record_packs = math.ceil(25_000 / (tasks * 2))
+    for task in range(tasks):
+        packs = []
+        for pack_id in range(packs_per_task):
+            groups = []
+            for group_index in range(groups_per_pack):
+                groups.append(
+                    {
+                        "index": group_index,
+                        "binding": binding,
+                        "routing_groups": [
+                            {
+                                "country": country,
+                                "minimum_route_hash": group_index << 56,
+                                "maximum_route_hash": ((group_index + 1) << 56) - 1,
+                            }
+                            for country in countries
+                        ],
+                    }
+                )
+            packs.append(
+                {
+                    "pack_id": pack_id,
+                    "object": identity("map/address/packs"),
+                    "directory": {"row_groups": groups},
+                }
+            )
+        records_packs = [
+            {
+                "object": identity("map/address/records"),
+                "directory_object": identity("map/address/record-directories"),
+            }
+            for _ in range(per_record_packs)
+        ]
+        writer(
+            {
+                "schema": HOSTED.ADDRESS.MARKER_SCHEMA,
+                "request_sha256": request_sha256,
+                "task_id": f"addresses-map-{task:03d}",
+                "packs": packs,
+                "address_records": {"records": 1, "packs": records_packs},
+            }
+        )
+    evidence = writer.finish({"binding": binding})
+    assert 38_533_990 / evidence["country_envelopes"] > 1_500
+    assert evidence["country_envelopes"] == (
+        tasks * packs_per_task * groups_per_pack * len(countries)
+    )
+    assert evidence["reduce_projection_bytes"] < 16 * 1024**2
+    assert evidence["finalize_projection_bytes"] < 16 * 1024**2
+    assert (
+        evidence["reduce_projection_bytes"]
+        < HOSTED.ADDRESS_REDUCE_PROJECTION_MAX_BYTES
+    )
 
 
 def test_the_per_record_publication_seam_covers_both_families():

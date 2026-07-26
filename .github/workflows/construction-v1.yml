@@ -635,13 +635,27 @@ jobs:
           # --store-root is an EMPTY local cache; the packs this phase needs are
           # hydrated by key from the run-scoped staging prefix and verified against
           # the digest in the key.
+          PROJECTION_FLAGS=()
+          if [ "$FAMILY_KEY" = addresses ]; then
+            PROJECTION_FLAGS=(
+              --address-reduce-projection-out plan/address-reduce-projection.sqlite
+              --address-finalize-projection-out plan/address-finalize-projection.json
+            )
+          fi
           python scripts/construction_v1_hosted.py plan-reduce \
             --contract control/contract.json --store-root store --family "$FAMILY_KEY" \
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
             --markers-dir mapdl/markers --scratch-dir plan-scratch \
             --ledger control/ledger.json --tail-minutes "$TAIL_MINUTES" \
             --staging-report plan/staging.json "${REDUCE_JOB_FLAG[@]}" \
+            "${PROJECTION_FLAGS[@]}" \
             --output plan/plan.json --matrix-out plan/reduce-matrix.json
+          # Places consumers still need their already-small markers. Address
+          # consumers get only the compact reduce/finalize projections above;
+          # never put the 17 GB full address marker set into cv1-plan.
+          if [ "$FAMILY_KEY" = places ]; then
+            mv mapdl/markers plan/map-markers
+          fi
           # The bound that decides whether this job fits a runner: peak HYDRATED
           # input resident at once, not the total it streamed through.
           PEAK="$(jq -r '.staged_peak_resident_bytes' plan/staging.json)"
@@ -665,9 +679,9 @@ jobs:
             echo "- Reduce partitions: $PARTITIONS across $COUNT jobs, owned by $OWNERSHIP (largest job $BATCH_SIZE partitions, bucket stride $STRIDE, matrix cap 256)"
             echo "- Effective reducer job cap: $(jq -r '.reduce_execution.job_cap' plan/plan.json) (dispatch input max_reduce_jobs: '${MAX_REDUCE_JOBS:-unset}')"
           } >> "$GITHUB_STEP_SUMMARY"
-      # Plan, markers, and the ledger. No store: this artifact WAS the 63.5 GB one
-      # every reduce batch downloaded whole.
-      - name: Publish the plan, markers, and updated ledger (store is in R2 staging)
+      # Plan, family-specific marker projections, and ledger. Address full map
+      # markers stop here; Places markers are already small and remain unchanged.
+      - name: Publish the plan projections and updated ledger (store is in R2 staging)
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: cv1-plan
@@ -676,7 +690,6 @@ jobs:
           include-hidden-files: true
           path: |
             plan
-            mapdl/markers
             control/ledger.json
 
   reduce:
@@ -728,8 +741,12 @@ jobs:
           echo "REDUCE BEGIN $FAMILY_KEY batch=$BATCH_INDEX"
           BINDIR="crates/target/release"
           case "$FAMILY_KEY" in
-            addresses) PROOF="$BINDIR/address-proof-directory"; ENC="$BINDIR/address-serving-encode-v1"; VER="$BINDIR/address-serving-verify-v1" ;;
-            places)    PROOF=""; ENC="$BINDIR/places-serving-encode-v1"; VER="$BINDIR/places-serving-verify-v1" ;;
+            addresses)
+              PROOF="$BINDIR/address-proof-directory"; ENC="$BINDIR/address-serving-encode-v1"; VER="$BINDIR/address-serving-verify-v1"
+              MARKER_ARGS=(--address-reduce-projection cv1/plan/address-reduce-projection.sqlite) ;;
+            places)
+              PROOF=""; ENC="$BINDIR/places-serving-encode-v1"; VER="$BINDIR/places-serving-verify-v1"
+              MARKER_ARGS=(--markers-dir cv1/plan/map-markers) ;;
           esac
           # P0-3: one matrix job reduces a contiguous BATCH of partitions serially,
           # writing one create-only serving object + marker per partition into
@@ -737,7 +754,7 @@ jobs:
           /usr/bin/time -v python scripts/construction_v1_hosted.py run-reduce \
             --contract cv1/control/contract.json --store-root store --family "$FAMILY_KEY" \
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
-            --plan cv1/plan/plan.json --markers-dir cv1/mapdl/markers \
+            --plan cv1/plan/plan.json "${MARKER_ARGS[@]}" \
             --batch-index "$BATCH_INDEX" --proof-binary "$PROOF" \
             --encoder-binary "$ENC" --verifier-binary "$VER" --scratch-dir reduce-scratch \
             --staging-report "phase/staging-${BATCH_INDEX}.json" \
@@ -819,7 +836,7 @@ jobs:
             python scripts/construction_v1_hosted.py run-head \
               --contract cv1plan/control/contract.json --store-root store \
               --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
-              --family places --markers-dir cv1plan/mapdl/markers \
+              --family places --markers-dir cv1plan/plan/map-markers \
               --encoder-binary "$BINDIR/places-serving-encode-v1" \
               --verifier-binary "$BINDIR/places-serving-verify-v1" \
               --staging-report head/staging.json \
@@ -907,8 +924,14 @@ jobs:
           mkdir -p final-work store
           HEAD_ARG=""
           if [ "$FAMILY_KEY" = places ]; then HEAD_ARG="--head headdl/head/head.json"; fi
+          if [ "$FAMILY_KEY" = addresses ]; then
+            MARKER_ARGS=(--address-finalize-projection cv1plan/plan/address-finalize-projection.json)
+          else
+            MARKER_ARGS=(--markers-dir cv1plan/plan/map-markers)
+          fi
           # --store-root is an EMPTY local cache. Every object in the published set
-          # is named by key in the reductions, head result and map markers, and is
+          # is named by key in the reductions, head result, and family-specific
+          # map projection (compact for Addresses, existing markers for Places), and is
           # hydrated from the run-scoped R2 staging prefix and verified against the
           # digest in its key. --remote-bucket is the PUBLICATION target: the exact
           # set goes straight into R2, create-only, marker last, with the whole-slice
@@ -922,7 +945,7 @@ jobs:
             --contract cv1plan/control/contract.json --store-root store \
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
             --family "$FAMILY_KEY" --plan cv1plan/plan/plan.json --reductions-dir red/reductions \
-            --markers-dir cv1plan/mapdl/markers \
+            "${MARKER_ARGS[@]}" \
             $HEAD_ARG --remote-bucket "$R2_BUCKET" --remote-endpoint-url "$R2_ENDPOINT" \
             --work-root final-work --output final-work/result.json
           echo "FINALIZE publication complete: $(jq -c '{objects,reconciles,marker_key,serving_objects,positions_objects,staged_objects_hydrated}' final-work/result.json)"

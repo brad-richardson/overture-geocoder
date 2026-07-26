@@ -417,6 +417,54 @@ def test_stage_watchdog_interrupts_and_reports_a_hard_cap_breach(tmp_path):
     assert watchdog.evidence()["peak_rss_bytes"] > 0
 
 
+def test_stage_watchdog_keeps_its_diagnosis_when_interrupt_raises_inside_with(
+    tmp_path,
+):
+    watchdog = CONSTRUCTION.StageWatchdog([tmp_path], CONSTRUCTION.Limits())
+    watchdog.thread = SimpleNamespace(start=lambda: None, join=lambda: None)
+    watchdog.failure = "whole-stage RSS exceeded its hard cap"
+    with pytest.raises(RuntimeError, match="RSS exceeded") as excinfo:
+        with watchdog:
+            raise RuntimeError("INTERRUPT Error: Interrupted!")
+    assert excinfo.value.__cause__ is not None
+    assert "Interrupted" in str(excinfo.value.__cause__)
+
+
+def test_streaming_plan_with_projection_callback_is_byte_identical(tmp_path):
+    binding = {
+        "records": 2,
+        "semantic_sum_a": "1".zfill(64),
+        "semantic_sum_b": "2".zfill(64),
+    }
+    marker = {
+        "binding": binding,
+        "packs": [
+            {
+                "directory": {
+                    "bucket_summaries": [
+                        {
+                            "country": "us",
+                            "maximum_bucket": 7,
+                            "binding": binding,
+                        }
+                    ]
+                }
+            }
+        ],
+    }
+    path = tmp_path / "000.json"
+    path.write_text(json.dumps(marker))
+    visited = []
+    streamed = CONSTRUCTION.genesis_plan_streaming(
+        [path], row_cap=10, visit_marker=lambda value: visited.append(value)
+    )
+    in_memory = CONSTRUCTION.genesis_plan([marker], row_cap=10)
+    assert CONSTRUCTION.canonical_json(streamed) == CONSTRUCTION.canonical_json(
+        in_memory
+    )
+    assert visited == [marker]
+
+
 def test_stage_watchdog_tolerates_a_file_vanishing_between_list_and_measure(
     tmp_path, monkeypatch
 ):
