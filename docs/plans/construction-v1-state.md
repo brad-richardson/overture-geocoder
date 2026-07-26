@@ -4,9 +4,23 @@
 purpose — the dated docs in this directory are point-in-time analyses; this one
 is the current picture and supersedes them where they disagree.
 
-Last updated 2026-07-25.
+Last updated 2026-07-26.
 
-## DISPATCH READINESS: NEITHER FAMILY IS READY (2026-07-25)
+## NEWER FINDINGS SUPERSEDE PARTS OF THIS FILE (2026-07-26)
+
+`docs/plans/2026-07-26-planet-probe-findings.md` records what a partial
+planet-scale probe measured after PR #177, and it **corrects several numbers
+written below and in the follow-ups doc** — the head workspace is 1.73x the disk
+floor rather than 1.48-1.64x, DuckDB temp spill is uncapped at all seven
+production sites and was missing from every projection, and the head phase's
+partitioned write emits 113 parquet files per partition, which makes the only
+guard over that region blind. It also records PR #178 (an R2 publication backend
+claiming BLOCKER A and BLOCKER C, green but **under review, not merged**), the two
+Europe-scale local stress runs with their resume commands, and a table of every
+figure corrected so far. Read it alongside this file; where they disagree it is
+newer.
+
+## DISPATCH READINESS: NEITHER FAMILY IS READY (2026-07-25, still true 2026-07-26)
 
 Read this before believing anything below about how close a planet dispatch is.
 Eight PRs on 2026-07-25 closed every blocker known at the time; a dedicated
