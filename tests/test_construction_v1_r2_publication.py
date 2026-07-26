@@ -28,11 +28,14 @@ from __future__ import annotations
 import hashlib
 import importlib.util
 import json
+import re
 import sys
 import threading
+import time
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -261,20 +264,39 @@ def test_the_upload_body_can_be_rewound_for_a_retry_and_the_digest_follows(tmp_p
     aws-cli path, part-way through publishing tens of thousands of objects. And a
     digest carried across the rewind would describe bytes that never arrived, so the
     whole-slice comparison would fail on a run that in fact published correctly.
+
+    THIS TEST USED TO ASSERT THE BUG. It required `seek` to a non-zero offset to
+    RAISE, on the theory that a partial rewind could not be accounted for. But a real
+    botocore client seeks to a non-zero offset on every single PUT -- `seek(0, 2)`, to
+    determine content length -- so that raise made the publication path unable to
+    upload one non-empty object over an https endpoint, and this test pinned it in
+    place. Seeks now move no bytes and therefore touch no digest; accounting is by
+    read POSITION. `tests/test_construction_v1_r2_real_client.py` is the coverage that
+    would have caught the original, and none of these doubles can.
     """
     source = _write(tmp_path / "body", b"payload-bytes" * 100)
+    payload = source.read_bytes()
     reader = REMOTE._MD5Reader(source.open("rb"))
     reader.read(64)
     assert reader.tell() == 64
-    # The retry: rewind and send it all.
+    # The retry: rewind and send it all. The digest describes the RESENT bytes, not
+    # the 64 bytes of the attempt that failed plus the resend.
     assert reader.seek(0) == 0
-    assert reader.read() == source.read_bytes()
-    assert reader.hexdigest() == hashlib.md5(source.read_bytes()).hexdigest()
-    # A PARTIAL rewind cannot be accounted for and must refuse rather than guess.
-    reader.seek(0)
-    reader.read(32)
-    with pytest.raises(RuntimeError, match="partial rewind"):
-        reader.seek(16)
+    assert reader.read() == payload
+    assert reader.content_md5(len(payload)) == hashlib.md5(payload).hexdigest()
+    # A length probe -- exactly what `determine_content_length` does -- is not a rewind
+    # and must be harmless.
+    probe = REMOTE._MD5Reader(source.open("rb"))
+    assert probe.seek(0, 2) == len(payload)
+    probe.seek(0)
+    assert probe.read() == payload
+    assert probe.content_md5(len(payload)) == hashlib.md5(payload).hexdigest()
+    # A read that never started at 0 yields NO digest rather than a wrong one, so the
+    # caller falls back to the full streaming read-back.
+    partial = REMOTE._MD5Reader(source.open("rb"))
+    partial.seek(16)
+    partial.read()
+    assert partial.content_md5(len(payload)) is None
 
     # And it works through a real publication whose store rewinds every body.
     class _RewindingStore(R2.FilesystemStore):
@@ -393,6 +415,173 @@ def test_the_per_upload_head_compares_the_digest_on_a_store_that_records_one(tmp
 # --------------------------------------------------------------------------- #
 # 2. The marker is last, and a mid-run failure leaves none
 # --------------------------------------------------------------------------- #
+def test_the_per_upload_head_verification_is_enforced_at_the_call_site(tmp_path):
+    """P1-3: the CALL SITE, not `_expected_head` and `remote.head` in isolation.
+
+    Deleting `if head != _expected_head(remote, item)` from `_publish_one` left 190
+    tests passing, because the tests for this property exercised the two helpers
+    directly and nothing routed through the publisher. That matters more on the R2
+    backend than it looks: `read_back_identity`'s fast path returns the EXPECTED
+    sha256, so `verify_whole_slice_once`'s own sha256 comparison is tautological there
+    and this per-upload check is the only independent one outside
+    `read_back_identity`.
+
+    Driven by a store that stores correctly but MISREPORTS on HEAD, in both
+    directions, so only the publisher's comparison can catch it.
+    """
+    artifacts = _objects(tmp_path, count=3)
+
+    class _LyingLengthStore(R2.FilesystemStore):
+        def head(self, key):
+            info = super().head(key)
+            return None if info is None else R2.ObjectInfo(info.bytes + 1, info.sha256)
+
+    class _LyingDigestStore(R2.FilesystemStore):
+        def head(self, key):
+            info = super().head(key)
+            return None if info is None else R2.ObjectInfo(info.bytes, "c" * 64)
+
+    for index, store_class in enumerate((_LyingLengthStore, _LyingDigestStore)):
+        root = tmp_path / f"bucket-{index}"
+        remote = REMOTE.VerifiedStoreRemote(store_class(root), _budget())
+        with pytest.raises(RuntimeError, match="per-upload HEAD verification failed"):
+            REMOTE.publish_exact_set(
+                remote, artifacts=artifacts, marker_key=MARKER,
+                request_sha256="b" * 64,
+            )
+        # And no marker was committed over a slice whose HEAD did not agree.
+        assert R2.FilesystemStore(root).head(MARKER) is None
+
+
+def test_the_runtime_operation_cap_actually_aborts_the_publication(tmp_path):
+    """P1-4: the enforcement half of #173, which nothing asserted.
+
+    The plan-time gate is well covered; the thing it PROMISES -- that a publication
+    over budget stops -- was not. `Budget.charge` raising is what makes the gate more
+    than advice, and no test anywhere asserted "remote operation cap exceeded".
+    """
+    artifacts = _objects(tmp_path, count=12)
+    remote, store = _store_remote(
+        tmp_path, budget=_budget(max_operations=9)
+    )
+    with pytest.raises(RuntimeError, match="remote operation cap exceeded"):
+        REMOTE.publish_exact_set(
+            remote, artifacts=artifacts, marker_key=MARKER, request_sha256="c" * 64
+        )
+    # Aborted part-way, and crucially with NO completion marker.
+    assert store.head(MARKER) is None
+    assert len(store.list_prefix(PREFIX)) < len(artifacts)
+
+
+def test_the_runtime_read_byte_cap_actually_aborts(tmp_path):
+    """P1-4, the other uncovered cap. Charged on every streaming read-back."""
+    artifacts = _objects(tmp_path, count=4, size=4096)
+    remote, _ = _store_remote(tmp_path)
+    marker = REMOTE.publish_exact_set(
+        remote, artifacts=artifacts, marker_key=MARKER, request_sha256="d" * 64
+    )
+    # A FRESH remote has no sent digests, so verification takes the streaming
+    # fallback -- which is the path that charges read bytes.
+    tight = REMOTE.VerifiedStoreRemote(
+        R2.FilesystemStore(tmp_path / "bucket"), _budget(max_read_bytes=5000)
+    )
+    with pytest.raises(RuntimeError, match="remote read-byte cap exceeded"):
+        REMOTE.verify_whole_slice_once(
+            tight, prefix=PREFIX, expected=marker["artifacts"]
+        )
+
+
+def test_the_write_byte_cap_actually_aborts(tmp_path):
+    """The third cap, for completeness: all three are fail-closed limits."""
+    artifacts = _objects(tmp_path, count=4, size=4096)
+    remote, store = _store_remote(tmp_path, budget=_budget(max_write_bytes=5000))
+    with pytest.raises(RuntimeError, match="remote write-byte cap exceeded"):
+        REMOTE.publish_exact_set(
+            remote, artifacts=artifacts, marker_key=MARKER, request_sha256="e" * 64
+        )
+    assert store.head(MARKER) is None
+
+
+def test_the_exact_set_equality_gate_refuses_a_slice_that_is_not_the_admitted_set(tmp_path):
+    """P1-5 (#168): both branches of `verify_whole_slice_once`'s equality gate.
+
+    An EXTRA object in the prefix and a MISSING one are different failures and both
+    were unpinned. This is the check that makes the published slice the admitted set
+    rather than a superset of it, and it runs before any object is touched.
+    """
+    artifacts = _objects(tmp_path, count=4)
+    remote, store = _store_remote(tmp_path)
+    marker = REMOTE.publish_exact_set(
+        remote, artifacts=artifacts, marker_key=MARKER, request_sha256="f" * 64
+    )
+    # Baseline: the admitted set verifies.
+    assert REMOTE.verify_whole_slice_once(
+        remote, prefix=PREFIX, expected=marker["artifacts"]
+    )["objects"] == 4
+    # EXTRA: something else appeared under the published prefix.
+    store.upload(
+        _write(tmp_path / "stowaway", b"not admitted"), f"{PREFIX}stowaway", "0" * 64
+    )
+    with pytest.raises(RuntimeError, match="missing, extra, or duplicate keys"):
+        REMOTE.verify_whole_slice_once(
+            remote, prefix=PREFIX, expected=marker["artifacts"]
+        )
+    # MISSING: an admitted object is not in the slice.
+    (tmp_path / "bucket" / f"{PREFIX}stowaway").unlink()
+    with pytest.raises(RuntimeError, match="missing, extra, or duplicate keys"):
+        REMOTE.verify_whole_slice_once(
+            remote, prefix=PREFIX, expected=marker["artifacts"][:-1]
+        )
+
+
+def test_a_slice_object_that_vanished_after_the_listing_is_refused(tmp_path):
+    """P1-5: `read_back_identity` must refuse an absent object, not skip it.
+
+    The listing and the per-object read-back are separate steps, so an object can be
+    in the listing and gone by the time it is verified. Accepting that would report a
+    verified slice with a hole in it.
+    """
+    artifacts = _objects(tmp_path, count=3)
+    remote, _ = _store_remote(tmp_path)
+    marker = REMOTE.publish_exact_set(
+        remote, artifacts=artifacts, marker_key=MARKER, request_sha256="1" * 64
+    )
+    victim = str(marker["artifacts"][1]["key"])
+
+    class _VanishingStore(R2.FilesystemStore):
+        def head_proof(self, key):
+            return None if key == victim else super().head_proof(key)
+
+    vanished = REMOTE.VerifiedStoreRemote(
+        _VanishingStore(tmp_path / "bucket"), _budget()
+    )
+    # Give it the sent digest so it takes the FAST path, which is the path whose
+    # absence check was unpinned.
+    vanished._sent_md5.update(remote._sent_md5)
+    with pytest.raises(RuntimeError, match="final slice object is absent"):
+        REMOTE.verify_whole_slice_once(
+            vanished, prefix=PREFIX, expected=marker["artifacts"]
+        )
+
+
+def test_a_backend_that_does_not_declare_its_head_strength_crashes(tmp_path):
+    """P2-11: the comment says a backend that forgets must crash. Make that true.
+
+    `_expected_head` reads `remote.records_sha256_metadata` as a plain attribute
+    precisely so a backend that omits it fails loudly instead of silently getting the
+    weaker length-only comparison. Mutating it to `getattr(..., False)` survived every
+    test, so the hardening was decoration.
+    """
+    class _Undeclared:
+        pass
+
+    with pytest.raises(AttributeError, match="records_sha256_metadata"):
+        REMOTE._expected_head(_Undeclared(), {"sha256": "a" * 64, "bytes": 1})
+    # Both real backends do declare it, in opposite directions.
+    assert REMOTE.FilesystemRemote.records_sha256_metadata is False
+    assert REMOTE.VerifiedStoreRemote.records_sha256_metadata is True
+
+
 def test_the_marker_is_the_last_object_written_even_under_concurrency(tmp_path):
     """Ordering that concurrency could plausibly break, asserted on the backend.
 
@@ -456,35 +645,59 @@ def test_a_failing_member_stops_submission_and_still_drains_the_pool(tmp_path):
     `_run_bounded` must stop submitting on the first failure AND await what is
     already running before it raises. If it raised while workers were live, the
     caller could commit a marker over a still-moving slice.
+
+    Drain is asserted by making the surviving members SLOW: if the publisher raised
+    without draining, workers would still be mid-upload when the exception surfaced
+    and `completed` would be short of `started`. An earlier version of this test
+    computed a peak and never asserted on it, so it asserted nothing at all.
+
+    Honest note on how strong this is. The drain is guaranteed twice over -- the wait
+    loop drains, and `ThreadPoolExecutor.__exit__` calls `shutdown(wait=True)` -- and a
+    RUNNING task in a thread pool cannot be cancelled at all, only a queued one. So no
+    one-line mutation can remove it: `pool.shutdown(wait=False, cancel_futures=True)`
+    still joins running workers. The property therefore holds structurally rather than
+    because this test defends it; what the test defends is that the pool stays inside
+    its `with`, which is what makes the stdlib guarantee apply.
     """
     artifacts = _objects(tmp_path, count=40)
-    live = [0]
-    peak_live_at_raise = [0]
+    started: list[str] = []
+    completed: list[str] = []
     lock = threading.Lock()
 
     class _SlowFailingStore(R2.FilesystemStore):
         def upload_fileobj(self, source, key, sha256, *, size):
             with lock:
-                live[0] += 1
-            try:
-                if key.endswith("0007"):
-                    raise RuntimeError("upload exploded")
-                return super().upload_fileobj(source, key, sha256, size=size)
-            finally:
-                with lock:
-                    live[0] -= 1
-                    peak_live_at_raise[0] = max(peak_live_at_raise[0], live[0])
+                started.append(key)
+            if key.endswith("0007"):
+                raise RuntimeError("upload exploded")
+            # Slow enough that a non-draining publisher raises while these run.
+            time.sleep(0.05)
+            result = super().upload_fileobj(source, key, sha256, size=size)
+            with lock:
+                completed.append(key)
+            return result
 
     remote = REMOTE.VerifiedStoreRemote(_SlowFailingStore(tmp_path / "bucket"), _budget())
     with pytest.raises(RuntimeError, match="upload exploded"):
         REMOTE.publish_exact_set(
             remote, artifacts=artifacts, marker_key=MARKER, request_sha256="3" * 64
         )
+    store = R2.FilesystemStore(tmp_path / "bucket")
     # No marker, and not every member was even attempted: submission stopped.
-    assert R2.FilesystemStore(tmp_path / "bucket").head(MARKER) is None
-    assert len(R2.FilesystemStore(tmp_path / "bucket").list_prefix(PREFIX)) < len(artifacts)
-    # By the time the exception surfaced, nothing was running.
-    assert live[0] == 0
+    assert store.head(MARKER) is None
+    assert len(store.list_prefix(PREFIX)) < len(artifacts)
+    # THE DRAIN: every upload that started has finished. Nothing was still running
+    # when the exception reached the caller, so the marker decision was made over a
+    # settled slice.
+    assert len(started) > 1, "only the failing member ran; drain is untested"
+    assert sorted(completed) == sorted(key for key in started if not key.endswith("0007"))
+    # The structural half: the pool must be entered as a context manager, because that
+    # is where `shutdown(wait=True)` comes from. Written as a source check precisely
+    # because no behavioural mutation can reach it.
+    import inspect
+
+    source = inspect.getsource(REMOTE._run_bounded)
+    assert "with ThreadPoolExecutor(max_workers=concurrency) as pool:" in source
 
 
 # --------------------------------------------------------------------------- #
@@ -791,10 +1004,9 @@ def test_finalize_builds_its_remote_through_the_selector_not_a_hardcoded_backend
 def test_the_publish_concurrency_bound_is_wired_and_named():
     """A worker pool with an unbounded submission is not a bound.
 
-    `PUBLISH_CONCURRENCY` has to be the DEFAULT the publisher uses, not merely a
-    constant someone can read: passing `len(artifacts)` at the call site, or dropping
-    the parameter, leaves the constant sitting there documenting a bound that is not
-    applied.
+    `PUBLISH_CONCURRENCY` has to be the CEILING the publisher uses, not merely a
+    constant someone can read: dropping the parameter leaves the constant sitting there
+    documenting a bound that is not applied.
     """
     import inspect
 
@@ -803,12 +1015,60 @@ def test_the_publish_concurrency_bound_is_wired_and_named():
     verify_signature = inspect.signature(REMOTE.verify_whole_slice_once)
     assert verify_signature.parameters["concurrency"].default == REMOTE.PUBLISH_CONCURRENCY
     assert 1 < REMOTE.PUBLISH_CONCURRENCY <= R2.DEFAULT_MAX_POOL_CONNECTIONS
-    # And `cmd_finalize` must not override it back to serial.
+    # `cmd_finalize` DERIVES its bound from the contract's limits rather than taking the
+    # module default or forcing serial -- and threads the same value to both passes.
     source = inspect.getsource(HOSTED.cmd_finalize)
-    assert "concurrency=" not in source
+    assert "REMOTE.publication_concurrency(" in source
+    assert source.count("concurrency=concurrency") == 2
+    assert "concurrency=1" not in source
     # `_run_bounded` refuses a nonsense bound rather than falling back to unbounded.
     with pytest.raises(ValueError, match="concurrency"):
         REMOTE._run_bounded(lambda _i, _x: None, [1, 2], concurrency=0)
+
+
+def test_the_concurrency_and_the_object_cap_fit_the_disk_floor():
+    """P2-9/P2-10: bound the concurrency, do not merely measure it.
+
+    Local-disk peak is `concurrency` x the largest resident object, so the worker count
+    is only safe in combination with the per-object cap the contract admits. The
+    MEASURED largest `.av1` is 278 MB (16 x that is 4.45 GB, 5.6x inside the floor),
+    but `max_serving_bytes` ADMITS 2 GiB, at which 16 workers would be 32 GiB -- 1.28x
+    OVER the floor. So assert the derivation, not the measurement.
+    """
+    floor = REMOTE.FINALIZE_FREE_DISK_FLOOR_BYTES
+    # The floor is the one the finalize job actually asserts.
+    workflow = (ROOT / ".github/workflows/construction-v1.yml").read_text()
+    assert "-ge 25000000" in workflow
+    assert floor == 25_000_000 * 1024
+
+    # The ceiling alone does NOT fit the admitted address cap -- which is why the
+    # derivation exists and why asserting the measurement would have been vacuous.
+    address_cap = HOSTED.HOSTED_LIMITS["addresses"]["max_serving_bytes"]
+    assert REMOTE.PUBLISH_CONCURRENCY * address_cap > floor
+    # Derived, it fits, with the worker count reduced accordingly.
+    derived = REMOTE.publication_concurrency(address_cap)
+    assert derived * address_cap <= floor
+    assert 1 < derived < REMOTE.PUBLISH_CONCURRENCY
+    # Every family that declares a per-object cap fits, and every such cap is under the
+    # single-PUT ceiling -- `put_object` is used directly, so an object above it cannot
+    # be published at all and `single_part_etag_md5` never gets to notice.
+    declared = 0
+    for family, limits in HOSTED.HOSTED_LIMITS.items():
+        cap = limits.get("max_serving_bytes")
+        if cap is None:
+            continue
+        declared += 1
+        assert REMOTE.publication_concurrency(cap) * cap <= floor, family
+        assert cap < REMOTE.SINGLE_PUT_MAX_BYTES, family
+    assert declared >= 1
+    # A family with no declared cap gets the ceiling; that is the previous behaviour and
+    # a tracked gap in the Places limits, not a licence to ignore the floor.
+    assert REMOTE.publication_concurrency(None) == REMOTE.PUBLISH_CONCURRENCY
+    assert "max_serving_bytes" not in HOSTED.HOSTED_LIMITS["places"]
+    # And it fails closed on a nonsense cap rather than inventing one.
+    for bad in (0, -1, True, "2147483648", 1.5):
+        with pytest.raises(ValueError, match="positive integer"):
+            REMOTE.publication_concurrency(bad)
 
 
 def test_the_budget_counter_is_mutated_under_its_lock():
@@ -921,6 +1181,118 @@ def test_the_staging_counters_are_safe_under_the_publisher_pool(tmp_path):
     assert evidence["staged_objects_released"] == rounds * workers
     assert evidence["staged_bytes_hydrated"] == 10 * rounds * workers
     assert store.resident_bytes == 0
+
+
+def test_the_workflow_gates_the_publication_on_derived_verification_evidence():
+    """P1-6: the gate that replaced the deleted mirror step, pinned.
+
+    The disk floor and the residency gate in that job are both pinned; this one was
+    not, so replacing it with `jq -e 'true'` passed everything. It also must not assert
+    `marker_written_last`: that is a hardcoded `True` literal in `cmd_finalize`, so
+    asserting it asserts a constant -- the same shape of worthless check as a `// 0`
+    default. `binding_sha256` is DERIVED from the verification, so it exists only if
+    the verification ran.
+    """
+    import yaml
+
+    workflow = (ROOT / ".github/workflows/construction-v1.yml").read_text()
+    document = yaml.safe_load(workflow)
+    steps = document["jobs"]["finalize"]["steps"]
+    gate = [
+        step for step in steps
+        if "binding_sha256" in str(step.get("run", ""))
+    ]
+    assert gate, "the finalize job has no publication-evidence gate"
+    run = str(gate[0]["run"])
+    assert "verification.binding_sha256" in run
+    # And the constant-assertion must NOT come back.
+    assert ".marker_written_last" not in workflow, (
+        "marker_written_last is a hardcoded literal in cmd_finalize; asserting it in "
+        "jq asserts a constant"
+    )
+
+    # EXECUTE the gate rather than grepping it. A substring check cannot tell
+    # `(.objects | numbers) > 0` from `true or (.objects | numbers) > 0` -- the second
+    # contains the first -- so the only honest test of a jq predicate is to run it
+    # against inputs it must accept and inputs it must reject.
+    program = _jq_program(run)
+    good = {
+        "objects": 4,
+        "bytes": 1234,
+        "verification": {"objects": 4, "binding_sha256": "a" * 64},
+    }
+    assert _jq_accepts(program, good), "the gate rejects a correctly published slice"
+    for label, bad in (
+        ("no objects", {**good, "objects": 0}),
+        ("no bytes", {**good, "bytes": 0}),
+        ("objects missing", {k: v for k, v in good.items() if k != "objects"}),
+        ("bytes a string", {**good, "bytes": "1234"}),
+        ("verification missing", {k: v for k, v in good.items() if k != "verification"}),
+        ("binding absent", {**good, "verification": {"objects": 4}}),
+        ("binding not a digest", {**good, "verification": {"objects": 4, "binding_sha256": "nope"}}),
+        ("binding not a string", {**good, "verification": {"objects": 4, "binding_sha256": 1}}),
+        ("count disagrees", {**good, "verification": {"objects": 3, "binding_sha256": "a" * 64}}),
+    ):
+        assert not _jq_accepts(program, bad), f"the gate accepted: {label}"
+
+
+def _jq_program(run: str, marker: str = "binding_sha256") -> str:
+    """The jq filter containing `marker`, out of the step's shell.
+
+    The finalize step runs SEVERAL `jq -e` gates (the residency bound is another one),
+    so select by content rather than taking the first.
+    """
+    programs = []
+    cursor = 0
+    while True:
+        found = run.find("jq -e '", cursor)
+        if found < 0:
+            break
+        start = found + len("jq -e '")
+        end = run.index("'", start)
+        programs.append(run[start:end])
+        cursor = end + 1
+    matching = [program for program in programs if marker in program]
+    assert len(matching) == 1, f"expected one gate containing {marker!r}, got {len(matching)}"
+    return matching[0]
+
+
+def _jq_accepts(program: str, payload: dict) -> bool:
+    import json as _json
+    import shutil as _shutil
+    import subprocess
+
+    jq = _shutil.which("jq")
+    assert jq, "jq is required to test a jq gate; it is present on hosted runners"
+    result = subprocess.run(
+        [jq, "-e", program], input=_json.dumps(payload), capture_output=True, text=True
+    )
+    return result.returncode == 0
+
+
+def test_the_finalize_ledger_estimate_is_the_pessimistic_end_of_the_projection():
+    """`ledger-check` is a fail-closed COST gate, so under-projecting fails OPEN.
+
+    It refuses to start the phase when prior + projected runner-minutes exceed the
+    confirmed cap. An estimate below the real cost therefore lets a run BEGIN a phase
+    it cannot afford -- the gate silently stops gating. Given a range and no
+    measurement, the conservative input is the top of the range, because
+    over-projecting can only refuse a dispatch and never admit a bad one. ("Don't swap
+    one guess for another" is the right instinct for a REPORTED number and the wrong
+    one for a gate INPUT.)
+
+    Pinned as a value, not a comment, because reverting it to the middle of the range
+    passed every other test.
+    """
+    workflow = (ROOT / ".github/workflows/construction-v1.yml").read_text()
+    match = re.search(r'FINALIZE_PHASE_ESTIMATE_MINUTES:\s*"(\d+)"', workflow)
+    assert match, "the finalize phase estimate is gone"
+    estimate = int(match.group(1))
+    # The projected address finalize is ~48-208 min; the estimate must cover the top of
+    # it, and must stay under the job's own timeout or the phase could never start.
+    assert 208 <= estimate < 360, estimate
+    timeout = yaml.safe_load(workflow)["jobs"]["finalize"]["timeout-minutes"]
+    assert estimate < timeout
 
 
 def test_the_shell_mirror_is_gone_from_the_workflow():

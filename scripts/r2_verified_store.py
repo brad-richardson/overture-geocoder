@@ -542,6 +542,32 @@ class Boto3Store:
             config=Config(
                 retries={"max_attempts": MAX_ATTEMPTS, "mode": "standard"},
                 max_pool_connections=max_pool_connections,
+                # PLAIN single PUTs, no flexible-checksum framing. Both of these are
+                # load-bearing and neither is a preference.
+                #
+                # botocore's default is `when_supported`, which adds a CRC32 in an
+                # `aws-chunked` trailer -- and the trailer location is chosen only for
+                # HTTPS, which every real endpoint is. That has two consequences:
+                #
+                #  1. it wraps the body in `AwsChunkedWrapper` and calls
+                #     `botocore.utils.determine_content_length`, which probes the body
+                #     with `seek(0, 2)`. MEASURED against the pinned botocore 1.43.56
+                #     over an https endpoint: PUTs of 1 KiB and 3 MiB both died before
+                #     a byte was sent; only a 0-byte body survived, because seeking to
+                #     the end of an empty file lands at 0. So the publication path
+                #     could not upload a single non-empty object.
+                #  2. it would send `x-amz-checksum-crc32` inside aws-chunked framing
+                #     that the aws-cli mirror this replaces never used, and R2's
+                #     acceptance of that framing is UNVERIFIED. Sending unverified
+                #     framing on every write while rejecting
+                #     `x-amz-checksum-sha256` for being unverified would be
+                #     incoherent; this makes both choices the same choice.
+                #
+                # `when_required` sends a checksum only where the S3 model demands one
+                # (which PutObject does not), so the request is a plain single PUT and
+                # the ETag stays the content MD5 that `single_part_etag_md5` reads.
+                request_checksum_calculation="when_required",
+                response_checksum_validation="when_required",
             ),
         )
 

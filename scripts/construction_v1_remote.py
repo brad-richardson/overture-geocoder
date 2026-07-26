@@ -62,6 +62,17 @@ R2 = _load("construction_v1_remote_r2_store", "scripts/r2_verified_store.py")
 # be pinning it against a cost R2 does not charge.
 LIST_PAGE_KEYS = R2.LIST_PAGE_KEYS
 
+# The free-disk floor the finalize job asserts before it starts
+# (`construction-v1.yml`: `df -Pk / | ... -ge 25000000`, i.e. 25 GB in 1 KiB blocks).
+# Named here because PUBLISH_CONCURRENCY is bounded BY it -- a worker count chosen
+# without reference to the disk it consumes is a coincidence, not a bound.
+FINALIZE_FREE_DISK_FLOOR_BYTES = 25_000_000 * 1024
+# S3/R2 single-PUT ceiling. `put_object` is used directly (never the transfer
+# manager), so any object above this cannot be published at all -- and
+# `single_part_etag_md5` would never get the chance to notice, because the PUT itself
+# fails. Asserted against `max_serving_bytes` in the tests.
+SINGLE_PUT_MAX_BYTES = 5 * 1000**3
+
 # Workers in the upload pass. Chosen, not guessed:
 #
 # * The per-object cost with a persistent client is two round trips (the
@@ -74,15 +85,49 @@ LIST_PAGE_KEYS = R2.LIST_PAGE_KEYS
 #   memory, so this bound does not depend on object size at all -- strictly
 #   stronger than the one-object-in-RAM bound #170 established.
 # * Local disk is 16 x the largest object resident at once, because each worker
-#   hydrates one staged object, publishes it and evicts it. At the planet address
-#   shape (725 .av1 over 87-132 GB, so ~120-182 MB each, and they sort adjacently
-#   so 16 big ones really can be in flight together) that is ~2-3 GB, or ~8 GB
-#   against a 3x outlier -- inside the finalize job's 25 GB free-disk floor now
-#   that the whole-slice `publish/` tree is gone.
+#   hydrates one staged object, publishes it and evicts it. MEASURED at the planet
+#   address shape the largest published object is a 278 MB `.av1`, so 16 x 278 MB =
+#   4.45 GB, 5.6x inside FINALIZE_FREE_DISK_FLOOR_BYTES -- and those objects are
+#   hydrated from staging and evicted rather than newly materialized.
+#
+#   BUT the measurement is not the bound. `HOSTED_LIMITS[...]["max_serving_bytes"]`
+#   admits an object of 2 GiB, and 16 x 2 GiB = 32 GiB is 1.28x OVER the floor. So the
+#   worker count and the per-object cap are only jointly safe, and that relationship
+#   is asserted (`test_the_concurrency_and_the_object_cap_fit_the_disk_floor`) rather
+#   than left to hold by luck: raise `max_serving_bytes` and the assertion tells you
+#   to lower PUBLISH_CONCURRENCY, or vice versa.
 # * It is <= r2_verified_store.DEFAULT_MAX_POOL_CONNECTIONS, so no worker blocks on
 #   the client's connection pool instead of on the network.
 PUBLISH_CONCURRENCY = 16
 assert PUBLISH_CONCURRENCY <= R2.DEFAULT_MAX_POOL_CONNECTIONS
+
+
+def publication_concurrency(max_object_bytes: int | None) -> int:
+    """Workers that fit the disk floor, given the largest object the run may admit.
+
+    Local-disk peak is `concurrency` x the largest resident object, so the worker count
+    and the per-object cap are only jointly safe and this is where that is resolved
+    instead of being asserted after the fact. `PUBLISH_CONCURRENCY` is a CEILING here,
+    not the answer: at the address family's admitted `max_serving_bytes` of 2 GiB,
+    16 workers would be 32 GiB against a 25.6 GB floor -- 1.28x over -- so this returns
+    11. The MEASURED largest `.av1` is 278 MB, at which 16 x 278 MB = 4.45 GB is 5.6x
+    inside the floor; deriving rather than measuring is what keeps that true if a
+    future partition produces a bigger object.
+
+    `None` means the family declares no per-object byte cap in its limits. Places does
+    not, and its largest published object post-#169 is a ~2.7 MB head shard, so the
+    ceiling applies -- which is also exactly the previous behaviour. The MISSING cap is
+    a real gap in the Places limits rather than a licence to ignore the floor, and it
+    is tracked as a follow-up; do not read this branch as "unbounded is fine".
+    """
+    if max_object_bytes is None:
+        return PUBLISH_CONCURRENCY
+    if not isinstance(max_object_bytes, int) or isinstance(max_object_bytes, bool) or max_object_bytes < 1:
+        raise ValueError(
+            f"largest admissible object size must be a positive integer, got "
+            f"{max_object_bytes!r}"
+        )
+    return max(1, min(PUBLISH_CONCURRENCY, FINALIZE_FREE_DISK_FLOOR_BYTES // max_object_bytes))
 
 CHUNK_BYTES = 1024 * 1024
 
@@ -153,42 +198,60 @@ class _MD5Reader:
     against without re-downloading the object. Digesting what was READ, rather than
     re-reading the file afterwards, is what makes it the bytes that were SENT.
 
-    `seek`/`tell` are delegated because botocore REWINDS a request body to retry a
-    transient 5xx or throttle: a body that cannot seek turns a retryable blip into a
-    hard failure part-way through publishing tens of thousands of objects, which is
-    strictly worse than the aws-cli path this replaces. A rewind to the start RESETS
-    the digest, because after a retry the bytes that were sent are the bytes read
-    after the rewind -- carrying the first attempt's digest forward would make the
-    whole-slice comparison compare against something that never arrived.
+    It must survive ARBITRARY seeks, because the SDK does several kinds and none of
+    them is a rewind-to-resend:
+
+    * `determine_content_length` probes with `seek(0, 2)` then seeks back. That reads
+      no bytes at all, so it must not disturb the digest -- and must not raise. An
+      earlier version raised on any non-zero seek, which made every non-empty PUT over
+      an https endpoint fail before a byte was sent.
+    * a retry rewinds to 0 and re-reads. The digest has to describe the bytes that
+      were ACTUALLY sent, so the second pass must REPLACE the first, not extend it.
+    * a body that cannot seek at all makes a retryable 5xx fatal, so `seek` and `tell`
+      are delegated rather than withheld.
+
+    So the digest is tracked by POSITION rather than by interpreting seeks: it covers
+    exactly the contiguous prefix `[0, digested)`, is restarted by any read beginning
+    at 0, and is abandoned if a read ever starts somewhere else. `content_md5` then
+    hands back a digest only when it covers the whole object as one pass, and None
+    otherwise -- which is the fail-closed answer, because the caller's fallback is the
+    full streaming read-back rather than a skipped check.
     """
 
     def __init__(self, source: BinaryIO):
         self._source = source
         self._digest = hashlib.md5(usedforsecurity=False)
+        self._digested = 0
+        self._contiguous = True
 
     def read(self, size: int = -1) -> bytes:
+        start = self._source.tell()
         chunk = self._source.read(size)
-        self._digest.update(chunk)
+        if start == 0:
+            # The stream (re)starts here: whatever was digested before belongs to an
+            # attempt whose bytes did not arrive.
+            self._digest = hashlib.md5(usedforsecurity=False)
+            self._digested = 0
+            self._contiguous = True
+        if self._contiguous and start == self._digested:
+            self._digest.update(chunk)
+            self._digested += len(chunk)
+        elif chunk:
+            self._contiguous = False
         return chunk
 
     def seek(self, offset: int, whence: int = os.SEEK_SET) -> int:
-        position = self._source.seek(offset, whence)
-        if position == 0:
-            self._digest = hashlib.md5(usedforsecurity=False)
-        elif self._digest is not None:
-            # A partial rewind would leave the digest covering bytes that were sent
-            # once and bytes that were sent twice. Nothing does this today (botocore
-            # rewinds to the start), and guessing is worse than refusing.
-            raise RuntimeError(
-                "cannot account for a partial rewind of a publication body: the "
-                f"digest would not describe the bytes that were sent (offset {position})"
-            )
-        return position
+        # Deliberately does NOT touch the digest. A seek moves no bytes; only a read
+        # does, and `read` is where the accounting lives.
+        return self._source.seek(offset, whence)
 
     def tell(self) -> int:
         return self._source.tell()
 
-    def hexdigest(self) -> str:
+    def content_md5(self, size: int) -> str | None:
+        """MD5 of the bytes sent, or None if they were not read as one whole pass."""
+        if not self._contiguous or self._digested != size:
+            return None
         return self._digest.hexdigest()
 
 
@@ -366,8 +429,13 @@ class VerifiedStoreRemote:
             self.store.upload_fileobj(reader, _safe_key(key), sha256, size=size)
         except FileExistsError as error:
             raise ConflictError(key) from error
-        with self._sent_md5_lock:
-            self._sent_md5[key] = reader.hexdigest()
+        # Recorded only when the digest provably covers the whole object as one pass.
+        # Absent means `read_back_identity` does the full streaming read-back instead
+        # of trusting a partial digest -- the check gets slower, never weaker.
+        sent = reader.content_md5(size)
+        if sent is not None:
+            with self._sent_md5_lock:
+                self._sent_md5[key] = sent
 
     def read_back_identity(self, key: str, expected: dict[str, object]) -> dict[str, object]:
         """Verify a published object by METADATA, not by downloading it again.

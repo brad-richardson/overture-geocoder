@@ -104,7 +104,20 @@ env:
   MAP_PHASE_ESTIMATE_MINUTES: "60"
   REDUCE_PHASE_ESTIMATE_MINUTES: "90"
   HEAD_PHASE_ESTIMATE_MINUTES: "90"
-  FINALIZE_PHASE_ESTIMATE_MINUTES: "120"
+  # The PESSIMISTIC end of the projected finalize phase, not the middle. `ledger-check`
+  # is a fail-closed COST gate: it refuses to start the phase when prior + projected
+  # runner-minutes exceed the confirmed cap. Under-projecting therefore fails OPEN --
+  # it lets a run begin a phase it cannot afford -- so given a range and no
+  # measurement, the conservative input is the top of the range. Over-projecting can
+  # only refuse a dispatch, never admit a bad one.
+  #
+  # 210 covers the projected address finalize (~48-208 min: round trips 10-31 min,
+  # bytes 38-177 min over three passes of a 100-145 GB slice), which is the expensive
+  # family. Places projects to ~12-43 min. Both sit under the job's own
+  # `timeout-minutes: 360`. PROJECTED, not measured -- replace with the first real
+  # dispatch's figure. A RESUMED address finalize can approach the timeout (it adds two
+  # full GETs of every object); see the follow-ups doc.
+  FINALIZE_PHASE_ESTIMATE_MINUTES: "210"
 
 jobs:
   admit:
@@ -969,16 +982,29 @@ jobs:
             echo "peak == hydrated with nothing released is eager hydration, which OOMs the planet finalize job." >&2
             exit 1
           }
-          # The publication itself is asserted from the SAME result file rather than
-          # by a second pass over R2: `objects` is what `verify_whole_slice_once`
-          # listed and read back from the bucket after the marker, so a non-zero count
-          # with `marker_written_last` is the create-only publication having completed
-          # against the real bucket. `| numbers` and `== true` for the same
-          # fail-closed reason as above -- a missing key must exit non-zero, not
-          # default to something that passes.
-          jq -e '(.objects | numbers) > 0 and .marker_written_last == true' \
-            final-work/result.json >/dev/null || {
+          # The publication itself, asserted from the SAME result file rather than by a
+          # second pass over R2: `objects` and `bytes` are what `verify_whole_slice_once`
+          # listed and verified against the bucket, and `binding_sha256` is a digest
+          # over those per-object identities.
+          #
+          # Deliberately NOT `marker_written_last`: that key is a hardcoded `True`
+          # literal in `cmd_finalize`, so asserting it asserts a constant. It reads
+          # like a check and is worth nothing, which is the same permissive-shape
+          # problem as a `// 0` default. `binding_sha256` is DERIVED from the
+          # verification, so it exists only if the verification ran.
+          #
+          # `| numbers` / `| strings` for the same fail-closed reason as above: a
+          # missing or wrong-typed key must exit non-zero rather than default to
+          # something that passes.
+          jq -e '
+            (.objects | numbers) > 0
+            and (.bytes | numbers) > 0
+            and ((.verification.binding_sha256 | strings) | test("^[0-9a-f]{64}$"))
+            and (.verification.objects | numbers) == (.objects | numbers)
+          ' final-work/result.json >/dev/null || {
             echo "Finalize did not publish and verify a non-empty slice to R2." >&2
+            jq -c '{objects,bytes,verification}' final-work/result.json >&2 \
+              || echo "(no verification evidence in final-work/result.json)" >&2
             exit 1
           }
           echo "R2 create-only publication complete; marker written last: $(jq -r '.marker_key' final-work/result.json)"

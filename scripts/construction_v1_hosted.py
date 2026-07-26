@@ -2074,6 +2074,9 @@ def _positions_objects(
 def cmd_finalize(args: argparse.Namespace) -> int:
     contract = read_json(args.contract)
     store = _store(args, request_sha256=contract["request_sha256"])
+    # Read for one reason: the largest object this contract admits, which is what
+    # bounds how many workers can be resident at once against the job's disk floor.
+    limits = _limits_for(contract, args.family)
     plan = read_json(args.plan)
     reductions = [read_json(path) for path in sorted(Path(args.reductions_dir).glob("*.json"))]
     if not reductions:
@@ -2292,6 +2295,15 @@ def cmd_finalize(args: argparse.Namespace) -> int:
             )
 
     marker_key = f"{contract['namespaces']['markers'].rstrip('/')}/finalize/{args.family}.json"
+    # DERIVED from the disk floor and the largest object this contract admits, not the
+    # module ceiling: local-disk peak is `concurrency` x the largest resident object, so
+    # the two are only jointly safe. At the address family's 2 GiB `max_serving_bytes`,
+    # 16 workers would be 32 GiB against a 25.6 GB floor. `publication_concurrency`
+    # resolves it from the CONTRACT's limits, which is the value that actually governs
+    # this run rather than the default someone read once.
+    concurrency = REMOTE.publication_concurrency(
+        getattr(limits, "max_serving_bytes", None)
+    )
     marker = REMOTE.publish_exact_set(
         remote,
         artifacts=exact_set,
@@ -2299,6 +2311,7 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         request_sha256=request_sha256,
         fail_after_upload=args.fail_after_upload,
         verify=verify_identity,
+        concurrency=concurrency,
     )
     # The admitted set IS the expected set: `publish_exact_set` computed each
     # identity by streaming the same file it uploaded, and `verify_identity` gated
@@ -2307,7 +2320,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     # the marker outlive the upload loop.
     expected = marker["artifacts"]
     verification = REMOTE.verify_whole_slice_once(
-        remote, prefix=f"{slice_root}/families/{args.family}/", expected=expected
+        remote,
+        prefix=f"{slice_root}/families/{args.family}/",
+        expected=expected,
+        # Same bound: the streaming fallback (a resume) holds an object per worker.
+        concurrency=concurrency,
     )
     result = {
         "family": args.family,

@@ -122,6 +122,30 @@ CAPS = {
     # inside verify_whole_slice_once, after every object was already published, so
     # the run produced no verification evidence and no result file.
     #
+    # WHAT THIS CAP DOES **NOT** COVER, because the projection matching the charge is
+    # the whole point of the gate and the claim has to be exact. It counts operations
+    # against the PUBLISHED SLICE PREFIX only. Two real classes of request are charged
+    # nothing at all:
+    #
+    #   * STAGING HYDRATION. Every `StagedObjectStore.path()` is 1 HEAD + 1 GET on the
+    #     same bucket, and finalize hydrates each published object TWICE (admission,
+    #     then the upload pass) -- so ~4 uncharged operations per published object,
+    #     ~263,000 for a planet address slice against a budgeted 263,073. `Budget`
+    #     wraps only the publication remote; `StagedObjectStore` and
+    #     `r2_verified_store` charge nothing.
+    #   * SDK RETRIES. `Boto3Store` retries a transient 5xx up to MAX_ATTEMPTS, and the
+    #     budget charges the logical operation once. MEASURED by injecting two 500s: 6
+    #     real HTTP requests against 4 charged.
+    #
+    # So the REAL request count for a planet finalize is roughly 2x what this cap
+    # bounds, and 346,182/400,000 is a margin computed against the publication half of
+    # the traffic. That is a fail-OPEN inaccuracy, not a correctness hole: R2 class-A
+    # operations are ~$4.50/million, so even 2x the ceiling is under $4, and the byte
+    # caps are what bound a runaway's cost. Fixing it means giving staging its own
+    # counter -- tracked in docs/plans/2026-07-24-construction-v1-follow-ups.md -- not
+    # inflating this number, which is calibrated against what `Budget.charge` actually
+    # sees.
+    #
     # 400_000 is sized off the RETRY-INCLUSIVE STRUCTURAL CEILING, not the
     # measurement: at the inventory gate's max_tasks 128 (both families' plan
     # limits), all 256 buckets occupied in every task, 4,096 head shards + manifest

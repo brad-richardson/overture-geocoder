@@ -26,18 +26,19 @@ Read this before believing anything below about how close a planet dispatch is.
 Eight PRs on 2026-07-25 closed every blocker known at the time; a dedicated
 address-family readiness pass then found three more, one of which stops Places too:
 
-- ~~**The R2 mirror cannot finish inside its job timeout, in BOTH families.** Its
-  serial `aws s3api` loop costs a MEASURED 0.34 s per invocation: 8.4 h for Places
-  (44,305 objects), 12.4 h for addresses (65,751), against a 360-minute timeout and a
-  `FINALIZE_PHASE_ESTIMATE_MINUTES` of 120 — before any bytes move.~~
-  **CLOSED 2026-07-26.** Finalize publishes straight to R2 through
-  `VerifiedStoreRemote` over a persistent client, 16 workers deep, and the shell
-  mirror is deleted. Projected ~12-43 min (Places) / ~48-208 min (addresses) — a
-  PROJECTION, not a measurement; validate on the first dispatch, and note the
-  pessimistic address end exceeds the 120-minute ledger estimate (not the timeout).
+- **The R2 mirror cannot finish inside its job timeout, in BOTH families.** Its
+  serial `aws s3api` loop cost a MEASURED 0.34 s per invocation: 8.4 h for Places
+  (44,305 objects), 12.4 h for addresses (65,751), against a 360-minute timeout —
+  before any bytes move. **MITIGATED 2026-07-26, not closed.** Finalize publishes
+  straight to R2 through `VerifiedStoreRemote` over a persistent client and the shell
+  mirror is deleted; projected ~12-43 min (Places) / ~48-208 min (addresses). That is a
+  PROJECTION and the blocker was raised on a MEASUREMENT, so it stays open until a
+  dispatch measures the new path — nothing here has run against R2 at any scale.
+  `FINALIZE_PHASE_ESTIMATE_MINUTES` is now 210 (the pessimistic end), because
+  `ledger-check` is a fail-closed cost gate and under-projecting one fails OPEN.
 - **The address marker fan-in is 14.6 GB of JSON / 23.9 GB RSS on a 16 GB runner**,
   loaded whole by `plan-reduce`, by all 121 reduce jobs, and by finalize. **STILL
-  OPEN — this is now the only remaining hard blocker.**
+  OPEN, and untouched by the 2026-07-26 publication work.**
 - ~~**Address finalize's local publish tree is ~100-145 GB against a 25 GB floor.**~~
   **CLOSED 2026-07-26** by the same change: there is no publish tree, and peak local
   disk is 16 × the largest single object (~2-4.5 GB).
