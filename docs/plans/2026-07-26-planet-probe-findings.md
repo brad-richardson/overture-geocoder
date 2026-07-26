@@ -743,3 +743,85 @@ This closes the remote create-only, framing, ETag/content, and resume-conflict
 questions that the local real-botocore stand-in could not answer. It does not
 measure many-object throughput; that remains part of the resumed Europe
 Addresses finalize after marker fan-in is fixed.
+
+## H. PR #182 and both preserved Europe builds complete end to end
+
+Added after PR #182 merged as `94eae08`. No planet workflow was dispatched.
+Temporary harness copies pointed at the merged main checkout so the old
+instrumented Address worktree and all preserved inputs remained untouched.
+
+### H1. Compact Address projections
+
+The 41 full Address markers totalled 7,799,189,884 bytes and described
+151,371,029 records. `plan-reduce` completed in 128.56 seconds at
+1,949,052,928 bytes peak RSS and emitted:
+
+| artifact | bytes | SHA-256 |
+|---|---:|---|
+| plan | 99,749 | `f5d875ddc30bddf4a2ccc027c5e4e3dcdab2e57e8d2a579fa291b26bc265333e` |
+| reduce SQLite projection | 667,648 | `db5882164ca33ab388b67cbb35df9c1a76a9ebfed79ea0a178509a0aad898639` |
+| finalize identity projection | 586,797 | `e3248437c9a13922f27a2dc47f58e7fb497db0102b67e0d1ad46f3b2df946a8d` |
+| core plan payload | 1,363,843 | composed from the three artifacts plus matrix |
+
+The plan was byte-identical to the previously preserved plan. Its compact
+representation covered 160 packs, 2,417 row groups, 2,520 exact
+row-group/country envelopes, 2,466 per-record object identities, 204
+partitions, and 102 two-partition reducer jobs.
+
+All 102 jobs completed with no failure or retry while four local workers ran
+concurrently. Each job had its own process-tree and scratch/store sampler, which
+matches the hosted one-job-per-runner unit:
+
+| reducer measurement | observed maximum |
+|---|---:|
+| peak RSS per job | **2,263,089,152 B** |
+| peak sampled scratch + store per job | **3,309,679,666 B** |
+| wall time per two-partition job | **34.75 s** |
+
+All 204 partition bindings verified, and each job released every hydrated pack.
+
+Address finalize completed in 265.13 seconds at 75,907,072 bytes peak RSS. It
+hydrated and released 5,340 staged reads / 94,218,506,354 bytes, reconciled the
+exact set, and wrote the marker last:
+
+| Address publication | result |
+|---|---:|
+| serving objects | **204** |
+| per-record objects | **2,466** |
+| finalizer manifests | **2** |
+| exact-set members | **2,672** |
+| files including marker | **2,673** |
+| bytes including marker | **47,110,551,015** |
+| reconciles / marker last | **true / true** |
+
+This closes the old 13.45 GB Europe marker OOM, the projected 29 GB planet
+marker RSS blocker, and the formerly hidden Address publication-size gate.
+
+### H2. Places finalize
+
+The preserved Places map, plan, all 128 reducer jobs, and 4,096-shard head were
+reused. On the same merged `94eae08`, finalize completed in 136.37 seconds at
+247,562,240 bytes peak RSS. It hydrated and released 41,130 staged reads /
+42,060,324,048 bytes and wrote:
+
+| Places publication | result |
+|---|---:|
+| serving objects | **12,109** |
+| positions objects | **8,456** |
+| finalizer manifests | **2** |
+| exact-set members | **20,567** |
+| files including marker | **20,568** |
+| bytes including marker | **21,039,995,295** |
+| reconciles / marker last | **true / true** |
+
+Together with §F's complete head result, Places has now completed every local
+Europe phase through exact publication on merged main.
+
+### H3. Operational conclusion
+
+Both families have passed rung 3 of the verification ladder at Europe scale,
+and the live R2 probe in §G passed rung 4 semantics. There is no remaining
+measured Europe-scale code blocker. The next forward action is a planet run
+sheet—fresh prediction/admission output, exact confirmation, cost and runner
+ceilings, family order, and the Places head residual—followed by an explicit
+operator decision. Agents must not dispatch it themselves.

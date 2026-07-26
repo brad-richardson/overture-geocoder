@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-26 after PR #178, PR #181, and the live R2 publication
-probe.
+Last updated 2026-07-26 after PR #182 and the successful preserved Europe
+Places and Addresses end-to-end completions.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -20,11 +20,15 @@ encodes cost and runner limits and must be supplied by the operator.
 
 ## Current snapshot
 
-The current construction-v1 code/evidence checkpoint on `main` is `82b4731`:
-PR #178's direct bounded R2 publication backend plus PR #181's live probe.
+The current construction-v1 code/evidence checkpoint on `main` is `94eae08`:
+PR #178's bounded R2 publisher, PR #181's live R2 probe, and PR #182's compact
+Address consumer projections.
 There are no open construction-v1 code PRs.
 
-Neither family is ready for a planet dispatch.
+Both families have passed the preserved Europe execution rung through
+publication and marker-last completion. There is no remaining measured
+Europe-scale code blocker. Planet request preparation and explicit operator
+authorization are still required; agents must not dispatch the planet workflow.
 
 ### Places
 
@@ -49,24 +53,42 @@ DuckDB statement. A full 4,096-shard head takes about 34 minutes at Europe
 scale. The old projected ~1% planet disk residual remains a planet-preparation
 gate, but Europe exercised the complete phase without approaching it.
 
+On merged `94eae08`, finalize then completed in 136.37 seconds at 247,562,240
+bytes peak RSS. It reconciled 20,567 exact-set members (12,109 serving, 8,456
+positions, 2 manifests), wrote the marker last, and produced 20,568 local files
+/ 21,039,995,295 bytes including that marker. It hydrated and released all
+41,130 staged reads / 42,060,324,048 bytes.
+
 ### Addresses
 
-The Europe address run reached the first hard failure in `run-reduce`.
-`_load_markers` consumed 13.45 GB outside the guarded region, and the watchdog
-aborted every reduce job on its first observation before useful work began.
+PR #182 removed full Address markers from every hosted consumer. The plan phase
+streams each full marker once and emits a query-only SQLite reduce projection
+plus an exact finalize identity projection. Reducers query only the row groups
+for their two owned partitions and re-prove the fetched packs before trusting
+the projected envelope.
 
-The planet marker set projects to about 29 GB against a 16 GB runner. Marker
-size is driven mainly by countries and duplicated directory structures, not
-row count. About 99.97% of the marker is `packs[*].directory`; reduce needs only
-the pack key, group index, country, and min/max `route_hash`.
+The preserved 7,799,189,884-byte Europe marker set projected in 128.56 seconds
+at 1,949,052,928 bytes peak RSS to:
 
-The current long pole is therefore one design change:
+- a 667,648-byte reduce projection;
+- a 586,797-byte finalize projection; and
+- a 99,749-byte plan / 1,363,843-byte core plan payload.
 
-> Project a compact reduce marker or stream the existing marker so address
-> reduce does not materialize the full map marker set.
+The plan remained byte-identical (`f5d875...333e`) and described 151,371,029
+records, 204 partitions, 102 two-partition jobs, 160 packs, 2,417 row groups,
+2,520 country envelopes, and 2,466 per-record objects.
 
-Address finalize's aggregate publication size cannot be measured until this is
-fixed. The old ordering "publication first, marker fan-in second" is retired.
+All 102 local reducer jobs then completed successfully with four workers and no
+retries. Per hosted job, the observed maxima were 2,263,089,152 bytes RSS,
+3,309,679,666 bytes sampled scratch+store, and 34.75 seconds wall time. All 204
+partition bindings verified and every hydrated pack was released.
+
+Finalize completed in 265.13 seconds at 75,907,072 bytes peak RSS. It reconciled
+2,672 exact-set members (204 serving, 2,466 per-record, 2 manifests), wrote the
+marker last, and produced 2,673 local files / 47,110,551,015 bytes including
+that marker. It hydrated and released all 5,340 staged reads /
+94,218,506,354 bytes. The former marker OOM and hidden Address publication-size
+gate are closed by execution.
 
 ### Publication
 
@@ -90,37 +112,37 @@ manual, main-only, one-object probe, and Actions run `30203859256` passed agains
 - same-length different bytes under the same key were rejected; and
 - the unconditional cleanup deleted the exact key and proved it absent.
 
-Remote create-only/checksum semantics are therefore closed. Fleet throughput
-remains a scale measurement, not a reason for another unit/review loop; the
-resumed Europe Addresses finalize will exercise it after marker fan-in is fixed.
+Remote create-only/checksum semantics are therefore closed. The two local
+Europe finalizers also proved bounded streaming and exact-set reconciliation at
+21.04 GB Places and 47.11 GB Addresses. R2 fleet throughput remains a planet-run
+measurement, not a reason for another unit/review loop.
 
 ## Fastest path
 
-Follow this sequence. Do not interleave hygiene, reverse implementation, or
-unrelated hardening. Direct publication and its live remote-semantics probe are
-complete.
+Follow this sequence. Europe execution, direct publication, and the live
+remote-semantics probe are complete.
 
-1. **Implement compact or streaming address markers.** Keep this PR limited to
-   making the marker fan-in fit and making its measurement trustworthy.
-2. **Resume the preserved Europe address reduce and finalize.** Measure the
-   reducer residency and aggregate publication behavior. Fix the next observed
-   blocker only.
-3. **Prepare the non-promoting planet workflow inputs.** Hand the exact
-   confirmation string, projected cost, runner ceilings, and known residuals to
-   the operator. The operator decides whether to dispatch.
+1. **Prepare the non-promoting planet workflow inputs.** Re-run the committed
+   prediction/admission commands at `94eae08`; record the exact confirmation
+   string, family order, projected cost, runner ceilings, and Places head disk
+   residual.
+2. **Hand the run sheet to the operator.** The operator decides whether and when
+   to dispatch. Run one family at a time so failures and cost remain attributable.
+3. **Begin reverse R1 as the fast follow.** The per-record prerequisites are now
+   durably publication-proven for both families. Keep reverse implementation
+   separate from planet-forward execution and consume these existing artifacts.
 
 ## Open blockers and gates
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
 | Possible ~1% planet head disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet remains a projection | Planet preparation gate, then the authorized non-promoting run |
-| Marker fan-in | Addresses | 13.45 GB Europe load; ~29 GB planet projection vs 16 GB runner | Compact/streaming representation and completed Europe reduce |
-| Address publication aggregate | Addresses | Old 100–145 GB projection; currently hidden behind marker failure | Completed Europe finalize with direct R2 backend |
-| Watchdog loses the useful diagnosis | Addresses | Observed on Europe abort | Fix alongside marker work if needed to trust the rerun |
-| Reducer cap fails open when absent | Addresses | `predict-reduce` accepted 242 jobs against its own default | Fail closed before planet request preparation |
+| Planet R2 fleet throughput | Both | Live semantics pass; local Europe publication passes at 21.04 GB / 47.11 GB | Measure in the authorized non-promoting run |
+| Planet authorization and cost | Both | Europe rung complete; planet has not been dispatched | Exact run sheet and operator confirmation |
 
-The last two are supporting correctness fixes for the next address execution,
-not separate review programs.
+The former Address marker fan-in, Address publication aggregate, watchdog
+diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful
+Europe execution. Do not reopen them without contradictory measured evidence.
 
 ## What is already established
 
@@ -134,6 +156,11 @@ not separate review programs.
 - Places head is routed through 4,096 shards with a published routing manifest.
 - The complete 43.9%-of-planet Europe Places head passes under merged #176:
   4,096 populated shards, 8.18 GB peak RSS, 5.40 GB peak sampled disk.
+- Europe Places completes finalize under merged `94eae08`: 20,567 exact-set
+  members, 21.04 GB including marker, reconciles true, marker written last.
+- Europe Addresses completes projected plan plus all 204 reduce partitions and
+  finalize under merged `94eae08`: 2,672 exact-set members, 47.11 GB including
+  marker, reconciles true, marker written last.
 - Both families emit and durably publish per-record artifacts needed by a later
   spatial reverse index.
 - Finalize verifies an exact publication set and has a projected remote
@@ -203,9 +230,10 @@ Keep reverse work off the critical path by sequencing it as:
 - **R3:** Worker range reader, bounded query planner, and API capability wiring.
 - **R4:** exact-set publication integration and end-to-end release rehearsal.
 
-R1 can begin after the forward blocker PR count falls below the two-PR WIP
-limit. R2–R4 should follow the first non-promoting forward planet run unless a
-measured dependency requires otherwise.
+R1 may begin now: the forward blocker PR count is zero and both Europe
+publications proved the required per-record artifacts. R2–R4 should follow the
+first non-promoting forward planet run unless a measured dependency requires
+otherwise.
 
 The full reviewed design, including geometry and API details, is
 `docs/plans/2026-07-25-reverse-v2-design.md`.
