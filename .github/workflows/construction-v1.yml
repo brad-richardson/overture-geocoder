@@ -32,8 +32,10 @@ name: Construction v1 planet build
 # ledger artifact, and each fan-in re-sums prior + spent + next and FAILS CLOSED
 # before provisioning the next matrix. Resume is a fresh dispatch (never Re-run
 # failed jobs): supply resume_from with the prior run id; the admission job
-# downloads the prior ledger read-only and refuses to start if its consumed
-# total does not match PRIOR_RUNNER_MINUTES bound into the confirmation.
+# downloads the prior ledger read-only, proves that it belongs to the same
+# request and family, and carries its consumed total into the new ledger. The
+# request hash stays unchanged so the fresh dispatch reuses the same immutable
+# R2 staging namespace.
 on:
   workflow_dispatch:
     inputs:
@@ -56,7 +58,7 @@ on:
         required: true
         type: string
       resume_from:
-        description: Optional prior run id for fresh-dispatch resume; its ledger's consumed total must equal PRIOR_RUNNER_MINUTES in the confirmation.
+        description: Optional prior run id for fresh-dispatch resume; its authenticated ledger must match this request and family and its consumed total is carried forward.
         required: false
         default: ""
         type: string
@@ -130,7 +132,7 @@ jobs:
       family_key: ${{ steps.gate.outputs.family_key }}
       max_parallel: ${{ steps.gate.outputs.max_parallel }}
       max_total_runner_minutes: ${{ steps.gate.outputs.max_total_runner_minutes }}
-      prior_runner_minutes: ${{ steps.gate.outputs.prior_runner_minutes }}
+      prior_runner_minutes: ${{ steps.resume.outputs.effective_prior_runner_minutes || steps.gate.outputs.prior_runner_minutes }}
       max_cost_usd: ${{ steps.gate.outputs.max_cost_usd }}
       producer_commit: ${{ steps.gate.outputs.producer_commit }}
       map_matrix: ${{ steps.gate.outputs.map_matrix }}
@@ -220,32 +222,48 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Carry the prior run ledger forward or fail closed (resume only)
+        id: resume
         if: inputs.resume_from != ''
         env:
           GH_TOKEN: ${{ github.token }}
           RESUME_FROM: ${{ inputs.resume_from }}
-          PRIOR: ${{ steps.gate.outputs.prior_runner_minutes }}
+          REQUEST_SHA256: ${{ steps.gate.outputs.request_sha256 }}
+          FAMILY_KEY: ${{ steps.gate.outputs.family_key }}
         run: |
           set -euo pipefail
           case "$RESUME_FROM" in ''|*[!0-9]*) echo "resume_from must be a prior run id" >&2; exit 1 ;; esac
           mkdir -p resume
           ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts" \
-            --jq '.artifacts[] | select(.name | startswith("construction-v1-ledger-")) | .archive_download_url' | head -1)"
+            --jq '([.artifacts[] | select(.name | startswith("construction-v1-ledger-"))] | first | .archive_download_url) // empty')"
           if [ -z "$ART_URL" ]; then
-            echo "resume failed closed: no construction-v1-ledger artifact on run ${RESUME_FROM}" >&2
+            ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts?name=cv1-plan" \
+              --jq '.artifacts[0].archive_download_url // empty')"
+          fi
+          if [ -z "$ART_URL" ]; then
+            echo "resume failed closed: no final or plan ledger artifact on run ${RESUME_FROM}" >&2
             exit 1
           fi
           gh api "$ART_URL" > resume/ledger.zip
           (cd resume && unzip -o ledger.zip >/dev/null)
-          PRIOR_CONSUMED="$(jq -r '(.prior_runner_minutes // 0) + ([.phases[].runner_minutes] | add // 0)' resume/ledger.json)"
-          echo "Prior run ${RESUME_FROM} consumed ${PRIOR_CONSUMED} runner minutes; confirmation binds PRIOR=${PRIOR}."
-          if [ "$PRIOR_CONSUMED" != "$PRIOR" ]; then
-            echo "resume failed closed: prior ledger consumed ${PRIOR_CONSUMED} != confirmation PRIOR_RUNNER_MINUTES ${PRIOR}" >&2
-            echo "Re-run prepare with --prior-runner-minutes ${PRIOR_CONSUMED} and dispatch the new confirmation." >&2
+          LEDGER=resume/ledger.json
+          if [ ! -f "$LEDGER" ]; then LEDGER=resume/control/ledger.json; fi
+          if [ ! -f "$LEDGER" ]; then
+            echo "resume failed closed: selected artifact contains no ledger" >&2
             exit 1
           fi
+          LEDGER_REQUEST="$(jq -er '.request_sha256 | strings' "$LEDGER")"
+          LEDGER_FAMILY="$(jq -er '.family | strings' "$LEDGER")"
+          if [ "$LEDGER_REQUEST" != "$REQUEST_SHA256" ] || [ "$LEDGER_FAMILY" != "$FAMILY_KEY" ]; then
+            echo "resume failed closed: prior ledger belongs to request=${LEDGER_REQUEST} family=${LEDGER_FAMILY}, expected request=${REQUEST_SHA256} family=${FAMILY_KEY}" >&2
+            exit 1
+          fi
+          PRIOR_CONSUMED="$(jq -er '(.prior_runner_minutes | numbers) + ([.phases[].runner_minutes | numbers] | add)' "$LEDGER")"
+          echo "Prior run ${RESUME_FROM} consumed ${PRIOR_CONSUMED} runner minutes for the same request and family."
+          echo "effective_prior_runner_minutes=$PRIOR_CONSUMED" >> "$GITHUB_OUTPUT"
 
       - name: Seed the run ledger (genesis or resumed prior)
+        env:
+          EFFECTIVE_PRIOR: ${{ steps.resume.outputs.effective_prior_runner_minutes || steps.gate.outputs.prior_runner_minutes }}
         run: |
           set -euo pipefail
           jq -n \
@@ -254,7 +272,7 @@ jobs:
             --arg request '${{ steps.gate.outputs.request_sha256 }}' \
             --arg family '${{ steps.gate.outputs.family_key }}' \
             --argjson cap '${{ steps.gate.outputs.max_total_runner_minutes }}' \
-            --argjson prior '${{ steps.gate.outputs.prior_runner_minutes }}' \
+            --argjson prior "$EFFECTIVE_PRIOR" \
             '{schema:"construction-v1-run-ledger-v1",run:$run,resume_from:$resume,request_sha256:$request,family:$family,max_total_runner_minutes:$cap,prior_runner_minutes:$prior,phases:[{phase:"admission",runner_minutes:0}]}' \
             > control/ledger.json
           python scripts/construction_v1_hosted.py ledger-check \
@@ -265,7 +283,7 @@ jobs:
             echo "- Family: \`${{ steps.gate.outputs.family_key }}\` | Mode: \`${{ inputs.mode }}\`"
             echo "- Request SHA-256: \`${{ steps.gate.outputs.request_sha256 }}\`"
             echo "- Map tasks: ${{ steps.gate.outputs.map_task_count }} | Max concurrency: ${{ steps.gate.outputs.max_parallel }}"
-            echo "- Retained runner-minute cap: ${{ steps.gate.outputs.max_total_runner_minutes }} | Prior (confirmation-bound): ${{ steps.gate.outputs.prior_runner_minutes }}"
+            echo "- Retained runner-minute cap: ${{ steps.gate.outputs.max_total_runner_minutes }} | Prior (verified ledger): $EFFECTIVE_PRIOR"
             echo "- Resume-from: \`${{ inputs.resume_from }}\` | Run attempt: ${{ github.run_attempt }} (admission requires 1)"
             echo "- Slice: non-promoting; production catalog writes forbidden"
           } >> "$GITHUB_STEP_SUMMARY"
@@ -690,6 +708,7 @@ jobs:
           include-hidden-files: true
           path: |
             plan
+            control/contract.json
             control/ledger.json
 
   reduce:
