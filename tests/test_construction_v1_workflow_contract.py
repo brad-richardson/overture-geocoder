@@ -420,7 +420,7 @@ def test_resume_carries_the_prior_ledger_or_fails_closed():
     assert "actions/runs/${RESUME_FROM}/artifacts" in value
     assert "resume failed closed" in value
     assert "construction-v1-ledger-" in value
-    assert 'select(.name == "cv1-plan")' in value
+    assert "artifacts?name=cv1-plan" in value
     assert 'LEDGER=resume/control/ledger.json' in value
     assert 'LEDGER_REQUEST="$(jq -er' in value
     assert 'LEDGER_FAMILY="$(jq -er' in value

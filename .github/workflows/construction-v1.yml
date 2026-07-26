@@ -234,7 +234,11 @@ jobs:
           case "$RESUME_FROM" in ''|*[!0-9]*) echo "resume_from must be a prior run id" >&2; exit 1 ;; esac
           mkdir -p resume
           ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts" \
-            --jq '([.artifacts[] | select(.name | startswith("construction-v1-ledger-"))] | first | .archive_download_url) // ([.artifacts[] | select(.name == "cv1-plan")] | first | .archive_download_url) // empty')"
+            --jq '([.artifacts[] | select(.name | startswith("construction-v1-ledger-"))] | first | .archive_download_url) // empty')"
+          if [ -z "$ART_URL" ]; then
+            ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts?name=cv1-plan" \
+              --jq '.artifacts[0].archive_download_url // empty')"
+          fi
           if [ -z "$ART_URL" ]; then
             echo "resume failed closed: no final or plan ledger artifact on run ${RESUME_FROM}" >&2
             exit 1
