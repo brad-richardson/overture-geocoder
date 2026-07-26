@@ -217,6 +217,17 @@ jobs:
             # uploads and EVICTS one object at a time, so a regression to eager
             # hydration makes peak == total and fails here.
             #
+            # `head_staged_objects_released > 0` is the SAME tripwire for the head
+            # phase, whose `[store.path(k) for k in candidates]` hydrated every map
+            # task's candidate pack before DuckDB read the first one and released
+            # none. It is asserted as `> 0` and NOT as `peak < total`, deliberately:
+            # this slice's head fan-in is ONE pack, so peak equals total however
+            # promptly the merge evicts, and a strict inequality would be
+            # unsatisfiable rather than strict. The strict multi-task bound (peak
+            # stays at head_merge_fan_in packs while many are merged) is asserted in
+            # tests/test_places_construction_v1.py::
+            # test_head_merge_releases_candidate_packs_and_bounds_peak_resident.
+            #
             # Every staging assertion goes through `| numbers`, which is what makes
             # it FAIL CLOSED. Bare comparisons have two holes in jq's cross-type
             # ordering, both verified: a MISSING key makes a residency comparison
@@ -254,6 +265,8 @@ jobs:
               and ((.plan_staged_peak_resident_bytes | numbers) < (.plan_staged_bytes_hydrated | numbers))
               and ((.reduce_staged_peak_resident_bytes | numbers) <= (.reduce_staged_bytes_hydrated | numbers))
               and (.head_staged_bytes_hydrated | numbers) > 0
+              and (.head_staged_objects_released | numbers) > 0
+              and ((.head_staged_peak_resident_bytes | numbers) <= (.head_staged_bytes_hydrated | numbers))
               and .serving_object_key == "routed_object"
               and .reduction_serving_objects == .partitions
               and (.head_manifest_objects | numbers) == 1
@@ -453,8 +466,11 @@ jobs:
             # Unlike places, `reconciles` for addresses is a REAL check
             # (validate_complete_reduction over the genesis plan), but it still
             # says nothing about volume, so assert counts the same way. The
-            # address family has no global head, so there are no head_* keys to
-            # assert -- which is why the reduce-ownership key is asserted instead:
+            # address family has no global head, so its head_* keys are asserted at
+            # ZERO -- hydrated and released alike -- rather than skipped, so a head
+            # phase silently doing work on the address path would fail here. The
+            # places job asserts the same two keys non-zero. That is also why the
+            # reduce-ownership key is asserted instead:
             # it proves the run went through the batch dispatch, not the legacy
             # one-job-per-partition path.
             #
@@ -494,6 +510,7 @@ jobs:
               and (.reduce_staged_objects_released | numbers) > 0
               and ((.reduce_staged_peak_resident_bytes | numbers) <= (.reduce_staged_bytes_hydrated | numbers))
               and (.head_staged_bytes_hydrated | numbers) == 0
+              and (.head_staged_objects_released | numbers) == 0
               and .serving_object_key == "artifact"
               and (.head_manifest_objects | numbers) == 0
               and .serving_objects == .partitions + (.head_manifest_objects | numbers)

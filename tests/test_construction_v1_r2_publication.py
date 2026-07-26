@@ -1021,6 +1021,7 @@ def test_the_publish_concurrency_bound_is_wired_and_named():
     assert "REMOTE.publication_concurrency(" in source
     assert source.count("concurrency=concurrency") == 2
     assert "concurrency=1" not in source
+    assert 'actual["bytes"] > max_publication_object_bytes' in source
     # `_run_bounded` refuses a nonsense bound rather than falling back to unbounded.
     with pytest.raises(ValueError, match="concurrency"):
         REMOTE._run_bounded(lambda _i, _x: None, [1, 2], concurrency=0)
@@ -1049,24 +1050,21 @@ def test_the_concurrency_and_the_object_cap_fit_the_disk_floor():
     derived = REMOTE.publication_concurrency(address_cap)
     assert derived * address_cap <= floor
     assert 1 < derived < REMOTE.PUBLISH_CONCURRENCY
-    # Every family that declares a per-object cap fits, and every such cap is under the
-    # single-PUT ceiling -- `put_object` is used directly, so an object above it cannot
-    # be published at all and `single_part_etag_md5` never gets to notice.
-    declared = 0
+    # Every family has a fail-closed per-object publication cap. Addresses declares a
+    # narrower serving cap; Places enforces max_output_bytes on every object it emits.
+    # Either way the production selector derives a worker count that fits the floor.
     for family, limits in HOSTED.HOSTED_LIMITS.items():
-        cap = limits.get("max_serving_bytes")
-        if cap is None:
-            continue
-        declared += 1
+        cap = limits.get("max_serving_bytes", limits["max_output_bytes"])
         assert REMOTE.publication_concurrency(cap) * cap <= floor, family
-        assert cap < REMOTE.SINGLE_PUT_MAX_BYTES, family
-    assert declared >= 1
-    # A family with no declared cap gets the ceiling; that is the previous behaviour and
-    # a tracked gap in the Places limits, not a licence to ignore the floor.
-    assert REMOTE.publication_concurrency(None) == REMOTE.PUBLISH_CONCURRENCY
+    places_cap = min(
+        HOSTED.HOSTED_LIMITS["places"]["max_output_bytes"],
+        REMOTE.SINGLE_PUT_MAX_BYTES,
+    )
     assert "max_serving_bytes" not in HOSTED.HOSTED_LIMITS["places"]
+    assert REMOTE.publication_concurrency(places_cap) * places_cap <= floor
+    assert REMOTE.publication_concurrency(places_cap) < REMOTE.PUBLISH_CONCURRENCY
     # And it fails closed on a nonsense cap rather than inventing one.
-    for bad in (0, -1, True, "2147483648", 1.5):
+    for bad in (None, 0, -1, True, "2147483648", 1.5):
         with pytest.raises(ValueError, match="positive integer"):
             REMOTE.publication_concurrency(bad)
 

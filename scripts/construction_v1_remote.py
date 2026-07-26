@@ -102,7 +102,7 @@ PUBLISH_CONCURRENCY = 16
 assert PUBLISH_CONCURRENCY <= R2.DEFAULT_MAX_POOL_CONNECTIONS
 
 
-def publication_concurrency(max_object_bytes: int | None) -> int:
+def publication_concurrency(max_object_bytes: int) -> int:
     """Workers that fit the disk floor, given the largest object the run may admit.
 
     Local-disk peak is `concurrency` x the largest resident object, so the worker count
@@ -114,14 +114,11 @@ def publication_concurrency(max_object_bytes: int | None) -> int:
     inside the floor; deriving rather than measuring is what keeps that true if a
     future partition produces a bigger object.
 
-    `None` means the family declares no per-object byte cap in its limits. Places does
-    not, and its largest published object post-#169 is a ~2.7 MB head shard, so the
-    ceiling applies -- which is also exactly the previous behaviour. The MISSING cap is
-    a real gap in the Places limits rather than a licence to ignore the floor, and it
-    is tracked as a follow-up; do not read this branch as "unbounded is fine".
+    Every caller must supply a positive cap from the run contract. Addresses has the
+    narrower `max_serving_bytes`; Places uses its enforced `max_output_bytes`.
+    Missing a cap is an admission defect, not permission to assume that 16 resident
+    objects fit.
     """
-    if max_object_bytes is None:
-        return PUBLISH_CONCURRENCY
     if not isinstance(max_object_bytes, int) or isinstance(max_object_bytes, bool) or max_object_bytes < 1:
         raise ValueError(
             f"largest admissible object size must be a positive integer, got "

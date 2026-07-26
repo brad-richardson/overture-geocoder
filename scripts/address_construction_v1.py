@@ -293,6 +293,29 @@ def combine_bindings(values: list[dict[str, Any]]) -> dict[str, Any]:
     return result
 
 
+# The share of a stage's disk budget DuckDB's spill may consume.
+#
+# `SET temp_directory` alone does NOT bound spill: `max_temp_directory_size` defaults
+# to **90% of available disk**, so any spilling query is licensed to fill the runner to
+# within 10% -- outside every cap this pipeline declares, and inside the same workspace
+# the stage's own inputs and outputs live in. Measured on a partial planet head probe:
+# 3.5 GB across 10 `duckdb_temp_storage_*.tmp` files at 26% completion, a term no
+# projection carried.
+#
+# A QUARTER of `max_scratch_bytes`, derived rather than a fresh literal, because spill
+# is one term inside that budget and shares it with everything else the stage writes.
+# Every production connection in both families sets it -- this is the per-family-parity
+# defect class, so the helper is shared and a contract test pins every call site.
+DUCKDB_TEMP_SHARE = 4
+
+
+def duckdb_temp_limit(max_scratch_bytes: int) -> str:
+    """The `max_temp_directory_size` literal for a stage with this scratch budget."""
+    if max_scratch_bytes <= 0:
+        raise ValueError("DuckDB temp cap needs a positive scratch budget")
+    return f"{max(1, int(max_scratch_bytes) // DUCKDB_TEMP_SHARE)}B"
+
+
 class StageWatchdog:
     def __init__(self, roots: list[Path], limits: Limits, connection=None):
         self.roots = roots
@@ -304,6 +327,8 @@ class StageWatchdog:
         self.failure: str | None = None
         self.finished = False
         self.process = None
+        self.sweeps = 0
+        self.peak_sweep_seconds = 0.0
         self.stop = threading.Event()
         self.thread = threading.Thread(target=self._run, daemon=True)
 
@@ -330,8 +355,13 @@ class StageWatchdog:
         return total
 
     def _observe(self) -> None:
+        started = time.monotonic()
         self.peak_rss_bytes = max(self.peak_rss_bytes, self.process.memory_info().rss)
         self.peak_disk_bytes = max(self.peak_disk_bytes, self.disk_bytes(self.roots))
+        self.sweeps += 1
+        self.peak_sweep_seconds = max(
+            self.peak_sweep_seconds, time.monotonic() - started
+        )
         if self.peak_rss_bytes > self.limits.max_rss_bytes:
             self.failure = "whole-stage RSS exceeded its hard cap"
         elif self.peak_disk_bytes > self.limits.max_scratch_bytes:
@@ -352,7 +382,25 @@ class StageWatchdog:
         # leaving __exit__ to report success and evidence() to report zero peaks.
         try:
             self._observe()
-            while not self.failure and not self.stop.wait(0.01):
+            # ADAPTIVE poll, not a fixed 5-10 ms one. `disk_bytes` is an rglob + stat
+            # over the whole tree, so its cost scales with the FILE COUNT: measured at
+            # 1.51 s per sweep over a 4,096-partition head workspace holding ~1.7M
+            # parquet files, against a 10 ms intended interval -- a ~150x overrun that
+            # (a) burns >=1.7 h of pure stat() across 4,096 encoder subprocesses and
+            # (b) makes the guard BLIND, because a subprocess can start and exit inside
+            # one sweep and be observed zero times.
+            #
+            # Sleeping for at least as long as the last sweep took caps the watchdog at
+            # ~50% duty cycle whatever the tree looks like, so a large tree costs
+            # resolution instead of costing unbounded CPU -- and `peak_sweep_seconds`
+            # makes the resolution it actually achieved visible in the evidence rather
+            # than assumed. The root cause is attacked separately: batching the shard
+            # COPY pins files-per-partition at the thread count (measured 3-4, flat in
+            # row volume, against 34 at 16.8M rows and 113 at planet scale unbatched),
+            # which takes the planet head sweep to ~13 ms.
+            while not self.failure and not self.stop.wait(
+                min(1.0, max(0.01, self.peak_sweep_seconds))
+            ):
                 self._observe()
         except BaseException as error:  # noqa: BLE001 - fail closed on any fault
             self.failure = f"stage watchdog stopped observing: {error!r}"
@@ -389,6 +437,12 @@ class StageWatchdog:
             "peak_rss_bytes": self.peak_rss_bytes,
             "peak_scratch_and_output_bytes": self.peak_disk_bytes,
             "wall_seconds": time.monotonic() - self.started,
+            # How well the guard could actually SEE. A watchdog whose sweep costs more
+            # than the thing it is watching is not coverage, and that was invisible
+            # until it was reported: these two say how many observations were taken and
+            # how slow the worst one was.
+            "observations": self.sweeps,
+            "peak_sweep_seconds": self.peak_sweep_seconds,
         }
 
 
@@ -402,6 +456,7 @@ def run_bounded(
     observed = psutil.Process(process.pid)
     peak_rss = 0
     peak_disk = 0
+    peak_sweep = 0.0
     failure = None
     while process.poll() is None:
         try:
@@ -419,7 +474,9 @@ def run_bounded(
             )
         except (psutil.Error, OSError):
             pass
+        sweep_started = time.monotonic()
         peak_disk = max(peak_disk, StageWatchdog.disk_bytes(scratch_roots))
+        peak_sweep = max(peak_sweep, time.monotonic() - sweep_started)
         elapsed = time.monotonic() - started
         if peak_rss > limits.max_rss_bytes:
             failure = "child RSS exceeded its hard cap"
@@ -441,13 +498,26 @@ def run_bounded(
                     process.kill()
                 process.wait()
             raise RuntimeError(failure)
-        time.sleep(0.005)
+        # ADAPTIVE, for the same reason as StageWatchdog._run: `disk_bytes` is an
+        # rglob + stat whose cost scales with the FILE COUNT, and this loop runs once
+        # per bounded subprocess -- 4,096 of them in the Places head phase. A fixed
+        # 5 ms sleep against a 1.51 s sweep (measured over a 4,096-partition workspace
+        # holding ~1.7M files) is a 100% duty cycle spent on stat(), and it makes the
+        # three checks above run once per 1.5 s instead of once per 5 ms, so a short
+        # child can start and exit between observations. Sleeping for at least as long
+        # as the worst sweep took caps the duty cycle at ~50% whatever the tree looks
+        # like; the 1 s ceiling keeps the guard from going blind for longer than that.
+        time.sleep(min(1.0, max(0.005, peak_sweep)))
     if process.returncode != 0:
         raise subprocess.CalledProcessError(process.returncode, process.args)
     return {
         "peak_rss_bytes": peak_rss,
         "peak_scratch_bytes": peak_disk,
         "wall_seconds": time.monotonic() - started,
+        # The resolution the guard actually achieved, for the same reason it is
+        # reported on StageWatchdog: a sweep that costs more than the thing it watches
+        # is not coverage, and that was invisible until it was measured.
+        "peak_sweep_seconds": peak_sweep,
     }
 
 
@@ -1017,6 +1087,9 @@ def map_task(
         connection.execute(f"SET memory_limit = '{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads = {limits.duckdb_threads}")
         connection.execute(f"SET temp_directory = '{duckdb_scratch}'")
+        connection.execute(
+            f"SET max_temp_directory_size = '{duckdb_temp_limit(limits.max_scratch_bytes)}'"
+        )
         with transformed.open("rb") as source:
             table = ipc.open_stream(source).read_all()
             connection.register("transformed_arrow", table)
@@ -1482,6 +1555,9 @@ def reduce_partition(
         connection.execute(f"SET memory_limit = '{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads = {limits.duckdb_threads}")
         connection.execute(f"SET temp_directory = '{workspace / 'duckdb-spill'}'")
+        connection.execute(
+            f"SET max_temp_directory_size = '{duckdb_temp_limit(limits.max_scratch_bytes)}'"
+        )
         with fetched.open("rb") as source:
             table = ipc.open_stream(source).read_all()
             connection.register("fetched_arrow", table)
