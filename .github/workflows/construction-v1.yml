@@ -62,6 +62,11 @@ on:
         required: false
         default: ""
         type: string
+      head_only_resume:
+        description: Places-only recovery path. Requires resume_from and reuses an authenticated successful plan/reducer set, skipping map, plan, and reduce.
+        required: false
+        default: false
+        type: boolean
       max_reduce_jobs:
         # An execution-shape knob, dispatch-time tunable so tuning it needs no code
         # change. It only ever LOWERS the job cap
@@ -138,6 +143,7 @@ jobs:
       map_matrix: ${{ steps.gate.outputs.map_matrix }}
       sample_matrix: ${{ steps.gate.outputs.sample_matrix }}
       map_task_count: ${{ steps.gate.outputs.map_task_count }}
+      head_only_resume: ${{ steps.gate.outputs.head_only_resume }}
     steps:
       - name: Check out dispatched main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -157,6 +163,9 @@ jobs:
           CONFIRMATION: ${{ inputs.confirmation }}
           REQUEST_JSON: ${{ inputs.request_json }}
           FAMILY: ${{ inputs.family }}
+          MODE: ${{ inputs.mode }}
+          RESUME_FROM: ${{ inputs.resume_from }}
+          HEAD_ONLY_RESUME: ${{ inputs.head_only_resume }}
         run: |
           set -euo pipefail
           mkdir -p control
@@ -179,6 +188,17 @@ jobs:
             address) FAMILY_KEY=addresses ;;
             places)  FAMILY_KEY=places ;;
             *) echo "unknown family $FAMILY" >&2; exit 1 ;;
+          esac
+          case "$HEAD_ONLY_RESUME" in
+            true)
+              if [ "$MODE" != execute ] || [ "$FAMILY_KEY" != places ] || [ -z "$RESUME_FROM" ]; then
+                echo "head_only_resume requires mode=execute, family=places, and a numeric resume_from run id" >&2
+                exit 1
+              fi
+              case "$RESUME_FROM" in *[!0-9]*) echo "head_only_resume requires a numeric resume_from run id" >&2; exit 1 ;; esac
+              ;;
+            false) : ;;
+            *) echo "head_only_resume must be true or false" >&2; exit 1 ;;
           esac
 
           # Fail-closed admission (regenerates the request, rejects any drift or
@@ -219,6 +239,7 @@ jobs:
             echo "map_matrix=$MAP_MATRIX"
             echo "sample_matrix=$SAMPLE_MATRIX"
             echo "map_task_count=$MAP_COUNT"
+            echo "head_only_resume=$HEAD_ONLY_RESUME"
           } >> "$GITHUB_OUTPUT"
 
       - name: Carry the prior run ledger forward or fail closed (resume only)
@@ -300,9 +321,188 @@ jobs:
             control/runtime.json
             control/ledger.json
 
+  resume_inputs:
+    name: Authenticate and normalize prior Places plan/reducers (no cloud secrets)
+    needs: admit
+    if: inputs.mode == 'execute' && needs.admit.outputs.head_only_resume == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out dispatched main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Download this dispatch's authenticated control package
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-control
+          path: control
+      - name: Authenticate the failed run and its complete successful reducer set
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_FROM: ${{ inputs.resume_from }}
+          MAP_TASK_COUNT: ${{ needs.admit.outputs.map_task_count }}
+        run: |
+          set -euo pipefail
+          mkdir -p prior-control prior-plan prior-reducers resume-plan resume-reductions/reductions resume-reductions/phase
+
+          # This recovery path is deliberately narrower than general resume:
+          # same workflow, main branch, first attempt, completed failure. The
+          # byte comparisons below then bind its artifacts to this admission.
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}" > prior-run.json
+          jq -e '
+            .name == "Construction v1 planet build"
+            and .event == "workflow_dispatch"
+            and .head_branch == "main"
+            and .run_attempt == 1
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' prior-run.json >/dev/null || {
+            echo "head-only resume failed closed: prior run is not a completed first-attempt failure of this workflow on main" >&2
+            exit 1
+          }
+
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-control --dir prior-control
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-plan --dir prior-plan
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --pattern 'cv1-reduce-*' --dir prior-reducers
+
+          # Re-canonicalize both request documents because workflow_dispatch may
+          # preserve one trailing newline and this workflow adds another. Compare
+          # the canonical bytes and bind their digest to the admitted request.
+          # The contract artifact itself has no dispatch transport ambiguity and
+          # is still compared byte-for-byte.
+          jq -cS . control/request.json > current-request.canonical.json
+          jq -cS . prior-control/request.json > prior-request.canonical.json
+          cmp --silent current-request.canonical.json prior-request.canonical.json || {
+            echo "head-only resume failed closed: prior canonical request differs" >&2
+            exit 1
+          }
+          CANONICAL_SHA="$(sha256sum current-request.canonical.json | awk '{print $1}')"
+          test "$CANONICAL_SHA" = '${{ needs.admit.outputs.request_sha256 }}' || {
+            echo "head-only resume failed closed: canonical request digest differs from admission" >&2
+            exit 1
+          }
+          cmp --silent control/contract.json prior-plan/control/contract.json || {
+            echo "head-only resume failed closed: prior contract bytes differ" >&2
+            exit 1
+          }
+          jq -e '.schema == "overture-places-adaptive-genesis-plan-v1"' prior-plan/plan/plan.json >/dev/null \
+            && jq -e '.family == "places"' prior-plan/control/ledger.json >/dev/null || {
+            echo "head-only resume failed closed: prior plan is not Places" >&2
+            exit 1
+          }
+
+          # Require exactly the admitted map-marker set and the deterministic,
+          # contiguous reducer matrix. A partial artifact fan-in must never
+          # masquerade as a resumable completed reduce phase.
+          MARKERS="$(find prior-plan/plan/map-markers -maxdepth 1 -type f -name '*.json' | wc -l)"
+          test "$MARKERS" -eq "$MAP_TASK_COUNT" || {
+            echo "head-only resume failed closed: expected $MAP_TASK_COUNT map markers, found $MARKERS" >&2
+            exit 1
+          }
+          for INDEX in $(seq 0 $(( MAP_TASK_COUNT - 1 ))); do
+            test -s "prior-plan/plan/map-markers/${INDEX}.json" || {
+              echo "head-only resume failed closed: missing map marker $INDEX" >&2
+              exit 1
+            }
+          done
+          jq -e '
+            .include | [.[].batch_index] as $b
+            | ($b | length) > 0
+              and ($b == [range(0; ($b | length))])
+          ' prior-plan/plan/reduce-matrix.json >/dev/null || {
+            echo "head-only resume failed closed: reducer matrix is not contiguous and unique from zero" >&2
+            exit 1
+          }
+          REDUCE_COUNT="$(jq -er '.include | length' prior-plan/plan/reduce-matrix.json)"
+          ARTIFACT_COUNT="$(find prior-reducers -mindepth 1 -maxdepth 1 -type d -name 'cv1-reduce-*' | wc -l)"
+          test "$ARTIFACT_COUNT" -eq "$REDUCE_COUNT" || {
+            echo "head-only resume failed closed: expected $REDUCE_COUNT reducer artifacts, found $ARTIFACT_COUNT" >&2
+            exit 1
+          }
+
+          # Artifact presence is not enough: independently require every
+          # corresponding matrix job to have completed successfully.
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/jobs?per_page=100" \
+            --jq '.jobs[] | select(.name | startswith("places reduce batch ")) | [.name,.conclusion] | @tsv' \
+            > prior-reducer-jobs.tsv
+          SUCCESS_COUNT="$(awk -F '\t' '$2 == "success" {count++} END {print count+0}' prior-reducer-jobs.tsv)"
+          test "$SUCCESS_COUNT" -eq "$REDUCE_COUNT" || {
+            echo "head-only resume failed closed: expected $REDUCE_COUNT successful reducer jobs, found $SUCCESS_COUNT" >&2
+            exit 1
+          }
+
+          cp -a prior-plan/. resume-plan/
+          cp control/ledger.json resume-plan/control/ledger.json
+          for BATCH in $(seq 0 $(( REDUCE_COUNT - 1 ))); do
+            DIR="prior-reducers/cv1-reduce-${BATCH}"
+            test -d "$DIR" || {
+              echo "head-only resume failed closed: missing reducer artifact $BATCH" >&2
+              exit 1
+            }
+            grep -Fqx "places reduce batch ${BATCH}	success" prior-reducer-jobs.tsv || {
+              echo "head-only resume failed closed: reducer job $BATCH did not succeed" >&2
+              exit 1
+            }
+            FRAG="$DIR/phase/ledger-fragment-${BATCH}.json"
+            jq -e --arg phase "reduce-batch-${BATCH}" '
+              .phase == $phase
+              and (.runner_minutes | type) == "number"
+              and .runner_minutes >= 0
+            ' "$FRAG" >/dev/null || {
+              echo "head-only resume failed closed: invalid reducer ledger fragment $BATCH" >&2
+              exit 1
+            }
+            PHASE="$(jq -r '.phase' "$FRAG")"
+            MINUTES="$(jq -r '.runner_minutes' "$FRAG")"
+            python scripts/construction_v1_hosted.py ledger-append \
+              --ledger resume-plan/control/ledger.json --phase "$PHASE" --minutes "$MINUTES"
+            cp "$FRAG" resume-reductions/phase/
+            while IFS= read -r REDUCTION; do
+              DEST="resume-reductions/reductions/$(basename "$REDUCTION")"
+              test ! -e "$DEST" || {
+                echo "head-only resume failed closed: duplicate reduction $(basename "$REDUCTION")" >&2
+                exit 1
+              }
+              cp "$REDUCTION" "$DEST"
+            done < <(find "$DIR/reductions" -maxdepth 1 -type f -name '*.json' | sort)
+          done
+          EXPECTED_PARTITIONS="$(jq -er '.reduce_execution.partition_count' resume-plan/plan/plan.json)"
+          ACTUAL_PARTITIONS="$(find resume-reductions/reductions -maxdepth 1 -type f -name '*.json' | wc -l)"
+          test "$ACTUAL_PARTITIONS" -eq "$EXPECTED_PARTITIONS" || {
+            echo "head-only resume failed closed: expected $EXPECTED_PARTITIONS reductions, found $ACTUAL_PARTITIONS" >&2
+            exit 1
+          }
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger resume-plan/control/ledger.json --next-phase-minutes "$HEAD_PHASE_ESTIMATE_MINUTES"
+          echo "Authenticated $MAP_TASK_COUNT map markers, $REDUCE_COUNT successful reducer jobs, and $ACTUAL_PARTITIONS exact reduction records."
+      - name: Publish the authenticated prior plan with the complete carried ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-resume-plan
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: resume-plan
+      - name: Publish the normalized complete prior reduction set
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-resume-reductions
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: resume-reductions
+
   map:
     name: ${{ needs.admit.outputs.family_key }} map ${{ matrix.task_index }}
     needs: admit
+    if: needs.admit.outputs.head_only_resume != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     strategy:
@@ -559,7 +759,7 @@ jobs:
   plan:
     name: Exact map fan-in and stable reducer plan
     needs: [admit, map]
-    if: inputs.mode == 'execute'
+    if: inputs.mode == 'execute' && needs.admit.outputs.head_only_resume != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     outputs:
@@ -714,7 +914,7 @@ jobs:
   reduce:
     name: ${{ needs.admit.outputs.family_key }} reduce batch ${{ matrix.batch_index }}
     needs: [admit, plan]
-    if: inputs.mode == 'execute'
+    if: inputs.mode == 'execute' && needs.admit.outputs.head_only_resume != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     strategy:
@@ -799,8 +999,13 @@ jobs:
 
   head:
     name: Global Places head (execute)
-    needs: [admit, plan, reduce]
-    if: inputs.mode == 'execute'
+    needs: [admit, plan, reduce, resume_inputs]
+    if: >-
+      always() && inputs.mode == 'execute' && needs.admit.result == 'success' &&
+      (
+        (needs.admit.outputs.head_only_resume == 'true' && needs.resume_inputs.result == 'success') ||
+        (needs.admit.outputs.head_only_resume != 'true' && needs.plan.result == 'success' && needs.reduce.result == 'success')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     steps:
@@ -816,15 +1021,23 @@ jobs:
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
       - name: Download every reduce fragment (reductions only; objects are in R2 staging)
+        if: needs.admit.outputs.head_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: cv1-reduce-*
           path: cv1
           merge-multiple: true
       - name: Download the plan artifact (plan.json, markers, ledger)
+        if: needs.admit.outputs.head_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-plan
+          path: cv1plan
+      - name: Download the authenticated resume plan (head-only recovery)
+        if: needs.admit.outputs.head_only_resume == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-resume-plan
           path: cv1plan
       - name: Build the global Places head (address is a no-op)
         env:
@@ -856,9 +1069,11 @@ jobs:
             # head-specific half-share fix. Apply the equivalent resource-only
             # setting in-process: it changes no keys, rows, ordering, or encoders,
             # and the unchanged 17 GiB whole-stage scratch watchdog still fails
-            # closed. The assertion prevents this compatibility shim from silently
-            # masking a future producer policy.
-            python -c 'import sys; sys.path.insert(0, "scripts"); import address_construction_v1 as A; assert A.DUCKDB_TEMP_SHARE == 4; A.DUCKDB_TEMP_SHARE = 2; import construction_v1_hosted as H; raise SystemExit(H.main())' run-head \
+            # closed. Places dynamically loads its own address helper module, so
+            # mutate that exact object (H.PLACES.A), then prove the effective
+            # DuckDB literal is half of the admitted contract scratch cap before
+            # starting the expensive statement.
+            python -c 'import json, sys; sys.path.insert(0, "scripts"); import construction_v1_hosted as H; limits = H._limits_for(json.load(open("cv1plan/control/contract.json")), "places"); shared = H.PLACES.A; assert shared.DUCKDB_TEMP_SHARE == 4; shared.DUCKDB_TEMP_SHARE = 2; expected = f"{limits.max_scratch_bytes // 2}B"; actual = shared.duckdb_temp_limit(limits.max_scratch_bytes); assert actual == expected, (actual, expected); print(f"verified Places head DuckDB spill cap: {actual}", flush=True); raise SystemExit(H.main())' run-head \
               --contract cv1plan/control/contract.json --store-root store \
               --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
               --family places --markers-dir cv1plan/plan/map-markers \
@@ -888,8 +1103,14 @@ jobs:
 
   finalize:
     name: Finalize the non-promoting slice, create-only to R2, marker last
-    needs: [admit, plan, reduce, head]
-    if: inputs.mode == 'execute'
+    needs: [admit, plan, reduce, resume_inputs, head]
+    if: >-
+      always() && inputs.mode == 'execute' && needs.admit.result == 'success' &&
+      needs.head.result == 'success' &&
+      (
+        (needs.admit.outputs.head_only_resume == 'true' && needs.resume_inputs.result == 'success') ||
+        (needs.admit.outputs.head_only_resume != 'true' && needs.plan.result == 'success' && needs.reduce.result == 'success')
+      )
     runs-on: ubuntu-24.04
     timeout-minutes: 360
     steps:
@@ -905,20 +1126,34 @@ jobs:
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
       - name: Download all reduce fragments
+        if: needs.admit.outputs.head_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: cv1-reduce-*
           path: red
           merge-multiple: true
+      - name: Download the authenticated normalized reductions (head-only recovery)
+        if: needs.admit.outputs.head_only_resume == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-resume-reductions
+          path: red
       - name: Download the head artifact (head.json; its shards are in R2 staging)
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-head
           path: headdl
       - name: Download the plan artifact
+        if: needs.admit.outputs.head_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-plan
+          path: cv1plan
+      - name: Download the authenticated resume plan (head-only recovery)
+        if: needs.admit.outputs.head_only_resume == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-resume-plan
           path: cv1plan
       - name: Fan in reduce minutes, gate, publish the exact set to R2, verify the whole slice once
         env:

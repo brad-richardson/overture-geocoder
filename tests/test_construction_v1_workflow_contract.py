@@ -53,6 +53,9 @@ def test_workflow_exposes_the_required_dispatch_inputs():
     assert inputs["mode"]["options"] == ["dry-run", "execute"]
     assert inputs["confirmation"]["required"] is True
     assert inputs["resume_from"]["required"] is False
+    assert inputs["head_only_resume"]["required"] is False
+    assert inputs["head_only_resume"]["default"] is False
+    assert inputs["head_only_resume"]["type"] == "boolean"
     assert "request_json" in inputs
     # The reducer job cap is dispatch-time tunable, and it must stay OPTIONAL with an
     # EMPTY default: a non-empty default would silently change production batching.
@@ -367,7 +370,7 @@ def test_r2_writes_are_execute_mode_only_and_create_only():
     doc = parsed()
     jobs = doc["jobs"]
     for name in ("plan", "reduce", "head", "finalize"):
-        assert jobs[name]["if"] == "inputs.mode == 'execute'"
+        assert "inputs.mode == 'execute'" in jobs[name]["if"]
     for name in ("admit", "map"):
         for step in jobs[name]["steps"]:
             env = step.get("env", {}) or {}
@@ -431,6 +434,53 @@ def test_resume_carries_the_prior_ledger_or_fails_closed():
         "steps.resume.outputs.effective_prior_runner_minutes "
         "|| steps.gate.outputs.prior_runner_minutes"
     ) in value
+
+
+def test_head_only_resume_is_narrow_authenticated_and_complete():
+    """Recovery may skip paid phases only after proving their exact outputs."""
+    value = text()
+    jobs = parsed()["jobs"]
+    resume = jobs["resume_inputs"]
+
+    assert jobs["map"]["if"] == "needs.admit.outputs.head_only_resume != 'true'"
+    for name in ("plan", "reduce"):
+        assert "needs.admit.outputs.head_only_resume != 'true'" in jobs[name]["if"]
+    assert resume["if"] == (
+        "inputs.mode == 'execute' && needs.admit.outputs.head_only_resume == 'true'"
+    )
+    assert "secrets." not in yaml.safe_dump(resume)
+    assert "mode=execute, family=places, and a numeric resume_from" in value
+
+    # Bind the prior run and artifacts to this exact admission, then require the
+    # complete successful reducer job/artifact/ledger/reduction set.
+    for needle in (
+        '.name == "Construction v1 planet build"',
+        '.event == "workflow_dispatch"',
+        '.head_branch == "main"',
+        '.run_attempt == 1',
+        '.conclusion == "failure"',
+        "cmp --silent current-request.canonical.json prior-request.canonical.json",
+        'CANONICAL_SHA="$(sha256sum current-request.canonical.json',
+        "cmp --silent control/contract.json prior-plan/control/contract.json",
+        "cv1-reduce-*",
+        'startswith("places reduce batch ")',
+        'grep -Fqx "places reduce batch ${BATCH}',
+        "ledger-fragment-${BATCH}.json",
+        ".reduce_execution.partition_count",
+        "--next-phase-minutes \"$HEAD_PHASE_ESTIMATE_MINUTES\"",
+    ):
+        assert needle in value
+
+    # Head and finalize consume only current-run normalized artifacts. Their
+    # always() guards permit the recovery branch despite normal phases skipping,
+    # but still require admission + resume validation (+ head for finalize).
+    assert "cv1-resume-plan" in value
+    assert "cv1-resume-reductions" in value
+    assert "always()" in jobs["head"]["if"]
+    assert "needs.resume_inputs.result == 'success'" in jobs["head"]["if"]
+    assert "needs.plan.result == 'success'" in jobs["head"]["if"]
+    assert "always()" in jobs["finalize"]["if"]
+    assert "needs.head.result == 'success'" in jobs["finalize"]["if"]
 
 
 def test_workflow_pins_actions_and_hash_locked_dependencies():
@@ -497,8 +547,12 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # A fresh resume checks out the request-pinned producer, so the measured
     # head-only resource fix must be applied in-process without mutating that
     # authenticated source tree. Total stage scratch remains unchanged.
-    assert "assert A.DUCKDB_TEMP_SHARE == 4" in value
-    assert "A.DUCKDB_TEMP_SHARE = 2" in value
+    assert "shared = H.PLACES.A" in value
+    assert "assert shared.DUCKDB_TEMP_SHARE == 4" in value
+    assert "shared.DUCKDB_TEMP_SHARE = 2" in value
+    assert 'import address_construction_v1 as A' not in value
+    assert 'actual = shared.duckdb_temp_limit(limits.max_scratch_bytes)' in value
+    assert "assert actual == expected" in value
     assert "unchanged 17 GiB whole-stage scratch watchdog" in value
 
     # A map task that staged nothing wrote its fragments nowhere durable, and the
@@ -622,5 +676,7 @@ def test_needs_graph_is_connected():
             needs = [needs]
         for dependency in needs:
             assert dependency in known, f"{name} needs unknown job {dependency}"
-    assert jobs["finalize"]["needs"] == ["admit", "plan", "reduce", "head"]
+    assert jobs["finalize"]["needs"] == [
+        "admit", "plan", "reduce", "resume_inputs", "head"
+    ]
     assert jobs["reduce"]["needs"] == ["admit", "plan"]

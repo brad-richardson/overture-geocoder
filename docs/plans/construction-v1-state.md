@@ -1,7 +1,8 @@
 # construction-v1: current state
 
-Last updated 2026-07-27 after the first Places planet attempt completed every
-map and reducer and measured one global-head spill-cap blocker.
+Last updated 2026-07-27 after two Places planet attempts completed every map
+and reducer, and the second proved that the first spill compatibility shim
+mutated the wrong dynamically loaded helper module.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -18,39 +19,52 @@ Do not dispatch a planet build without the exact operator-supplied workflow
 confirmation. The operator supplied authorization for request
 `88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`
 with max parallel 4 and a 40,000 runner-minute ceiling. Address completed under
-that authorization; Places run `30226086949` used the same request and its
-staged outputs remain reusable by a fresh-dispatch resume.
+that authorization; Places runs `30226086949` and `30263207263` used the same
+request. Run `30263207263` has the newest complete plan plus all 128 successful
+reducer artifacts and is the authenticated source for a head-only resume.
 
 ## Current snapshot
 
-The last successful construction-v1 workflow checkpoint on `main` is `40a7682`: PR
+The current construction-v1 workflow checkpoint on `main` is `e202103`: PR
 #178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
-consumer projections, and PR #183's authenticated same-request resume plus the
-missing plan contract artifact.
+consumer projections, PR #183's authenticated same-request resume plus the
+missing plan contract artifact, and the subsequent Places head resource
+compatibility work.
 There are no open construction-v1 code PRs.
 
 Both families passed the preserved Europe execution rung through publication
 and marker-last completion. Address has now also passed the hosted planet rung
-through marker-last R2 publication. Places planet run `30226086949` passed
-fail-closed admission, all 89 maps, planning, and all 128 reducers. Its global
-head then measured one blocker before sharding; finalization correctly skipped.
-There is no remaining measured Address blocker.
+through marker-last R2 publication. Places planet runs `30226086949` and
+`30263207263` each passed fail-closed admission, all 89 maps, planning, and all
+128 reducers. Their global heads measured the same blocker before sharding;
+finalization correctly skipped. There is no remaining measured Address blocker.
 
 ### Places
 
 Planet run `30226086949` was admitted at main workflow SHA `40a7682` for the
-request above, with prior runner minutes 0 and the next-phase projection at
-60/40,000 minutes. It completed all 89 map jobs at concurrency 4, planning, and
-all 128 reducer jobs.
+request above, completed all 89 map jobs at concurrency 4, planning, and all
+128 reducer jobs. Fresh resume `30263207263` repeated those successful phases
+and preserved a complete current plan/reducer artifact set.
 
-The global head failed during the first candidate tree merge with DuckDB
-`max_temp_directory_size` exhausted at 4.2 GiB. This was the deliberately
-derived quarter-share spill cap, not runner ENOSPC, the 17 GiB whole-stage
-scratch watchdog, RSS, R2 transport, or a candidate-count admission cap. The
-scoped fix gives this head connection one-half of the existing scratch budget
-while leaving the independent 17 GiB workspace-plus-cache guard and the
-25.6 GB runner floor unchanged. A fresh-dispatch resume must reuse the exact
-request and staged map/reduce outputs; do not use GitHub's Re-run action.
+Both global heads failed during the first candidate tree merge with DuckDB
+`max_temp_directory_size` exhausted at 4.2 GiB. The first failure established
+that the deliberately derived quarter-share spill cap was the blocker, not
+runner ENOSPC, the 17 GiB whole-stage scratch watchdog, RSS, R2 transport, or a
+candidate-count admission cap. The second failure established that the
+workflow's compatibility shim had not changed the producer used by Places:
+`places_construction_v1.py` dynamically loads `address_construction_v1.py` as
+`H.PLACES.A`, while the shim mutated an unrelated top-level import.
+
+The recovery workflow now has a Places-only, explicit head-only resume path.
+Before skipping paid phases it authenticates the prior failed run, canonical
+request, byte-identical contract, exact 89-marker set, contiguous reducer
+matrix, all 128 successful reducer jobs and artifacts, every reducer ledger
+fragment, and all 16,601 reduction records. It then carries those reducer
+minutes into the head ledger. The compatibility shim mutates `H.PLACES.A`,
+changes its spill share from four to two, and asserts the effective
+9,126,805,504-byte DuckDB limit is exactly half of the admitted
+18,253,611,008-byte scratch cap before executing the head. The independent
+whole-stage scratch guard and runner floor remain unchanged.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
 phases completed and head produced all 4,096 populated shards. The full head
@@ -164,9 +178,9 @@ verification of 10,931 objects.
 Follow this sequence. Address planet execution is complete and Places has one
 measured head-only blocker.
 
-1. **Land and verify the head spill-allocation fix, then fresh-dispatch resume
-   from Places run `30226086949`.** Reuse all 89 map outputs and all 128 reducer
-   outputs under the exact authenticated request.
+1. **Land the authenticated head-only recovery and fresh-dispatch from Places
+   run `30263207263`.** Set the explicit head-only input; admission must prove
+   the prior plan/reducer set before map, plan, and reduce stay skipped.
 2. **Record the complete Places evidence.** Preserve map/reduce/head/finalize
    timing, residency, R2 traffic, exact-set counts, and marker identity.
 3. **Begin reverse R1 as the fast follow.** Consume the already published
@@ -176,7 +190,7 @@ measured head-only blocker.
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
-| DuckDB head spill quarter-share is too small | Places | Planet head exhausted 4.2 GiB `max_temp_directory_size`; 17 GiB whole-stage guard did not fire | Resume with head spill at one-half of the unchanged scratch cap |
+| DuckDB head spill compatibility shim targeted the wrong module | Places | Runs `30226086949` and `30263207263` both exhausted the same 4.2 GiB cap; the latter proved the shim did not reach `H.PLACES.A` | Head-only resume prints and asserts the 9,126,805,504-byte effective cap, then passes the global head |
 | Possible planet head total-disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet failed earlier at DuckDB's sub-cap | Resumed global head |
 | Planet final publication throughput | Places | All 128 planet reducers passed; finalization skipped after head failure | Resumed finalize phase |
 
