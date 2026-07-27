@@ -67,6 +67,11 @@ on:
         required: false
         default: false
         type: boolean
+      finalize_only_resume:
+        description: Places-only recovery path. Requires resume_from and reuses an authenticated successful head plus its plan/reducers, skipping map through head.
+        required: false
+        default: false
+        type: boolean
       max_reduce_jobs:
         # An execution-shape knob, dispatch-time tunable so tuning it needs no code
         # change. It only ever LOWERS the job cap
@@ -110,7 +115,10 @@ env:
   # ledger gate (match construction_v1_control CAPS map/reduce wall minutes).
   MAP_PHASE_ESTIMATE_MINUTES: "60"
   REDUCE_PHASE_ESTIMATE_MINUTES: "90"
-  HEAD_PHASE_ESTIMATE_MINUTES: "90"
+  # Planet Places measured 207 runner minutes in run 30288619536. A cost gate
+  # must use an upper bound, so reserve the job's full timeout rather than the
+  # now-disproved 90-minute projection.
+  HEAD_PHASE_ESTIMATE_MINUTES: "330"
   # The PESSIMISTIC end of the projected finalize phase, not the middle. `ledger-check`
   # is a fail-closed COST gate: it refuses to start the phase when prior + projected
   # runner-minutes exceed the confirmed cap. Under-projecting therefore fails OPEN --
@@ -144,6 +152,7 @@ jobs:
       sample_matrix: ${{ steps.gate.outputs.sample_matrix }}
       map_task_count: ${{ steps.gate.outputs.map_task_count }}
       head_only_resume: ${{ steps.gate.outputs.head_only_resume }}
+      finalize_only_resume: ${{ steps.gate.outputs.finalize_only_resume }}
     steps:
       - name: Check out dispatched main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -166,6 +175,7 @@ jobs:
           MODE: ${{ inputs.mode }}
           RESUME_FROM: ${{ inputs.resume_from }}
           HEAD_ONLY_RESUME: ${{ inputs.head_only_resume }}
+          FINALIZE_ONLY_RESUME: ${{ inputs.finalize_only_resume }}
         run: |
           set -euo pipefail
           mkdir -p control
@@ -199,6 +209,21 @@ jobs:
               ;;
             false) : ;;
             *) echo "head_only_resume must be true or false" >&2; exit 1 ;;
+          esac
+          case "$FINALIZE_ONLY_RESUME" in
+            true)
+              if [ "$HEAD_ONLY_RESUME" = true ]; then
+                echo "head_only_resume and finalize_only_resume are mutually exclusive" >&2
+                exit 1
+              fi
+              if [ "$MODE" != execute ] || [ "$FAMILY_KEY" != places ] || [ -z "$RESUME_FROM" ]; then
+                echo "finalize_only_resume requires mode=execute, family=places, and a numeric resume_from run id" >&2
+                exit 1
+              fi
+              case "$RESUME_FROM" in *[!0-9]*) echo "finalize_only_resume requires a numeric resume_from run id" >&2; exit 1 ;; esac
+              ;;
+            false) : ;;
+            *) echo "finalize_only_resume must be true or false" >&2; exit 1 ;;
           esac
 
           # Fail-closed admission (regenerates the request, rejects any drift or
@@ -240,6 +265,7 @@ jobs:
             echo "sample_matrix=$SAMPLE_MATRIX"
             echo "map_task_count=$MAP_COUNT"
             echo "head_only_resume=$HEAD_ONLY_RESUME"
+            echo "finalize_only_resume=$FINALIZE_ONLY_RESUME"
           } >> "$GITHUB_OUTPUT"
 
       - name: Carry the prior run ledger forward or fail closed (resume only)
@@ -258,6 +284,10 @@ jobs:
             --jq '([.artifacts[] | select(.name | startswith("construction-v1-ledger-"))] | first | .archive_download_url) // empty')"
           if [ -z "$ART_URL" ]; then
             ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts?name=cv1-plan" \
+              --jq '.artifacts[0].archive_download_url // empty')"
+          fi
+          if [ -z "$ART_URL" ]; then
+            ART_URL="$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/artifacts?name=cv1-resume-plan" \
               --jq '.artifacts[0].archive_download_url // empty')"
           fi
           if [ -z "$ART_URL" ]; then
@@ -499,10 +529,182 @@ jobs:
           include-hidden-files: true
           path: resume-reductions
 
+  finalize_resume_inputs:
+    name: Authenticate successful prior Places head and finalize inputs (no cloud secrets)
+    needs: admit
+    if: inputs.mode == 'execute' && needs.admit.outputs.finalize_only_resume == 'true'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Check out dispatched main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+      - name: Install hash-pinned hosted dependencies
+        run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Download this dispatch's authenticated control package
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-control
+          path: control
+      - name: Authenticate the failed run and its successful head inputs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RESUME_FROM: ${{ inputs.resume_from }}
+          MAP_TASK_COUNT: ${{ needs.admit.outputs.map_task_count }}
+        run: |
+          set -euo pipefail
+          mkdir -p prior-control prior-plan prior-reductions prior-head resume-plan resume-reductions resume-head
+
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}" > prior-run.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/jobs?per_page=100" > prior-jobs.json
+          jq -e '
+            .name == "Construction v1 planet build"
+            and .event == "workflow_dispatch"
+            and .head_branch == "main"
+            and .run_attempt == 1
+            and .status == "completed"
+            and .conclusion == "failure"
+          ' prior-run.json >/dev/null || {
+            echo "finalize-only resume failed closed: prior run is not a completed first-attempt failure of this workflow on main" >&2
+            exit 1
+          }
+          jq -e '
+            ([.jobs[] | select(.name == "Global Places head (execute)" and .conclusion == "success")] | length) == 1
+            and ([.jobs[] | select(.name == "Finalize the non-promoting slice, create-only to R2, marker last" and .conclusion == "failure")] | length) == 1
+          ' prior-jobs.json >/dev/null || {
+            echo "finalize-only resume failed closed: prior run lacks one successful Places head followed by failed finalize" >&2
+            exit 1
+          }
+
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-control --dir prior-control
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-resume-plan --dir prior-plan
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-resume-reductions --dir prior-reductions
+          gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-head --dir prior-head
+
+          jq -cS . control/request.json > current-request.canonical.json
+          jq -cS . prior-control/request.json > prior-request.canonical.json
+          cmp --silent current-request.canonical.json prior-request.canonical.json || {
+            echo "finalize-only resume failed closed: prior canonical request differs" >&2
+            exit 1
+          }
+          CANONICAL_SHA="$(sha256sum current-request.canonical.json | awk '{print $1}')"
+          test "$CANONICAL_SHA" = '${{ needs.admit.outputs.request_sha256 }}' || {
+            echo "finalize-only resume failed closed: canonical request digest differs from admission" >&2
+            exit 1
+          }
+          cmp --silent control/contract.json prior-plan/control/contract.json || {
+            echo "finalize-only resume failed closed: prior contract bytes differ" >&2
+            exit 1
+          }
+          jq -e '.schema == "overture-places-adaptive-genesis-plan-v1"' prior-plan/plan/plan.json >/dev/null \
+            && jq -e '.family == "places"' prior-plan/control/ledger.json >/dev/null || {
+            echo "finalize-only resume failed closed: prior plan is not Places" >&2
+            exit 1
+          }
+
+          REDUCE_COUNT="$(jq -er '.include | length' prior-plan/plan/reduce-matrix.json)"
+          EXPECTED_PARTITIONS="$(jq -er '.reduce_execution.partition_count' prior-plan/plan/plan.json)"
+          ACTUAL_FRAGMENTS="$(find prior-reductions/phase -maxdepth 1 -type f -name 'ledger-fragment-*.json' | wc -l)"
+          ACTUAL_PARTITIONS="$(find prior-reductions/reductions -maxdepth 1 -type f -name '*.json' | wc -l)"
+          test "$ACTUAL_FRAGMENTS" -eq "$REDUCE_COUNT" || {
+            echo "finalize-only resume failed closed: expected $REDUCE_COUNT reducer ledger fragments, found $ACTUAL_FRAGMENTS" >&2
+            exit 1
+          }
+          test "$ACTUAL_PARTITIONS" -eq "$EXPECTED_PARTITIONS" || {
+            echo "finalize-only resume failed closed: expected $EXPECTED_PARTITIONS reductions, found $ACTUAL_PARTITIONS" >&2
+            exit 1
+          }
+          for BATCH in $(seq 0 $(( REDUCE_COUNT - 1 ))); do
+            jq -e --arg phase "reduce-batch-${BATCH}" '
+              .phase == $phase
+              and (.runner_minutes | type) == "number"
+              and .runner_minutes >= 0
+            ' "prior-reductions/phase/ledger-fragment-${BATCH}.json" >/dev/null || {
+              echo "finalize-only resume failed closed: invalid reducer ledger fragment $BATCH" >&2
+              exit 1
+            }
+          done
+
+          jq -e --argjson maps "$MAP_TASK_COUNT" '
+            .schema == "overture-places-global-head-sharded-v2"
+            and .shard_bits == 12
+            and .shard_count == 4096
+            and .populated_shards > 0
+            and .populated_shards <= .shard_count
+            and (.shard_objects | length) == .populated_shards
+            and (.task_ids | length) == $maps
+            and .input_candidate_rows > 0
+            and .total_records > 0
+            and .total_index_entries > 0
+            and (.manifest_object.key | type) == "string"
+            and (.manifest_object.sha256 | type) == "string"
+            and .staged_objects_published > 0
+            and .staged_bytes_published > 0
+          ' prior-head/head.json >/dev/null || {
+            echo "finalize-only resume failed closed: prior head result is incomplete or malformed" >&2
+            exit 1
+          }
+          jq -e --slurpfile head prior-head/head.json '
+            .staging_prefix == $head[0].staging_prefix
+            and .staged_objects_published == $head[0].staged_objects_published
+            and .staged_bytes_published == $head[0].staged_bytes_published
+            and .staged_objects_hydrated == $head[0].staged_objects_hydrated
+            and .staged_bytes_hydrated == $head[0].staged_bytes_hydrated
+            and .staged_objects_released == $head[0].staged_objects_released
+            and .staged_bytes_released == $head[0].staged_bytes_released
+          ' prior-head/staging.json >/dev/null || {
+            echo "finalize-only resume failed closed: prior head staging evidence disagrees with head.json" >&2
+            exit 1
+          }
+
+          cp -a prior-plan/. resume-plan/
+          cp control/ledger.json resume-plan/control/ledger.json
+          cp -a prior-reductions/. resume-reductions/
+          cp -a prior-head/. resume-head/
+          HEAD_SECONDS="$(jq -er '
+            [.jobs[] | select(.name == "Global Places head (execute)" and .conclusion == "success")][0]
+            | ((.completed_at | fromdateiso8601) - (.started_at | fromdateiso8601))
+          ' prior-jobs.json)"
+          HEAD_MINUTES=$(( (HEAD_SECONDS + 59) / 60 ))
+          python scripts/construction_v1_hosted.py ledger-append \
+            --ledger resume-plan/control/ledger.json --phase global-head --minutes "$HEAD_MINUTES"
+          python scripts/construction_v1_hosted.py ledger-check \
+            --ledger resume-plan/control/ledger.json --next-phase-minutes "$FINALIZE_PHASE_ESTIMATE_MINUTES"
+          echo "Authenticated $ACTUAL_PARTITIONS reductions and a successful ${HEAD_MINUTES}-minute, 4096-shard Places head."
+      - name: Publish the authenticated finalize-only plan and carried ledger
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-resume-plan
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: resume-plan
+      - name: Publish the authenticated finalize-only reductions
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-resume-reductions
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: resume-reductions
+      - name: Publish the authenticated successful prior head
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-resume-head
+          if-no-files-found: error
+          retention-days: 7
+          include-hidden-files: true
+          path: resume-head
+
   map:
     name: ${{ needs.admit.outputs.family_key }} map ${{ matrix.task_index }}
     needs: admit
-    if: needs.admit.outputs.head_only_resume != 'true'
+    if: needs.admit.outputs.head_only_resume != 'true' && needs.admit.outputs.finalize_only_resume != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     strategy:
@@ -759,7 +961,10 @@ jobs:
   plan:
     name: Exact map fan-in and stable reducer plan
     needs: [admit, map]
-    if: inputs.mode == 'execute' && needs.admit.outputs.head_only_resume != 'true'
+    if: >-
+      inputs.mode == 'execute' &&
+      needs.admit.outputs.head_only_resume != 'true' &&
+      needs.admit.outputs.finalize_only_resume != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     outputs:
@@ -914,7 +1119,10 @@ jobs:
   reduce:
     name: ${{ needs.admit.outputs.family_key }} reduce batch ${{ matrix.batch_index }}
     needs: [admit, plan]
-    if: inputs.mode == 'execute' && needs.admit.outputs.head_only_resume != 'true'
+    if: >-
+      inputs.mode == 'execute' &&
+      needs.admit.outputs.head_only_resume != 'true' &&
+      needs.admit.outputs.finalize_only_resume != 'true'
     runs-on: ubuntu-24.04
     timeout-minutes: 330
     strategy:
@@ -999,9 +1207,10 @@ jobs:
 
   head:
     name: Global Places head (execute)
-    needs: [admit, plan, reduce, resume_inputs]
+    needs: [admit, plan, reduce, resume_inputs, finalize_resume_inputs]
     if: >-
       always() && inputs.mode == 'execute' && needs.admit.result == 'success' &&
+      needs.admit.outputs.finalize_only_resume != 'true' &&
       (
         (needs.admit.outputs.head_only_resume == 'true' && needs.resume_inputs.result == 'success') ||
         (needs.admit.outputs.head_only_resume != 'true' && needs.plan.result == 'success' && needs.reduce.result == 'success')
@@ -1103,13 +1312,18 @@ jobs:
 
   finalize:
     name: Finalize the non-promoting slice, create-only to R2, marker last
-    needs: [admit, plan, reduce, resume_inputs, head]
+    needs: [admit, plan, reduce, resume_inputs, finalize_resume_inputs, head]
     if: >-
       always() && inputs.mode == 'execute' && needs.admit.result == 'success' &&
-      needs.head.result == 'success' &&
       (
-        (needs.admit.outputs.head_only_resume == 'true' && needs.resume_inputs.result == 'success') ||
-        (needs.admit.outputs.head_only_resume != 'true' && needs.plan.result == 'success' && needs.reduce.result == 'success')
+        (needs.admit.outputs.finalize_only_resume == 'true' && needs.finalize_resume_inputs.result == 'success') ||
+        (
+          needs.admit.outputs.finalize_only_resume != 'true' && needs.head.result == 'success' &&
+          (
+            (needs.admit.outputs.head_only_resume == 'true' && needs.resume_inputs.result == 'success') ||
+            (needs.admit.outputs.head_only_resume != 'true' && needs.plan.result == 'success' && needs.reduce.result == 'success')
+          )
+        )
       )
     runs-on: ubuntu-24.04
     timeout-minutes: 360
@@ -1126,31 +1340,38 @@ jobs:
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
       - name: Download all reduce fragments
-        if: needs.admit.outputs.head_only_resume != 'true'
+        if: needs.admit.outputs.head_only_resume != 'true' && needs.admit.outputs.finalize_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           pattern: cv1-reduce-*
           path: red
           merge-multiple: true
-      - name: Download the authenticated normalized reductions (head-only recovery)
-        if: needs.admit.outputs.head_only_resume == 'true'
+      - name: Download the authenticated normalized reductions (recovery)
+        if: needs.admit.outputs.head_only_resume == 'true' || needs.admit.outputs.finalize_only_resume == 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-resume-reductions
           path: red
       - name: Download the head artifact (head.json; its shards are in R2 staging)
+        if: needs.admit.outputs.finalize_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-head
           path: headdl
+      - name: Download the authenticated successful prior head (finalize-only recovery)
+        if: needs.admit.outputs.finalize_only_resume == 'true'
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-resume-head
+          path: headdl
       - name: Download the plan artifact
-        if: needs.admit.outputs.head_only_resume != 'true'
+        if: needs.admit.outputs.head_only_resume != 'true' && needs.admit.outputs.finalize_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-plan
           path: cv1plan
-      - name: Download the authenticated resume plan (head-only recovery)
-        if: needs.admit.outputs.head_only_resume == 'true'
+      - name: Download the authenticated resume plan (recovery)
+        if: needs.admit.outputs.head_only_resume == 'true' || needs.admit.outputs.finalize_only_resume == 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
         with:
           name: cv1-resume-plan
@@ -1158,6 +1379,7 @@ jobs:
       - name: Fan in reduce minutes, gate, publish the exact set to R2, verify the whole slice once
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
+          REDUCERS_ALREADY_ACCOUNTED: ${{ needs.admit.outputs.head_only_resume == 'true' || needs.admit.outputs.finalize_only_resume == 'true' }}
           # Finalize hydrates the exact published set by key from the run-scoped
           # staging prefix (serving objects, head shards, per-record packs), verifies
           # each against the digest in its key, and publishes it straight to R2.
@@ -1173,17 +1395,19 @@ jobs:
           # that made the address family unable to land here at all. The floor is kept
           # unchanged as headroom for the work root and the runner image.
           test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
-          for FRAG in red/phase/ledger-fragment-*.json; do
-            [ -f "$FRAG" ] || continue
-            PH="$(jq -r '.phase' "$FRAG")"; MN="$(jq -r '.runner_minutes' "$FRAG")"
-            python scripts/construction_v1_hosted.py ledger-append \
-              --ledger cv1plan/control/ledger.json --phase "$PH" --minutes "$MN"
-          done
+          if [ "$REDUCERS_ALREADY_ACCOUNTED" != true ]; then
+            for FRAG in red/phase/ledger-fragment-*.json; do
+              [ -f "$FRAG" ] || continue
+              PH="$(jq -r '.phase' "$FRAG")"; MN="$(jq -r '.runner_minutes' "$FRAG")"
+              python scripts/construction_v1_hosted.py ledger-append \
+                --ledger cv1plan/control/ledger.json --phase "$PH" --minutes "$MN"
+            done
+          fi
           python scripts/construction_v1_hosted.py ledger-check \
             --ledger cv1plan/control/ledger.json --next-phase-minutes "$FINALIZE_PHASE_ESTIMATE_MINUTES"
           mkdir -p final-work store
           HEAD_ARG=""
-          if [ "$FAMILY_KEY" = places ]; then HEAD_ARG="--head headdl/head/head.json"; fi
+          if [ "$FAMILY_KEY" = places ]; then HEAD_ARG="--head headdl/head.json"; fi
           if [ "$FAMILY_KEY" = addresses ]; then
             MARKER_ARGS=(--address-finalize-projection cv1plan/plan/address-finalize-projection.json)
           else
@@ -1229,8 +1453,8 @@ jobs:
           # calls out. An absent or non-numeric key exits non-zero here instead.
           MANIFESTS="$(jq -er '.head_manifest_objects | numbers' final-work/result.json)"
           POP=0
-          if [ -f headdl/head/head.json ]; then
-            POP="$(jq -r '.populated_shards // 0' headdl/head/head.json)"
+          if [ -f headdl/head.json ]; then
+            POP="$(jq -r '.populated_shards // 0' headdl/head.json)"
           fi
           test "$SERVING" -eq "$(( REDUCTIONS + POP + MANIFESTS ))"
           test "$SERVING" -gt 0

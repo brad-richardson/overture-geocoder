@@ -56,6 +56,9 @@ def test_workflow_exposes_the_required_dispatch_inputs():
     assert inputs["head_only_resume"]["required"] is False
     assert inputs["head_only_resume"]["default"] is False
     assert inputs["head_only_resume"]["type"] == "boolean"
+    assert inputs["finalize_only_resume"]["required"] is False
+    assert inputs["finalize_only_resume"]["default"] is False
+    assert inputs["finalize_only_resume"]["type"] == "boolean"
     assert "request_json" in inputs
     # The reducer job cap is dispatch-time tunable, and it must stay OPTIONAL with an
     # EMPTY default: a non-empty default would silently change production batching.
@@ -363,6 +366,9 @@ def test_every_phase_carries_the_330_minute_job_timeout():
     for name in ("map", "plan", "reduce", "head"):
         assert jobs[name]["timeout-minutes"] == 330
     assert jobs["finalize"]["timeout-minutes"] == 360
+    # Planet Places measured 207 minutes. The fail-closed cost projection must
+    # be an upper bound, not the disproved 90-minute estimate.
+    assert 'HEAD_PHASE_ESTIMATE_MINUTES: "330"' in text()
 
 
 def test_r2_writes_are_execute_mode_only_and_create_only():
@@ -442,7 +448,8 @@ def test_head_only_resume_is_narrow_authenticated_and_complete():
     jobs = parsed()["jobs"]
     resume = jobs["resume_inputs"]
 
-    assert jobs["map"]["if"] == "needs.admit.outputs.head_only_resume != 'true'"
+    assert "needs.admit.outputs.head_only_resume != 'true'" in jobs["map"]["if"]
+    assert "needs.admit.outputs.finalize_only_resume != 'true'" in jobs["map"]["if"]
     for name in ("plan", "reduce"):
         assert "needs.admit.outputs.head_only_resume != 'true'" in jobs[name]["if"]
     assert resume["if"] == (
@@ -481,6 +488,45 @@ def test_head_only_resume_is_narrow_authenticated_and_complete():
     assert "needs.plan.result == 'success'" in jobs["head"]["if"]
     assert "always()" in jobs["finalize"]["if"]
     assert "needs.head.result == 'success'" in jobs["finalize"]["if"]
+
+
+def test_finalize_only_resume_authenticates_the_successful_head_and_skips_it():
+    value = text()
+    jobs = parsed()["jobs"]
+    recovery = jobs["finalize_resume_inputs"]
+
+    assert recovery["if"] == (
+        "inputs.mode == 'execute' && needs.admit.outputs.finalize_only_resume == 'true'"
+    )
+    assert "secrets." not in yaml.safe_dump(recovery)
+    assert "head_only_resume and finalize_only_resume are mutually exclusive" in value
+    assert "finalize_only_resume requires mode=execute, family=places" in value
+    assert "artifacts?name=cv1-resume-plan" in value
+
+    block = yaml.safe_dump(recovery)
+    for needle in (
+        "cv1-resume-plan",
+        "cv1-resume-reductions",
+        "cv1-head",
+        'Global Places head (execute)',
+        'conclusion == "success"',
+        "cmp --silent current-request.canonical.json prior-request.canonical.json",
+        "cmp --silent control/contract.json prior-plan/control/contract.json",
+        'schema == "overture-places-global-head-sharded-v2"',
+        ".shard_count == 4096",
+        "ACTUAL_PARTITIONS",
+        "HEAD_MINUTES",
+        "--phase global-head",
+        '--next-phase-minutes "$FINALIZE_PHASE_ESTIMATE_MINUTES"',
+        "cv1-resume-head",
+    ):
+        assert needle in value
+
+    assert "needs.admit.outputs.finalize_only_resume != 'true'" in jobs["head"]["if"]
+    assert "needs.finalize_resume_inputs.result == 'success'" in jobs["finalize"]["if"]
+    assert "needs.head.result == 'success'" in jobs["finalize"]["if"]
+    assert "REDUCERS_ALREADY_ACCOUNTED" in yaml.safe_dump(jobs["finalize"])
+    assert 'if [ "$REDUCERS_ALREADY_ACCOUNTED" != true ]; then' in value
 
 
 def test_workflow_pins_actions_and_hash_locked_dependencies():
@@ -591,7 +637,9 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # that published every routed object and NO head shards -- the other half of the
     # same permissive-get defect, which was demonstrated as publishable.
     assert 'test "$SERVING" -ge "$REDUCTIONS"' not in value
-    assert "POP=\"$(jq -r '.populated_shards // 0' headdl/head/head.json)\"" in value
+    assert 'HEAD_ARG="--head headdl/head.json"' in value
+    assert "POP=\"$(jq -r '.populated_shards // 0' headdl/head.json)\"" in value
+    assert "headdl/head/head.json" not in value
     # The head ROUTING MANIFEST is part of the published serving set (shard objects
     # are content-addressed, so it is the only shard_id -> object map), so the
     # equality carries its term. Family-generic: addresses report 0.
@@ -677,6 +725,6 @@ def test_needs_graph_is_connected():
         for dependency in needs:
             assert dependency in known, f"{name} needs unknown job {dependency}"
     assert jobs["finalize"]["needs"] == [
-        "admit", "plan", "reduce", "resume_inputs", "head"
+        "admit", "plan", "reduce", "resume_inputs", "finalize_resume_inputs", "head"
     ]
     assert jobs["reduce"]["needs"] == ["admit", "plan"]

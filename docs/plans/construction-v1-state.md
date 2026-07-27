@@ -1,8 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-27 after two Places planet attempts completed every map
-and reducer, and the second proved that the first spill compatibility shim
-mutated the wrong dynamically loaded helper module.
+Last updated 2026-07-27 after Places run `30288619536` completed the planet
+global head and exposed one finalize artifact-path defect before publication.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -19,13 +18,14 @@ Do not dispatch a planet build without the exact operator-supplied workflow
 confirmation. The operator supplied authorization for request
 `88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`
 with max parallel 4 and a 40,000 runner-minute ceiling. Address completed under
-that authorization; Places runs `30226086949` and `30263207263` used the same
-request. Run `30263207263` has the newest complete plan plus all 128 successful
-reducer artifacts and is the authenticated source for a head-only resume.
+that authorization; Places runs `30226086949`, `30263207263`, and
+`30288619536` used the same request. Run `30288619536` retains authenticated
+normalized plan/reducer artifacts plus the successful planet head and is the
+source for a finalize-only resume.
 
 ## Current snapshot
 
-The current construction-v1 workflow checkpoint on `main` is `e202103`: PR
+The current construction-v1 workflow checkpoint on `main` is `f0117ce`: PR
 #178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
 consumer projections, PR #183's authenticated same-request resume plus the
 missing plan contract artifact, and the subsequent Places head resource
@@ -35,9 +35,11 @@ There are no open construction-v1 code PRs.
 Both families passed the preserved Europe execution rung through publication
 and marker-last completion. Address has now also passed the hosted planet rung
 through marker-last R2 publication. Places planet runs `30226086949` and
-`30263207263` each passed fail-closed admission, all 89 maps, planning, and all
-128 reducers. Their global heads measured the same blocker before sharding;
-finalization correctly skipped. There is no remaining measured Address blocker.
+`30263207263` passed fail-closed admission, all 89 maps, planning, and all 128
+reducers. Head-only recovery `30288619536` authenticated those outputs, skipped
+every paid upstream phase, completed the global head, then failed before
+publication because finalize looked for `head.json` under one extra directory
+component. There is no remaining measured Address or Places-head blocker.
 
 ### Places
 
@@ -65,6 +67,27 @@ changes its spill share from four to two, and asserts the effective
 9,126,805,504-byte DuckDB limit is exactly half of the admitted
 18,253,611,008-byte scratch cap before executing the head. The independent
 whole-stage scratch guard and runner floor remain unchanged.
+
+Head-only run `30288619536` proved that recovery path and closed the planet
+head gate. The head asserted the effective 9,126,805,504-byte spill cap, then
+completed in 12,381 seconds (207 rounded runner minutes). It admitted
+62,573,648 candidates and produced 30,841,082 records / 13,971,501 index
+entries across all 4,096 populated shards. It hydrated and released
+7,436,087,621 bytes from 89 staged objects with 1,504,727,912 bytes peak
+staged-cache residency, and published 4,098 staged objects /
+5,141,583,720 bytes.
+
+Finalize then failed in 43 seconds before publication. Uploading the single
+`head/` directory flattens its contents into `cv1-head`, so downloading it at
+`headdl` creates `headdl/head.json`; the workflow passed
+`headdl/head/head.json`. The finalizer rejected the missing `--head` result
+before any R2 publication or completion-marker write. The scoped recovery
+corrects both consumers of that path and adds an authenticated finalize-only
+resume from `30288619536`, preserving the successful head rather than spending
+another 207 runner minutes. It also avoids appending reducer ledger fragments
+twice on recovery; the retained resume plan already carries all 502 reducer
+minutes. The fail-closed head projection is raised from the disproved 90-minute
+estimate to the job's 330-minute timeout.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
 phases completed and head produced all 4,096 populated shards. The full head
@@ -175,12 +198,14 @@ verification of 10,931 objects.
 
 ## Fastest path
 
-Follow this sequence. Address planet execution is complete and Places has one
-measured head-only blocker.
+Follow this sequence. Address planet execution and the Places planet head are
+complete. Places has one measured finalize input-path blocker.
 
-1. **Land the authenticated head-only recovery and fresh-dispatch from Places
-   run `30263207263`.** Set the explicit head-only input; admission must prove
-   the prior plan/reducer set before map, plan, and reduce stay skipped.
+1. **Land the corrected head path and authenticated finalize-only recovery,
+   then fresh-dispatch from run `30288619536`.** Admission must prove the
+   canonical request, byte-identical contract, complete plan/reductions, one
+   successful head job, and internally consistent head artifact before every
+   upstream job remains skipped.
 2. **Record the complete Places evidence.** Preserve map/reduce/head/finalize
    timing, residency, R2 traffic, exact-set counts, and marker identity.
 3. **Begin reverse R1 as the fast follow.** Consume the already published
@@ -190,9 +215,8 @@ measured head-only blocker.
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
-| DuckDB head spill compatibility shim targeted the wrong module | Places | Runs `30226086949` and `30263207263` both exhausted the same 4.2 GiB cap; the latter proved the shim did not reach `H.PLACES.A` | Head-only resume prints and asserts the 9,126,805,504-byte effective cap, then passes the global head |
-| Possible planet head total-disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet failed earlier at DuckDB's sub-cap | Resumed global head |
-| Planet final publication throughput | Places | All 128 planet reducers passed; finalization skipped after head failure | Resumed finalize phase |
+| Finalize used the pre-extraction head artifact path | Places | Run `30288619536` completed the head, then finalizer rejected nonexistent `headdl/head/head.json`; the artifact contains `headdl/head.json` | Authenticated finalize-only resume reaches publication with the corrected path |
+| Planet final publication throughput | Places | All 128 reducers and the 4,096-shard planet head passed; finalization stopped before its first publication call | Finalize-only resume reconciles the exact set and writes the completion marker last |
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful
@@ -208,6 +232,9 @@ Europe execution. Do not reopen them without contradictory measured evidence.
 - Places term rows are combined before shuffle, removing about 46% at planet
   scale.
 - Places head is routed through 4,096 shards with a published routing manifest.
+- Planet Places head completes under request `88b7f...32614`: 62,573,648
+  candidates, 30,841,082 records, 13,971,501 index entries, all 4,096 shards,
+  and 1.50 GB peak staged-cache residency.
 - The complete 43.9%-of-planet Europe Places head passes under merged #176:
   4,096 populated shards, 8.18 GB peak RSS, 5.40 GB peak sampled disk.
 - Europe Places completes finalize under merged `94eae08`: 20,567 exact-set
