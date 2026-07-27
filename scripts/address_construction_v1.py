@@ -309,15 +309,11 @@ def combine_bindings(values: list[dict[str, Any]]) -> dict[str, Any]:
 DUCKDB_TEMP_SHARE = 4
 
 
-def duckdb_temp_limit(
-    max_scratch_bytes: int, *, share: int = DUCKDB_TEMP_SHARE
-) -> str:
+def duckdb_temp_limit(max_scratch_bytes: int) -> str:
     """The `max_temp_directory_size` literal for a stage with this scratch budget."""
     if max_scratch_bytes <= 0:
         raise ValueError("DuckDB temp cap needs a positive scratch budget")
-    if share < 2:
-        raise ValueError("DuckDB temp cap must leave scratch for non-spill files")
-    return f"{max(1, int(max_scratch_bytes) // share)}B"
+    return f"{max(1, int(max_scratch_bytes) // DUCKDB_TEMP_SHARE)}B"
 
 
 class StageWatchdog:
