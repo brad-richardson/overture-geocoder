@@ -2790,9 +2790,13 @@ def build_sharded_global_head_from_markers(
         connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{workspace}'")
+        # Planet run 30226086949 measured the generic quarter-share spill cap as
+        # insufficient during the first head tree merge (4.2 GiB/4.2 GiB used).
+        # Give this phase half of the EXISTING scratch budget; the whole workspace
+        # plus hydrated cache remains independently bounded by max_scratch_bytes.
         connection.execute(
             f"SET max_temp_directory_size='"
-            f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+            f"{A.duckdb_temp_limit(limits.max_scratch_bytes, share=2)}'"
         )
         connection.create_function(
             "head_shard",

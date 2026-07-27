@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-26 after the first successful non-promoting planet Address
-completion and the admitted Places planet dispatch.
+Last updated 2026-07-27 after the first Places planet attempt completed every
+map and reducer and measured one global-head spill-cap blocker.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -18,12 +18,12 @@ Do not dispatch a planet build without the exact operator-supplied workflow
 confirmation. The operator supplied authorization for request
 `88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`
 with max parallel 4 and a 40,000 runner-minute ceiling. Address completed under
-that authorization; Places run `30226086949` is now executing under the same
-request.
+that authorization; Places run `30226086949` used the same request and its
+staged outputs remain reusable by a fresh-dispatch resume.
 
 ## Current snapshot
 
-The current construction-v1 workflow checkpoint on `main` is `40a7682`: PR
+The last successful construction-v1 workflow checkpoint on `main` is `40a7682`: PR
 #178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
 consumer projections, and PR #183's authenticated same-request resume plus the
 missing plan contract artifact.
@@ -32,15 +32,25 @@ There are no open construction-v1 code PRs.
 Both families passed the preserved Europe execution rung through publication
 and marker-last completion. Address has now also passed the hosted planet rung
 through marker-last R2 publication. Places planet run `30226086949` passed
-fail-closed admission and is in its map phase. There is no remaining measured
-Address blocker; fix Places only if that active run produces a measured blocker.
+fail-closed admission, all 89 maps, planning, and all 128 reducers. Its global
+head then measured one blocker before sharding; finalization correctly skipped.
+There is no remaining measured Address blocker.
 
 ### Places
 
 Planet run `30226086949` was admitted at main workflow SHA `40a7682` for the
 request above, with prior runner minutes 0 and the next-phase projection at
-60/40,000 minutes. It created 89 map jobs at concurrency 4. This is the active
-execution; do not start a parallel construction workstream while it runs.
+60/40,000 minutes. It completed all 89 map jobs at concurrency 4, planning, and
+all 128 reducer jobs.
+
+The global head failed during the first candidate tree merge with DuckDB
+`max_temp_directory_size` exhausted at 4.2 GiB. This was the deliberately
+derived quarter-share spill cap, not runner ENOSPC, the 17 GiB whole-stage
+scratch watchdog, RSS, R2 transport, or a candidate-count admission cap. The
+scoped fix gives this head connection one-half of the existing scratch budget
+while leaving the independent 17 GiB workspace-plus-cache guard and the
+25.6 GB runner floor unchanged. A fresh-dispatch resume must reuse the exact
+request and staged map/reduce outputs; do not use GitHub's Re-run action.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
 phases completed and head produced all 4,096 populated shards. The full head
@@ -151,11 +161,12 @@ verification of 10,931 objects.
 
 ## Fastest path
 
-Follow this sequence. Address planet execution is complete and Places is active.
+Follow this sequence. Address planet execution is complete and Places has one
+measured head-only blocker.
 
-1. **Monitor Places run `30226086949` through all five phases.** Fix only a
-   measured blocker that prevents or invalidates that run, using fresh-dispatch
-   resume rather than GitHub's Re-run action.
+1. **Land and verify the head spill-allocation fix, then fresh-dispatch resume
+   from Places run `30226086949`.** Reuse all 89 map outputs and all 128 reducer
+   outputs under the exact authenticated request.
 2. **Record the complete Places evidence.** Preserve map/reduce/head/finalize
    timing, residency, R2 traffic, exact-set counts, and marker identity.
 3. **Begin reverse R1 as the fast follow.** Consume the already published
@@ -165,8 +176,9 @@ Follow this sequence. Address planet execution is complete and Places is active.
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
-| Possible ~1% planet head disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet run `30226086949` is active | Active run's global head |
-| Planet R2 fleet throughput | Places | Live semantics and Europe publication pass; Address planet passed | Active run's reduce/finalize phases |
+| DuckDB head spill quarter-share is too small | Places | Planet head exhausted 4.2 GiB `max_temp_directory_size`; 17 GiB whole-stage guard did not fire | Resume with head spill at one-half of the unchanged scratch cap |
+| Possible planet head total-disk residual | Places | Europe full head passed at 5.40 GB peak sampled disk; planet failed earlier at DuckDB's sub-cap | Resumed global head |
+| Planet final publication throughput | Places | All 128 planet reducers passed; finalization skipped after head failure | Resumed finalize phase |
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful

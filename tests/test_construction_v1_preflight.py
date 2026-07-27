@@ -299,10 +299,19 @@ def test_every_production_duckdb_connection_caps_its_temp_directory():
     address = _load("preflight_address", "scripts/address_construction_v1.py")
     cap = HOSTED.HOSTED_LIMITS["places"]["max_scratch_bytes"]
     assert address.duckdb_temp_limit(cap) == f"{cap // address.DUCKDB_TEMP_SHARE}B"
+    assert address.duckdb_temp_limit(cap, share=2) == f"{cap // 2}B"
     # Spill is ONE term inside the scratch budget, so it must be a fraction of it.
     assert address.DUCKDB_TEMP_SHARE >= 2
     with pytest.raises(ValueError):
         address.duckdb_temp_limit(0)
+    with pytest.raises(ValueError):
+        address.duckdb_temp_limit(cap, share=1)
+
+    # The global Places head is the measured exception: run 30226086949 exhausted
+    # the generic quarter-share cap while the independent whole-stage 17 GiB guard
+    # remained healthy.
+    places = (ROOT / "scripts/places_construction_v1.py").read_text()
+    assert "duckdb_temp_limit(limits.max_scratch_bytes, share=2)" in places
 
 
 def test_stage_watchdog_poll_is_bounded_by_its_own_sweep_cost():

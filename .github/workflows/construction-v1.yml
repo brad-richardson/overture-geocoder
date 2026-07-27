@@ -852,7 +852,13 @@ jobs:
             python scripts/construction_v1_hosted.py ledger-check \
               --ledger cv1plan/control/ledger.json --next-phase-minutes "$HEAD_PHASE_ESTIMATE_MINUTES"
             BINDIR="crates/target/release"
-            python scripts/construction_v1_hosted.py run-head \
+            # The authenticated producer for an in-flight resume predates the
+            # head-specific half-share fix. Apply the equivalent resource-only
+            # setting in-process: it changes no keys, rows, ordering, or encoders,
+            # and the unchanged 17 GiB whole-stage scratch watchdog still fails
+            # closed. The assertion prevents this compatibility shim from silently
+            # masking a future producer policy.
+            python -c 'import sys; sys.path.insert(0, "scripts"); import address_construction_v1 as A; assert A.DUCKDB_TEMP_SHARE == 4; A.DUCKDB_TEMP_SHARE = 2; import construction_v1_hosted as H; raise SystemExit(H.main())' run-head \
               --contract cv1plan/control/contract.json --store-root store \
               --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
               --family places --markers-dir cv1plan/plan/map-markers \

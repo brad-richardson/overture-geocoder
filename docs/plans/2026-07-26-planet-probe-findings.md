@@ -935,3 +935,20 @@ admission passed for the same request with prior runner minutes 0 and projected
 the next phase at 60/40,000 minutes. The run created 89 map jobs at concurrency
 4. Its remaining measured gates are the planet global head disk residual and
 Places R2 fleet throughput.
+
+### I5. Places maps and reducers pass; the head measures a spill sub-cap
+
+Run `30226086949` completed all 89 map jobs, planning, and all 128 reducer jobs.
+The global head then failed in `_tree_merge_head_candidates` before sharding:
+DuckDB could not offload another 128 KiB block because
+`max_temp_directory_size` had reached 4.2 GiB. The ledger was at 801 minutes
+with a projected 891/40,000 before the head command.
+
+This is narrower than the projected whole-head disk residual. The job did not
+hit runner ENOSPC, RSS, R2 transport, or the independent 17 GiB
+workspace-plus-cache watchdog; it exhausted the generic DuckDB quarter-share
+inside that budget. The scoped correction allocates half of the same 17 GiB to
+head spill while retaining the total-stage guard and 25.6 GB free-disk floor.
+Because every earlier object is immutable in the same request-derived staging
+namespace, the next execution is a fresh-dispatch resume of `30226086949`, not
+a rerun and not a new request.

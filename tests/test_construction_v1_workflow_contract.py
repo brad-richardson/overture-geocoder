@@ -485,9 +485,21 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
         '--staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT"'
     ) == 7  # admit-task, run-map, plan-reduce, run-reduce, run-head x2, finalize
     for command in ("run-map", "plan-reduce", "run-reduce", "run-head", "finalize"):
-        block_start = value.index(f"construction_v1_hosted.py {command}")
+        needle = (
+            f"construction_v1_hosted.py {command}"
+            if command != "run-head"
+            else "' run-head"
+        )
+        block_start = value.index(needle)
         block = value[block_start : block_start + 900]
         assert "--staging-bucket" in block, command
+
+    # A fresh resume checks out the request-pinned producer, so the measured
+    # head-only resource fix must be applied in-process without mutating that
+    # authenticated source tree. Total stage scratch remains unchanged.
+    assert "assert A.DUCKDB_TEMP_SHARE == 4" in value
+    assert "A.DUCKDB_TEMP_SHARE = 2" in value
+    assert "unchanged 17 GiB whole-stage scratch watchdog" in value
 
     # A map task that staged nothing wrote its fragments nowhere durable, and the
     # artifact no longer carries them.
