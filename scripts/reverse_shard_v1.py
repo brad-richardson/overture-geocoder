@@ -5,7 +5,8 @@ The reverse index (docs/plans/2026-07-25-reverse-v2-design.md) serves one shard
 per populated level-8 cell and keys records inside a shard by a leaf key: the
 4-hex `partition_cell` plus L base-4 sub-digits derived by subdividing that
 cell's E7 bbox. This module pins that contract -- the grid constants, the digit
-convention, the depth rule -- ahead of the encoder that will write it.
+convention, the depth rule -- and carries the Python oracle decoder
+(`ReverseShard`) for the `.plrx` shards `reverse-encode-v1` writes.
 
 Everything here is MIRRORED, not imported, per the convention stated in
 `scripts/address_construction_v1.py`: the authoritative cell is `route()` in
@@ -25,6 +26,8 @@ Clamping makes a leaf key that escapes its own cell unrepresentable.
 
 from __future__ import annotations
 
+import hashlib
+import struct
 from dataclasses import dataclass
 
 
@@ -205,3 +208,199 @@ def leaf_sql(
 def _validate_level(level: int) -> None:
     if not 0 <= level <= MAX_SUB_CELL_LEVEL:
         raise ValueError(f"reverse sub-cell level is out of range: {level!r}")
+
+
+# --------------------------------------------------------------------------- #
+# .plrx oracle decoder
+# --------------------------------------------------------------------------- #
+# Python mirror of the `.plrx` reverse serving shard written by
+# `reverse-encode-v1` and independently re-decoded by `reverse-verify-v1`
+# (crates/geocoder-construction/src/bin/). Mirrored, never imported, following
+# `experiment_places_compact_shard.CompactShard`: a third implementation of the
+# wire format so the Rust encoder, the Rust verifier and this oracle are
+# mutually fuzz-comparable.
+
+SERVING_MAGIC = b"PLRX0001"
+SERVING_HEADER_BYTES = 32
+SERVING_INDEX_ENTRY_BYTES = 40
+SERVING_INDEX_DOMAIN = b"overture-reverse-index-v1\x00"
+SERVING_DIGEST_DOMAIN_A = b"overture-reverse-shard-v1\x00"
+SERVING_DIGEST_DOMAIN_B = b"overture-reverse-shard-v1\x01"
+# Header family byte -> encoder --family value. The serving families map onto
+# the depth-ceiling families above as places -> "poi", addresses -> "address".
+SERVING_FAMILY_CODES = {0: "places", 1: "addresses"}
+DEPTH_FAMILY_BY_SERVING = {"places": "poi", "addresses": "address"}
+
+_PLACES_TEXT_FIELDS = (
+    "primary_name",
+    "brand_name",
+    "category",
+    "locality",
+    "region",
+    "country",
+)
+_ADDRESS_TEXT_FIELDS = (
+    "display_country",
+    "postal_city",
+    "postcode",
+    "street",
+    "number",
+    "unit",
+)
+
+
+def serving_index_hash(key: bytes) -> int:
+    """u64 index hash: first 8 big-endian bytes of the domain-separated SHA-256."""
+    digest = hashlib.sha256(SERVING_INDEX_DOMAIN + key).digest()
+    return int.from_bytes(digest[:8], "big")
+
+
+@dataclass(frozen=True)
+class LeafRange:
+    """One index entry: the payload extent of one populated leaf."""
+
+    key: str
+    payload_offset: int
+    payload_bytes: int
+    records: int
+
+
+def _text(data: bytes, position: int) -> tuple[str, int]:
+    (length,) = struct.unpack_from("<H", data, position)
+    position += 2
+    if position + length > len(data):
+        raise ValueError("reverse shard text is truncated")
+    return data[position : position + length].decode("utf-8"), position + length
+
+
+class ReverseShard:
+    """Full `.plrx` decoder over in-memory bytes.
+
+    The constructor validates the header and the index frame (hashes, key
+    shapes, blob extent); `leaf_ranges` exposes the payload extents in payload
+    order; `decode_leaf` decodes one leaf's records and re-derives every leaf
+    key from the record's own E7 coordinates, so a payload row filed under the
+    wrong leaf cannot decode silently.
+    """
+
+    def __init__(self, data: bytes):
+        if len(data) < SERVING_HEADER_BYTES + 4 or data[:8] != SERVING_MAGIC:
+            raise ValueError("not a reverse serving shard")
+        (self.records,) = struct.unpack_from("<Q", data, 8)
+        (index_offset,) = struct.unpack_from("<Q", data, 16)
+        (index_count,) = struct.unpack_from("<I", data, 24)
+        family_code, self.cell_level, self.sub_cell_level, flags = data[28:32]
+        if family_code not in SERVING_FAMILY_CODES:
+            raise ValueError(f"reverse shard family is unknown: {family_code}")
+        if flags != 0 or self.cell_level != CELL_LEVEL:
+            raise ValueError("reverse shard header is malformed")
+        self.family = SERVING_FAMILY_CODES[family_code]
+        self.index_offset = index_offset
+        if not SERVING_HEADER_BYTES <= index_offset <= len(data) - 4:
+            raise ValueError("reverse shard index offset is out of range")
+        (stored_count,) = struct.unpack_from("<I", data, index_offset)
+        if stored_count != index_count:
+            raise ValueError("reverse shard index counts disagree")
+        fixed_start = index_offset + 4
+        key_start = fixed_start + SERVING_INDEX_ENTRY_BYTES * index_count
+        if key_start > len(data):
+            raise ValueError("reverse shard index is truncated")
+        self._entries: list[LeafRange] = []
+        self._by_key: dict[str, LeafRange] = {}
+        previous: tuple[int, bytes] | None = None
+        expected_key_offset = 0
+        for item in range(index_count):
+            hash_, key_offset, key_length, records, offset, length = struct.unpack_from(
+                "<QQIIQQ", data, fixed_start + SERVING_INDEX_ENTRY_BYTES * item
+            )
+            raw = data[key_start + key_offset : key_start + key_offset + key_length]
+            if len(raw) != key_length or key_offset != expected_key_offset:
+                raise ValueError("reverse shard index key blob is malformed")
+            expected_key_offset += key_length
+            key = raw.decode("ascii")
+            digits = key[4:]
+            if len(digits) != self.sub_cell_level:
+                raise ValueError("reverse shard leaf key depth differs from header")
+            leaf_key(key[:4], digits)
+            if hash_ != serving_index_hash(raw):
+                raise ValueError("reverse shard index hash is wrong")
+            if previous is not None and previous > (hash_, raw):
+                raise ValueError("reverse shard index is not sorted by (hash, key)")
+            previous = (hash_, raw)
+            entry = LeafRange(key, offset, length, records)
+            self._entries.append(entry)
+            self._by_key[key] = entry
+        if len(self._by_key) != index_count:
+            raise ValueError("reverse shard index repeats a leaf key")
+        if key_start + expected_key_offset != len(data):
+            raise ValueError("reverse shard index length differs")
+        cells = {entry.key[:4] for entry in self._entries}
+        if len(cells) > 1:
+            raise ValueError("reverse shard mixes cells")
+        self.cell = cells.pop() if cells else None
+        self._data = data
+
+    def leaf_ranges(self) -> list[LeafRange]:
+        """Populated leaves in payload (row-major) order."""
+        return sorted(self._entries, key=lambda entry: entry.payload_offset)
+
+    def decode_leaf(self, key: str) -> list[dict]:
+        entry = self._by_key[key]
+        data = self._data
+        position = entry.payload_offset
+        end = entry.payload_offset + entry.payload_bytes
+        if not SERVING_HEADER_BYTES <= position <= end <= self.index_offset:
+            raise ValueError("reverse shard leaf extent is out of range")
+        records = []
+        while position < end:
+            (length,) = struct.unpack_from("<I", data, position)
+            record_end = position + 4 + length
+            if record_end > end:
+                raise ValueError("reverse shard record overruns its leaf")
+            records.append(self._decode_record(data[position + 4 : record_end], key))
+            position = record_end
+        if len(records) != entry.records:
+            raise ValueError("reverse shard leaf record count differs")
+        return records
+
+    def _decode_record(self, entry: bytes, key: str) -> dict:
+        feature_id = entry[:16]
+        if len(feature_id) != 16:
+            raise ValueError("reverse shard record is truncated")
+        longitude_e7, latitude_e7 = struct.unpack_from("<ii", entry, 16)
+        record = {
+            "feature_id": feature_id,
+            "longitude_e7": longitude_e7,
+            "latitude_e7": latitude_e7,
+        }
+        position = 24
+        if self.family == "places":
+            record["confidence_rank"] = entry[position]
+            position += 1
+        (
+            record["source_object_index"],
+            record["source_row_group"],
+            record["source_row_index"],
+        ) = struct.unpack_from("<IIQ", entry, position)
+        position += 16
+        fields = (
+            _PLACES_TEXT_FIELDS if self.family == "places" else _ADDRESS_TEXT_FIELDS
+        )
+        for field in fields:
+            record[field], position = _text(entry, position)
+        if self.family == "addresses":
+            (count,) = struct.unpack_from("<H", entry, position)
+            position += 2
+            levels = []
+            for _ in range(count):
+                level, position = _text(entry, position)
+                levels.append(level)
+            record["address_levels"] = levels
+        if position != len(entry):
+            raise ValueError("reverse shard record has trailing bytes")
+        digits = leaf_digits_e7(
+            longitude_e7, latitude_e7, key[:4], self.sub_cell_level
+        )
+        if key != leaf_key(key[:4], digits):
+            raise ValueError("reverse shard record is filed under the wrong leaf")
+        return record
