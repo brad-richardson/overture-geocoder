@@ -1,15 +1,73 @@
-//! Dormant decoder/query boundary for Places construction-v1 serving artifacts.
+//! Decoder/query boundary for Places construction-v1 serving artifacts.
 //!
-//! No Worker route or R2 loader references this module. Checkpoint 4 proves
-//! only that independently verified construction bytes have a bounded consumer.
+//! The `/v2/forward` Places lane routes here when a release's Places family
+//! declares the promoted construction format (`PLRV0002+PLHD0002`): the
+//! promoted `slice-YYYY-MM-DD.N/families/places/` tree holds `routing.json`
+//! (`overture-promoted-places-routing-v1`), the copied head routing manifest
+//! (`overture-places-global-head-sharded-v2`), and content-addressed
+//! `objects/<sha256>.plrv` / `.plhd` serving artifacts. Everything below
+//! `impl ShardLoader` is pure and natively tested; the loader glue only
+//! fetches bounded bytes and composes those pure calls.
 
 #![allow(dead_code)]
 
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
+use std::rc::Rc;
+
 use geocoder_core::pages::format_uuid;
+use serde::Deserialize;
 use sha2::{Digest, Sha256};
+
+use crate::places_pages::{point_quadkey, PlaceProjection};
+use crate::stac::cache::IMMUTABLE_CACHE_TTL;
+use crate::stac::{not_found, ShardLoader};
 
 type Result<T> = std::result::Result<T, String>;
 const MAXIMUM_INDEX_PROBES: usize = 32;
+
+/// The promoted construction-v1 Places family format identity
+/// (`scripts/promote_construction_slice.py` `DEFAULT_VERSIONS["places"]`):
+/// routed `.plrv` artifacts plus the 4,096-way sharded `.plhd` head.
+pub(crate) const PLACES_CONSTRUCTION_FORMAT: &str = "PLRV0002+PLHD0002";
+pub(crate) const PLACES_ROUTING_SCHEMA: &str = "overture-promoted-places-routing-v1";
+pub(crate) const PLACES_HEAD_MANIFEST_SCHEMA: &str = "overture-places-global-head-sharded-v2";
+const PLACES_ROUTING_CELL_SCHEME: &str = "level-4-quadkey-yx-hex";
+const PLACES_ROUTING_SUBPARTITION_SCHEME: &str = "token-sha256-nibble-prefix-v1";
+
+/// routing.json cap. The planet slice carries 16,601 routed entries at roughly
+/// 80 bytes each (~1.3 MiB); 8 MiB leaves 6x headroom and stays far under the
+/// isolate budget.
+pub(crate) const MAX_PLACES_ROUTING_BYTES: usize = 8 * 1024 * 1024;
+/// Head routing manifest cap: 4,096 shard rows plus digests is about 1.5 MiB.
+pub(crate) const MAX_PLACES_HEAD_ROUTING_BYTES: usize = 8 * 1024 * 1024;
+/// Whole-object cap for one routed `.plrv` artifact. Objects above this fail
+/// closed rather than exhaust the 128 MiB isolate; serving the few planet
+/// partitions above it needs a future range-read routed lane, not a bigger cap.
+pub(crate) const MAX_ROUTED_OBJECT_BYTES: usize = 64 * 1024 * 1024;
+/// Whole-object cap for one `.plhd` head shard (~2.7 MB at planet scale).
+pub(crate) const MAX_HEAD_SHARD_BYTES: usize = 16 * 1024 * 1024;
+const MAX_ARTIFACT_RECORDS: usize = 5_000_000;
+const MAX_ARTIFACT_ENTRY_BYTES: usize = 64 * 1024;
+/// Producer cap: at most `maximum_serving_candidates` (256) records survive per
+/// `(partition_cell, token)` group (`scripts/places_construction_v1.py`).
+const ROUTED_CANDIDATE_CAP: usize = 256;
+/// Producer cap: at most `head_result_cap` (10) records per head token.
+const HEAD_RESULT_CAP: usize = 10;
+const HEAD_CANDIDATE_CAP: usize = 256;
+const MAX_ROUTING_CELLS: usize = 65_536;
+const MAX_CELL_SUBPARTITIONS: usize = 4_096;
+/// `_prefix_sql` in scripts/places_construction_v1.py rejects depth > 8.
+const MAX_SUBPARTITION_DEPTH: usize = 8;
+const MAX_HEAD_SHARD_BITS: u32 = 24;
+
+thread_local! {
+    /// Parsed promoted routing tables, LRU-last, one live generation each.
+    static PLACES_ROUTING_CACHE: RefCell<Vec<(String, Rc<PlacesRouting>)>> =
+        const { RefCell::new(Vec::new()) };
+    static PLACES_HEAD_ROUTING_CACHE: RefCell<Vec<(String, Rc<HeadRoutingManifest>)>> =
+        const { RefCell::new(Vec::new()) };
+}
 
 struct PlacesV1Index {
     hash: u64,
@@ -411,9 +469,554 @@ fn read_u32(bytes: &[u8], offset: usize) -> Result<u32> {
     ))
 }
 
+// ---------------------------------------------------------------------------
+// Promoted-slice routing (routing.json + head routing manifest).
+
+/// The construction partition hash of one token: the top eight big-endian
+/// bytes of SHA-256 over the `overture-places-token-partition-v1\0` domain.
+/// Byte-identical to `token_hash` in
+/// `crates/geocoder-construction/src/bin/places_transform_v1.rs`; the
+/// `token-sha256-nibble-prefix-v1` ownership prefixes are its top nibbles.
+pub(crate) fn routed_token_hash(token: &str) -> u64 {
+    let mut digest = Sha256::new();
+    digest.update(b"overture-places-token-partition-v1\0");
+    digest.update(token.as_bytes());
+    u64::from_be_bytes(digest.finalize()[..8].try_into().unwrap())
+}
+
+/// The level-4 `{y:02x}{x:02x}` construction partition cell containing a
+/// point: the level-8 quadkey re-encoded onto the 256x256 `(y<<8)|x` grid.
+/// The correspondence is pinned by the shared
+/// `tests/fixtures/reverse/cell-identifier-vectors-v1.json` vectors.
+pub(crate) fn construction_cell(longitude: f64, latitude: f64) -> Option<String> {
+    let quadkey = point_quadkey(longitude, latitude, 8)?;
+    let mut x = 0_u32;
+    let mut y = 0_u32;
+    for digit in quadkey.bytes().map(|value| value - b'0') {
+        x = (x << 1) | u32::from(digit & 1);
+        y = (y << 1) | u32::from((digit >> 1) & 1);
+    }
+    Some(format!("{y:02x}{x:02x}"))
+}
+
+fn valid_sha256_hex(value: &str) -> bool {
+    value.len() == 64
+        && value
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+/// A published object name must be content-addressed: `<sha256><extension>`.
+fn content_addressed_name(name: &str, extension: &str) -> bool {
+    name.len() == 64 + extension.len() && name.ends_with(extension) && valid_sha256_hex(&name[..64])
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRoutingHead {
+    schema: String,
+    shard_bits: u32,
+    shard_count: u32,
+    populated_shards: usize,
+    manifest_object: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRouting {
+    schema: String,
+    family: String,
+    cell_scheme: String,
+    subpartition_scheme: String,
+    cells: std::collections::BTreeMap<String, Vec<(String, String)>>,
+    head: RawRoutingHead,
+}
+
+#[derive(Debug)]
+struct CellSubpartition {
+    depth: usize,
+    prefix: u64,
+    object: String,
+}
+
+/// Head geometry as promoted routing.json records it; must agree exactly with
+/// the head routing manifest it points at.
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct PlacesRoutingHead {
+    pub shard_bits: u32,
+    pub shard_count: u32,
+    pub populated_shards: usize,
+    pub manifest_object: String,
+}
+
+/// Validated `overture-promoted-places-routing-v1` table.
+#[derive(Debug)]
+pub(crate) struct PlacesRouting {
+    cells: HashMap<String, Vec<CellSubpartition>>,
+    pub head: PlacesRoutingHead,
+}
+
+impl PlacesRouting {
+    pub(crate) fn parse(text: &str) -> Result<Self> {
+        let raw: RawRouting = serde_json::from_str(text)
+            .map_err(|error| format!("invalid Places routing JSON: {error}"))?;
+        if raw.schema != PLACES_ROUTING_SCHEMA
+            || raw.family != "places"
+            || raw.cell_scheme != PLACES_ROUTING_CELL_SCHEME
+            || raw.subpartition_scheme != PLACES_ROUTING_SUBPARTITION_SCHEME
+        {
+            return Err("unsupported Places routing contract".into());
+        }
+        if raw.cells.is_empty() || raw.cells.len() > MAX_ROUTING_CELLS {
+            return Err("Places routing cell count is outside hard bounds".into());
+        }
+        let mut cells = HashMap::with_capacity(raw.cells.len());
+        for (cell, entries) in raw.cells {
+            if cell.len() != 4
+                || !cell
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            {
+                return Err(format!("Places routing cell is malformed: {cell}"));
+            }
+            if entries.is_empty() || entries.len() > MAX_CELL_SUBPARTITIONS {
+                return Err(format!(
+                    "Places routing cell {cell} subpartition count is outside hard bounds"
+                ));
+            }
+            let mut parsed = Vec::with_capacity(entries.len());
+            for (prefix, object) in entries {
+                let depth = prefix.len();
+                if depth > MAX_SUBPARTITION_DEPTH
+                    || !prefix
+                        .bytes()
+                        .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                {
+                    return Err(format!(
+                        "Places routing cell {cell} has an invalid token prefix"
+                    ));
+                }
+                if !content_addressed_name(&object, ".plrv") {
+                    return Err(format!(
+                        "Places routing cell {cell} names a non-content-addressed object"
+                    ));
+                }
+                let prefix = if depth == 0 {
+                    0
+                } else {
+                    u64::from_str_radix(&prefix, 16)
+                        .map_err(|_| format!("Places routing cell {cell} prefix overflows"))?
+                };
+                parsed.push(CellSubpartition {
+                    depth,
+                    prefix,
+                    object,
+                });
+            }
+            // Exact tiling of the nibble space, mirroring the promotion tool's
+            // fail-closed check: a gap would silently drop every token whose
+            // hash lands in it, an overlap would make routing ambiguous.
+            let depth_max = parsed.iter().map(|entry| entry.depth).max().unwrap_or(0);
+            let mut spans: Vec<(u64, u64)> = parsed
+                .iter()
+                .map(|entry| {
+                    let width = 16_u64.pow((depth_max - entry.depth) as u32);
+                    (entry.prefix * width, width)
+                })
+                .collect();
+            spans.sort_unstable();
+            let mut expected_start = 0_u64;
+            for (start, width) in &spans {
+                if *start != expected_start {
+                    return Err(format!(
+                        "Places routing cell {cell} subpartitions do not tile the nibble space"
+                    ));
+                }
+                expected_start = start
+                    .checked_add(*width)
+                    .ok_or_else(|| format!("Places routing cell {cell} span overflows"))?;
+            }
+            if expected_start != 16_u64.pow(depth_max as u32) {
+                return Err(format!(
+                    "Places routing cell {cell} subpartitions do not cover the nibble space"
+                ));
+            }
+            cells.insert(cell, parsed);
+        }
+        let head = raw.head;
+        if head.schema != PLACES_HEAD_MANIFEST_SCHEMA
+            || head.shard_bits == 0
+            || head.shard_bits > MAX_HEAD_SHARD_BITS
+            || head.shard_count != 1_u32 << head.shard_bits
+            || head.populated_shards == 0
+            || head.populated_shards > head.shard_count as usize
+            || !content_addressed_name(&head.manifest_object, ".json")
+        {
+            return Err("unsupported Places routing head block".into());
+        }
+        Ok(Self {
+            cells,
+            head: PlacesRoutingHead {
+                shard_bits: head.shard_bits,
+                shard_count: head.shard_count,
+                populated_shards: head.populated_shards,
+                manifest_object: head.manifest_object,
+            },
+        })
+    }
+
+    /// Names of every routed `.plrv` object reachable from the cell table.
+    pub(crate) fn routed_object_names(&self) -> impl Iterator<Item = &str> {
+        self.cells
+            .values()
+            .flatten()
+            .map(|entry| entry.object.as_str())
+    }
+
+    /// The routed object owning `token` inside `cell`. `Ok(None)` means the
+    /// cell holds no Places at all; an unowned token inside a populated cell
+    /// is a broken tiling invariant and fails closed.
+    pub(crate) fn route(&self, cell: &str, token: &str) -> Result<Option<&str>> {
+        let Some(entries) = self.cells.get(cell) else {
+            return Ok(None);
+        };
+        let hash = routed_token_hash(token);
+        for entry in entries {
+            let matched =
+                entry.depth == 0 || (hash >> (64 - 4 * entry.depth as u32)) == entry.prefix;
+            if matched {
+                return Ok(Some(&entry.object));
+            }
+        }
+        Err(format!(
+            "Places routing cell {cell} owns no subpartition for the token hash"
+        ))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RawHeadShard {
+    shard_id: u32,
+    path: String,
+    sha256: String,
+    bytes: u64,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawHeadManifest {
+    schema: String,
+    shard_bits: u32,
+    shard_count: u32,
+    populated_shards: usize,
+    shards: Vec<RawHeadShard>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) struct HeadShardIdentity {
+    pub shard_id: u32,
+    pub path: String,
+    pub sha256: String,
+    pub bytes: u64,
+}
+
+/// Validated `overture-places-global-head-sharded-v2` routing manifest.
+#[derive(Debug)]
+pub(crate) struct HeadRoutingManifest {
+    pub shard_bits: u32,
+    pub shard_count: u32,
+    shards: HashMap<u32, HeadShardIdentity>,
+}
+
+impl HeadRoutingManifest {
+    pub(crate) fn parse(text: &str) -> Result<Self> {
+        let raw: RawHeadManifest = serde_json::from_str(text)
+            .map_err(|error| format!("invalid Places head routing manifest: {error}"))?;
+        if raw.schema != PLACES_HEAD_MANIFEST_SCHEMA
+            || raw.shard_bits == 0
+            || raw.shard_bits > MAX_HEAD_SHARD_BITS
+            || raw.shard_count != 1_u32 << raw.shard_bits
+            || raw.shards.is_empty()
+            || raw.populated_shards != raw.shards.len()
+            || raw.shards.len() > raw.shard_count as usize
+        {
+            return Err("unsupported Places head routing manifest contract".into());
+        }
+        let mut shards = HashMap::with_capacity(raw.shards.len());
+        for shard in raw.shards {
+            if shard.shard_id >= raw.shard_count
+                || !content_addressed_name(&shard.path, ".plhd")
+                || !valid_sha256_hex(&shard.sha256)
+                || shard.bytes == 0
+                || shard.bytes > MAX_HEAD_SHARD_BYTES as u64
+            {
+                return Err("invalid Places head routing shard entry".into());
+            }
+            let identity = HeadShardIdentity {
+                shard_id: shard.shard_id,
+                path: shard.path,
+                sha256: shard.sha256,
+                bytes: shard.bytes,
+            };
+            if shards.insert(identity.shard_id, identity).is_some() {
+                return Err("Places head routing manifest repeats a shard id".into());
+            }
+        }
+        Ok(Self {
+            shard_bits: raw.shard_bits,
+            shard_count: raw.shard_count,
+            shards,
+        })
+    }
+
+    pub(crate) fn shard(&self, shard_id: u32) -> Option<&HeadShardIdentity> {
+        self.shards.get(&shard_id)
+    }
+
+    pub(crate) fn shards(&self) -> impl Iterator<Item = &HeadShardIdentity> {
+        self.shards.values()
+    }
+
+    /// Geometry agreement with the routing.json head block, checked at both
+    /// admission and serving time.
+    pub(crate) fn agrees_with(&self, head: &PlacesRoutingHead) -> bool {
+        self.shard_bits == head.shard_bits
+            && self.shard_count == head.shard_count
+            && self.shards.len() == head.populated_shards
+    }
+
+    /// Deterministic admission spot-check sample: the first, middle, and last
+    /// populated shards in shard-id order (deduplicated). Full verification of
+    /// all 4,096 shards (5.14 GB) is deliberately NOT done at admission; the
+    /// per-shard identities remain pinned by this manifest, whose own bytes are
+    /// pinned by the release-attested family manifest.
+    pub(crate) fn admission_sample(&self) -> Vec<&HeadShardIdentity> {
+        let mut ids: Vec<u32> = self.shards.keys().copied().collect();
+        ids.sort_unstable();
+        let mut picks = vec![ids[0], ids[ids.len() / 2], ids[ids.len() - 1]];
+        picks.dedup();
+        picks.into_iter().map(|id| &self.shards[&id]).collect()
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Pure query pipeline over fetched artifact bytes.
+
+/// Decode one fetched routed `.plrv` object and answer `(cell, token)`.
+pub(crate) fn routed_lookup(bytes: &[u8], cell: &str, token: &str) -> Result<Vec<PlacesV1Record>> {
+    let artifact = PlacesV1Artifact::parse(
+        bytes,
+        PlacesV1Mode::Routed,
+        MAX_ROUTED_OBJECT_BYTES,
+        MAX_ARTIFACT_RECORDS,
+        MAX_ARTIFACT_ENTRY_BYTES,
+    )?;
+    artifact.lookup(
+        token,
+        Some(cell),
+        ROUTED_CANDIDATE_CAP,
+        ROUTED_CANDIDATE_CAP,
+    )
+}
+
+/// Decode one fetched `.plhd` head shard and answer `token`, keeping the
+/// misroute fail-closed check in [`lookup_head_shard`].
+pub(crate) fn head_shard_lookup(
+    bytes: &[u8],
+    shard_id: u32,
+    shard_bits: u32,
+    token: &str,
+) -> Result<Vec<PlacesV1Record>> {
+    lookup_head_shard(
+        bytes,
+        shard_id,
+        shard_bits,
+        token,
+        MAX_HEAD_SHARD_BYTES,
+        MAX_ARTIFACT_RECORDS,
+        MAX_ARTIFACT_ENTRY_BYTES,
+        HEAD_CANDIDATE_CAP,
+        HEAD_RESULT_CAP,
+    )
+}
+
+/// Plan the routed fetches for one proximity query: token indexes grouped by
+/// owning object in first-use order. The serving loop walks this plan holding
+/// exactly ONE routed artifact at a time and drops its bytes before fetching
+/// the next, so the lane's aggregate residency is bounded by one
+/// `MAX_ROUTED_OBJECT_BYTES` (64 MiB) object regardless of token count —
+/// never tokens x cap (up to 4 x 64 MiB), which two near-cap objects alone
+/// would turn into an isolate OOM instead of a fail-closed error. Each object
+/// is still fetched exactly once per query. `Ok(None)` means the cell holds no
+/// Places at all.
+/// One fetch per DISTINCT routed object: `(object name, owned token indexes)`
+/// in first-use order.
+pub(crate) type RoutedFetchPlan<'routing> = Vec<(&'routing str, Vec<usize>)>;
+
+pub(crate) fn routed_fetch_plan<'routing>(
+    routing: &'routing PlacesRouting,
+    cell: &str,
+    tokens: &[String],
+) -> Result<Option<RoutedFetchPlan<'routing>>> {
+    let mut plan: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        let Some(object) = routing.route(cell, token)? else {
+            return Ok(None);
+        };
+        match plan.iter_mut().find(|(name, _)| *name == object) {
+            Some((_, indexes)) => indexes.push(index),
+            None => plan.push((object, vec![index])),
+        }
+    }
+    Ok(Some(plan))
+}
+
+/// AND-intersect per-token record lists by feature id, keeping the first
+/// token's producer order (`confidence_rank DESC, feature_id, locator`).
+pub(crate) fn intersect_ranked(mut per_token: Vec<Vec<PlacesV1Record>>) -> Vec<PlacesV1Record> {
+    if per_token.is_empty() {
+        return Vec::new();
+    }
+    let mut results = per_token.remove(0);
+    for other in per_token {
+        let ids: HashSet<String> = other.into_iter().map(|record| record.id).collect();
+        results.retain(|record| ids.contains(&record.id));
+    }
+    results
+}
+
+/// Project one construction record into the shared serving projection.
+pub(crate) fn record_projection(record: &PlacesV1Record) -> PlaceProjection {
+    PlaceProjection {
+        id: record.id.clone(),
+        latitude: record.latitude as f32,
+        longitude: record.longitude as f32,
+        confidence: f32::from(record.confidence_rank) / 255.0,
+        name: record.primary_name.clone(),
+        category: record.category.clone(),
+        locality: record.locality.clone(),
+        region: record.region.clone(),
+        country: record.country.clone(),
+        distance_km: None,
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Bounded R2 loader glue. Identity trust model matches the PCSH lane: object
+// identities are release-pinned and spot-verified at admission; serving-time
+// integrity rests on the artifacts' structural self-checks (exact index/key
+// reconciliation, misroute fail-closed) rather than per-request re-hashing.
+
+impl ShardLoader {
+    pub(crate) async fn lookup_places_construction_routing(
+        &self,
+        object_key: &str,
+    ) -> worker::Result<Rc<PlacesRouting>> {
+        if let Some(routing) = cache_get(&PLACES_ROUTING_CACHE, object_key) {
+            return Ok(routing);
+        }
+        let read = self
+            .cached_bounded_prefix_read_measured(
+                object_key,
+                MAX_PLACES_ROUTING_BYTES,
+                IMMUTABLE_CACHE_TTL,
+            )
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        let text = std::str::from_utf8(&read.bytes)
+            .map_err(|_| worker::Error::RustError("Places routing is not UTF-8".into()))?;
+        let routing = Rc::new(PlacesRouting::parse(text).map_err(worker::Error::RustError)?);
+        cache_put(&PLACES_ROUTING_CACHE, object_key, Rc::clone(&routing));
+        Ok(routing)
+    }
+
+    pub(crate) async fn lookup_places_construction_head_routing(
+        &self,
+        object_key: &str,
+        head: &PlacesRoutingHead,
+    ) -> worker::Result<Rc<HeadRoutingManifest>> {
+        let manifest = match cache_get(&PLACES_HEAD_ROUTING_CACHE, object_key) {
+            Some(manifest) => manifest,
+            None => {
+                let read = self
+                    .cached_bounded_prefix_read_measured(
+                        object_key,
+                        MAX_PLACES_HEAD_ROUTING_BYTES,
+                        IMMUTABLE_CACHE_TTL,
+                    )
+                    .await?
+                    .ok_or_else(|| not_found(object_key))?;
+                let text = std::str::from_utf8(&read.bytes).map_err(|_| {
+                    worker::Error::RustError("Places head routing manifest is not UTF-8".into())
+                })?;
+                let manifest =
+                    Rc::new(HeadRoutingManifest::parse(text).map_err(worker::Error::RustError)?);
+                cache_put(&PLACES_HEAD_ROUTING_CACHE, object_key, Rc::clone(&manifest));
+                manifest
+            }
+        };
+        if !manifest.agrees_with(head) {
+            return Err(worker::Error::RustError(
+                "Places head routing manifest geometry differs from routing.json".into(),
+            ));
+        }
+        Ok(manifest)
+    }
+
+    /// Fetch one whole serving artifact under a hard byte cap, edge-cached
+    /// with the immutable TTL like every other content-addressed object.
+    pub(crate) async fn places_construction_object(
+        &self,
+        object_key: &str,
+        max_bytes: usize,
+    ) -> worker::Result<bytes::Bytes> {
+        let read = self
+            .cached_bounded_prefix_read_measured(object_key, max_bytes, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        Ok(read.bytes)
+    }
+}
+
+/// One thread-local generation of parsed immutable control documents.
+type ParsedDocumentCache<T> = std::thread::LocalKey<RefCell<Vec<(String, Rc<T>)>>>;
+
+fn cache_get<T>(cache: &'static ParsedDocumentCache<T>, key: &str) -> Option<Rc<T>> {
+    cache.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        cache
+            .iter()
+            .position(|(cached_key, _)| cached_key == key)
+            .map(|position| {
+                let entry = cache.remove(position);
+                let value = Rc::clone(&entry.1);
+                cache.push(entry);
+                value
+            })
+    })
+}
+
+fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, value: Rc<T>) {
+    const MAX_ENTRIES: usize = 1;
+    cache.with(|cache| {
+        let mut cache = cache.borrow_mut();
+        if !cache.iter().any(|(cached_key, _)| cached_key == key) {
+            cache.push((key.to_string(), value));
+            while cache.len() > MAX_ENTRIES {
+                cache.remove(0);
+            }
+        }
+    });
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{head_shard_id, index_hash, lookup_head_shard, PlacesV1Artifact, PlacesV1Mode};
+    use super::{
+        construction_cell, head_shard_id, head_shard_lookup, index_hash, intersect_ranked,
+        lookup_head_shard, record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
+        HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1Record,
+        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+    };
+    use serde_json::{json, Value};
+    use sha2::{Digest, Sha256};
+    use std::collections::HashMap;
 
     fn text(output: &mut Vec<u8>, value: &str) {
         output.extend_from_slice(&(value.len() as u16).to_le_bytes());
@@ -692,5 +1295,541 @@ mod tests {
         let mut truncated = artifact(PlacesV1Mode::Head, &[entry("cafe", None, 255, 1, 0)]);
         truncated.pop();
         assert!(PlacesV1Artifact::parse(&truncated, PlacesV1Mode::Head, 4096, 10, 1024).is_err());
+    }
+
+    // -----------------------------------------------------------------------
+    // Promoted-slice routing and serving pipeline.
+
+    fn sha_hex(bytes: &[u8]) -> String {
+        format!("{:x}", Sha256::digest(bytes))
+    }
+
+    /// Cross-implementation pin: byte-identical to `token_hash` in
+    /// `places_transform_v1.rs` (values computed independently with Python
+    /// `hashlib` over the `overture-places-token-partition-v1\0` domain).
+    #[test]
+    fn routed_token_hash_matches_the_construction_transform() {
+        assert_eq!(routed_token_hash("cafe"), 0x1440_127e_7afa_2247);
+        assert_eq!(routed_token_hash("tower"), 0x28ee_0390_2490_ca39);
+        assert_eq!(routed_token_hash("museum"), 0x9724_4ca3_f765_613e);
+        assert_eq!(routed_token_hash("東京"), 0x0635_792b_4bf5_adb4);
+    }
+
+    /// The bias-point cell derivation must re-encode the exact `(y<<8)|x` grid
+    /// the construction partitioner uses, pinned by the shared PR #187 cell
+    /// identifier vectors (quadkey8 <-> 4-hex `{y:02x}{x:02x}` cell).
+    #[test]
+    fn construction_cell_matches_the_shared_identifier_vectors() {
+        let fixture = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures/reverse/cell-identifier-vectors-v1.json");
+        let payload: Value =
+            serde_json::from_str(&std::fs::read_to_string(&fixture).unwrap()).unwrap();
+        assert_eq!(
+            payload["schema"].as_str(),
+            Some("overture-reverse-cell-identifier-vectors-v1")
+        );
+        let vectors = payload["vectors"].as_array().unwrap();
+        assert!(vectors.len() >= 300);
+        for vector in vectors {
+            let longitude = vector["longitude_e7"].as_i64().unwrap() as f64 / 1e7;
+            let latitude = vector["latitude_e7"].as_i64().unwrap() as f64 / 1e7;
+            assert_eq!(
+                construction_cell(longitude, latitude).as_deref(),
+                vector["partition_cell"].as_str(),
+                "cell mismatch at ({longitude}, {latitude})"
+            );
+        }
+    }
+
+    fn head_block(populated_shards: usize, manifest_object: &str) -> Value {
+        json!({
+            "schema": PLACES_HEAD_MANIFEST_SCHEMA,
+            "shard_bits": 4,
+            "shard_count": 16,
+            "populated_shards": populated_shards,
+            "manifest_object": manifest_object,
+        })
+    }
+
+    fn routing_json(cells: Value, head: Value) -> String {
+        json!({
+            "schema": PLACES_ROUTING_SCHEMA,
+            "family": "places",
+            "cell_scheme": "level-4-quadkey-yx-hex",
+            "subpartition_scheme": "token-sha256-nibble-prefix-v1",
+            "cells": cells,
+            "head": head,
+        })
+        .to_string()
+    }
+
+    fn plrv_name(bytes: &[u8]) -> String {
+        format!("{}.plrv", sha_hex(bytes))
+    }
+
+    /// A minimal promoted slice: one unsplit cell, one depth-1 split cell whose
+    /// sixteen subpartitions tile the nibble space, an unpopulated rest of the
+    /// world, and a 16-way sharded head with its routing manifest.
+    struct PromotedSlice {
+        store: HashMap<String, Vec<u8>>,
+        routing: PlacesRouting,
+        head: HeadRoutingManifest,
+        unsplit_cell: String,
+        split_cell: String,
+    }
+
+    fn promoted_slice() -> PromotedSlice {
+        // Boston-ish (unsplit) and Paris-ish (split) bias points.
+        let unsplit_cell = construction_cell(-71.06, 42.36).unwrap();
+        let split_cell = construction_cell(2.35, 48.86).unwrap();
+        assert_ne!(unsplit_cell, split_cell);
+        let mut store = HashMap::new();
+
+        // Unsplit cell: "cafe" -> {1, 2}, "town" -> {2, 3}; intersection is 2.
+        let unsplit_bytes = artifact(
+            PlacesV1Mode::Routed,
+            &[
+                entry("cafe", Some(&unsplit_cell), 255, 1, 0),
+                entry("cafe", Some(&unsplit_cell), 200, 2, 1),
+                entry("town", Some(&unsplit_cell), 250, 2, 0),
+                entry("town", Some(&unsplit_cell), 240, 3, 1),
+            ],
+        );
+        let unsplit_name = plrv_name(&unsplit_bytes);
+        store.insert(unsplit_name.clone(), unsplit_bytes);
+
+        // Split cell at depth 1: "cafe" (nibble 1) and "tower" (nibble 2) live
+        // in their owning subpartitions and share feature id 7; the other
+        // fourteen subpartitions are valid empty artifacts.
+        let mut split_entries = Vec::new();
+        for nibble in 0..16_u64 {
+            let members: Vec<Vec<u8>> = match nibble {
+                1 => vec![
+                    entry("cafe", Some(&split_cell), 255, 7, 0),
+                    entry("cafe", Some(&split_cell), 254, 8, 1),
+                ],
+                2 => vec![entry("tower", Some(&split_cell), 255, 7, 0)],
+                _ => Vec::new(),
+            };
+            let bytes = artifact(PlacesV1Mode::Routed, &members);
+            let name = plrv_name(&bytes);
+            store.insert(name.clone(), bytes);
+            split_entries.push(json!([format!("{nibble:x}"), name]));
+        }
+        assert_eq!(routed_token_hash("cafe") >> 60, 1);
+        assert_eq!(routed_token_hash("tower") >> 60, 2);
+
+        // Sharded head over "cafe" and "town" at shard_bits 4.
+        let mut by_shard: std::collections::BTreeMap<u32, Vec<Vec<u8>>> =
+            std::collections::BTreeMap::new();
+        for (token, id) in [("cafe", 21_u128), ("town", 22)] {
+            by_shard
+                .entry(head_shard_id(token, 4))
+                .or_default()
+                .push(entry(token, None, 255, id, 0));
+        }
+        let mut shard_rows = Vec::new();
+        for (shard_id, entries) in by_shard {
+            let bytes = artifact(PlacesV1Mode::Head, &entries);
+            let name = format!("{}.plhd", sha_hex(&bytes));
+            shard_rows.push(json!({
+                "shard_id": shard_id,
+                "path": name,
+                "sha256": sha_hex(&bytes),
+                "bytes": bytes.len(),
+            }));
+            store.insert(name, bytes);
+        }
+        let head_manifest_text = json!({
+            "schema": PLACES_HEAD_MANIFEST_SCHEMA,
+            "shard_bits": 4,
+            "shard_count": 16,
+            "populated_shards": shard_rows.len(),
+            "result_cap": 10,
+            "shards": shard_rows,
+        })
+        .to_string();
+        let head_manifest_name = format!("{}.json", sha_hex(head_manifest_text.as_bytes()));
+        let populated = store.keys().filter(|key| key.ends_with(".plhd")).count();
+        store.insert(
+            head_manifest_name.clone(),
+            head_manifest_text.clone().into_bytes(),
+        );
+
+        let mut cells = serde_json::Map::new();
+        cells.insert(unsplit_cell.clone(), json!([["", unsplit_name]]));
+        cells.insert(split_cell.clone(), Value::Array(split_entries));
+        let routing_text = routing_json(
+            Value::Object(cells),
+            head_block(populated, &head_manifest_name),
+        );
+        let routing = PlacesRouting::parse(&routing_text).unwrap();
+        let head = HeadRoutingManifest::parse(&head_manifest_text).unwrap();
+        assert!(head.agrees_with(&routing.head));
+        PromotedSlice {
+            store,
+            routing,
+            head,
+            unsplit_cell,
+            split_cell,
+        }
+    }
+
+    /// The pure serving pipeline for the proximity lane, mirroring
+    /// `search_places_construction` step for step over a mock store: one plan,
+    /// one live object per plan entry, bytes dropped before the next fetch.
+    fn routed_query(
+        slice: &PromotedSlice,
+        longitude: f64,
+        latitude: f64,
+        tokens: &[&str],
+        limit: usize,
+    ) -> Result<Vec<PlacesV1Record>, String> {
+        let cell = construction_cell(longitude, latitude).unwrap();
+        let tokens: Vec<String> = tokens.iter().map(|token| token.to_string()).collect();
+        let Some(plan) = routed_fetch_plan(&slice.routing, &cell, &tokens)? else {
+            return Ok(Vec::new());
+        };
+        let mut per_token: Vec<Option<Vec<PlacesV1Record>>> =
+            (0..tokens.len()).map(|_| None).collect();
+        for (object, token_indexes) in plan {
+            let bytes = slice.store.get(object).expect("routed object is published");
+            for index in token_indexes {
+                let records = routed_lookup(bytes, &cell, &tokens[index])?;
+                if records.is_empty() {
+                    return Ok(Vec::new());
+                }
+                per_token[index] = Some(records);
+            }
+        }
+        let per_token = per_token
+            .into_iter()
+            .map(|records| records.expect("plan covers every token"))
+            .collect();
+        let mut records = intersect_ranked(per_token);
+        records.truncate(limit);
+        Ok(records)
+    }
+
+    /// Pins the residency-bound fetch policy: the plan holds one entry per
+    /// DISTINCT routed object in first-use order, every token index exactly
+    /// once, so the serving loop fetches each object once and never keeps more
+    /// than one routed artifact's bytes alive at a time.
+    #[test]
+    fn routed_fetch_plan_groups_tokens_one_object_at_a_time() {
+        let slice = promoted_slice();
+
+        // Split cell: "cafe" and "tower" live in different subpartitions, so a
+        // two-token query is two sequential single-object fetches.
+        let tokens: Vec<String> = vec!["cafe".into(), "tower".into()];
+        let plan = routed_fetch_plan(&slice.routing, &slice.split_cell, &tokens)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.len(), 2);
+        assert_ne!(plan[0].0, plan[1].0);
+        assert_eq!(plan[0].1, vec![0]);
+        assert_eq!(plan[1].1, vec![1]);
+
+        // Unsplit cell: both tokens share the one object, which therefore
+        // appears once and is fetched once.
+        let tokens: Vec<String> = vec!["cafe".into(), "town".into()];
+        let plan = routed_fetch_plan(&slice.routing, &slice.unsplit_cell, &tokens)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].1, vec![0, 1]);
+
+        // Four tokens over the split cell still plan at most one entry per
+        // distinct object, with every token index covered exactly once.
+        let tokens: Vec<String> = vec!["cafe".into(), "tower".into(), "cafe".into(), "東京".into()];
+        let plan = routed_fetch_plan(&slice.routing, &slice.split_cell, &tokens)
+            .unwrap()
+            .unwrap();
+        let mut objects: Vec<&str> = plan.iter().map(|(object, _)| *object).collect();
+        objects.sort_unstable();
+        objects.dedup();
+        assert_eq!(objects.len(), plan.len(), "plan repeats an object");
+        let mut covered: Vec<usize> = plan.iter().flat_map(|(_, ids)| ids.clone()).collect();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3]);
+
+        // An unpopulated cell yields no plan at all.
+        let unpopulated = construction_cell(151.2, -33.87).unwrap();
+        assert!(routed_fetch_plan(&slice.routing, &unpopulated, &tokens)
+            .unwrap()
+            .is_none());
+    }
+
+    /// The pure serving pipeline for the head lane over a mock store.
+    fn head_query(
+        slice: &PromotedSlice,
+        tokens: &[&str],
+        limit: usize,
+    ) -> Result<Vec<PlacesV1Record>, String> {
+        let mut per_token = Vec::new();
+        for token in tokens {
+            let shard_id = head_shard_id(token, slice.head.shard_bits);
+            let Some(shard) = slice.head.shard(shard_id) else {
+                return Ok(Vec::new());
+            };
+            let bytes = slice
+                .store
+                .get(&shard.path)
+                .expect("head shard is published");
+            let records = head_shard_lookup(bytes, shard_id, slice.head.shard_bits, token)?;
+            if records.is_empty() {
+                return Ok(Vec::new());
+            }
+            per_token.push(records);
+        }
+        let mut records = intersect_ranked(per_token);
+        records.truncate(limit);
+        Ok(records)
+    }
+
+    #[test]
+    fn routed_lane_serves_split_unsplit_and_unpopulated_cells() {
+        let slice = promoted_slice();
+
+        // Unsplit cell: single token is served in producer rank order.
+        let hits = routed_query(&slice, -71.06, 42.36, &["cafe"], 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        assert_eq!(hits[0].confidence_rank, 255);
+        assert_eq!(
+            hits[0].partition_cell.as_deref(),
+            Some(slice.unsplit_cell.as_str())
+        );
+
+        // Unsplit cell: two-token AND keeps only the shared feature.
+        let hits = routed_query(&slice, -71.06, 42.36, &["cafe", "town"], 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, format_uuid_of(2));
+
+        // Split cell: each token resolves through its own nibble subpartition,
+        // and the cross-object AND keeps the shared feature.
+        let hits = routed_query(&slice, 2.35, 48.86, &["cafe"], 10).unwrap();
+        assert_eq!(hits.len(), 2);
+        let hits = routed_query(&slice, 2.35, 48.86, &["cafe", "tower"], 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].id, format_uuid_of(7));
+
+        // A token whose owning subpartition is empty resolves to no results.
+        assert!(routed_query(&slice, 2.35, 48.86, &["museum"], 10)
+            .unwrap()
+            .is_empty());
+
+        // A bias point in an unpopulated cell is empty, not an error.
+        assert!(routed_query(&slice, 151.2, -33.87, &["cafe"], 10)
+            .unwrap()
+            .is_empty());
+
+        // The projection carries the construction confidence and identity.
+        let hits = routed_query(&slice, -71.06, 42.36, &["cafe"], 10).unwrap();
+        let projection = record_projection(&hits[0]);
+        assert_eq!(projection.id, hits[0].id);
+        assert!((projection.confidence - 1.0).abs() < f32::EPSILON);
+        assert_eq!(projection.name, "Cafe");
+    }
+
+    fn format_uuid_of(id: u128) -> String {
+        geocoder_core::pages::format_uuid(id.to_be_bytes())
+    }
+
+    #[test]
+    fn head_lane_resolves_tokens_and_preserves_misroute_fail_closed() {
+        let slice = promoted_slice();
+        let hits = head_query(&slice, &["cafe"], 10).unwrap();
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].token, "cafe");
+
+        // Distinct-feature two-token AND is empty (no shared id in the head).
+        assert!(head_query(&slice, &["cafe", "town"], 10)
+            .unwrap()
+            .is_empty());
+
+        // A token whose shard is unpopulated resolves empty.
+        let absent = ["bakery", "museum", "park", "harbor"]
+            .into_iter()
+            .find(|token| slice.head.shard(head_shard_id(token, 4)).is_none());
+        if let Some(token) = absent {
+            assert!(head_query(&slice, &[token], 10).unwrap().is_empty());
+        }
+
+        // The decoder still rejects the same bytes under any other shard id.
+        let shard_id = head_shard_id("cafe", 4);
+        let shard = slice.head.shard(shard_id).unwrap();
+        let bytes = slice.store.get(&shard.path).unwrap();
+        let wrong = (shard_id + 1) % 16;
+        assert!(head_shard_lookup(bytes, wrong, 4, "cafe").is_err());
+    }
+
+    #[test]
+    fn intersect_keeps_first_token_rank_order() {
+        let first = vec![
+            entry_record("cafe", 255, 1),
+            entry_record("cafe", 250, 2),
+            entry_record("cafe", 240, 3),
+        ];
+        let second = vec![entry_record("town", 255, 3), entry_record("town", 200, 1)];
+        let merged = intersect_ranked(vec![first, second]);
+        assert_eq!(merged.len(), 2);
+        assert_eq!(merged[0].id, format_uuid_of(1));
+        assert_eq!(merged[1].id, format_uuid_of(3));
+        assert!(intersect_ranked(Vec::new()).is_empty());
+    }
+
+    fn entry_record(token: &str, rank: u8, id: u128) -> PlacesV1Record {
+        let bytes = entry(token, None, rank, id, 0);
+        let (record, _) = super::decode_entry(&bytes, PlacesV1Mode::Head).unwrap();
+        record
+    }
+
+    #[test]
+    fn routing_rejects_broken_schemas_tilings_and_names() {
+        let slice = promoted_slice();
+        let name = slice
+            .routing
+            .routed_object_names()
+            .next()
+            .unwrap()
+            .to_string();
+        let head = head_block(2, &format!("{}.json", "a".repeat(64)));
+
+        // Wrong schema strings fail closed.
+        for (field, value) in [
+            ("schema", "overture-promoted-places-routing-v2"),
+            ("family", "addresses"),
+            ("cell_scheme", "level-8-quadkey"),
+            ("subpartition_scheme", "token-md5-prefix"),
+        ] {
+            let mut value_json: Value =
+                serde_json::from_str(&routing_json(json!({"8080": [["", name]]}), head.clone()))
+                    .unwrap();
+            value_json[field] = json!(value);
+            assert!(PlacesRouting::parse(&value_json.to_string()).is_err());
+        }
+
+        // A malformed cell, a non-content-addressed object, and an over-deep
+        // prefix all fail closed.
+        assert!(
+            PlacesRouting::parse(&routing_json(json!({"80800": [["", name]]}), head.clone()))
+                .is_err()
+        );
+        assert!(PlacesRouting::parse(&routing_json(
+            json!({"8080": [["", "objects.plrv"]]}),
+            head.clone()
+        ))
+        .is_err());
+        assert!(PlacesRouting::parse(&routing_json(
+            json!({"8080": [["012345678", name]]}),
+            head.clone()
+        ))
+        .is_err());
+
+        // A gap (missing nibble) and an overlap both break the exact tiling.
+        let partial: Vec<Value> = (0..15_u64)
+            .map(|nibble| json!([format!("{nibble:x}"), name]))
+            .collect();
+        assert!(
+            PlacesRouting::parse(&routing_json(json!({"8080": partial}), head.clone())).is_err()
+        );
+        assert!(PlacesRouting::parse(&routing_json(
+            json!({"8080": [["", name], ["0", name]]}),
+            head.clone()
+        ))
+        .is_err());
+
+        // Head geometry lies fail closed.
+        let mut bad_head = head.clone();
+        bad_head["shard_count"] = json!(8);
+        assert!(
+            PlacesRouting::parse(&routing_json(json!({"8080": [["", name]]}), bad_head)).is_err()
+        );
+    }
+
+    #[test]
+    fn head_manifest_rejects_geometry_and_identity_lies() {
+        let slice = promoted_slice();
+        let shard = slice.head.shards().next().unwrap();
+        let row = json!({
+            "shard_id": shard.shard_id,
+            "path": shard.path,
+            "sha256": shard.sha256,
+            "bytes": shard.bytes,
+        });
+        let manifest = |mutate: &dyn Fn(&mut Value)| {
+            let mut value = json!({
+                "schema": PLACES_HEAD_MANIFEST_SCHEMA,
+                "shard_bits": 4,
+                "shard_count": 16,
+                "populated_shards": 1,
+                "shards": [row.clone()],
+            });
+            mutate(&mut value);
+            HeadRoutingManifest::parse(&value.to_string())
+        };
+        assert!(manifest(&|_| {}).is_ok());
+        assert!(manifest(&|value| value["schema"] = json!("other")).is_err());
+        assert!(manifest(&|value| value["shard_count"] = json!(8)).is_err());
+        assert!(manifest(&|value| value["populated_shards"] = json!(2)).is_err());
+        assert!(manifest(&|value| value["shards"][0]["shard_id"] = json!(16)).is_err());
+        assert!(manifest(&|value| value["shards"][0]["bytes"] = json!(0)).is_err());
+        assert!(manifest(&|value| value["shards"][0]["path"] = json!("head.plhd")).is_err());
+
+        // The deterministic admission sample is first, middle, last by id.
+        let ids: Vec<u32> = {
+            let mut ids: Vec<u32> = slice.head.shards().map(|shard| shard.shard_id).collect();
+            ids.sort_unstable();
+            ids
+        };
+        let sample: Vec<u32> = slice
+            .head
+            .admission_sample()
+            .iter()
+            .map(|shard| shard.shard_id)
+            .collect();
+        let mut expected = vec![ids[0], ids[ids.len() / 2], ids[ids.len() - 1]];
+        expected.dedup();
+        assert_eq!(sample, expected);
+    }
+
+    /// Local evidence over a real promoted slice (for example the Monaco
+    /// harness output of `scripts/promote_construction_slice.py`). `#[ignore]`d
+    /// like the head-shard evidence harness; drive it with:
+    ///
+    /// `PLACES_PROMOTED_FAMILY_DIR` — the promoted `.../families/places` dir.
+    /// `PLACES_PROMOTED_QUERIES` — `longitude\tlatitude\ttoken` rows.
+    #[test]
+    #[ignore = "requires a locally promoted slice; driven manually"]
+    fn local_promoted_slice_serves_routed_queries() {
+        let root = std::path::PathBuf::from(
+            std::env::var("PLACES_PROMOTED_FAMILY_DIR")
+                .expect("PLACES_PROMOTED_FAMILY_DIR is required"),
+        );
+        let routing_text =
+            std::fs::read_to_string(root.join("routing.json")).expect("read routing.json");
+        let routing = PlacesRouting::parse(&routing_text).expect("routing parses");
+        let head_text =
+            std::fs::read_to_string(root.join("objects").join(&routing.head.manifest_object))
+                .expect("read head routing manifest");
+        let head = HeadRoutingManifest::parse(&head_text).expect("head manifest parses");
+        assert!(head.agrees_with(&routing.head));
+        let queries =
+            std::env::var("PLACES_PROMOTED_QUERIES").expect("PLACES_PROMOTED_QUERIES is required");
+        for row in queries.lines().filter(|line| !line.is_empty()) {
+            let mut parts = row.split('\t');
+            let longitude: f64 = parts.next().expect("longitude").parse().unwrap();
+            let latitude: f64 = parts.next().expect("latitude").parse().unwrap();
+            let token = parts.next().expect("token");
+            let cell = construction_cell(longitude, latitude).expect("cell");
+            let object = routing
+                .route(&cell, token)
+                .expect("tiling holds")
+                .expect("cell is populated");
+            let bytes = std::fs::read(root.join("objects").join(object)).expect("routed object");
+            let hits = routed_lookup(&bytes, &cell, token).expect("routed artifact decodes");
+            assert!(!hits.is_empty(), "token {token} resolved zero records");
+            assert_eq!(hits[0].token, token);
+        }
     }
 }
