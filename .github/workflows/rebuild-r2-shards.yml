@@ -50,6 +50,11 @@ on:
         type: boolean
         required: false
         default: false
+      finalize_only:
+        description: 'Skip all builds and re-run only finalize-release for an existing complete version (requires explicit version, promote=true, build_type=both, empty countries, build_id_index=true)'
+        type: boolean
+        required: false
+        default: false
 
 # Overlapping runs (scheduled + a manual re-trigger) would compute the same
 # {date}.{n} version from the same published catalog, interleave uploads into
@@ -84,6 +89,7 @@ jobs:
       release: ${{ steps.release.outputs.release }}
       promote: ${{ steps.mode.outputs.promote }}
       complete: ${{ steps.mode.outputs.complete }}
+      finalize_only: ${{ steps.mode.outputs.finalize_only }}
     steps:
       - uses: actions/checkout@v7
 
@@ -107,11 +113,13 @@ jobs:
         id: mode
         env:
           COUNTRIES_INPUT: ${{ github.event.inputs.countries || '' }}
+          VERSION_INPUT: ${{ github.event.inputs.version || '' }}
         run: |
           BUILD_TYPE="${{ github.event.inputs.build_type || 'both' }}"
           COUNTRIES="$COUNTRIES_INPUT"
           BUILD_ID="${{ github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false' }}"
           PROMOTE="${{ github.event_name == 'schedule' || github.event.inputs.promote == 'true' }}"
+          FINALIZE_ONLY="${{ github.event_name == 'workflow_dispatch' && github.event.inputs.finalize_only == 'true' }}"
 
           COMPLETE=false
           if [ -z "$COUNTRIES" ] && [ "$BUILD_TYPE" = "both" ] && [ "$BUILD_ID" = "true" ]; then
@@ -125,9 +133,31 @@ jobs:
             fi
           fi
 
+          # finalize_only reruns ONLY finalize-release (verify + manifest +
+          # promote) against a version whose immutable artifacts already exist
+          # (run 30360636219, 2026-07-28: attempt 1 failed in the promote smoke
+          # after a full build; the rerun had nothing to rebuild). It must name
+          # that version explicitly and carry the full complete+promote shape so
+          # the finalize gates see exactly what a promoting build would produce.
+          if [ "$FINALIZE_ONLY" = "true" ]; then
+            if [ -z "$VERSION_INPUT" ]; then
+              echo "::error::finalize_only requires an explicit version input naming the existing complete build"
+              exit 1
+            fi
+            if [ "$PROMOTE" != "true" ]; then
+              echo "::error::finalize_only requires promote=true (finalize+promotion is its only effect)"
+              exit 1
+            fi
+            if [ "$COMPLETE" != "true" ]; then
+              echo "::error::finalize_only requires a complete-build dispatch: countries empty, build_type=both, build_id_index=true"
+              exit 1
+            fi
+          fi
+
           echo "promote=$PROMOTE" >> "$GITHUB_OUTPUT"
           echo "complete=$COMPLETE" >> "$GITHUB_OUTPUT"
-          echo "Build mode: type=$BUILD_TYPE, id=$BUILD_ID, complete=$COMPLETE, promote=$PROMOTE"
+          echo "finalize_only=$FINALIZE_ONLY" >> "$GITHUB_OUTPUT"
+          echo "Build mode: type=$BUILD_TYPE, id=$BUILD_ID, complete=$COMPLETE, promote=$PROMOTE, finalize_only=$FINALIZE_ONLY"
 
       - name: Compute version
         id: version
@@ -191,7 +221,16 @@ jobs:
             --bucket geocoder-shards --prefix "${VERSION}/" --max-keys 1 \
             --endpoint-url "$ENDPOINT" --region auto \
             --query 'KeyCount' --output text)
-          if [ "$EXISTING" != "0" ]; then
+          if [ "${{ steps.mode.outputs.finalize_only }}" = "true" ]; then
+            # finalize_only re-finalizes a version whose build already exists:
+            # here existence is REQUIRED, not rejected. No build job runs, so
+            # the immutable prefix is still never written to — finalize only
+            # verifies it and (re)publishes the identical release manifest.
+            if [ "$EXISTING" = "0" ]; then
+              echo "::error::finalize_only requires existing objects under ${VERSION}/ but the prefix is empty"
+              exit 1
+            fi
+          elif [ "$EXISTING" != "0" ]; then
             echo "::error::Version prefix ${VERSION}/ already exists in R2; choose a new version"
             exit 1
           fi
@@ -202,6 +241,9 @@ jobs:
   rebuild-shards:
     runs-on: ubuntu-24.04-arm
     needs: prep
+    # finalize_only re-runs finalize against an existing immutable build; no
+    # build job may touch the version prefix in that mode.
+    if: needs.prep.outputs.finalize_only != 'true'
     steps:
       - uses: actions/checkout@v7
 
@@ -589,7 +631,12 @@ jobs:
   id-stage-registry:
     runs-on: ubuntu-24.04-arm
     needs: prep
-    if: github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false'
+    # Skipping this job (and id-stage-release below) in finalize_only mode
+    # cascades through the default success() condition on every downstream
+    # id-* job, so the whole ID pipeline skips without touching each job.
+    if: >-
+      (github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false') &&
+      needs.prep.outputs.finalize_only != 'true'
     strategy:
       fail-fast: false
       max-parallel: 4
@@ -645,7 +692,9 @@ jobs:
     runs-on: ubuntu-24.04-arm
     timeout-minutes: 180
     needs: prep
-    if: github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false'
+    if: >-
+      (github.event_name == 'schedule' || github.event.inputs.build_id_index != 'false') &&
+      needs.prep.outputs.finalize_only != 'true'
     strategy:
       fail-fast: false
       max-parallel: 7
@@ -892,11 +941,21 @@ jobs:
   finalize-release:
     runs-on: ubuntu-24.04-arm
     needs: [prep, rebuild-shards, id-post]
+    # Normal complete builds require BOTH build families to have succeeded.
+    # finalize_only instead requires both to have been SKIPPED (their `if`
+    # guards, cascaded through the id-* chain): the artifacts already exist
+    # under the immutable prefix and only verify+manifest+promote reruns.
+    # `always()` (not the default success()) is what lets this job run at all
+    # when its needs were skipped; the result checks then pick the branch.
     if: >-
       always() &&
       needs.prep.outputs.complete == 'true' &&
-      needs.rebuild-shards.result == 'success' &&
-      needs.id-post.result == 'success'
+      ((needs.prep.outputs.finalize_only != 'true' &&
+        needs.rebuild-shards.result == 'success' &&
+        needs.id-post.result == 'success') ||
+       (needs.prep.outputs.finalize_only == 'true' &&
+        needs.rebuild-shards.result == 'skipped' &&
+        needs.id-post.result == 'skipped'))
     steps:
       - uses: actions/checkout@v7
 
@@ -985,7 +1044,10 @@ jobs:
           # ID smoke, and rollback on smoke failure now live in the unit-tested
           # promote path so those guards are not pinned only in bash. This exits
           # non-zero (after attempting rollback) if promotion fails.
-          python scripts/finalize_rebuild.py promote \
+          # -u: unbuffered stdout, so each smoke attempt's diagnostics land in
+          # the live Actions log with a real timestamp (run 30360636219 emitted
+          # ~6.5 min of smoke output in one buffered flush at step end).
+          python -u scripts/finalize_rebuild.py promote \
             --version "${{ needs.prep.outputs.version }}" \
             --before /tmp/rebuild-finalize/catalog-before.json \
             --candidate /tmp/rebuild-finalize/catalog-next.json
@@ -1014,7 +1076,7 @@ jobs:
           # after a hard runner loss, so this independent job restores the prior
           # catalog and confirms cached production recovered. No-op when the
           # promotion never reached durable candidate publication.
-          python3 scripts/finalize_rebuild.py recover --version "$VERSION"
+          python3 -u scripts/finalize_rebuild.py recover --version "$VERSION"
 
       # Staging is several GB per version and is never read again once the
       # release is finalized. Delete it here, AFTER finalize, and only when

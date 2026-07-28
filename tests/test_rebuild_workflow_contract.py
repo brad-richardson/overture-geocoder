@@ -130,6 +130,80 @@ def test_finalize_release_needs_graph_and_completeness_gate():
     assert "needs.prep.outputs.complete == 'true'" in gate
 
 
+# --- (b2) finalize-only dispatch mode -----------------------------------------
+
+
+def _rebuild_dispatch_inputs():
+    wf = load(REBUILD)
+    triggers = wf[True] if True in wf else wf["on"]
+    return triggers["workflow_dispatch"]["inputs"]
+
+
+def test_finalize_only_input_is_an_opt_in_boolean():
+    finalize_only = _rebuild_dispatch_inputs()["finalize_only"]
+    assert finalize_only["type"] == "boolean"
+    assert finalize_only["default"] is False
+
+
+def test_finalize_only_skips_every_build_job():
+    rebuild = jobs(load(REBUILD))
+    guard = "needs.prep.outputs.finalize_only != 'true'"
+    # The three root build jobs carry the guard directly; every other id-* job
+    # keeps the default success() condition, so a skipped need cascades the
+    # skip down the whole ID chain without per-job guards.
+    for name in ("rebuild-shards", "id-stage-registry", "id-stage-release"):
+        assert guard in " ".join(rebuild[name]["if"].split()), name
+    for name in ("id-stage-release-finalize", "id-dictionary", "id-build", "id-post"):
+        assert "if" not in rebuild[name], name
+
+
+def test_finalize_release_gate_covers_both_modes():
+    gate = " ".join(jobs(load(REBUILD))["finalize-release"]["if"].split())
+    # always() is what lets the job evaluate its branch at all when its needs
+    # were skipped (the default success() would cascade the skip).
+    assert gate.startswith("always()")
+    # finalize-only mode requires both build families to have been SKIPPED by
+    # their guards, never failed; normal mode still requires both successes
+    # (asserted in the completeness-gate test above).
+    assert "needs.prep.outputs.finalize_only == 'true'" in gate
+    assert "needs.rebuild-shards.result == 'skipped'" in gate
+    assert "needs.id-post.result == 'skipped'" in gate
+
+
+def test_prep_validates_finalize_only_dispatch_shape():
+    prep = jobs(load(REBUILD))["prep"]
+    mode = step_by_name(prep, "Validate build and promotion mode")["run"]
+    for fragment in (
+        "finalize_only requires an explicit version input",
+        "finalize_only requires promote=true",
+        "finalize_only requires a complete-build dispatch",
+    ):
+        assert fragment in mode, fragment
+    # The version step flips the prefix-existence check by mode: finalize-only
+    # requires a non-empty existing prefix, normal runs still reject one.
+    version = step_by_name(prep, "Compute version")["run"]
+    assert "finalize_only requires existing objects" in version
+    assert "already exists in R2; choose a new version" in version
+
+
+def test_promote_and_recover_run_python_unbuffered():
+    rebuild = jobs(load(REBUILD))
+    promote = step_by_name(
+        rebuild["finalize-release"], "Atomically promote and smoke production"
+    )["run"]
+    assert re.search(
+        r"python3? -u scripts/finalize_rebuild\.py promote",
+        _join_continuations(promote),
+    )
+    recover = step_by_name(
+        rebuild["post-finalize"], "Recover an interrupted catalog promotion"
+    )["run"]
+    assert re.search(
+        r"python3? -u scripts/finalize_rebuild\.py recover",
+        _join_continuations(recover),
+    )
+
+
 # --- (c) one shared production-catalog concurrency group ----------------------
 
 
