@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import importlib.util
 import json
 import subprocess
@@ -41,7 +42,7 @@ def test_existing_corrupt_remote_object_is_never_overwritten(tmp_path):
     store.upload(source, key, identity["sha256"])
     store._path(key).write_bytes(b"corrupt!")
 
-    with pytest.raises(ValueError, match="SHA-256 differs"):
+    with pytest.raises(ValueError, match="stored object identity differs"):
         shuffle.ensure_uploaded(store, source, key)
     assert store._path(key).read_bytes() == b"corrupt!"
 
@@ -55,17 +56,24 @@ def test_raced_remote_object_is_never_overwritten(tmp_path):
             super().__init__(root)
             self.first_head = True
 
-        def head(self, key):
+        def head_proof(self, key):
             if self.first_head:
                 self.first_head = False
                 return None
-            return super().head(key)
+            return super().head_proof(key)
 
-        def upload(self, source, key, sha256):
+        def upload_fileobj(self, source, key, sha256, *, size):
             raced = tmp_path / "raced.bin"
             raced.write_bytes(b"raced object")
             identity = shuffle.artifact_identity(raced)
-            super().upload(raced, key, identity["sha256"])
+            with raced.open("rb") as raced_handle:
+                shuffle.FilesystemStore.upload_fileobj(
+                    self,
+                    raced_handle,
+                    key,
+                    identity["sha256"],
+                    size=identity["bytes"],
+                )
             raise FileExistsError(key)
 
     store = RaceStore(tmp_path / "remote")
@@ -75,6 +83,35 @@ def test_raced_remote_object_is_never_overwritten(tmp_path):
     with pytest.raises(ValueError, match="refusing overwrite"):
         shuffle.ensure_uploaded(store, source, key)
     assert store._path(key).read_bytes() == b"raced object"
+
+
+def test_ensure_uploaded_uses_only_byte_proving_heads(tmp_path):
+    source = tmp_path / "fragment.bin"
+    source.write_bytes(b"expected")
+
+    class CountingStore(shuffle.FilesystemStore):
+        def __init__(self, root):
+            super().__init__(root)
+            self.proofs = 0
+            self.downloads = 0
+
+        def head_proof(self, key):
+            self.proofs += 1
+            return super().head_proof(key)
+
+        def download_with_info(self, key, destination):
+            self.downloads += 1
+            return super().download_with_info(key, destination)
+
+    store = CountingStore(tmp_path / "remote")
+    identity = shuffle.artifact_identity(source)
+    key = shuffle.immutable_key("runs/1", identity)
+
+    assert shuffle.ensure_uploaded(store, source, key)["status"] == "uploaded"
+    assert (store.proofs, store.downloads) == (2, 0)
+
+    assert shuffle.ensure_uploaded(store, source, key)["status"] == "existing_verified"
+    assert (store.proofs, store.downloads) == (3, 0)
 
 
 def test_s3_upload_uses_create_only_precondition(tmp_path, monkeypatch):
@@ -110,6 +147,66 @@ def test_s3_upload_maps_precondition_failure_to_race(tmp_path, monkeypatch):
         shuffle.S3Store("bucket", "https://example.invalid").upload(
             source, "prefix/key", shuffle.sha256_file(source)
         )
+
+
+def test_s3_download_maps_only_definitive_absence(tmp_path, monkeypatch):
+    store = shuffle.S3Store("bucket", "https://example.invalid")
+
+    def absent(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(
+            255, ["aws"], output="", stderr="NoSuchKey (404)"
+        )
+
+    monkeypatch.setattr(store, "_run", absent)
+    with pytest.raises(FileNotFoundError):
+        store.download_with_info("missing", tmp_path / "missing")
+
+    def transport_error(*_args, **_kwargs):
+        raise subprocess.CalledProcessError(
+            255, ["aws"], output="", stderr="connection reset"
+        )
+
+    monkeypatch.setattr(store, "_run", transport_error)
+    with pytest.raises(RuntimeError, match="connection reset"):
+        store.download_with_info("broken", tmp_path / "broken")
+
+
+def test_boto3_download_retries_a_mid_body_timeout(tmp_path, monkeypatch):
+    botocore = pytest.importorskip("botocore.exceptions")
+
+    class TimedOutBody(io.BytesIO):
+        def read(self, *_args, **_kwargs):
+            raise botocore.ReadTimeoutError(
+                endpoint_url="https://example.invalid",
+                error=TimeoutError("read timed out"),
+            )
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def get_object(self, **_kwargs):
+            self.calls += 1
+            body = TimedOutBody(b"partial") if self.calls == 1 else io.BytesIO(b"whole")
+            return {
+                "ContentLength": 5,
+                "Metadata": {"sha256": "a" * 64},
+                "Body": body,
+            }
+
+    store = shuffle.Boto3Store.__new__(shuffle.Boto3Store)
+    store.client = Client()
+    store.bucket = "bucket"
+    store._client_error = type("NeverClientError", (Exception,), {})
+    store._stream_retry_error = botocore.HTTPClientError
+    monkeypatch.setattr(shuffle.time, "sleep", lambda _seconds: None)
+
+    destination = tmp_path / "download"
+    assert store.download_with_info("key", destination) == shuffle.ObjectInfo(
+        5, "a" * 64
+    )
+    assert destination.read_bytes() == b"whole"
+    assert store.client.calls == 2
 
 
 def test_s3_list_prefix_paginates_and_sorts_exact_keys(monkeypatch):

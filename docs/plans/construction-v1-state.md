@@ -1,7 +1,8 @@
 # construction-v1: current state
 
-Last updated 2026-07-27 after Places run `30288619536` completed the planet
-global head and exposed one finalize artifact-path defect before publication.
+Last updated 2026-07-28 after Places finalize-only run `30305749838`
+authenticated the completed planet head, reached exact-set admission, and
+exposed one transient R2 body-read failure before publication.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -20,16 +21,18 @@ confirmation. The operator supplied authorization for request
 with max parallel 4 and a 40,000 runner-minute ceiling. Address completed under
 that authorization; Places runs `30226086949`, `30263207263`, and
 `30288619536` used the same request. Run `30288619536` retains authenticated
-normalized plan/reducer artifacts plus the successful planet head and is the
-source for a finalize-only resume.
+normalized plan/reducer artifacts plus the successful planet head and remains
+the source for a finalize-only resume. Run `30305749838` cannot itself be the
+resume source because its head job was intentionally skipped; the recovery gate
+requires one successful prior head job.
 
 ## Current snapshot
 
-The current construction-v1 workflow checkpoint on `main` is `f0117ce`: PR
+The current construction-v1 workflow checkpoint on `main` is `f408147`: PR
 #178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
 consumer projections, PR #183's authenticated same-request resume plus the
 missing plan contract artifact, and the subsequent Places head resource
-compatibility work.
+compatibility and finalize-only recovery work.
 There are no open construction-v1 code PRs.
 
 Both families passed the preserved Europe execution rung through publication
@@ -39,7 +42,10 @@ through marker-last R2 publication. Places planet runs `30226086949` and
 reducers. Head-only recovery `30288619536` authenticated those outputs, skipped
 every paid upstream phase, completed the global head, then failed before
 publication because finalize looked for `head.json` under one extra directory
-component. There is no remaining measured Address or Places-head blocker.
+component. Finalize-only recovery `30305749838` proved that correction and
+authenticated all retained inputs, but a single staging GET body timed out
+during the pre-publication admission pass. There is no remaining measured
+Address or Places-head blocker.
 
 ### Places
 
@@ -77,7 +83,7 @@ entries across all 4,096 populated shards. It hydrated and released
 staged-cache residency, and published 4,098 staged objects /
 5,141,583,720 bytes.
 
-Finalize then failed in 43 seconds before publication. Uploading the single
+Finalize in run `30288619536` failed in 43 seconds before publication. Uploading the single
 `head/` directory flattens its contents into `cv1-head`, so downloading it at
 `headdl` creates `headdl/head.json`; the workflow passed
 `headdl/head/head.json`. The finalizer rejected the missing `--head` result
@@ -88,6 +94,36 @@ another 207 runner minutes. It also avoids appending reducer ledger fragments
 twice on recovery; the retained resume plan already carries all 502 reducer
 minutes. The fail-closed head projection is raised from the disproved 90-minute
 estimate to the job's 330-minute timeout.
+
+Finalize-only run `30305749838` then authenticated the complete plan, all
+16,601 reductions, and the successful 4,096-shard head from `30288619536`.
+Every upstream execution job remained skipped. The finalizer reconciled an exact
+set of 40,931 members / 51,814,660,317 bytes (40,929 staged members plus two
+manifests), then spent 4 hours 17 minutes in the serial admission pass before one
+R2 `GetObject` streaming body raised `ReadTimeoutError`. The exception occurred
+after `get_object` had returned, outside botocore's request retry loop. Admission
+had not completed, so the barrier correctly prevented every final-prefix PUT,
+completion marker, final result, and ledger write. All authenticated source
+artifacts remain reusable.
+
+The scoped correction keeps that barrier but removes avoidable latency and the
+single-transient abort:
+
+- staging hydration uses one GET whose response supplies length and SHA metadata,
+  rather than a HEAD followed by GET;
+- a mid-body timeout or truncated response retries the whole GET with bounded
+  backoff;
+- admission hydrates five members concurrently, derived from the untrusted
+  5 GB contract cap and the 25.6 GB runner disk floor;
+- after admission proves producer-recorded identities, upload uses the measured
+  largest 209,194,480-byte object and all 16 persistent-client workers;
+- whole-slice stored-byte metadata verification uses all 16 workers; and
+- logs report admission, upload, and verification progress every 1,000 objects.
+
+The same change removes full GET read-back from immutable staging uploads and
+resumes. A new object is proved with HEAD, create-only PUT, HEAD; an existing
+object needs one proof HEAD. The HEAD proof compares size, the store-computed
+single-part ETag/content MD5, and recorded SHA-256 metadata.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
 phases completed and head produced all 4,096 populated shards. The full head
@@ -199,13 +235,13 @@ verification of 10,931 objects.
 ## Fastest path
 
 Follow this sequence. Address planet execution and the Places planet head are
-complete. Places has one measured finalize input-path blocker.
+complete. Places has one measured finalize transport blocker.
 
-1. **Land the corrected head path and authenticated finalize-only recovery,
-   then fresh-dispatch from run `30288619536`.** Admission must prove the
-   canonical request, byte-identical contract, complete plan/reductions, one
-   successful head job, and internally consistent head artifact before every
-   upstream job remains skipped.
+1. **Land the bounded/retriable finalizer, then fresh-dispatch finalize-only from
+   run `30288619536`.** Admission must again prove the canonical request,
+   byte-identical contract, complete plan/reductions, one successful head job,
+   and internally consistent head artifact before every upstream job remains
+   skipped.
 2. **Record the complete Places evidence.** Preserve map/reduce/head/finalize
    timing, residency, R2 traffic, exact-set counts, and marker identity.
 3. **Begin reverse R1 as the fast follow.** Consume the already published
@@ -215,8 +251,8 @@ complete. Places has one measured finalize input-path blocker.
 
 | Item | Family | Evidence | Closure gate |
 |---|---|---|---|
-| Finalize used the pre-extraction head artifact path | Places | Run `30288619536` completed the head, then finalizer rejected nonexistent `headdl/head/head.json`; the artifact contains `headdl/head.json` | Authenticated finalize-only resume reaches publication with the corrected path |
-| Planet final publication throughput | Places | All 128 reducers and the 4,096-shard planet head passed; finalization stopped before its first publication call | Finalize-only resume reconciles the exact set and writes the completion marker last |
+| Serial admission had no body-read retry | Places | Run `30305749838` reconciled 40,931 members, spent 4h17 in admission, then one R2 GET streaming body timed out outside botocore's request retry loop | Bounded parallel admission survives transient body-read failure and completes its barrier |
+| Planet final publication throughput | Places | All 128 reducers and the 4,096-shard planet head passed; both finalize attempts stopped before their first publication call | Finalize-only resume reconciles the exact set and writes the completion marker last |
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful

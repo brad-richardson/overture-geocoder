@@ -146,10 +146,13 @@ class _S3StandIn(http.server.BaseHTTPRequestHandler):
         if item is None:
             self._respond(404, b"<Error><Code>NoSuchKey</Code></Error>")
             return
+        headers = {"ETag": '"%s"' % hashlib.md5(item["body"]).hexdigest()}
+        for name, value in item["metadata"].items():
+            headers["x-amz-meta-" + name] = value
         self._respond(
             200,
             item["body"],
-            {"ETag": '"%s"' % hashlib.md5(item["body"]).hexdigest()},
+            headers,
         )
 
     def _list(self, query):
@@ -295,6 +298,35 @@ def test_the_etag_the_client_gets_back_is_the_content_md5(s3_stand_in, tmp_path)
     assert REMOTE.verify_whole_slice_once(
         remote, prefix=PREFIX, expected=marker["artifacts"]
     )["objects"] == 2
+
+
+def test_staging_proofs_avoid_redundant_class_b_requests(s3_stand_in, tmp_path):
+    source = tmp_path / "staged.bin"
+    source.write_bytes(b"staged bytes")
+    identity = R2.artifact_identity(source)
+    key = R2.immutable_key("staging/test", identity)
+    store = R2.s3_object_store(BUCKET, s3_stand_in)
+
+    assert R2.ensure_uploaded(store, source, key)["status"] == "uploaded"
+    assert [verb for verb, _, _ in _S3StandIn.requests] == ["HEAD", "PUT", "HEAD"]
+
+    _S3StandIn.requests.clear()
+    assert R2.ensure_uploaded(store, source, key)["status"] == "existing_verified"
+    assert [verb for verb, _, _ in _S3StandIn.requests] == ["HEAD"]
+
+    _S3StandIn.requests.clear()
+    destination = tmp_path / "hydrated.bin"
+    assert (
+        R2.verified_content_addressed_download(
+            store,
+            key,
+            destination,
+            expected_sha256=identity["sha256"],
+        )
+        == "remote_verified"
+    )
+    assert destination.read_bytes() == source.read_bytes()
+    assert [verb for verb, _, _ in _S3StandIn.requests] == ["GET"]
 
 
 def test_a_real_client_retry_resends_the_body_and_the_digest_follows(s3_stand_in, tmp_path):

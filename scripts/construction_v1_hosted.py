@@ -131,7 +131,7 @@ def _timeout_max_batch(per_partition_minutes: float, *, job_timeout: int, margin
 # FIRST attempt, 3 per object + 2 for the slice + the listing:
 #
 #   publish_exact_set        create-only put + the per-upload HEAD   2 per object
-#   verify_whole_slice_once  one streaming read per final object     1 per object
+#   verify_whole_slice_once  one stored-byte metadata proof/object   1 per object
 #   fixed                    marker put, marker HEAD                 2 per slice
 #   listing                  one request per LISTING PAGE            see below
 #
@@ -2871,7 +2871,35 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         getattr(limits, "max_serving_bytes", limits.max_output_bytes),
         REMOTE.SINGLE_PUT_MAX_BYTES,
     )
-    concurrency = REMOTE.publication_concurrency(max_publication_object_bytes)
+    # Admission has not yet proved the recorded sizes, so its residency must use
+    # the contract ceiling. Once the barrier completes, every actual size equals
+    # its producer-recorded identity and upload can safely use that much narrower
+    # measured maximum.
+    admission_concurrency = REMOTE.publication_concurrency(
+        max_publication_object_bytes
+    )
+    recorded_sizes = [int(item["bytes"]) for item in (*artifacts, *positions)]
+    recorded_sizes.extend(path.stat().st_size for path in manifests.values())
+    max_recorded_object_bytes = max(recorded_sizes)
+    concurrency = REMOTE.publication_concurrency(max_recorded_object_bytes)
+
+    def report_progress(phase: str, completed: int, total: int) -> None:
+        print(
+            json.dumps(
+                {
+                    "finalize_progress": phase,
+                    "completed": completed,
+                    "total": total,
+                    "admission_concurrency": admission_concurrency,
+                    "publication_concurrency": concurrency,
+                    "verification_concurrency": REMOTE.PUBLISH_CONCURRENCY,
+                    "max_recorded_object_bytes": max_recorded_object_bytes,
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+
     marker = REMOTE.publish_exact_set(
         remote,
         artifacts=exact_set,
@@ -2880,6 +2908,8 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         fail_after_upload=args.fail_after_upload,
         verify=verify_identity,
         concurrency=concurrency,
+        admission_concurrency=admission_concurrency,
+        progress=report_progress,
     )
     # The admitted set IS the expected set: `publish_exact_set` computed each
     # identity by streaming the same file it uploaded, and `verify_identity` gated
@@ -2891,8 +2921,11 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         remote,
         prefix=f"{slice_root}/families/{args.family}/",
         expected=expected,
-        # Same bound: the streaming fallback (a resume) holds an object per worker.
-        concurrency=concurrency,
+        # The R2 backend verifies one stored-byte metadata proof per object. The
+        # filesystem fallback streams existing local files and consumes no cache
+        # residency, so both can safely use the full persistent-client pool bound.
+        concurrency=REMOTE.PUBLISH_CONCURRENCY,
+        progress=report_progress,
     )
     result = {
         "family": args.family,

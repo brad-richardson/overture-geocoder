@@ -22,9 +22,10 @@ store; nothing about the pipeline's semantics changes:
   so an object's name proves its bytes. That is what lets ``path()`` hydrate a
   missing object and verify it with no side table: the expected digest is IN the
   key it was asked for.
-* **Create-only.** ``ensure_uploaded`` writes with ``If-None-Match: '*'``, reads
-  the object back, verifies size and SHA-256, and re-HEADs. A byte-identical
-  re-run is a no-op; differing content under the same key raises.
+* **Create-only.** ``ensure_uploaded`` writes with ``If-None-Match: '*'`` and
+  verifies the store-computed single-part ETag, size, and SHA-256 metadata in one
+  proof HEAD. A byte-identical re-run is a no-op; differing content under the same
+  key raises.
 * **Deterministic keys.** The staging prefix is a pure function of
   ``request_sha256`` and the family, so a consumer DISCOVERS its objects by
   deriving keys from the markers it already carries. No LIST, no manifest, no
@@ -266,25 +267,20 @@ class StagedObjectStore:
                 "There would be no digest to verify the fetched bytes against."
             )
         staging = self.staging_key(key)
-        info = self.store.head(staging)
-        if info is None:
+        try:
+            R2.verified_content_addressed_download(
+                self.store,
+                staging,
+                path,
+                expected_sha256=digest,
+            )
+        except FileNotFoundError as error:
             raise FileNotFoundError(
                 f"staged object is absent: {staging}. The map phase's store now "
                 "travels through R2 staging, so a missing object is a missing "
                 "input -- aborting rather than continuing with partial data."
-            )
-        if info.sha256 is not None and info.sha256 != digest:
-            raise ValueError(
-                f"staged object metadata digest differs from its key: {staging}"
-            )
-        R2.verified_download(
-            self.store,
-            staging,
-            path,
-            expected_bytes=info.bytes,
-            expected_sha256=digest,
-        )
-        self._account_hydrated(int(info.bytes))
+            ) from error
+        self._account_hydrated(path.stat().st_size)
         return path
 
     def release(self, key: str) -> None:

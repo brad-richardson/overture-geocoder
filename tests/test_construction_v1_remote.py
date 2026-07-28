@@ -153,14 +153,14 @@ def test_publish_ram_is_the_chunk_times_the_workers_not_the_object_size(tmp_path
 
 
 def test_publish_residency_is_bounded_by_the_worker_count_and_admission_holds_one(tmp_path):
-    """Bounded local disk: at most PUBLISH_CONCURRENCY objects resident, ever.
+    """The generic publisher's conservative default keeps admission serial.
 
     Finalize used to build its exact set as a list of `store.path(...)` results,
     which hydrated every published object from R2 staging onto the runner before the
-    first upload and released none of them. #170 cut that to one at a time; the
-    upload pass is now a worker pool, so the honest bound is the WORKER COUNT -- and
-    it has to be an assertion, because "bounded" and "unbounded" differ only in the
-    peak.
+    first upload and released none of them. #170 cut that to bounded hydration; this
+    test pins the reusable primitive's default at one admission worker and its upload
+    pass at no more than the worker bound. Hosted finalize derives a larger admission
+    bound from its contract and is covered separately.
 
     Two separate claims, because they have different bounds:
 
@@ -215,6 +215,44 @@ def test_publish_residency_is_bounded_by_the_worker_count_and_admission_holds_on
     # Twice each: once to hash it into the admitted set, once to upload it.
     assert len(released) == 2 * OBJECT_COUNT
     assert sorted(set(released)) == sorted(item["key"] for item in marker["artifacts"])
+
+
+def test_the_admission_pass_really_runs_at_its_derived_bound(tmp_path):
+    """Admission overlaps safely while the phase barrier still precedes upload."""
+    artifacts = _many_objects(tmp_path, count=8)
+    lock = threading.Lock()
+    all_workers_started = threading.Event()
+    started = [0]
+    in_flight = [0]
+    peak_in_flight = [0]
+
+    def verify(_key: str, _identity: dict[str, object]) -> None:
+        with lock:
+            started[0] += 1
+            in_flight[0] += 1
+            peak_in_flight[0] = max(peak_in_flight[0], in_flight[0])
+            if started[0] == 4:
+                all_workers_started.set()
+        assert all_workers_started.wait(2), "admission did not fill its worker bound"
+        time.sleep(0.01)
+        with lock:
+            in_flight[0] -= 1
+
+    remote = backend(
+        tmp_path,
+        max_operations=100,
+        max_write_bytes=16 * OBJECT_BYTES,
+        max_read_bytes=16 * OBJECT_BYTES,
+    )
+    REMOTE.publish_exact_set(
+        remote,
+        artifacts=artifacts,
+        marker_key="construction-v1/binding/markers/admission-parallel.json",
+        request_sha256="6" * 64,
+        verify=verify,
+        admission_concurrency=4,
+    )
+    assert peak_in_flight[0] == 4
 
 
 def test_the_upload_pass_really_runs_concurrently(tmp_path):
@@ -326,12 +364,49 @@ def test_admission_verify_hook_runs_before_any_upload(tmp_path):
             marker_key="construction-v1/binding/markers/gate.json",
             request_sha256="f" * 64,
             verify=verify,
+            admission_concurrency=4,
         )
     assert len(seen) == len(artifacts)
     # Rejecting the LAST member still published nothing: the gate ran on every one
     # of them before the first upload.
     assert remote.list("construction-v1/binding/slice/a") == []
     assert remote.head("construction-v1/binding/markers/gate.json") is None
+
+
+def test_publication_and_verification_report_phase_progress(tmp_path):
+    artifacts = _many_objects(tmp_path, count=3)
+    remote = backend(
+        tmp_path,
+        max_operations=100,
+        max_write_bytes=10 * OBJECT_BYTES,
+        max_read_bytes=10 * OBJECT_BYTES,
+    )
+    progress: list[tuple[str, int, int]] = []
+    marker = REMOTE.publish_exact_set(
+        remote,
+        artifacts=artifacts,
+        marker_key="construction-v1/binding/markers/progress.json",
+        request_sha256="5" * 64,
+        progress=lambda phase, complete, total: progress.append(
+            (phase, complete, total)
+        ),
+    )
+    REMOTE.verify_whole_slice_once(
+        remote,
+        prefix="construction-v1/binding/slice/a",
+        expected=marker["artifacts"],
+        progress=lambda phase, complete, total: progress.append(
+            (phase, complete, total)
+        ),
+    )
+    assert progress == [
+        ("admission", 0, 3),
+        ("admission", 3, 3),
+        ("upload", 0, 3),
+        ("upload", 3, 3),
+        ("verification", 0, 3),
+        ("verification", 3, 3),
+    ]
 
 
 def test_a_plain_tuple_member_whose_file_changes_between_reads_is_refused(tmp_path):

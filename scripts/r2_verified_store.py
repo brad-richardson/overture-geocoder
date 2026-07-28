@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-"""Upload and restore immutable artifacts with size and SHA-256 verification.
+"""Upload and restore immutable artifacts with stored-byte verification.
 
 The object identity includes the content digest. An existing object is never
-overwritten: it is downloaded and verified before being accepted as completed.
-Downloads likewise land in a temporary file and replace a stale destination
-only after verification. The filesystem backend makes the restart contract
+overwritten: its store-computed single-part ETag, length, and recorded SHA-256
+metadata are verified before it is accepted as completed. Downloads land in a
+temporary file and replace a stale destination only after their bytes and
+metadata are verified. The filesystem backend makes the restart contract
 testable without credentials; the S3 backends target Cloudflare R2.
 
 There are two S3 backends and the difference is throughput, not discipline.
@@ -27,6 +28,7 @@ import os
 import shutil
 import subprocess
 import tempfile
+import time
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO, Iterator, Protocol
@@ -112,6 +114,10 @@ class ObjectStore(Protocol):
         ...
 
     def download(self, key: str, destination: Path) -> None: ...
+
+    def download_with_info(self, key: str, destination: Path) -> ObjectInfo:
+        """Download once and return the metadata carried by that same response."""
+        ...
 
     def open_stream(self, key: str) -> tuple[int, BinaryIO]:
         """``(content_length, reader)`` for one whole-object read.
@@ -262,11 +268,21 @@ class FilesystemStore:
         finally:
             temporary_path.unlink(missing_ok=True)
 
-    def download(self, key: str, destination: Path) -> None:
+    def download_with_info(self, key: str, destination: Path) -> ObjectInfo:
         source = self._path(key)
         if not source.is_file():
             raise FileNotFoundError(key)
         shutil.copyfile(source, destination)
+        metadata_path = source.with_name(f"{source.name}.metadata.json")
+        metadata = (
+            json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+        )
+        return ObjectInfo(
+            source.stat().st_size, metadata.get(SHA_METADATA_KEY)
+        )
+
+    def download(self, key: str, destination: Path) -> None:
+        self.download_with_info(key, destination)
 
     def open_stream(self, key: str) -> tuple[int, BinaryIO]:
         source = self._path(key)
@@ -459,17 +475,43 @@ class S3Store:
             raise FileExistsError(f"object appeared during create-only upload: {key}")
         raise RuntimeError(f"put-object failed for {key}: {result.stderr.strip()}")
 
-    def download(self, key: str, destination: Path) -> None:
-        self._run(
-            [
-                "get-object",
-                "--bucket",
-                self.bucket,
-                "--key",
-                key,
-                str(destination),
-            ]
+    def download_with_info(self, key: str, destination: Path) -> ObjectInfo:
+        try:
+            result = self._run(
+                [
+                    "get-object",
+                    "--bucket",
+                    self.bucket,
+                    "--key",
+                    key,
+                    "--output",
+                    "json",
+                    str(destination),
+                ],
+                capture=True,
+            )
+        except subprocess.CalledProcessError as error:
+            combined = f"{error.stdout or ''}\n{error.stderr or ''}"
+            if (
+                "404" in combined
+                or "Not Found" in combined
+                or "NoSuchKey" in combined
+            ):
+                raise FileNotFoundError(key) from error
+            raise RuntimeError(
+                f"get-object failed for {key}: {combined.strip()}"
+            ) from error
+        try:
+            payload = json.loads(result.stdout)
+        except json.JSONDecodeError as exc:
+            raise ValueError("R2 get-object response is not JSON") from exc
+        metadata = payload.get("Metadata") or {}
+        return ObjectInfo(
+            int(payload["ContentLength"]), metadata.get(SHA_METADATA_KEY)
         )
+
+    def download(self, key: str, destination: Path) -> None:
+        self.download_with_info(key, destination)
 
 
 # Connection-pool size for the persistent client. It must be at least the
@@ -520,7 +562,7 @@ class Boto3Store:
         try:
             import boto3
             from botocore.config import Config
-            from botocore.exceptions import ClientError
+            from botocore.exceptions import ClientError, HTTPClientError
         except ImportError as error:  # pragma: no cover - covered by the pin test
             raise SystemExit(
                 "the construction-v1 R2 transport needs boto3, which is pinned in "
@@ -530,6 +572,10 @@ class Boto3Store:
                 "exists to remove."
             ) from error
         self._client_error = ClientError
+        # Botocore retries failures that occur while obtaining the GET response,
+        # but a StreamingBody read happens after that retry loop has returned.
+        # A mid-body timeout therefore needs its own bounded whole-GET retry.
+        self._stream_retry_error = HTTPClientError
         self.bucket = bucket
         self.endpoint_url = endpoint_url
         # One client, shared by every publisher thread. botocore clients are
@@ -664,16 +710,40 @@ class Boto3Store:
             "sha256_metadata": metadata.get(SHA_METADATA_KEY),
         }
 
+    def download_with_info(self, key: str, destination: Path) -> ObjectInfo:
+        last_error: BaseException | None = None
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            try:
+                payload = self.client.get_object(Bucket=self.bucket, Key=key)
+                size = int(payload["ContentLength"])
+                metadata = payload.get("Metadata") or {}
+                body = payload["Body"]
+                with contextlib.closing(body), destination.open("wb") as output:
+                    shutil.copyfileobj(body, output)
+                if destination.stat().st_size != size:
+                    raise self._stream_retry_error(
+                        error=OSError(
+                            f"received {destination.stat().st_size} of {size} bytes"
+                        )
+                    )
+                return ObjectInfo(size, metadata.get(SHA_METADATA_KEY))
+            except self._client_error as error:
+                if self._codes(error) & _ABSENT_ERROR_CODES:
+                    raise FileNotFoundError(key) from error
+                last_error = error
+            except self._stream_retry_error as error:
+                last_error = error
+            if attempt < MAX_ATTEMPTS:
+                # Small bounded backoff: enough to avoid immediately hitting the
+                # same transient connection, negligible next to a large object.
+                time.sleep(min(0.25 * (2 ** (attempt - 1)), 2.0))
+        raise RuntimeError(
+            f"get-object body failed after {MAX_ATTEMPTS} attempts for {key}: "
+            f"{last_error}"
+        ) from last_error
+
     def download(self, key: str, destination: Path) -> None:
-        size, body = self.open_stream(key)
-        with contextlib.closing(body), destination.open("wb") as output:
-            written = shutil.copyfileobj(body, output)
-        del written
-        if destination.stat().st_size != size:
-            raise RuntimeError(
-                f"get-object for {key} delivered "
-                f"{destination.stat().st_size} of {size} bytes"
-            )
+        self.download_with_info(key, destination)
 
 
 def s3_object_store(
@@ -752,39 +822,116 @@ def verified_download(
     return "remote_verified"
 
 
-def ensure_uploaded(store: ObjectStore, source: Path, key: str) -> dict[str, Any]:
-    artifact = artifact_identity(source)
-    expected = ObjectInfo(artifact["bytes"], artifact["sha256"])
-    remote = store.head(key)
-    status = "uploaded"
-    if remote is None:
+def verified_content_addressed_download(
+    store: ObjectStore,
+    key: str,
+    destination: Path,
+    *,
+    expected_sha256: str,
+) -> str:
+    """Fetch a content-addressed object with one GET instead of HEAD + GET.
+
+    The GET response already carries both ContentLength and the object's SHA-256
+    metadata. The downloaded body is then hashed against the digest encoded in
+    its key. A preceding HEAD adds latency and a billed Class B operation but no
+    independent evidence: the GET supplies the same metadata and the body supplies
+    the stronger byte proof.
+    """
+    if destination.exists():
         try:
-            store.upload(source, key, artifact["sha256"])
-        except FileExistsError:
-            # A concurrent create won after our HEAD. Never retry with an
-            # overwrite: inspect and read back the winner under the same rules
-            # as an object that existed before the operation.
-            remote = store.head(key)
-            status = "existing_verified"
-    if remote is not None:
-        if remote != expected:
-            raise ValueError(
-                f"existing object identity differs; refusing overwrite: {key}"
-            )
-        status = "existing_verified"
-    with tempfile.TemporaryDirectory(prefix="verified-shuffle-readback-") as directory:
-        readback = Path(directory) / source.name
-        verified_download(
-            store,
-            key,
-            readback,
-            expected_bytes=artifact["bytes"],
-            expected_sha256=artifact["sha256"],
+            if sha256_file(destination) == expected_sha256:
+                return "local_verified"
+        except OSError:
+            pass
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    with tempfile.NamedTemporaryFile(
+        prefix=f".{destination.name}.",
+        suffix=".download",
+        dir=destination.parent,
+        delete=False,
+    ) as temporary:
+        temporary_path = Path(temporary.name)
+    try:
+        info = store.download_with_info(key, temporary_path)
+        if info.sha256 is not None and info.sha256 != expected_sha256:
+            raise ValueError(f"staged object metadata digest differs from its key: {key}")
+        if temporary_path.stat().st_size != info.bytes:
+            raise ValueError(f"artifact byte count differs: {temporary_path}")
+        if sha256_file(temporary_path) != expected_sha256:
+            raise ValueError(f"artifact SHA-256 differs: {temporary_path}")
+        os.replace(temporary_path, destination)
+    finally:
+        temporary_path.unlink(missing_ok=True)
+    return "remote_verified"
+
+
+def _source_proof(source: BinaryIO) -> dict[str, Any]:
+    sha256 = hashlib.sha256()
+    content_md5 = hashlib.md5(usedforsecurity=False)
+    size = 0
+    for chunk in iter(lambda: source.read(1024 * 1024), b""):
+        sha256.update(chunk)
+        content_md5.update(chunk)
+        size += len(chunk)
+    return {
+        "bytes": size,
+        "sha256": sha256.hexdigest(),
+        "content_md5": content_md5.hexdigest(),
+    }
+
+
+def _verify_stored_proof(
+    key: str, actual: dict[str, Any] | None, expected: dict[str, Any]
+) -> None:
+    if actual is None:
+        raise ValueError(f"uploaded object is absent: {key}")
+    if actual != expected:
+        raise ValueError(
+            f"stored object identity differs; refusing overwrite: {key}"
         )
-    after = store.head(key)
-    if after != expected:
-        raise ValueError(f"remote object identity changed during verification: {key}")
-    return {**artifact, "key": key, "status": status, "readback_verified": True}
+
+
+def ensure_uploaded(store: ObjectStore, source: Path, key: str) -> dict[str, Any]:
+    if not source.is_file():
+        raise ValueError(f"artifact is not a regular file: {source}")
+    with source.open("rb") as handle:
+        artifact = _source_proof(handle)
+        expected = {
+            "bytes": artifact["bytes"],
+            "content_md5": artifact["content_md5"],
+            "sha256_metadata": artifact["sha256"],
+        }
+        remote = store.head_proof(key)
+        status = "uploaded"
+        if remote is None:
+            handle.seek(0)
+            try:
+                store.upload_fileobj(
+                    handle,
+                    key,
+                    artifact["sha256"],
+                    size=artifact["bytes"],
+                )
+            except FileExistsError:
+                # A concurrent create won after our HEAD. Never retry with an
+                # overwrite: prove the winner's stored bytes exactly as for an
+                # object that existed before the operation.
+                status = "existing_verified"
+            remote = store.head_proof(key)
+        else:
+            status = "existing_verified"
+        _verify_stored_proof(key, remote, expected)
+    return {
+        "path": str(source),
+        "bytes": artifact["bytes"],
+        "sha256": artifact["sha256"],
+        "key": key,
+        "status": status,
+        # Compatibility with existing manifests/workflows. Verification now uses
+        # the store-computed ETag plus SHA metadata in one HEAD rather than a full
+        # GET followed by another HEAD.
+        "readback_verified": True,
+    }
 
 
 def load_manifest(path: Path) -> dict[str, Any]:
