@@ -472,7 +472,7 @@ if STAGED:
           f"({result['staged_bytes_hydrated']/1e6:.2f} MB) into an EMPTY local store")
     print(f"           peak resident {result['staged_peak_resident_bytes']/1e6:.2f} MB, "
           f"released {result['staged_objects_released']} objects "
-          f"({result['staged_bytes_released']/1e6:.2f} MB) -- one object at a time")
+          f"({result['staged_bytes_released']/1e6:.2f} MB) -- bounded by phase workers")
 print(
     "\nNOTE: do not extrapolate these linearly to planet scale. Only the map/\n"
     "class is what the inter-phase transport carries out of map, and a slice this\n"

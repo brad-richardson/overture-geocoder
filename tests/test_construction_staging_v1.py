@@ -216,7 +216,7 @@ def test_staged_bytes_that_do_not_hash_to_their_key_abort(tmp_path):
         consumer.path(key)
 
 
-def test_lying_staged_metadata_aborts_before_any_download(tmp_path):
+def test_lying_staged_metadata_aborts_from_the_same_download_response(tmp_path):
     staged, staging_root = _store(tmp_path)
     source = tmp_path / "pack.parquet"
     source.write_bytes(b"payload")
@@ -227,6 +227,34 @@ def test_lying_staged_metadata_aborts_before_any_download(tmp_path):
     consumer = _fresh_cache(staged, tmp_path, "consumer")
     with pytest.raises(ValueError, match="metadata digest differs"):
         consumer.path(key)
+
+
+def test_content_addressed_hydration_is_one_get_with_no_preceding_head(tmp_path):
+    staged, _ = _store(tmp_path)
+    source = tmp_path / "pack.parquet"
+    source.write_bytes(b"payload")
+    key = staged.put_content(source, "map/places-v1/packs", ".parquet")["key"]
+
+    class CountingStore(type(staged.store)):
+        def __init__(self, root):
+            super().__init__(root)
+            self.head_calls = 0
+            self.downloads = 0
+
+        def head(self, key):
+            self.head_calls += 1
+            return super().head(key)
+
+        def download_with_info(self, key, destination):
+            self.downloads += 1
+            return super().download_with_info(key, destination)
+
+    counting = CountingStore(staged.store.root)
+    local = ADDRESS.LocalObjectStore(tmp_path / "consumer")
+    consumer = STAGING.StagedObjectStore(local, counting, staged.prefix)
+
+    assert consumer.path(key).read_bytes() == source.read_bytes()
+    assert (counting.head_calls, counting.downloads) == (0, 1)
 
 
 def test_a_key_with_no_digest_to_verify_against_is_never_hydrated(tmp_path):

@@ -543,8 +543,9 @@ def test_the_staging_transport_carries_the_store_and_outputs_are_unchanged(
     # `store.path(...)` calls, so every published object was hydrated onto this
     # runner before the first upload and NOTHING was released anywhere in the
     # phase -- 13-18 GB at planet scale, on the last job of a multi-hour run. It
-    # now hydrates, verifies, uploads and evicts one object at a time, so peak
-    # below total is how you can tell (eager hydration makes them equal).
+    # now hydrates, verifies, uploads and evicts only a bounded worker set at a
+    # time, so peak below total is how you can tell (eager hydration makes them
+    # equal).
     assert staged_final["staged_objects_released"] > 0
     assert (
         staged_final["staged_peak_resident_bytes"]

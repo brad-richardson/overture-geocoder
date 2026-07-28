@@ -378,9 +378,11 @@ def test_the_executor_is_created_with_the_concurrency_bound(tmp_path, monkeypatc
     marker = REMOTE.publish_exact_set(
         remote, artifacts=artifacts, marker_key=MARKER, request_sha256="9" * 64
     )
-    REMOTE.verify_whole_slice_once(remote, prefix=PREFIX, expected=marker["artifacts"])
+    REMOTE.verify_whole_slice_once(
+        remote, prefix=PREFIX, expected=marker["artifacts"]
+    )
     assert seen, "the publisher did not build a pool at all"
-    assert set(seen) == {REMOTE.PUBLISH_CONCURRENCY}
+    assert set(seen) == {1, REMOTE.PUBLISH_CONCURRENCY}
 
 
 def test_the_per_upload_head_compares_the_digest_on_a_store_that_records_one(tmp_path):
@@ -1012,15 +1014,18 @@ def test_the_publish_concurrency_bound_is_wired_and_named():
 
     signature = inspect.signature(REMOTE.publish_exact_set)
     assert signature.parameters["concurrency"].default == REMOTE.PUBLISH_CONCURRENCY
+    assert signature.parameters["admission_concurrency"].default == 1
     verify_signature = inspect.signature(REMOTE.verify_whole_slice_once)
     assert verify_signature.parameters["concurrency"].default == REMOTE.PUBLISH_CONCURRENCY
     assert 1 < REMOTE.PUBLISH_CONCURRENCY <= R2.DEFAULT_MAX_POOL_CONNECTIONS
-    # `cmd_finalize` DERIVES its bound from the contract's limits rather than taking the
-    # module default or forcing serial -- and threads the same value to both passes.
+    # `cmd_finalize` uses the conservative contract cap before identities are proven,
+    # then the recorded/verified maximum for upload, and the full pool for metadata-only
+    # verification.
     source = inspect.getsource(HOSTED.cmd_finalize)
     assert "REMOTE.publication_concurrency(" in source
-    assert source.count("concurrency=concurrency") == 2
-    assert "concurrency=1" not in source
+    assert "admission_concurrency=admission_concurrency" in source
+    assert "concurrency=concurrency" in source
+    assert "concurrency=REMOTE.PUBLISH_CONCURRENCY" in source
     assert 'actual["bytes"] > max_publication_object_bytes' in source
     # `_run_bounded` refuses a nonsense bound rather than falling back to unbounded.
     with pytest.raises(ValueError, match="concurrency"):

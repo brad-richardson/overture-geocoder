@@ -588,9 +588,9 @@ class Member:
     """One member of an admitted set, plus how to make its bytes locally readable.
 
     `publish_exact_set` touches every member's file exactly twice -- once to hash
-    it into the admitted set, once to read the payload it uploads -- and must not
-    hold more than one member at a time in RAM or on disk. At planet scale the set
-    is 13-18 GB (a ~10-11 GB head payload plus 3.3-6.7 GB of positions packs) on a
+    it into the admitted set, once to read the payload it uploads -- and holds only
+    the bounded worker count in RAM or on disk. At planet scale the set is
+    13-18 GB (a ~10-11 GB head payload plus 3.3-6.7 GB of positions packs) on a
     16 GB runner with a bounded disk, so "hold them all" is an unconditional OOM.
 
     `hydrate` returns the local path, fetching the object if it is not resident;
@@ -642,6 +642,8 @@ def publish_exact_set(
     fail_after_upload: int | None = None,
     verify: Callable[[str, dict[str, object]], None] | None = None,
     concurrency: int = PUBLISH_CONCURRENCY,
+    admission_concurrency: int = 1,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, object]:
     """Upload an admitted set, HEAD each upload, and commit its marker last.
 
@@ -649,14 +651,17 @@ def publish_exact_set(
     admitted before ANY upload starts, so the admitted set -- and therefore the
     marker that describes it and the byte-exact identity a conflicting retry is
     allowed to accept -- is fixed and sorted before a single byte is published.
-    The upload pass runs `concurrency` members at a time; the admission pass does
-    not, so the barrier between them is where "fixed before any upload" lives.
+    The upload pass runs `concurrency` members at a time; admission runs at
+    `admission_concurrency`, but `_run_bounded` drains it completely before upload
+    starts. That barrier, rather than serial execution, is what makes the admitted
+    set fixed before any byte is published.
 
-    ADMISSION is serial on purpose. It is the pass that runs the caller's
-    fail-closed gates, so serial keeps the abort deterministic (the first offending
-    member in set order, every time) and keeps admission's residency at exactly one
-    object. It is also not the expensive pass: the 2N remote operations that turned
-    the old shell mirror into 12.4 hours all live in the upload pass.
+    Admission concurrency must be derived from the contract's largest admissible
+    object because these bytes have not been verified yet. Upload concurrency may
+    be derived from the largest identity admission actually proved, which is
+    normally much smaller. This distinction matters at planet Places: the safe
+    pre-admission bound is 5 workers at the 5 GB contract ceiling, while the
+    measured largest object is ~209 MB and safely admits all 16 publisher workers.
 
     Identities are computed by STREAMING each file, never by retaining its bytes:
     holding all payloads simultaneously to reuse them in the upload loop was a
@@ -675,8 +680,17 @@ def publish_exact_set(
     """
     members = _members(artifacts)
     by_key = {member.key: member for member in members}
-    admitted = []
-    for member in members:
+    if len(by_key) != len(members):
+        raise ValueError("duplicate artifact key")
+    admitted_slots: list[dict[str, object] | None] = [None] * len(members)
+    admission_completed = 0
+    admission_counter = threading.Lock()
+
+    if progress is not None:
+        progress("admission", 0, len(members))
+
+    def _admit_one(index: int, member: Member) -> None:
+        nonlocal admission_completed
         # Resident only for the hash. `file_identity` streams in 1 MiB chunks, so
         # nothing here scales with the object's size either.
         path = member.hydrate()
@@ -687,14 +701,24 @@ def publish_exact_set(
         # gate stays on disk for a human to look at -- the run is aborting anyway,
         # and evicting the offending bytes would destroy the only evidence of them.
         member.release()
-        admitted.append(identity)
+        admitted_slots[index - 1] = identity
+        with admission_counter:
+            admission_completed += 1
+            reached = admission_completed
+        if progress is not None and (reached == len(members) or reached % 1000 == 0):
+            progress("admission", reached, len(members))
+
+    _run_bounded(_admit_one, members, concurrency=admission_concurrency)
+    if any(item is None for item in admitted_slots):
+        raise RuntimeError("admission did not cover every object")
+    admitted = [item for item in admitted_slots if item is not None]
     admitted.sort(key=lambda item: str(item["key"]))
-    if len({item["key"] for item in admitted}) != len(admitted):
-        raise ValueError("duplicate artifact key")
 
     uploaded = 0
     counter = threading.Lock()
     interrupted = threading.Event()
+    if progress is not None:
+        progress("upload", 0, len(admitted))
 
     def _publish_one(_index: int, item: dict[str, object]) -> None:
         nonlocal uploaded
@@ -761,6 +785,10 @@ def publish_exact_set(
         with counter:
             uploaded += 1
             reached = uploaded
+        if progress is not None and (
+            reached == len(admitted) or reached % 1000 == 0
+        ):
+            progress("upload", reached, len(admitted))
         if fail_after_upload == reached:
             interrupted.set()
             raise RuntimeError("injected interruption before marker")
@@ -799,6 +827,7 @@ def verify_whole_slice_once(
     prefix: str,
     expected: list[dict[str, object]],
     concurrency: int = PUBLISH_CONCURRENCY,
+    progress: Callable[[str, int, int], None] | None = None,
 ) -> dict[str, object]:
     """One listing and one read-back per final object; no fleet re-reads.
 
@@ -822,13 +851,23 @@ def verify_whole_slice_once(
     if keys != sorted(expected_by_key):
         raise RuntimeError("final slice has missing, extra, or duplicate keys")
     verified: list[dict[str, object] | None] = [None] * len(keys)
+    completed = 0
+    counter = threading.Lock()
+    if progress is not None:
+        progress("verification", 0, len(keys))
 
     def _verify_one(index: int, key: str) -> None:
+        nonlocal completed
         wanted = expected_by_key[key]
         actual = remote.read_back_identity(key, wanted)
         if actual != {"sha256": wanted["sha256"], "bytes": wanted["bytes"]}:
             raise RuntimeError(f"final slice identity differs: {key}")
         verified[index - 1] = {"key": key, **actual}
+        with counter:
+            completed += 1
+            reached = completed
+        if progress is not None and (reached == len(keys) or reached % 1000 == 0):
+            progress("verification", reached, len(keys))
 
     _run_bounded(_verify_one, keys, concurrency=concurrency)
     if any(item is None for item in verified):
