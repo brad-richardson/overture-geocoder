@@ -837,6 +837,37 @@ pub(crate) fn head_shard_lookup(
     )
 }
 
+/// Plan the routed fetches for one proximity query: token indexes grouped by
+/// owning object in first-use order. The serving loop walks this plan holding
+/// exactly ONE routed artifact at a time and drops its bytes before fetching
+/// the next, so the lane's aggregate residency is bounded by one
+/// `MAX_ROUTED_OBJECT_BYTES` (64 MiB) object regardless of token count —
+/// never tokens x cap (up to 4 x 64 MiB), which two near-cap objects alone
+/// would turn into an isolate OOM instead of a fail-closed error. Each object
+/// is still fetched exactly once per query. `Ok(None)` means the cell holds no
+/// Places at all.
+/// One fetch per DISTINCT routed object: `(object name, owned token indexes)`
+/// in first-use order.
+pub(crate) type RoutedFetchPlan<'routing> = Vec<(&'routing str, Vec<usize>)>;
+
+pub(crate) fn routed_fetch_plan<'routing>(
+    routing: &'routing PlacesRouting,
+    cell: &str,
+    tokens: &[String],
+) -> Result<Option<RoutedFetchPlan<'routing>>> {
+    let mut plan: Vec<(&str, Vec<usize>)> = Vec::new();
+    for (index, token) in tokens.iter().enumerate() {
+        let Some(object) = routing.route(cell, token)? else {
+            return Ok(None);
+        };
+        match plan.iter_mut().find(|(name, _)| *name == object) {
+            Some((_, indexes)) => indexes.push(index),
+            None => plan.push((object, vec![index])),
+        }
+    }
+    Ok(Some(plan))
+}
+
 /// AND-intersect per-token record lists by feature id, keeping the first
 /// token's producer order (`confidence_rank DESC, feature_id, locator`).
 pub(crate) fn intersect_ranked(mut per_token: Vec<Vec<PlacesV1Record>>) -> Vec<PlacesV1Record> {
@@ -979,7 +1010,7 @@ fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, value: Rc<T>)
 mod tests {
     use super::{
         construction_cell, head_shard_id, head_shard_lookup, index_hash, intersect_ranked,
-        lookup_head_shard, record_projection, routed_lookup, routed_token_hash,
+        lookup_head_shard, record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
         HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1Record,
         PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
     };
@@ -1445,7 +1476,8 @@ mod tests {
     }
 
     /// The pure serving pipeline for the proximity lane, mirroring
-    /// `search_places_construction` step for step over a mock store.
+    /// `search_places_construction` step for step over a mock store: one plan,
+    /// one live object per plan entry, bytes dropped before the next fetch.
     fn routed_query(
         slice: &PromotedSlice,
         longitude: f64,
@@ -1454,21 +1486,78 @@ mod tests {
         limit: usize,
     ) -> Result<Vec<PlacesV1Record>, String> {
         let cell = construction_cell(longitude, latitude).unwrap();
-        let mut per_token = Vec::new();
-        for token in tokens {
-            let Some(object) = slice.routing.route(&cell, token)? else {
-                return Ok(Vec::new());
-            };
+        let tokens: Vec<String> = tokens.iter().map(|token| token.to_string()).collect();
+        let Some(plan) = routed_fetch_plan(&slice.routing, &cell, &tokens)? else {
+            return Ok(Vec::new());
+        };
+        let mut per_token: Vec<Option<Vec<PlacesV1Record>>> =
+            (0..tokens.len()).map(|_| None).collect();
+        for (object, token_indexes) in plan {
             let bytes = slice.store.get(object).expect("routed object is published");
-            let records = routed_lookup(bytes, &cell, token)?;
-            if records.is_empty() {
-                return Ok(Vec::new());
+            for index in token_indexes {
+                let records = routed_lookup(bytes, &cell, &tokens[index])?;
+                if records.is_empty() {
+                    return Ok(Vec::new());
+                }
+                per_token[index] = Some(records);
             }
-            per_token.push(records);
         }
+        let per_token = per_token
+            .into_iter()
+            .map(|records| records.expect("plan covers every token"))
+            .collect();
         let mut records = intersect_ranked(per_token);
         records.truncate(limit);
         Ok(records)
+    }
+
+    /// Pins the residency-bound fetch policy: the plan holds one entry per
+    /// DISTINCT routed object in first-use order, every token index exactly
+    /// once, so the serving loop fetches each object once and never keeps more
+    /// than one routed artifact's bytes alive at a time.
+    #[test]
+    fn routed_fetch_plan_groups_tokens_one_object_at_a_time() {
+        let slice = promoted_slice();
+
+        // Split cell: "cafe" and "tower" live in different subpartitions, so a
+        // two-token query is two sequential single-object fetches.
+        let tokens: Vec<String> = vec!["cafe".into(), "tower".into()];
+        let plan = routed_fetch_plan(&slice.routing, &slice.split_cell, &tokens)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.len(), 2);
+        assert_ne!(plan[0].0, plan[1].0);
+        assert_eq!(plan[0].1, vec![0]);
+        assert_eq!(plan[1].1, vec![1]);
+
+        // Unsplit cell: both tokens share the one object, which therefore
+        // appears once and is fetched once.
+        let tokens: Vec<String> = vec!["cafe".into(), "town".into()];
+        let plan = routed_fetch_plan(&slice.routing, &slice.unsplit_cell, &tokens)
+            .unwrap()
+            .unwrap();
+        assert_eq!(plan.len(), 1);
+        assert_eq!(plan[0].1, vec![0, 1]);
+
+        // Four tokens over the split cell still plan at most one entry per
+        // distinct object, with every token index covered exactly once.
+        let tokens: Vec<String> = vec!["cafe".into(), "tower".into(), "cafe".into(), "東京".into()];
+        let plan = routed_fetch_plan(&slice.routing, &slice.split_cell, &tokens)
+            .unwrap()
+            .unwrap();
+        let mut objects: Vec<&str> = plan.iter().map(|(object, _)| *object).collect();
+        objects.sort_unstable();
+        objects.dedup();
+        assert_eq!(objects.len(), plan.len(), "plan repeats an object");
+        let mut covered: Vec<usize> = plan.iter().flat_map(|(_, ids)| ids.clone()).collect();
+        covered.sort_unstable();
+        assert_eq!(covered, vec![0, 1, 2, 3]);
+
+        // An unpopulated cell yields no plan at all.
+        let unpopulated = construction_cell(151.2, -33.87).unwrap();
+        assert!(routed_fetch_plan(&slice.routing, &unpopulated, &tokens)
+            .unwrap()
+            .is_none());
     }
 
     /// The pure serving pipeline for the head lane over a mock store.

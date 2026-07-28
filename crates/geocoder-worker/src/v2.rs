@@ -15,7 +15,7 @@ use crate::address::MAX_ADDRESS_COLLECTION_BYTES;
 use crate::address::{build_lookup_key, AddressOutcome};
 use crate::places_construction_v1::{
     construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, record_projection,
-    routed_lookup, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
+    routed_fetch_plan, routed_lookup, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
     MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, MAX_ROUTED_OBJECT_BYTES,
     PLACES_CONSTRUCTION_FORMAT,
 };
@@ -1259,32 +1259,43 @@ async fn search_places_construction(
         let Some(cell) = construction_cell(longitude, latitude) else {
             return Ok(Vec::new());
         };
-        let mut fetched: HashMap<String, bytes::Bytes> = HashMap::new();
-        let mut per_token = Vec::with_capacity(tokens.len());
-        for token in &tokens {
-            // A bias point in an unpopulated cell is an empty result, not an
-            // error; a populated cell that owns no subpartition for the token
-            // hash is a broken tiling invariant and fails closed inside route.
-            let Some(object) = routing.route(&cell, token).map_err(Error::RustError)? else {
-                return Ok(Vec::new());
-            };
+        // A bias point in an unpopulated cell is an empty result, not an
+        // error; a populated cell that owns no subpartition for a token hash
+        // is a broken tiling invariant and fails closed inside the plan.
+        let Some(plan) = routed_fetch_plan(&routing, &cell, &tokens).map_err(Error::RustError)?
+        else {
+            return Ok(Vec::new());
+        };
+        // Aggregate residency bound: the plan groups tokens by owning object,
+        // and each object's bytes drop at the end of its iteration before the
+        // next fetch, so at most ONE routed artifact (MAX_ROUTED_OBJECT_BYTES,
+        // 64 MiB) is live at a time — not tokens x cap, which could exceed the
+        // 128 MiB isolate and kill in-flight requests instead of failing
+        // closed. The edge cache absorbs any cross-request refetch.
+        let mut per_token: Vec<Option<Vec<crate::places_construction_v1::PlacesV1Record>>> =
+            (0..tokens.len()).map(|_| None).collect();
+        for (object, token_indexes) in plan {
             let object_key = format!("{object_root}/objects/{object}");
-            let bytes = match fetched.get(&object_key) {
-                Some(bytes) => bytes.clone(),
-                None => {
-                    let bytes = loader
-                        .places_construction_object(&object_key, MAX_ROUTED_OBJECT_BYTES)
-                        .await?;
-                    fetched.insert(object_key, bytes.clone());
-                    bytes
+            let bytes = loader
+                .places_construction_object(&object_key, MAX_ROUTED_OBJECT_BYTES)
+                .await?;
+            for index in token_indexes {
+                let records =
+                    routed_lookup(&bytes, &cell, &tokens[index]).map_err(Error::RustError)?;
+                if records.is_empty() {
+                    return Ok(Vec::new());
                 }
-            };
-            let records = routed_lookup(&bytes, &cell, token).map_err(Error::RustError)?;
-            if records.is_empty() {
-                return Ok(Vec::new());
+                per_token[index] = Some(records);
             }
-            per_token.push(records);
         }
+        let per_token = per_token
+            .into_iter()
+            .map(|records| {
+                records.ok_or_else(|| {
+                    Error::RustError("v2 Places routed fetch plan missed a token".into())
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
         let mut records = intersect_ranked(per_token);
         records.truncate(limit);
         let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
