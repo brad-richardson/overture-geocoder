@@ -2,6 +2,7 @@ import hashlib
 import json
 import subprocess
 import sys
+import urllib.error
 from pathlib import Path
 
 import pytest
@@ -465,6 +466,100 @@ def test_verify_release_passes_without_content_md5(tmp_path):
     )
 
 
+# ---------------------------------------------------------------------------
+# Finalize rerun: a pre-existing release-manifest.json under the version prefix
+# (run 30360636219 attempt 2, 2026-07-28: attempt 1 published the manifest and
+# then failed in the promote smoke; the rerun died in verify with
+# unexpected=['release-manifest.json']).
+# ---------------------------------------------------------------------------
+
+
+def _verify_to(metadata, readback, inventory, output_path):
+    return fr.verify_release(
+        version=VERSION,
+        release=RELEASE,
+        inventory_path=inventory,
+        metadata_dir=metadata,
+        readback_dir=readback,
+        output_path=output_path,
+    )
+
+
+def _add_preexisting_manifest(metadata, inventory, manifest_bytes):
+    """Place attempt 1's published manifest in the inventory + metadata sync."""
+    (metadata / "release-manifest.json").write_bytes(manifest_bytes)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry("release-manifest.json", len(manifest_bytes)))
+    _write_json(inventory, value)
+
+
+def test_verify_release_rerun_accepts_matching_preexisting_manifest(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _verify_to(metadata, readback, inventory, tmp_path / "first.json")
+    # Attempt 1's manifest carries attempt 1's clock: generated_at is the ONLY
+    # run-varying field and must not fail the rerun.
+    published = json.loads((tmp_path / "first.json").read_text())
+    published["generated_at"] = "2026-07-28T00:00:00+00:00"
+    published_bytes = (json.dumps(published, indent=2) + "\n").encode()
+    _add_preexisting_manifest(metadata, inventory, published_bytes)
+
+    rerun = _verify_to(metadata, readback, inventory, tmp_path / "rerun.json")
+
+    # The rerun adopts the published bytes verbatim, so the later manifest
+    # publish re-writes the immutable object with identical bytes.
+    assert (tmp_path / "rerun.json").read_bytes() == published_bytes
+    assert rerun["generated_at"] == "2026-07-28T00:00:00+00:00"
+    # The manifest stays self-reference-free, exactly like a first run's.
+    hrefs = {obj["href"] for obj in rerun["verified_version_objects"]}
+    assert "./release-manifest.json" not in hrefs
+    assert len(rerun["verified_version_objects"]) == 4109
+
+
+def test_verify_release_rerun_rejects_differing_preexisting_manifest(tmp_path):
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _verify_to(metadata, readback, inventory, tmp_path / "first.json")
+    # Content drift beyond generated_at (here: a forward shard SHA) means the
+    # published manifest attests a fleet this verify did not prove.
+    tampered = json.loads((tmp_path / "first.json").read_text())
+    tampered["families"]["forward"]["objects"][0]["sha256"] = "0" * 64
+    _add_preexisting_manifest(
+        metadata, inventory, (json.dumps(tampered, indent=2) + "\n").encode()
+    )
+
+    with pytest.raises(ValueError, match="does not match this verification"):
+        _verify_to(metadata, readback, inventory, tmp_path / "rerun.json")
+
+
+def test_verify_release_rerun_requires_manifest_readback(tmp_path):
+    # In the R2 inventory but absent from the metadata sync: fail closed rather
+    # than trusting an object whose bytes were never read back.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry("release-manifest.json", 10))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="missing from the metadata readback"):
+        _verify_to(metadata, readback, inventory, tmp_path / "rerun.json")
+
+
+def test_verify_release_rerun_still_rejects_other_unexpected_keys(tmp_path):
+    # The rerun tolerance is for exactly release-manifest.json: a matching
+    # manifest plus ANY other stray key still fails the exact-set gate.
+    metadata, readback, inventory = _release_fixture(tmp_path)
+    _verify_to(metadata, readback, inventory, tmp_path / "first.json")
+    _add_preexisting_manifest(
+        metadata, inventory, (tmp_path / "first.json").read_bytes()
+    )
+    value = json.loads(inventory.read_text())
+    value["Contents"].append(_entry("stray-root.json", 12))
+    _write_json(inventory, value)
+
+    with pytest.raises(ValueError, match="not an exact match") as excinfo:
+        _verify_to(metadata, readback, inventory, tmp_path / "rerun.json")
+    assert "stray-root.json" in str(excinfo.value)
+    assert "release-manifest.json" not in str(excinfo.value)
+
+
 def test_build_catalog_publishes_once_and_sorts_numeric_suffixes(tmp_path):
     before = tmp_path / "before.json"
     output = tmp_path / "next.json"
@@ -768,6 +863,90 @@ def test_recover_lost_cas_to_foreign_catalog_refuses_cleanly():
 
     with pytest.raises(fr.RecoveryError, match="restore readback did not equal"):
         _recover(client)
+
+
+# ---------------------------------------------------------------------------
+# Smoke/health diagnostics: run 30360636219 (2026-07-28) failed 14+14 smoke
+# attempts with a bare False and no way to tell a stale catalog from a 500.
+# Each check must log its endpoint and what it observed, keeping the bool
+# contract for callers.
+# ---------------------------------------------------------------------------
+
+
+def test_smoke_logs_stale_version_with_endpoint(monkeypatch):
+    monkeypatch.setattr(
+        fr, "_get_json",
+        lambda _base, _path, _timeout: {"status": "ok", "version": PREVIOUS},
+    )
+    logs = []
+    assert fr._smoke_production("https://geo", NEW, log=logs.append) is False
+    # One line: the health check failed first, naming its endpoint and the
+    # observed (stale) version -> "attempt N saw health.version=<old>".
+    assert len(logs) == 1
+    assert f"/health?rebuild={NEW}" in logs[0]
+    assert PREVIOUS in logs[0] and NEW in logs[0]
+
+
+def test_smoke_logs_http_status_for_failing_endpoint(monkeypatch):
+    def fake(_base, path, _timeout):
+        if path.startswith("/health"):
+            return {"status": "ok", "version": NEW}
+        raise urllib.error.HTTPError(
+            "https://geo" + path, 500, "Internal Server Error", None, None
+        )
+
+    monkeypatch.setattr(fr, "_get_json", fake)
+    logs = []
+    assert fr._smoke_production("https://geo", NEW, log=logs.append) is False
+    # -> "attempt N: /search returned 500".
+    assert f"/search?q=boston&limit=1&rebuild={NEW}" in logs[-1]
+    assert "500" in logs[-1]
+
+
+def test_smoke_logs_empty_search_results(monkeypatch):
+    def fake(_base, path, _timeout):
+        if path.startswith("/health"):
+            return {"status": "ok", "version": NEW}
+        return {"data_version": NEW, "results": []}
+
+    monkeypatch.setattr(fr, "_get_json", fake)
+    logs = []
+    assert fr._smoke_production("https://geo", NEW, log=logs.append) is False
+    assert "result_count=0" in logs[-1]
+
+
+def test_smoke_happy_path_logs_every_check_and_stays_true(monkeypatch):
+    def fake(_base, path, _timeout):
+        if path.startswith("/health"):
+            return {"status": "ok", "version": NEW}
+        if path.startswith("/search"):
+            return {"data_version": NEW, "results": [{"gers_id": "abc"}]}
+        if path.startswith("/reverse"):
+            return {"data_version": NEW, "gers_id": "def"}
+        if path.startswith("/id/abc"):
+            return {"data_version": NEW, "id": "abc"}
+        raise AssertionError(f"unexpected path {path}")
+
+    monkeypatch.setattr(fr, "_get_json", fake)
+    logs = []
+    assert fr._smoke_production("https://geo", NEW, log=logs.append) is True
+    assert len(logs) == 4  # one observation per check, even on success
+    for fragment in ("/health", "/search", "/reverse", "/id/abc"):
+        assert any(fragment in line for line in logs), fragment
+
+
+def test_health_production_logs_observed_version(monkeypatch):
+    monkeypatch.setattr(
+        fr, "_get_json",
+        lambda _base, _path, _timeout: {"status": "ok", "version": PREVIOUS},
+    )
+    logs = []
+    assert (
+        fr._health_production("https://geo", NEW, "recovery=x-1", log=logs.append)
+        is False
+    )
+    assert "/health?recovery=x-1" in logs[0]
+    assert PREVIOUS in logs[0] and NEW in logs[0]
 
 
 # ---------------------------------------------------------------------------

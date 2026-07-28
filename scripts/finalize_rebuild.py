@@ -65,6 +65,11 @@ CATALOG_KEY = "catalog.json"
 BACKUP_PREFIX = "backups"
 BASE_URL_DEFAULT = "https://geocoder.bradr.dev"
 
+# The immutable per-release manifest published under the version prefix by the
+# finalize job AFTER verify succeeds. A rerun of a finalize that failed later
+# (e.g. in the promote smoke) therefore finds it already present.
+RELEASE_MANIFEST_KEY = "release-manifest.json"
+
 
 def _load_json(path: Path) -> dict:
     with path.open() as src:
@@ -375,6 +380,66 @@ def _verify_optional_family(
     return expected_keys, summary
 
 
+# The release manifest is NOT byte-deterministic across verify runs: it embeds
+# exactly one run-varying field, ``generated_at`` (the verify wall-clock,
+# stamped in verify_release below). Every other field is a pure function of the
+# immutable release fleet (relative keys, sizes, R2 ETags, producer SHA-256s,
+# all iterated in sorted order), so two verify runs over the same objects must
+# agree on this canonical form or one of them verified a different fleet.
+_RUN_VARYING_MANIFEST_FIELDS = frozenset({"generated_at"})
+
+
+def _canonical_manifest_form(manifest: dict) -> str:
+    return json.dumps(
+        {
+            key: value
+            for key, value in manifest.items()
+            if key not in _RUN_VARYING_MANIFEST_FIELDS
+        },
+        sort_keys=True,
+    )
+
+
+def _matching_preexisting_manifest(
+    *, entry: dict, metadata_dir: Path, version: str, manifest: dict
+) -> bytes:
+    """Return the pre-existing release-manifest.json bytes iff they match.
+
+    Rerun tolerance for run 30360636219 (2026-07-28): attempt 1 published
+    release-manifest.json and then failed in the promote smoke; attempt 2 then
+    failed verify with ``unexpected=['release-manifest.json']``, bricking the
+    rerun. A pre-existing manifest is acceptable only when its content
+    canonically equals the manifest THIS verification just recomputed from the
+    fleet (see ``_canonical_manifest_form``: byte comparison minus only the
+    provably run-varying ``generated_at``). Anything else — absent from the
+    metadata readback, size drift from the inventory entry, or any content
+    difference — stays a hard failure, because it means the published manifest
+    attests a fleet this verify did not prove.
+    """
+    local = metadata_dir / RELEASE_MANIFEST_KEY
+    if not local.is_file():
+        raise ValueError(
+            f"{RELEASE_MANIFEST_KEY} is in the R2 inventory but missing from the "
+            "metadata readback"
+        )
+    existing_bytes = local.read_bytes()
+    if len(existing_bytes) != entry["size_bytes"]:
+        raise ValueError(
+            f"pre-existing {RELEASE_MANIFEST_KEY} size does not match its "
+            "inventory entry"
+        )
+    existing = json.loads(existing_bytes)
+    if not isinstance(existing, dict):
+        raise ValueError(f"pre-existing {RELEASE_MANIFEST_KEY} is not a JSON object")
+    if _canonical_manifest_form(existing) != _canonical_manifest_form(manifest):
+        raise ValueError(
+            f"version {version} already has a {RELEASE_MANIFEST_KEY} that does "
+            "not match this verification (differences beyond the run-varying "
+            "generated_at); refusing to overwrite or bless it"
+        )
+    return existing_bytes
+
+
 def verify_release(
     *,
     version: str,
@@ -387,6 +452,16 @@ def verify_release(
 ) -> dict:
     _version_key(version)
     inventory = _inventory_by_relative_key(_load_json(inventory_path), version)
+
+    # A finalize rerun finds the release manifest already under the version
+    # prefix when the previous attempt failed AFTER "Publish immutable release
+    # manifest" (run 30360636219, 2026-07-28: attempt 1 died in the promote
+    # smoke, attempt 2 died here with unexpected=['release-manifest.json']).
+    # Set that one key aside now — so the exact-set gate and the verified
+    # object set match a first-run manifest exactly — and require at the end
+    # that its content canonically equals the manifest this run recomputes;
+    # any other content remains a hard failure.
+    preexisting_manifest_entry = inventory.pop(RELEASE_MANIFEST_KEY, None)
 
     forward = _require_metadata_file(metadata_dir, "collection.json")
     reverse = _require_metadata_file(metadata_dir, "reverse-collection.json")
@@ -596,7 +671,8 @@ def verify_release(
     # finalize can be recovered; it is excluded here rather than blessed. Any
     # OTHER extra key (stray uploads) or a missing expected key fails closed.
     # release-manifest.json is uploaded only afterward, so it is legitimately
-    # absent from this listing.
+    # absent from a first-run listing; a rerun's pre-existing copy was set
+    # aside above and is content-checked after the manifest is recomputed.
     expected_keys = set(required_root)
     expected_keys |= {f"shards/{shard_id}.db" for shard_id in _collection_items(forward, "forward")}
     expected_keys |= {f"reverse/{shard_id}.db" for shard_id in _collection_items(reverse, "reverse")}
@@ -679,6 +755,19 @@ def verify_release(
     if optional_summaries:
         manifest["optional_families"] = optional_summaries
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    if preexisting_manifest_entry is not None:
+        existing_bytes = _matching_preexisting_manifest(
+            entry=preexisting_manifest_entry,
+            metadata_dir=metadata_dir,
+            version=version,
+            manifest=manifest,
+        )
+        # Adopt the already-published bytes (proven above to differ from the
+        # recomputed manifest only in the run-varying generated_at) so the
+        # subsequent "Publish immutable release manifest" step re-writes the
+        # immutable object with identical bytes instead of a fresh timestamp.
+        output_path.write_bytes(existing_bytes)
+        return json.loads(existing_bytes.decode())
     output_path.write_text(json.dumps(manifest, indent=2) + "\n")
     return manifest
 
@@ -868,6 +957,19 @@ def _latest_version(catalog: dict) -> str:
     raise ValueError("catalog has no latest child")
 
 
+def _flush_log(message: str) -> None:
+    """``print`` that flushes immediately: the promote/rollback default logger.
+
+    Run 30360636219 (2026-07-28) emitted ~6.5 minutes of promote and rollback
+    smoke output in ONE buffered flush at the end of the step, so the Actions
+    per-line timestamps said nothing about when each attempt actually ran.
+    Promotion diagnostics must land in the live log as they happen, even with
+    stdout block-buffered (non-tty runner); the workflow additionally invokes
+    this script with ``python -u``.
+    """
+    print(message, flush=True)
+
+
 def _get_json(base_url: str, path: str, timeout: float) -> dict:
     """GET a JSON body, raising (like ``curl -f``) on any non-2xx status."""
     request = urllib.request.Request(base_url + path, headers={"Accept": "application/json"})
@@ -879,44 +981,105 @@ def _get_json(base_url: str, path: str, timeout: float) -> dict:
     return value
 
 
-def _smoke_production(base_url: str, version: str) -> bool:
+def _smoke_production(base_url: str, version: str, log=_flush_log) -> bool:
     """health + a forward search + a reverse + an ID lookup, all pinned to
     ``version`` via the ``rebuild`` cache-buster. Ports the bash ``smoke_once``.
-    """
-    try:
-        health = _get_json(base_url, f"/health?rebuild={version}", 20)
-        if health.get("status") != "ok" or health.get("version") != version:
-            return False
 
-        search = _get_json(base_url, f"/search?q=boston&limit=1&rebuild={version}", 20)
+    Pass/fail semantics are unchanged; every check now logs the endpoint it
+    hit and what it observed. Run 30360636219 (2026-07-28): all 14 promote
+    attempts AND all 14 rollback attempts returned a bare False, leaving no
+    way to tell "health still serves the prior version (stale catalog)" from
+    "/search returned 500" from "search matched nothing". The per-check lines
+    below make each failure mode name itself in the Actions log.
+    """
+    path = f"/health?rebuild={version}"
+    try:
+        health = _get_json(base_url, path, 20)
+        if health.get("status") != "ok" or health.get("version") != version:
+            log(
+                f"smoke {path}: status={health.get('status')!r} "
+                f"version={health.get('version')!r} "
+                f"(want status='ok' version={version!r})"
+            )
+            return False
+        log(f"smoke {path}: ok, version={health.get('version')!r}")
+
+        path = f"/search?q=boston&limit=1&rebuild={version}"
+        search = _get_json(base_url, path, 20)
         results = search.get("results")
+        result_count = len(results) if isinstance(results, list) else None
         if search.get("data_version") != version or not isinstance(results, list) or not results:
+            log(
+                f"smoke {path}: data_version={search.get('data_version')!r} "
+                f"result_count={result_count} "
+                f"(want data_version={version!r} and at least one result)"
+            )
             return False
         first = results[0]
         gers_id = first.get("gers_id") if isinstance(first, dict) else None
         if not isinstance(gers_id, str) or not gers_id:
+            log(f"smoke {path}: first result has no usable gers_id ({gers_id!r})")
             return False
+        log(
+            f"smoke {path}: ok, data_version={search.get('data_version')!r} "
+            f"result_count={result_count}"
+        )
 
-        reverse = _get_json(base_url, f"/reverse?lat=42.36&lon=-71.06&rebuild={version}", 20)
+        path = f"/reverse?lat=42.36&lon=-71.06&rebuild={version}"
+        reverse = _get_json(base_url, path, 20)
         if reverse.get("data_version") != version or not isinstance(reverse.get("gers_id"), str):
+            log(
+                f"smoke {path}: data_version={reverse.get('data_version')!r} "
+                f"gers_id={reverse.get('gers_id')!r} "
+                f"(want data_version={version!r} and a gers_id)"
+            )
             return False
+        log(f"smoke {path}: ok, data_version={reverse.get('data_version')!r}")
 
-        id_json = _get_json(base_url, f"/id/{gers_id}?rebuild={version}", 30)
+        path = f"/id/{gers_id}?rebuild={version}"
+        id_json = _get_json(base_url, path, 30)
         if id_json.get("data_version") != version or id_json.get("id") != gers_id:
+            log(
+                f"smoke {path}: data_version={id_json.get('data_version')!r} "
+                f"id={id_json.get('id')!r} "
+                f"(want data_version={version!r} id={gers_id!r})"
+            )
             return False
+        log(f"smoke {path}: ok, data_version={id_json.get('data_version')!r}")
         return True
-    except (urllib.error.URLError, OSError, ValueError):
-        # URLError covers HTTPError (>=400) and connection/timeout failures;
-        # OSError covers socket timeouts; ValueError covers JSON decode errors.
+    except urllib.error.HTTPError as exc:
+        # Before URLError: HTTPError subclasses it, and the status line is the
+        # diagnostic that separates a 500 from a stale-but-healthy endpoint.
+        log(f"smoke {path}: HTTP {exc.code} {exc.reason}")
+        return False
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        # URLError covers connection/timeout failures; OSError covers socket
+        # timeouts; ValueError covers JSON decode errors.
+        log(f"smoke {path}: {type(exc).__name__}: {exc}")
         return False
 
 
-def _health_production(base_url: str, version: str, cache_buster: str) -> bool:
-    """health-only check (ports the bash recovery-loop curl)."""
+def _health_production(base_url: str, version: str, cache_buster: str, log=_flush_log) -> bool:
+    """health-only check (ports the bash recovery-loop curl); logs like
+    ``_smoke_production`` so a failed recovery names what production returned.
+    """
+    path = f"/health?{cache_buster}"
     try:
-        health = _get_json(base_url, f"/health?{cache_buster}", 20)
-        return health.get("status") == "ok" and health.get("version") == version
-    except (urllib.error.URLError, OSError, ValueError):
+        health = _get_json(base_url, path, 20)
+        if health.get("status") == "ok" and health.get("version") == version:
+            log(f"health {path}: ok, version={health.get('version')!r}")
+            return True
+        log(
+            f"health {path}: status={health.get('status')!r} "
+            f"version={health.get('version')!r} "
+            f"(want status='ok' version={version!r})"
+        )
+        return False
+    except urllib.error.HTTPError as exc:
+        log(f"health {path}: HTTP {exc.code} {exc.reason}")
+        return False
+    except (urllib.error.URLError, OSError, ValueError) as exc:
+        log(f"health {path}: {type(exc).__name__}: {exc}")
         return False
 
 
@@ -1296,7 +1459,7 @@ def promote(
     smoke_attempts: int = 14,
     smoke_interval: int = 30,
     sleep=time.sleep,
-    log=print,
+    log=_flush_log,
     manage_signals: bool = True,
 ) -> None:
     """Atomically publish ``candidate`` as the production catalog and smoke it,
@@ -1393,7 +1556,7 @@ def recover(
     health_attempts: int = 14,
     health_interval: int = 30,
     sleep=time.sleep,
-    log=print,
+    log=_flush_log,
 ) -> None:
     """Reconcile the catalog after a promotion that a hard runner loss cut off
     between publish and smoke. Uses the durable before/candidate pair and the
@@ -1455,7 +1618,7 @@ def publish_family(
     family: str,
     manifest_path: Path,
     artifacts_root: Path,
-    log=print,
+    log=_flush_log,
 ) -> dict:
     """Publish one non-promoting optional family under ``{version}/families/{family}/``.
 
@@ -1675,7 +1838,7 @@ def main() -> None:
                 candidate_bytes=args.candidate.read_bytes(),
             )
         except (PromotionError, RecoveryError) as exc:
-            print(f"::error::{exc}", file=sys.stderr)
+            print(f"::error::{exc}", file=sys.stderr, flush=True)
             sys.exit(1)
         return
     if args.command == "recover":
@@ -1683,7 +1846,7 @@ def main() -> None:
         try:
             recover(client, version=args.version)
         except RecoveryError as exc:
-            print(f"::error::{exc}", file=sys.stderr)
+            print(f"::error::{exc}", file=sys.stderr, flush=True)
             sys.exit(1)
         return
     if args.command == "publish-family":
@@ -1697,7 +1860,7 @@ def main() -> None:
                 artifacts_root=args.artifacts_root,
             )
         except (PromotionError, ValueError) as exc:
-            print(f"::error::{exc}", file=sys.stderr)
+            print(f"::error::{exc}", file=sys.stderr, flush=True)
             sys.exit(1)
         return
     if args.command == "verify-families-only":
@@ -1713,7 +1876,7 @@ def main() -> None:
                 families=families,
             )
         except ValueError as exc:
-            print(f"::error::{exc}", file=sys.stderr)
+            print(f"::error::{exc}", file=sys.stderr, flush=True)
             sys.exit(1)
         summary = ", ".join(
             f"{name}={info['artifact_count']}"
