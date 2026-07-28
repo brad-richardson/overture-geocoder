@@ -1189,6 +1189,151 @@ def cmd_verify(args: argparse.Namespace) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Slice manifest: the #107 slice-wide source document the v2 release tooling
+# (v2_release_manifest.py assemble / _validate_family_source) requires at
+# {version}/slice-manifest.json. Derived from the SAME plan(s) that execute
+# wrote and verify proved, and bound to the destination by re-downloading each
+# published family manifest before a byte is written.
+
+
+def cmd_slice_manifest(args: argparse.Namespace) -> int:
+    plans = [_load_plan(path) for path in args.plan]
+    version = plans[0]["version"]
+    release = plans[0]["release"]
+    for plan in plans[1:]:
+        if plan["version"] != version or plan["release"] != release:
+            raise fail("slice-manifest plans disagree on version or release")
+    validate_slice_version(version)
+    families: dict[str, dict[str, Any]] = {}
+    for plan in plans:
+        for family, value in plan["families"].items():
+            if family in families:
+                raise fail(f"family {family} appears in more than one plan")
+            families[family] = value
+    if not families:
+        raise fail("slice-manifest requires at least one planned family")
+
+    destination = open_tree(args.destination, "--destination")
+    # Deterministic by default (the slice date at midnight UTC), so two runs
+    # over the same plans emit byte-identical documents and the create-only
+    # publication is naturally resumable.
+    generated_at = args.generated_at or f"{version[6:16]}T00:00:00+00:00"
+
+    summaries: dict[str, dict[str, Any]] = {}
+    verified: list[dict[str, Any]] = []
+    for family in sorted(families):
+        value = families[family]
+        manifest = GBM.validate_family_manifest(value["family_manifest"])
+        manifest_bytes = canonical(manifest)
+        if (
+            sha256_bytes(manifest_bytes) != value["family_manifest_sha256"]
+            or len(manifest_bytes) != value["family_manifest_bytes"]
+        ):
+            raise fail(f"{family} plan-recorded family manifest identity disagrees")
+        # Bind the document to what is actually published: the DOWNLOADED
+        # destination manifest bytes must hash to the plan-recorded digest, so
+        # a slice manifest can never attest a tree that execute+verify did not
+        # put there.
+        published = destination.read_bytes(value["family_manifest_key"])
+        if sha256_bytes(published) != value["family_manifest_sha256"]:
+            raise fail(
+                f"{family} destination family manifest at "
+                f"{value['family_manifest_key']} does not hash to the "
+                "plan-recorded digest; run execute and verify first"
+            )
+        artifacts = manifest["artifacts"]
+        href = f"./families/{family}/family-manifest.json"
+        objects = [
+            {
+                "href": f"./{artifact['object_key']}",
+                "size_bytes": artifact["bytes"],
+                "sha256": artifact["sha256"],
+            }
+            for artifact in artifacts
+        ]
+        summaries[family] = {
+            "manifest": href,
+            "manifest_digest": manifest["manifest_digest"],
+            "region": manifest["region"],
+            "artifact_count": len(artifacts),
+            "total_bytes": sum(artifact["bytes"] for artifact in artifacts),
+            "objects": objects,
+            "promotion_eligible": False,
+        }
+        verified.append(
+            {
+                "href": href,
+                "size_bytes": value["family_manifest_bytes"],
+                "sha256": value["family_manifest_sha256"],
+            }
+        )
+        verified.extend(objects)
+
+    document = {
+        "schema_version": 1,
+        "slice_version": version,
+        "overture_release": release,
+        "generated_at": generated_at,
+        # A verified, NON-promoting family fleet: no core release, no catalog
+        # link. Promotion eligibility is decided by the v2 catalog CAS layer,
+        # never by this document.
+        "is_slice": True,
+        "promotion_eligible": False,
+        "families": summaries,
+        "verified_version_objects": verified,
+    }
+    payload = canonical(document)
+    sha256 = sha256_bytes(payload)
+    key = f"{version}/slice-manifest.json"
+    print(
+        json.dumps(
+            {
+                "planned_write": {
+                    "key": key,
+                    "sha256": sha256,
+                    "bytes": len(payload),
+                    "mode": "create-only",
+                    "families": sorted(summaries),
+                }
+            },
+            sort_keys=True,
+        )
+    )
+    output = Path(args.output)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_bytes(payload)
+
+    existing = destination.identity(key)
+    if existing is not None and existing["sha256"] != sha256:
+        # Fail closed in BOTH modes: an existing different document means this
+        # slice version already attests another family set, and slice
+        # manifests are immutable -- promote under a new slice version.
+        raise fail(
+            f"destination {key} exists with different bytes (sha256 "
+            f"{existing['sha256']}); slice manifests are immutable"
+        )
+    if not args.execute:
+        status = "already-published" if existing is not None else "dry-run"
+    else:
+        state = _put_derived_create_only(destination, key, payload, sha256)
+        status = "already-published" if state == "already-present" else "written"
+    print(
+        json.dumps(
+            {
+                "slice_manifest": key,
+                "sha256": sha256,
+                "bytes": len(payload),
+                "families": sorted(summaries),
+                "output": str(output),
+                "status": status,
+            },
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
+# ---------------------------------------------------------------------------
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1234,6 +1379,34 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser.add_argument("--plan", required=True, type=Path)
     verify_parser.add_argument("--destination", required=True)
     verify_parser.set_defaults(entry=cmd_verify)
+
+    slice_manifest_parser = commands.add_parser(
+        "slice-manifest",
+        help="emit and create-only publish {version}/slice-manifest.json "
+        "from executed+verified promotion plans",
+    )
+    slice_manifest_parser.add_argument(
+        "--plan",
+        action="append",
+        required=True,
+        type=Path,
+        help="promotion plan (repeatable; one slice manifest covers every "
+        "planned family, and the set is immutable once published)",
+    )
+    slice_manifest_parser.add_argument("--destination", required=True)
+    slice_manifest_parser.add_argument("--output", required=True)
+    slice_manifest_parser.add_argument(
+        "--generated-at",
+        help="defaults to the slice date at midnight UTC so two runs over the "
+        "same plans are byte-identical",
+    )
+    slice_manifest_parser.add_argument(
+        "--execute",
+        action="store_true",
+        help="write to the destination; the default is a dry-run that only "
+        "prints the planned create-only write",
+    )
+    slice_manifest_parser.set_defaults(entry=cmd_slice_manifest)
 
     args = parser.parse_args(argv)
     return args.entry(args)
