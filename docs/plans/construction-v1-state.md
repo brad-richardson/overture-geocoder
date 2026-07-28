@@ -1,8 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-28 after Places finalize-only run `30305749838`
-authenticated the completed planet head, reached exact-set admission, and
-exposed one transient R2 body-read failure before publication.
+Last updated 2026-07-28 after Places finalize-only run `30323929757`
+completed exact-set R2 publication and marker-last verification.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -12,8 +11,9 @@ here.
 
 ## Current milestone
 
-Complete the first non-promoting planet-scale build for both Places and
-Addresses by removing only blockers measured on the active execution rung.
+The first non-promoting planet-scale build is complete for both Places and
+Addresses. The next milestone is reverse-geocoding R1 over their already
+published per-record artifacts.
 
 Do not dispatch a planet build without the exact operator-supplied workflow
 confirmation. The operator supplied authorization for request
@@ -28,24 +28,29 @@ requires one successful prior head job.
 
 ## Current snapshot
 
-The current construction-v1 workflow checkpoint on `main` is `f408147`: PR
+The current construction-v1 workflow checkpoint on `main` is `e981012`: PR
 #178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
 consumer projections, PR #183's authenticated same-request resume plus the
-missing plan contract artifact, and the subsequent Places head resource
-compatibility and finalize-only recovery work.
+missing plan contract artifact, the subsequent Places head resource
+compatibility and finalize-only recovery work, PR #184's bounded/retriable R2
+finalizer, and PR #185's reviewed finalizer transport overlay.
 There are no open construction-v1 code PRs.
 
 Both families passed the preserved Europe execution rung through publication
 and marker-last completion. Address has now also passed the hosted planet rung
-through marker-last R2 publication. Places planet runs `30226086949` and
+through marker-last R2 publication. Places now passed the hosted planet rung
+through marker-last R2 publication in finalize-only run `30323929757`.
+Places planet runs `30226086949` and
 `30263207263` passed fail-closed admission, all 89 maps, planning, and all 128
 reducers. Head-only recovery `30288619536` authenticated those outputs, skipped
 every paid upstream phase, completed the global head, then failed before
 publication because finalize looked for `head.json` under one extra directory
 component. Finalize-only recovery `30305749838` proved that correction and
 authenticated all retained inputs, but a single staging GET body timed out
-during the pre-publication admission pass. There is no remaining measured
-Address or Places-head blocker.
+during the pre-publication admission pass. Run `30323929757` reused those same
+authenticated inputs, completed the corrected bounded finalizer in 56 minutes
+50 seconds, verified all 40,931 final members, and wrote the completion marker
+last. There is no remaining measured forward planet blocker.
 
 ### Places
 
@@ -124,6 +129,20 @@ The same change removes full GET read-back from immutable staging uploads and
 resumes. A new object is proved with HEAD, create-only PUT, HEAD; an existing
 object needs one proof HEAD. The HEAD proof compares size, the store-computed
 single-part ETag/content MD5, and recorded SHA-256 metadata.
+
+Finalize-only run `30323929757` execution-proved that correction on the exact
+planet set. Admission used five workers and completed in 24 minutes 56 seconds;
+publication used 16 workers and completed in 27 minutes 02 seconds; whole-slice
+verification used 16 workers and completed in 4 minutes 24 seconds. The
+40,931-member / 51,814,660,317-byte exact set reconciled, all stored-byte
+metadata verified, and
+`construction-v1/86558218e2b67db0e0249abbee0c6d17650dea43467ed14c59789bc60c7bacb0/markers/finalize/places.json`
+was written last. The finalizer completed 81,858 logical staged-object
+hydrations, two passes over each of the 40,929 staged members; the one-GET path
+avoided 81,858 redundant Class B HEAD requests relative to the old
+implementation. Silent bounded whole-GET retries mean physical GET attempts can
+be higher than the logical counter. The full result and operation analysis is
+`docs/plans/2026-07-28-planet-places-publication-result.md`.
 
 The Europe run covered 43.9% of the planet. After PR #176 merged, all five
 phases completed and head produced all 4,096 populated shards. The full head
@@ -234,25 +253,18 @@ verification of 10,931 objects.
 
 ## Fastest path
 
-Follow this sequence. Address planet execution and the Places planet head are
-complete. Places has one measured finalize transport blocker.
+The forward planet milestone is complete. Follow this sequence:
 
-1. **Land the bounded/retriable finalizer, then fresh-dispatch finalize-only from
-   run `30288619536`.** Admission must again prove the canonical request,
-   byte-identical contract, complete plan/reductions, one successful head job,
-   and internally consistent head artifact before every upstream job remains
-   skipped.
-2. **Record the complete Places evidence.** Preserve map/reduce/head/finalize
-   timing, residency, R2 traffic, exact-set counts, and marker identity.
-3. **Begin reverse R1 as the fast follow.** Consume the already published
-   per-record artifacts; do not rerun either forward map.
+1. **Begin reverse R1.** Consume the already published per-record artifacts; do
+   not rerun either forward map.
+2. **Prove shared cell parity and the encoder/verifier on the small real-data
+   harness.**
+3. **Advance to the reverse bucket-range reducer only after R1 passes.**
 
 ## Open blockers and gates
 
-| Item | Family | Evidence | Closure gate |
-|---|---|---|---|
-| Serial admission had no body-read retry | Places | Run `30305749838` reconciled 40,931 members, spent 4h17 in admission, then one R2 GET streaming body timed out outside botocore's request retry loop | Bounded parallel admission survives transient body-read failure and completes its barrier |
-| Planet final publication throughput | Places | All 128 reducers and the 4,096-shard planet head passed; both finalize attempts stopped before their first publication call | Finalize-only resume reconciles the exact set and writes the completion marker last |
+There are no measured construction-v1 forward planet blockers. Reverse R1 is
+the active execution rung.
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful
@@ -281,6 +293,9 @@ Europe execution. Do not reopen them without contradictory measured evidence.
 - Planet Addresses completes under request `88b7f...32614`: 127 reused maps,
   117 reducers, 10,931 verified exact-set members, reconciles true, marker
   written last.
+- Planet Places completes under request `88b7f...32614`: 89 maps, 128 reducers,
+  4,096 populated head shards, 40,931 verified exact-set members /
+  51,814,660,317 bytes, reconciles true, marker written last.
 - Both families emit and durably publish per-record artifacts needed by a later
   spatial reverse index.
 - Finalize verifies an exact publication set and has a projected remote
