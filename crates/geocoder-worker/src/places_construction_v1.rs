@@ -507,7 +507,7 @@ fn valid_sha256_hex(value: &str) -> bool {
 }
 
 /// A published object name must be content-addressed: `<sha256><extension>`.
-fn content_addressed_name(name: &str, extension: &str) -> bool {
+pub(crate) fn content_addressed_name(name: &str, extension: &str) -> bool {
     name.len() == 64 + extension.len() && name.ends_with(extension) && valid_sha256_hex(&name[..64])
 }
 
@@ -976,9 +976,9 @@ impl ShardLoader {
 }
 
 /// One thread-local generation of parsed immutable control documents.
-type ParsedDocumentCache<T> = std::thread::LocalKey<RefCell<Vec<(String, Rc<T>)>>>;
+pub(crate) type ParsedDocumentCache<T> = std::thread::LocalKey<RefCell<Vec<(String, Rc<T>)>>>;
 
-fn cache_get<T>(cache: &'static ParsedDocumentCache<T>, key: &str) -> Option<Rc<T>> {
+pub(crate) fn cache_get<T>(cache: &'static ParsedDocumentCache<T>, key: &str) -> Option<Rc<T>> {
     cache.with(|cache| {
         let mut cache = cache.borrow_mut();
         cache
@@ -993,7 +993,7 @@ fn cache_get<T>(cache: &'static ParsedDocumentCache<T>, key: &str) -> Option<Rc<
     })
 }
 
-fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, value: Rc<T>) {
+pub(crate) fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, value: Rc<T>) {
     const MAX_ENTRIES: usize = 1;
     cache.with(|cache| {
         let mut cache = cache.borrow_mut();

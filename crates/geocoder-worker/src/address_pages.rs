@@ -46,7 +46,10 @@ pub(crate) struct AddressPageRecord {
     pub latitude: f64,
     pub source_object_index: u32,
     pub source_row_group: u32,
-    pub source_row_index: u32,
+    /// `u64` so the construction-v1 lane (which stores 64-bit row indexes)
+    /// shares this record shape; the reduce-2 page decoder still enforces its
+    /// own u32 bound before widening.
+    pub source_row_index: u64,
     pub country: String,
     pub postal_city: String,
     pub postcode: String,
@@ -245,8 +248,10 @@ fn decode_useful_page_measured(bytes: &[u8]) -> Result<(Vec<AddressPageRecord>, 
             .map_err(|_| PageError::new("source object index is too large"))?;
         let source_row_group = u32::try_from(reader.uvarint()?)
             .map_err(|_| PageError::new("source row group is too large"))?;
-        let source_row_index = u32::try_from(reader.uvarint()?)
-            .map_err(|_| PageError::new("source row index is too large"))?;
+        let source_row_index = u64::from(
+            u32::try_from(reader.uvarint()?)
+                .map_err(|_| PageError::new("source row index is too large"))?,
+        );
         let mut display = [0_usize; 6];
         for slot in display.iter_mut() {
             *slot = dictionary_id(&mut reader, strings.len())?;

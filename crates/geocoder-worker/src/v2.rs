@@ -13,6 +13,10 @@ use worker::*;
 
 use crate::address::MAX_ADDRESS_COLLECTION_BYTES;
 use crate::address::{build_lookup_key, AddressOutcome};
+use crate::address_construction_v1::{
+    AddressRouting, ADDRESS_CONSTRUCTION_FORMAT, ADDRESS_CONSTRUCTION_NORMALIZATION_VERSION,
+    MAX_ADDRESS_ROUTING_BYTES,
+};
 use crate::places_construction_v1::{
     construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, record_projection,
     routed_fetch_plan, routed_lookup, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
@@ -150,10 +154,6 @@ impl V2Release {
         self.operations
             .get(operation)
             .is_some_and(|families| families.iter().any(|value| value == family))
-    }
-
-    fn family_entrypoint(&self, family: &str, operation: &str) -> Option<&ArtifactIdentity> {
-        self.families.get(family)?.entrypoints.get(operation)
     }
 }
 
@@ -388,23 +388,33 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
     {
         return Err(format!("v2 {name} operations differ from entrypoints"));
     }
-    // The promoted construction format (`PLRV0002+PLHD0002`) is accepted only
-    // for `family_slice` sources; every other Places source keeps the exact
-    // PCSH0001 contract. A construction format on a core_release source, a
-    // PCSH catalog entrypoint under the construction format, or any unknown
+    // The promoted construction formats (`PLRV0002+PLHD0002` for Places,
+    // `OAV1ART` for addresses) are accepted only for `family_slice` sources;
+    // every other source keeps the exact PCSH0001 / address-reduce-2
+    // contract. A construction format on a core_release source, a legacy
+    // entrypoint under a construction format (or the reverse), or any unknown
     // format string all fail closed below.
     let places_construction = name == "places"
         && family.source.kind == "family_slice"
         && family.versions.format == PLACES_CONSTRUCTION_FORMAT;
+    let address_construction = name == "addresses"
+        && family.source.kind == "family_slice"
+        && family.versions.format == ADDRESS_CONSTRUCTION_FORMAT;
+    let expected_address_normalization = if address_construction {
+        ADDRESS_CONSTRUCTION_NORMALIZATION_VERSION
+    } else {
+        ADDRESS_NORMALIZATION_VERSION
+    };
     if (name == "places"
         && ((!places_construction && family.versions.format != PLACES_FORMAT_VERSION)
             || family.operations != ["forward"]
             || family.versions.tokenizer.as_deref() != Some(TOKENIZER_VERSION)
             || family.versions.normalization.is_some()))
         || (name == "addresses"
-            && (family.versions.format != ADDRESS_FORMAT_VERSION
+            && ((!address_construction && family.versions.format != ADDRESS_FORMAT_VERSION)
                 || family.operations != ["structured_forward"]
-                || family.versions.normalization.as_deref() != Some(ADDRESS_NORMALIZATION_VERSION)
+                || family.versions.normalization.as_deref()
+                    != Some(expected_address_normalization)
                 || family.versions.tokenizer.is_some()))
     {
         return Err(format!("v2 {name} family versions are unsupported"));
@@ -419,6 +429,19 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
     } else {
         MAX_CATALOG_OBJECT_BYTES
     };
+    let address_entrypoint_key = if address_construction {
+        format!("{}/families/addresses/routing.json", family.source.version)
+    } else {
+        format!(
+            "{}/families/addresses/address-collection.json",
+            family.source.version
+        )
+    };
+    let address_entrypoint_cap = if address_construction {
+        MAX_ADDRESS_ROUTING_BYTES
+    } else {
+        MAX_ADDRESS_COLLECTION_BYTES
+    };
     for (operation, identity) in &family.entrypoints {
         let prefix = format!("{}/families/{name}/", family.source.version);
         if !identity.object_key.starts_with(&prefix)
@@ -426,14 +449,9 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
             || identity.bytes == 0
             || !valid_sha256(&identity.sha256)
             || (name == "places" && identity.bytes > places_entrypoint_cap)
-            || (name == "addresses" && identity.bytes > MAX_ADDRESS_COLLECTION_BYTES)
+            || (name == "addresses" && identity.bytes > address_entrypoint_cap)
             || (name == "places" && identity.object_key != places_entrypoint_key)
-            || (name == "addresses"
-                && identity.object_key
-                    != format!(
-                        "{}/families/addresses/address-collection.json",
-                        family.source.version
-                    ))
+            || (name == "addresses" && identity.object_key != address_entrypoint_key)
         {
             return Err(format!("invalid v2 {name} {operation} entrypoint"));
         }
@@ -562,10 +580,15 @@ fn release_readiness_objects(release: &V2Release) -> Vec<ReadinessObject> {
                 expected_sha256: family.source.manifest_sha256.clone(),
             });
         }
-        // The Places manifest is loaded under a bounded parse below so its
-        // canonical head identity can be extracted before admission. Other
-        // family manifests only need their release-pinned streaming identity.
-        if family_name != "places" {
+        // The Places manifest — and the addresses manifest on the promoted
+        // construction format — is loaded under a bounded parse below so its
+        // attested artifact identities can be extracted before admission.
+        // Other family manifests only need their release-pinned streaming
+        // identity.
+        let bounded_parse = family_name == "places"
+            || (family_name == "addresses"
+                && family.versions.format == ADDRESS_CONSTRUCTION_FORMAT);
+        if !bounded_parse {
             objects.push(ReadinessObject {
                 key: family.manifest_key.clone(),
                 expected_bytes: None,
@@ -619,37 +642,40 @@ fn places_head_requirement(
 /// `object_key -> (bytes, sha256)` identities a family manifest attests.
 type AttestedArtifacts = HashMap<String, (u64, String)>;
 
-/// Validate a promoted construction Places family manifest against the release
+/// Validate a promoted construction family manifest against the release
 /// reference and return its attested `object_key -> (bytes, sha256)` map.
-fn places_family_manifest_artifacts(
+fn family_manifest_artifacts(
     manifest_text: &str,
     family: &FamilyReference,
+    name: &str,
 ) -> std::result::Result<AttestedArtifacts, String> {
     let actual_manifest_sha = format!("{:x}", Sha256::digest(manifest_text.as_bytes()));
     if actual_manifest_sha != family.manifest_sha256 {
-        return Err("v2 Places family manifest SHA-256 differs from release".into());
+        return Err(format!(
+            "v2 {name} family manifest SHA-256 differs from release"
+        ));
     }
     let manifest: ServingFamilyManifest = serde_json::from_str(manifest_text)
-        .map_err(|error| format!("Invalid v2 Places family manifest: {error}"))?;
+        .map_err(|error| format!("Invalid v2 {name} family manifest: {error}"))?;
     if manifest.schema != FAMILY_MANIFEST_SCHEMA
-        || manifest.family != "places"
+        || manifest.family != name
         || manifest.manifest_digest != family.manifest_digest
         || manifest.artifacts.is_empty()
         || manifest.artifacts.len() > MAX_FAMILY_MANIFEST_ARTIFACTS
     {
-        return Err("unsupported v2 Places family manifest contract".into());
+        return Err(format!("unsupported v2 {name} family manifest contract"));
     }
     let mut artifacts = HashMap::with_capacity(manifest.artifacts.len());
     for artifact in manifest.artifacts {
         if artifact.bytes == 0 || !valid_sha256(&artifact.sha256) || !safe_key(&artifact.object_key)
         {
-            return Err("invalid v2 Places family manifest artifact".into());
+            return Err(format!("invalid v2 {name} family manifest artifact"));
         }
         if artifacts
             .insert(artifact.object_key, (artifact.bytes, artifact.sha256))
             .is_some()
         {
-            return Err("v2 Places family manifest repeats an artifact".into());
+            return Err(format!("v2 {name} family manifest repeats an artifact"));
         }
     }
     Ok(artifacts)
@@ -664,7 +690,7 @@ fn places_construction_admission(
     routing_text: &str,
     family: &FamilyReference,
 ) -> std::result::Result<(AttestedArtifacts, PlacesRouting), String> {
-    let artifacts = places_family_manifest_artifacts(manifest_text, family)?;
+    let artifacts = family_manifest_artifacts(manifest_text, family, "places")?;
     let entrypoint = family
         .entrypoints
         .get("forward")
@@ -743,6 +769,85 @@ fn places_construction_head_requirements(
             key: format!("{version}/families/places/objects/{}", shard.path),
             expected_bytes: Some(shard.bytes),
             expected_sha256: shard.sha256.clone(),
+        })
+        .collect())
+}
+
+/// Individual admission sample cap for the addresses construction lane. Planet
+/// `OAV1ART` artifacts approach the 2 GiB publication cap, so streaming-hash
+/// verification is proportionate only for small objects; larger ones stay
+/// pinned by the release-attested family manifest and are structurally
+/// self-checked at serving time.
+const MAX_ADDRESS_ADMISSION_SAMPLE_BYTES: u64 = 32 * 1024 * 1024;
+const ADDRESS_ADMISSION_SAMPLE_OBJECTS: usize = 3;
+
+/// Admission for the promoted construction addresses layout: authenticate the
+/// family manifest, prove routing.json's bytes against the release-pinned
+/// entrypoint identity, parse and validate the envelope table, and require
+/// every object it can route to to be attested.
+fn address_construction_admission(
+    manifest_text: &str,
+    routing_text: &str,
+    family: &FamilyReference,
+) -> std::result::Result<(AttestedArtifacts, AddressRouting), String> {
+    let artifacts = family_manifest_artifacts(manifest_text, family, "addresses")?;
+    let entrypoint = family
+        .entrypoints
+        .get("structured_forward")
+        .ok_or_else(|| {
+            "v2 addresses construction family omits its structured_forward entrypoint".to_string()
+        })?;
+    let attested_routing = artifacts
+        .get("families/addresses/routing.json")
+        .ok_or_else(|| "v2 addresses family manifest omits routing.json".to_string())?;
+    if attested_routing.0 != entrypoint.bytes as u64 || attested_routing.1 != entrypoint.sha256 {
+        return Err("v2 addresses routing identity differs between manifest and release".into());
+    }
+    let actual_routing_sha = format!("{:x}", Sha256::digest(routing_text.as_bytes()));
+    if routing_text.len() != entrypoint.bytes || actual_routing_sha != entrypoint.sha256 {
+        return Err("v2 addresses routing bytes differ from the release-pinned identity".into());
+    }
+    let routing = AddressRouting::parse(routing_text)?;
+    for name in routing.routed_object_names() {
+        if !artifacts.contains_key(&format!("families/addresses/objects/{name}")) {
+            return Err(format!(
+                "v2 addresses routing names an unattested object: {name}"
+            ));
+        }
+    }
+    Ok((artifacts, routing))
+}
+
+/// Deterministic admission spot-check sample for the addresses construction
+/// layout: the up-to-three smallest routed objects (ordered by attested
+/// `(bytes, name)`) that fit the per-object sample cap, streamed and hashed
+/// from R2 against their attested identities. Full verification of all routed
+/// objects (581 at planet scale, individually up to 2 GiB) is deliberately
+/// NOT done at admission; every identity remains pinned by the family
+/// manifest, whose own bytes are pinned by the release.
+fn address_construction_sample(
+    routing: &AddressRouting,
+    artifacts: &AttestedArtifacts,
+    version: &str,
+) -> std::result::Result<Vec<ReadinessObject>, String> {
+    let mut candidates = Vec::new();
+    let names: HashSet<&str> = routing.routed_object_names().collect();
+    for name in names {
+        let (bytes, sha256) = artifacts
+            .get(&format!("families/addresses/objects/{name}"))
+            .ok_or_else(|| format!("v2 addresses routing names an unattested object: {name}"))?;
+        if *bytes <= MAX_ADDRESS_ADMISSION_SAMPLE_BYTES {
+            candidates.push((*bytes, name, sha256));
+        }
+    }
+    candidates.sort();
+    candidates.truncate(ADDRESS_ADMISSION_SAMPLE_OBJECTS);
+    Ok(candidates
+        .into_iter()
+        .map(|(bytes, name, sha256)| ReadinessObject {
+            key: format!("{version}/families/addresses/objects/{name}"),
+            expected_bytes: Some(bytes),
+            expected_sha256: sha256.clone(),
         })
         .collect())
 }
@@ -826,6 +931,37 @@ impl ShardLoader {
         Ok(())
     }
 
+    /// Admission for the promoted construction addresses layout: authenticate
+    /// the family manifest and routing.json identities, then stream-verify
+    /// only the deterministic small-object sample.
+    async fn verify_address_construction_readiness(&self, family: &FamilyReference) -> Result<()> {
+        let manifest_text = self
+            .memoized_get_bounded_text(
+                &family.manifest_key,
+                MAX_PLACES_FAMILY_MANIFEST_BYTES,
+                IMMUTABLE_CACHE_TTL,
+            )
+            .await?
+            .ok_or_else(|| crate::stac::not_found(&family.manifest_key))?;
+        self.forget_memoized_text(&family.manifest_key);
+        let routing_key = format!("{}/families/addresses/routing.json", family.source.version);
+        let routing_text = self
+            .memoized_get_bounded_text(&routing_key, MAX_ADDRESS_ROUTING_BYTES, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| crate::stac::not_found(&routing_key))?;
+        self.forget_memoized_text(&routing_key);
+        let (artifacts, routing) =
+            address_construction_admission(&manifest_text, &routing_text, family)
+                .map_err(Error::RustError)?;
+        let requirements =
+            address_construction_sample(&routing, &artifacts, &family.source.version)
+                .map_err(Error::RustError)?;
+        for requirement in requirements {
+            self.verify_readiness_object(&requirement).await?;
+        }
+        Ok(())
+    }
+
     async fn verify_readiness_object(&self, requirement: &ReadinessObject) -> Result<()> {
         let max_bytes = requirement
             .expected_bytes
@@ -853,6 +989,12 @@ impl ShardLoader {
             } else {
                 let head = self.verified_places_head_requirement(places).await?;
                 self.verify_readiness_object(&head).await?;
+            }
+        }
+        if let Some(addresses) = release.families.get("addresses") {
+            if addresses.versions.format == ADDRESS_CONSTRUCTION_FORMAT {
+                self.verify_address_construction_readiness(addresses)
+                    .await?;
             }
         }
         Ok(())
@@ -1457,16 +1599,27 @@ pub(crate) async fn handle_forward(
             Ok(value) => value,
             Err(error) => return json_error("invalid_request", &error.message(), 400),
         };
-        let Some(entrypoint) = release.family_entrypoint("addresses", "structured_forward") else {
+        let family = release
+            .families
+            .get("addresses")
+            .filter(|family| family.entrypoints.contains_key("structured_forward"));
+        let Some(family) = family else {
             return json_error(
                 "capability_unavailable",
                 "structured address data is unavailable",
                 503,
             );
         };
-        let outcome = loader
-            .lookup_address_entrypoint(&key, &entrypoint.object_key, &release.geocoder_build)
-            .await?;
+        let entrypoint = &family.entrypoints["structured_forward"];
+        let outcome = if family.versions.format == ADDRESS_CONSTRUCTION_FORMAT {
+            loader
+                .lookup_address_construction(&key, &entrypoint.object_key, &release.geocoder_build)
+                .await?
+        } else {
+            loader
+                .lookup_address_entrypoint(&key, &entrypoint.object_key, &release.geocoder_build)
+                .await?
+        };
         let (coverage, normalization_version, records) = match outcome {
             AddressOutcome::Resolved {
                 data_version,
@@ -2487,6 +2640,314 @@ mod tests {
         )
         .unwrap_err()
         .contains("geometry differs"));
+    }
+
+    fn address_construction_release_value() -> Value {
+        let mut value = release_value();
+        value["families"]["addresses"]["versions"]["format"] = json!(ADDRESS_CONSTRUCTION_FORMAT);
+        value["families"]["addresses"]["versions"]["normalization"] =
+            json!(ADDRESS_CONSTRUCTION_NORMALIZATION_VERSION);
+        value["families"]["addresses"]["entrypoints"]["structured_forward"]["object_key"] =
+            json!("slice-2026-07-19.0/families/addresses/routing.json");
+        value
+    }
+
+    #[test]
+    fn address_construction_format_is_accepted_for_slices_only_with_routing_entrypoint() {
+        let release: V2Release =
+            serde_json::from_value(address_construction_release_value()).unwrap();
+        validate_release(&release, &catalog().releases[0]).unwrap();
+
+        // Construction format with the reduce-2 collection entrypoint fails
+        // closed.
+        let mut mixed = address_construction_release_value();
+        mixed["families"]["addresses"]["entrypoints"]["structured_forward"]["object_key"] =
+            json!("slice-2026-07-19.0/families/addresses/address-collection.json");
+        let mixed: V2Release = serde_json::from_value(mixed).unwrap();
+        assert!(validate_release(&mixed, &catalog().releases[0]).is_err());
+
+        // reduce-2 format with the routing entrypoint fails closed.
+        let mut mixed = release_value();
+        mixed["families"]["addresses"]["entrypoints"]["structured_forward"]["object_key"] =
+            json!("slice-2026-07-19.0/families/addresses/routing.json");
+        let mixed: V2Release = serde_json::from_value(mixed).unwrap();
+        assert!(validate_release(&mixed, &catalog().releases[0]).is_err());
+
+        // Construction format on a core_release source fails closed.
+        let mut core = address_construction_release_value();
+        core["families"]["addresses"]["source"] = json!({
+            "kind": "core_release",
+            "version": "2026-07-19.0",
+            "manifest_key": "2026-07-19.0/release-manifest.json",
+            "manifest_sha256": sha(),
+        });
+        core["families"]["addresses"]["manifest_key"] =
+            json!("2026-07-19.0/families/addresses/family-manifest.json");
+        core["families"]["addresses"]["entrypoints"]["structured_forward"]["object_key"] =
+            json!("2026-07-19.0/families/addresses/routing.json");
+        let core: V2Release = serde_json::from_value(core).unwrap();
+        assert!(validate_release(&core, &catalog().releases[0]).is_err());
+
+        // An unknown format string stays rejected.
+        let mut unknown = address_construction_release_value();
+        unknown["families"]["addresses"]["versions"]["format"] = json!("OAV1ART2");
+        let unknown: V2Release = serde_json::from_value(unknown).unwrap();
+        assert!(validate_release(&unknown, &catalog().releases[0]).is_err());
+
+        // Each lane requires exactly its own normalization identity.
+        let mut wrong_normalization = address_construction_release_value();
+        wrong_normalization["families"]["addresses"]["versions"]["normalization"] =
+            json!(ADDRESS_NORMALIZATION_VERSION);
+        let wrong_normalization: V2Release = serde_json::from_value(wrong_normalization).unwrap();
+        assert!(validate_release(&wrong_normalization, &catalog().releases[0]).is_err());
+        let mut wrong_normalization = release_value();
+        wrong_normalization["families"]["addresses"]["versions"]["normalization"] =
+            json!(ADDRESS_CONSTRUCTION_NORMALIZATION_VERSION);
+        let wrong_normalization: V2Release = serde_json::from_value(wrong_normalization).unwrap();
+        assert!(validate_release(&wrong_normalization, &catalog().releases[0]).is_err());
+
+        // A construction family must not grow a tokenizer.
+        let mut tokenized = address_construction_release_value();
+        tokenized["families"]["addresses"]["versions"]["tokenizer"] = json!("t1");
+        let tokenized: V2Release = serde_json::from_value(tokenized).unwrap();
+        assert!(validate_release(&tokenized, &catalog().releases[0]).is_err());
+
+        // The routing entrypoint keeps its own byte cap.
+        let mut oversized = address_construction_release_value();
+        oversized["families"]["addresses"]["entrypoints"]["structured_forward"]["bytes"] =
+            json!(MAX_ADDRESS_ROUTING_BYTES + 1);
+        let oversized: V2Release = serde_json::from_value(oversized).unwrap();
+        assert!(validate_release(&oversized, &catalog().releases[0]).is_err());
+    }
+
+    #[test]
+    fn address_construction_readiness_skips_the_bounded_parse_manifest() {
+        // The reduce-2 addresses manifest is streamed as a plain readiness
+        // object (asserted by the readiness gate test above); the construction
+        // manifest is loaded under a bounded parse instead, exactly like the
+        // Places manifest, so it must not appear twice.
+        let release: V2Release =
+            serde_json::from_value(address_construction_release_value()).unwrap();
+        let keys: HashSet<String> = release_readiness_objects(&release)
+            .into_iter()
+            .map(|requirement| requirement.key)
+            .collect();
+        assert!(!keys.contains("slice-2026-07-19.0/families/addresses/family-manifest.json"));
+        assert!(keys.contains("slice-2026-07-19.0/families/addresses/routing.json"));
+    }
+
+    struct AddressConstructionFixture {
+        family: FamilyReference,
+        manifest_text: String,
+        routing_text: String,
+        smaller: String,
+        small: String,
+        large: String,
+    }
+
+    /// A consistent promoted-slice address control-document set: two small
+    /// routed objects, one above the admission sample cap, and a family
+    /// manifest attesting every object plus routing.json, with the release
+    /// entrypoint pinned to the routing bytes.
+    fn address_construction_fixture() -> AddressConstructionFixture {
+        let smaller = hex_name(0x32, ".av1");
+        let small = hex_name(0x31, ".av1");
+        let large = hex_name(0x33, ".av1");
+        let routing_text = serde_json::to_string(&json!({
+            "schema": "overture-promoted-addresses-routing-v1",
+            "family": "addresses",
+            "key_scheme": "country-route-hash-range-v1",
+            "partitions": [
+                {"country": "mc", "hash_start": 0_u64, "hash_end": u64::MAX, "object": smaller},
+                {"country": "us", "hash_start": 0_u64, "hash_end": 999_u64, "object": small},
+                {"country": "us", "hash_start": 1000_u64, "hash_end": u64::MAX, "object": large},
+            ],
+        }))
+        .unwrap();
+        let artifacts = vec![
+            json!({
+                "object_key": "families/addresses/routing.json",
+                "bytes": routing_text.len(),
+                "sha256": format!("{:x}", Sha256::digest(routing_text.as_bytes())),
+            }),
+            json!({
+                "object_key": format!("families/addresses/objects/{smaller}"),
+                "bytes": 500,
+                "sha256": "2".repeat(64),
+            }),
+            json!({
+                "object_key": format!("families/addresses/objects/{small}"),
+                "bytes": 1000,
+                "sha256": "1".repeat(64),
+            }),
+            json!({
+                "object_key": format!("families/addresses/objects/{large}"),
+                "bytes": MAX_ADDRESS_ADMISSION_SAMPLE_BYTES + 1,
+                "sha256": "3".repeat(64),
+            }),
+        ];
+        let manifest_text = serde_json::to_string(&json!({
+            "schema": FAMILY_MANIFEST_SCHEMA,
+            "family": "addresses",
+            "manifest_digest": sha(),
+            "artifacts": artifacts,
+        }))
+        .unwrap();
+        let mut family = address_construction_release_value()["families"]["addresses"].clone();
+        family["manifest_sha256"] =
+            json!(format!("{:x}", Sha256::digest(manifest_text.as_bytes())));
+        family["entrypoints"]["structured_forward"]["bytes"] = json!(routing_text.len());
+        family["entrypoints"]["structured_forward"]["sha256"] =
+            json!(format!("{:x}", Sha256::digest(routing_text.as_bytes())));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        AddressConstructionFixture {
+            family,
+            manifest_text,
+            routing_text,
+            smaller,
+            small,
+            large,
+        }
+    }
+
+    #[test]
+    fn address_admission_pins_identities_and_samples_smallest_objects() {
+        let fixture = address_construction_fixture();
+        let (artifacts, routing) = address_construction_admission(
+            &fixture.manifest_text,
+            &fixture.routing_text,
+            &fixture.family,
+        )
+        .unwrap();
+        let sample =
+            address_construction_sample(&routing, &artifacts, "slice-2026-07-19.0").unwrap();
+        // The over-cap object is excluded; the rest are streamed smallest
+        // first with their attested identities.
+        assert_eq!(sample.len(), 2);
+        assert_eq!(
+            sample[0].key,
+            format!(
+                "slice-2026-07-19.0/families/addresses/objects/{}",
+                fixture.smaller
+            )
+        );
+        assert_eq!(sample[0].expected_bytes, Some(500));
+        assert_eq!(sample[0].expected_sha256, "2".repeat(64));
+        assert_eq!(
+            sample[1].key,
+            format!(
+                "slice-2026-07-19.0/families/addresses/objects/{}",
+                fixture.small
+            )
+        );
+        assert_eq!(sample[1].expected_bytes, Some(1000));
+        assert!(!sample
+            .iter()
+            .any(|requirement| requirement.key.contains(&fixture.large)));
+        // A tampered stored object (wrong bytes or wrong hash) fails.
+        assert!(readiness_identity_matches(&sample[0], 500, &"2".repeat(64)));
+        assert!(!readiness_identity_matches(
+            &sample[0],
+            501,
+            &"2".repeat(64)
+        ));
+        assert!(!readiness_identity_matches(
+            &sample[0],
+            500,
+            &"f".repeat(64)
+        ));
+    }
+
+    #[test]
+    fn address_admission_rejects_tampered_documents() {
+        let fixture = address_construction_fixture();
+
+        // Tampered family manifest bytes.
+        let mut tampered_manifest = fixture.manifest_text.clone();
+        tampered_manifest.push(' ');
+        assert!(address_construction_admission(
+            &tampered_manifest,
+            &fixture.routing_text,
+            &fixture.family
+        )
+        .unwrap_err()
+        .contains("SHA-256 differs"));
+
+        // Tampered routing bytes.
+        let mut tampered_routing = fixture.routing_text.clone();
+        tampered_routing.push(' ');
+        assert!(address_construction_admission(
+            &fixture.manifest_text,
+            &tampered_routing,
+            &fixture.family
+        )
+        .unwrap_err()
+        .contains("release-pinned identity"));
+
+        // A routed object the family manifest does not attest.
+        let mut unattested: Value = serde_json::from_str(&fixture.manifest_text).unwrap();
+        let artifacts = unattested["artifacts"].as_array_mut().unwrap();
+        artifacts.retain(|artifact| {
+            !artifact["object_key"]
+                .as_str()
+                .unwrap()
+                .contains(&fixture.small)
+        });
+        let unattested = serde_json::to_string(&unattested).unwrap();
+        let mut family = address_construction_release_value()["families"]["addresses"].clone();
+        family["manifest_sha256"] = json!(format!("{:x}", Sha256::digest(unattested.as_bytes())));
+        family["entrypoints"]["structured_forward"]["bytes"] = json!(fixture.routing_text.len());
+        family["entrypoints"]["structured_forward"]["sha256"] = json!(format!(
+            "{:x}",
+            Sha256::digest(fixture.routing_text.as_bytes())
+        ));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        assert!(
+            address_construction_admission(&unattested, &fixture.routing_text, &family)
+                .unwrap_err()
+                .contains("unattested object")
+        );
+
+        // A family manifest whose routing attestation disagrees with the
+        // release-pinned entrypoint identity.
+        let mut lying: Value = serde_json::from_str(&fixture.manifest_text).unwrap();
+        for artifact in lying["artifacts"].as_array_mut().unwrap() {
+            if artifact["object_key"] == json!("families/addresses/routing.json") {
+                artifact["sha256"] = json!("e".repeat(64));
+            }
+        }
+        let lying = serde_json::to_string(&lying).unwrap();
+        let mut family = address_construction_release_value()["families"]["addresses"].clone();
+        family["manifest_sha256"] = json!(format!("{:x}", Sha256::digest(lying.as_bytes())));
+        family["entrypoints"]["structured_forward"]["bytes"] = json!(fixture.routing_text.len());
+        family["entrypoints"]["structured_forward"]["sha256"] = json!(format!(
+            "{:x}",
+            Sha256::digest(fixture.routing_text.as_bytes())
+        ));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        assert!(
+            address_construction_admission(&lying, &fixture.routing_text, &family)
+                .unwrap_err()
+                .contains("differs between manifest and release")
+        );
+
+        // A manifest claiming the wrong family name.
+        let mut wrong_family: Value = serde_json::from_str(&fixture.manifest_text).unwrap();
+        wrong_family["family"] = json!("places");
+        let wrong_family = serde_json::to_string(&wrong_family).unwrap();
+        let mut family = address_construction_release_value()["families"]["addresses"].clone();
+        family["manifest_sha256"] = json!(format!("{:x}", Sha256::digest(wrong_family.as_bytes())));
+        family["entrypoints"]["structured_forward"]["bytes"] = json!(fixture.routing_text.len());
+        family["entrypoints"]["structured_forward"]["sha256"] = json!(format!(
+            "{:x}",
+            Sha256::digest(fixture.routing_text.as_bytes())
+        ));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        assert!(
+            address_construction_admission(&wrong_family, &fixture.routing_text, &family)
+                .unwrap_err()
+                .contains("unsupported v2 addresses family manifest")
+        );
     }
 
     #[test]
