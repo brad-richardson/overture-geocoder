@@ -185,6 +185,25 @@ def test_address_case_params_reconstruct_the_eight_field_key():
     }
 
 
+def test_address_case_params_keep_empty_string_levels_for_key_parity():
+    # The producer's levels() drops only NULLs and keys on first/last including
+    # "": ["", "X"] must yield an empty (omitted) admin_level_general and
+    # admin_level_specific "X", not general "X".
+    params = bench.address_case_params(
+        address_record(bytes([4] * 16), levels=("", "X")))
+    assert "admin_level_general" not in params
+    assert params["admin_level_specific"] == "X"
+    trailing = bench.address_case_params(
+        address_record(bytes([4] * 16), levels=("X", "")))
+    assert trailing["admin_level_general"] == "X"
+    assert "admin_level_specific" not in trailing
+    # None entries are the producer's NULLs and are still dropped.
+    nulls = bench.address_case_params(
+        address_record(bytes([4] * 16), levels=(None, "X")))
+    assert nulls["admin_level_general"] == "X"
+    assert nulls["admin_level_specific"] == "X"
+
+
 def test_address_cases_stratify_by_completeness_and_skip_unqueryable_rows():
     records = [
         address_record(bytes([1] * 16), locator=(8, 1, 1)),

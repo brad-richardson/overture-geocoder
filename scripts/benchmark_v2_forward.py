@@ -309,8 +309,13 @@ def address_case_params(record):
 
     Empty fields are omitted: the worker treats a missing parameter as the
     literal empty string, which is what the stored key holds for them.
+
+    The producer (geocoder-construction `levels()`) drops only NULL entries and
+    keys on first/last including empty strings, so only None is filtered here —
+    dropping "" would shift first/last and mismatch the stored key.
     """
-    levels = [level for level in (record.get("address_levels") or []) if level]
+    levels = [level for level in (record.get("address_levels") or [])
+              if level is not None]
     values = {
         "country": record.get("country") or "",
         "admin_level_general": levels[0] if levels else "",
@@ -605,12 +610,16 @@ class Runner:
 
     def execute(self, case):
         url, params = case_request(case, self.base_url, self.limit)
-        start = time.perf_counter()
         status, body, error = None, None, None
+        ms = 0.0
         for attempt in range(self.rate_limit_retries + 1):
+            # Pacing and Retry-After sleeps happen before the timer starts, so
+            # ms measures only the (last) HTTP attempt, not the send schedule.
             self._pace()
+            start = time.perf_counter()
             try:
                 resp = self.session.get(url, params=params, timeout=self.timeout)
+                ms = (time.perf_counter() - start) * 1000
                 status = resp.status_code
                 if status == 429 and attempt < self.rate_limit_retries:
                     try:
@@ -627,9 +636,9 @@ class Runner:
                     self.data_version = resp.headers.get("X-Geocoder-Build")
                 break
             except requests.RequestException as exception:
+                ms = (time.perf_counter() - start) * 1000
                 error = str(exception)
                 break
-        ms = (time.perf_counter() - start) * 1000
         check_release_unavailable(status, body)
 
         features = body.get("features", []) if isinstance(body, dict) else []
