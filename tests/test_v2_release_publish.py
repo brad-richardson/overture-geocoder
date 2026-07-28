@@ -164,7 +164,7 @@ class StubClientError(Exception):
 
 
 class StubR2Client:
-    """In-memory GetObject/PutObject/DeleteObject with conditional headers.
+    """In-memory GetObject/PutObject with conditional headers.
 
     ETags are single-part content MD5s, exactly what the CAS layer's If-Match
     condition is value-addressed on.
@@ -208,13 +208,6 @@ class StubR2Client:
         assert len(payload) == ContentLength
         assert Metadata == {"sha256": _sha(payload)}
         self.objects[Key] = payload
-
-    def delete_object(self, Bucket, Key, IfMatch):
-        self.log.append(("delete", Key, IfMatch))
-        if Key not in self.objects or self._etag(self.objects[Key]) != IfMatch:
-            raise StubClientError("412")
-        del self.objects[Key]
-
 
 def stub_control_store(client: StubR2Client):
     import r2_verified_store as rvs
@@ -394,6 +387,24 @@ def test_promote_expect_absent_then_expect_sha256(world, tmp_path):
     assert cas_puts and cas_puts[-1][3] == StubR2Client._etag(first)
 
 
+def test_promote_can_replace_signed_unavailable_state(world, tmp_path):
+    publish(assemble(tmp_path))
+    promote(BUILD, "--expect-absent")
+    current = world.objects[CATALOG_KEY]
+    _recover("--unavailable", "--expect-sha256", _sha(current))
+    unavailable = world.objects[CATALOG_KEY]
+
+    publish(assemble(tmp_path, build=NEWER_BUILD, name="newer.json"))
+    promote(NEWER_BUILD, "--expect-sha256", _sha(unavailable))
+    catalog = v2.validate_catalog(json.loads(world.objects[CATALOG_KEY]))
+    assert catalog["latest"] == NEWER_BUILD
+    assert [entry["geocoder_build"] for entry in catalog["releases"]] == [
+        NEWER_BUILD
+    ]
+    assert world.log[-2][0] == "put"
+    assert world.log[-2][3] == StubR2Client._etag(unavailable)
+
+
 def test_promote_dry_run_writes_nothing(world, tmp_path):
     publish(assemble(tmp_path))
     promote(BUILD, "--expect-absent", execute=False)
@@ -461,14 +472,56 @@ def test_recover_repoints_to_a_prior_release(world, tmp_path):
     assert f"v2/releases/{NEWER_BUILD}/release.json" in world.objects
 
 
-def test_recover_deletes_the_catalog(world, tmp_path):
+def test_recover_compare_and_swaps_to_signed_unavailable_state(world, tmp_path):
     publish(assemble(tmp_path))
     promote(BUILD, "--expect-absent")
     current = world.objects[CATALOG_KEY]
-    _recover("--delete", "--expect-sha256", _sha(current))
-    assert CATALOG_KEY not in world.objects
+    _recover("--unavailable", "--expect-sha256", _sha(current))
+    unavailable = v2.validate_unavailable_catalog(
+        json.loads(world.objects[CATALOG_KEY])
+    )
+    assert unavailable["previous_catalog_sha256"] == _sha(current)
+    assert unavailable["reason"] == v2.UNAVAILABLE_REASON
+    cas_puts = [
+        entry
+        for entry in world.log
+        if entry[0] == "put" and entry[1] == CATALOG_KEY and entry[3] is not None
+    ]
+    assert cas_puts[-1][3] == StubR2Client._etag(current)
     # The release document survives for a later re-promotion.
     assert f"v2/releases/{BUILD}/release.json" in world.objects
+
+
+def test_recover_can_repoint_from_unavailable_to_named_release(world, tmp_path):
+    publish(assemble(tmp_path))
+    promote(BUILD, "--expect-absent")
+    current = world.objects[CATALOG_KEY]
+    _recover("--unavailable", "--expect-sha256", _sha(current))
+    unavailable = world.objects[CATALOG_KEY]
+
+    _recover("--build", BUILD, "--expect-sha256", _sha(unavailable))
+    catalog = v2.validate_catalog(json.loads(world.objects[CATALOG_KEY]))
+    assert catalog["latest"] == BUILD
+    assert [entry["geocoder_build"] for entry in catalog["releases"]] == [BUILD]
+
+
+def test_unavailable_catalog_contract_is_exact_and_production_only():
+    unavailable = v2.build_unavailable_catalog(
+        previous_catalog_sha256="a" * 64,
+        generated_at="fixed",
+    )
+    assert v2.validate_unavailable_catalog(unavailable) == unavailable
+    with pytest.raises(ValueError, match="only in production"):
+        v2.validate_unavailable_catalog(
+            unavailable, catalog_key="smoketest-v2/run-1/catalog.json"
+        )
+
+    extra = {**unavailable, "extra": True}
+    with pytest.raises(ValueError, match="fields"):
+        v2.validate_unavailable_catalog(extra)
+    tampered = {**unavailable, "previous_catalog_sha256": "b" * 64}
+    with pytest.raises(ValueError, match="catalog_digest"):
+        v2.validate_unavailable_catalog(tampered)
 
 
 def test_recover_fails_closed_on_expectation_mismatch(world, tmp_path):
@@ -476,7 +529,7 @@ def test_recover_fails_closed_on_expectation_mismatch(world, tmp_path):
     promote(BUILD, "--expect-absent")
     before = world.objects[CATALOG_KEY]
     with pytest.raises(SystemExit, match="not the stated expectation"):
-        _recover("--delete", "--expect-sha256", "0" * 64)
+        _recover("--unavailable", "--expect-sha256", "0" * 64)
     assert world.objects[CATALOG_KEY] == before
 
 
@@ -487,7 +540,7 @@ def test_recover_requires_exactly_one_action(world, tmp_path):
     with pytest.raises(SystemExit, match="exactly one of"):
         _recover("--expect-sha256", sha)
     with pytest.raises(SystemExit, match="exactly one of"):
-        _recover("--build", BUILD, "--delete", "--expect-sha256", sha)
+        _recover("--build", BUILD, "--unavailable", "--expect-sha256", sha)
 
 
 # ---------------------------------------------------------------------------
@@ -705,7 +758,7 @@ def test_local_backend_full_lifecycle(tmp_path):
             "recover",
             "--store",
             store_spec,
-            "--delete",
+            "--unavailable",
             "--expect-sha256",
             _sha(catalog_path.read_bytes()),
             "--generated-at",
@@ -713,7 +766,10 @@ def test_local_backend_full_lifecycle(tmp_path):
             "--execute",
         ]
     )
-    assert not catalog_path.exists()
+    unavailable = v2.validate_unavailable_catalog(
+        json.loads(catalog_path.read_bytes())
+    )
+    assert unavailable["reason"] == v2.UNAVAILABLE_REASON
 
 
 def test_local_store_cas_rejects_stale_expectations(tmp_path):
@@ -724,10 +780,7 @@ def test_local_store_cas_rejects_stale_expectations(tmp_path):
     with pytest.raises(v2.StateConflict):
         store.put("v2/catalog.json", b"two", expect=_sha(b"stale"))
     store.put("v2/catalog.json", b"two", expect=_sha(b"one"))
-    with pytest.raises(v2.StateConflict):
-        store.delete("v2/catalog.json", expect=_sha(b"one"))
-    store.delete("v2/catalog.json", expect=_sha(b"two"))
-    assert store.get("v2/catalog.json") is None
+    assert store.get("v2/catalog.json") == (b"two", _sha(b"two"))
 
 
 # The head.phrp dependency stays pinned to the legacy PCSH0001 format; the

@@ -30,6 +30,8 @@ use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL, TEXT_MEMO_TTL_M
 use crate::stac::{ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
 
 const CATALOG_SCHEMA: &str = "overture-geocoder-v2-catalog-v1";
+const UNAVAILABLE_CATALOG_SCHEMA: &str = "overture-geocoder-v2-unavailable-v1";
+const UNAVAILABLE_REASON: &str = "operator-recovery";
 const RELEASE_SCHEMA: &str = "overture-geocoder-v2-release-v1";
 const PLACES_FORMAT_VERSION: &str = "PCSH0001";
 const ADDRESS_FORMAT_VERSION: &str = "address-reduce-2";
@@ -341,6 +343,48 @@ fn validate_catalog<'a>(
         previous = Some(key);
     }
     Ok(&catalog.releases[0])
+}
+
+fn parse_catalog_control(
+    text: &str,
+    catalog_key: &str,
+) -> std::result::Result<Option<V2Catalog>, String> {
+    let value: Value = parse_verified_control_document(text, "catalog_digest", catalog_key)?;
+    if value.get("schema").and_then(Value::as_str) != Some(UNAVAILABLE_CATALOG_SCHEMA) {
+        let catalog = serde_json::from_value(value)
+            .map_err(|error| format!("Invalid {catalog_key}: {error}"))?;
+        return Ok(Some(catalog));
+    }
+    if catalog_key != "v2/catalog.json" {
+        return Err("an unavailable v2 catalog is allowed only in production".into());
+    }
+    let object = value
+        .as_object()
+        .ok_or_else(|| format!("Invalid {catalog_key}: expected a JSON object"))?;
+    let exact_fields = [
+        "schema",
+        "generated_at",
+        "previous_catalog_sha256",
+        "reason",
+        "catalog_digest",
+    ];
+    if object.len() != exact_fields.len()
+        || exact_fields
+            .iter()
+            .any(|field| !object.contains_key(*field))
+        || object
+            .get("generated_at")
+            .and_then(Value::as_str)
+            .is_none_or(str::is_empty)
+        || object
+            .get("previous_catalog_sha256")
+            .and_then(Value::as_str)
+            .is_none_or(|value| !valid_sha256(value))
+        || object.get("reason").and_then(Value::as_str) != Some(UNAVAILABLE_REASON)
+    {
+        return Err("unsupported unavailable v2 catalog contract".into());
+    }
+    Ok(None)
 }
 
 fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<(), String> {
@@ -1017,9 +1061,11 @@ impl ShardLoader {
             .memoized_get_bounded_text(&catalog_key, MAX_V2_CATALOG_BYTES, CATALOG_CACHE_TTL)
             .await?
             .ok_or_else(|| crate::stac::not_found(&catalog_key))?;
-        let catalog: V2Catalog =
-            parse_verified_control_document(&catalog_text, "catalog_digest", &catalog_key)
-                .map_err(Error::RustError)?;
+        let Some(catalog) =
+            parse_catalog_control(&catalog_text, &catalog_key).map_err(Error::RustError)?
+        else {
+            return Err(crate::stac::not_found(&catalog_key));
+        };
         let entry = validate_catalog(&catalog, &catalog_key).map_err(Error::RustError)?;
         let cache_key = format!("{}#{}", entry.manifest_key, entry.manifest_sha256);
         let cached = V2_RELEASE_CACHE.with(|cache| {
@@ -2075,11 +2121,45 @@ mod tests {
             "catalog_digest": sha(),
         });
         let catalog_text = sign_control_document(catalog_value, "catalog_digest");
-        let parsed_catalog: V2Catalog =
-            parse_verified_control_document(&catalog_text, "catalog_digest", "catalog fixture")
-                .unwrap();
+        let parsed_catalog = parse_catalog_control(&catalog_text, "v2/catalog.json")
+            .unwrap()
+            .unwrap();
         let entry = validate_catalog(&parsed_catalog, "v2/catalog.json").unwrap();
         validate_release(&parsed_release, entry).unwrap();
+    }
+
+    #[test]
+    fn signed_unavailable_catalog_is_production_only_and_exact() {
+        let unavailable = json!({
+            "schema": UNAVAILABLE_CATALOG_SCHEMA,
+            "generated_at": "2026-07-28T00:00:00+00:00",
+            "previous_catalog_sha256": sha(),
+            "reason": UNAVAILABLE_REASON,
+            "catalog_digest": sha(),
+        });
+        let text = sign_control_document(unavailable.clone(), "catalog_digest");
+        assert!(parse_catalog_control(&text, "v2/catalog.json")
+            .unwrap()
+            .is_none());
+        assert!(
+            parse_catalog_control(&text, "smoketest-v2/run-1/catalog.json")
+                .unwrap_err()
+                .contains("only in production")
+        );
+
+        let mut extra = unavailable.clone();
+        extra["extra"] = Value::Bool(true);
+        let text = sign_control_document(extra, "catalog_digest");
+        assert!(parse_catalog_control(&text, "v2/catalog.json")
+            .unwrap_err()
+            .contains("unsupported unavailable"));
+
+        let mut bad_previous = unavailable;
+        bad_previous["previous_catalog_sha256"] = Value::String("bad".into());
+        let text = sign_control_document(bad_previous, "catalog_digest");
+        assert!(parse_catalog_control(&text, "v2/catalog.json")
+            .unwrap_err()
+            .contains("unsupported unavailable"));
     }
 
     #[test]
