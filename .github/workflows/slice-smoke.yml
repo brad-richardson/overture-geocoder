@@ -18,6 +18,11 @@ name: Construction v1 slice smoke
 #                  its projector, transform, proof binary, genesis plan,
 #                  selective reducer and finalize adapter ran only on fixtures.
 #
+# After its slice run, each job also encodes and verifies reverse `.plrx`
+# shards from the per-record artifacts (reverse R1-c,
+# scripts/reverse_r1_slice_v1.py), so `reverse-encode-v1`/`reverse-verify-v1`
+# run on real data on every change to them.
+#
 # What this actually covers, per defect, stated honestly:
 #   #149 (cargo manifest path)  -> the build step below; byte-identical command.
 #   #150 (missing psutil)       -> the SLICE job (either family). psutil is
@@ -285,10 +290,59 @@ jobs:
               exit 1
             }
             cp -f "${WORK}/summary.json" slice/summary.json
+            # The reverse step below consumes this attempt's completed work tree.
+            echo "SLICE_WORK=$WORK" >> "$GITHUB_ENV"
             exit 0
           done
           echo "The Monaco slice failed twice; this is a real data-plane failure or a sustained S3 outage." >&2
           exit 1
+
+      - name: Encode and verify reverse shards from the positions artifact
+        run: |
+          set -euo pipefail
+          # Reverse R1-c: one `.plrx` shard per populated level-8 cell, encoded
+          # from the SAME work tree the slice run left behind -- no re-map, no
+          # credentials. `reverse-encode-v1`/`reverse-verify-v1` come from the
+          # construction-binaries build step above (`--bins` covers them). The
+          # driver sizes every shard from the pack DIRECTORIES (never the
+          # data), cross-checks each shard against the Python oracle, and the
+          # completeness equality asserted below is the R1 form of the
+          # finalizer invariant: shard records == positions artifact records
+          # == transform admitted rows.
+          python scripts/reverse_r1_slice_v1.py \
+            --work "$SLICE_WORK" --family places --output slice/reverse
+          # The map task carries whole row groups, so the positions artifact
+          # spans the task's FOUR cells even though the Monaco bbox itself sits
+          # inside be85 (which holds one of the two dense shards). Pinned as an
+          # exact set, like the task index: a release layout change surfaces as
+          # cell-set drift here instead of silently weakening the fixture.
+          #
+          # `mean_record_bytes` is gated against the MEASURED R1-b encoder
+          # model -- 112 B/record for places, INCLUDING the 16-byte source
+          # locator, not the design doc's 96 B. Real Monaco text fields run
+          # ~6% shorter than the synthetic model rows (measured 105.0 B on
+          # 2026-07-22.0), so the band is 10% of the model: wide enough for
+          # real-data drift, tight enough that a dropped field or added
+          # padding still trips it.
+          jq -e '
+            .schema == "overture-reverse-r1-slice-summary-v1"
+            and .family == "places"
+            and .shards == 4
+            and .cells == ["be84", "be85", "bf84", "bf85"]
+            and .records > 0
+            and .records == .artifact_records
+            and .artifact_records == .admitted_rows
+            and .model_record_bytes == 112
+            and (.mean_record_bytes | numbers) >= .model_record_bytes * 0.90
+            and (.mean_record_bytes | numbers) <= .model_record_bytes * 1.10
+            and (.per_cell | length) == .shards
+          ' slice/reverse/summary.json >/dev/null || {
+            echo "The reverse encode ran but its summary does not prove the shards are complete:" >&2
+            cat slice/reverse/summary.json >&2 || echo "(no reverse summary written)" >&2
+            echo "If only the cell set changed, release $SLICE_RELEASE row-group layout moved; update the pinned cells together with SLICE_TASK_INDEX." >&2
+            exit 1
+          }
+          cp -f slice/reverse/summary.json slice/reverse-summary.json
 
       - name: Summarize the slice run
         if: always()
@@ -304,6 +358,14 @@ jobs:
               echo
               echo "\`\`\`json"
               jq -S '.' slice/summary.json
+              echo "\`\`\`"
+            fi
+            if [ -f slice/reverse-summary.json ]; then
+              echo
+              echo "### Reverse R1 shards"
+              echo
+              echo "\`\`\`json"
+              jq -S '.' slice/reverse-summary.json
               echo "\`\`\`"
             fi
             for LOG in slice/run-attempt-*.log; do
@@ -528,10 +590,48 @@ jobs:
               exit 1
             }
             cp -f "${WORK}/summary.json" slice/address-summary.json
+            # The reverse step below consumes this attempt's completed work tree.
+            echo "ADDRESS_SLICE_WORK=$WORK" >> "$GITHUB_ENV"
             exit 0
           done
           echo "The Seattle address slice failed twice; this is a real data-plane failure or a sustained S3 outage." >&2
           exit 1
+
+      - name: Encode and verify reverse shards from the address records artifact
+        run: |
+          set -euo pipefail
+          # Reverse R1-c for the address family, same driver and same
+          # invariants as the places job: shards sized from the record-pack
+          # directories, verified by `reverse-verify-v1` and the Python
+          # oracle, and the completeness equality shard records == records
+          # artifact == transform admitted rows. Exactly the two cells the
+          # slice exists to span (c328/c329, the level-8 boundary at
+          # longitude -122.34375): one shard each, pinned as an exact set so a
+          # layout change cannot silently reduce this to a single-cell
+          # fixture. The address model is the measured 122 B/record (design
+          # 104 B plus the 16-byte locator and the u16 level-count prefix);
+          # real Seattle rows run shorter, so only the model identity is
+          # pinned here -- the places job carries the mean-size band.
+          python scripts/reverse_r1_slice_v1.py \
+            --work "$ADDRESS_SLICE_WORK" --family addresses --output slice/address-reverse
+          jq -e '
+            .schema == "overture-reverse-r1-slice-summary-v1"
+            and .family == "addresses"
+            and .shards == 2
+            and .cells == ["c328", "c329"]
+            and .records > 0
+            and .records == .artifact_records
+            and .artifact_records == .admitted_rows
+            and .model_record_bytes == 122
+            and (.mean_record_bytes | numbers) > 0
+            and (.per_cell | length) == .shards
+          ' slice/address-reverse/summary.json >/dev/null || {
+            echo "The address reverse encode ran but its summary does not prove the shards are complete:" >&2
+            cat slice/address-reverse/summary.json >&2 || echo "(no reverse summary written)" >&2
+            echo "If only the cell set changed, release $SLICE_RELEASE row-group layout moved; update the pinned cells together with ADDRESS_SLICE_TASK_INDEX." >&2
+            exit 1
+          }
+          cp -f slice/address-reverse/summary.json slice/address-reverse-summary.json
 
       - name: Summarize the address slice run
         if: always()
@@ -547,6 +647,14 @@ jobs:
               echo
               echo "\`\`\`json"
               jq -S '.' slice/address-summary.json
+              echo "\`\`\`"
+            fi
+            if [ -f slice/address-reverse-summary.json ]; then
+              echo
+              echo "### Reverse R1 shards"
+              echo
+              echo "\`\`\`json"
+              jq -S '.' slice/address-reverse-summary.json
               echo "\`\`\`"
             fi
             for LOG in slice/address-run-attempt-*.log; do
