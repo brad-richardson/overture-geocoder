@@ -13,6 +13,12 @@ use worker::*;
 
 use crate::address::MAX_ADDRESS_COLLECTION_BYTES;
 use crate::address::{build_lookup_key, AddressOutcome};
+use crate::places_construction_v1::{
+    construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, record_projection,
+    routed_lookup, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
+    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, MAX_ROUTED_OBJECT_BYTES,
+    PLACES_CONSTRUCTION_FORMAT,
+};
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
 };
@@ -382,8 +388,16 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
     {
         return Err(format!("v2 {name} operations differ from entrypoints"));
     }
+    // The promoted construction format (`PLRV0002+PLHD0002`) is accepted only
+    // for `family_slice` sources; every other Places source keeps the exact
+    // PCSH0001 contract. A construction format on a core_release source, a
+    // PCSH catalog entrypoint under the construction format, or any unknown
+    // format string all fail closed below.
+    let places_construction = name == "places"
+        && family.source.kind == "family_slice"
+        && family.versions.format == PLACES_CONSTRUCTION_FORMAT;
     if (name == "places"
-        && (family.versions.format != PLACES_FORMAT_VERSION
+        && ((!places_construction && family.versions.format != PLACES_FORMAT_VERSION)
             || family.operations != ["forward"]
             || family.versions.tokenizer.as_deref() != Some(TOKENIZER_VERSION)
             || family.versions.normalization.is_some()))
@@ -395,17 +409,25 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
     {
         return Err(format!("v2 {name} family versions are unsupported"));
     }
+    let places_entrypoint_key = if places_construction {
+        format!("{}/families/places/routing.json", family.source.version)
+    } else {
+        format!("{}/families/places/catalog.pcat", family.source.version)
+    };
+    let places_entrypoint_cap = if places_construction {
+        MAX_PLACES_ROUTING_BYTES
+    } else {
+        MAX_CATALOG_OBJECT_BYTES
+    };
     for (operation, identity) in &family.entrypoints {
         let prefix = format!("{}/families/{name}/", family.source.version);
         if !identity.object_key.starts_with(&prefix)
             || !safe_key(&identity.object_key)
             || identity.bytes == 0
             || !valid_sha256(&identity.sha256)
-            || (name == "places" && identity.bytes > MAX_CATALOG_OBJECT_BYTES)
+            || (name == "places" && identity.bytes > places_entrypoint_cap)
             || (name == "addresses" && identity.bytes > MAX_ADDRESS_COLLECTION_BYTES)
-            || (name == "places"
-                && identity.object_key
-                    != format!("{}/families/places/catalog.pcat", family.source.version))
+            || (name == "places" && identity.object_key != places_entrypoint_key)
             || (name == "addresses"
                 && identity.object_key
                     != format!(
@@ -594,6 +616,137 @@ fn places_head_requirement(
     })
 }
 
+/// `object_key -> (bytes, sha256)` identities a family manifest attests.
+type AttestedArtifacts = HashMap<String, (u64, String)>;
+
+/// Validate a promoted construction Places family manifest against the release
+/// reference and return its attested `object_key -> (bytes, sha256)` map.
+fn places_family_manifest_artifacts(
+    manifest_text: &str,
+    family: &FamilyReference,
+) -> std::result::Result<AttestedArtifacts, String> {
+    let actual_manifest_sha = format!("{:x}", Sha256::digest(manifest_text.as_bytes()));
+    if actual_manifest_sha != family.manifest_sha256 {
+        return Err("v2 Places family manifest SHA-256 differs from release".into());
+    }
+    let manifest: ServingFamilyManifest = serde_json::from_str(manifest_text)
+        .map_err(|error| format!("Invalid v2 Places family manifest: {error}"))?;
+    if manifest.schema != FAMILY_MANIFEST_SCHEMA
+        || manifest.family != "places"
+        || manifest.manifest_digest != family.manifest_digest
+        || manifest.artifacts.is_empty()
+        || manifest.artifacts.len() > MAX_FAMILY_MANIFEST_ARTIFACTS
+    {
+        return Err("unsupported v2 Places family manifest contract".into());
+    }
+    let mut artifacts = HashMap::with_capacity(manifest.artifacts.len());
+    for artifact in manifest.artifacts {
+        if artifact.bytes == 0 || !valid_sha256(&artifact.sha256) || !safe_key(&artifact.object_key)
+        {
+            return Err("invalid v2 Places family manifest artifact".into());
+        }
+        if artifacts
+            .insert(artifact.object_key, (artifact.bytes, artifact.sha256))
+            .is_some()
+        {
+            return Err("v2 Places family manifest repeats an artifact".into());
+        }
+    }
+    Ok(artifacts)
+}
+
+/// Admission for the promoted construction layout: authenticate the family
+/// manifest, prove routing.json's bytes against the release-pinned entrypoint
+/// identity, parse and validate the routing table, and require every object it
+/// can route to (including the head routing manifest) to be attested.
+fn places_construction_admission(
+    manifest_text: &str,
+    routing_text: &str,
+    family: &FamilyReference,
+) -> std::result::Result<(AttestedArtifacts, PlacesRouting), String> {
+    let artifacts = places_family_manifest_artifacts(manifest_text, family)?;
+    let entrypoint = family
+        .entrypoints
+        .get("forward")
+        .ok_or_else(|| "v2 Places construction family omits its forward entrypoint".to_string())?;
+    let attested_routing = artifacts
+        .get("families/places/routing.json")
+        .ok_or_else(|| "v2 Places family manifest omits routing.json".to_string())?;
+    if attested_routing.0 != entrypoint.bytes as u64 || attested_routing.1 != entrypoint.sha256 {
+        return Err("v2 Places routing identity differs between manifest and release".into());
+    }
+    let actual_routing_sha = format!("{:x}", Sha256::digest(routing_text.as_bytes()));
+    if routing_text.len() != entrypoint.bytes || actual_routing_sha != entrypoint.sha256 {
+        return Err("v2 Places routing bytes differ from the release-pinned identity".into());
+    }
+    let routing = PlacesRouting::parse(routing_text)?;
+    for name in routing.routed_object_names() {
+        if !artifacts.contains_key(&format!("families/places/objects/{name}")) {
+            return Err(format!(
+                "v2 Places routing names an unattested object: {name}"
+            ));
+        }
+    }
+    if !artifacts.contains_key(&format!(
+        "families/places/objects/{}",
+        routing.head.manifest_object
+    )) {
+        return Err("v2 Places head routing manifest is not attested".into());
+    }
+    Ok((artifacts, routing))
+}
+
+/// Head admission for the promoted construction layout: authenticate the head
+/// routing manifest bytes against the family-manifest attestation, check its
+/// geometry against routing.json, require every populated shard's identity to
+/// agree with the attestation, and emit the deterministic spot-check sample
+/// (first, middle, and last populated shards in shard-id order) as readiness
+/// objects that are then streamed-and-hashed from R2. Full verification of all
+/// 4,096 shards (5.14 GB) is deliberately not done at admission; the per-shard
+/// identities stay pinned by this manifest, whose own bytes are pinned by the
+/// release-attested family manifest.
+fn places_construction_head_requirements(
+    head_manifest_text: &str,
+    routing: &PlacesRouting,
+    artifacts: &AttestedArtifacts,
+    version: &str,
+) -> std::result::Result<Vec<ReadinessObject>, String> {
+    let attested = artifacts
+        .get(&format!(
+            "families/places/objects/{}",
+            routing.head.manifest_object
+        ))
+        .ok_or_else(|| "v2 Places head routing manifest is not attested".to_string())?;
+    let actual_sha = format!("{:x}", Sha256::digest(head_manifest_text.as_bytes()));
+    if head_manifest_text.len() as u64 != attested.0 || actual_sha != attested.1 {
+        return Err("v2 Places head routing manifest bytes differ from attestation".into());
+    }
+    let manifest = HeadRoutingManifest::parse(head_manifest_text)?;
+    if !manifest.agrees_with(&routing.head) {
+        return Err("v2 Places head routing manifest geometry differs from routing.json".into());
+    }
+    for shard in manifest.shards() {
+        let attested = artifacts
+            .get(&format!("families/places/objects/{}", shard.path))
+            .ok_or_else(|| format!("v2 Places head shard is not attested: {}", shard.path))?;
+        if attested.0 != shard.bytes || attested.1 != shard.sha256 {
+            return Err(format!(
+                "v2 Places head shard identity disagrees between manifests: {}",
+                shard.path
+            ));
+        }
+    }
+    Ok(manifest
+        .admission_sample()
+        .into_iter()
+        .map(|shard| ReadinessObject {
+            key: format!("{version}/families/places/objects/{}", shard.path),
+            expected_bytes: Some(shard.bytes),
+            expected_sha256: shard.sha256.clone(),
+        })
+        .collect())
+}
+
 fn readiness_identity_matches(
     requirement: &ReadinessObject,
     actual_bytes: u64,
@@ -625,6 +778,54 @@ impl ShardLoader {
         places_head_requirement(&manifest_text, family).map_err(Error::RustError)
     }
 
+    /// Admission for the promoted construction Places layout: authenticate the
+    /// family manifest, routing.json, and head routing manifest identities,
+    /// then stream-verify only the deterministic head-shard sample.
+    async fn verify_places_construction_readiness(&self, family: &FamilyReference) -> Result<()> {
+        let manifest_text = self
+            .memoized_get_bounded_text(
+                &family.manifest_key,
+                MAX_PLACES_FAMILY_MANIFEST_BYTES,
+                IMMUTABLE_CACHE_TTL,
+            )
+            .await?
+            .ok_or_else(|| crate::stac::not_found(&family.manifest_key))?;
+        self.forget_memoized_text(&family.manifest_key);
+        let routing_key = format!("{}/families/places/routing.json", family.source.version);
+        let routing_text = self
+            .memoized_get_bounded_text(&routing_key, MAX_PLACES_ROUTING_BYTES, IMMUTABLE_CACHE_TTL)
+            .await?
+            .ok_or_else(|| crate::stac::not_found(&routing_key))?;
+        self.forget_memoized_text(&routing_key);
+        let (artifacts, routing) =
+            places_construction_admission(&manifest_text, &routing_text, family)
+                .map_err(Error::RustError)?;
+        let head_key = format!(
+            "{}/families/places/objects/{}",
+            family.source.version, routing.head.manifest_object
+        );
+        let head_text = self
+            .memoized_get_bounded_text(
+                &head_key,
+                MAX_PLACES_HEAD_ROUTING_BYTES,
+                IMMUTABLE_CACHE_TTL,
+            )
+            .await?
+            .ok_or_else(|| crate::stac::not_found(&head_key))?;
+        self.forget_memoized_text(&head_key);
+        let requirements = places_construction_head_requirements(
+            &head_text,
+            &routing,
+            &artifacts,
+            &family.source.version,
+        )
+        .map_err(Error::RustError)?;
+        for requirement in requirements {
+            self.verify_readiness_object(&requirement).await?;
+        }
+        Ok(())
+    }
+
     async fn verify_readiness_object(&self, requirement: &ReadinessObject) -> Result<()> {
         let max_bytes = requirement
             .expected_bytes
@@ -647,8 +848,12 @@ impl ShardLoader {
             self.verify_readiness_object(&requirement).await?;
         }
         if let Some(places) = release.families.get("places") {
-            let head = self.verified_places_head_requirement(places).await?;
-            self.verify_readiness_object(&head).await?;
+            if places.versions.format == PLACES_CONSTRUCTION_FORMAT {
+                self.verify_places_construction_readiness(places).await?;
+            } else {
+                let head = self.verified_places_head_requirement(places).await?;
+                self.verify_readiness_object(&head).await?;
+            }
         }
         Ok(())
     }
@@ -1024,14 +1229,120 @@ fn haversine_km(latitude_a: f64, longitude_a: f64, latitude_b: f64, longitude_b:
     2.0 * radius_km * haversine.sqrt().asin()
 }
 
-async fn search_places(
+/// Serve `/v2/forward` Places from a promoted construction slice
+/// (`PLRV0002+PLHD0002`). The no-proximity lane resolves each exact token
+/// through the sharded global head; the proximity lane derives the level-4
+/// construction cell for the bias point, selects each token's nibble-prefix
+/// subpartition from routing.json, and answers from the routed `.plrv`
+/// artifact. Both artifact classes carry exact tokens only, so autocomplete
+/// prefix expansion does not apply here.
+async fn search_places_construction(
     loader: &ShardLoader,
     entrypoint: &ArtifactIdentity,
+    query: &str,
+    proximity: Option<(f64, f64)>,
+    limit: usize,
+) -> Result<Vec<PlaceProjection>> {
+    const SUFFIX: &str = "/routing.json";
+    let object_root = entrypoint
+        .object_key
+        .strip_suffix(SUFFIX)
+        .ok_or_else(|| Error::RustError("v2 Places entrypoint is not a routing object".into()))?;
+    let tokens = query_terms(query);
+    if tokens.is_empty() || tokens.len() > 4 {
+        return Ok(Vec::new());
+    }
+    let routing = loader
+        .lookup_places_construction_routing(&entrypoint.object_key)
+        .await?;
+    if let Some((longitude, latitude)) = proximity {
+        let Some(cell) = construction_cell(longitude, latitude) else {
+            return Ok(Vec::new());
+        };
+        let mut fetched: HashMap<String, bytes::Bytes> = HashMap::new();
+        let mut per_token = Vec::with_capacity(tokens.len());
+        for token in &tokens {
+            // A bias point in an unpopulated cell is an empty result, not an
+            // error; a populated cell that owns no subpartition for the token
+            // hash is a broken tiling invariant and fails closed inside route.
+            let Some(object) = routing.route(&cell, token).map_err(Error::RustError)? else {
+                return Ok(Vec::new());
+            };
+            let object_key = format!("{object_root}/objects/{object}");
+            let bytes = match fetched.get(&object_key) {
+                Some(bytes) => bytes.clone(),
+                None => {
+                    let bytes = loader
+                        .places_construction_object(&object_key, MAX_ROUTED_OBJECT_BYTES)
+                        .await?;
+                    fetched.insert(object_key, bytes.clone());
+                    bytes
+                }
+            };
+            let records = routed_lookup(&bytes, &cell, token).map_err(Error::RustError)?;
+            if records.is_empty() {
+                return Ok(Vec::new());
+            }
+            per_token.push(records);
+        }
+        let mut records = intersect_ranked(per_token);
+        records.truncate(limit);
+        let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
+        for place in &mut results {
+            place.distance_km = Some(haversine_km(
+                latitude,
+                longitude,
+                f64::from(place.latitude),
+                f64::from(place.longitude),
+            ));
+        }
+        return Ok(results);
+    }
+    if tokens.len() > 2 {
+        return Ok(Vec::new());
+    }
+    let head_manifest_key = format!("{object_root}/objects/{}", routing.head.manifest_object);
+    let head = loader
+        .lookup_places_construction_head_routing(&head_manifest_key, &routing.head)
+        .await?;
+    let mut per_token = Vec::with_capacity(tokens.len());
+    for token in &tokens {
+        let shard_id = head_shard_id(token, head.shard_bits);
+        // An unpopulated shard means no head record exists for the token.
+        let Some(shard) = head.shard(shard_id) else {
+            return Ok(Vec::new());
+        };
+        let object_key = format!("{object_root}/objects/{}", shard.path);
+        let bytes = loader
+            .places_construction_object(&object_key, MAX_HEAD_SHARD_BYTES)
+            .await?;
+        let records = head_shard_lookup(&bytes, shard_id, head.shard_bits, token)
+            .map_err(Error::RustError)?;
+        if records.is_empty() {
+            return Ok(Vec::new());
+        }
+        per_token.push(records);
+    }
+    let mut records = intersect_ranked(per_token);
+    records.truncate(limit);
+    Ok(records.iter().map(record_projection).collect())
+}
+
+async fn search_places(
+    loader: &ShardLoader,
+    family: &FamilyReference,
     query: &str,
     proximity: Option<(f64, f64)>,
     autocomplete: bool,
     limit: usize,
 ) -> Result<Vec<PlaceProjection>> {
+    let entrypoint = family
+        .entrypoints
+        .get("forward")
+        .ok_or_else(|| Error::RustError("v2 Places family omits its forward entrypoint".into()))?;
+    if family.versions.format == PLACES_CONSTRUCTION_FORMAT {
+        return search_places_construction(loader, entrypoint, query, proximity, limit).await;
+    }
     const SUFFIX: &str = "/catalog.pcat";
     let object_root = entrypoint
         .object_key
@@ -1278,7 +1589,11 @@ pub(crate) async fn handle_forward(
         ranked.extend(search.results.iter().map(division_feature));
     }
     if types.contains("poi") {
-        let Some(entrypoint) = release.family_entrypoint("places", "forward") else {
+        let places_family = release
+            .families
+            .get("places")
+            .filter(|family| family.entrypoints.contains_key("forward"));
+        let Some(family) = places_family else {
             if params.contains_key("types") {
                 return json_error("capability_unavailable", "Places data is unavailable", 503);
             }
@@ -1292,7 +1607,7 @@ pub(crate) async fn handle_forward(
         };
         let places = search_places(
             &loader,
-            entrypoint,
+            family,
             query.as_str(),
             proximity,
             autocomplete,
@@ -1810,6 +2125,357 @@ mod tests {
         let valid = manifest(json!([valid_artifact]));
         places.manifest_sha256 = "f".repeat(64);
         assert!(places_head_requirement(&valid, places).is_err());
+    }
+
+    fn construction_release_value() -> Value {
+        let mut value = release_value();
+        value["families"]["places"]["versions"]["format"] = json!(PLACES_CONSTRUCTION_FORMAT);
+        value["families"]["places"]["entrypoints"]["forward"]["object_key"] =
+            json!("slice-2026-07-19.0/families/places/routing.json");
+        value
+    }
+
+    #[test]
+    fn construction_format_is_accepted_for_slices_only_with_routing_entrypoint() {
+        let release: V2Release = serde_json::from_value(construction_release_value()).unwrap();
+        validate_release(&release, &catalog().releases[0]).unwrap();
+
+        // Construction format with the PCSH catalog entrypoint fails closed.
+        let mut mixed = construction_release_value();
+        mixed["families"]["places"]["entrypoints"]["forward"]["object_key"] =
+            json!("slice-2026-07-19.0/families/places/catalog.pcat");
+        let mixed: V2Release = serde_json::from_value(mixed).unwrap();
+        assert!(validate_release(&mixed, &catalog().releases[0]).is_err());
+
+        // PCSH format with the routing entrypoint fails closed.
+        let mut mixed = release_value();
+        mixed["families"]["places"]["entrypoints"]["forward"]["object_key"] =
+            json!("slice-2026-07-19.0/families/places/routing.json");
+        let mixed: V2Release = serde_json::from_value(mixed).unwrap();
+        assert!(validate_release(&mixed, &catalog().releases[0]).is_err());
+
+        // Construction format on a core_release source fails closed.
+        let mut core = construction_release_value();
+        core["families"]["places"]["source"] = json!({
+            "kind": "core_release",
+            "version": "2026-07-19.0",
+            "manifest_key": "2026-07-19.0/release-manifest.json",
+            "manifest_sha256": sha(),
+        });
+        core["families"]["places"]["manifest_key"] =
+            json!("2026-07-19.0/families/places/family-manifest.json");
+        core["families"]["places"]["entrypoints"]["forward"]["object_key"] =
+            json!("2026-07-19.0/families/places/routing.json");
+        let core: V2Release = serde_json::from_value(core).unwrap();
+        assert!(validate_release(&core, &catalog().releases[0]).is_err());
+
+        // An unknown format string stays rejected on either source kind.
+        let mut unknown = construction_release_value();
+        unknown["families"]["places"]["versions"]["format"] = json!("PLRV9999+PLHD9999");
+        let unknown: V2Release = serde_json::from_value(unknown).unwrap();
+        assert!(validate_release(&unknown, &catalog().releases[0]).is_err());
+
+        // The routing entrypoint keeps its own byte cap.
+        let mut oversized = construction_release_value();
+        oversized["families"]["places"]["entrypoints"]["forward"]["bytes"] =
+            json!(MAX_PLACES_ROUTING_BYTES + 1);
+        let oversized: V2Release = serde_json::from_value(oversized).unwrap();
+        assert!(validate_release(&oversized, &catalog().releases[0]).is_err());
+    }
+
+    fn hex_name(seed: u8, extension: &str) -> String {
+        format!("{}{extension}", format!("{seed:02x}").repeat(32))
+    }
+
+    struct ConstructionFixture {
+        family: FamilyReference,
+        manifest_text: String,
+        routing_text: String,
+        head_text: String,
+        shard_identities: Vec<(u32, String, String, u64)>,
+    }
+
+    /// A consistent promoted-slice control-document set: three populated head
+    /// shards, one unsplit routed cell, and a family manifest attesting every
+    /// object plus routing.json, with the release entrypoint pinned to the
+    /// routing bytes.
+    fn construction_fixture() -> ConstructionFixture {
+        let routed_name = hex_name(0x11, ".plrv");
+        let shard_identities: Vec<(u32, String, String, u64)> = [3_u32, 7, 12]
+            .into_iter()
+            .map(|id| {
+                (
+                    id,
+                    hex_name(0x20 + id as u8, ".plhd"),
+                    format!("{:02x}", 0x40 + id).repeat(32),
+                    100 + u64::from(id),
+                )
+            })
+            .collect();
+        let head_text = serde_json::to_string(&json!({
+            "schema": "overture-places-global-head-sharded-v2",
+            "shard_bits": 4,
+            "shard_count": 16,
+            "populated_shards": 3,
+            "shards": shard_identities
+                .iter()
+                .map(|(id, path, sha256, bytes)| json!({
+                    "shard_id": id,
+                    "path": path,
+                    "sha256": sha256,
+                    "bytes": bytes,
+                }))
+                .collect::<Vec<_>>(),
+        }))
+        .unwrap();
+        let head_name = format!("{:x}.json", Sha256::digest(head_text.as_bytes()));
+        let routing_text = serde_json::to_string(&json!({
+            "schema": "overture-promoted-places-routing-v1",
+            "family": "places",
+            "cell_scheme": "level-4-quadkey-yx-hex",
+            "subpartition_scheme": "token-sha256-nibble-prefix-v1",
+            "cells": {"8080": [["", routed_name]]},
+            "head": {
+                "schema": "overture-places-global-head-sharded-v2",
+                "shard_bits": 4,
+                "shard_count": 16,
+                "populated_shards": 3,
+                "manifest_object": head_name,
+            },
+        }))
+        .unwrap();
+        let mut artifacts = vec![json!({
+            "object_key": "families/places/routing.json",
+            "bytes": routing_text.len(),
+            "sha256": format!("{:x}", Sha256::digest(routing_text.as_bytes())),
+        })];
+        artifacts.push(json!({
+            "object_key": format!("families/places/objects/{routed_name}"),
+            "bytes": 4096,
+            "sha256": "1".repeat(64),
+        }));
+        artifacts.push(json!({
+            "object_key": format!("families/places/objects/{head_name}"),
+            "bytes": head_text.len(),
+            "sha256": format!("{:x}", Sha256::digest(head_text.as_bytes())),
+        }));
+        for (_, path, sha256, bytes) in &shard_identities {
+            artifacts.push(json!({
+                "object_key": format!("families/places/objects/{path}"),
+                "bytes": bytes,
+                "sha256": sha256,
+            }));
+        }
+        let manifest_text = serde_json::to_string(&json!({
+            "schema": FAMILY_MANIFEST_SCHEMA,
+            "family": "places",
+            "manifest_digest": sha(),
+            "artifacts": artifacts,
+        }))
+        .unwrap();
+        let mut family = construction_release_value()["families"]["places"].clone();
+        family["manifest_sha256"] =
+            json!(format!("{:x}", Sha256::digest(manifest_text.as_bytes())));
+        family["entrypoints"]["forward"]["bytes"] = json!(routing_text.len());
+        family["entrypoints"]["forward"]["sha256"] =
+            json!(format!("{:x}", Sha256::digest(routing_text.as_bytes())));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        ConstructionFixture {
+            family,
+            manifest_text,
+            routing_text,
+            head_text,
+            shard_identities,
+        }
+    }
+
+    #[test]
+    fn construction_admission_pins_identities_and_samples_head_shards() {
+        let fixture = construction_fixture();
+        let (artifacts, routing) = places_construction_admission(
+            &fixture.manifest_text,
+            &fixture.routing_text,
+            &fixture.family,
+        )
+        .unwrap();
+        let requirements = places_construction_head_requirements(
+            &fixture.head_text,
+            &routing,
+            &artifacts,
+            "slice-2026-07-19.0",
+        )
+        .unwrap();
+
+        // The sample is the first, middle, and last populated shards.
+        let expected: Vec<&(u32, String, String, u64)> = vec![
+            &fixture.shard_identities[0],
+            &fixture.shard_identities[1],
+            &fixture.shard_identities[2],
+        ];
+        assert_eq!(requirements.len(), expected.len());
+        for (requirement, (_, path, sha256, bytes)) in requirements.iter().zip(expected) {
+            assert_eq!(
+                requirement.key,
+                format!("slice-2026-07-19.0/families/places/objects/{path}")
+            );
+            assert_eq!(requirement.expected_bytes, Some(*bytes));
+            assert_eq!(&requirement.expected_sha256, sha256);
+            // The streamed shard must reproduce the manifest identity exactly:
+            // a tampered stored shard (wrong bytes or wrong hash) fails.
+            assert!(readiness_identity_matches(requirement, *bytes, sha256));
+            assert!(!readiness_identity_matches(requirement, *bytes + 1, sha256));
+            assert!(!readiness_identity_matches(
+                requirement,
+                *bytes,
+                &"f".repeat(64)
+            ));
+        }
+    }
+
+    #[test]
+    fn construction_admission_rejects_tampered_documents() {
+        let fixture = construction_fixture();
+
+        // Tampered family manifest bytes.
+        let mut tampered_manifest = fixture.manifest_text.clone();
+        tampered_manifest.push(' ');
+        assert!(places_construction_admission(
+            &tampered_manifest,
+            &fixture.routing_text,
+            &fixture.family
+        )
+        .unwrap_err()
+        .contains("SHA-256 differs"));
+
+        // Tampered routing bytes.
+        let mut tampered_routing = fixture.routing_text.clone();
+        tampered_routing.push(' ');
+        assert!(places_construction_admission(
+            &fixture.manifest_text,
+            &tampered_routing,
+            &fixture.family
+        )
+        .unwrap_err()
+        .contains("release-pinned identity"));
+
+        // A routed object the family manifest does not attest.
+        let mut unattested: Value = serde_json::from_str(&fixture.manifest_text).unwrap();
+        let artifacts = unattested["artifacts"].as_array_mut().unwrap();
+        artifacts.retain(|artifact| !artifact["object_key"].as_str().unwrap().ends_with(".plrv"));
+        let unattested = serde_json::to_string(&unattested).unwrap();
+        let mut family = construction_release_value()["families"]["places"].clone();
+        family["manifest_sha256"] = json!(format!("{:x}", Sha256::digest(unattested.as_bytes())));
+        family["entrypoints"]["forward"]["bytes"] = json!(fixture.routing_text.len());
+        family["entrypoints"]["forward"]["sha256"] = json!(format!(
+            "{:x}",
+            Sha256::digest(fixture.routing_text.as_bytes())
+        ));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        assert!(
+            places_construction_admission(&unattested, &fixture.routing_text, &family)
+                .unwrap_err()
+                .contains("unattested object")
+        );
+
+        // Tampered head routing manifest bytes.
+        let (artifacts, routing) = places_construction_admission(
+            &fixture.manifest_text,
+            &fixture.routing_text,
+            &fixture.family,
+        )
+        .unwrap();
+        let mut tampered_head = fixture.head_text.clone();
+        tampered_head.push(' ');
+        assert!(places_construction_head_requirements(
+            &tampered_head,
+            &routing,
+            &artifacts,
+            "slice-2026-07-19.0"
+        )
+        .unwrap_err()
+        .contains("differ from attestation"));
+
+        // A shard whose identity disagrees between the two manifests.
+        let mut lying_head: Value = serde_json::from_str(&fixture.head_text).unwrap();
+        lying_head["shards"][0]["sha256"] = json!("e".repeat(64));
+        let lying_head = serde_json::to_string(&lying_head).unwrap();
+        let mut manifest: Value = serde_json::from_str(&fixture.manifest_text).unwrap();
+        for artifact in manifest["artifacts"].as_array_mut().unwrap() {
+            let key = artifact["object_key"].as_str().unwrap().to_string();
+            if key.ends_with(".json") && key.contains("objects/") {
+                artifact["bytes"] = json!(lying_head.len());
+                artifact["sha256"] = json!(format!("{:x}", Sha256::digest(lying_head.as_bytes())));
+            }
+        }
+        // The head manifest object is content-addressed, so its renamed copy
+        // needs a matching routing pointer; patch both.
+        let lying_head_name = format!("{:x}.json", Sha256::digest(lying_head.as_bytes()));
+        for artifact in manifest["artifacts"].as_array_mut().unwrap() {
+            let key = artifact["object_key"].as_str().unwrap().to_string();
+            if key.ends_with(".json") && key.contains("objects/") {
+                artifact["object_key"] =
+                    json!(format!("families/places/objects/{lying_head_name}"));
+            }
+        }
+        let mut routing_value: Value = serde_json::from_str(&fixture.routing_text).unwrap();
+        routing_value["head"]["manifest_object"] = json!(lying_head_name);
+        let routing_text = serde_json::to_string(&routing_value).unwrap();
+        for artifact in manifest["artifacts"].as_array_mut().unwrap() {
+            if artifact["object_key"] == json!("families/places/routing.json") {
+                artifact["bytes"] = json!(routing_text.len());
+                artifact["sha256"] =
+                    json!(format!("{:x}", Sha256::digest(routing_text.as_bytes())));
+            }
+        }
+        let manifest_text = serde_json::to_string(&manifest).unwrap();
+        let mut family = construction_release_value()["families"]["places"].clone();
+        family["manifest_sha256"] =
+            json!(format!("{:x}", Sha256::digest(manifest_text.as_bytes())));
+        family["entrypoints"]["forward"]["bytes"] = json!(routing_text.len());
+        family["entrypoints"]["forward"]["sha256"] =
+            json!(format!("{:x}", Sha256::digest(routing_text.as_bytes())));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        let (artifacts, routing) =
+            places_construction_admission(&manifest_text, &routing_text, &family).unwrap();
+        assert!(places_construction_head_requirements(
+            &lying_head,
+            &routing,
+            &artifacts,
+            "slice-2026-07-19.0"
+        )
+        .unwrap_err()
+        .contains("disagrees between manifests"));
+
+        // Head geometry that differs from routing.json fails closed.
+        let mut short_routing: Value = serde_json::from_str(&fixture.routing_text).unwrap();
+        short_routing["head"]["populated_shards"] = json!(2);
+        let short_routing = serde_json::to_string(&short_routing).unwrap();
+        let mut manifest: Value = serde_json::from_str(&fixture.manifest_text).unwrap();
+        for artifact in manifest["artifacts"].as_array_mut().unwrap() {
+            if artifact["object_key"] == json!("families/places/routing.json") {
+                artifact["bytes"] = json!(short_routing.len());
+                artifact["sha256"] =
+                    json!(format!("{:x}", Sha256::digest(short_routing.as_bytes())));
+            }
+        }
+        let manifest_text = serde_json::to_string(&manifest).unwrap();
+        let mut family = construction_release_value()["families"]["places"].clone();
+        family["manifest_sha256"] =
+            json!(format!("{:x}", Sha256::digest(manifest_text.as_bytes())));
+        family["entrypoints"]["forward"]["bytes"] = json!(short_routing.len());
+        family["entrypoints"]["forward"]["sha256"] =
+            json!(format!("{:x}", Sha256::digest(short_routing.as_bytes())));
+        let family: FamilyReference = serde_json::from_value(family).unwrap();
+        let (artifacts, routing) =
+            places_construction_admission(&manifest_text, &short_routing, &family).unwrap();
+        assert!(places_construction_head_requirements(
+            &fixture.head_text,
+            &routing,
+            &artifacts,
+            "slice-2026-07-19.0"
+        )
+        .unwrap_err()
+        .contains("geometry differs"));
     }
 
     #[test]

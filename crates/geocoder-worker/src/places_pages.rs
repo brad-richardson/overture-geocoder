@@ -558,7 +558,7 @@ fn valid_quadkey(cell: &str, minimum_level: usize, maximum_level: usize) -> bool
         && cell.bytes().all(|digit| (b'0'..=b'3').contains(&digit))
 }
 
-fn point_quadkey(longitude: f64, latitude: f64, level: usize) -> Option<String> {
+pub(crate) fn point_quadkey(longitude: f64, latitude: f64, level: usize) -> Option<String> {
     if level == 0
         || level > MAX_QUADKEY_LEVEL
         || !(-180.0..=180.0).contains(&longitude)
