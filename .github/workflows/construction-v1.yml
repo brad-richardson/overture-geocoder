@@ -1333,12 +1333,50 @@ jobs:
         with:
           ref: ${{ needs.admit.outputs.producer_commit }}
           persist-credentials: false
+      # Finalize is transport/control-plane code, not a data producer. The immutable
+      # request deliberately pins the source transforms used by map/reduce/head, but
+      # that also means a recovery would otherwise check out the old finalizer that
+      # the recovery exists to repair. Keep the authenticated producer tree and
+      # overlay only this reviewed four-file finalizer allowlist from the exact
+      # dispatched main SHA. The next step proves both checkouts and every copy.
+      - name: Check out reviewed finalizer transport from dispatched main
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ github.sha }}
+          path: finalizer-overlay
+          persist-credentials: false
+          sparse-checkout: |
+            scripts/construction_staging_v1.py
+            scripts/construction_v1_hosted.py
+            scripts/construction_v1_remote.py
+            scripts/r2_verified_store.py
+          sparse-checkout-cone-mode: false
       - name: Set up exact Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
           python-version: "3.11.14"
       - name: Install hash-pinned hosted dependencies
         run: "python -m pip install --only-binary=:all: --require-hashes -r .github/requirements-hosted-rowgroup.txt"
+      - name: Overlay and verify reviewed finalizer transport
+        env:
+          PINNED_PRODUCER: ${{ needs.admit.outputs.producer_commit }}
+          REVIEWED_FINALIZER_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$PINNED_PRODUCER"
+          test "$(git -C finalizer-overlay rev-parse HEAD)" = "$REVIEWED_FINALIZER_SHA"
+          FILES=(
+            scripts/construction_staging_v1.py
+            scripts/construction_v1_hosted.py
+            scripts/construction_v1_remote.py
+            scripts/r2_verified_store.py
+          )
+          for FILE in "${FILES[@]}"; do
+            cp -- "finalizer-overlay/$FILE" "$FILE"
+            cmp --silent "finalizer-overlay/$FILE" "$FILE"
+          done
+          python -c 'import inspect, sys; sys.path.insert(0, "scripts"); import construction_v1_hosted as H, construction_v1_remote as R, r2_verified_store as S; source = inspect.getsource(H.cmd_finalize); assert "admission_concurrency=admission_concurrency" in source; assert "progress=report_progress" in source; assert "def download_with_info" in inspect.getsource(S.Boto3Store); assert inspect.signature(R.publish_exact_set).parameters["admission_concurrency"].default == 1'
+          echo "Verified finalizer transport overlay at $REVIEWED_FINALIZER_SHA over pinned producer $PINNED_PRODUCER"
       - name: Download all reduce fragments
         if: needs.admit.outputs.head_only_resume != 'true' && needs.admit.outputs.finalize_only_resume != 'true'
         uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
