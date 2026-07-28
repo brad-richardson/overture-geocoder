@@ -529,6 +529,62 @@ def test_finalize_only_resume_authenticates_the_successful_head_and_skips_it():
     assert 'if [ "$REDUCERS_ALREADY_ACCOUNTED" != true ]; then' in value
 
 
+def test_finalize_overlays_only_reviewed_transport_from_the_dispatch_sha():
+    """Recovery must not silently execute the finalizer defect it was built to fix.
+
+    The request-pinned checkout preserves data-production semantics, but finalize is
+    precisely where later transport fixes have to run. Pin both trees, copy an exact
+    allowlist, and prove the live Python surface before touching R2.
+    """
+    steps = parsed()["jobs"]["finalize"]["steps"]
+    checkout = next(
+        step
+        for step in steps
+        if step["name"] == "Check out reviewed finalizer transport from dispatched main"
+    )
+    assert checkout["uses"] == (
+        "actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0"
+    )
+    assert checkout["with"]["ref"] == "${{ github.sha }}"
+    assert checkout["with"]["path"] == "finalizer-overlay"
+    assert checkout["with"]["persist-credentials"] is False
+    assert checkout["with"]["sparse-checkout-cone-mode"] is False
+
+    expected = {
+        "scripts/construction_staging_v1.py",
+        "scripts/construction_v1_hosted.py",
+        "scripts/construction_v1_remote.py",
+        "scripts/r2_verified_store.py",
+    }
+    assert set(checkout["with"]["sparse-checkout"].splitlines()) == expected
+
+    overlay = next(
+        step
+        for step in steps
+        if step["name"] == "Overlay and verify reviewed finalizer transport"
+    )
+    run = overlay["run"]
+    assert overlay["env"]["PINNED_PRODUCER"] == (
+        "${{ needs.admit.outputs.producer_commit }}"
+    )
+    assert overlay["env"]["REVIEWED_FINALIZER_SHA"] == "${{ github.sha }}"
+    assert 'test "$(git rev-parse HEAD)" = "$PINNED_PRODUCER"' in run
+    assert (
+        'test "$(git -C finalizer-overlay rev-parse HEAD)" = '
+        '"$REVIEWED_FINALIZER_SHA"'
+    ) in run
+    assert 'cp -- "finalizer-overlay/$FILE" "$FILE"' in run
+    assert 'cmp --silent "finalizer-overlay/$FILE" "$FILE"' in run
+    for path in expected:
+        assert run.count(path) == 1
+    for proof in (
+        "admission_concurrency=admission_concurrency",
+        "progress=report_progress",
+        "def download_with_info",
+    ):
+        assert proof in run
+
+
 def test_workflow_pins_actions_and_hash_locked_dependencies():
     value = text()
     requirements = REQUIREMENTS.read_text()
