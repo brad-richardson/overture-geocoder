@@ -1,20 +1,55 @@
 #!/usr/bin/env python3
-"""Build and validate the non-promoting v2 release/catalog control plane.
+"""Build, validate, and publish the v2 release/catalog control plane.
 
-The public v1 catalog remains the production discovery root.  This module
-creates a separate, deterministic v2 release manifest which binds one complete
-legacy core release (division forward/reverse plus the ID index) to optional
-Places and address family manifests from that same Overture release.  It also
-creates a ``v2/catalog.json`` candidate.  Neither command accesses R2 or
-publishes a catalog.
+The document layer (``release`` / ``validate-release`` / ``catalog`` /
+``validate-catalog``) creates and proves the deterministic v2 release manifest
+binding one complete legacy core release (division forward/reverse plus the ID
+index) to optional Places and address family manifests from that same Overture
+release, plus a ``v2/catalog.json`` candidate.  Those four subcommands never
+access R2.
+
+The publication layer makes ``/v2/forward`` live:
+
+``assemble`` reads a promoted ``slice-YYYY-MM-DD.N`` construction tree plus the
+frozen legacy core from R2 (or a ``local:`` mirror), hashes every byte the
+worker will pin (family manifests, the slice source manifest, the routing
+entrypoints, the legacy release manifest), and emits a canonical
+``release.json`` locally.  ``publish-release`` is the create-only upload of
+``v2/releases/{build}/release.json``; byte-identical re-runs succeed, different
+bytes fail closed, and the catalog is never touched.  ``promote`` is a
+compare-and-swap write of ``v2/catalog.json`` against an explicitly stated
+expectation (``--expect-absent`` or ``--expect-sha256``), re-proving every
+release reference against its source bytes first.  ``recover`` repoints the
+catalog at a prior release under the same discipline, or ``--delete``\\ s it so
+the worker serves 503 ``release_unavailable``.  Release documents are never
+deleted by tooling.  All publication writes are dry-run by default
+(``--execute`` writes), are announced with target key + SHA-256 before any
+write, and every written object is re-downloaded and hashed afterwards.
+
+CAS honesty: on R2 the swap sends ``If-Match`` with the ETag captured by the
+SAME GET that hashed the current catalog, so the conditional PUT is atomic at
+the store IF R2 enforces ``If-Match`` on PutObject.  That header is exercised
+nowhere else in this repo; probe it with one object (PUT, then a second PUT
+carrying a stale ``If-Match``, expecting 412) before the first production
+promote -- the PR #181 discipline promote_construction_slice applies to
+CopyObject.  The create-only leg (``If-None-Match: *``) is already
+execution-proven live (PR #181).  On the ``local:`` backend the swap and the
+delete are check-then-act with a small unavoidable race window between reading
+the current bytes and replacing them; that backend exists for rehearsal, not
+production.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
+import hashlib
+import io
 import json
+import os
 import re
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -46,8 +81,18 @@ DEFAULT_FAMILY_OPERATIONS = {
     "addresses": ["structured_forward"],
     "places": ["forward"],
 }
+# Operation dependencies are keyed by (family, operation, versions.format):
+# the worker's admission requires the canonical global head for the legacy
+# PCSH0001 Places layout, and the routing.json entrypoint for the promoted
+# construction formats (crates/geocoder-worker/src/v2.rs
+# verify_v2_release_readiness / places_construction_admission /
+# address_construction_admission).
 FAMILY_OPERATION_DEPENDENCIES = {
-    ("places", "forward"): ["families/places/head.phrp"],
+    ("places", "forward", "PCSH0001"): ["families/places/head.phrp"],
+    ("places", "forward", "PLRV0002+PLHD0002"): ["families/places/routing.json"],
+    ("addresses", "structured_forward", "OAV1ART"): [
+        "families/addresses/routing.json"
+    ],
 }
 CORE_OPERATIONS = {
     "feature_lookup": ["id"],
@@ -469,7 +514,7 @@ def build_release_manifest(
         }
         for operation in operations:
             for required_key in FAMILY_OPERATION_DEPENDENCIES.get(
-                (family, operation), []
+                (family, operation, validated["versions"]["format"]), []
             ):
                 if required_key not in artifacts_by_key:
                     raise ValueError(
@@ -913,6 +958,710 @@ def validate_catalog(
     return catalog
 
 
+# ---------------------------------------------------------------------------
+# Publication layer: assemble / publish-release / promote / recover.
+#
+# Worker admission contract for promoted construction slices, mined from
+# crates/geocoder-worker/src/v2.rs validate_family (the worker is FROZEN; this
+# producer conforms to it, never the reverse):
+#
+#   format strings : "PLRV0002+PLHD0002" (places_construction_v1.rs:32) and
+#                    "OAV1ART" (address_construction_v1.rs:47), accepted only
+#                    on family_slice sources (v2.rs:397-402).
+#   tokenizer      : places must carry exactly TOKENIZER_VERSION
+#                    "nfkd-lower-stripmark-cjk-bigram-v4" (places_pages.rs:67,
+#                    v2.rs:411) and null normalization; addresses the reverse,
+#                    with ADDRESS_CONSTRUCTION_NORMALIZATION_VERSION
+#                    "address-transform-v1" (address_construction_v1.rs:50,
+#                    v2.rs:403-417).
+#   operations     : exactly ["forward"] (places) and ["structured_forward"]
+#                    (addresses) (v2.rs:410,415).
+#   entrypoints    : exactly {slice}/families/{family}/routing.json, non-empty
+#                    and within MAX_PLACES_ROUTING_BYTES /
+#                    MAX_ADDRESS_ROUTING_BYTES = 8 MiB
+#                    (places_construction_v1.rs:41,
+#                    address_construction_v1.rs:57, v2.rs:422-457).
+WORKER_CONSTRUCTION_CONTRACTS = {
+    ("places", "PLRV0002+PLHD0002"): {
+        "operations": ("forward",),
+        "tokenizer": "nfkd-lower-stripmark-cjk-bigram-v4",
+        "normalization": None,
+        "entrypoint": "routing.json",
+        "entrypoint_cap": 8 * 1024 * 1024,
+    },
+    ("addresses", "OAV1ART"): {
+        "operations": ("structured_forward",),
+        "tokenizer": None,
+        "normalization": "address-transform-v1",
+        "entrypoint": "routing.json",
+        "entrypoint_cap": 8 * 1024 * 1024,
+    },
+}
+
+_ABSENT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
+_CONFLICT_CODES = frozenset({"412", "PreconditionFailed"})
+
+
+def _fail(message: str) -> SystemExit:
+    return SystemExit(f"v2-release-manifest: {message}")
+
+
+def _sha256_bytes(payload: bytes) -> str:
+    return hashlib.sha256(payload).hexdigest()
+
+
+class StateConflict(Exception):
+    """The store's current state differs from the stated expectation."""
+
+
+class LocalControlStore:
+    """Filesystem control-document store for rehearsal and tests.
+
+    The compare-and-swap token is the SHA-256 of the current bytes (state IS
+    value here).  ``put(expect=token)`` and ``delete`` are check-then-act with
+    a small race window between reading the current bytes and replacing or
+    unlinking them; the R2 backend closes that window with ``If-Match``.
+    """
+
+    scheme = "local"
+
+    def __init__(self, root: Path):
+        self.root = root
+
+    def _path(self, key: str) -> Path:
+        if key.startswith("/") or any(
+            part in ("", ".", "..") for part in key.split("/")
+        ):
+            raise _fail(f"unsafe object key {key!r}")
+        return self.root / key
+
+    def get(self, key: str) -> tuple[bytes, str] | None:
+        path = self._path(key)
+        if not path.is_file():
+            return None
+        payload = path.read_bytes()
+        return payload, _sha256_bytes(payload)
+
+    def put(self, key: str, payload: bytes, *, expect: str | None = None) -> None:
+        path = self._path(key)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(dir=path.parent, delete=False) as staging:
+            staging_path = Path(staging.name)
+            staging.write(payload)
+        try:
+            if expect is None:
+                try:
+                    # link(2) is the filesystem's atomic create-only PUT.
+                    os.link(staging_path, path)
+                except FileExistsError as error:
+                    raise StateConflict(f"{key} already exists") from error
+            else:
+                current = self.get(key)
+                if current is None or current[1] != expect:
+                    raise StateConflict(
+                        f"{key} state differs from the stated expectation"
+                    )
+                os.replace(staging_path, path)
+        finally:
+            staging_path.unlink(missing_ok=True)
+
+    def delete(self, key: str, *, expect: str) -> None:
+        current = self.get(key)
+        if current is None or current[1] != expect:
+            raise StateConflict(f"{key} state differs from the stated expectation")
+        self._path(key).unlink()
+
+
+class R2ControlStore:
+    """R2 control-document store over r2_verified_store's persistent client.
+
+    ``get`` returns the payload plus the ETag from that same response; ``put``
+    with an expectation sends ``If-Match`` with that ETag, so the swap is
+    conditional at the store on the exact bytes the expectation hashed (a
+    single-PUT ETag is the content MD5, so the condition is value-addressed).
+    ``If-Match`` on PutObject/DeleteObject needs a one-object live probe before
+    first production use; see the module docstring.
+    """
+
+    scheme = "r2"
+
+    def __init__(self, store: Any):
+        self.store = store
+
+    def _codes(self, error: Any) -> set[str]:
+        response = getattr(error, "response", None) or {}
+        metadata = response.get("ResponseMetadata") or {}
+        return {
+            str((response.get("Error") or {}).get("Code", "")),
+            str(metadata.get("HTTPStatusCode", "")),
+        }
+
+    def get(self, key: str) -> tuple[bytes, str] | None:
+        try:
+            payload = self.store.client.get_object(
+                Bucket=self.store.bucket, Key=key
+            )
+        except self.store._client_error as error:
+            if self._codes(error) & _ABSENT_CODES:
+                return None
+            raise RuntimeError(f"get-object failed for {key}: {error}") from error
+        body = payload["Body"]
+        with contextlib.closing(body):
+            data = body.read()
+        if len(data) != int(payload["ContentLength"]):
+            raise _fail(f"short read for {key}")
+        etag = payload.get("ETag")
+        if not isinstance(etag, str) or not etag:
+            raise _fail(f"object {key} carries no ETag to compare-and-swap on")
+        return data, etag
+
+    def put(self, key: str, payload: bytes, *, expect: str | None = None) -> None:
+        arguments: dict[str, Any] = {
+            "Bucket": self.store.bucket,
+            "Key": key,
+            "Body": io.BytesIO(payload),
+            "ContentLength": len(payload),
+            "Metadata": {"sha256": _sha256_bytes(payload)},
+        }
+        if expect is None:
+            arguments["IfNoneMatch"] = "*"
+        else:
+            arguments["IfMatch"] = expect
+        try:
+            self.store.client.put_object(**arguments)
+        except self.store._client_error as error:
+            if self._codes(error) & _CONFLICT_CODES:
+                raise StateConflict(
+                    f"{key} state differs from the stated expectation"
+                ) from error
+            raise RuntimeError(f"put-object failed for {key}: {error}") from error
+
+    def delete(self, key: str, *, expect: str) -> None:
+        try:
+            self.store.client.delete_object(
+                Bucket=self.store.bucket, Key=key, IfMatch=expect
+            )
+        except self.store._client_error as error:
+            if self._codes(error) & _CONFLICT_CODES:
+                raise StateConflict(
+                    f"{key} state differs from the stated expectation"
+                ) from error
+            raise RuntimeError(f"delete-object failed for {key}: {error}") from error
+
+
+def open_control_store(spec: str, what: str) -> LocalControlStore | R2ControlStore:
+    """``local:<absolute-root>`` or ``r2:<bucket>``, reusing the promotion
+    tool's store construction and credential gate."""
+    import promote_construction_slice as promotion
+
+    tree = promotion.open_tree(spec, what)
+    if isinstance(tree, promotion.LocalTree):
+        return LocalControlStore(tree.root)
+    return R2ControlStore(tree.store)
+
+
+def _fetch(
+    store: LocalControlStore | R2ControlStore, key: str, what: str
+) -> tuple[bytes, str]:
+    found = store.get(key)
+    if found is None:
+        raise _fail(f"{what} is missing at {key}")
+    return found[0], _sha256_bytes(found[0])
+
+
+def _fetch_document(
+    store: LocalControlStore | R2ControlStore, key: str, what: str
+) -> tuple[dict[str, Any], bytes, str]:
+    payload, sha = _fetch(store, key, what)
+    try:
+        value = json.loads(payload)
+    except ValueError as error:
+        raise _fail(f"{what} at {key} is not valid JSON") from error
+    if not isinstance(value, dict):
+        raise _fail(f"{what} at {key} is not a JSON object")
+    return value, payload, sha
+
+
+def _load_release_from_store(
+    store: LocalControlStore | R2ControlStore, catalog_key: str, build: str
+) -> tuple[str, dict[str, Any], str]:
+    key = release_manifest_key_for_catalog(catalog_key, build)
+    release, _, sha = _fetch_document(store, key, f"v2 release {build}")
+    validate_release_manifest(release)
+    if release["geocoder_build"] != build:
+        raise _fail(
+            f"release document at {key} declares build "
+            f"{release['geocoder_build']!r}, not {build!r}"
+        )
+    return key, release, sha
+
+
+def _release_sources_from_store(
+    store: LocalControlStore | R2ControlStore, release: dict[str, Any]
+) -> dict[str, Any]:
+    """Fetch and hash-verify every source document and entrypoint the release
+    pins -- the same objects the worker hashes at admission (minus the sampled
+    data objects) -- returning ``build_catalog`` / ``verify_release_sources``
+    keyword inputs."""
+    legacy_key = release["legacy_core"]["manifest_key"]
+    legacy, _, legacy_sha = _fetch_document(
+        store, legacy_key, "legacy core release manifest"
+    )
+    if legacy_sha != release["legacy_core"]["manifest_sha256"]:
+        raise _fail(
+            f"legacy core manifest bytes at {legacy_key} do not hash to the "
+            "release-pinned sha256"
+        )
+    family_manifests: dict[str, tuple[Any, str]] = {}
+    family_sources: dict[str, tuple[Any, str]] = {}
+    for family, reference in sorted(release["families"].items()):
+        source_key = reference["source"]["manifest_key"]
+        source, _, source_sha = _fetch_document(
+            store, source_key, f"{family} source manifest"
+        )
+        if source_sha != reference["source"]["manifest_sha256"]:
+            raise _fail(
+                f"{family} source manifest bytes at {source_key} do not hash "
+                "to the release-pinned sha256"
+            )
+        manifest, _, manifest_sha = _fetch_document(
+            store, reference["manifest_key"], f"{family} family manifest"
+        )
+        if manifest_sha != reference["manifest_sha256"]:
+            raise _fail(
+                f"{family} family manifest bytes at {reference['manifest_key']} "
+                "do not hash to the release-pinned sha256"
+            )
+        for operation, identity in sorted(reference["entrypoints"].items()):
+            payload, payload_sha = _fetch(
+                store, identity["object_key"], f"{family} {operation} entrypoint"
+            )
+            if len(payload) != identity["bytes"] or payload_sha != identity["sha256"]:
+                raise _fail(
+                    f"{family} {operation} entrypoint at "
+                    f"{identity['object_key']} does not match its "
+                    "release-pinned identity"
+                )
+        family_manifests[family] = (manifest, manifest_sha)
+        family_sources[family] = (source, source_sha)
+    return {
+        "legacy_release": legacy,
+        "legacy_manifest_sha256": legacy_sha,
+        "family_manifests": family_manifests,
+        "family_source_manifests": family_sources,
+    }
+
+
+def _write_catalog_verified(
+    store: LocalControlStore | R2ControlStore,
+    catalog_key: str,
+    payload: bytes,
+    expect_token: str | None,
+) -> None:
+    try:
+        store.put(catalog_key, payload, expect=expect_token)
+    except StateConflict as error:
+        raise _fail(
+            f"catalog {catalog_key} changed underneath the compare-and-swap; "
+            "re-read it and restate the expectation"
+        ) from error
+    # Verify-after-write: re-download and hash what a reader will fetch.
+    written = store.get(catalog_key)
+    if written is None or _sha256_bytes(written[0]) != _sha256_bytes(payload):
+        raise _fail(f"post-write verification failed for {catalog_key}")
+
+
+def cmd_assemble(args: argparse.Namespace) -> None:
+    build = _require_build(args.geocoder_build)
+    if not SLICE_RE.fullmatch(args.slice_version):
+        raise _fail("--slice-version must use slice-YYYY-MM-DD.N")
+    legacy_version = _require_build(args.legacy_core)
+    families = sorted(set(args.family or sorted(gbm.FAMILIES)))
+    store = open_control_store(args.store, "--store")
+
+    legacy, _, legacy_sha = _fetch_document(
+        store,
+        f"{legacy_version}/release-manifest.json",
+        "legacy core release manifest",
+    )
+    source_key = f"{args.slice_version}/slice-manifest.json"
+    source, _, source_sha = _fetch_document(store, source_key, "slice source manifest")
+    if source.get("slice_version") != args.slice_version:
+        raise _fail(
+            f"slice source manifest at {source_key} declares slice_version "
+            f"{source.get('slice_version')!r}, not {args.slice_version!r}"
+        )
+
+    family_manifests: dict[str, tuple[Any, str]] = {}
+    family_source_manifests: dict[str, tuple[Any, str]] = {}
+    operations: dict[str, list[str]] = {}
+    entrypoints: dict[str, dict[str, str]] = {}
+    for family in families:
+        manifest_key = f"{args.slice_version}/families/{family}/family-manifest.json"
+        manifest, _, manifest_sha = _fetch_document(
+            store, manifest_key, f"{family} family manifest"
+        )
+        validated = gbm.validate_family_manifest(manifest)
+        fmt = validated["versions"]["format"]
+        contract = WORKER_CONSTRUCTION_CONTRACTS.get((family, fmt))
+        if contract is None:
+            raise _fail(
+                f"{family} format {fmt!r} is not a promoted construction "
+                "format the worker admits on a family_slice source; use the "
+                "`release` subcommand for legacy layouts"
+            )
+        if (
+            validated["versions"]["tokenizer"] != contract["tokenizer"]
+            or validated["versions"]["normalization"] != contract["normalization"]
+        ):
+            raise _fail(
+                f"{family} tokenizer/normalization differ from the worker "
+                "admission contract"
+            )
+        entrypoint_key = f"families/{family}/{contract['entrypoint']}"
+        recorded = next(
+            (
+                artifact
+                for artifact in validated["artifacts"]
+                if artifact["object_key"] == entrypoint_key
+            ),
+            None,
+        )
+        if recorded is None:
+            raise _fail(f"{family} family manifest does not attest {entrypoint_key}")
+        # The worker pins the entrypoint identity from the release document and
+        # verifies the STORED bytes against it at admission; read those bytes
+        # now so the release can only ever pin what is actually there.
+        payload, payload_sha = _fetch(
+            store,
+            f"{args.slice_version}/{entrypoint_key}",
+            f"{family} routing entrypoint",
+        )
+        if len(payload) != recorded["bytes"] or payload_sha != recorded["sha256"]:
+            raise _fail(
+                f"{family} routing entrypoint bytes do not match the identity "
+                "its family manifest records"
+            )
+        if not payload or len(payload) > contract["entrypoint_cap"]:
+            raise _fail(
+                f"{family} routing entrypoint is outside the worker's "
+                f"(0, {contract['entrypoint_cap']}] byte cap"
+            )
+        family_manifests[family] = (manifest, manifest_sha)
+        family_source_manifests[family] = (source, source_sha)
+        operations[family] = list(contract["operations"])
+        entrypoints[family] = {
+            operation: entrypoint_key for operation in contract["operations"]
+        }
+
+    # Deterministic by default: two assembles of the same inputs are
+    # byte-identical. generated_at is a label the worker hashes but ignores.
+    generated_at = args.generated_at or f"{build[:10]}T00:00:00+00:00"
+    release = build_release_manifest(
+        geocoder_build=build,
+        overture_release=args.overture_release,
+        legacy_release=legacy,
+        legacy_manifest_sha256=legacy_sha,
+        family_manifests=family_manifests,
+        family_source_manifests=family_source_manifests,
+        family_operations=operations,
+        family_entrypoints=entrypoints,
+        generated_at=generated_at,
+    )
+    for family, reference in release["families"].items():
+        if reference["source"]["version"] != args.slice_version:
+            raise _fail(
+                f"{family} source version {reference['source']['version']!r} "
+                f"differs from the requested slice {args.slice_version!r}"
+            )
+    payload = gbm.canonical_json(release)
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    args.output.write_bytes(payload)
+    print(
+        json.dumps(
+            {
+                "assembled": str(args.output),
+                "geocoder_build": build,
+                "release_digest": release["release_digest"],
+                "sha256": _sha256_bytes(payload),
+                "bytes": len(payload),
+                "manifest_key": release_manifest_key_for_catalog(
+                    args.catalog_key, build
+                ),
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def cmd_publish_release(args: argparse.Namespace) -> None:
+    payload = Path(args.release).read_bytes()
+    try:
+        release = json.loads(payload)
+    except ValueError as error:
+        raise _fail(f"{args.release} is not valid JSON") from error
+    validate_release_manifest(release)
+    key = release_manifest_key_for_catalog(args.catalog_key, release["geocoder_build"])
+    sha = _sha256_bytes(payload)
+    print(
+        json.dumps(
+            {
+                "planned_write": {
+                    "key": key,
+                    "sha256": sha,
+                    "bytes": len(payload),
+                    "mode": "create-only",
+                }
+            },
+            sort_keys=True,
+        )
+    )
+    store = open_control_store(args.store, "--store")
+    existing = store.get(key)
+    if existing is not None:
+        if _sha256_bytes(existing[0]) == sha:
+            print(
+                json.dumps(
+                    {"published": key, "sha256": sha, "status": "already-published"},
+                    sort_keys=True,
+                )
+            )
+            return
+        raise _fail(
+            f"release document {key} exists with different bytes (sha256 "
+            f"{_sha256_bytes(existing[0])}); release documents are immutable "
+            "-- assemble under a new build id"
+        )
+    if not args.execute:
+        print(
+            json.dumps(
+                {"published": None, "sha256": sha, "status": "dry-run"},
+                sort_keys=True,
+            )
+        )
+        return
+    try:
+        store.put(key, payload, expect=None)
+    except StateConflict as error:
+        # A concurrent create won after our read: byte-identical is a benign
+        # race, anything else is a squatter.
+        raced = store.get(key)
+        if raced is None or _sha256_bytes(raced[0]) != sha:
+            raise _fail(
+                f"release document {key} appeared with different bytes during "
+                "the create-only write"
+            ) from error
+    written = store.get(key)
+    if written is None or _sha256_bytes(written[0]) != sha:
+        raise _fail(f"post-write verification failed for {key}")
+    print(
+        json.dumps(
+            {"published": key, "sha256": sha, "status": "written"}, sort_keys=True
+        )
+    )
+
+
+def cmd_promote(args: argparse.Namespace) -> None:
+    if (args.expect_sha256 is None) == (not args.expect_absent):
+        raise _fail("promote requires exactly one of --expect-absent or --expect-sha256")
+    if args.expect_sha256 is not None and not SHA256_RE.fullmatch(args.expect_sha256):
+        raise _fail("--expect-sha256 must be a lowercase SHA-256 digest")
+    store = open_control_store(args.store, "--store")
+    _, release, release_sha = _load_release_from_store(
+        store, args.catalog_key, args.build
+    )
+    sources = _release_sources_from_store(store, release)
+    current = store.get(args.catalog_key)
+    if args.expect_absent:
+        if current is not None:
+            raise _fail(
+                f"catalog {args.catalog_key} exists (sha256 "
+                f"{_sha256_bytes(current[0])}); review it and rerun with "
+                "--expect-sha256"
+            )
+        expect_token = None
+        before = None
+    else:
+        if current is None:
+            raise _fail(
+                f"catalog {args.catalog_key} is absent; rerun with "
+                "--expect-absent if this is the first promotion"
+            )
+        current_sha = _sha256_bytes(current[0])
+        if current_sha != args.expect_sha256:
+            raise _fail(
+                f"catalog {args.catalog_key} is sha256 {current_sha}, not the "
+                "stated expectation; refusing the compare-and-swap"
+            )
+        expect_token = current[1]
+        try:
+            before = json.loads(current[0])
+        except ValueError as error:
+            raise _fail(
+                f"catalog {args.catalog_key} is not valid JSON; use recover"
+            ) from error
+    catalog = build_catalog(
+        release_manifest=release,
+        release_manifest_sha256=release_sha,
+        before=before,
+        initialize=before is None,
+        generated_at=args.generated_at,
+        catalog_key=args.catalog_key,
+        **sources,
+    )
+    payload = gbm.canonical_json(catalog)
+    sha = _sha256_bytes(payload)
+    print(
+        json.dumps(
+            {
+                "planned_write": {
+                    "key": args.catalog_key,
+                    "sha256": sha,
+                    "bytes": len(payload),
+                    "latest": args.build,
+                    "mode": "create-only" if expect_token is None else "compare-and-swap",
+                }
+            },
+            sort_keys=True,
+        )
+    )
+    if not args.execute:
+        print(json.dumps({"promoted": None, "status": "dry-run"}, sort_keys=True))
+        return
+    _write_catalog_verified(store, args.catalog_key, payload, expect_token)
+    print(
+        json.dumps(
+            {
+                "catalog": args.catalog_key,
+                "promoted": args.build,
+                "sha256": sha,
+                "status": "written",
+            },
+            sort_keys=True,
+        )
+    )
+
+
+def cmd_recover(args: argparse.Namespace) -> None:
+    if (args.build is None) == (not args.delete):
+        raise _fail("recover requires exactly one of --build or --delete")
+    if not SHA256_RE.fullmatch(args.expect_sha256):
+        raise _fail("--expect-sha256 must be a lowercase SHA-256 digest")
+    store = open_control_store(args.store, "--store")
+    current = store.get(args.catalog_key)
+    if current is None:
+        raise _fail(
+            f"catalog {args.catalog_key} is absent; nothing to recover "
+            "(a first promotion is `promote --expect-absent`)"
+        )
+    current_sha = _sha256_bytes(current[0])
+    if current_sha != args.expect_sha256:
+        raise _fail(
+            f"catalog {args.catalog_key} is sha256 {current_sha}, not the "
+            "stated expectation; refusing to act"
+        )
+    expect_token = current[1]
+
+    if args.delete:
+        print(
+            json.dumps(
+                {
+                    "planned_delete": {
+                        "key": args.catalog_key,
+                        "expected_sha256": current_sha,
+                    }
+                },
+                sort_keys=True,
+            )
+        )
+        if not args.execute:
+            print(json.dumps({"recovered": None, "status": "dry-run"}, sort_keys=True))
+            return
+        try:
+            store.delete(args.catalog_key, expect=expect_token)
+        except StateConflict as error:
+            raise _fail(
+                f"catalog {args.catalog_key} changed underneath the delete; "
+                "re-read it and restate the expectation"
+            ) from error
+        if store.get(args.catalog_key) is not None:
+            raise _fail(f"catalog {args.catalog_key} is still present after delete")
+        # The worker now serves 503 release_unavailable until re-promoted.
+        print(
+            json.dumps(
+                {"catalog": args.catalog_key, "recovered": "deleted", "status": "written"},
+                sort_keys=True,
+            )
+        )
+        return
+
+    _, release, release_sha = _load_release_from_store(
+        store, args.catalog_key, args.build
+    )
+    sources = _release_sources_from_store(store, release)
+    verify_release_sources(release, **sources)
+    history = "preserved"
+    retained: list[dict[str, Any]] = []
+    try:
+        before = validate_catalog(
+            json.loads(current[0]), catalog_key=args.catalog_key
+        )
+        target = version_sort_key(args.build)
+        retained = [
+            entry
+            for entry in before["releases"]
+            if version_sort_key(entry["geocoder_build"]) < target
+        ]
+    except ValueError:
+        # The current catalog does not validate -- which may be exactly why we
+        # are recovering. Repoint with a single-entry catalog rather than
+        # blocking the rollback on the damage being rolled back.
+        history = "discarded-invalid"
+    catalog: dict[str, Any] = {
+        "schema": CATALOG_SCHEMA,
+        "generated_at": _require_string(args.generated_at or _now(), "generated_at"),
+        "latest": args.build,
+        "releases": [
+            _catalog_entry(release, release_sha, catalog_key=args.catalog_key),
+            *retained,
+        ],
+    }
+    catalog["catalog_digest"] = gbm.digest(catalog)
+    validate_catalog(catalog, catalog_key=args.catalog_key)
+    payload = gbm.canonical_json(catalog)
+    sha = _sha256_bytes(payload)
+    print(
+        json.dumps(
+            {
+                "planned_write": {
+                    "key": args.catalog_key,
+                    "sha256": sha,
+                    "bytes": len(payload),
+                    "latest": args.build,
+                    "history": history,
+                    "mode": "compare-and-swap",
+                }
+            },
+            sort_keys=True,
+        )
+    )
+    if not args.execute:
+        print(json.dumps({"recovered": None, "status": "dry-run"}, sort_keys=True))
+        return
+    _write_catalog_verified(store, args.catalog_key, payload, expect_token)
+    print(
+        json.dumps(
+            {
+                "catalog": args.catalog_key,
+                "recovered": args.build,
+                "sha256": sha,
+                "status": "written",
+            },
+            sort_keys=True,
+        )
+    )
+
+
 def _read_json(path: Path) -> Any:
     return json.loads(path.read_text())
 
@@ -924,7 +1673,7 @@ def _parse_assignment(value: str, kind: str) -> tuple[str, str]:
     return family, assigned
 
 
-def main() -> None:
+def main(argv: list[str] | None = None) -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     commands = parser.add_subparsers(dest="command", required=True)
 
@@ -965,8 +1714,77 @@ def main() -> None:
         "--catalog-key", default=PRODUCTION_CATALOG_KEY
     )
 
-    args = parser.parse_args()
-    if args.command == "release":
+    assemble = commands.add_parser(
+        "assemble",
+        help="assemble a v2 release from a promoted construction slice",
+    )
+    assemble.add_argument(
+        "--store", required=True, help="local:<absolute-root> or r2:<bucket>"
+    )
+    assemble.add_argument("--geocoder-build", required=True)
+    assemble.add_argument("--overture-release", required=True)
+    assemble.add_argument(
+        "--slice-version", required=True, help="promoted slice-YYYY-MM-DD.N prefix"
+    )
+    assemble.add_argument(
+        "--legacy-core",
+        required=True,
+        help="frozen legacy core version, e.g. 2026-07-18.0",
+    )
+    assemble.add_argument(
+        "--family", action="append", choices=sorted(gbm.FAMILIES)
+    )
+    assemble.add_argument(
+        "--generated-at",
+        help="defaults to the build date at midnight UTC so two assembles of "
+        "the same inputs are byte-identical",
+    )
+    assemble.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
+    assemble.add_argument("--output", type=Path, required=True)
+
+    publish = commands.add_parser(
+        "publish-release",
+        help="create-only upload of v2/releases/{build}/release.json",
+    )
+    publish.add_argument("--store", required=True)
+    publish.add_argument("--release", type=Path, required=True)
+    publish.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
+    publish.add_argument("--execute", action="store_true")
+
+    promote = commands.add_parser(
+        "promote",
+        help="compare-and-swap v2/catalog.json to a published release",
+    )
+    promote.add_argument("--store", required=True)
+    promote.add_argument("--build", required=True)
+    promote.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
+    promote.add_argument("--expect-absent", action="store_true")
+    promote.add_argument("--expect-sha256")
+    promote.add_argument("--generated-at")
+    promote.add_argument("--execute", action="store_true")
+
+    recover = commands.add_parser(
+        "recover",
+        help="repoint the catalog at a prior release, or delete it",
+    )
+    recover.add_argument("--store", required=True)
+    recover.add_argument("--build")
+    recover.add_argument("--delete", action="store_true")
+    recover.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
+    recover.add_argument("--expect-sha256", required=True)
+    recover.add_argument("--generated-at")
+    recover.add_argument("--execute", action="store_true")
+
+    args = parser.parse_args(argv)
+    if args.command == "assemble":
+        cmd_assemble(args)
+    elif args.command == "publish-release":
+        cmd_publish_release(args)
+    elif args.command == "promote":
+        cmd_promote(args)
+    elif args.command == "recover":
+        cmd_recover(args)
+    elif args.command == "release":
         family_manifests: dict[str, tuple[Any, str]] = {}
         for raw in args.family_manifest:
             family, path_value = _parse_assignment(raw, "family manifest")
