@@ -1912,3 +1912,28 @@ def test_get_json_sends_smoke_auth_header(monkeypatch):
     assert fr._get_json("https://geo", "/health?rebuild=v", 20) == {}
     assert seen["headers"].get("X-rebuild-smoke-auth") == "s3cret"
     assert seen["headers"].get("Accept") == "application/json"
+
+
+def test_get_json_pins_non_urllib_user_agent(monkeypatch):
+    monkeypatch.delenv("REBUILD_SMOKE_AUTH", raising=False)
+    seen = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(request, timeout):
+        seen["headers"] = dict(request.header_items())
+        return _Response()
+
+    monkeypatch.setattr(fr.urllib.request, "urlopen", fake_urlopen)
+    assert fr._get_json("https://geo", "/health", 20) == {}
+    agent = seen["headers"].get("User-agent", "")
+    assert agent.startswith("overture-geocoder-rebuild-smoke/")
+    assert "urllib" not in agent.lower()
