@@ -1856,3 +1856,84 @@ def test_verify_families_only_single_family_leaves_the_other_unexpected(tmp_path
         _verify_families_only(
             metadata, readback, inventory, tmp_path, families=["addresses"]
         )
+
+
+# ---------------------------------------------------------------------------
+# Smoke auth header. Run 30375533399 (2026-07-28): the Cloudflare edge
+# rejected every runner smoke request HTTP 403 (datacenter-IP bot
+# mitigation) while production served real clients fine, rolling back a
+# healthy promotion on a false negative. REBUILD_SMOKE_AUTH lets the edge
+# rule recognize smoke traffic; unset must mean exactly no extra header.
+# ---------------------------------------------------------------------------
+
+
+def test_smoke_auth_headers_absent_env_adds_nothing(monkeypatch):
+    monkeypatch.delenv("REBUILD_SMOKE_AUTH", raising=False)
+    assert fr._smoke_auth_headers() == {}
+
+
+def test_smoke_auth_headers_blank_env_adds_nothing(monkeypatch):
+    monkeypatch.setenv("REBUILD_SMOKE_AUTH", "   ")
+    assert fr._smoke_auth_headers() == {}
+
+
+def test_smoke_auth_headers_parses_name_and_value(monkeypatch):
+    monkeypatch.setenv("REBUILD_SMOKE_AUTH", "X-Rebuild-Smoke-Auth: s3cret ")
+    assert fr._smoke_auth_headers() == {"X-Rebuild-Smoke-Auth": "s3cret"}
+
+
+@pytest.mark.parametrize("raw", ["no-colon", ": value-only", "Name-only:", "Name-only:   "])
+def test_smoke_auth_headers_rejects_malformed(monkeypatch, raw):
+    monkeypatch.setenv("REBUILD_SMOKE_AUTH", raw)
+    with pytest.raises(ValueError, match="REBUILD_SMOKE_AUTH"):
+        fr._smoke_auth_headers()
+
+
+def test_get_json_sends_smoke_auth_header(monkeypatch):
+    monkeypatch.setenv("REBUILD_SMOKE_AUTH", "X-Rebuild-Smoke-Auth: s3cret")
+    seen = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(request, timeout):
+        seen["headers"] = dict(request.header_items())
+        seen["url"] = request.full_url
+        return _Response()
+
+    monkeypatch.setattr(fr.urllib.request, "urlopen", fake_urlopen)
+    assert fr._get_json("https://geo", "/health?rebuild=v", 20) == {}
+    assert seen["headers"].get("X-rebuild-smoke-auth") == "s3cret"
+    assert seen["headers"].get("Accept") == "application/json"
+
+
+def test_get_json_pins_non_urllib_user_agent(monkeypatch):
+    monkeypatch.delenv("REBUILD_SMOKE_AUTH", raising=False)
+    seen = {}
+
+    class _Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *exc):
+            return False
+
+        def read(self):
+            return b"{}"
+
+    def fake_urlopen(request, timeout):
+        seen["headers"] = dict(request.header_items())
+        return _Response()
+
+    monkeypatch.setattr(fr.urllib.request, "urlopen", fake_urlopen)
+    assert fr._get_json("https://geo", "/health", 20) == {}
+    agent = seen["headers"].get("User-agent", "")
+    assert agent.startswith("overture-geocoder-rebuild-smoke/")
+    assert "urllib" not in agent.lower()

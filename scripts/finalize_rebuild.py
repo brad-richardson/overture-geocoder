@@ -970,9 +970,40 @@ def _flush_log(message: str) -> None:
     print(message, flush=True)
 
 
+def _smoke_auth_headers() -> dict:
+    """Optional extra header identifying smoke traffic to the edge firewall.
+
+    Run 30375533399 (2026-07-28): every promote and rollback smoke request
+    from the Actions runner was rejected HTTP 403 by the Cloudflare edge
+    (datacenter-IP bot mitigation) while the same endpoints served real
+    clients fine, so a healthy promotion was rolled back on a false negative.
+    ``REBUILD_SMOKE_AUTH`` holds ``Header-Name: value`` (a repository secret);
+    the matching edge rule skips bot mitigation for exactly that header, so
+    the bypass stays scoped to smoke traffic instead of loosening protection
+    for every datacenter IP. Unset means no header — plans without custom
+    rule support disable bot mitigation at the dashboard instead.
+    """
+    raw = os.environ.get("REBUILD_SMOKE_AUTH", "")
+    if not raw.strip():
+        return {}
+    name, sep, value = raw.partition(":")
+    if not sep or not name.strip() or not value.strip():
+        raise ValueError("REBUILD_SMOKE_AUTH must be 'Header-Name: value'")
+    return {name.strip(): value.strip()}
+
+
 def _get_json(base_url: str, path: str, timeout: float) -> dict:
     """GET a JSON body, raising (like ``curl -f``) on any non-2xx status."""
-    request = urllib.request.Request(base_url + path, headers={"Accept": "application/json"})
+    headers = {
+        "Accept": "application/json",
+        # The urllib default UA is a scraper signature to the edge: during
+        # run 30375533399's smoke window (2026-07-28 15:53-16:00 UTC) a
+        # runner curl passed post-deploy verification while every
+        # Python-urllib smoke request from the same runner pool got 403.
+        "User-Agent": "overture-geocoder-rebuild-smoke/1 (+github-actions)",
+        **_smoke_auth_headers(),
+    }
+    request = urllib.request.Request(base_url + path, headers=headers)
     with urllib.request.urlopen(request, timeout=timeout) as response:  # noqa: S310 (fixed host)
         body = response.read()
     value = json.loads(body)
