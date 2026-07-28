@@ -280,6 +280,62 @@ ingest, not a dedicated measurement run.
 
 ## Open blockers and gates
 
+### Paused checkpoint, 2026-07-28 evening (resume here)
+
+Work paused by the operator with two open PRs and one production retry pending.
+State of each thread:
+
+1. **v1 divisions/ID rebuild `2026-07-28.0` — built, verified, NOT promoted.**
+   Both promotion attempts failed on a FALSE NEGATIVE: the Cloudflare edge
+   returns HTTP 403 to promotion smoke requests from GitHub runners. Proven by
+   run `30375533399` (finalize-only mode + per-check diagnostics from PR #195):
+   every `Python-urllib` smoke request 403'd, while in the same minutes a
+   deploy run's curl-based post-deploy verification from the same runner pool
+   passed, and a residential poller watched production serve `2026-07-28.0`
+   correctly from 15:58:26Z until auto-rollback at 16:03:43Z. The edge is
+   UA/fingerprint-matching (Browser Integrity Check or AI-scraper heuristics —
+   bot fight mode is already off per operator), not IP-blocking. Worker has no
+   403 path; its rate limiter returns 429. Production is healthy on
+   `2026-07-13.0`.
+   - **PR #196 (open, review APPROVE at 7189e25)**: `REBUILD_SMOKE_AUTH`
+     secret header + (commit `52c59a8`, small, unreviewed) a pinned
+     non-urllib User-Agent, which may fix the 403 on its own.
+   - Resume: merge #196 → optionally create the `REBUILD_SMOKE_AUTH`
+     secret + edge skip rule (may be unnecessary if the UA pin suffices) →
+     re-dispatch finalize-only (`finalize_only=true, version=2026-07-28.0,
+     promote=true, confirm=REBUILD`). TIME-SENSITIVE: becomes un-dispatchable
+     once the next Overture release publishes (prep re-discovers latest).
+2. **v2 promotion series — 4 of 5 code rungs merged** (#188 slice promotion
+   tool, #191 Places serving, #193 Addresses serving, #194 release
+   publication tooling with ETag CAS). **PR #197 (open)**: the staged
+   `promote-v2-release.yml` workflow (probe / promote-slice / publish-release
+   / promote-catalog) + `slice-manifest` emitter. Its adversarial review was
+   CANCELLED mid-run by the pause — resume by relaunching the one review pass
+   before merge. Two review questions to carry into it: whether its
+   post-promote `/v2/forward` smoke needs the same 403 mitigation as #196,
+   and the 2 GiB probe's runner feasibility.
+   - TIME-SENSITIVE: promote-slice consumes `cv1-control`/`cv1-reduce-*`
+     artifacts with 7-day retention; the Address planet run's are nearest
+     expiry (~2026-08-01). Dispatch the slice promotion soon after #197
+     merges, else the reduction records must be regenerated.
+3. **After both**: ops rungs — probe stage, slice promotion
+   (`slice-2026-07-28.0`, both families in ONE dispatch), publish-release,
+   promote-catalog (`--expect-absent`), then verify `/v2/forward` end to end
+   and run `benchmark_v2_forward.py` for the accuracy baseline (head
+   truncation and blend calibration are the predicted top risks).
+4. **Scheduled rebuilds**: operator re-enabled `ENABLE_SCHEDULED_REBUILD` via
+   web UI (unverifiable locally; provable at the Aug 25 scheduled run).
+5. **Reverse R1 complete** (PRs #187/#190/#191/#192); next reverse rung is
+   the bucket-range reducer (R2) — see the Fastest path section. Deferred:
+   PR #192's two P2s (recorded on the PR), PR #194's four P2s (worker's
+   64-release catalog cap, promote-not-full-admission-gate, entrypoint-drift
+   test gap, live If-Match probe precondition), PR #195's three P2s
+   (`!cancelled()` on finalize gate, missing-generated_at adoption oddity),
+   PR #196's two P2s (newline-in-secret log leak, fail-late malformed
+   secret), range-read routed `.plrv` lane for oversize planet cells
+   (largest ~209 MB > 64 MiB cap, fails closed today).
+
+
 There are no measured construction-v1 forward planet blockers. Reverse R1
 passed on 2026-07-28; the reverse bucket-range reducer (R2) is the active
 execution rung.
