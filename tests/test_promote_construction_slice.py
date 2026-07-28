@@ -15,6 +15,7 @@ harness needs network access and the release Rust binaries.
 """
 
 import hashlib
+import io
 import json
 import os
 import subprocess
@@ -592,6 +593,235 @@ def test_verify_fails_on_tampered_destination_object(both):
     (destination / victim).write_bytes(b"corrupted")
     with pytest.raises(SystemExit, match="identity differs"):
         run_verify(plan_path, destination)
+
+
+# ---------------------------------------------------------------------------
+# R2 leg over a stubbed boto3 client (no credentials, no boto3 import): proves
+# the HEAD -> create-only copy -> HEAD proof sequence, the content_md5
+# byte-fidelity gate, paginated listing in verify, and error propagation.
+
+
+class FakeClientError(Exception):
+    def __init__(self, code):
+        super().__init__(code)
+        self.response = {"Error": {"Code": code}}
+
+
+class FakeR2Client:
+    """In-memory ListObjectsV2/HeadObject/PutObject/GetObject/CopyObject.
+
+    CopyObject copies metadata VERBATIM (the sha256 echo) while the ETag is
+    always computed from the stored destination bytes -- exactly the R2
+    contract the content_md5 check exists for. `corrupt_copies` flips one byte
+    of every copy WITHOUT changing length or metadata, so only the ETag can
+    see it; `head_overrides` lets a test make HEAD lie relative to GET.
+    """
+
+    def __init__(self, page_size=2):
+        self.objects = {}
+        self.log = []
+        self.page_size = page_size
+        self.fail_copy = None
+        self.corrupt_copies = False
+        self.head_overrides = {}
+        self.list_pages_served = 0
+
+    @staticmethod
+    def _etag(payload):
+        return '"%s"' % hashlib.md5(payload).hexdigest()
+
+    def seed(self, key, payload):
+        self.objects[key] = {"payload": payload, "meta": {"sha256": _sha(payload)}}
+
+    def head_object(self, Bucket, Key):
+        self.log.append(("head", Key))
+        if Key in self.head_overrides:
+            return self.head_overrides[Key]
+        if Key not in self.objects:
+            raise FakeClientError("404")
+        item = self.objects[Key]
+        return {
+            "ContentLength": len(item["payload"]),
+            "Metadata": dict(item["meta"]),
+            "ETag": self._etag(item["payload"]),
+        }
+
+    def put_object(self, Bucket, Key, Body, ContentLength, Metadata, IfNoneMatch):
+        assert IfNoneMatch == "*"
+        self.log.append(("put", Key))
+        if Key in self.objects:
+            raise FakeClientError("412")
+        payload = Body.read()
+        assert len(payload) == ContentLength
+        self.objects[Key] = {"payload": payload, "meta": dict(Metadata)}
+
+    def get_object(self, Bucket, Key):
+        self.log.append(("get", Key))
+        if Key not in self.objects:
+            raise FakeClientError("404")
+        item = self.objects[Key]
+        return {
+            "ContentLength": len(item["payload"]),
+            "Body": io.BytesIO(item["payload"]),
+            "Metadata": dict(item["meta"]),
+        }
+
+    def copy_object(self, Bucket, Key, CopySource, MetadataDirective):
+        self.log.append(("copy", CopySource["Key"], Key))
+        if self.fail_copy is not None:
+            raise self.fail_copy
+        assert MetadataDirective == "COPY"
+        source = self.objects[CopySource["Key"]]
+        payload = source["payload"]
+        if self.corrupt_copies:
+            payload = payload[:-1] + bytes([payload[-1] ^ 1])
+        self.objects[Key] = {"payload": payload, "meta": dict(source["meta"])}
+
+    def list_objects_v2(self, Bucket, Prefix, MaxKeys, ContinuationToken=None):
+        self.log.append(("list", Prefix, ContinuationToken))
+        self.list_pages_served += 1
+        keys = sorted(key for key in self.objects if key.startswith(Prefix))
+        start = int(ContinuationToken) if ContinuationToken else 0
+        page = keys[start : start + self.page_size]
+        truncated = start + self.page_size < len(keys)
+        payload = {"Contents": [{"Key": key} for key in page], "IsTruncated": truncated}
+        if truncated:
+            payload["NextContinuationToken"] = str(start + self.page_size)
+        return payload
+
+
+def _fake_store(client):
+    import r2_verified_store as rvs
+
+    store = rvs.Boto3Store.__new__(rvs.Boto3Store)
+    store.client = client
+    store.bucket = "test-bucket"
+    store._client_error = FakeClientError
+    store._stream_retry_error = type("NeverRetry", (Exception,), {})
+    return store
+
+
+@pytest.fixture()
+def r2_world(tmp_path, monkeypatch):
+    built = build_places(tmp_path)
+    client = FakeR2Client()
+    for path in sorted((tmp_path / "source").rglob("*")):
+        if path.is_file():
+            client.seed(
+                path.relative_to(tmp_path / "source").as_posix(), path.read_bytes()
+            )
+    tree = promote.R2Tree(_fake_store(client))
+    original = promote.open_tree
+    monkeypatch.setattr(
+        promote,
+        "open_tree",
+        lambda spec, what: tree if spec == "r2:test-bucket" else original(spec, what),
+    )
+    return tmp_path, built, client
+
+
+def _r2_plan(tmp_path, built):
+    plan_path = tmp_path / "plan.json"
+    args = plan_args(tmp_path, [built], plan_path)
+    args[args.index(f"local:{tmp_path / 'source'}")] = "r2:test-bucket"
+    assert promote.main(args) == 0
+    return plan_path, json.loads(plan_path.read_text())
+
+
+def test_r2_plan_execute_verify_with_content_md5_and_pagination(r2_world):
+    tmp_path, built, client = r2_world
+    plan_path, plan = _r2_plan(tmp_path, built)
+    # (a) the plan records the store-computed content MD5 of every source object.
+    payloads = {obj["name"]: obj["payload"] for obj in built.serving}
+    for item in plan["families"]["places"]["objects"]:
+        name = item["destination_key"].rsplit("/", 1)[1]
+        assert item["content_md5"] == hashlib.md5(payloads[name]).hexdigest()
+
+    execute_start = len(client.log)
+    assert (
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", "r2:test-bucket", "--destination", "r2:test-bucket"]
+        )
+        == 0
+    )
+    # Per-object sequence: HEAD source (unchanged since plan), HEAD destination
+    # (create-only conflict check), server-side copy, HEAD destination (proof).
+    item = plan["families"]["places"]["objects"][0]
+    source_key, destination_key = item["source_key"], item["destination_key"]
+    touching = [
+        entry
+        for entry in client.log[execute_start:]
+        if source_key in entry or destination_key in entry
+    ]
+    assert touching == [
+        ("head", source_key),
+        ("head", destination_key),
+        ("copy", source_key, destination_key),
+        ("head", destination_key),
+    ]
+    # Derived documents go through create-only PutObject, manifest last.
+    puts = [entry[1] for entry in client.log[execute_start:] if entry[0] == "put"]
+    family = plan["families"]["places"]
+    assert puts == [family["routing_key"], family["family_manifest_key"]]
+
+    client.list_pages_served = 0
+    assert (
+        promote.main(
+            ["verify", "--plan", str(plan_path), "--destination", "r2:test-bucket"]
+        )
+        == 0
+    )
+    # 23 destination keys at 2 keys per page: verify's listing is paginated.
+    assert client.list_pages_served > 1
+
+
+def test_r2_copy_corruption_is_caught_by_content_md5(r2_world):
+    tmp_path, built, client = r2_world
+    plan_path, _ = _r2_plan(tmp_path, built)
+    # The copy flips one byte but keeps length AND the copied sha256 metadata
+    # echo, so ONLY the destination's own ETag (content MD5) can catch it.
+    client.corrupt_copies = True
+    with pytest.raises(SystemExit, match="post-copy identity proof"):
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", "r2:test-bucket", "--destination", "r2:test-bucket"]
+        )
+
+
+def test_r2_copy_client_error_propagates(r2_world):
+    tmp_path, built, client = r2_world
+    plan_path, _ = _r2_plan(tmp_path, built)
+    client.fail_copy = FakeClientError("500")
+    # A transport failure must escape loudly -- the create-only FileExistsError
+    # handler around the copy must not swallow it.
+    with pytest.raises(FakeClientError):
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", "r2:test-bucket", "--destination", "r2:test-bucket"]
+        )
+
+
+def test_r2_verify_hashes_downloaded_routing_bytes(r2_world):
+    tmp_path, built, client = r2_world
+    plan_path, plan = _r2_plan(tmp_path, built)
+    assert (
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", "r2:test-bucket", "--destination", "r2:test-bucket"]
+        )
+        == 0
+    )
+    # Freeze HEAD at the honest answer, then tamper the stored bytes: the
+    # per-key metadata proof cannot see it, only the download-and-hash pass can.
+    routing_key = plan["families"]["places"]["routing_key"]
+    client.head_overrides[routing_key] = client.head_object("bucket", routing_key)
+    payload = client.objects[routing_key]["payload"]
+    client.objects[routing_key]["payload"] = payload[:-2] + b"~" + payload[-1:]
+    with pytest.raises(SystemExit, match="routing.json bytes do not hash"):
+        promote.main(
+            ["verify", "--plan", str(plan_path), "--destination", "r2:test-bucket"]
+        )
 
 
 # ---------------------------------------------------------------------------

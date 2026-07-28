@@ -42,6 +42,21 @@ Everything fails closed: a missing finalize marker, any recorded/actual SHA-256
 disagreement, a pre-existing destination object with different bytes, a routing
 entry without its object, or any object-count mismatch aborts with a named
 diagnosis.
+
+Live probe required before planet promotion. The R2 CopyObject leg rests on
+three behaviours of Cloudflare R2 that this repo has never exercised live, and
+each must be proved with a one-object probe (the PR #181 pattern: probe the
+exact call against the real bucket before trusting it at fleet scale) before
+any planet-scale execute:
+
+* that `MetadataDirective: COPY` actually carries the `x-amz-meta-sha256`
+  metadata onto the copy (the post-copy sha256-metadata comparison is an echo
+  of whatever landed there);
+* that a server-side copy of a single-PUT object yields a SINGLE-PART ETag
+  equal to the content MD5 (the `content_md5` fidelity proof below fails
+  closed on a dashed or non-MD5 ETag rather than passing vacuously);
+* that CopyObject accepts the largest serving objects this tool moves (~209 MB
+  planet Places, ~2 GiB-capped Addresses) in one call.
 """
 
 from __future__ import annotations
@@ -160,6 +175,29 @@ def require_identity(value: Any, what: str) -> dict[str, Any]:
     return value
 
 
+def check_identity(actual: dict[str, Any] | None, expected: dict[str, Any]) -> bool:
+    """True iff ``actual`` proves the ``expected`` identity.
+
+    `bytes` and `sha256` must always match. `content_md5` is compared exactly
+    when the expectation records one (the plan records it for every R2 source
+    object): then the actual proof MUST also carry one and agree. On R2 the
+    sha256 metadata is a producer claim that CopyObject echoes verbatim, so the
+    store-computed content MD5 is the only field here derived from the stored
+    destination bytes -- dropping it would turn the post-copy proof back into
+    an echo comparison.
+    """
+    if (
+        actual is None
+        or actual["bytes"] != expected["bytes"]
+        or actual["sha256"] != expected["sha256"]
+    ):
+        return False
+    recorded = expected.get("content_md5")
+    if recorded is not None:
+        return actual.get("content_md5") == recorded
+    return True
+
+
 def object_name(store_key: str, sha256: str, what: str) -> str:
     """The published object name for a content-addressed store key.
 
@@ -240,10 +278,13 @@ class LocalTree:
 class R2Tree:
     """R2 bucket via r2_verified_store's persistent boto3 client.
 
-    `identity` is a stored-byte metadata proof (size + recorded sha256
-    metadata), never a re-download; the construction publisher recorded the
-    metadata (VerifiedStoreRemote.records_sha256_metadata) and CopyObject with
-    MetadataDirective COPY preserves it, so the proof survives promotion.
+    `identity` is a stored-byte metadata proof, never a re-download. It carries
+    THREE fields, and the third is the load-bearing one on the copy path:
+    `sha256` is recorded object metadata, which CopyObject with
+    MetadataDirective COPY merely ECHOES from the source, so after a copy it
+    proves provenance and not bytes; `content_md5` is the store-computed
+    single-part ETag over the DESTINATION's stored bytes, which is what makes
+    the post-copy proof a byte-fidelity check.
     """
 
     scheme = "r2"
@@ -260,7 +301,11 @@ class R2Tree:
                 f"object {key} carries no recorded sha256 metadata; refusing to "
                 "trust its bytes without a stored-byte proof"
             )
-        return {"bytes": proof["bytes"], "sha256": proof["sha256_metadata"]}
+        return {
+            "bytes": proof["bytes"],
+            "sha256": proof["sha256_metadata"],
+            "content_md5": proof["content_md5"],
+        }
 
     def read_bytes(self, key: str) -> bytes:
         try:
@@ -693,6 +738,26 @@ def _plan_family(
             }
         )
 
+    if isinstance(source, R2Tree):
+        # Record the store-computed content MD5 (single-part ETag) of every
+        # source object. After the server-side copy the sha256 metadata is an
+        # echo of the source's, so this recorded MD5 is what execute and verify
+        # compare against the DESTINATION's own ETag to prove byte fidelity.
+        # Deterministic: the source objects are immutable, so their ETags are.
+        for item in objects:
+            proof = source.identity(item["source_key"])
+            if proof is None:
+                raise fail(f"{family} source object is missing: {item['source_key']}")
+            if (
+                proof["bytes"] != item["bytes"]
+                or proof["sha256"] != item["sha256"]
+            ):
+                raise fail(
+                    f"{family} source object {item['source_key']} does not match "
+                    "the identity its producing phase recorded"
+                )
+            item["content_md5"] = proof["content_md5"]
+
     routing_bytes = canonical(routing)
     manifest_artifacts = [
         {
@@ -882,17 +947,28 @@ def _derived_members(
 def _put_derived_create_only(
     destination: LocalTree | R2Tree, key: str, payload: bytes, sha256: str
 ) -> str:
+    # The payload is in hand, so its content MD5 is computable directly and the
+    # post-write proof can demand the store-computed one match it (R2; a local
+    # identity carries no md5 and the sha256 there is a fresh byte hash).
+    expected = {
+        "bytes": len(payload),
+        "sha256": sha256,
+        "content_md5": (
+            hashlib.md5(payload).hexdigest()
+            if isinstance(destination, R2Tree)
+            else None
+        ),
+    }
     existing = destination.identity(key)
     if existing is not None:
-        if existing["sha256"] == sha256 and existing["bytes"] == len(payload):
+        if check_identity(existing, expected):
             return "already-present"
         raise fail(f"destination {key} exists with different bytes; refusing")
     try:
         destination.put_bytes_create_only(key, payload)
     except FileExistsError as error:
         raise fail(f"destination {key} appeared during create-only write") from error
-    verified = destination.identity(key)
-    if verified is None or verified["sha256"] != sha256:
+    if not check_identity(destination.identity(key), expected):
         raise fail(f"destination {key} failed post-write verification")
     return "written"
 
@@ -907,20 +983,25 @@ def cmd_execute(args: argparse.Namespace) -> int:
         derived = _derived_members(family, value)
         copied = skipped = 0
         for item in value["objects"]:
-            expected = {"bytes": item["bytes"], "sha256": item["sha256"]}
-            # The source must still be the object the plan admitted.
+            expected = {
+                "bytes": item["bytes"],
+                "sha256": item["sha256"],
+                "content_md5": item.get("content_md5"),
+            }
+            # The source must still be the object the plan admitted, down to
+            # its stored-byte MD5 when the plan recorded one (R2 source).
             actual = source.identity(item["source_key"])
             if actual is None:
                 raise fail(f"source object vanished: {item['source_key']}")
-            if actual != expected:
+            if not check_identity(actual, expected):
                 raise fail(
                     f"source object {item['source_key']} does not match the "
-                    f"planned identity (sha/bytes changed)"
+                    f"planned identity (sha/bytes/md5 changed)"
                 )
             existing = destination.identity(item["destination_key"])
             if existing is not None:
                 # Byte-identical is a resume; anything else is a squatter.
-                if existing == expected:
+                if check_identity(existing, expected):
                     skipped += 1
                     continue
                 raise fail(
@@ -936,11 +1017,16 @@ def cmd_execute(args: argparse.Namespace) -> int:
                     f"destination {item['destination_key']} appeared during the "
                     "create-only copy"
                 ) from error
+            # On R2 this is the byte-fidelity gate: the destination's OWN
+            # single-part ETag (content MD5 of its stored bytes) must equal the
+            # source MD5 the plan recorded; the copied sha256 metadata alone is
+            # only an echo.
             verified = destination.identity(item["destination_key"])
-            if verified != expected:
+            if not check_identity(verified, expected):
                 raise fail(
                     f"destination {item['destination_key']} failed its "
-                    "post-copy identity proof"
+                    "post-copy identity proof (stored bytes differ from the "
+                    "planned source identity)"
                 )
             copied += 1
         # Routing first, manifest STRICTLY last: a present #107 manifest must
@@ -972,16 +1058,38 @@ def cmd_verify(args: argparse.Namespace) -> int:
         value = plan["families"][family]
         prefix = f"{version}/families/{family}/"
         expected = {
-            item["destination_key"]: {"bytes": item["bytes"], "sha256": item["sha256"]}
+            item["destination_key"]: {
+                "bytes": item["bytes"],
+                "sha256": item["sha256"],
+                "content_md5": item.get("content_md5"),
+            }
             for item in value["objects"]
         }
+        # The derived documents' bytes are reproducible from the plan, so their
+        # content MD5 is too -- on R2 that turns the per-key HEAD proof into a
+        # stored-byte check for them as well.
+        derived_payloads = {
+            value["routing_key"]: canonical(value["routing"]),
+            value["family_manifest_key"]: canonical(value["family_manifest"]),
+        }
+        on_r2 = isinstance(destination, R2Tree)
         expected[value["routing_key"]] = {
             "bytes": value["routing_bytes"],
             "sha256": value["routing_sha256"],
+            "content_md5": (
+                hashlib.md5(derived_payloads[value["routing_key"]]).hexdigest()
+                if on_r2
+                else None
+            ),
         }
         expected[value["family_manifest_key"]] = {
             "bytes": value["family_manifest_bytes"],
             "sha256": value["family_manifest_sha256"],
+            "content_md5": (
+                hashlib.md5(derived_payloads[value["family_manifest_key"]]).hexdigest()
+                if on_r2
+                else None
+            ),
         }
         listed = destination.list_prefix(prefix)
         if listed != sorted(expected):
@@ -992,14 +1100,19 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 f"missing={missing}, unexpected={extra}"
             )
         for key in listed:
-            actual = destination.identity(key)
-            if actual != expected[key]:
+            if not check_identity(destination.identity(key), expected[key]):
                 raise fail(f"{family} destination object {key} identity differs")
-        # Routing is re-read FROM THE DESTINATION, not from the plan: this pass
-        # proves what a reader will actually fetch.
-        routing = _load_json_object(
-            destination.read_bytes(value["routing_key"]), f"{family} routing.json"
-        )
+        # Routing and the family manifest are re-read FROM THE DESTINATION and
+        # their DOWNLOADED bytes are hashed against the plan-recorded digests:
+        # this pass proves what a reader will actually fetch, not what a HEAD's
+        # metadata claims about it.
+        routing_bytes = destination.read_bytes(value["routing_key"])
+        if sha256_bytes(routing_bytes) != value["routing_sha256"]:
+            raise fail(
+                f"{family} destination routing.json bytes do not hash to the "
+                "plan-recorded digest"
+            )
+        routing = _load_json_object(routing_bytes, f"{family} routing.json")
         object_keys = {
             PurePosixPath(key).name
             for key in expected
@@ -1016,11 +1129,19 @@ def cmd_verify(args: argparse.Namespace) -> int:
             # routing manifest routing.json points at must itself name only
             # existing .plhd shards, and together the two hops must reach
             # every promoted object.
+            head_manifest_key = f"{prefix}objects/{routing['head']['manifest_object']}"
+            head_manifest_bytes = destination.read_bytes(head_manifest_key)
+            if (
+                head_manifest_key not in expected
+                or sha256_bytes(head_manifest_bytes)
+                != expected[head_manifest_key]["sha256"]
+            ):
+                raise fail(
+                    f"{family} destination head routing manifest bytes do not "
+                    "hash to the plan-recorded digest"
+                )
             head_manifest = _load_json_object(
-                destination.read_bytes(
-                    f"{prefix}objects/{routing['head']['manifest_object']}"
-                ),
-                f"{family} head routing manifest",
+                head_manifest_bytes, f"{family} head routing manifest"
             )
             routed |= {shard["path"] for shard in head_manifest.get("shards") or []}
             if not routed <= object_keys:
@@ -1033,13 +1154,17 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 f"{family} destination objects are unreachable from routing: "
                 f"{sorted(object_keys - routed)[:5]}"
             )
-        # The destination #107 manifest must validate self-consistently and
-        # attest exactly the non-manifest objects under the family prefix.
-        manifest = GBM.validate_family_manifest(
-            _load_json_object(
-                destination.read_bytes(value["family_manifest_key"]),
-                f"{family} family manifest",
+        # The destination #107 manifest must hash to the planned bytes,
+        # validate self-consistently, and attest exactly the non-manifest
+        # objects under the family prefix.
+        manifest_bytes = destination.read_bytes(value["family_manifest_key"])
+        if sha256_bytes(manifest_bytes) != value["family_manifest_sha256"]:
+            raise fail(
+                f"{family} destination family manifest bytes do not hash to "
+                "the plan-recorded digest"
             )
+        manifest = GBM.validate_family_manifest(
+            _load_json_object(manifest_bytes, f"{family} family manifest")
         )
         attested = {
             f"{version}/{artifact['object_key']}": {
@@ -1049,7 +1174,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
             for artifact in manifest["artifacts"]
         }
         non_manifest = {
-            key: identity
+            key: {"bytes": identity["bytes"], "sha256": identity["sha256"]}
             for key, identity in expected.items()
             if key != value["family_manifest_key"]
         }
