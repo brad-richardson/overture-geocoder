@@ -595,6 +595,32 @@ def test_verify_fails_on_tampered_destination_object(both):
         run_verify(plan_path, destination)
 
 
+def test_r2_open_tree_scopes_the_long_timeout_to_copy(monkeypatch):
+    import r2_verified_store
+
+    seen = {}
+
+    class Store:
+        bucket = "test-bucket"
+
+    def fake_store(bucket, endpoint, **kwargs):
+        seen.update(bucket=bucket, endpoint=endpoint, **kwargs)
+        return Store()
+
+    monkeypatch.setenv("R2_ENDPOINT", "https://example.invalid")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setattr(r2_verified_store, "s3_object_store", fake_store)
+
+    tree = promote.open_tree("r2:test-bucket", "test tree")
+    assert isinstance(tree, promote.R2Tree)
+    assert seen == {
+        "bucket": "test-bucket",
+        "endpoint": "https://example.invalid",
+        "copy_read_timeout_seconds": promote.COPY_READ_TIMEOUT_SECONDS,
+    }
+
+
 # ---------------------------------------------------------------------------
 # R2 leg over a stubbed boto3 client (no credentials, no boto3 import): proves
 # the HEAD -> create-only copy -> HEAD proof sequence, the content_md5
@@ -695,6 +721,7 @@ def _fake_store(client):
 
     store = rvs.Boto3Store.__new__(rvs.Boto3Store)
     store.client = client
+    store.copy_client = client
     store.bucket = "test-bucket"
     store._client_error = FakeClientError
     store._stream_retry_error = type("NeverRetry", (Exception,), {})

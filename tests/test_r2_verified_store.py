@@ -18,6 +18,44 @@ sys.modules[SPEC.name] = shuffle
 SPEC.loader.exec_module(shuffle)
 
 
+def test_boto3_copy_client_scopes_long_timeout_and_disables_replay(monkeypatch):
+    pytest.importorskip("boto3")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+
+    store = shuffle.Boto3Store(
+        "bucket",
+        "https://example.invalid",
+        copy_read_timeout_seconds=15 * 60,
+    )
+    try:
+        normal = store.client.meta.config
+        copy = store.copy_client.meta.config
+        assert normal.read_timeout == 60
+        assert normal.retries["total_max_attempts"] == shuffle.MAX_ATTEMPTS + 1
+        assert copy.read_timeout == 15 * 60
+        assert copy.retries["total_max_attempts"] == 1
+        assert store.copy_client is not store.client
+    finally:
+        store.client.close()
+        store.copy_client.close()
+
+
+@pytest.mark.parametrize("timeout", [0, -1, True, 1.5, "900"])
+def test_boto3_copy_client_rejects_invalid_timeout(monkeypatch, timeout):
+    pytest.importorskip("boto3")
+    monkeypatch.setenv("AWS_ACCESS_KEY_ID", "test")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "test")
+    monkeypatch.setenv("AWS_EC2_METADATA_DISABLED", "true")
+    with pytest.raises(ValueError, match="positive integer"):
+        shuffle.Boto3Store(
+            "bucket",
+            "https://example.invalid",
+            copy_read_timeout_seconds=timeout,
+        )
+
+
 def test_resume_verifies_existing_remote_object_without_overwrite(tmp_path):
     source = tmp_path / "fragment.bin"
     source.write_bytes(b"complete fragment")

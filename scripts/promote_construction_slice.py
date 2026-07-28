@@ -80,6 +80,12 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import global_build_manifest as GBM  # noqa: E402  (#107 family manifest)
 
 PLAN_SCHEMA = "promote-construction-slice-plan-v1"
+# Run 30388252232: a 2 GiB single PUT completed, but R2's synchronous
+# CopyObject did not acknowledge within botocore's 60-second default and the
+# standard client replayed it six times before failing. One 15-minute response
+# window stays inside the workflow's 45-minute bound and is scoped only to
+# CopyObject; all ordinary R2 operations keep their existing timeout.
+COPY_READ_TIMEOUT_SECONDS = 15 * 60
 PLACES_ROUTING_SCHEMA = "overture-promoted-places-routing-v1"
 ADDRESS_ROUTING_SCHEMA = "overture-promoted-addresses-routing-v1"
 CONSTRUCTION_FAMILY_MANIFEST_SCHEMA = "construction-v1-family-manifest-v1"
@@ -330,12 +336,7 @@ class R2Tree:
         # Server-side CopyObject: the object never transits this machine.
         # MetadataDirective COPY carries the producer's sha256 metadata along,
         # which is what lets identity() prove the copy afterwards.
-        self.store.client.copy_object(
-            Bucket=self.store.bucket,
-            Key=destination_key,
-            CopySource={"Bucket": self.store.bucket, "Key": source_key},
-            MetadataDirective="COPY",
-        )
+        self.store.copy_within_bucket(source_key, destination_key)
 
 
 def open_tree(spec: str, what: str) -> LocalTree | R2Tree:
@@ -369,7 +370,13 @@ def open_tree(spec: str, what: str) -> LocalTree | R2Tree:
         os.environ.setdefault("AWS_SECRET_ACCESS_KEY", secret)
         import r2_verified_store
 
-        return R2Tree(r2_verified_store.s3_object_store(rest, endpoint))
+        return R2Tree(
+            r2_verified_store.s3_object_store(
+                rest,
+                endpoint,
+                copy_read_timeout_seconds=COPY_READ_TIMEOUT_SECONDS,
+            )
+        )
     raise fail(f"{what} must be local:<absolute-root> or r2:<bucket>, got {spec!r}")
 
 

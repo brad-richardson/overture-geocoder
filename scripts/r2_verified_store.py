@@ -558,6 +558,7 @@ class Boto3Store:
         endpoint_url: str,
         *,
         max_pool_connections: int = DEFAULT_MAX_POOL_CONNECTIONS,
+        copy_read_timeout_seconds: int | None = None,
     ):
         try:
             import boto3
@@ -578,6 +579,15 @@ class Boto3Store:
         self._stream_retry_error = HTTPClientError
         self.bucket = bucket
         self.endpoint_url = endpoint_url
+        if (
+            copy_read_timeout_seconds is not None
+            and (
+                not isinstance(copy_read_timeout_seconds, int)
+                or isinstance(copy_read_timeout_seconds, bool)
+                or copy_read_timeout_seconds <= 0
+            )
+        ):
+            raise ValueError("copy read timeout must be a positive integer")
         # One client, shared by every publisher thread. botocore clients are
         # thread-safe for these calls; the connection pool is what makes them
         # concurrent, hence max_pool_connections above.
@@ -616,6 +626,27 @@ class Boto3Store:
                 response_checksum_validation="when_required",
             ),
         )
+        # CopyObject is normally tiny, but R2 did not acknowledge a 2 GiB
+        # server-side copy inside botocore's default 60-second read timeout.
+        # Run 30388252232 measured six ambiguous automatic replays followed by
+        # ReadTimeoutError. Promotion can opt into one dedicated, long-timeout
+        # request: ordinary HEAD/LIST/PUT calls keep their short stall bound,
+        # and a lost response is reconciled by the promotion's exact-identity
+        # rerun instead of replaying an overwrite inside one process.
+        self.copy_client = self.client
+        if copy_read_timeout_seconds is not None:
+            self.copy_client = boto3.client(
+                "s3",
+                endpoint_url=endpoint_url,
+                region_name="auto",
+                config=Config(
+                    retries={"total_max_attempts": 1, "mode": "standard"},
+                    read_timeout=copy_read_timeout_seconds,
+                    max_pool_connections=max_pool_connections,
+                    request_checksum_calculation="when_required",
+                    response_checksum_validation="when_required",
+                ),
+            )
 
     def _codes(self, error: Any) -> set[str]:
         response = getattr(error, "response", None) or {}
@@ -687,6 +718,14 @@ class Boto3Store:
                 ) from error
             raise RuntimeError(f"put-object failed for {key}: {error}") from error
 
+    def copy_within_bucket(self, source_key: str, destination_key: str) -> None:
+        self.copy_client.copy_object(
+            Bucket=self.bucket,
+            Key=destination_key,
+            CopySource={"Bucket": self.bucket, "Key": source_key},
+            MetadataDirective="COPY",
+        )
+
     def open_stream(self, key: str) -> tuple[int, BinaryIO]:
         try:
             payload = self.client.get_object(Bucket=self.bucket, Key=key)
@@ -751,6 +790,7 @@ def s3_object_store(
     endpoint_url: str,
     *,
     max_pool_connections: int = DEFAULT_MAX_POOL_CONNECTIONS,
+    copy_read_timeout_seconds: int | None = None,
 ) -> ObjectStore:
     """The S3/R2 backend construction-v1 uses: one persistent client.
 
@@ -762,7 +802,10 @@ def s3_object_store(
     if not bucket or not endpoint_url:
         raise ValueError("an S3/R2 object store needs a bucket and an endpoint URL")
     return Boto3Store(
-        bucket, endpoint_url, max_pool_connections=max_pool_connections
+        bucket,
+        endpoint_url,
+        max_pool_connections=max_pool_connections,
+        copy_read_timeout_seconds=copy_read_timeout_seconds,
     )
 
 
