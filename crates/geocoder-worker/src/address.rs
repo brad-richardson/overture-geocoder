@@ -557,7 +557,7 @@ fn positive_identity(bytes: Option<usize>, sha256: Option<&str>) -> bool {
 /// producer that splits a country across shards MUST partition by this exact
 /// hash so every duplicate candidate for a key lands on one shard. Single-shard
 /// countries (today's regional reality) never consult it.
-fn address_key_hash(key: &[String; 8]) -> u64 {
+pub(crate) fn address_key_hash(key: &[String; 8]) -> u64 {
     const OFFSET: u64 = 0xcbf2_9ce4_8422_2325;
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash = OFFSET;
