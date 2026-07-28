@@ -261,6 +261,18 @@ The forward planet milestone is complete. Follow this sequence:
    harness.**
 3. **Advance to the reverse bucket-range reducer only after R1 passes.**
 
+Wall-clock optimization of the forward build is an adopted secondary track,
+run within the two-active-PR budget and never ahead of reverse R1. The adopted
+direction is staged Track A-to-B per
+`2026-07-28-planet-build-wall-clock-review.md` and its post-publication
+addendum: execute its Waves 1-3 (shared binaries, early marker discovery,
+eight-way probe, Address reducer cap probe, selective Places planning, head
+radix plus bounded workers, single-write final publication), then the
+Track B-specific pieces; Track C is not planned. Single-write publication is on
+the Places critical path because measured finalize (57 minutes) is about 3x its
+budget. The post-change cold control should ride the next real Overture release
+ingest, not a dedicated measurement run.
+
 ## Open blockers and gates
 
 There are no measured construction-v1 forward planet blockers. Reverse R1 is
@@ -415,6 +427,11 @@ These remain useful but do not block the next measured milestone:
 
 ## Evidence and history
 
+- `docs/plans/2026-07-28-planet-build-wall-clock-review.md` — wall-clock
+  review of all planet attempts, Tracks A/B/C, and the adopted staged
+  A-to-B optimization sequence (see its addendum).
+- `docs/plans/2026-07-28-planet-places-publication-result.md` — successful
+  planet Places publication evidence and measured finalize phase timings.
 - `docs/plans/2026-07-26-planet-probe-findings.md` — Europe runs, corrected
   projections, preserved work trees, and resume commands.
 - `docs/plans/2026-07-25-reverse-v2-design.md` — reviewed POI/address reverse
