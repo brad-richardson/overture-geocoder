@@ -1,0 +1,921 @@
+name: Promote v2 Release
+
+# Operator-dispatched, staged promotion of the published construction-v1
+# planet build to a live /v2/forward. Four separately dispatched rungs,
+# selected by the `stage` input; every write goes through the reviewed Python
+# tools (create-only for immutable objects, If-Match compare-and-swap for the
+# one mutable catalog), every stage prints its planned writes before any
+# --execute, and every written object is verified after write by the tool
+# itself.
+#
+#   probe            One-object live proofs on the real bucket, run-unique
+#                    keys, unconditional cleanup: the CopyObject behaviours
+#                    promote_construction_slice.py requires (MetadataDirective
+#                    COPY metadata preservation, single-part copy ETag ==
+#                    content MD5, size acceptance at the 2 GiB Address serving
+#                    cap) and the If-Match conditional PUT/DELETE semantics
+#                    v2_release_manifest.py's catalog CAS requires (stale
+#                    If-Match must 412). No other stage may be executed until
+#                    this has a green run; later stages enforce that by a
+#                    typed PROBES-GREEN:<probe-run-id> attestation inside the
+#                    confirmation string, recorded in the run log (workflows
+#                    cannot cheaply query past runs, so the operator attests).
+#   promote-slice    promote_construction_slice.py plan -> execute -> verify
+#                    per family (server-side CopyObject inside the bucket),
+#                    then create-only publication of
+#                    {slice}/slice-manifest.json, the #107 source document
+#                    v2_release_manifest.py assemble fails closed without.
+#                    Reduction records and the construction contract are
+#                    downloaded from the named construction-v1 run's
+#                    cv1-control / cv1-reduce-* artifacts (cv1-reduce-*
+#                    retention is 7 days; a lapsed run fails loudly here).
+#                    The slice manifest freezes the slice version's family
+#                    set forever: promote every family that should serve
+#                    from this slice in ONE dispatch.
+#   publish-release  v2_release_manifest.py assemble (from R2, read-only) +
+#                    publish-release (create-only v2/releases/{build}/
+#                    release.json). The release sha256 is printed prominently;
+#                    the operator needs it for later recovery expectations.
+#   promote-catalog  v2_release_manifest.py promote: If-Match compare-and-swap
+#                    of v2/catalog.json against exactly one stated expectation
+#                    (`catalog_expectation` = "absent" or the current catalog
+#                    sha256), then a bounded /v2/forward smoke. A failed smoke
+#                    fails the job LOUDLY and prints the exact recover
+#                    command; it never auto-recovers (the catalog CAS makes
+#                    manual recovery safe, and an auto-recover could fight a
+#                    concurrent operator).
+#
+# There is no preview/staging worker environment (wrangler.toml defines only
+# the production geocoder worker on geocoder.bradr.dev), so the smoke is a
+# post-promote production check with recover-on-failure guidance by design.
+on:
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: Which promotion rung to run. Later rungs require a green probe run, attested in `confirm`.
+        required: true
+        type: choice
+        options: [probe, promote-slice, publish-release, promote-catalog]
+      mode:
+        description: dry-run prints every planned write and writes nothing; execute performs them. The probe stage always executes its self-cleaning one-object proofs.
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, execute]
+      confirm:
+        description: >-
+          Typed confirmation, required for execute of every stage except probe:
+          "PROMOTE-SLICE <slice_version> PROBES-GREEN:<probe-run-id>",
+          "PUBLISH-RELEASE <geocoder_build> PROBES-GREEN:<probe-run-id>", or
+          "PROMOTE-CATALOG <geocoder_build> PROBES-GREEN:<probe-run-id>".
+          The probe run id attests a green `stage: probe` run of this workflow.
+        required: false
+        default: ""
+        type: string
+      slice_version:
+        description: Destination slice version (slice-YYYY-MM-DD.N). Used by promote-slice and publish-release.
+        required: false
+        default: ""
+        type: string
+      geocoder_build:
+        description: v2 geocoder build (YYYY-MM-DD.N). Used by publish-release and promote-catalog.
+        required: false
+        default: ""
+        type: string
+      overture_release:
+        description: Overture release the slice was built from (publish-release).
+        required: false
+        default: "2026-06-17.0"
+        type: string
+      legacy_core:
+        description: Frozen legacy core release version bound into the v2 release (publish-release).
+        required: false
+        default: "2026-07-18.0"
+        type: string
+      places_source:
+        description: >-
+          promote-slice only. "<request-sha256>:<construction-run-id>" naming
+          the Places construction-v1 request and the run whose cv1-control /
+          cv1-reduce-* artifacts carry its contract and reduction records.
+          Leave empty to promote no Places family.
+        required: false
+        default: ""
+        type: string
+      addresses_source:
+        description: >-
+          promote-slice only. "<request-sha256>:<construction-run-id>" for the
+          Address family, same shape as places_source. Leave empty to promote
+          no Address family.
+        required: false
+        default: ""
+        type: string
+      catalog_expectation:
+        description: >-
+          promote-catalog only. Exactly one CAS expectation: "absent" for the
+          first-ever promotion, or the sha256 of the CURRENT v2/catalog.json.
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  # The single v2 control-plane group: every job here can mutate v2/ or the
+  # promoted slice trees, and any FUTURE workflow that writes under v2/ must
+  # join this exact group. Never cancel in flight: an interrupted credentialed
+  # write sequence is worse than a waiting one.
+  group: r2-v2-publication
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET: geocoder-shards
+  BASE_URL: https://geocoder.bradr.dev
+
+jobs:
+  # --- Secret-free admission: validate every input for the dispatched stage ---
+  gate:
+    name: Validate stage inputs and record the probe attestation
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate inputs for the dispatched stage (no secrets)
+        env:
+          STAGE: ${{ inputs.stage }}
+          MODE: ${{ inputs.mode }}
+          CONFIRM: ${{ inputs.confirm }}
+          SLICE_VERSION: ${{ inputs.slice_version }}
+          GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+          OVERTURE_RELEASE: ${{ inputs.overture_release }}
+          LEGACY_CORE: ${{ inputs.legacy_core }}
+          PLACES_SOURCE: ${{ inputs.places_source }}
+          ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
+          CATALOG_EXPECTATION: ${{ inputs.catalog_expectation }}
+        run: |
+          set -euo pipefail
+
+          require_slice_version () {
+            if ! printf '%s' "$SLICE_VERSION" | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+              echo "::error::slice_version '$SLICE_VERSION' must match slice-YYYY-MM-DD.N"
+              exit 1
+            fi
+            if printf '%s' "$SLICE_VERSION" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+              echo "::error::slice_version '$SLICE_VERSION' matches the production release pattern"
+              exit 1
+            fi
+          }
+          require_build () {
+            local label="$1" value="$2"
+            if ! printf '%s' "$value" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'; then
+              echo "::error::${label} '${value}' must match YYYY-MM-DD.N"
+              exit 1
+            fi
+          }
+          require_source () {
+            local label="$1" value="$2"
+            [ -z "$value" ] && return 0
+            if ! printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}:[0-9]+$'; then
+              echo "::error::${label} '${value}' must be <request-sha256>:<construction-run-id>"
+              exit 1
+            fi
+          }
+          # The typed confirmation binds the stage word, the exact promotion
+          # target, and the operator's attestation that a `stage: probe` run
+          # of this workflow is green. Required for every execute except the
+          # self-cleaning probe itself.
+          require_confirm () {
+            local word="$1" target="$2"
+            [ "$MODE" = "execute" ] || return 0
+            local prefix="${word} ${target} PROBES-GREEN:"
+            case "$CONFIRM" in
+              "${prefix}"*) ;;
+              *)
+                echo "::error::confirm must be exactly '${prefix}<probe-run-id>'"
+                exit 1
+                ;;
+            esac
+            PROBE_RUN_ID="${CONFIRM#"${prefix}"}"
+            case "$PROBE_RUN_ID" in
+              ''|*[!0-9]*)
+                echo "::error::PROBES-GREEN must name a numeric probe run id"
+                exit 1
+                ;;
+            esac
+            {
+              echo "## Promote v2 release: ${STAGE} (${MODE})"
+              echo
+              echo "- Operator attestation: probe run \`${PROBE_RUN_ID}\` is green"
+              echo "  (https://github.com/${GITHUB_REPOSITORY}/actions/runs/${PROBE_RUN_ID})"
+              echo "- Typed confirmation: \`${CONFIRM}\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
+          case "$STAGE" in
+            probe)
+              echo "probe stage: one-object live proofs, run-unique keys, unconditional cleanup"
+              ;;
+            promote-slice)
+              require_slice_version
+              if [ -z "$PLACES_SOURCE" ] && [ -z "$ADDRESSES_SOURCE" ]; then
+                echo "::error::promote-slice needs places_source and/or addresses_source"
+                exit 1
+              fi
+              require_source places_source "$PLACES_SOURCE"
+              require_source addresses_source "$ADDRESSES_SOURCE"
+              require_confirm PROMOTE-SLICE "$SLICE_VERSION"
+              ;;
+            publish-release)
+              require_slice_version
+              require_build geocoder_build "$GEOCODER_BUILD"
+              require_build overture_release "$OVERTURE_RELEASE"
+              require_build legacy_core "$LEGACY_CORE"
+              require_confirm PUBLISH-RELEASE "$GEOCODER_BUILD"
+              ;;
+            promote-catalog)
+              require_build geocoder_build "$GEOCODER_BUILD"
+              if [ "$CATALOG_EXPECTATION" != "absent" ] \
+                && ! printf '%s' "$CATALOG_EXPECTATION" | grep -Eq '^[0-9a-f]{64}$'; then
+                echo "::error::catalog_expectation must be exactly 'absent' or the current catalog sha256"
+                exit 1
+              fi
+              require_confirm PROMOTE-CATALOG "$GEOCODER_BUILD"
+              ;;
+            *)
+              echo "::error::unknown stage '$STAGE'"
+              exit 1
+              ;;
+          esac
+          echo "Gate passed for stage=$STAGE mode=$MODE"
+
+  # --- Stage: probe -----------------------------------------------------------
+  probe:
+    name: Live one-object CopyObject and If-Match proofs
+    needs: gate
+    if: inputs.stage == 'probe' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      PROBE_PREFIX: construction-v1/probes/promote-v2/${{ github.run_id }}-${{ github.run_attempt }}
+      # The Address serving-object cap (2 GiB): the largest object the
+      # promotion's server-side CopyObject must accept in one call.
+      PROBE_LARGE_BYTES: "2147483648"
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Prove CopyObject metadata preservation and single-part copy ETag
+        run: |
+          python -u - <<'PY'
+          import hashlib
+          import os
+          import sys
+
+          sys.path.insert(0, "scripts")
+          import promote_construction_slice as promote
+
+          prefix = os.environ["PROBE_PREFIX"]
+          tree = promote.open_tree(f"r2:{os.environ['R2_BUCKET']}", "probe tree")
+
+          # Non-empty, multi-chunk, uneven tail; uploaded through the SAME
+          # create-only path the promotion tool uses (sha256 metadata recorded).
+          payload = b"promote-v2-copyobject-probe\n" + bytes(range(251)) * 33_000
+          expected = {
+              "bytes": len(payload),
+              "sha256": hashlib.sha256(payload).hexdigest(),
+              "content_md5": hashlib.md5(
+                  payload, usedforsecurity=False
+              ).hexdigest(),
+          }
+          source_key = f"{prefix}/copy-source.bin"
+          destination_key = f"{prefix}/copy-destination.bin"
+          tree.put_bytes_create_only(source_key, payload)
+          # The EXACT production call: server-side CopyObject with
+          # MetadataDirective COPY inside one bucket.
+          tree.copy_within_bucket(source_key, destination_key)
+          # identity() fails closed if the sha256 metadata did not survive the
+          # copy, and its content_md5 is the DESTINATION's own single-part
+          # ETag -- equality with the source MD5 is the byte-fidelity proof.
+          identity = tree.identity(destination_key)
+          if identity != expected:
+              raise SystemExit(
+                  f"copy identity proof failed: {identity} != {expected}"
+              )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## CopyObject probe\n\n")
+              summary.write(f"- Source key: `{source_key}`\n")
+              summary.write("- MetadataDirective COPY carried sha256 metadata: passed\n")
+              summary.write("- Copy ETag == content MD5 (single-part): passed\n")
+          PY
+
+      - name: Prove CopyObject size acceptance at the 2 GiB Address serving cap
+        run: |
+          python -u - <<'PY'
+          import hashlib
+          import os
+          import sys
+          from pathlib import Path
+
+          sys.path.insert(0, "scripts")
+          import promote_construction_slice as promote
+
+          prefix = os.environ["PROBE_PREFIX"]
+          size = int(os.environ["PROBE_LARGE_BYTES"])
+          tree = promote.open_tree(f"r2:{os.environ['R2_BUCKET']}", "probe tree")
+
+          path = Path("probe-large.bin")
+          sha256 = hashlib.sha256()
+          md5 = hashlib.md5(usedforsecurity=False)
+          chunk = os.urandom(1 << 22)
+          with path.open("wb") as handle:
+              remaining = size
+              while remaining:
+                  piece = chunk[: min(remaining, len(chunk))]
+                  handle.write(piece)
+                  sha256.update(piece)
+                  md5.update(piece)
+                  remaining -= len(piece)
+          expected = {
+              "bytes": size,
+              "sha256": sha256.hexdigest(),
+              "content_md5": md5.hexdigest(),
+          }
+          source_key = f"{prefix}/copy-large-source.bin"
+          destination_key = f"{prefix}/copy-large-destination.bin"
+          # Single PUT (the production publication path), then the one-call
+          # server-side copy the planet promotion depends on at this size.
+          tree.store.upload(path, source_key, expected["sha256"])
+          path.unlink()
+          tree.copy_within_bucket(source_key, destination_key)
+          identity = tree.identity(destination_key)
+          if identity != expected:
+              raise SystemExit(
+                  f"large copy identity proof failed: {identity} != {expected}"
+              )
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(f"- CopyObject accepted {size} bytes in one call: passed\n")
+          PY
+
+      - name: Prove If-Match conditional PUT and DELETE semantics (412 on stale)
+        run: |
+          python -u - <<'PY'
+          import os
+          import sys
+
+          sys.path.insert(0, "scripts")
+          import v2_release_manifest as v2
+
+          store = v2.open_control_store(
+              f"r2:{os.environ['R2_BUCKET']}", "probe store"
+          )
+          key = f"{os.environ['PROBE_PREFIX']}/catalog-cas.json"
+          one = b'{"probe": 1}\n'
+          two = b'{"probe": 2}\n'
+          three = b'{"probe": 3}\n'
+
+          # Create-only leg (If-None-Match: *), already execution-proven live
+          # (PR #181) but re-proven here in one call.
+          store.put(key, one)
+          try:
+              store.put(key, one)
+          except v2.StateConflict:
+              pass
+          else:
+              raise SystemExit("create-only PUT over an existing key did not 412")
+
+          payload, etag_one = store.get(key)
+          assert payload == one
+          # The CAS swap the production promote performs: If-Match with the
+          # ETag from the SAME GET that hashed the current bytes.
+          store.put(key, two, expect=etag_one)
+          payload, etag_two = store.get(key)
+          assert payload == two and etag_two != etag_one
+
+          # THE probe: R2 must ENFORCE If-Match on PutObject. A stale
+          # condition must 412, never silently overwrite.
+          try:
+              store.put(key, three, expect=etag_one)
+          except v2.StateConflict:
+              pass
+          else:
+              raise SystemExit("stale If-Match PUT did not 412; CAS is unsound")
+          payload, _ = store.get(key)
+          assert payload == two, "stale If-Match PUT mutated the object"
+
+          # recover --delete depends on DeleteObject honouring If-Match too.
+          try:
+              store.delete(key, expect=etag_one)
+          except v2.StateConflict:
+              pass
+          else:
+              raise SystemExit("stale If-Match DELETE did not 412")
+          store.delete(key, expect=etag_two)
+          assert store.get(key) is None
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write("## If-Match CAS probe\n\n")
+              summary.write(f"- Key: `{key}`\n")
+              summary.write("- Create-only conflict on existing key: passed\n")
+              summary.write("- If-Match PUT with current ETag: passed\n")
+              summary.write("- Stale If-Match PUT rejected with 412: passed\n")
+              summary.write("- Stale If-Match DELETE rejected, exact DELETE applied: passed\n")
+          PY
+
+      - name: Delete the exact probe keys and prove the prefix is empty
+        if: always()
+        run: |
+          set -euo pipefail
+          for ATTEMPT in 1 2 3; do
+            for NAME in copy-source.bin copy-destination.bin \
+              copy-large-source.bin copy-large-destination.bin catalog-cas.json; do
+              aws s3api delete-object \
+                --bucket "$R2_BUCKET" \
+                --key "$PROBE_PREFIX/$NAME" \
+                --endpoint-url "$R2_ENDPOINT" \
+                --region auto
+            done
+            REMAINING="$(aws s3api list-objects-v2 \
+              --bucket "$R2_BUCKET" \
+              --prefix "$PROBE_PREFIX/" \
+              --max-keys 1 \
+              --query 'KeyCount' \
+              --output text \
+              --endpoint-url "$R2_ENDPOINT" \
+              --region auto)"
+            if [ "$REMAINING" = "0" ]; then
+              echo "Deleted and verified absent: $PROBE_PREFIX/"
+              exit 0
+            fi
+            sleep $(( ATTEMPT * 2 ))
+          done
+          echo "::error::Cleanup left objects under the exact probe prefix $PROBE_PREFIX/"
+          exit 1
+
+  # --- Stage: promote-slice ----------------------------------------------------
+  promote-slice:
+    name: Promote the construction slice (plan, execute, verify, slice manifest)
+    needs: gate
+    if: inputs.stage == 'promote-slice' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      # gh run download of the construction run's cv1-control / cv1-reduce-*
+      # artifacts; nothing here writes back to GitHub.
+      actions: read
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      MODE: ${{ inputs.mode }}
+      SLICE_VERSION: ${{ inputs.slice_version }}
+      PLACES_SOURCE: ${{ inputs.places_source }}
+      ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Fetch and authenticate the construction contract and reduction records
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p cv1 plans out
+          RELEASE_SEEN=""
+          fetch_family () {
+            local family="$1" source="$2"
+            [ -n "$source" ] || return 0
+            local sha="${source%%:*}" run_id="${source##*:}"
+            mkdir -p "cv1/${family}/control" "cv1/${family}/reducers" "cv1/${family}/reductions"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "cv1/${family}/run.json"
+            jq -e '
+              .name == "Construction v1 planet build"
+              and .event == "workflow_dispatch"
+              and .head_branch == "main"
+            ' "cv1/${family}/run.json" >/dev/null || {
+              echo "::error::${family}: run ${run_id} is not a main-branch construction-v1 dispatch"
+              exit 1
+            }
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --name cv1-control --dir "cv1/${family}/control"
+            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'cv1-reduce-*' --dir "cv1/${family}/reducers"
+            local contract="cv1/${family}/control/contract.json"
+            local contract_sha
+            contract_sha="$(jq -er '.request_sha256' "$contract")"
+            if [ "$contract_sha" != "$sha" ]; then
+              echo "::error::${family}: contract request sha ${contract_sha} differs from the supplied ${sha}"
+              exit 1
+            fi
+            printf '%s' "$sha" > "cv1/${family}/request-sha"
+            local release
+            release="$(jq -er '.release' "$contract")"
+            if [ -z "$RELEASE_SEEN" ]; then
+              RELEASE_SEEN="$release"
+            elif [ "$RELEASE_SEEN" != "$release" ]; then
+              echo "::error::families disagree on the Overture release"
+              exit 1
+            fi
+            jq -er '.namespaces.slice' "$contract" > "cv1/${family}/slice-root"
+            jq -er '.namespaces.markers' "$contract" > "cv1/${family}/markers-root"
+            grep -Eq '^construction-v1/[0-9a-f]{64}/slice/' "cv1/${family}/slice-root" || {
+              echo "::error::${family}: contract slice namespace is not a construction-v1 slice prefix"
+              exit 1
+            }
+            grep -Eq '^construction-v1/[0-9a-f]{64}/markers/$' "cv1/${family}/markers-root" || {
+              echo "::error::${family}: contract markers namespace is not a construction-v1 markers prefix"
+              exit 1
+            }
+            jq -er '.producer_commit' "cv1/${family}/control/request.json" \
+              > "cv1/${family}/producer-commit"
+            # Flatten every reducer batch's reduction records into one
+            # directory; a duplicate partition file means overlapping batch
+            # artifacts and fails closed.
+            while IFS= read -r record; do
+              local target
+              target="cv1/${family}/reductions/$(basename "$record")"
+              if [ -e "$target" ]; then
+                echo "::error::${family}: duplicate reduction record $(basename "$record")"
+                exit 1
+              fi
+              cp "$record" "$target"
+            done < <(find "cv1/${family}/reducers" -type f -path '*/reductions/*.json' | sort)
+            local count
+            count="$(find "cv1/${family}/reductions" -name '*.json' | wc -l)"
+            if [ "$count" -eq 0 ]; then
+              echo "::error::${family}: run ${run_id} carried no reduction records"
+              exit 1
+            fi
+            echo "${family}: ${count} reduction records from run ${run_id}"
+          }
+          fetch_family places "$PLACES_SOURCE"
+          fetch_family addresses "$ADDRESSES_SOURCE"
+          echo "RELEASE=$RELEASE_SEEN" >> "$GITHUB_ENV"
+
+      - name: Plan every family promotion and echo exactly what will be written
+        run: |
+          set -euo pipefail
+          {
+            echo "## Slice promotion plan (${SLICE_VERSION}, release ${RELEASE})"
+            echo
+          } >> "$GITHUB_STEP_SUMMARY"
+          for FAMILY in places addresses; do
+            [ -d "cv1/${FAMILY}/control" ] || continue
+            python -u scripts/promote_construction_slice.py plan \
+              --source "r2:${R2_BUCKET}" \
+              --family "$FAMILY" \
+              --slice-root "${FAMILY}=$(cat "cv1/${FAMILY}/slice-root")" \
+              --markers-root "${FAMILY}=$(cat "cv1/${FAMILY}/markers-root")" \
+              --reductions-dir "${FAMILY}=cv1/${FAMILY}/reductions" \
+              --version "$SLICE_VERSION" \
+              --release "$RELEASE" \
+              --producer-commit "$(cat "cv1/${FAMILY}/producer-commit")" \
+              --output "plans/${FAMILY}.json"
+            # The plan re-derived the request digest from the construction
+            # tree's own manifests and marker; bind it to the operator input.
+            PLAN_SHA="$(jq -er --arg f "$FAMILY" '.families[$f].request_sha256' "plans/${FAMILY}.json")"
+            if [ "$PLAN_SHA" != "$(cat "cv1/${FAMILY}/request-sha")" ]; then
+              echo "::error::${FAMILY}: planned request sha ${PLAN_SHA} differs from the supplied one"
+              exit 1
+            fi
+            TOTALS="$(jq -c --arg f "$FAMILY" '.families[$f].totals' "plans/${FAMILY}.json")"
+            echo "planned ${FAMILY}: ${TOTALS} -> ${SLICE_VERSION}/families/${FAMILY}/ (create-only, never deletes)"
+            echo "- \`${FAMILY}\`: ${TOTALS}" >> "$GITHUB_STEP_SUMMARY"
+          done
+          if [ "$MODE" != "execute" ]; then
+            echo "dry-run: no execute, no verify, no slice manifest written" | tee -a "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Execute and verify every family promotion (create-only copies)
+        if: inputs.mode == 'execute'
+        run: |
+          set -euo pipefail
+          for FAMILY in places addresses; do
+            [ -f "plans/${FAMILY}.json" ] || continue
+            python -u scripts/promote_construction_slice.py execute \
+              --plan "plans/${FAMILY}.json" \
+              --source "r2:${R2_BUCKET}" \
+              --destination "r2:${R2_BUCKET}"
+            python -u scripts/promote_construction_slice.py verify \
+              --plan "plans/${FAMILY}.json" \
+              --destination "r2:${R2_BUCKET}"
+          done
+
+      - name: Publish the slice manifest (create-only, announced before write)
+        if: inputs.mode == 'execute'
+        run: |
+          set -euo pipefail
+          PLAN_ARGS=()
+          for FAMILY in places addresses; do
+            [ -f "plans/${FAMILY}.json" ] && PLAN_ARGS+=(--plan "plans/${FAMILY}.json")
+          done
+          # Prints the planned create-only write (key, sha256, bytes) before
+          # writing; byte-identical re-runs are accepted, different bytes fail
+          # closed (slice manifests are immutable).
+          python -u scripts/promote_construction_slice.py slice-manifest \
+            "${PLAN_ARGS[@]}" \
+            --destination "r2:${R2_BUCKET}" \
+            --output out/slice-manifest.json --execute
+          {
+            echo "- Slice manifest: \`${SLICE_VERSION}/slice-manifest.json\`"
+            echo "  (sha256 \`$(sha256sum out/slice-manifest.json | awk '{print $1}')\`)"
+            echo "- The slice version's family set is now FROZEN by the create-only manifest."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the promotion evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: promote-slice-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            plans/
+            out/
+
+  # --- Stage: publish-release ---------------------------------------------------
+  publish-release:
+    name: Assemble and publish the v2 release document
+    needs: gate
+    if: inputs.stage == 'publish-release' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      MODE: ${{ inputs.mode }}
+      SLICE_VERSION: ${{ inputs.slice_version }}
+      GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+      OVERTURE_RELEASE: ${{ inputs.overture_release }}
+      LEGACY_CORE: ${{ inputs.legacy_core }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Read the promoted slice manifest and derive its family set
+        run: |
+          set -euo pipefail
+          aws s3api get-object \
+            --bucket "$R2_BUCKET" \
+            --key "${SLICE_VERSION}/slice-manifest.json" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto \
+            slice-manifest.json > /dev/null
+          jq -e '.is_slice == true and .promotion_eligible == false' slice-manifest.json > /dev/null
+          jq -r '.families | keys[]' slice-manifest.json > families.txt
+          test -s families.txt
+          echo "slice ${SLICE_VERSION} families: $(paste -sd, families.txt)"
+
+      - name: Assemble the release document from R2 and print its sha256
+        run: |
+          set -euo pipefail
+          FAMILY_ARGS=()
+          while IFS= read -r FAMILY; do
+            FAMILY_ARGS+=(--family "$FAMILY")
+          done < families.txt
+          python -u scripts/v2_release_manifest.py assemble \
+            --store "r2:${R2_BUCKET}" \
+            --geocoder-build "$GEOCODER_BUILD" \
+            --overture-release "$OVERTURE_RELEASE" \
+            --slice-version "$SLICE_VERSION" \
+            --legacy-core "$LEGACY_CORE" \
+            "${FAMILY_ARGS[@]}" \
+            --output release.json | tee assemble.json
+          RELEASE_SHA="$(jq -er '.sha256' assemble.json)"
+          {
+            echo "## v2 release assembled: ${GEOCODER_BUILD}"
+            echo
+            echo "### Release sha256 (needed for the next rung): \`${RELEASE_SHA}\`"
+            echo
+            echo "- manifest key: \`$(jq -er '.manifest_key' assemble.json)\`"
+            echo "- release_digest: \`$(jq -er '.release_digest' assemble.json)\`"
+            echo "- bytes: $(jq -er '.bytes' assemble.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Announce the create-only release publication (dry run)
+        run: |
+          set -euo pipefail
+          python -u scripts/v2_release_manifest.py publish-release \
+            --store "r2:${R2_BUCKET}" \
+            --release release.json
+
+      - name: Publish the release document (create-only, verified after write)
+        if: inputs.mode == 'execute'
+        run: |
+          set -euo pipefail
+          python -u scripts/v2_release_manifest.py publish-release \
+            --store "r2:${R2_BUCKET}" \
+            --release release.json \
+            --execute
+
+      - name: Upload the assembled release document
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: v2-release-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: warn
+          retention-days: 90
+          path: |
+            release.json
+            assemble.json
+
+  # --- Stage: promote-catalog ----------------------------------------------------
+  promote-catalog:
+    name: Compare-and-swap the v2 catalog, then smoke /v2/forward
+    needs: gate
+    if: inputs.stage == 'promote-catalog' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+      AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      MODE: ${{ inputs.mode }}
+      GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+      CATALOG_EXPECTATION: ${{ inputs.catalog_expectation }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Announce the catalog compare-and-swap (dry run)
+        run: |
+          set -euo pipefail
+          # Exactly one CAS expectation, validated by the gate: "absent" means
+          # --expect-absent, anything else is the current catalog sha256.
+          EXPECT_ARGS=(--expect-absent)
+          if [ "$CATALOG_EXPECTATION" != "absent" ]; then
+            EXPECT_ARGS=(--expect-sha256 "$CATALOG_EXPECTATION")
+          fi
+          python -u scripts/v2_release_manifest.py promote \
+            --store "r2:${R2_BUCKET}" \
+            --build "$GEOCODER_BUILD" \
+            "${EXPECT_ARGS[@]}" | tee promote-dry.json
+
+      - name: Execute the catalog compare-and-swap (verified after write)
+        if: inputs.mode == 'execute'
+        run: |
+          set -euo pipefail
+          EXPECT_ARGS=(--expect-absent)
+          if [ "$CATALOG_EXPECTATION" != "absent" ]; then
+            EXPECT_ARGS=(--expect-sha256 "$CATALOG_EXPECTATION")
+          fi
+          python -u scripts/v2_release_manifest.py promote \
+            --store "r2:${R2_BUCKET}" \
+            --build "$GEOCODER_BUILD" \
+            "${EXPECT_ARGS[@]}" \
+            --execute | tee promote.json
+          PROMOTED_SHA="$(jq -rs '.[-1].sha256' promote.json)"
+          echo "PROMOTED_SHA=$PROMOTED_SHA" >> "$GITHUB_ENV"
+          {
+            echo "## v2 catalog promoted to ${GEOCODER_BUILD}"
+            echo
+            echo "- New catalog sha256: \`${PROMOTED_SHA}\`"
+            echo "- Recovery expectation for any later recover/promote: \`${PROMOTED_SHA}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Bounded post-promote smoke of /v2/forward (never auto-recovers)
+        if: inputs.mode == 'execute'
+        run: |
+          set -uo pipefail
+          # There is no preview/staging worker environment, so this is a
+          # bounded PRODUCTION check. The retry window rides out the worker's
+          # 5-minute catalog edge-cache TTL. On failure it prints the exact
+          # recover commands and fails loudly; it NEVER runs recover itself.
+          fetch () {
+            curl -sS --max-time 20 --get "$BASE_URL/v2/forward" "$@"
+          }
+          check_envelope () {
+            local body="$1" label="$2"
+            if echo "$body" | jq -e '.error == "release_unavailable"' > /dev/null 2>&1; then
+              echo "  FAIL $label: 503 release_unavailable"
+              return 1
+            fi
+            echo "$body" | jq -e --arg build "$GEOCODER_BUILD" '
+              .type == "FeatureCollection"
+              and .data_version.geocoder_build == $build
+            ' > /dev/null || {
+              echo "  FAIL $label: wrong build or shape -> $(echo "$body" | head -c 300)"
+              return 1
+            }
+          }
+          run_checks () {
+            local body
+
+            body=$(fetch --data-urlencode "q=Berlin" --data-urlencode "limit=3") || {
+              echo "  FAIL divisions: request error"; return 1; }
+            check_envelope "$body" divisions || return 1
+            echo "$body" | jq -e '(.features | length) >= 1' > /dev/null || {
+              echo "  FAIL divisions: no features for Berlin"; return 1; }
+            echo "  OK   divisions (q=Berlin, build $GEOCODER_BUILD)"
+
+            body=$(fetch --data-urlencode "q=Eiffel Tower" --data-urlencode "limit=3") || {
+              echo "  FAIL places: request error"; return 1; }
+            check_envelope "$body" places || return 1
+            echo "$body" | jq -e '(.features | length) >= 1' > /dev/null || {
+              echo "  FAIL places: no features for Eiffel Tower"; return 1; }
+            echo "  OK   places (q=Eiffel Tower)"
+
+            body=$(fetch --data-urlencode "number=350" \
+              --data-urlencode "street=5th Avenue" \
+              --data-urlencode "city=New York") || {
+              echo "  FAIL addresses: request error"; return 1; }
+            check_envelope "$body" addresses || return 1
+            if ! echo "$body" | jq -e '(.features | length) >= 1' > /dev/null; then
+              echo "  WARN addresses: 200 on the promoted build but no feature for 350 5th Avenue"
+            fi
+            echo "  OK   addresses (structured forward, build $GEOCODER_BUILD)"
+            return 0
+          }
+          for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
+            echo "Post-promote smoke, attempt $ATTEMPT/10:"
+            if run_checks; then
+              echo "All post-promote checks passed on build $GEOCODER_BUILD."
+              exit 0
+            fi
+            if [ "$ATTEMPT" -lt 10 ]; then
+              echo "Retrying in 45s (catalog edge cache TTL is 5 minutes)..."
+              sleep 45
+            fi
+          done
+          echo "::error::/v2/forward smoke failed after 10 attempts on build $GEOCODER_BUILD."
+          {
+            echo "## Post-promote smoke FAILED -- manual recovery required"
+            echo
+            echo "This workflow never auto-recovers (a concurrent operator could be acting)."
+            echo "The catalog CAS makes manual recovery safe. Current catalog sha256: \`${PROMOTED_SHA}\`"
+            echo
+            echo "Repoint at a prior build:"
+            echo '```'
+            echo "python scripts/v2_release_manifest.py recover --store r2:${R2_BUCKET} --build <prior-build> --expect-sha256 ${PROMOTED_SHA} --execute"
+            echo '```'
+            echo "Take /v2 down (worker serves 503 release_unavailable):"
+            echo '```'
+            echo "python scripts/v2_release_manifest.py recover --store r2:${R2_BUCKET} --delete --expect-sha256 ${PROMOTED_SHA} --execute"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 1

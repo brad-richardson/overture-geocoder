@@ -873,3 +873,183 @@ def test_harness_end_to_end(tmp_path, family):
     for name in promote._routing_object_names(routing):
         assert (family_dir / "objects" / name).is_file()
     assert plan["families"][family]["totals"]["objects"] > 0
+
+
+# ---------------------------------------------------------------------------
+# slice-manifest: the #107 slice source document consumed by
+# v2_release_manifest.py assemble / _validate_family_source.
+
+
+import importlib.util  # noqa: E402
+
+_V2_SPEC = importlib.util.spec_from_file_location(
+    "v2_release_manifest_for_promote",
+    Path(__file__).parent.parent / "scripts" / "v2_release_manifest.py",
+)
+assert _V2_SPEC and _V2_SPEC.loader
+v2 = importlib.util.module_from_spec(_V2_SPEC)
+_V2_SPEC.loader.exec_module(v2)
+
+_FIXTURE_SPEC = importlib.util.spec_from_file_location(
+    "v2_release_manifest_fixtures_for_promote",
+    Path(__file__).parent / "test_v2_release_manifest.py",
+)
+assert _FIXTURE_SPEC and _FIXTURE_SPEC.loader
+v2_fixtures = importlib.util.module_from_spec(_FIXTURE_SPEC)
+_FIXTURE_SPEC.loader.exec_module(v2_fixtures)
+
+LEGACY = "2026-07-18.0"
+
+
+def _run_slice_manifest(plan_paths, destination, output, execute=True):
+    args = ["slice-manifest"]
+    for path in plan_paths:
+        args += ["--plan", str(path)]
+    args += ["--destination", f"local:{destination}", "--output", str(output)]
+    if execute:
+        args.append("--execute")
+    return promote.main(args)
+
+
+def _promoted_world(both):
+    """plan+execute+verify both families, one plan per family (the workflow
+    shape: two construction runs with different producer commits)."""
+    root, slices = both
+    destination = root / "dest"
+    plan_paths = []
+    for built in slices:
+        plan_path = root / f"plan-{built.family}.json"
+        run_plan(root, [built], plan_path)
+        run_execute(root, plan_path, destination)
+        run_verify(plan_path, destination)
+        plan_paths.append(plan_path)
+    return root, destination, plan_paths
+
+
+def test_slice_manifest_end_to_end_feeds_v2_assemble(both):
+    root, destination, plan_paths = _promoted_world(both)
+    output = root / "slice-manifest.json"
+    assert _run_slice_manifest(plan_paths, destination, output) == 0
+
+    key = destination / VERSION / "slice-manifest.json"
+    assert key.read_bytes() == output.read_bytes()
+    document = json.loads(output.read_text())
+    assert document["is_slice"] is True
+    assert document["promotion_eligible"] is False
+    assert document["slice_version"] == VERSION
+    assert sorted(document["families"]) == ["addresses", "places"]
+
+    # The document must satisfy the #194 source-manifest boundary exactly.
+    for family in ("addresses", "places"):
+        plan = json.loads(
+            (root / f"plan-{family}.json").read_text()
+        )["families"][family]
+        family_manifest = gbm.validate_family_manifest(plan["family_manifest"])
+        v2._validate_family_source(
+            family,
+            document,
+            hashlib.sha256(output.read_bytes()).hexdigest(),
+            family_manifest,
+            RELEASE,
+        )
+
+    # And the full #194 assemble must run against the promoted tree alone.
+    legacy = v2_fixtures.legacy_release(LEGACY, release=RELEASE)
+    legacy_path = destination / LEGACY / "release-manifest.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(v2.gbm.canonical_json(legacy))
+    release_out = root / "release.json"
+    v2.main(
+        [
+            "assemble",
+            "--store", f"local:{destination}",
+            "--geocoder-build", "2026-07-28.0",
+            "--overture-release", RELEASE,
+            "--slice-version", VERSION,
+            "--legacy-core", LEGACY,
+            "--output", str(release_out),
+        ]
+    )
+    release = json.loads(release_out.read_text())
+    v2.validate_release_manifest(release)
+    for family in ("addresses", "places"):
+        assert release["families"][family]["source"] == {
+            "kind": "family_slice",
+            "version": VERSION,
+            "manifest_key": f"{VERSION}/slice-manifest.json",
+            "manifest_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
+        }
+
+
+def test_slice_manifest_is_deterministic_and_republish_is_benign(both):
+    root, destination, plan_paths = _promoted_world(both)
+    first = root / "first.json"
+    second = root / "second.json"
+    assert _run_slice_manifest(plan_paths, destination, first) == 0
+    # A second execute over the same plans must emit byte-identical content
+    # and accept the already-published document.
+    assert _run_slice_manifest(plan_paths, destination, second) == 0
+    assert first.read_bytes() == second.read_bytes()
+
+
+def test_slice_manifest_dry_run_writes_nothing(both):
+    root, destination, plan_paths = _promoted_world(both)
+    output = root / "slice-manifest.json"
+    assert _run_slice_manifest(plan_paths, destination, output, execute=False) == 0
+    assert not (destination / VERSION / "slice-manifest.json").exists()
+    assert output.is_file()
+
+
+def test_slice_manifest_fails_before_execute(both):
+    root, slices = both
+    plan_path = root / "plan.json"
+    run_plan(root, slices, plan_path)
+    with pytest.raises(
+        SystemExit, match="missing object|run execute and verify first"
+    ):
+        _run_slice_manifest(
+            [plan_path], root / "never-executed", root / "out.json"
+        )
+
+
+def test_slice_manifest_fails_on_conflicting_published_document(both):
+    root, destination, plan_paths = _promoted_world(both)
+    conflicting = destination / VERSION / "slice-manifest.json"
+    conflicting.parent.mkdir(parents=True, exist_ok=True)
+    conflicting.write_bytes(b'{"other": "document"}')
+    for execute in (False, True):
+        with pytest.raises(SystemExit, match="immutable"):
+            _run_slice_manifest(
+                plan_paths, destination, root / "out.json", execute=execute
+            )
+
+
+def test_slice_manifest_rejects_disagreeing_plans(both):
+    root, destination, plan_paths = _promoted_world(both)
+    doctored = json.loads(plan_paths[0].read_text())
+    doctored["version"] = "slice-2026-07-29.0"
+    doctored_path = root / "doctored.json"
+    doctored_path.write_text(json.dumps(doctored))
+    with pytest.raises(SystemExit, match="disagree on version or release"):
+        _run_slice_manifest(
+            [doctored_path, plan_paths[1]], destination, root / "out.json"
+        )
+
+
+def test_slice_manifest_rejects_duplicate_family_plans(both):
+    root, destination, plan_paths = _promoted_world(both)
+    with pytest.raises(SystemExit, match="more than one plan"):
+        _run_slice_manifest(
+            [plan_paths[0], plan_paths[0]], destination, root / "out.json"
+        )
+
+
+def test_slice_manifest_fails_on_tampered_plan_manifest(both):
+    root, destination, plan_paths = _promoted_world(both)
+    doctored = json.loads(plan_paths[1].read_text())
+    family = next(iter(doctored["families"]))
+    doctored["families"][family]["family_manifest_sha256"] = "0" * 64
+    doctored_path = root / "doctored.json"
+    doctored_path.write_text(json.dumps(doctored))
+    with pytest.raises(SystemExit, match="identity disagrees"):
+        _run_slice_manifest([doctored_path], destination, root / "out.json")
