@@ -253,13 +253,18 @@ verification of 10,931 objects.
 
 ## Fastest path
 
-The forward planet milestone is complete. Follow this sequence:
+The forward planet milestone is complete. Reverse R1 is also complete
+(2026-07-28): the shared leaf-key contract and Python oracle (PR #187), the
+`.plrx` encoder/verifier pair (PR #190), the cell-identifier parity vectors
+consumed by Python, the worker, and the encoder (PR #191), and the slice
+harness with fail-closed CI gates on the Monaco/Seattle slices (PR #192, clean
+adversarial review). Follow this sequence:
 
-1. **Begin reverse R1.** Consume the already published per-record artifacts; do
-   not rerun either forward map.
-2. **Prove shared cell parity and the encoder/verifier on the small real-data
-   harness.**
-3. **Advance to the reverse bucket-range reducer only after R1 passes.**
+1. **Advance to the reverse bucket-range reducer (R2)** over the published
+   per-record artifacts; do not rerun either forward map. Carry PR #192's two
+   recorded P2s into the R2 design: add a genuine `COUNT(*) over packs ==
+   sum(directory records)` cross-check, and note the address size band is
+   deliberately absent (real mean 101 B vs the 122 B model).
 
 Wall-clock optimization of the forward build is an adopted secondary track,
 run within the two-active-PR budget and never ahead of reverse R1. The adopted
@@ -275,8 +280,9 @@ ingest, not a dedicated measurement run.
 
 ## Open blockers and gates
 
-There are no measured construction-v1 forward planet blockers. Reverse R1 is
-the active execution rung.
+There are no measured construction-v1 forward planet blockers. Reverse R1
+passed on 2026-07-28; the reverse bucket-range reducer (R2) is the active
+execution rung.
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful
