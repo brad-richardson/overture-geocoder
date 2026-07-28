@@ -13,9 +13,11 @@ name: Promote v2 Release
 #                    promote_construction_slice.py requires (MetadataDirective
 #                    COPY metadata preservation, single-part copy ETag ==
 #                    content MD5, size acceptance at the 2 GiB Address serving
-#                    cap) and the If-Match conditional PUT/DELETE semantics
+#                    cap) and the If-Match conditional PUT semantics
 #                    v2_release_manifest.py's catalog CAS requires (stale
-#                    If-Match must 412). No other stage may be executed until
+#                    If-Match must 412). R2 does not implement conditional
+#                    DeleteObject, so unavailable recovery is a signed CAS PUT.
+#                    No other stage may be executed until
 #                    this has a green run; later stages enforce that by a
 #                    typed PROBES-GREEN:<probe-run-id> attestation inside the
 #                    confirmation string, recorded in the run log (workflows
@@ -378,7 +380,7 @@ jobs:
               summary.write(f"- CopyObject accepted {size} bytes in one call: passed\n")
           PY
 
-      - name: Prove If-Match conditional PUT and DELETE semantics (412 on stale)
+      - name: Prove If-Match conditional PUT semantics (412 on stale)
         run: |
           python -u - <<'PY'
           import os
@@ -424,23 +426,12 @@ jobs:
           payload, _ = store.get(key)
           assert payload == two, "stale If-Match PUT mutated the object"
 
-          # recover --delete depends on DeleteObject honouring If-Match too.
-          try:
-              store.delete(key, expect=etag_one)
-          except v2.StateConflict:
-              pass
-          else:
-              raise SystemExit("stale If-Match DELETE did not 412")
-          store.delete(key, expect=etag_two)
-          assert store.get(key) is None
-
           with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
               summary.write("## If-Match CAS probe\n\n")
               summary.write(f"- Key: `{key}`\n")
               summary.write("- Create-only conflict on existing key: passed\n")
               summary.write("- If-Match PUT with current ETag: passed\n")
               summary.write("- Stale If-Match PUT rejected with 412: passed\n")
-              summary.write("- Stale If-Match DELETE rejected, exact DELETE applied: passed\n")
           PY
 
       - name: Delete the exact probe keys and prove the prefix is empty
@@ -913,9 +904,9 @@ jobs:
             echo '```'
             echo "python scripts/v2_release_manifest.py recover --store r2:${R2_BUCKET} --build <prior-build> --expect-sha256 ${PROMOTED_SHA} --execute"
             echo '```'
-            echo "Take /v2 down (worker serves 503 release_unavailable):"
+            echo "Take /v2 down with a catalog CAS (worker serves 503 release_unavailable):"
             echo '```'
-            echo "python scripts/v2_release_manifest.py recover --store r2:${R2_BUCKET} --delete --expect-sha256 ${PROMOTED_SHA} --execute"
+            echo "python scripts/v2_release_manifest.py recover --store r2:${R2_BUCKET} --unavailable --expect-sha256 ${PROMOTED_SHA} --execute"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
           exit 1

@@ -20,11 +20,12 @@ bytes fail closed, and the catalog is never touched.  ``promote`` is a
 compare-and-swap write of ``v2/catalog.json`` against an explicitly stated
 expectation (``--expect-absent`` or ``--expect-sha256``), re-proving every
 release reference against its source bytes first.  ``recover`` repoints the
-catalog at a prior release under the same discipline, or ``--delete``\\ s it so
-the worker serves 503 ``release_unavailable``.  Release documents are never
-deleted by tooling.  All publication writes are dry-run by default
-(``--execute`` writes), are announced with target key + SHA-256 before any
-write, and every written object is re-downloaded and hashed afterwards.
+catalog at a prior release under the same discipline, or ``--unavailable``
+compare-and-swaps it to a signed unavailable document so the worker serves 503
+``release_unavailable``.  Release documents are never deleted by tooling.  All
+publication writes are dry-run by default (``--execute`` writes), are announced
+with target key + SHA-256 before any write, and every written object is
+re-downloaded and hashed afterwards.
 
 CAS honesty: on R2 the swap sends ``If-Match`` with the ETag captured by the
 SAME GET that hashed the current catalog, so the conditional PUT is atomic at
@@ -33,10 +34,9 @@ nowhere else in this repo; probe it with one object (PUT, then a second PUT
 carrying a stale ``If-Match``, expecting 412) before the first production
 promote -- the PR #181 discipline promote_construction_slice applies to
 CopyObject.  The create-only leg (``If-None-Match: *``) is already
-execution-proven live (PR #181).  On the ``local:`` backend the swap and the
-delete are check-then-act with a small unavoidable race window between reading
-the current bytes and replacing them; that backend exists for rehearsal, not
-production.
+execution-proven live (PR #181).  On the ``local:`` backend the swap is
+check-then-act with a small unavoidable race window between reading the current
+bytes and replacing them; that backend exists for rehearsal, not production.
 """
 
 from __future__ import annotations
@@ -65,6 +65,8 @@ from common import sha256_file, version_sort_key  # noqa: E402
 
 RELEASE_SCHEMA = "overture-geocoder-v2-release-v1"
 CATALOG_SCHEMA = "overture-geocoder-v2-catalog-v1"
+UNAVAILABLE_CATALOG_SCHEMA = "overture-geocoder-v2-unavailable-v1"
+UNAVAILABLE_REASON = "operator-recovery"
 BUILD_RE = re.compile(r"\d{4}-\d{2}-\d{2}\.\d+")
 SLICE_RE = re.compile(r"slice-\d{4}-\d{2}-\d{2}\.\d+")
 KEY_COMPONENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,127}")
@@ -958,6 +960,72 @@ def validate_catalog(
     return catalog
 
 
+def build_unavailable_catalog(
+    *,
+    previous_catalog_sha256: str,
+    generated_at: str | None = None,
+) -> dict[str, Any]:
+    """Build the signed production tombstone used instead of unsafe DELETE.
+
+    R2 enforces ``If-Match`` on PutObject but not DeleteObject.  Replacing the
+    live catalog with this document therefore preserves the same atomic CAS
+    boundary as promotion while giving the worker an explicit unavailable
+    state.
+    """
+    catalog = {
+        "schema": UNAVAILABLE_CATALOG_SCHEMA,
+        "generated_at": _require_string(generated_at or _now(), "generated_at"),
+        "previous_catalog_sha256": _require_sha256(
+            previous_catalog_sha256, "previous catalog SHA-256"
+        ),
+        "reason": UNAVAILABLE_REASON,
+    }
+    catalog["catalog_digest"] = gbm.digest(catalog)
+    return catalog
+
+
+def validate_unavailable_catalog(
+    catalog: Any, *, catalog_key: str = PRODUCTION_CATALOG_KEY
+) -> dict[str, Any]:
+    if catalog_key != PRODUCTION_CATALOG_KEY:
+        raise ValueError("an unavailable v2 catalog is allowed only in production")
+    if (
+        not isinstance(catalog, dict)
+        or catalog.get("schema") != UNAVAILABLE_CATALOG_SCHEMA
+    ):
+        raise ValueError(
+            f"unavailable v2 catalog schema must be {UNAVAILABLE_CATALOG_SCHEMA}"
+        )
+    _require_exact_fields(
+        catalog,
+        {
+            "schema",
+            "generated_at",
+            "previous_catalog_sha256",
+            "reason",
+            "catalog_digest",
+        },
+        "unavailable v2 catalog",
+    )
+    _require_string(catalog["generated_at"], "generated_at")
+    _require_sha256(
+        catalog["previous_catalog_sha256"], "previous catalog SHA-256"
+    )
+    if catalog["reason"] != UNAVAILABLE_REASON:
+        raise ValueError(
+            f"unavailable v2 catalog reason must be {UNAVAILABLE_REASON!r}"
+        )
+    _require_sha256(catalog["catalog_digest"], "catalog_digest")
+    unsigned = {
+        key: value for key, value in catalog.items() if key != "catalog_digest"
+    }
+    if gbm.digest(unsigned) != catalog["catalog_digest"]:
+        raise ValueError(
+            "unavailable v2 catalog does not match its catalog_digest"
+        )
+    return catalog
+
+
 # ---------------------------------------------------------------------------
 # Publication layer: assemble / publish-release / promote / recover.
 #
@@ -1018,9 +1086,9 @@ class LocalControlStore:
     """Filesystem control-document store for rehearsal and tests.
 
     The compare-and-swap token is the SHA-256 of the current bytes (state IS
-    value here).  ``put(expect=token)`` and ``delete`` are check-then-act with
-    a small race window between reading the current bytes and replacing or
-    unlinking them; the R2 backend closes that window with ``If-Match``.
+    value here).  ``put(expect=token)`` is check-then-act with a small race
+    window between reading the current bytes and replacing them; the R2
+    backend closes that window with ``If-Match``.
     """
 
     scheme = "local"
@@ -1065,13 +1133,6 @@ class LocalControlStore:
         finally:
             staging_path.unlink(missing_ok=True)
 
-    def delete(self, key: str, *, expect: str) -> None:
-        current = self.get(key)
-        if current is None or current[1] != expect:
-            raise StateConflict(f"{key} state differs from the stated expectation")
-        self._path(key).unlink()
-
-
 class R2ControlStore:
     """R2 control-document store over r2_verified_store's persistent client.
 
@@ -1079,8 +1140,10 @@ class R2ControlStore:
     with an expectation sends ``If-Match`` with that ETag, so the swap is
     conditional at the store on the exact bytes the expectation hashed (a
     single-PUT ETag is the content MD5, so the condition is value-addressed).
-    ``If-Match`` on PutObject/DeleteObject needs a one-object live probe before
-    first production use; see the module docstring.
+    ``If-Match`` on PutObject needs a one-object live probe before first
+    production use; see the module docstring.  R2 does not implement
+    conditional DeleteObject, so mutable control-plane recovery never deletes
+    the catalog: taking v2 unavailable is another conditional PutObject.
     """
 
     scheme = "r2"
@@ -1135,19 +1198,6 @@ class R2ControlStore:
                     f"{key} state differs from the stated expectation"
                 ) from error
             raise RuntimeError(f"put-object failed for {key}: {error}") from error
-
-    def delete(self, key: str, *, expect: str) -> None:
-        try:
-            self.store.client.delete_object(
-                Bucket=self.store.bucket, Key=key, IfMatch=expect
-            )
-        except self.store._client_error as error:
-            if self._codes(error) & _CONFLICT_CODES:
-                raise StateConflict(
-                    f"{key} state differs from the stated expectation"
-                ) from error
-            raise RuntimeError(f"delete-object failed for {key}: {error}") from error
-
 
 def open_control_store(spec: str, what: str) -> LocalControlStore | R2ControlStore:
     """``local:<absolute-root>`` or ``r2:<bucket>``, reusing the promotion
@@ -1500,6 +1550,22 @@ def cmd_promote(args: argparse.Namespace) -> None:
             raise _fail(
                 f"catalog {args.catalog_key} is not valid JSON; use recover"
             ) from error
+        if (
+            isinstance(before, dict)
+            and before.get("schema") == UNAVAILABLE_CATALOG_SCHEMA
+        ):
+            try:
+                validate_unavailable_catalog(
+                    before, catalog_key=args.catalog_key
+                )
+            except ValueError as error:
+                raise _fail(
+                    f"catalog {args.catalog_key} is not a valid unavailable "
+                    f"document: {error}"
+                ) from error
+            # An unavailable document has no release history to preserve, but
+            # the replacement still uses the ETag from the same GET above.
+            before = None
     catalog = build_catalog(
         release_manifest=release,
         release_manifest_sha256=release_sha,
@@ -1543,8 +1609,8 @@ def cmd_promote(args: argparse.Namespace) -> None:
 
 
 def cmd_recover(args: argparse.Namespace) -> None:
-    if (args.build is None) == (not args.delete):
-        raise _fail("recover requires exactly one of --build or --delete")
+    if (args.build is None) == (not args.unavailable):
+        raise _fail("recover requires exactly one of --build or --unavailable")
     if not SHA256_RE.fullmatch(args.expect_sha256):
         raise _fail("--expect-sha256 must be a lowercase SHA-256 digest")
     store = open_control_store(args.store, "--store")
@@ -1562,34 +1628,49 @@ def cmd_recover(args: argparse.Namespace) -> None:
         )
     expect_token = current[1]
 
-    if args.delete:
+    if args.unavailable:
+        if args.catalog_key != PRODUCTION_CATALOG_KEY:
+            raise _fail("--unavailable is allowed only for v2/catalog.json")
+        unavailable = build_unavailable_catalog(
+            previous_catalog_sha256=current_sha,
+            generated_at=args.generated_at,
+        )
+        payload = gbm.canonical_json(unavailable)
+        sha = _sha256_bytes(payload)
         print(
             json.dumps(
                 {
-                    "planned_delete": {
+                    "planned_write": {
                         "key": args.catalog_key,
-                        "expected_sha256": current_sha,
+                        "sha256": sha,
+                        "bytes": len(payload),
+                        "previous_catalog_sha256": current_sha,
+                        "state": "unavailable",
+                        "mode": "compare-and-swap",
                     }
                 },
                 sort_keys=True,
             )
         )
         if not args.execute:
-            print(json.dumps({"recovered": None, "status": "dry-run"}, sort_keys=True))
+            print(
+                json.dumps(
+                    {"recovered": None, "sha256": sha, "status": "dry-run"},
+                    sort_keys=True,
+                )
+            )
             return
-        try:
-            store.delete(args.catalog_key, expect=expect_token)
-        except StateConflict as error:
-            raise _fail(
-                f"catalog {args.catalog_key} changed underneath the delete; "
-                "re-read it and restate the expectation"
-            ) from error
-        if store.get(args.catalog_key) is not None:
-            raise _fail(f"catalog {args.catalog_key} is still present after delete")
-        # The worker now serves 503 release_unavailable until re-promoted.
+        _write_catalog_verified(store, args.catalog_key, payload, expect_token)
+        # The worker serves 503 release_unavailable until a CAS promotion or
+        # recovery to a named immutable release replaces this document.
         print(
             json.dumps(
-                {"catalog": args.catalog_key, "recovered": "deleted", "status": "written"},
+                {
+                    "catalog": args.catalog_key,
+                    "recovered": "unavailable",
+                    "sha256": sha,
+                    "status": "written",
+                },
                 sort_keys=True,
             )
         )
@@ -1765,11 +1846,11 @@ def main(argv: list[str] | None = None) -> None:
 
     recover = commands.add_parser(
         "recover",
-        help="repoint the catalog at a prior release, or delete it",
+        help="repoint the catalog at a prior release, or make v2 unavailable",
     )
     recover.add_argument("--store", required=True)
     recover.add_argument("--build")
-    recover.add_argument("--delete", action="store_true")
+    recover.add_argument("--unavailable", action="store_true")
     recover.add_argument("--catalog-key", default=PRODUCTION_CATALOG_KEY)
     recover.add_argument("--expect-sha256", required=True)
     recover.add_argument("--generated-at")

@@ -223,7 +223,7 @@ def test_probe_cleanup_is_unconditional_and_verifies_absence():
     ))
 
 
-def test_probe_proves_copy_metadata_etag_size_and_if_match():
+def test_probe_proves_copy_metadata_etag_size_and_put_if_match():
     body = "\n".join(scripts(jobs()["probe"]))
     assert "copy_within_bucket" in body
     assert "MetadataDirective" in body or "sha256 metadata" in body
@@ -232,7 +232,8 @@ def test_probe_proves_copy_metadata_etag_size_and_if_match():
     ))
     assert "StateConflict" in body
     assert "stale If-Match PUT did not 412" in body
-    assert "stale If-Match DELETE did not 412" in body
+    assert "stale If-Match DELETE did not 412" not in body
+    assert "store.delete(" not in body
 
 
 # --- promote-catalog discipline --------------------------------------------------
@@ -254,6 +255,15 @@ def test_smoke_never_auto_recovers():
         for line in script.splitlines():
             if "v2_release_manifest.py recover" in line:
                 assert line.lstrip().startswith("echo "), line
+
+
+def test_smoke_recovery_uses_cas_unavailable_state_not_conditional_delete():
+    body = "\n".join(scripts(jobs()["promote-catalog"]))
+    assert "recover --store" in body
+    assert "--unavailable" in body
+    for line in body.splitlines():
+        if "recover --store" in line:
+            assert "--delete" not in line
 
 
 def test_smoke_is_bounded_and_checks_the_promoted_build():
