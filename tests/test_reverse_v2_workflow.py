@@ -71,7 +71,7 @@ def test_execute_confirmation_binds_cost_shape_and_destination():
     )
 
 
-def test_plan_streams_durable_markers_once_into_the_compact_plan():
+def test_plan_regenerates_exact_admitted_tasks_then_streams_the_compact_plan():
     script = body("plan")
     assert "reverse_r2_v1.py admit" in script
     assert "--publish-destination" in script
@@ -91,10 +91,13 @@ def test_plan_streams_durable_markers_once_into_the_compact_plan():
     assert "wc -c < forward-family-manifest.json" in script
     assert "FORWARD_POSITIONS_RECORDS" in script
     assert 'test "$EXPECTED_RECORDS" = "$FORWARD_POSITIONS_RECORDS"' in script
-    assert "durable-map-marker-keys.json" in script
-    assert "list-objects-v2" in script
-    assert "staging/global-v2/${REQUEST_SHA256}/construction-v1/${FAMILY}" in script
-    assert "control/matrices.env" not in script
+    assert "construction_v1_control.py admit-dispatch" in script
+    assert "--request control/request.json" in script
+    assert "--run-attempt 1" in script
+    assert "--github-output control/matrices.env" in script
+    assert "MATRIX_KEY=places_matrix" in script
+    assert "MATRIX_KEY=address_matrix" in script
+    assert "list-objects-v2" not in script
 
 
 def test_execute_is_sixteen_bounded_ranges_then_one_catalog():
