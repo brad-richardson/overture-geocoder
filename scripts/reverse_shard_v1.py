@@ -226,6 +226,10 @@ SERVING_INDEX_ENTRY_BYTES = 40
 SERVING_INDEX_DOMAIN = b"overture-reverse-index-v1\x00"
 SERVING_DIGEST_DOMAIN_A = b"overture-reverse-shard-v1\x00"
 SERVING_DIGEST_DOMAIN_B = b"overture-reverse-shard-v1\x01"
+ADDRESS_DICTIONARY_MAGIC = b"ARDX0001"
+ADDRESS_DICTIONARY_FLAG = 1
+ADDRESS_DICTIONARY_FIELDS = 7
+MAX_ADDRESS_DICTIONARY_BYTES = 8 * 1024 * 1024
 # Header family byte -> encoder --family value. The serving families map onto
 # the depth-ceiling families above as places -> "poi", addresses -> "address".
 SERVING_FAMILY_CODES = {0: "places", 1: "addresses"}
@@ -292,12 +296,49 @@ class ReverseShard:
         family_code, self.cell_level, self.sub_cell_level, flags = data[28:32]
         if family_code not in SERVING_FAMILY_CODES:
             raise ValueError(f"reverse shard family is unknown: {family_code}")
-        if flags != 0 or self.cell_level != CELL_LEVEL:
-            raise ValueError("reverse shard header is malformed")
         self.family = SERVING_FAMILY_CODES[family_code]
+        expected_flags = (
+            ADDRESS_DICTIONARY_FLAG if self.family == "addresses" else 0
+        )
+        if flags != expected_flags or self.cell_level != CELL_LEVEL:
+            raise ValueError("reverse shard header is malformed")
         self.index_offset = index_offset
         if not SERVING_HEADER_BYTES <= index_offset <= len(data) - 4:
             raise ValueError("reverse shard index offset is out of range")
+        dictionary_position = SERVING_HEADER_BYTES
+        self._address_dictionary: list[list[str]] | None = None
+        if self.family == "addresses":
+            if (
+                data[dictionary_position : dictionary_position + 8]
+                != ADDRESS_DICTIONARY_MAGIC
+                or data[dictionary_position + 8 : dictionary_position + 10]
+                != bytes((ADDRESS_DICTIONARY_FIELDS, 0))
+                or struct.unpack_from("<H", data, dictionary_position + 10)[0] != 0
+            ):
+                raise ValueError("reverse address dictionary header is malformed")
+            dictionary_position += 12
+            fields = []
+            for _ in range(ADDRESS_DICTIONARY_FIELDS):
+                (count,) = struct.unpack_from("<I", data, dictionary_position)
+                dictionary_position += 4
+                if count > 65_536:
+                    raise ValueError("reverse address dictionary exceeds u16 codes")
+                values = []
+                for _ in range(count):
+                    value, dictionary_position = _text(data, dictionary_position)
+                    if values and value <= values[-1]:
+                        raise ValueError(
+                            "reverse address dictionary is not unique and sorted"
+                        )
+                    values.append(value)
+                fields.append(values)
+            self._address_dictionary = fields
+        self.dictionary_bytes = dictionary_position - SERVING_HEADER_BYTES
+        if self.dictionary_bytes > MAX_ADDRESS_DICTIONARY_BYTES:
+            raise ValueError("reverse address dictionary exceeds serving read cap")
+        self.payload_offset = dictionary_position
+        if self.payload_offset > self.index_offset:
+            raise ValueError("reverse address dictionary overlaps the index")
         (stored_count,) = struct.unpack_from("<I", data, index_offset)
         if stored_count != index_count:
             raise ValueError("reverse shard index counts disagree")
@@ -349,15 +390,23 @@ class ReverseShard:
         data = self._data
         position = entry.payload_offset
         end = entry.payload_offset + entry.payload_bytes
-        if not SERVING_HEADER_BYTES <= position <= end <= self.index_offset:
+        if not self.payload_offset <= position <= end <= self.index_offset:
             raise ValueError("reverse shard leaf extent is out of range")
         records = []
         while position < end:
-            (length,) = struct.unpack_from("<I", data, position)
-            record_end = position + 4 + length
+            if self.family == "places":
+                (length,) = struct.unpack_from("<I", data, position)
+                record_start = position + 4
+                record_end = record_start + length
+            else:
+                record_start = position
+                if record_start + 54 > end:
+                    raise ValueError("reverse address record is truncated")
+                (levels,) = struct.unpack_from("<H", data, record_start + 52)
+                record_end = record_start + 54 + levels * 2
             if record_end > end:
                 raise ValueError("reverse shard record overruns its leaf")
-            records.append(self._decode_record(data[position + 4 : record_end], key))
+            records.append(self._decode_record(data[record_start:record_end], key))
             position = record_end
         if len(records) != entry.records:
             raise ValueError("reverse shard leaf record count differs")
@@ -383,18 +432,34 @@ class ReverseShard:
             record["source_row_index"],
         ) = struct.unpack_from("<IIQ", entry, position)
         position += 16
-        fields = (
-            _PLACES_TEXT_FIELDS if self.family == "places" else _ADDRESS_TEXT_FIELDS
-        )
-        for field in fields:
-            record[field], position = _text(entry, position)
-        if self.family == "addresses":
+        if self.family == "places":
+            for field in _PLACES_TEXT_FIELDS:
+                record[field], position = _text(entry, position)
+        else:
+            if self._address_dictionary is None:
+                raise ValueError("reverse address dictionary is absent")
+            for field, values in zip(
+                _ADDRESS_TEXT_FIELDS, self._address_dictionary[:6], strict=True
+            ):
+                (code,) = struct.unpack_from("<H", entry, position)
+                position += 2
+                if code >= len(values):
+                    raise ValueError(
+                        "reverse address dictionary code is out of range"
+                    )
+                record[field] = values[code]
             (count,) = struct.unpack_from("<H", entry, position)
             position += 2
             levels = []
             for _ in range(count):
-                level, position = _text(entry, position)
-                levels.append(level)
+                (code,) = struct.unpack_from("<H", entry, position)
+                position += 2
+                values = self._address_dictionary[6]
+                if code >= len(values):
+                    raise ValueError(
+                        "reverse address-level dictionary code is out of range"
+                    )
+                levels.append(values[code])
             record["address_levels"] = levels
         if position != len(entry):
             raise ValueError("reverse shard record has trailing bytes")

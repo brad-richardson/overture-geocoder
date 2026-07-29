@@ -24,11 +24,11 @@
 //!   `address_levels` list (structure mirroring `address_serving_encode_v1.rs`,
 //!   widths in this format's u16 framing); normalized `country` is routing
 //!   metadata and stays OUT of the payload.
-//! * Record payloads carry the source-locator triple. The design's section-5
-//!   size table omits those 16 bytes, but its own section-2 within-leaf order
-//!   and the duplicate-GERS contract are keyed on the locator, so the measured
-//!   size model is section 5 plus the locator.
+//! * Record payloads carry the source-locator triple. The duplicate-GERS
+//!   contract and within-leaf order are keyed on those 16 bytes, and the
+//!   design's measured size evidence includes them.
 
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Seek, SeekFrom, Write};
 use std::path::PathBuf;
@@ -49,6 +49,10 @@ const INDEX_DOMAIN: &[u8] = b"overture-reverse-index-v1\0";
 // forward head digest so the sum is partition-independent.
 const DIGEST_DOMAIN_A: &[u8] = b"overture-reverse-shard-v1\0";
 const DIGEST_DOMAIN_B: &[u8] = b"overture-reverse-shard-v1\x01";
+const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0001";
+const ADDRESS_DICTIONARY_FLAG: u8 = 1;
+const ADDRESS_DICTIONARY_FIELDS: usize = 7;
+const MAX_ADDRESS_DICTIONARY_BYTES: usize = 8 * 1024 * 1024;
 
 const LONGITUDE_E7_ORIGIN: i64 = 1_800_000_000;
 const LATITUDE_E7_ORIGIN: i64 = 900_000_000;
@@ -283,6 +287,82 @@ fn address_levels(array: &ListArray, row: usize) -> Result<Vec<String>> {
         .collect()
 }
 
+struct AddressDictionary {
+    codes: Vec<BTreeMap<String, u16>>,
+    bytes: Vec<u8>,
+}
+
+impl AddressDictionary {
+    fn build(input: &PathBuf, cell: &str) -> Result<Self> {
+        let mut values = (0..ADDRESS_DICTIONARY_FIELDS)
+            .map(|_| BTreeSet::<String>::new())
+            .collect::<Vec<_>>();
+        let reader = StreamReader::try_new(BufReader::new(File::open(input)?), None)?;
+        for batch in reader {
+            let batch = batch?;
+            let cells = required::<StringArray>(&batch, "partition_cell")?;
+            let display = [
+                required::<StringArray>(&batch, "display_country")?,
+                required::<StringArray>(&batch, "postal_city")?,
+                required::<StringArray>(&batch, "postcode")?,
+                required::<StringArray>(&batch, "street")?,
+                required::<StringArray>(&batch, "number")?,
+                required::<StringArray>(&batch, "unit")?,
+            ];
+            let levels = required::<ListArray>(&batch, "address_levels")?;
+            for row in 0..batch.num_rows() {
+                if text(cells, row)? != cell {
+                    bail!("reverse row cell differs from --cell")
+                }
+                for (field, array) in display.iter().enumerate() {
+                    values[field].insert(text(array, row)?.to_owned());
+                }
+                for level in address_levels(levels, row)? {
+                    values[6].insert(level);
+                }
+            }
+        }
+
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(ADDRESS_DICTIONARY_MAGIC);
+        bytes.push(ADDRESS_DICTIONARY_FIELDS as u8);
+        bytes.push(0);
+        bytes.extend_from_slice(&0_u16.to_le_bytes());
+        let mut codes = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
+        for field in values {
+            if field.len() > usize::from(u16::MAX) + 1 {
+                bail!("reverse address dictionary field exceeds u16 codes")
+            }
+            let count: u32 = field
+                .len()
+                .try_into()
+                .context("reverse address dictionary count exceeds u32")?;
+            bytes.extend_from_slice(&count.to_le_bytes());
+            let mut mapping = BTreeMap::new();
+            for (index, value) in field.into_iter().enumerate() {
+                let code: u16 = index
+                    .try_into()
+                    .context("reverse address dictionary code exceeds u16")?;
+                put_text(&mut bytes, &value)?;
+                mapping.insert(value, code);
+            }
+            codes.push(mapping);
+        }
+        if bytes.len() > MAX_ADDRESS_DICTIONARY_BYTES {
+            bail!("reverse address dictionary exceeds serving read cap")
+        }
+        Ok(Self { codes, bytes })
+    }
+
+    fn code(&self, field: usize, value: &str) -> Result<u16> {
+        self.codes
+            .get(field)
+            .and_then(|codes| codes.get(value))
+            .copied()
+            .context("reverse address value is absent from its dictionary")
+    }
+}
+
 struct IndexEntry {
     hash: u64,
     key: Vec<u8>,
@@ -368,6 +448,7 @@ impl Encoder {
         latitude_e7: i64,
         order_identity: ([u8; 16], u32, u32, u64),
         entry: &[u8],
+        framed: bool,
     ) -> Result<()> {
         let (sub_y, sub_x) = leaf_sub(
             longitude_e7,
@@ -408,9 +489,11 @@ impl Encoder {
             add_256(&mut self.sum_a, &record_digest(DIGEST_DOMAIN_A, entry));
             add_256(&mut self.sum_b, &record_digest(DIGEST_DOMAIN_B, entry));
         }
-        self.destination.write_all(&length.to_le_bytes())?;
+        if framed {
+            self.destination.write_all(&length.to_le_bytes())?;
+        }
         self.destination.write_all(entry)?;
-        let encoded_bytes = 4_u64 + u64::from(length);
+        let encoded_bytes = u64::from(length) + if framed { 4 } else { 0 };
         let active = self.index.last_mut().unwrap();
         active.payload_bytes += encoded_bytes;
         active.records = active
@@ -487,12 +570,17 @@ fn encode_places_batch(encoder: &mut Encoder, batch: &RecordBatch) -> Result<()>
             latitude_e7,
             (id, locator.0, locator.1, locator.2),
             &entry,
+            true,
         )?;
     }
     Ok(())
 }
 
-fn encode_addresses_batch(encoder: &mut Encoder, batch: &RecordBatch) -> Result<()> {
+fn encode_addresses_batch(
+    encoder: &mut Encoder,
+    batch: &RecordBatch,
+    dictionary: &AddressDictionary,
+) -> Result<()> {
     let cells = required::<StringArray>(batch, "partition_cell")?;
     let lons = required::<Int32Array>(batch, "longitude_e7")?;
     let lats = required::<Int32Array>(batch, "latitude_e7")?;
@@ -526,8 +614,8 @@ fn encode_addresses_batch(encoder: &mut Encoder, batch: &RecordBatch) -> Result<
         entry.extend_from_slice(&locator.0.to_le_bytes());
         entry.extend_from_slice(&locator.1.to_le_bytes());
         entry.extend_from_slice(&locator.2.to_le_bytes());
-        for value in &display {
-            put_text(&mut entry, text(value, row)?)?;
+        for (field, value) in display.iter().enumerate() {
+            entry.extend_from_slice(&dictionary.code(field, text(value, row)?)?.to_le_bytes());
         }
         let levels = address_levels(levels, row)?;
         let count: u16 = levels
@@ -536,13 +624,14 @@ fn encode_addresses_batch(encoder: &mut Encoder, batch: &RecordBatch) -> Result<
             .context("address level count exceeds u16")?;
         entry.extend_from_slice(&count.to_le_bytes());
         for level in &levels {
-            put_text(&mut entry, level)?;
+            entry.extend_from_slice(&dictionary.code(6, level)?.to_le_bytes());
         }
         encoder.push(
             longitude_e7,
             latitude_e7,
             (id, locator.0, locator.1, locator.2),
             &entry,
+            false,
         )?;
     }
     Ok(())
@@ -552,12 +641,32 @@ fn main() -> Result<()> {
     let args = args()?;
     let (cell_y, cell_x) = cell_yx(&args.cell)?;
     let level = sub_cell_level(args.records, &args.cell, args.family)?;
+    let address_dictionary = if args.family == Family::Addresses {
+        Some(AddressDictionary::build(&args.input, &args.cell)?)
+    } else {
+        None
+    };
+    let dictionary_bytes = address_dictionary
+        .as_ref()
+        .map_or(0_u64, |dictionary| dictionary.bytes.len() as u64);
     let mut destination = BufWriter::new(File::create(&args.output)?);
     destination.write_all(MAGIC)?;
     destination.write_all(&0_u64.to_le_bytes())?;
     destination.write_all(&0_u64.to_le_bytes())?;
     destination.write_all(&0_u32.to_le_bytes())?;
-    destination.write_all(&[args.family.code(), CELL_LEVEL, level, 0])?;
+    destination.write_all(&[
+        args.family.code(),
+        CELL_LEVEL,
+        level,
+        if address_dictionary.is_some() {
+            ADDRESS_DICTIONARY_FLAG
+        } else {
+            0
+        },
+    ])?;
+    if let Some(dictionary) = &address_dictionary {
+        destination.write_all(&dictionary.bytes)?;
+    }
     let reader = StreamReader::try_new(BufReader::new(File::open(&args.input)?), None)?;
     let mut encoder = Encoder {
         destination,
@@ -565,7 +674,7 @@ fn main() -> Result<()> {
         cell_y,
         cell_x,
         level,
-        offset: HEADER_BYTES,
+        offset: HEADER_BYTES + dictionary_bytes,
         count: 0,
         index: Vec::new(),
         active_key: None,
@@ -578,7 +687,13 @@ fn main() -> Result<()> {
         let batch = batch?;
         match args.family {
             Family::Places => encode_places_batch(&mut encoder, &batch)?,
-            Family::Addresses => encode_addresses_batch(&mut encoder, &batch)?,
+            Family::Addresses => encode_addresses_batch(
+                &mut encoder,
+                &batch,
+                address_dictionary
+                    .as_ref()
+                    .context("address dictionary was not constructed")?,
+            )?,
         }
     }
     // The depth was derived from --records, so a count mismatch would be a
@@ -631,7 +746,7 @@ fn main() -> Result<()> {
     destination.flush()?;
     if let Some(path) = args.digest_out {
         let sidecar = format!(
-            "{{\"records\":{},\"index_entries\":{index_count},\"sum_a\":\"{}\",\"sum_b\":\"{}\"}}",
+            "{{\"records\":{},\"index_entries\":{index_count},\"dictionary_bytes\":{dictionary_bytes},\"sum_a\":\"{}\",\"sum_b\":\"{}\"}}",
             args.records,
             hex(&sum_a),
             hex(&sum_b)

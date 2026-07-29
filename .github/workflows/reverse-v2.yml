@@ -9,8 +9,9 @@ name: Build v2 reverse indexes
 # A dry run performs the expensive-marker fan-in once, producing the compact
 # authenticated plan and no writes. Execute requires an exact typed
 # confirmation binding the request, family, slice, fixed range count,
-# concurrency, and runner-minute ceiling. Merely merging this workflow launches
-# nothing; workflow_dispatch on main is the only trigger.
+# concurrency, runner-minute ceiling, and per-range output ceiling. Merely
+# merging this workflow launches nothing; workflow_dispatch on main is the only
+# trigger.
 on:
   workflow_dispatch:
     inputs:
@@ -47,7 +48,7 @@ on:
       confirmation:
         description: >-
           Execute only:
-          EXECUTE_REVERSE_V2::<request-sha256>::FAMILY=<family>::SLICE=<slice_version>::RANGES=16::MAX_PARALLEL=<n>::MAX_TOTAL_RUNNER_MINUTES=<n>
+          EXECUTE_REVERSE_V2::<request-sha256>::FAMILY=<family>::SLICE=<slice_version>::RANGES=16::MAX_PARALLEL=<n>::MAX_TOTAL_RUNNER_MINUTES=<n>::MAX_OUTPUT_BYTES_PER_RANGE=3221225472
         required: false
         default: ""
         type: string
@@ -68,6 +69,13 @@ env:
   # Exact sum of every execute-mode job timeout:
   # plan 180 + 16 range jobs * 45 + catalog 30.
   EXECUTE_MAX_RUNNER_MINUTES: "930"
+  # Leave five minutes inside each 45-minute matrix timeout for setup,
+  # artifact upload, and cancellation-safe teardown.
+  REDUCE_WALL_SECONDS: "2400"
+  # The Address dictionary projects the largest range at 1.96 GiB from the
+  # measured Seattle slice. A 3 GiB hard cap leaves 53% headroom and bounds all
+  # 16 ranges to 48 GiB before the catalog can be advertised.
+  REDUCE_MAX_OUTPUT_BYTES: "3221225472"
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
 
@@ -134,7 +142,7 @@ jobs:
             echo "::error::max_total_runner_minutes must cover the fail-closed ${EXECUTE_MAX_RUNNER_MINUTES}-minute sum of all job timeouts"
             exit 1
           fi
-          EXPECTED="EXECUTE_REVERSE_V2::${REQUEST_SHA256}::FAMILY=${FAMILY}::SLICE=${SLICE_VERSION}::RANGES=${RANGE_COUNT}::MAX_PARALLEL=${MAX_PARALLEL}::MAX_TOTAL_RUNNER_MINUTES=${MAX_TOTAL_RUNNER_MINUTES}"
+          EXPECTED="EXECUTE_REVERSE_V2::${REQUEST_SHA256}::FAMILY=${FAMILY}::SLICE=${SLICE_VERSION}::RANGES=${RANGE_COUNT}::MAX_PARALLEL=${MAX_PARALLEL}::MAX_TOTAL_RUNNER_MINUTES=${MAX_TOTAL_RUNNER_MINUTES}::MAX_OUTPUT_BYTES_PER_RANGE=${REDUCE_MAX_OUTPUT_BYTES}"
           if [ "$MODE" = execute ] && [ "$CONFIRMATION" != "$EXPECTED" ]; then
             echo "::error::execute confirmation must be exactly: $EXPECTED"
             exit 1
@@ -151,6 +159,7 @@ jobs:
             echo "- Destination: \`${SLICE_VERSION}/families/${FAMILY}/reverse/\`"
             echo "- Fixed ranges: ${RANGE_COUNT}; max parallel: ${MAX_PARALLEL}"
             echo "- Execute timeout ceiling: ${EXECUTE_MAX_RUNNER_MINUTES} runner-minutes; operator ceiling: ${MAX_TOTAL_RUNNER_MINUTES}"
+            echo "- Per-range output ceiling: ${REDUCE_MAX_OUTPUT_BYTES} bytes; aggregate ceiling: 48 GiB"
             echo "- This workflow never reruns a forward map and never promotes a catalog."
           } >> "$GITHUB_STEP_SUMMARY"
 
@@ -434,6 +443,8 @@ jobs:
             --scratch-dir scratch \
             --encoder-binary crates/target/release/reverse-encode-v1 \
             --verifier-binary crates/target/release/reverse-verify-v1 \
+            --wall-seconds "$REDUCE_WALL_SECONDS" \
+            --max-output-bytes "$REDUCE_MAX_OUTPUT_BYTES" \
             --output 'reductions/range-${{ matrix.range_id }}.json'
 
       - name: Upload the exact range record

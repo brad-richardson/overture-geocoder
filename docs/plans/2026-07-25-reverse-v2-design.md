@@ -632,8 +632,9 @@ chained waves *per shard* on top of the catalog's. Both are avoidable: the catal
 entry carries `records`, `sub_cell_level`, `bytes` and `index_bytes`, so the
 header range and the index range are both computable before any read of the shard.
 **Mandate one coalesced call of 2 ranges — one wave.** The same rule covers the
-address string dictionary: its offset and length go in the **catalog entry**, not
-discovered from the shard header, otherwise it adds a fourth wave.
+address string dictionary: its length goes in the **catalog entry** and its
+offset is fixed by the format at byte 32, immediately after the shard header.
+Neither value is discovered from a shard read, otherwise it adds a fourth wave.
 
 **Cache.** One `RangeReader` per shard. All `.plrx` and `.rcat` objects are
 immutable and take `IMMUTABLE_CACHE_TTL` (7 days); the mutable `v2/catalog.json`
@@ -654,12 +655,14 @@ Therefore:
 - **`.rcat` is a fully binary format**, not JSON. Raw 32-byte digests are
   impossible inside a JSON payload (base64 costs +55 B/entry), and a binary
   payload is what makes a compact entry real.
-- **Entries are 52 fixed bytes**, with no bbox and no object key:
+- **Entries are 56 fixed bytes**, with no bbox and no object key:
   `cell u16 | sub_cell_level u8 | flags u8 | records u32 | bytes u64 |
-  index_bytes u32 | sha256 [u8;32]`. The bbox is *derivable* from the cell and the
-  object key is by convention
+  index_bytes u32 | dictionary_bytes u32 | sha256 [u8;32]`. Places records set
+  `flags=0,dictionary_bytes=0`; Addresses records set the dictionary flag and a
+  positive bounded length. The bbox is *derivable* from the cell and the object
+  key is by convention
   (`{version}/families/{family}/reverse/r-{cell}.plrx`), so storing either is pure
-  waste. 16,633 x 52 = **865 KB** for Places.
+  waste. 16,633 x 56 = **931 KB** for Places.
 - **Sharded by the first hex digit of the cell**, 16 shards per family, because
   addresses will populate more cells and 865 KB is not a comfortable margin. A
   small **root** object is the manifest entrypoint: magic, family, `cell_level`,
@@ -711,27 +714,28 @@ warm-median gate is *measured* per class rather than asserted.
 
 ### Record size
 
-From the actual encoder framing (`u16` text length prefixes, 16-byte
-`feature_id`, E7 `Int32` coordinates, `u32` record length prefix):
+The original static model used `u16` text length prefixes, a 16-byte
+`feature_id`, E7 `Int32` coordinates, and a `u32` record length prefix:
 
 | | Places | Addresses |
 |---|---|---|
 | record length prefix | 4 | 4 |
 | `feature_id` | 16 | 16 |
 | lon + lat (E7) | 8 | 8 |
+| source object + row group + row locator | 16 | 16 |
 | `confidence_rank` | 1 | — |
 | text length prefixes | 6 x u16 = 12 | 8 x u16 = 16 |
 | text payload | ~55 | ~60 |
-| **total** | **96 B** | **104 B** |
+| **model total** | **112 B** | **120 B** |
 
 Places text: name ~20, brand ~2, category ~15, locality ~10, region ~6,
 country 2. Address text, from the eight contract fields
 (`address-structured-endpoint-contract.md` L15-22): street 18, number 4, unit 1,
 postcode 7, postal_city 12, admin_general 8, admin_specific 8, country 2.
 
-The first draft asserted 90 B for Places and ~70 B for addresses. Its own Places
-table summed to 96, and 70 was not derivable at all — that draft's own dictionary
-example implied 40 B of street text per row.
+The first draft asserted 90 B for Places and ~70 B for addresses while omitting
+the 16-byte source locator. The real slice measurements below supersede those
+static estimates.
 
 ### Artifact sizes
 
@@ -757,27 +761,39 @@ real price of not needing a round trip to render a result.
 
 | Addresses reverse | value |
 |---|---|
-| records | 473,576,753 |
-| bytes, inline at 104 B | **49.3 GB** |
-| vs the 33.2 GB selected address source | **1.48x** |
+| authenticated planet-plan records | 431,705,590 |
+| bytes, measured inline at 101.055 B/record | **43.63 GB / 40.63 GiB** |
+| compressed per-record source reads in that plan | **13.63 GB** |
 
-**Address reverse is the expensive artifact and needs a compression decision.**
+**Address reverse is the expensive artifact and needed a compression decision.**
 The cause is repetition: within a level-14 leaf, `street`, `postal_city`,
 `postcode` and both admin levels take a handful of distinct values across
 thousands of rows. A per-shard string dictionary, with codes in the record:
 
 | variant | per row | planet |
 |---|---|---|
-| inline | 104 B | 49.3 GB |
-| 5 repeating columns coded (5 x u16 = 10 B of codes replacing 63 B of text+prefix) | 51 B | **24.2 GB** |
-| all 8 columns coded, records become fixed-width so the u32 length prefix goes away (16 + 8 + 8 x u16) | 40 B | **18.9 GB** |
-| as above with per-column adaptive code width (u8 where a shard has < 256 distinct values) | ~32 B | ~15.2 GB |
+| measured inline | 101.055 B | **43.63 GB** |
+| implemented all-display-values dictionary (16-byte ID + 8-byte coordinates + 16-byte source locator + 6 scalar u16 codes + u16 list count + u16 per raw address level, plus dictionary/index overhead) | **59.5804 B measured** | **25.72 GB projected** |
+| adaptive code widths (u8 where a shard has < 256 distinct values) | deferred | not projected |
 
 The code bytes are not free: 5 x u16 over a 500,000-row shard is ~5 MB of codes,
-against ~120 KB of dictionary. Recommendation: target the **fixed-width
-all-columns variant, ~19 GB**, and treat adaptive code widths as a later
-refinement. Ship the inline version first — it is correct and provable on a slice
-— and land the dictionary before the planet address reverse build.
+against ~120 KB of dictionary. Recommendation: target the **all-display-values
+dictionary variant** and treat adaptive code widths as a later refinement. Ship
+the inline version first — it is correct and provable on a slice — and land the
+dictionary before the planet address reverse build.
+
+**Implementation evidence, 2026-07-29.** The source locator is part of the
+duplicate-record identity and was missing from the original 40 B estimate.
+The implemented per-shard, per-field sorted dictionary preserves six scalar
+display fields plus every raw `address_levels` value. Codes are u16 and Address
+records are self-delimiting. On the preserved Seattle slice it encoded 104,928
+records into 6,251,653 bytes, including 174,179 dictionary bytes: **59.5804
+B/record**, 41.0% below the measured 101.055 B inline format. The authenticated
+planet plan contains 431,705,590 records, projecting **25.72 GB / 23.95 GiB**.
+Its largest 16-bucket range contains 35,388,179 records and projects 1.964 GiB;
+the workflow therefore uses a confirmation-bound 3 GiB per-range hard output
+cap (48 GiB aggregate) and a 2,400-second internal wall budget inside each
+45-minute range job.
 
 ### Build-time cost
 
@@ -883,9 +899,9 @@ it as written:
 | 1b | The missing **cross-implementation cell-identifier test**: Rust `route()` / `point_quadkey()` / `cell_partition_key()` and their Python mirrors agree on a shared vector set including boundaries and clamps. | — | one vector file, three implementations, no skips |
 | 2 | `reduce_reverse_cell` in the bucket-range reducer, depth read from the positions directory's per-cell counts (single pass), `r-{cell}.plrx` per cell. | 1, bucket-range reduce (in flight), the harness change above | Monaco emits 1 shard; the boundary fixture emits `c085` and `c086` from **two** reducer invocations; `sum(records) == admitted rows` |
 | 3 | Worker `.plrx` range-read reader: header+index in one coalesced call, cell/leaf enumeration with budgets, nearest-first with the stated tie-breaks, antimeridian and polar clamps. Python oracle mirror. | 1, 1b | fuzz set (interior, cell boundary, antimeridian, 66°, 85°, 89.5°, poles) returns byte-identical result sets in Rust and Python |
-| 4 | Binary sharded `.rcat` (root + 16 shards, 52-byte entries, raw digests, `index_bytes`), family manifest `reverse` entrypoint, `v2_release_manifest.py` entrypoints, per-operation entrypoint validation in `v2.rs`, allowlist. | 2 | a release with `["forward","reverse"]` validates; a forward-only release still validates; the root fits in one read |
+| 4 | Binary sharded `.rcat` (root + 16 shards, 56-byte entries, raw digests, `index_bytes`, `dictionary_bytes`), family manifest `reverse` entrypoint, `v2_release_manifest.py` entrypoints, per-operation entrypoint validation in `v2.rs`, allowlist. | 2 | a release with `["forward","reverse"]` validates; a forward-only release still validates; the root fits in one read |
 | 5 | `handle_reverse` `poi` branch: `radius`/`limit`, response assembly, `metadata.reverse`, **503 semantics**, `benchmark_latency.py` entries. | 3, 4 | Monaco slice returns POIs with distances; a published release lacking the reverse entrypoint returns **503 `capability_unavailable`**, not 400; unknown `types` still 400 |
-| 6 | Address reverse: reverse reduce, shared encoder `--family addresses`, dictionary (offsets in the catalog entry), address `.rcat`, worker address branch. | 0c, 0d, 1-5 | address slice end to end; dictionary reaches the fixed-width ~40 B/row target |
+| 6 | Address reverse: reverse reduce, shared encoder `--family addresses`, dictionary (fixed offset plus length in the catalog entry), address `.rcat`, worker address branch. | 0c, 0d, 1-5 | address slice end to end; dictionary materially reduces the measured inline byte rate |
 | 7 | Planet: reverse reduce over the same map output; publish forward + reverse in one v2 release. | all, R2 staging | one release advertising `forward`+`reverse` for divisions, poi, address |
 
 Increments 1-7 are additive to a published or unpublished build. Only 0, 0b and 0c
@@ -949,20 +965,22 @@ change rather than a schema change and therefore not map-blocking.
 10. **Cross-family ranking?** None. Fixed array order `divisions, poi, address`
     plus `properties.feature_type`; distance-sorted within family. GeoJSON has no
     grouping construct, so order plus the property is the whole mechanism.
-11. **Reverse catalog format?** Fully **binary**, 52-byte entries with raw
-    digests, no bbox (derivable from the cell) and no object key (by convention),
-    sharded 16 ways by the cell's first hex digit behind a ~700 B root. Not
+11. **Reverse catalog format?** Fully **binary**, 56-byte entries with raw
+    digests and dictionary length, no bbox (derivable from the cell) and no
+    object key (by convention), sharded 16 ways by the cell's first hex digit
+    behind a ~700 B root. Not
     optional: a `.pcat`-style JSON catalog is 4.2-4.7 MB against a 2 MiB cap, and
     even a lean binary layout breaches it with hex digests. Routing costs **2**
     chained waves, not zero.
-12. **How does the address dictionary's byte range get discovered?** From the
-    **catalog entry** (offset + length), not the shard header. Header-only
-    discovery would add a fourth wave; in the catalog it coalesces with the index
-    read.
-13. **Address reverse at 49.3 GB — compress or accept?** Compress. Target the
-    fixed-width all-columns dictionary form, **~19 GB** (5-column coding alone
-    only reaches ~24 GB, and ~15 GB needs adaptive code widths). Ship inline first
-    for correctness; land the dictionary before the planet address reverse build.
+12. **How does the address dictionary's byte range get discovered?** Its offset
+    is fixed at byte 32 and its length comes from the **catalog entry**, not the
+    shard header. Header-only discovery would add a fourth wave; the catalog
+    metadata lets the header+dictionary and index reads run in one coalesced
+    call.
+13. **Large inline Address reverse — compress or accept?** Compress. The landed
+    all-display-values dictionary measures 59.5804 B/record on Seattle and
+    projects 25.72 GB for the authenticated 431.7-million-record planet plan.
+    Adaptive code widths remain a later refinement.
 14. **Distance metric?** Haversine in metres over the whole candidate leaf set.
     Degree-space comparison mis-orders candidates by up to 2x at 60° latitude, and
     the candidate set is at most a few thousand rows.
