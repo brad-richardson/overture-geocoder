@@ -62,6 +62,7 @@ any planet-scale execute:
 from __future__ import annotations
 
 import argparse
+import concurrent.futures
 import contextlib
 import datetime
 import hashlib
@@ -86,6 +87,13 @@ PLAN_SCHEMA = "promote-construction-slice-plan-v1"
 # window stays inside the workflow's 45-minute bound and is scoped only to
 # CopyObject; all ordinary R2 operations keep their existing timeout.
 COPY_READ_TIMEOUT_SECONDS = 15 * 60
+# R2 CopyObject is synchronous and the planet Address objects take tens of
+# seconds each even though the bytes stay inside the bucket.  Distinct
+# content-addressed destination keys are independent, so a small fixed pool
+# keeps the promotion inside the workflow window without weakening any
+# per-object source/destination/post-copy identity proof.  Keep this bounded:
+# the dedicated copy client deliberately does not replay an ambiguous request.
+COPY_WORKERS = 4
 PLACES_ROUTING_SCHEMA = "overture-promoted-places-routing-v1"
 ADDRESS_ROUTING_SCHEMA = "overture-promoted-addresses-routing-v1"
 CONSTRUCTION_FAMILY_MANIFEST_SCHEMA = "construction-v1-family-manifest-v1"
@@ -980,6 +988,54 @@ def _put_derived_create_only(
     return "written"
 
 
+def _execute_object(
+    item: dict[str, Any],
+    source: LocalTree | R2Tree,
+    destination: LocalTree | R2Tree,
+) -> str:
+    expected = {
+        "bytes": item["bytes"],
+        "sha256": item["sha256"],
+        "content_md5": item.get("content_md5"),
+    }
+    # The source must still be the object the plan admitted, down to its
+    # stored-byte MD5 when the plan recorded one (R2 source).
+    actual = source.identity(item["source_key"])
+    if actual is None:
+        raise fail(f"source object vanished: {item['source_key']}")
+    if not check_identity(actual, expected):
+        raise fail(
+            f"source object {item['source_key']} does not match the "
+            f"planned identity (sha/bytes/md5 changed)"
+        )
+    existing = destination.identity(item["destination_key"])
+    if existing is not None:
+        # Byte-identical is a resume; anything else is a squatter.
+        if check_identity(existing, expected):
+            return "already-present"
+        raise fail(
+            f"destination {item['destination_key']} exists with "
+            "different bytes; refusing to overwrite"
+        )
+    try:
+        copy_object(source, destination, item["source_key"], item["destination_key"])
+    except FileExistsError as error:
+        raise fail(
+            f"destination {item['destination_key']} appeared during the "
+            "create-only copy"
+        ) from error
+    # On R2 this is the byte-fidelity gate: the destination's OWN single-part
+    # ETag (content MD5 of its stored bytes) must equal the source MD5 the plan
+    # recorded; the copied sha256 metadata alone is only an echo.
+    verified = destination.identity(item["destination_key"])
+    if not check_identity(verified, expected):
+        raise fail(
+            f"destination {item['destination_key']} failed its post-copy "
+            "identity proof (stored bytes differ from the planned source identity)"
+        )
+    return "copied"
+
+
 def cmd_execute(args: argparse.Namespace) -> int:
     plan = _load_plan(args.plan)
     source = open_tree(args.source, "--source")
@@ -988,65 +1044,37 @@ def cmd_execute(args: argparse.Namespace) -> int:
     for family in sorted(plan["families"]):
         value = plan["families"][family]
         derived = _derived_members(family, value)
-        copied = skipped = 0
-        for item in value["objects"]:
-            expected = {
-                "bytes": item["bytes"],
-                "sha256": item["sha256"],
-                "content_md5": item.get("content_md5"),
-            }
-            # The source must still be the object the plan admitted, down to
-            # its stored-byte MD5 when the plan recorded one (R2 source).
-            actual = source.identity(item["source_key"])
-            if actual is None:
-                raise fail(f"source object vanished: {item['source_key']}")
-            if not check_identity(actual, expected):
-                raise fail(
-                    f"source object {item['source_key']} does not match the "
-                    f"planned identity (sha/bytes/md5 changed)"
+        if isinstance(source, R2Tree) and isinstance(destination, R2Tree):
+            # Each task owns one immutable destination key.  executor.map
+            # propagates every worker exception; the manifest is written only
+            # after the entire pool has completed successfully.
+            with concurrent.futures.ThreadPoolExecutor(
+                max_workers=COPY_WORKERS
+            ) as executor:
+                states = list(
+                    executor.map(
+                        lambda item: _execute_object(item, source, destination),
+                        value["objects"],
+                    )
                 )
-            existing = destination.identity(item["destination_key"])
-            if existing is not None:
-                # Byte-identical is a resume; anything else is a squatter.
-                if check_identity(existing, expected):
-                    skipped += 1
-                    continue
-                raise fail(
-                    f"destination {item['destination_key']} exists with "
-                    "different bytes; refusing to overwrite"
-                )
-            try:
-                copy_object(
-                    source, destination, item["source_key"], item["destination_key"]
-                )
-            except FileExistsError as error:
-                raise fail(
-                    f"destination {item['destination_key']} appeared during the "
-                    "create-only copy"
-                ) from error
-            # On R2 this is the byte-fidelity gate: the destination's OWN
-            # single-part ETag (content MD5 of its stored bytes) must equal the
-            # source MD5 the plan recorded; the copied sha256 metadata alone is
-            # only an echo.
-            verified = destination.identity(item["destination_key"])
-            if not check_identity(verified, expected):
-                raise fail(
-                    f"destination {item['destination_key']} failed its "
-                    "post-copy identity proof (stored bytes differ from the "
-                    "planned source identity)"
-                )
-            copied += 1
+        else:
+            states = [
+                _execute_object(item, source, destination)
+                for item in value["objects"]
+            ]
+        copied = states.count("copied")
+        skipped = states.count("already-present")
         # Routing first, manifest STRICTLY last: a present #107 manifest must
         # always attest already-present data.
-        states = [
+        derived_states = [
             _put_derived_create_only(destination, key, payload, sha256)
             for key, payload, sha256 in derived
         ]
         report[family] = {
             "copied": copied,
             "already_present": skipped,
-            "routing": states[0],
-            "family_manifest": states[1],
+            "routing": derived_states[0],
+            "family_manifest": derived_states[1],
         }
     print(json.dumps({"executed": report, "version": plan["version"]}, sort_keys=True))
     return 0

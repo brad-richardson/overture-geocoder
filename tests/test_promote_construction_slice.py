@@ -20,6 +20,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -827,6 +828,40 @@ def test_r2_copy_client_error_propagates(r2_world):
             ["execute", "--plan", str(plan_path),
              "--source", "r2:test-bucket", "--destination", "r2:test-bucket"]
         )
+
+
+def test_r2_execute_uses_bounded_copy_pool(r2_world, monkeypatch):
+    tmp_path, built, client = r2_world
+    plan_path, _ = _r2_plan(tmp_path, built)
+    original_copy = client.copy_object
+    lock = threading.Lock()
+    release = threading.Event()
+    active = peak = entered = 0
+
+    def observed_copy(**kwargs):
+        nonlocal active, peak, entered
+        with lock:
+            active += 1
+            entered += 1
+            peak = max(peak, active)
+            if entered == promote.COPY_WORKERS:
+                release.set()
+        assert release.wait(timeout=2)
+        try:
+            return original_copy(**kwargs)
+        finally:
+            with lock:
+                active -= 1
+
+    monkeypatch.setattr(client, "copy_object", observed_copy)
+    assert (
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", "r2:test-bucket", "--destination", "r2:test-bucket"]
+        )
+        == 0
+    )
+    assert peak == promote.COPY_WORKERS
 
 
 def test_r2_verify_hashes_downloaded_routing_bytes(r2_world):
