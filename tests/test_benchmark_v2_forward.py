@@ -320,13 +320,16 @@ def test_score_case_accepts_alt_names_and_accents():
 
 def test_aggregate_and_summary_math():
     rows = [
-        {"kind": "place", "strata": {"country": "MC"}, "error": None,
+        {"kind": "place", "query_style": "name", "strata": {"country": "MC"},
+         "error": None,
          "rank": 1, "found_at_1": True, "found_at_10": True,
          "top1_distance_km": 0.1, "ms": 100.0},
-        {"kind": "place", "strata": {"country": "MC"}, "error": None,
+        {"kind": "place", "query_style": "name", "strata": {"country": "MC"},
+         "error": None,
          "rank": 4, "found_at_1": False, "found_at_10": True,
          "top1_distance_km": 2.0, "ms": 200.0},
-        {"kind": "place", "strata": {"country": "FR"}, "error": None,
+        {"kind": "place", "query_style": "name_locality",
+         "strata": {"country": "FR"}, "error": None,
          "rank": None, "found_at_1": False, "found_at_10": False,
          "top1_distance_km": 500.0, "ms": 300.0},
         {"kind": "seam", "error": None, "rank": 1, "found_at_1": True,
@@ -338,24 +341,29 @@ def test_aggregate_and_summary_math():
     summary = bench.summarize_results(rows)
     assert summary["overall"]["n"] == 5
     assert summary["overall"]["errors"] == 1
-    assert summary["overall"]["recall_at_1"] == 0.5
-    assert summary["overall"]["recall_at_10"] == 0.75
+    assert summary["overall"]["recall_at_1"] == 0.4
+    assert summary["overall"]["recall_at_5"] == 0.6
+    assert summary["overall"]["recall_at_10"] == 0.6
     assert summary["self_recall"]["n"] == 4
-    assert summary["self_recall"]["recall_at_10"] == round(2 / 3, 3)
+    assert summary["self_recall"]["recall_at_10"] == 0.5
     assert summary["by_kind"]["seam"]["recall_at_1"] == 1.0
     assert summary["by_stratum"]["place:country=MC"]["recall_at_10"] == 1.0
+    assert summary["by_query_style"]["place:name"]["recall_at_10"] == 1.0
+    assert summary["by_query_style"]["place:name_locality"]["recall_at_10"] == 0.0
+    assert summary["overall"]["p95_ms"] == 300.0
     # mrr counts misses as zero contribution
     assert summary["by_stratum"]["place:country=MC"]["mrr"] == round(
         (1 + 1 / 4) / 2, 3)
-    assert bench.self_recall_at_10(summary) == round(2 / 3, 3)
+    assert bench.self_recall_at_10(summary) == 0.5
 
 
-def test_aggregate_with_no_scored_rows_yields_none_metrics():
+def test_aggregate_with_only_errors_counts_them_as_misses():
     stats = bench.summarize_results(
         [{"kind": "place", "error": "boom", "rank": None, "found_at_1": False,
           "found_at_10": False, "top1_distance_km": None, "ms": 10.0}])
-    assert stats["overall"]["recall_at_10"] is None
-    assert bench.self_recall_at_10(stats) is None
+    assert stats["overall"]["recall_at_10"] == 0.0
+    assert stats["overall"]["p50_ms"] is None
+    assert bench.self_recall_at_10(stats) == 0.0
 
 
 # ---------------------------------------------------------------------------
