@@ -19,9 +19,8 @@ use crate::address_construction_v1::{
 };
 use crate::places_construction_v1::{
     construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, record_projection,
-    routed_fetch_plan, routed_lookup, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
-    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, MAX_ROUTED_OBJECT_BYTES,
-    PLACES_CONSTRUCTION_FORMAT,
+    routed_fetch_plan, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
+    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, PLACES_CONSTRUCTION_FORMAT,
 };
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
@@ -1454,22 +1453,22 @@ async fn search_places_construction(
         else {
             return Ok(Vec::new());
         };
-        // Aggregate residency bound: the plan groups tokens by owning object,
-        // and each object's bytes drop at the end of its iteration before the
-        // next fetch, so at most ONE routed artifact (MAX_ROUTED_OBJECT_BYTES,
-        // 64 MiB) is live at a time — not tokens x cap, which could exceed the
-        // 128 MiB isolate and kill in-flight requests instead of failing
-        // closed. The edge cache absorbs any cross-request refetch.
+        // Aggregate residency bound: the plan groups tokens by owning object.
+        // Each object is range-read through its fixed index and one bounded
+        // payload at a time; a 209 MiB planet object is never materialized in
+        // the 128 MiB isolate. The edge cache absorbs cross-request refetches.
         let mut per_token: Vec<Option<Vec<crate::places_construction_v1::PlacesV1Record>>> =
             (0..tokens.len()).map(|_| None).collect();
         for (object, token_indexes) in plan {
             let object_key = format!("{object_root}/objects/{object}");
-            let bytes = loader
-                .places_construction_object(&object_key, MAX_ROUTED_OBJECT_BYTES)
+            let object_tokens: Vec<String> = token_indexes
+                .iter()
+                .map(|index| tokens[*index].clone())
+                .collect();
+            let object_records = loader
+                .lookup_places_construction_routed(&object_key, &cell, &object_tokens)
                 .await?;
-            for index in token_indexes {
-                let records =
-                    routed_lookup(&bytes, &cell, &tokens[index]).map_err(Error::RustError)?;
+            for (index, records) in token_indexes.into_iter().zip(object_records) {
                 if records.is_empty() {
                     return Ok(Vec::new());
                 }
