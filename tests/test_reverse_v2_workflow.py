@@ -84,6 +84,17 @@ def test_plan_streams_durable_markers_once_into_the_compact_plan():
     assert "--staging-bucket" in script
     assert "forward-finalize.json" in script
     assert "overture-construction-v1-create-only-marker-v1" in script
+    assert "construction-v1-family-manifest-v1" in script
+    assert "FAMILY_MANIFEST_SHA256" in script
+    assert "sha256sum forward-family-manifest.json" in script
+    assert "FAMILY_MANIFEST_BYTES" in script
+    assert "wc -c < forward-family-manifest.json" in script
+    assert "FORWARD_POSITIONS_RECORDS" in script
+    assert 'test "$EXPECTED_RECORDS" = "$FORWARD_POSITIONS_RECORDS"' in script
+    assert "durable-map-marker-keys.json" in script
+    assert "list-objects-v2" in script
+    assert "staging/global-v2/${REQUEST_SHA256}/construction-v1/${FAMILY}" in script
+    assert "control/matrices.env" not in script
 
 
 def test_execute_is_sixteen_bounded_ranges_then_one_catalog():

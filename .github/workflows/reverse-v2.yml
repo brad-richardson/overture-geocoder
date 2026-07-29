@@ -172,11 +172,6 @@ jobs:
           test "$(jq -er '.request_sha256' control/contract.json)" = "$REQUEST_SHA256" || {
             echo "::error::construction contract request digest differs"; exit 1; }
           OVERTURE_RELEASE="$(jq -er '.release' control/contract.json)"
-          MATRIX_NAME="${FAMILY}_matrix"
-          [ "$FAMILY" = addresses ] && MATRIX_NAME=address_matrix
-          sed -n "s/^${MATRIX_NAME}=//p" control/matrices.env \
-            | jq -er '.include[].task_id' > task-ids.txt
-          test -s task-ids.txt
 
           # Forward finalize is the prerequisite marker. It is read and checked,
           # never modified; reverse consumes only already-published per-record data.
@@ -194,7 +189,94 @@ jobs:
             and (.artifacts | length) > 0
           ' forward-finalize.json >/dev/null || {
             echo "::error::forward finalize marker does not attest this source"; exit 1; }
-          echo "OVERTURE_RELEASE=$OVERTURE_RELEASE" >> "$GITHUB_ENV"
+
+          # Bind the discovered marker set to the forward finalizer's exact-set
+          # evidence. A non-empty staging prefix alone cannot prove completeness:
+          # cleanup could leave a canonical subset. The create-only finalize marker
+          # attests exactly one family manifest identity, and that manifest carries
+          # the authoritative per-record total the reverse plan must reproduce.
+          FAMILY_MANIFEST_IDENTITY="$(
+            jq -cer --arg suffix "/families/${FAMILY}/family-manifest.json" '
+              [.artifacts[]
+                | select(
+                    (.key | type) == "string"
+                    and (.key | endswith($suffix))
+                  )
+              ] as $matches
+              | if ($matches | length) == 1
+                then $matches[0]
+                else error("finalize marker must attest exactly one family manifest")
+                end
+              | select(
+                  (.sha256 | type) == "string"
+                  and (.sha256 | test("^[0-9a-f]{64}$"))
+                  and (.bytes | type) == "number"
+                  and .bytes > 0
+                )
+            ' forward-finalize.json
+          )"
+          FAMILY_MANIFEST_KEY="$(jq -er '.key' <<<"$FAMILY_MANIFEST_IDENTITY")"
+          FAMILY_MANIFEST_SHA256="$(jq -er '.sha256' <<<"$FAMILY_MANIFEST_IDENTITY")"
+          FAMILY_MANIFEST_BYTES="$(jq -er '.bytes' <<<"$FAMILY_MANIFEST_IDENTITY")"
+          aws s3api get-object \
+            --bucket "$R2_BUCKET" \
+            --key "$FAMILY_MANIFEST_KEY" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto \
+            forward-family-manifest.json >/dev/null
+          test "$(sha256sum forward-family-manifest.json | cut -d ' ' -f1)" \
+            = "$FAMILY_MANIFEST_SHA256" || {
+              echo "::error::forward family manifest digest differs"; exit 1; }
+          test "$(wc -c < forward-family-manifest.json)" = "$FAMILY_MANIFEST_BYTES" || {
+            echo "::error::forward family manifest size differs"; exit 1; }
+          jq -e --arg request "$REQUEST_SHA256" --arg family "$FAMILY" '
+            .schema == "construction-v1-family-manifest-v1"
+            and .request_sha256 == $request
+            and .family == $family
+            and (.positions | type) == "object"
+            and (.positions.records | type) == "number"
+            and .positions.records > 0
+          ' forward-family-manifest.json >/dev/null || {
+            echo "::error::forward family manifest is malformed or differs"; exit 1; }
+          FORWARD_POSITIONS_RECORDS="$(
+            jq -er '.positions.records' forward-family-manifest.json
+          )"
+
+          # cv1-control intentionally contains only the durable request/contract
+          # documents, not the admission job's transient matrices.env. Discover
+          # candidate tasks from the request- and family-scoped durable map marker
+          # prefix instead. Every selected marker is re-read and request/task-
+          # validated by reverse_r2_v1.py, then the resulting record total is
+          # reconciled with the authenticated forward manifest above.
+          STAGING_PREFIX="staging/global-v2/${REQUEST_SHA256}/construction-v1/${FAMILY}"
+          if [ "$FAMILY" = places ]; then
+            MAP_MARKER_PREFIX="${STAGING_PREFIX}/map/places-v1/tasks/"
+          else
+            MAP_MARKER_PREFIX="${STAGING_PREFIX}/map/address/tasks/"
+          fi
+          aws s3api list-objects-v2 \
+            --bucket "$R2_BUCKET" \
+            --prefix "$MAP_MARKER_PREFIX" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto \
+            --query 'Contents[].Key' \
+            --output json > durable-map-marker-keys.json
+          jq -er --arg prefix "$MAP_MARKER_PREFIX" '
+            .[]
+            | select(startswith($prefix) and endswith("/complete.json"))
+            | .[($prefix | length):-("/complete.json" | length)]
+            | select(test("^[a-z0-9_-]+$"))
+          ' durable-map-marker-keys.json | sort -u > task-ids.txt
+          LISTED_MARKERS="$(jq -er 'length' durable-map-marker-keys.json)"
+          TASKS="$(wc -l < task-ids.txt)"
+          test "$TASKS" -gt 0 || {
+            echo "::error::durable map marker prefix is empty"; exit 1; }
+          test "$TASKS" -eq "$LISTED_MARKERS" || {
+            echo "::error::durable map marker prefix contains a non-canonical key"; exit 1; }
+          {
+            echo "OVERTURE_RELEASE=$OVERTURE_RELEASE"
+            echo "FORWARD_POSITIONS_RECORDS=$FORWARD_POSITIONS_RECORDS"
+          } >> "$GITHUB_ENV"
 
       - name: Refuse finalized destinations and bind execute to one fresh slice
         run: |
@@ -220,6 +302,10 @@ jobs:
             --task-ids-file task-ids.txt \
             --output out/reverse-plan.json | tee out/plan-summary.json
           EXPECTED_RECORDS="$(jq -er '.expected_records' out/reverse-plan.json)"
+          test "$EXPECTED_RECORDS" = "$FORWARD_POSITIONS_RECORDS" || {
+            echo "::error::reverse task set has ${EXPECTED_RECORDS} records; authenticated forward manifest requires ${FORWARD_POSITIONS_RECORDS}"
+            exit 1
+          }
           RANGE_MATRIX="$(jq -cn '
             {include: [
               range(0; 16) as $range
@@ -255,6 +341,7 @@ jobs:
             out/
             task-ids.txt
             forward-finalize.json
+            forward-family-manifest.json
 
   reduce:
     name: ${{ inputs.family }} reverse buckets ${{ matrix.bucket_start }}-${{ matrix.bucket_end }}
