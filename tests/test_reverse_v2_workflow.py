@@ -73,6 +73,12 @@ def test_execute_confirmation_binds_cost_shape_and_destination():
 
 def test_plan_streams_durable_markers_once_into_the_compact_plan():
     script = body("plan")
+    assert "reverse_r2_v1.py admit" in script
+    assert "--publish-destination" in script
+    assert '--mode "$MODE"' in script
+    assert script.index("reverse_r2_v1.py admit") < script.index(
+        "reverse_r2_v1.py plan"
+    )
     assert "reverse_r2_v1.py plan" in script
     assert "--task-ids-file task-ids.txt" in script
     assert "--staging-bucket" in script

@@ -418,18 +418,32 @@ def test_r2_replay_requires_store_computed_content_md5():
 
     publisher = object.__new__(R2.DirectPublishedArtifactStore)
     publisher.destination = Destination()
+    publisher.family_prefix = "slice-2026-07-29.0/families/places"
     with pytest.raises(ValueError, match="store-computed content MD5"):
         publisher.verify_identity(
-            {"key": "x", "bytes": 7, "sha256": "b" * 64}
+            {
+                "key": "slice-2026-07-29.0/families/places/reverse/x",
+                "bytes": 7,
+                "sha256": "b" * 64,
+            }
         )
     publisher.verify_identity(
         {
-            "key": "x",
+            "key": "slice-2026-07-29.0/families/places/reverse/x",
             "bytes": 7,
             "sha256": "b" * 64,
             "content_md5": "c" * 32,
         }
     )
+    with pytest.raises(ValueError, match="escapes the claimed family slice"):
+        publisher.verify_identity(
+            {
+                "key": "slice-2026-07-30.0/families/places/reverse/x",
+                "bytes": 7,
+                "sha256": "b" * 64,
+                "content_md5": "c" * 32,
+            }
+        )
 
 
 def test_direct_publication_claims_slice_and_never_copies_reverse_artifacts(
@@ -484,6 +498,29 @@ def test_direct_publication_claims_slice_and_never_copies_reverse_artifacts(
         "sha256": shard["sha256"],
     }
     assert construction.read_json(R2.range_marker_key("places", 0, 255)) == reduction
+    assert reduction["slice_claim"] == publisher.slice_claim
+    retry_publisher = R2.DirectPublishedArtifactStore(
+        destination=destination,
+        version="slice-2026-07-30.0",
+        family="places",
+        request_sha256=REQUEST,
+        overture_release="2026-07-22.0",
+    )
+    with pytest.raises(
+        ValueError, match="durable reverse range marker differs"
+    ):
+        R2.reduce_bucket_range(
+            family="places",
+            request_sha256=REQUEST,
+            markers=[marker],
+            store=construction,
+            artifact_store=retry_publisher,
+            bucket_start=0,
+            bucket_end=255,
+            scratch_root=tmp_path / "cross-slice-resume-must-not-run",
+            encoder_binary=tmp_path / "missing-encoder",
+            verifier_binary=tmp_path / "missing-verifier",
+        )
 
     catalog = R2.assemble_catalog(
         family="places",
@@ -536,6 +573,47 @@ def test_direct_publication_claims_slice_and_never_copies_reverse_artifacts(
             request_sha256="b" * 64,
             overture_release="2026-07-22.0",
         )
+
+
+@pytest.mark.parametrize(
+    "manifest",
+    (
+        "slice-2026-07-29.0/slice-manifest.json",
+        "slice-2026-07-29.0/families/places/family-manifest.json",
+    ),
+)
+def test_direct_publication_refuses_finalized_destination(tmp_path, manifest):
+    destination = R2.PROMOTION.LocalTree(tmp_path / "published")
+    destination.put_bytes_create_only(manifest, b"finalized\n")
+    with pytest.raises(ValueError, match="already finalized"):
+        R2.DirectPublishedArtifactStore(
+            destination=destination,
+            version="slice-2026-07-29.0",
+            family="places",
+            request_sha256=REQUEST,
+            overture_release="2026-07-22.0",
+            claim_slice=False,
+        )
+
+
+def test_direct_publication_dry_run_admits_fresh_slice_without_claiming_it(
+    tmp_path,
+):
+    destination = R2.PROMOTION.LocalTree(tmp_path / "published")
+    publisher = R2.DirectPublishedArtifactStore(
+        destination=destination,
+        version="slice-2026-07-29.0",
+        family="places",
+        request_sha256=REQUEST,
+        overture_release="2026-07-22.0",
+        claim_slice=False,
+    )
+    assert publisher.admission_state == "fresh"
+    assert publisher.slice_claim is None
+    assert (
+        destination.identity("slice-2026-07-29.0/claims/places.json")
+        is None
+    )
 
 
 def test_reducer_cross_checks_real_pack_count_against_directory(binaries, tmp_path):

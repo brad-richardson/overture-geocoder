@@ -29,8 +29,6 @@ INPUTS = {
     "legacy_core",
     "places_source",
     "addresses_source",
-    "places_reverse_run",
-    "addresses_reverse_run",
     "catalog_expectation",
 }
 
@@ -60,6 +58,7 @@ def test_workflow_is_dispatch_only_with_the_exact_staged_inputs():
     assert set(triggers) == {"workflow_dispatch"}
     inputs = triggers["workflow_dispatch"]["inputs"]
     assert set(inputs) == INPUTS
+    assert len(inputs) <= 10
     assert inputs["stage"]["options"] == STAGES
     assert inputs["stage"]["required"] is True
     assert inputs["mode"]["options"] == ["dry-run", "execute"]
@@ -182,9 +181,10 @@ def test_promote_slice_authenticates_the_construction_request_sha():
 
 def test_promote_slice_authenticates_optional_reverse_runs_without_copying_them():
     gate = "\n".join(scripts(jobs()["gate"]))
-    assert "places_reverse_run" in gate
-    assert "addresses_reverse_run" in gate
+    assert "<request-sha256>:<construction-run-id>[:<reverse-run-id>]" in gate
     body = "\n".join(scripts(jobs()["promote-slice"]))
+    assert 'local run_and_reverse="${source#*:}"' in body
+    assert 'reverse_run="${run_and_reverse#*:}"' in body
     assert '.name == "Build v2 reverse indexes"' in body
     assert 'reverse-v2-${family}-catalog' in body
     assert "--reverse-catalog" in body

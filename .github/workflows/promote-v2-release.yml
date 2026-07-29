@@ -97,32 +97,17 @@ on:
       places_source:
         description: >-
           promote-slice only. "<request-sha256>:<construction-run-id>" naming
-          the Places construction-v1 request and the run whose cv1-control /
-          cv1-reduce-* artifacts carry its contract and reduction records.
-          Leave empty to promote no Places family.
+          the Places construction source, optionally followed by
+          ":<reverse-run-id>" to authenticate its completed reverse catalog
+          without copying reverse data. Leave empty to promote no Places family.
         required: false
         default: ""
         type: string
       addresses_source:
         description: >-
-          promote-slice only. "<request-sha256>:<construction-run-id>" for the
-          Address family, same shape as places_source. Leave empty to promote
-          no Address family.
-        required: false
-        default: ""
-        type: string
-      places_reverse_run:
-        description: >-
-          promote-slice only. Optional successful "Build v2 reverse indexes"
-          run id for the same Places request and slice_version. Its completion
-          record is authenticated and included without copying reverse data.
-        required: false
-        default: ""
-        type: string
-      addresses_reverse_run:
-        description: >-
-          promote-slice only. Optional successful reverse-v2 run id for the
-          same Address request and slice_version.
+          promote-slice only. Address family in the same
+          "<request-sha256>:<construction-run-id>[:<reverse-run-id>]" shape as
+          places_source. Leave empty to promote no Address family.
         required: false
         default: ""
         type: string
@@ -173,8 +158,6 @@ jobs:
           LEGACY_CORE: ${{ inputs.legacy_core }}
           PLACES_SOURCE: ${{ inputs.places_source }}
           ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
-          PLACES_REVERSE_RUN: ${{ inputs.places_reverse_run }}
-          ADDRESSES_REVERSE_RUN: ${{ inputs.addresses_reverse_run }}
           CATALOG_EXPECTATION: ${{ inputs.catalog_expectation }}
         run: |
           set -euo pipefail
@@ -199,20 +182,9 @@ jobs:
           require_source () {
             local label="$1" value="$2"
             [ -z "$value" ] && return 0
-            if ! printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}:[0-9]+$'; then
-              echo "::error::${label} '${value}' must be <request-sha256>:<construction-run-id>"
-              exit 1
-            fi
-          }
-          require_reverse_run () {
-            local label="$1" value="$2" source="$3"
-            [ -z "$value" ] && return 0
-            if [ -z "$source" ]; then
-              echo "::error::${label} requires its matching construction source"
-              exit 1
-            fi
-            if ! printf '%s' "$value" | grep -Eq '^[0-9]+$'; then
-              echo "::error::${label} must be a numeric successful reverse-v2 run id"
+            if ! printf '%s' "$value" \
+              | grep -Eq '^[0-9a-f]{64}:[0-9]+(:[0-9]+)?$'; then
+              echo "::error::${label} '${value}' must be <request-sha256>:<construction-run-id>[:<reverse-run-id>]"
               exit 1
             fi
           }
@@ -259,8 +231,6 @@ jobs:
               fi
               require_source places_source "$PLACES_SOURCE"
               require_source addresses_source "$ADDRESSES_SOURCE"
-              require_reverse_run places_reverse_run "$PLACES_REVERSE_RUN" "$PLACES_SOURCE"
-              require_reverse_run addresses_reverse_run "$ADDRESSES_REVERSE_RUN" "$ADDRESSES_SOURCE"
               require_confirm PROMOTE-SLICE "$SLICE_VERSION"
               ;;
             publish-release)
@@ -517,8 +487,6 @@ jobs:
       SLICE_VERSION: ${{ inputs.slice_version }}
       PLACES_SOURCE: ${{ inputs.places_source }}
       ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
-      PLACES_REVERSE_RUN: ${{ inputs.places_reverse_run }}
-      ADDRESSES_REVERSE_RUN: ${{ inputs.addresses_reverse_run }}
     steps:
       - name: Check out main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -543,9 +511,15 @@ jobs:
           mkdir -p cv1 plans out
           RELEASE_SEEN=""
           fetch_family () {
-            local family="$1" source="$2" reverse_run="$3"
+            local family="$1" source="$2"
             [ -n "$source" ] || return 0
-            local sha="${source%%:*}" run_id="${source##*:}"
+            local sha="${source%%:*}"
+            local run_and_reverse="${source#*:}"
+            local run_id="${run_and_reverse%%:*}"
+            local reverse_run=""
+            if [ "$run_and_reverse" != "$run_id" ]; then
+              reverse_run="${run_and_reverse#*:}"
+            fi
             mkdir -p "cv1/${family}/control" "cv1/${family}/reducers" "cv1/${family}/reductions"
             gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" > "cv1/${family}/run.json"
             jq -e '
@@ -640,8 +614,8 @@ jobs:
               echo "${family}: authenticated reverse completion from run ${reverse_run}"
             fi
           }
-          fetch_family places "$PLACES_SOURCE" "$PLACES_REVERSE_RUN"
-          fetch_family addresses "$ADDRESSES_SOURCE" "$ADDRESSES_REVERSE_RUN"
+          fetch_family places "$PLACES_SOURCE"
+          fetch_family addresses "$ADDRESSES_SOURCE"
           echo "RELEASE=$RELEASE_SEEN" >> "$GITHUB_ENV"
 
       - name: Plan every family promotion and echo exactly what will be written

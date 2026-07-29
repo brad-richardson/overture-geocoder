@@ -558,7 +558,6 @@ pub(crate) fn haversine_m(
 }
 
 fn distance_to_box(longitude: f64, latitude: f64, bounds: GeoBox) -> f64 {
-    let nearest_latitude = latitude.clamp(bounds.min_lat, bounds.max_lat);
     let mut nearest_longitude = bounds.min_lon;
     let mut best_delta = f64::INFINITY;
     for shifted in [longitude - 360.0, longitude, longitude + 360.0] {
@@ -569,7 +568,49 @@ fn distance_to_box(longitude: f64, latitude: f64, bounds: GeoBox) -> f64 {
             nearest_longitude = candidate;
         }
     }
-    haversine_m(longitude, latitude, nearest_longitude, nearest_latitude)
+    if best_delta == 0.0 && (bounds.min_lat..=bounds.max_lat).contains(&latitude) {
+        return 0.0;
+    }
+
+    // A lat/lon rectangle is bounded by two small-circle latitude arcs and
+    // two great-circle meridian arcs. Evaluate the exact closest point on all
+    // four edges; independently clamping latitude and longitude is not the
+    // spherical minimum, particularly near the poles.
+    let mut best = f64::INFINITY;
+    for edge_latitude in [bounds.min_lat, bounds.max_lat] {
+        best = best.min(haversine_m(
+            longitude,
+            latitude,
+            nearest_longitude,
+            edge_latitude,
+        ));
+    }
+    let query_latitude = latitude.to_radians();
+    for edge_longitude in [bounds.min_lon, bounds.max_lon] {
+        let longitude_delta = normalize_longitude_delta(edge_longitude - longitude).to_radians();
+        let stationary = query_latitude
+            .sin()
+            .atan2(query_latitude.cos() * longitude_delta.cos());
+        let min_latitude = bounds.min_lat.to_radians();
+        let max_latitude = bounds.max_lat.to_radians();
+        for candidate in [
+            min_latitude,
+            max_latitude,
+            stationary,
+            stationary - std::f64::consts::PI,
+            stationary + std::f64::consts::PI,
+        ] {
+            if (min_latitude..=max_latitude).contains(&candidate) {
+                best = best.min(haversine_m(
+                    longitude,
+                    latitude,
+                    edge_longitude,
+                    candidate.to_degrees(),
+                ));
+            }
+        }
+    }
+    best
 }
 
 fn latitude_span(latitude: f64, radius_m: f64) -> (f64, f64) {
@@ -1279,36 +1320,64 @@ mod tests {
     }
 
     #[test]
-    fn latitude_window_matches_a_full_world_cell_oracle_at_boundaries_and_poles() {
+    fn cell_and_leaf_plans_cover_independent_in_radius_e7_points() {
         let cases = [
-            (-180.0, 0.0, 2_000.0),
-            (180.0, 0.0, 2_000.0),
-            (-0.000_000_1, 0.0, 500.0),
-            (0.0, 66.0, 2_000.0),
-            (0.0, -66.0, 2_000.0),
-            (45.0, 85.0, 2_000.0),
-            (-135.0, -85.0, 2_000.0),
-            (179.999_999, 89.5, 2_000.0),
-            (-179.999_999, -89.5, 2_000.0),
-            (0.0, 89.999_999, 2_000.0),
-            (0.0, -89.999_999, 2_000.0),
+            (179.9999, 0.0, 50.0, -1_799_999_000, 0),
+            (-179.9999, 0.0, 50.0, 1_799_999_000, 0),
+            (-0.000_000_1, 0.0, 50.0, 1, 1),
+            (0.0, 66.0, 50.0, 1_000, 660_001_000),
+            (0.0, -66.0, 50.0, -1_000, -660_001_000),
+            (45.0, 85.0, 50.0, 450_010_000, 850_001_000),
+            (-135.0, -85.0, 50.0, -1_350_010_000, -850_001_000),
+            (179.999_999, 89.5, 50.0, -1_799_999_990, 895_001_000),
+            (-179.999_999, -89.5, 50.0, 1_799_999_990, -895_001_000),
+            (0.0, 89.9999, 20.0, 1_790_000_000, 900_000_000),
+            (0.0, -89.9999, 20.0, -1_790_000_000, -900_000_000),
         ];
-        for (longitude, latitude, radius_m) in cases {
-            let planned = plan_cells(longitude, latitude, radius_m)
-                .into_iter()
-                .map(|cell| (cell.y, cell.x))
-                .collect::<BTreeSet<_>>();
-            let full_world = (0_u8..=255)
-                .flat_map(|y| (0_u8..=255).map(move |x| (y, x)))
-                .filter(|(y, x)| {
-                    distance_to_box(longitude, latitude, cell_box(*y, *x)) <= radius_m + 1e-6
-                })
-                .collect::<BTreeSet<_>>();
-            assert_eq!(
-                planned, full_world,
-                "latitude-window planner omitted or added a cell at {longitude},{latitude}"
+        for (longitude, latitude, radius_m, record_longitude_e7, record_latitude_e7) in cases {
+            let record_longitude = f64::from(record_longitude_e7) / 1e7;
+            let record_latitude = f64::from(record_latitude_e7) / 1e7;
+            assert!(
+                haversine_m(longitude, latitude, record_longitude, record_latitude) <= radius_m,
+                "oracle point is outside its stated radius"
+            );
+            let x = coordinate_index(record_longitude, 180.0, 360.0);
+            let y = coordinate_index(record_latitude, 90.0, 180.0);
+            let cells = plan_cells(longitude, latitude, radius_m);
+            let cell = cells
+                .iter()
+                .find(|cell| (cell.y, cell.x) == (y, x))
+                .unwrap_or_else(|| {
+                    panic!("planner omitted E7 point cell {y:02x}{x:02x} at {longitude},{latitude}")
+                });
+            let expected_leaf = leaf_key_e7(
+                record_longitude_e7,
+                record_latitude_e7,
+                (u16::from(y) << 8) | u16::from(x),
+                3,
+            );
+            assert!(
+                plan_leaves(cell, 3, longitude, latitude, radius_m)
+                    .iter()
+                    .any(|leaf| leaf.key == expected_leaf),
+                "planner omitted E7 point leaf in {y:02x}{x:02x}"
             );
         }
+    }
+
+    #[test]
+    fn polar_spherical_box_regression_includes_cell_0301() {
+        let longitude = -176.856_626_028_588_92;
+        let latitude = -87.276_792_589_623_34;
+        let radius_m = 1_748.0;
+        let record_longitude = -177.187_500_1;
+        let record_latitude = -87.276_837_9;
+        let record_distance = haversine_m(longitude, latitude, record_longitude, record_latitude);
+        assert!(record_distance < radius_m);
+        assert!(distance_to_box(longitude, latitude, cell_box(0x03, 0x01)) <= record_distance);
+        let cells = plan_cells(longitude, latitude, radius_m);
+        assert!(cells.iter().any(|cell| (cell.y, cell.x) == (0x03, 0x01)));
+        assert!(cells.len() <= MAX_CELLS);
     }
 
     #[test]

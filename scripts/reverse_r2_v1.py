@@ -60,6 +60,7 @@ PROMOTION = _load(
 RANGE_SCHEMA = "overture-reverse-bucket-range-reduction-v1"
 CATALOG_SCHEMA = "overture-reverse-catalog-publication-v1"
 PLAN_SCHEMA = "overture-reverse-r2-plan-v1"
+ADMISSION_SCHEMA = "overture-reverse-publication-admission-v1"
 SLICE_CLAIM_SCHEMA = "overture-construction-slice-claim-v1"
 CATALOG_ROOT_MAGIC = b"RCAT0001"
 CATALOG_SHARD_MAGIC = b"RCAS0001"
@@ -144,6 +145,7 @@ class DirectPublishedArtifactStore:
         family: str,
         request_sha256: str,
         overture_release: str,
+        claim_slice: bool = True,
     ):
         self.destination = destination
         self.version = PROMOTION.validate_slice_version(version)
@@ -155,7 +157,9 @@ class DirectPublishedArtifactStore:
         self.request_sha256 = request_sha256
         self.overture_release = overture_release
         self.family_prefix = f"{self.version}/families/{self.family}"
-        self.slice_claim = self._claim_slice()
+        self.admission_state, self.slice_claim = self._admit_slice(
+            claim_slice=claim_slice
+        )
 
     @staticmethod
     def _content_md5(path: Path) -> str:
@@ -223,6 +227,10 @@ class DirectPublishedArtifactStore:
 
     def verify_identity(self, value: dict[str, Any]) -> None:
         identity = validate_identity(value, what="published reverse artifact")
+        if not identity["key"].startswith(f"{self.family_prefix}/"):
+            raise ValueError(
+                "published reverse artifact escapes the claimed family slice"
+            )
         expected = {
             "bytes": identity["bytes"],
             "sha256": identity["sha256"],
@@ -241,7 +249,7 @@ class DirectPublishedArtifactStore:
                 f"published reverse artifact differs: {identity['key']}"
             )
 
-    def _claim_slice(self) -> dict[str, Any]:
+    def _slice_claim(self) -> tuple[str, bytes]:
         claim = {
             "schema": SLICE_CLAIM_SCHEMA,
             "version": self.version,
@@ -249,16 +257,51 @@ class DirectPublishedArtifactStore:
             "request_sha256": self.request_sha256,
             "overture_release": self.overture_release,
         }
-        payload = canonical_json(claim) + b"\n"
+        return (
+            f"{self.version}/claims/{self.family}.json",
+            canonical_json(claim) + b"\n",
+        )
+
+    def _admit_slice(
+        self, *, claim_slice: bool
+    ) -> tuple[str, dict[str, Any] | None]:
+        for key in (
+            f"{self.version}/slice-manifest.json",
+            f"{self.family_prefix}/family-manifest.json",
+        ):
+            if self.destination.identity(key) is not None:
+                raise ValueError(
+                    f"reverse destination is already finalized: {key}"
+                )
+        key, payload = self._slice_claim()
+        expected = {
+            "bytes": len(payload),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        }
+        if self.destination.scheme == "r2":
+            expected["content_md5"] = hashlib.md5(
+                payload, usedforsecurity=False
+            ).hexdigest()
+        existing = self.destination.identity(key)
+        if existing is not None:
+            if not self._matches(existing, expected):
+                raise ValueError(
+                    f"existing immutable reverse artifact differs: {key}"
+                )
+            identity = {**existing, "key": key}
+            return "resume", validate_identity(
+                identity, what="existing reverse slice claim"
+            )
+        if not claim_slice:
+            return "fresh", None
+
         with tempfile.NamedTemporaryFile(
             prefix=".reverse-slice-claim.", suffix=".json", delete=False
         ) as output:
             path = Path(output.name)
             output.write(payload)
         try:
-            return self._put_exact(
-                path, f"{self.version}/claims/{self.family}.json"
-            )
+            return "claimed", self._put_exact(path, key)
         finally:
             path.unlink(missing_ok=True)
 
@@ -787,6 +830,11 @@ def reduce_bucket_range(
         ],
         "directory_records": sum(pack["records"] for pack in selected),
     }
+    slice_claim = getattr(artifact_store, "slice_claim", None)
+    if slice_claim is not None:
+        base["slice_claim"] = validate_identity(
+            slice_claim, what="reverse range slice claim"
+        )
     durable = store.read_json(range_marker_key(family, start, end))
     if durable is not None:
         if any(durable.get(key) != value for key, value in base.items()):
@@ -1726,6 +1774,31 @@ def cmd_plan(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_admit(args: argparse.Namespace) -> int:
+    publisher = DirectPublishedArtifactStore(
+        destination=PROMOTION.open_tree(
+            args.publish_destination, "--publish-destination"
+        ),
+        version=args.version,
+        family=args.family,
+        request_sha256=args.request_sha256,
+        overture_release=args.overture_release,
+        claim_slice=args.mode == "execute",
+    )
+    result = {
+        "schema": ADMISSION_SCHEMA,
+        "mode": args.mode,
+        "state": publisher.admission_state,
+        "version": publisher.version,
+        "family": publisher.family,
+        "request_sha256": publisher.request_sha256,
+        "overture_release": publisher.overture_release,
+        "slice_claim": publisher.slice_claim,
+    }
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
 def cmd_reduce(args: argparse.Namespace) -> int:
     store = _store(args)
     plan = (
@@ -1808,6 +1881,15 @@ def build_parser() -> argparse.ArgumentParser:
     source.add_argument("--task-ids-file", type=Path)
     plan.add_argument("--output", type=Path, required=True)
     plan.set_defaults(func=cmd_plan)
+
+    admit = commands.add_parser("admit")
+    admit.add_argument("--family", choices=("places", "addresses"), required=True)
+    admit.add_argument("--request-sha256", required=True)
+    admit.add_argument("--publish-destination", required=True)
+    admit.add_argument("--version", required=True)
+    admit.add_argument("--overture-release", required=True)
+    admit.add_argument("--mode", choices=("dry-run", "execute"), required=True)
+    admit.set_defaults(func=cmd_admit)
 
     reduce = commands.add_parser("reduce")
     _add_store_arguments(reduce)

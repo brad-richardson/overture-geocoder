@@ -196,6 +196,17 @@ jobs:
             echo "::error::forward finalize marker does not attest this source"; exit 1; }
           echo "OVERTURE_RELEASE=$OVERTURE_RELEASE" >> "$GITHUB_ENV"
 
+      - name: Refuse finalized destinations and bind execute to one fresh slice
+        run: |
+          set -euo pipefail
+          python -u scripts/reverse_r2_v1.py admit \
+            --family "$FAMILY" \
+            --request-sha256 "$REQUEST_SHA256" \
+            --publish-destination "r2:${R2_BUCKET}" \
+            --version "$SLICE_VERSION" \
+            --overture-release "$OVERTURE_RELEASE" \
+            --mode "$MODE" | tee out/publication-admission.json
+
       - name: Stream durable map markers once into a compact authenticated plan
         id: plan
         run: |
