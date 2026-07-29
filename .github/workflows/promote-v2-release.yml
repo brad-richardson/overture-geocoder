@@ -111,6 +111,21 @@ on:
         required: false
         default: ""
         type: string
+      places_reverse_run:
+        description: >-
+          promote-slice only. Optional successful "Build v2 reverse indexes"
+          run id for the same Places request and slice_version. Its completion
+          record is authenticated and included without copying reverse data.
+        required: false
+        default: ""
+        type: string
+      addresses_reverse_run:
+        description: >-
+          promote-slice only. Optional successful reverse-v2 run id for the
+          same Address request and slice_version.
+        required: false
+        default: ""
+        type: string
       catalog_expectation:
         description: >-
           promote-catalog only. Exactly one CAS expectation: "absent" for the
@@ -158,6 +173,8 @@ jobs:
           LEGACY_CORE: ${{ inputs.legacy_core }}
           PLACES_SOURCE: ${{ inputs.places_source }}
           ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
+          PLACES_REVERSE_RUN: ${{ inputs.places_reverse_run }}
+          ADDRESSES_REVERSE_RUN: ${{ inputs.addresses_reverse_run }}
           CATALOG_EXPECTATION: ${{ inputs.catalog_expectation }}
         run: |
           set -euo pipefail
@@ -184,6 +201,18 @@ jobs:
             [ -z "$value" ] && return 0
             if ! printf '%s' "$value" | grep -Eq '^[0-9a-f]{64}:[0-9]+$'; then
               echo "::error::${label} '${value}' must be <request-sha256>:<construction-run-id>"
+              exit 1
+            fi
+          }
+          require_reverse_run () {
+            local label="$1" value="$2" source="$3"
+            [ -z "$value" ] && return 0
+            if [ -z "$source" ]; then
+              echo "::error::${label} requires its matching construction source"
+              exit 1
+            fi
+            if ! printf '%s' "$value" | grep -Eq '^[0-9]+$'; then
+              echo "::error::${label} must be a numeric successful reverse-v2 run id"
               exit 1
             fi
           }
@@ -230,6 +259,8 @@ jobs:
               fi
               require_source places_source "$PLACES_SOURCE"
               require_source addresses_source "$ADDRESSES_SOURCE"
+              require_reverse_run places_reverse_run "$PLACES_REVERSE_RUN" "$PLACES_SOURCE"
+              require_reverse_run addresses_reverse_run "$ADDRESSES_REVERSE_RUN" "$ADDRESSES_SOURCE"
               require_confirm PROMOTE-SLICE "$SLICE_VERSION"
               ;;
             publish-release)
@@ -486,6 +517,8 @@ jobs:
       SLICE_VERSION: ${{ inputs.slice_version }}
       PLACES_SOURCE: ${{ inputs.places_source }}
       ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
+      PLACES_REVERSE_RUN: ${{ inputs.places_reverse_run }}
+      ADDRESSES_REVERSE_RUN: ${{ inputs.addresses_reverse_run }}
     steps:
       - name: Check out main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -510,7 +543,7 @@ jobs:
           mkdir -p cv1 plans out
           RELEASE_SEEN=""
           fetch_family () {
-            local family="$1" source="$2"
+            local family="$1" source="$2" reverse_run="$3"
             [ -n "$source" ] || return 0
             local sha="${source%%:*}" run_id="${source##*:}"
             mkdir -p "cv1/${family}/control" "cv1/${family}/reducers" "cv1/${family}/reductions"
@@ -574,9 +607,41 @@ jobs:
               exit 1
             fi
             echo "${family}: ${count} reduction records from run ${run_id}"
+            if [ -n "$reverse_run" ]; then
+              mkdir -p "cv1/${family}/reverse"
+              gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${reverse_run}" \
+                > "cv1/${family}/reverse-run.json"
+              jq -e '
+                .name == "Build v2 reverse indexes"
+                and .event == "workflow_dispatch"
+                and .head_branch == "main"
+                and .status == "completed"
+                and .conclusion == "success"
+              ' "cv1/${family}/reverse-run.json" >/dev/null || {
+                echo "::error::${family}: reverse run ${reverse_run} is not a successful main run"
+                exit 1
+              }
+              gh run download "$reverse_run" --repo "$GITHUB_REPOSITORY" \
+                --name "reverse-v2-${family}-catalog" \
+                --dir "cv1/${family}/reverse"
+              local reverse_catalog="cv1/${family}/reverse/reverse-catalog.json"
+              test -s "$reverse_catalog"
+              jq -e --arg family "$family" --arg request "$sha" '
+                .schema == "overture-reverse-catalog-publication-v1"
+                and .family == $family
+                and .request_sha256 == $request
+                and .records > 0
+                and .cells > 0
+              ' "$reverse_catalog" >/dev/null || {
+                echo "::error::${family}: reverse completion differs from the construction source"
+                exit 1
+              }
+              printf '%s' "$reverse_catalog" > "cv1/${family}/reverse-catalog-path"
+              echo "${family}: authenticated reverse completion from run ${reverse_run}"
+            fi
           }
-          fetch_family places "$PLACES_SOURCE"
-          fetch_family addresses "$ADDRESSES_SOURCE"
+          fetch_family places "$PLACES_SOURCE" "$PLACES_REVERSE_RUN"
+          fetch_family addresses "$ADDRESSES_SOURCE" "$ADDRESSES_REVERSE_RUN"
           echo "RELEASE=$RELEASE_SEEN" >> "$GITHUB_ENV"
 
       - name: Plan every family promotion and echo exactly what will be written
@@ -588,6 +653,13 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           for FAMILY in places addresses; do
             [ -d "cv1/${FAMILY}/control" ] || continue
+            REVERSE_ARGS=()
+            if [ -s "cv1/${FAMILY}/reverse-catalog-path" ]; then
+              REVERSE_ARGS=(
+                --reverse-catalog
+                "${FAMILY}=$(cat "cv1/${FAMILY}/reverse-catalog-path")"
+              )
+            fi
             python -u scripts/promote_construction_slice.py plan \
               --source "r2:${R2_BUCKET}" \
               --family "$FAMILY" \
@@ -597,6 +669,7 @@ jobs:
               --version "$SLICE_VERSION" \
               --release "$RELEASE" \
               --producer-commit "$(cat "cv1/${FAMILY}/producer-commit")" \
+              "${REVERSE_ARGS[@]}" \
               --output "plans/${FAMILY}.json"
             # The plan re-derived the request digest from the construction
             # tree's own manifests and marker; bind it to the operator input.
@@ -659,6 +732,7 @@ jobs:
           path: |
             plans/
             out/
+            cv1/*/reverse/
 
   # --- Stage: publish-release ---------------------------------------------------
   publish-release:

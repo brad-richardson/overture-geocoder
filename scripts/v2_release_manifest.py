@@ -1042,13 +1042,10 @@ def validate_unavailable_catalog(
 #                    with ADDRESS_CONSTRUCTION_NORMALIZATION_VERSION
 #                    "address-transform-v1" (address_construction_v1.rs:50,
 #                    v2.rs:403-417).
-#   operations     : exactly ["forward"] (places) and ["structured_forward"]
-#                    (addresses) (v2.rs:410,415).
-#   entrypoints    : exactly {slice}/families/{family}/routing.json, non-empty
-#                    and within MAX_PLACES_ROUTING_BYTES /
-#                    MAX_ADDRESS_ROUTING_BYTES = 8 MiB
-#                    (places_construction_v1.rs:41,
-#                    address_construction_v1.rs:57, v2.rs:422-457).
+#   operations     : forward/structured_forward, plus reverse only when the
+#                    family manifest attests the fixed reverse root.
+#   entrypoints    : routing.json (<= 8 MiB) for forward and the exact 688-byte
+#                    reverse-catalog.rcat for reverse.
 WORKER_CONSTRUCTION_CONTRACTS = {
     ("places", "PLRV0002+PLHD0002"): {
         "operations": ("forward",),
@@ -1065,6 +1062,9 @@ WORKER_CONSTRUCTION_CONTRACTS = {
         "entrypoint_cap": 8 * 1024 * 1024,
     },
 }
+REVERSE_ROOT_BYTES = 688
+REVERSE_ROOT_MAGIC = b"RCAT0001"
+REVERSE_FAMILY_CODE = {"places": 1, "addresses": 2}
 
 _ABSENT_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 _CONFLICT_CODES = frozenset({"412", "PreconditionFailed"})
@@ -1328,6 +1328,13 @@ def cmd_assemble(args: argparse.Namespace) -> None:
     legacy_version = _require_build(args.legacy_core)
     families = sorted(set(args.family or sorted(gbm.FAMILIES)))
     store = open_control_store(args.store, "--store")
+    import promote_construction_slice as promotion
+
+    publication_tree = (
+        promotion.LocalTree(store.root)
+        if isinstance(store, LocalControlStore)
+        else promotion.R2Tree(store.store)
+    )
 
     legacy, _, legacy_sha = _fetch_document(
         store,
@@ -1397,12 +1404,65 @@ def cmd_assemble(args: argparse.Namespace) -> None:
                 f"{family} routing entrypoint is outside the worker's "
                 f"(0, {contract['entrypoint_cap']}] byte cap"
             )
-        family_manifests[family] = (manifest, manifest_sha)
-        family_source_manifests[family] = (source, source_sha)
-        operations[family] = list(contract["operations"])
-        entrypoints[family] = {
+        family_operations = list(contract["operations"])
+        family_entrypoints = {
             operation: entrypoint_key for operation in contract["operations"]
         }
+        reverse_key = f"families/{family}/reverse-catalog.rcat"
+        reverse_recorded = next(
+            (
+                artifact
+                for artifact in validated["artifacts"]
+                if artifact["object_key"] == reverse_key
+            ),
+            None,
+        )
+        has_reverse_objects = any(
+            artifact["object_key"].startswith(
+                f"families/{family}/reverse/"
+            )
+            for artifact in validated["artifacts"]
+        )
+        if reverse_recorded is None and has_reverse_objects:
+            raise _fail(
+                f"{family} family manifest carries reverse shards without "
+                "reverse-catalog.rcat"
+            )
+        if reverse_recorded is not None:
+            reverse_payload, reverse_sha = _fetch(
+                store,
+                f"{args.slice_version}/{reverse_key}",
+                f"{family} reverse entrypoint",
+            )
+            if (
+                len(reverse_payload) != REVERSE_ROOT_BYTES
+                or len(reverse_payload) != reverse_recorded["bytes"]
+                or reverse_sha != reverse_recorded["sha256"]
+                or reverse_payload[:8] != REVERSE_ROOT_MAGIC
+                or reverse_payload[8] != REVERSE_FAMILY_CODE[family]
+            ):
+                raise _fail(
+                    f"{family} reverse entrypoint differs from the fixed "
+                    "binary root contract"
+                )
+            try:
+                promotion.validate_reverse_graph(
+                    family=family,
+                    version=args.slice_version,
+                    artifacts=validated["artifacts"],
+                    destination=publication_tree,
+                )
+            except SystemExit as error:
+                raise _fail(
+                    f"{family} reverse catalog graph failed admission: {error}"
+                ) from error
+            family_operations.append("reverse")
+            family_entrypoints["reverse"] = reverse_key
+
+        family_manifests[family] = (manifest, manifest_sha)
+        family_source_manifests[family] = (source, source_sha)
+        operations[family] = sorted(family_operations)
+        entrypoints[family] = family_entrypoints
 
     # Deterministic by default: two assembles of the same inputs are
     # byte-identical. generated_at is a label the worker hashes but ignores.

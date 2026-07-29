@@ -1,0 +1,16 @@
+name = "geocoder-reverse-v2-local"
+main = "build/worker/shim.mjs"
+compatibility_date = "2026-05-01"
+
+[build]
+command = "true"
+
+[limits]
+cpu_ms = 500
+
+[[r2_buckets]]
+binding = "SHARDS_BUCKET"
+bucket_name = "geocoder-shards"
+
+[vars]
+ENVIRONMENT = "production"

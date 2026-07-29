@@ -174,6 +174,22 @@ def test_republishing_byte_identical_content_is_a_verified_no_op(tmp_path):
     assert again == first
 
 
+def test_a_streamed_marker_can_be_evicted_without_deleting_the_durable_record(
+    tmp_path,
+):
+    staged, staging_root = _store(tmp_path)
+    key = "map/places-v1/tasks/places-map-000/complete.json"
+    staged.write_marker_last(key, {"task_id": "places-map-000"})
+
+    consumer = _fresh_cache(staged, tmp_path, "consumer")
+    assert consumer.read_json(key) == {"task_id": "places-map-000"}
+    assert consumer.local.path(key).is_file()
+    consumer.release_marker(key)
+    assert not consumer.local.path(key).exists()
+    assert (staging_root / consumer.staging_key(key)).is_file()
+    assert consumer.evidence()["staged_objects_released"] == 1
+
+
 def test_a_missing_staged_object_aborts_instead_of_falling_back(tmp_path):
     # There is no artifact path to fall back to any more, and a silent fallback is
     # how a partial store becomes a wrong slice.

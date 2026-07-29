@@ -11,6 +11,7 @@ mod handlers;
 mod places_construction_v1;
 mod places_pages;
 mod range_reader;
+mod reverse_construction_v1;
 mod stac;
 mod v2;
 

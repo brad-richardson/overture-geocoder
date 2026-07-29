@@ -2,9 +2,10 @@
 """
 Cold/warm latency and reverse-quality benchmark for the Overture geocoder worker.
 
-Measures /search, /reverse, and /id/:gers_id latency, separating "cold"
-(first request against a location shard, likely an edge-cache miss) from
-"warm" (immediate repeats of the same request).
+Measures /search, /reverse, /v2/reverse point-family route classes, and
+/id/:gers_id latency, separating "cold" (first request against a location
+shard, likely an edge-cache miss) from "warm" (immediate repeats of the same
+request).
 
 Shard selection for /search and /reverse is coordinate-driven, so each target
 uses a location in a different low-traffic country to maximize the chance the
@@ -85,6 +86,15 @@ TARGETS = [
      "expected_region_names": ["New York"]},
 ]
 
+# Point-family v2 reverse routes have different serving artifacts and read
+# shapes, so they remain separate latency classes. Correctness/recall is gated
+# by benchmark_v2_reverse.py; this script supplies comparable deployed-edge
+# cold/warm measurements for each class.
+V2_REVERSE_CLASSES = (
+    ("v2-reverse-poi", "poi"),
+    ("v2-reverse-address", "address"),
+)
+
 
 def normalize_name(value: str) -> str:
     """Case- and accent-insensitive comparison form for reverse names."""
@@ -110,6 +120,17 @@ def _context_code(name: object, subtype: object) -> str | None:
     if subtype == "country" and re.fullmatch(r"[A-Z]{2}", suffix):
         return suffix
     return None
+
+
+def v2_reverse_path(target: dict, feature_type: str) -> str:
+    """Build one point-family v2 reverse request without locale formatting."""
+    return "/v2/reverse?" + urllib.parse.urlencode(
+        {
+            "lon": target["lon"],
+            "lat": target["lat"],
+            "types": feature_type,
+        }
+    )
 
 
 def evaluate_reverse_quality(body: dict | None, target: dict) -> dict:
@@ -624,7 +645,12 @@ def main():
     bench = Bench(args.base_url, args.interval, args.timeout)
 
     n_targets = len(TARGETS)
-    total = 1 + n_targets * 2 * (1 + args.warm_repeats) + args.id_targets * (1 + args.warm_repeats)
+    target_route_classes = 2 + len(V2_REVERSE_CLASSES)
+    total = (
+        1
+        + n_targets * target_route_classes * (1 + args.warm_repeats)
+        + args.id_targets * (1 + args.warm_repeats)
+    )
     print(f"~{total} requests at {args.interval}s spacing "
           f"(~{total * args.interval / 60:.1f} min) against {args.base_url}\n")
 
@@ -644,6 +670,13 @@ def main():
                              f"/reverse?lat={t['lat']}&lon={t['lon']}", t)
         if isinstance(body, dict) and body.get("gers_id"):
             reverse_ids.append((t["name"], body["gers_id"]))
+        for endpoint, feature_type in V2_REVERSE_CLASSES:
+            bench.request(
+                endpoint,
+                "cold",
+                t["name"],
+                v2_reverse_path(t, feature_type),
+            )
 
     # Warm passes: identical requests, immediately after.
     for _ in range(args.warm_repeats):
@@ -653,6 +686,13 @@ def main():
                           f"/search?q={q}&lat={t['lat']}&lon={t['lon']}")
             bench.request("reverse", "warm", t["name"],
                           f"/reverse?lat={t['lat']}&lon={t['lon']}", t)
+            for endpoint, feature_type in V2_REVERSE_CLASSES:
+                bench.request(
+                    endpoint,
+                    "warm",
+                    t["name"],
+                    v2_reverse_path(t, feature_type),
+                )
 
     # /id lookups: cold then warm, verifying IDs harvested from reverse results.
     reverse_ids = reverse_ids[:args.id_targets]

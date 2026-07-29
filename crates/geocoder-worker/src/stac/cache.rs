@@ -221,6 +221,20 @@ impl ShardLoader {
         offset: u64,
         length: u64,
     ) -> Result<Option<CacheRangeRead>> {
+        self.cached_range_read_measured_with_ttl(key, offset, length, ID_INDEX_CACHE_TTL)
+            .await
+    }
+
+    /// Range-read one immutable or mutable object with the caller's cache TTL.
+    /// The legacy wrapper above keeps the ID-index TTL; construction artifacts
+    /// use the seven-day immutable TTL without cloning this range/cache path.
+    pub(crate) async fn cached_range_read_measured_with_ttl(
+        &self,
+        key: &str,
+        offset: u64,
+        length: u64,
+        ttl: u64,
+    ) -> Result<Option<CacheRangeRead>> {
         let cache_key = format!("{}{}__r{}-{}", CACHE_PREFIX, key, offset, length);
 
         let request = Request::new(&cache_key, Method::Get)?;
@@ -261,7 +275,7 @@ impl ShardLoader {
                 "R2 range length differs from requested extent".into(),
             ));
         }
-        self.cache_put_bytes_background(cache_key, bytes.clone(), ID_INDEX_CACHE_TTL)
+        self.cache_put_bytes_background(cache_key, bytes.clone(), ttl)
             .await;
 
         Ok(Some(CacheRangeRead {

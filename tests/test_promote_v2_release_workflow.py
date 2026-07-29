@@ -29,6 +29,8 @@ INPUTS = {
     "legacy_core",
     "places_source",
     "addresses_source",
+    "places_reverse_run",
+    "addresses_reverse_run",
     "catalog_expectation",
 }
 
@@ -176,6 +178,16 @@ def test_promote_slice_authenticates_the_construction_request_sha():
     body = "\n".join(scripts(jobs()["promote-slice"]))
     assert "request_sha256" in body
     assert "cv1-control" in body and "cv1-reduce-" in body
+
+
+def test_promote_slice_authenticates_optional_reverse_runs_without_copying_them():
+    gate = "\n".join(scripts(jobs()["gate"]))
+    assert "places_reverse_run" in gate
+    assert "addresses_reverse_run" in gate
+    body = "\n".join(scripts(jobs()["promote-slice"]))
+    assert '.name == "Build v2 reverse indexes"' in body
+    assert 'reverse-v2-${family}-catalog' in body
+    assert "--reverse-catalog" in body
 
 
 # --- create-only / no-delete discipline ----------------------------------------
