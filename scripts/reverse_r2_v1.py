@@ -504,7 +504,6 @@ def per_record_packs(
     total_admitted = 0
     task_ids: set[str] = set()
     object_keys: set[str] = set()
-    directory_keys: set[str] = set()
     marker_schema = (
         PLACES.MARKER_SCHEMA if family == "places" else ADDRESS.MARKER_SCHEMA
     )
@@ -553,11 +552,13 @@ def per_record_packs(
             raise ValueError(f"{task_id} per-record artifact differs from admitted rows")
         for pack in validated:
             object_key = pack["object"]["key"]
-            directory_key = pack["directory_object"]["key"]
-            if object_key in object_keys or directory_key in directory_keys:
-                raise ValueError("reverse input repeats a logical pack object")
+            # The Parquet object is the logical pack and must have one owner.
+            # Directory JSON is content-addressed metadata, so two small packs in
+            # different tasks can legitimately reuse the same immutable object
+            # when bucket/cell/row-group counts are identical.
+            if object_key in object_keys:
+                raise ValueError("reverse input repeats a logical data pack object")
             object_keys.add(object_key)
-            directory_keys.add(directory_key)
         for pack in validated:
             if (
                 bucket_start is not None
@@ -641,7 +642,6 @@ def validate_plan(
         raise ValueError("reverse plan contents are invalid")
     normalized = []
     object_keys: set[str] = set()
-    directory_keys: set[str] = set()
     records = 0
     previous: tuple[int, str] | None = None
     for pack in packs:
@@ -669,13 +669,9 @@ def validate_plan(
         directory_identity = validate_identity(
             pack.get("directory_object"), what="reverse plan directory"
         )
-        if (
-            object_identity["key"] in object_keys
-            or directory_identity["key"] in directory_keys
-        ):
-            raise ValueError("reverse plan repeats an immutable input")
+        if object_identity["key"] in object_keys:
+            raise ValueError("reverse plan repeats an immutable data pack")
         object_keys.add(object_identity["key"])
-        directory_keys.add(directory_identity["key"])
         records += count
         normalized.append(
             {
@@ -1405,7 +1401,6 @@ def validate_reduction_cover(
     ordered = sorted(reductions, key=lambda item: item.get("bucket_start", -1))
     cursor = 0
     source_pack_keys: set[str] = set()
-    source_directory_keys: set[str] = set()
     cells: set[str] = set()
     total = 0
     for reduction in ordered:
@@ -1450,12 +1445,9 @@ def validate_reduction_cover(
                 raise ValueError("reverse reductions consume one source pack twice")
             source_pack_keys.add(key)
         for source in source_directories:
-            key = validate_identity(source, what="reverse source directory")["key"]
-            if key in source_directory_keys:
-                raise ValueError(
-                    "reverse reductions consume one source directory twice"
-                )
-            source_directory_keys.add(key)
+            # Content-addressed directory metadata may be shared by different
+            # logical data packs whose bucket/cell/count layouts are identical.
+            validate_identity(source, what="reverse source directory")
         declared = reduction.get("cells")
         shards = reduction.get("shards")
         if not isinstance(declared, list) or not isinstance(shards, list):

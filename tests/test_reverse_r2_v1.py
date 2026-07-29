@@ -404,6 +404,68 @@ def test_compact_plan_drops_embedded_directories_and_drives_reduce(
     }
 
 
+def test_content_addressed_directory_can_be_shared_but_data_pack_cannot(
+    binaries, tmp_path
+):
+    store = R2.ADDRESS.LocalObjectStore(tmp_path / "store")
+    markers = [
+        marker_with_pack(
+            root=tmp_path,
+            store=store,
+            family="places",
+            task_id="places-map-a",
+            rows=places_rows("be85", 1),
+        ),
+        marker_with_pack(
+            root=tmp_path,
+            store=store,
+            family="places",
+            task_id="places-map-b",
+            rows=places_rows("be85", 1, start=100),
+        ),
+    ]
+    first = markers[0]["positions"]["packs"][0]
+    second = markers[1]["positions"]["packs"][0]
+    assert first["directory_object"] == second["directory_object"]
+    assert first["object"]["key"] != second["object"]["key"]
+
+    plan = R2.build_plan(
+        family="places",
+        request_sha256=REQUEST,
+        markers=markers,
+    )
+    assert plan["expected_records"] == 2
+    assert len(plan["packs"]) == 2
+    reduction = R2.reduce_bucket_range(
+        family="places",
+        request_sha256=REQUEST,
+        plan=plan,
+        store=store,
+        bucket_start=0,
+        bucket_end=255,
+        scratch_root=tmp_path / "shared-directory",
+        encoder_binary=binaries["encode"],
+        verifier_binary=binaries["verify"],
+    )
+    assert reduction["source_packs"][0] != reduction["source_packs"][1]
+    assert reduction["source_directories"][0] == reduction["source_directories"][1]
+    assert R2.validate_reduction_cover(
+        [reduction],
+        family="places",
+        request_sha256=REQUEST,
+        expected_records=2,
+    ) == [reduction]
+
+    repeated_data = copy.deepcopy(markers)
+    repeated_data[1]["positions"]["packs"][0]["object"] = first["object"]
+    with pytest.raises(ValueError, match="repeats a logical data pack object"):
+        R2.per_record_packs(
+            repeated_data,
+            family="places",
+            request_sha256=REQUEST,
+        )
+
+
 def test_r2_replay_requires_store_computed_content_md5():
     class Destination:
         scheme = "r2"
