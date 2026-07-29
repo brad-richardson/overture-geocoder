@@ -1102,6 +1102,108 @@ pub(crate) fn intersect_ranked(mut per_token: Vec<Vec<PlacesV1Record>>) -> Vec<P
     results
 }
 
+/// Merge the bounded routed postings without making a full producer posting a
+/// false-negative gate.
+///
+/// Each `(cell, token)` posting is independently capped at 256 records. Absence
+/// from a shorter posting is therefore authoritative, while absence from a full
+/// posting may only mean that static confidence evicted the record. Seed from
+/// the bounded union, retain direct posting membership (including common-name
+/// evidence that is not present in the serving projection), and admit a missing
+/// full-posting token only when the record's stored display fields prove it.
+///
+/// Identity includes the source locator because construction-v1 deliberately
+/// preserves duplicate UUID rows at different source positions.
+pub(crate) fn merge_routed_candidates(
+    tokens: &[String],
+    per_token: Vec<Vec<PlacesV1Record>>,
+) -> Result<Vec<PlacesV1Record>> {
+    if tokens.len() != per_token.len() {
+        return Err("Places v1 routed token/posting count differs".to_string());
+    }
+    if tokens.is_empty() {
+        return Ok(Vec::new());
+    }
+    if tokens.len() > 4 {
+        return Err("Places v1 routed token cap exceeded".to_string());
+    }
+    if per_token
+        .iter()
+        .any(|records| records.len() > ROUTED_CANDIDATE_CAP)
+    {
+        return Err("Places v1 routed posting exceeds producer cap".to_string());
+    }
+    if per_token.iter().any(Vec::is_empty) {
+        return Ok(Vec::new());
+    }
+
+    struct Candidate {
+        record: PlacesV1Record,
+        posting_membership: u8,
+    }
+
+    let saturated: Vec<bool> = per_token
+        .iter()
+        .map(|records| records.len() == ROUTED_CANDIDATE_CAP)
+        .collect();
+    let mut candidates: HashMap<(String, u32, u32, u64), Candidate> = HashMap::new();
+    for (token_index, records) in per_token.into_iter().enumerate() {
+        for record in records {
+            let identity = (
+                record.id.clone(),
+                record.source_object_index,
+                record.source_row_group,
+                record.source_row_index,
+            );
+            let candidate = candidates.entry(identity).or_insert_with(|| Candidate {
+                record,
+                posting_membership: 0,
+            });
+            candidate.posting_membership |= 1 << token_index;
+        }
+    }
+
+    let mut results = Vec::new();
+    for candidate in candidates.into_values() {
+        let mut display_tokens = None;
+        let matches = tokens.iter().enumerate().all(|(token_index, token)| {
+            if candidate.posting_membership & (1 << token_index) != 0 {
+                return true;
+            }
+            if !saturated[token_index] {
+                return false;
+            }
+            let tokens = display_tokens.get_or_insert_with(|| {
+                [
+                    &candidate.record.primary_name,
+                    &candidate.record.brand_name,
+                    &candidate.record.category,
+                    &candidate.record.locality,
+                    &candidate.record.region,
+                    &candidate.record.country,
+                ]
+                .into_iter()
+                .flat_map(|value| crate::places_pages::query_terms(value))
+                .collect::<HashSet<_>>()
+            });
+            tokens.contains(token)
+        });
+        if matches {
+            results.push(candidate.record);
+        }
+    }
+    results.sort_by(|left, right| {
+        right
+            .confidence_rank
+            .cmp(&left.confidence_rank)
+            .then_with(|| left.id.cmp(&right.id))
+            .then_with(|| left.source_object_index.cmp(&right.source_object_index))
+            .then_with(|| left.source_row_group.cmp(&right.source_row_group))
+            .then_with(|| left.source_row_index.cmp(&right.source_row_index))
+    });
+    Ok(results)
+}
+
 /// Project one construction record into the shared serving projection.
 pub(crate) fn record_projection(record: &PlacesV1Record) -> PlaceProjection {
     PlaceProjection {
@@ -1352,12 +1454,12 @@ pub(crate) fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, va
 mod tests {
     use super::{
         construction_cell, decode_routed_range_payload, head_shard_id, head_shard_lookup,
-        index_hash, intersect_ranked, lookup_head_shard, parse_routed_range_header,
-        parse_routed_range_index, query_key, ranged_index_candidates, record_projection,
-        routed_fetch_plan, routed_lookup, routed_token_hash, validate_routed_range_payload_extent,
-        HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex,
-        PlacesV1Record, MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA,
-        PLACES_ROUTING_SCHEMA,
+        index_hash, intersect_ranked, lookup_head_shard, merge_routed_candidates,
+        parse_routed_range_header, parse_routed_range_index, query_key, ranged_index_candidates,
+        record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
+        validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
+        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, MAX_ARTIFACT_ENTRY_BYTES,
+        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -1845,8 +1947,8 @@ mod tests {
             &[
                 entry("cafe", Some(&unsplit_cell), 255, 1, 0),
                 entry("cafe", Some(&unsplit_cell), 200, 2, 1),
-                entry("town", Some(&unsplit_cell), 250, 2, 0),
-                entry("town", Some(&unsplit_cell), 240, 3, 1),
+                entry("town", Some(&unsplit_cell), 250, 2, 1),
+                entry("town", Some(&unsplit_cell), 240, 3, 2),
             ],
         );
         let unsplit_name = plrv_name(&unsplit_bytes);
@@ -1960,7 +2062,7 @@ mod tests {
             .into_iter()
             .map(|records| records.expect("plan covers every token"))
             .collect();
-        let mut records = intersect_ranked(per_token);
+        let mut records = merge_routed_candidates(&tokens, per_token)?;
         records.truncate(limit);
         Ok(records)
     }
@@ -2132,8 +2234,61 @@ mod tests {
         assert!(intersect_ranked(Vec::new()).is_empty());
     }
 
+    #[test]
+    fn routed_merge_treats_only_saturated_posting_absence_as_recoverable() {
+        let target = entry_record("cafe", 200, 999);
+        let selective = vec![target];
+        let saturated: Vec<_> = (1..=256).map(|id| entry_record("town", 255, id)).collect();
+        let tokens = vec!["cafe".to_string(), "town".to_string()];
+
+        let merged = merge_routed_candidates(&tokens, vec![selective, saturated]).unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, format_uuid_of(999));
+
+        // A shorter posting is complete, so local display text cannot excuse
+        // absence from it.
+        let target = entry_record("cafe", 200, 999);
+        assert!(merge_routed_candidates(
+            &tokens,
+            vec![vec![target], vec![entry_record("town", 255, 1)]],
+        )
+        .unwrap()
+        .is_empty());
+    }
+
+    #[test]
+    fn routed_merge_preserves_duplicate_uuid_rows_by_source_locator() {
+        let tokens = vec!["cafe".to_string(), "town".to_string()];
+        let merged = merge_routed_candidates(
+            &tokens,
+            vec![
+                vec![
+                    entry_record_at("cafe", 200, 999, 10),
+                    entry_record_at("cafe", 200, 999, 11),
+                ],
+                vec![
+                    entry_record_at("town", 200, 999, 10),
+                    entry_record_at("town", 200, 999, 11),
+                ],
+            ],
+        )
+        .unwrap();
+        assert_eq!(merged.len(), 2);
+        assert_eq!(
+            merged
+                .iter()
+                .map(|record| record.source_row_index)
+                .collect::<Vec<_>>(),
+            vec![10, 11]
+        );
+    }
+
     fn entry_record(token: &str, rank: u8, id: u128) -> PlacesV1Record {
-        let bytes = entry(token, None, rank, id, 0);
+        entry_record_at(token, rank, id, 0)
+    }
+
+    fn entry_record_at(token: &str, rank: u8, id: u128, row: u64) -> PlacesV1Record {
+        let bytes = entry(token, None, rank, id, row);
         let (record, _) = super::decode_entry(&bytes, PlacesV1Mode::Head).unwrap();
         record
     }
