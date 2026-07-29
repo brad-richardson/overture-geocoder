@@ -9,7 +9,7 @@ public API reference and `SPEC.md` for architecture details.
 ## Features
 
 - Worker routing (`/search`, `/reverse`, `/id/:gers_id`, `/v2/forward`,
-  `/v2/reverse`, `/v2/features/:gers_id`, `/health`, `/`), with HEAD request
+  `/v2/reverse`, `/v2/ids/:id`, `/health`, `/`), with HEAD request
   support on all endpoints
 - STAC catalog loading from R2 with version fallback
 - Forward shard selection: HEAD + location shards (coordinates or
@@ -64,7 +64,7 @@ Summary:
 - `GET /v2/forward` — unified division/POI text search or structured exact
   address lookup, with comma-separated `types`
 - `GET /v2/reverse?lat=<f>&lon=<f>` — division reverse geocoding
-- `GET /v2/features/:gers_id` — release-pinned GeoJSON feature lookup
+- `GET /v2/ids/:id` — release-pinned GERS ID lookup
 - `GET /health` — verifies the catalog loads and a version exists
 
 See `docs/api-v2.md` for the full staged v2 contract and current limitations.

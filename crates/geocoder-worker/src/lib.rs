@@ -87,7 +87,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
         .get_async("/id/:gers_id", handlers::handle_id_lookup)
         .get_async("/v2/forward", v2::handle_forward)
         .get_async("/v2/reverse", v2::handle_reverse)
-        .get_async("/v2/features/:gers_id", v2::handle_feature);
+        .get_async("/v2/ids/:id", v2::handle_id);
 
     let result = if preview_isolated {
         router
@@ -101,7 +101,7 @@ async fn fetch(req: Request, env: Env, ctx: Context) -> Result<Response> {
                 Response::ok(concat!(
                     r#"{"name":"overture-geocoder","version":""#,
                     env!("CARGO_PKG_VERSION"),
-                    r#"","endpoints":["/search","/reverse","/id/:id","/v2/forward","/v2/reverse","/v2/features/:gers_id"]}"#,
+                    r#"","endpoints":["/search","/reverse","/id/:id","/v2/forward","/v2/reverse","/v2/ids/:id"]}"#,
                 ))
             })
             .run(req, env)
@@ -152,7 +152,7 @@ fn preview_path_allowed(path: &str, catalog_override: Option<&str>) -> bool {
     if catalog_override == Some("smoketest-id/catalog.json") {
         return path.strip_prefix("/id/").is_some_and(uuid_path_segment);
     }
-    matches!(path, "/health" | "/v2/forward" | "/v2/reverse") || path.starts_with("/v2/features/")
+    matches!(path, "/health" | "/v2/forward" | "/v2/reverse") || path.starts_with("/v2/ids/")
 }
 
 fn uuid_path_segment(value: &str) -> bool {
@@ -176,7 +176,7 @@ fn request_endpoint(path: &str) -> &'static str {
         "/health" => "health",
         "/" => "root",
         path if path.starts_with("/id/") => "id",
-        path if path.starts_with("/v2/features/") => "v2_feature",
+        path if path.starts_with("/v2/ids/") => "v2_id",
         _ => "other",
     }
 }
@@ -232,7 +232,8 @@ mod tests {
         assert_eq!(request_endpoint("/id/abc-123"), "id");
         assert_eq!(request_endpoint("/v2/forward"), "v2_forward");
         assert_eq!(request_endpoint("/v2/reverse"), "v2_reverse");
-        assert_eq!(request_endpoint("/v2/features/abc-123"), "v2_feature");
+        assert_eq!(request_endpoint("/v2/ids/abc-123"), "v2_id");
+        assert_eq!(request_endpoint("/v2/features/abc-123"), "other");
         assert_eq!(request_endpoint("/unexpected"), "other");
     }
 
@@ -243,10 +244,18 @@ mod tests {
 
     #[test]
     fn v2_preview_exposes_only_candidate_health_and_required_v2_routes() {
-        for path in ["/health", "/v2/forward", "/v2/reverse", "/v2/features/id"] {
+        for path in ["/health", "/v2/forward", "/v2/reverse", "/v2/ids/id"] {
             assert!(preview_path_allowed(path, None));
         }
-        for path in ["/", "/search", "/reverse", "/id/id", "/id", "/unexpected"] {
+        for path in [
+            "/",
+            "/search",
+            "/reverse",
+            "/id/id",
+            "/id",
+            "/v2/features/id",
+            "/unexpected",
+        ] {
             assert!(!preview_path_allowed(path, None));
         }
     }
@@ -276,6 +285,7 @@ mod tests {
             "/id/00000000-0000-4000-8000-00000000000%2F",
             "/v2/forward",
             "/v2/reverse",
+            "/v2/ids/id",
             "/v2/features/id",
             "/unexpected",
         ] {

@@ -5,7 +5,7 @@ Status: implemented Worker contract; not discoverable until a verified
 shards or publish a v2 release.
 
 V2 consolidates division and Places text search, structured exact-address
-lookup, reverse geocoding, and feature lookup under a small GeoJSON-oriented
+lookup, reverse geocoding, and GERS ID lookup under a small
 surface. It borrows the familiar forward/reverse split and comma-separated
 `types` filter used by hosted geocoders, but it does not claim wire compatibility
 with Mapbox, TomTom, or Nominatim.
@@ -91,12 +91,13 @@ spatial reverse indexes exist.
 
 The response is a GeoJSON `FeatureCollection` containing zero or one feature.
 
-## `GET /v2/features/:gers_id`
+## `GET /v2/ids/:id`
 
 Looks up a 32-hex-digit or canonical hyphenated Overture GERS UUID in the exact
-core release selected by v2. The response is one GeoJSON `Feature` with its
-bbox and locator metadata. A syntactically invalid ID returns 400 without an R2
-shard read; a valid absent ID returns 404.
+core release selected by v2. The successful response matches the existing
+`/id/:gers_id` object shape—`id`, `bbox`, and optional locator metadata—and adds
+the atomic v2 `data_version` object. A syntactically invalid ID returns 400
+without an R2 shard read; a valid absent ID returns 404.
 
 ## Legacy and availability behavior
 
