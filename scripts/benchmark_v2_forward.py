@@ -652,6 +652,7 @@ class Runner:
             "case_id": case["id"],
             "kind": case["kind"],
             "query": case.get("query"),
+            "query_style": case.get("query_style"),
             "status": status,
             "ms": round(ms, 1),
             "error": error,
@@ -678,32 +679,52 @@ def _round_or_none(value):
 # run: aggregation, comparison, assertions
 
 
+def _percentile(values, percentile):
+    if not values:
+        return None
+    ordered = sorted(values)
+    return ordered[min(int(len(ordered) * percentile), len(ordered) - 1)]
+
+
 def _aggregate(rows):
-    scored = [row for row in rows if row["error"] is None]
-    found1 = sum(row["found_at_1"] for row in scored)
-    found10 = sum(row["found_at_10"] for row in scored)
-    ranks = [row["rank"] for row in scored if row["rank"] is not None]
-    distances = [row["top1_distance_km"] for row in scored
+    successful = [row for row in rows if row["error"] is None]
+    found1 = sum(row["found_at_1"] for row in rows)
+    found5 = sum(
+        row["rank"] is not None and row["rank"] <= 5
+        for row in rows
+    )
+    found10 = sum(row["found_at_10"] for row in rows)
+    ranks = [row["rank"] for row in rows if row["rank"] is not None]
+    distances = [row["top1_distance_km"] for row in successful
                  if row["top1_distance_km"] is not None]
-    latencies = [row["ms"] for row in scored]
+    latencies = [row["ms"] for row in successful]
+    denominator = len(rows)
     return {
-        "n": len(rows),
-        "errors": len(rows) - len(scored),
+        "n": denominator,
+        "errors": denominator - len(successful),
         "found_at_1": found1,
+        "found_at_5": found5,
         "found_at_10": found10,
-        "recall_at_1": round(found1 / len(scored), 3) if scored else None,
-        "recall_at_10": round(found10 / len(scored), 3) if scored else None,
-        "mrr": round(sum(1 / rank for rank in ranks) / len(scored), 3) if scored else None,
+        # Transport failures are misses, as well as a separate zero-error gate.
+        # Excluding them would make an unavailable endpoint look more accurate.
+        "recall_at_1": round(found1 / denominator, 3) if rows else None,
+        "recall_at_5": round(found5 / denominator, 3) if rows else None,
+        "recall_at_10": round(found10 / denominator, 3) if rows else None,
+        "mrr": round(sum(1 / rank for rank in ranks) / denominator, 3) if rows else None,
         "median_top1_distance_km": (round(statistics.median(distances), 3)
                                     if distances else None),
         "p50_ms": round(statistics.median(latencies), 1) if latencies else None,
+        "p95_ms": round(_percentile(latencies, 0.95), 1) if latencies else None,
     }
 
 
 def summarize_results(rows):
-    by_kind, by_stratum = {}, {}
+    by_kind, by_query_style, by_stratum = {}, {}, {}
     for row in rows:
         by_kind.setdefault(row["kind"], []).append(row)
+        if row.get("query_style"):
+            key = f"{row['kind']}:{row['query_style']}"
+            by_query_style.setdefault(key, []).append(row)
         if row["kind"] in SELF_RECALL_KINDS and "strata" in row:
             key = f"{row['kind']}:{stratum_key(row['strata'])}"
             by_stratum.setdefault(key, []).append(row)
@@ -712,6 +733,9 @@ def summarize_results(rows):
         "overall": _aggregate(rows),
         "self_recall": _aggregate(self_recall_rows),
         "by_kind": {kind: _aggregate(group) for kind, group in sorted(by_kind.items())},
+        "by_query_style": {
+            key: _aggregate(group) for key, group in sorted(by_query_style.items())
+        },
         "by_stratum": {key: _aggregate(group)
                        for key, group in sorted(by_stratum.items())},
     }
@@ -726,7 +750,7 @@ def compare_summaries(baseline, current, threshold):
     regressions = []
     groups = [("overall", baseline.get("overall"), current.get("overall")),
               ("self_recall", baseline.get("self_recall"), current.get("self_recall"))]
-    for section in ("by_kind", "by_stratum"):
+    for section in ("by_kind", "by_query_style", "by_stratum"):
         base_section = baseline.get(section, {})
         current_section = current.get(section, {})
         for key in sorted(set(base_section) & set(current_section)):
@@ -781,20 +805,24 @@ def print_comparison(baseline_payload, current_summary, threshold):
 
 
 def print_summary(summary):
-    print(f"\n{'group':<44}{'n':>4}{'err':>4}{'r@1':>7}{'r@10':>7}"
-          f"{'mrr':>7}{'med km':>8}{'p50ms':>7}")
-    print("-" * 78)
+    print(f"\n{'group':<44}{'n':>4}{'err':>4}{'r@1':>7}{'r@5':>7}{'r@10':>7}"
+          f"{'mrr':>7}{'med km':>8}{'p50ms':>7}{'p95ms':>7}")
+    print("-" * 92)
     rows = [("overall", summary["overall"]), ("self_recall", summary["self_recall"])]
     rows += [(f"kind:{key}", stats) for key, stats in summary["by_kind"].items()]
+    rows += [(f"style:{key}", stats)
+             for key, stats in summary["by_query_style"].items()]
     rows += [(key, stats) for key, stats in summary["by_stratum"].items()]
     for name, stats in rows:
         def cell(value, width, digits=3):
             return "-".rjust(width) if value is None else f"{value:>{width}.{digits}f}"
         print(f"{name[:43]:<44}{stats['n']:>4}{stats['errors']:>4}"
-              f"{cell(stats['recall_at_1'], 7)}{cell(stats['recall_at_10'], 7)}"
+              f"{cell(stats['recall_at_1'], 7)}{cell(stats['recall_at_5'], 7)}"
+              f"{cell(stats['recall_at_10'], 7)}"
               f"{cell(stats['mrr'], 7)}"
               f"{cell(stats['median_top1_distance_km'], 8)}"
-              f"{cell(stats['p50_ms'], 7, 1)}")
+              f"{cell(stats['p50_ms'], 7, 1)}"
+              f"{cell(stats['p95_ms'], 7, 1)}")
 
 
 def git_sha():

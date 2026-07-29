@@ -18,8 +18,8 @@ use crate::address_construction_v1::{
     MAX_ADDRESS_ROUTING_BYTES,
 };
 use crate::places_construction_v1::{
-    construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, record_projection,
-    routed_fetch_plan, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
+    construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, merge_routed_candidates,
+    record_projection, routed_fetch_plan, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
     MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, PLACES_CONSTRUCTION_FORMAT,
 };
 use crate::places_pages::{
@@ -1621,7 +1621,7 @@ async fn search_places_construction(
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut records = intersect_ranked(per_token);
+        let mut records = merge_routed_candidates(&tokens, per_token).map_err(Error::RustError)?;
         records.truncate(limit);
         let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
         for place in &mut results {
