@@ -327,19 +327,19 @@ def run_plan(root: Path, slices, output: Path) -> dict:
 
 
 def direct_reverse_publication(
-    root: Path, family: str, destination: Path
+    root: Path, family: str, destination: Path, *, version: str = VERSION
 ) -> Path:
-    prefix = f"{VERSION}/families/{family}"
+    prefix = f"{version}/families/{family}"
     claim_payload = promote.canonical(
         {
             "schema": promote.SLICE_CLAIM_SCHEMA,
-            "version": VERSION,
+            "version": version,
             "family": family,
             "request_sha256": REQUEST_SHA,
             "overture_release": RELEASE,
         }
     )
-    claim_key = f"{VERSION}/claims/{family}.json"
+    claim_key = f"{version}/claims/{family}.json"
     claim_path = destination / claim_key
     claim_path.parent.mkdir(parents=True, exist_ok=True)
     if claim_path.exists():
@@ -1377,6 +1377,94 @@ def test_no_copy_reverse_publication_feeds_v2_assemble(both):
         assert release["families"][family]["entrypoints"]["reverse"][
             "object_key"
         ] == f"{VERSION}/families/{family}/reverse-catalog.rcat"
+
+
+def test_manifest_only_release_keeps_forward_data_in_its_existing_slice(both):
+    root, destination, plan_paths = _promoted_world(both)
+    source_output = root / "base-slice-manifest.json"
+    assert _run_slice_manifest(plan_paths, destination, source_output) == 0
+
+    reverse_version = "slice-2026-07-29.0"
+    reverse_publications = {
+        family: direct_reverse_publication(
+            root, family, destination, version=reverse_version
+        )
+        for family in ("addresses", "places")
+    }
+    legacy = v2_fixtures.legacy_release(LEGACY, release=RELEASE)
+    legacy_path = destination / LEGACY / "release-manifest.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(v2.gbm.canonical_json(legacy))
+    release_out = root / "manifest-only-release.json"
+    v2.main(
+        [
+            "assemble",
+            "--store", f"local:{destination}",
+            "--geocoder-build", "2026-07-29.0",
+            "--overture-release", RELEASE,
+            "--slice-version", VERSION,
+            "--legacy-core", LEGACY,
+            "--reverse-publication", f"places={reverse_publications['places']}",
+            "--reverse-publication", f"addresses={reverse_publications['addresses']}",
+            "--output", str(release_out),
+        ]
+    )
+
+    release = v2.validate_release_manifest(json.loads(release_out.read_text()))
+    for family, forward_operation in (
+        ("places", "forward"),
+        ("addresses", "structured_forward"),
+    ):
+        reference = release["families"][family]
+        assert reference["source"]["version"] == VERSION
+        assert reference["entrypoints"][forward_operation]["object_key"].startswith(
+            f"{VERSION}/"
+        )
+        assert reference["entrypoints"]["reverse"]["object_key"] == (
+            f"{reverse_version}/families/{family}/reverse-catalog.rcat"
+        )
+        assert reference["operation_sources"]["reverse"]["version"] == reverse_version
+        assert not (
+            destination / reverse_version / "families" / family / "family-manifest.json"
+        ).exists()
+        assert not (
+            destination / reverse_version / "families" / family / "routing.json"
+        ).exists()
+
+    v2.main(
+        [
+            "publish-release",
+            "--store", f"local:{destination}",
+            "--release", str(release_out),
+            "--execute",
+        ]
+    )
+    claim_path = destination / reverse_version / "claims" / "places.json"
+    claim_payload = claim_path.read_bytes()
+    claim_path.write_bytes(claim_payload + b" ")
+    with pytest.raises(SystemExit, match="slice claim"):
+        v2.main(
+            [
+                "promote",
+                "--store", f"local:{destination}",
+                "--build", "2026-07-29.0",
+                "--expect-absent",
+            ]
+        )
+    claim_path.write_bytes(claim_payload)
+    v2.main(
+        [
+            "promote",
+            "--store", f"local:{destination}",
+            "--build", "2026-07-29.0",
+            "--expect-absent",
+            "--execute",
+        ]
+    )
+    catalog = v2.validate_catalog(
+        json.loads((destination / "v2" / "catalog.json").read_text())
+    )
+    assert catalog["latest"] == "2026-07-29.0"
 
 
 def test_slice_manifest_is_deterministic_and_republish_is_benign(both):

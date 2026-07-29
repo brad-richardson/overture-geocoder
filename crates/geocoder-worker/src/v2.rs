@@ -126,6 +126,14 @@ struct FamilyVersions {
 }
 
 #[derive(Debug, Deserialize)]
+struct OperationSource {
+    kind: String,
+    version: String,
+    request_sha256: String,
+    slice_claim: ArtifactIdentity,
+}
+
+#[derive(Debug, Deserialize)]
 struct FamilyReference {
     source: FamilySource,
     manifest_key: String,
@@ -135,6 +143,18 @@ struct FamilyReference {
     coverage: Value,
     operations: Vec<String>,
     entrypoints: HashMap<String, ArtifactIdentity>,
+    #[serde(default)]
+    operation_sources: HashMap<String, OperationSource>,
+}
+
+impl FamilyReference {
+    fn operation_version(&self, operation: &str) -> &str {
+        self.operation_sources
+            .get(operation)
+            .map_or(self.source.version.as_str(), |source| {
+                source.version.as_str()
+            })
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -389,7 +409,11 @@ fn parse_catalog_control(
     Ok(None)
 }
 
-fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<(), String> {
+fn validate_family(
+    name: &str,
+    family: &FamilyReference,
+    overture_release: &str,
+) -> std::result::Result<(), String> {
     let valid_source = match family.source.kind.as_str() {
         "core_release" => {
             valid_build(&family.source.version)
@@ -433,6 +457,39 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
                 .collect::<HashSet<_>>()
     {
         return Err(format!("v2 {name} operations differ from entrypoints"));
+    }
+    if family
+        .operation_sources
+        .keys()
+        .any(|operation| operation != "reverse" || !operation_set.contains(operation.as_str()))
+    {
+        return Err(format!("invalid v2 {name} external operation source"));
+    }
+    for (operation, source) in &family.operation_sources {
+        let claim_payload = format!(
+            concat!(
+                "{{\"family\":\"{}\",\"overture_release\":\"{}\",",
+                "\"request_sha256\":\"{}\",",
+                "\"schema\":\"overture-construction-slice-claim-v1\",",
+                "\"version\":\"{}\"}}\n"
+            ),
+            name, overture_release, source.request_sha256, source.version
+        );
+        let claim_sha256 = format!("{:x}", Sha256::digest(claim_payload.as_bytes()));
+        if operation != "reverse"
+            || source.kind != "reverse_slice"
+            || source.version == family.source.version
+            || !source
+                .version
+                .strip_prefix("slice-")
+                .is_some_and(valid_build)
+            || !valid_sha256(&source.request_sha256)
+            || source.slice_claim.object_key != format!("{}/claims/{name}.json", source.version)
+            || source.slice_claim.bytes != claim_payload.len()
+            || source.slice_claim.sha256 != claim_sha256
+        {
+            return Err(format!("invalid v2 {name} {operation} operation source"));
+        }
     }
     // The promoted construction formats (`PLRV0002+PLHD0002` for Places,
     // `OAV1ART` for addresses) are accepted only for `family_slice` sources;
@@ -499,7 +556,8 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
         MAX_ADDRESS_COLLECTION_BYTES
     };
     for (operation, identity) in &family.entrypoints {
-        let prefix = format!("{}/families/{name}/", family.source.version);
+        let entrypoint_version = family.operation_version(operation);
+        let prefix = format!("{entrypoint_version}/families/{name}/");
         let (expected_key, maximum_bytes) = match (name, operation.as_str()) {
             ("places", "forward") => (places_entrypoint_key.clone(), places_entrypoint_cap),
             ("addresses", "structured_forward") => {
@@ -508,7 +566,7 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
             ("places" | "addresses", "reverse") => (
                 format!(
                     "{}/families/{name}/reverse-catalog.rcat",
-                    family.source.version
+                    entrypoint_version
                 ),
                 MAX_REVERSE_CATALOG_OBJECT_BYTES,
             ),
@@ -570,7 +628,7 @@ fn validate_release(
         return Err("v2 release core capabilities are inconsistent".into());
     }
     for (name, family) in &release.families {
-        validate_family(name, family)
+        validate_family(name, family, &release.overture_release)
             .map_err(|error| format!("{CAPABILITY_INVALID_SENTINEL} {error}"))?;
         for operation in &family.operations {
             if !release.supports(operation, name) {
@@ -672,6 +730,16 @@ fn release_readiness_objects(release: &V2Release) -> Vec<ReadinessObject> {
             expected_bytes: Some(identity.bytes as u64),
             expected_sha256: identity.sha256.clone(),
         }));
+        objects.extend(
+            family
+                .operation_sources
+                .values()
+                .map(|source| ReadinessObject {
+                    key: source.slice_claim.object_key.clone(),
+                    expected_bytes: Some(source.slice_claim.bytes as u64),
+                    expected_sha256: source.slice_claim.sha256.clone(),
+                }),
+        );
     }
     objects
 }
@@ -764,6 +832,9 @@ fn attest_family_entrypoints(
 ) -> std::result::Result<(), String> {
     let source_prefix = format!("{}/", family.source.version);
     for (operation, entrypoint) in &family.entrypoints {
+        if family.operation_sources.contains_key(operation) {
+            continue;
+        }
         let relative_key = entrypoint
             .object_key
             .strip_prefix(&source_prefix)
@@ -2112,7 +2183,7 @@ pub(crate) async fn handle_reverse(
         };
         let search = loader
             .reverse_construction_family(
-                &family.source.version,
+                family.operation_version("reverse"),
                 family_type,
                 &entrypoint.object_key,
                 entrypoint.bytes,
@@ -2485,6 +2556,66 @@ mod tests {
             .unwrap()
             .bytes -= 1;
         assert!(validate_release(&malformed_reverse, &catalog().releases[0])
+            .unwrap_err()
+            .contains(CAPABILITY_INVALID_SENTINEL));
+
+        let mut external_reverse = release_value();
+        let family = "places";
+        let version = "slice-2026-07-29.0";
+        let request_sha256 = "b".repeat(64);
+        let claim_payload = format!(
+            concat!(
+                "{{\"family\":\"{}\",\"overture_release\":\"2026-06-17.0\",",
+                "\"request_sha256\":\"{}\",",
+                "\"schema\":\"overture-construction-slice-claim-v1\",",
+                "\"version\":\"{}\"}}\n"
+            ),
+            family, request_sha256, version
+        );
+        external_reverse["families"][family]["operations"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("reverse"));
+        external_reverse["families"][family]["entrypoints"]["reverse"] = json!({
+            "object_key": format!(
+                "{version}/families/{family}/reverse-catalog.rcat"
+            ),
+            "bytes": MAX_REVERSE_CATALOG_OBJECT_BYTES,
+            "sha256": sha(),
+        });
+        external_reverse["families"][family]["operation_sources"] = json!({
+            "reverse": {
+                "kind": "reverse_slice",
+                "version": version,
+                "request_sha256": request_sha256,
+                "slice_claim": {
+                    "object_key": format!("{version}/claims/{family}.json"),
+                    "bytes": claim_payload.len(),
+                    "sha256": format!("{:x}", Sha256::digest(claim_payload.as_bytes())),
+                }
+            }
+        });
+        external_reverse["operations"]["reverse"] = json!(["divisions", "places"]);
+        let external_reverse: V2Release = serde_json::from_value(external_reverse).unwrap();
+        validate_release(&external_reverse, &catalog().releases[0]).unwrap();
+        let places = &external_reverse.families["places"];
+        assert_eq!(places.operation_version("forward"), "slice-2026-07-19.0");
+        assert_eq!(places.operation_version("reverse"), version);
+        assert!(release_readiness_objects(&external_reverse)
+            .iter()
+            .any(|object| object.key == format!("{version}/claims/{family}.json")));
+
+        let mut bad_external = external_reverse;
+        bad_external
+            .families
+            .get_mut(family)
+            .unwrap()
+            .operation_sources
+            .get_mut("reverse")
+            .unwrap()
+            .slice_claim
+            .sha256 = sha();
+        assert!(validate_release(&bad_external, &catalog().releases[0])
             .unwrap_err()
             .contains(CAPABILITY_INVALID_SENTINEL));
 

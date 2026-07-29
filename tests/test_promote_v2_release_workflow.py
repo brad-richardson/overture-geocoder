@@ -69,7 +69,7 @@ def test_permissions_are_read_only_with_actions_read_only_for_artifact_fetch():
     wf = load()
     assert wf["permissions"] == {"contents": "read"}
     for name, job in jobs().items():
-        if name == "promote-slice":
+        if name in {"promote-slice", "publish-release"}:
             assert job["permissions"] == {"contents": "read", "actions": "read"}
         else:
             assert "permissions" not in job, name
@@ -188,6 +188,17 @@ def test_promote_slice_authenticates_optional_reverse_runs_without_copying_them(
     assert '.name == "Build v2 reverse indexes"' in body
     assert 'reverse-v2-${family}-catalog' in body
     assert "--reverse-catalog" in body
+
+
+def test_publish_release_attaches_authenticated_reverse_without_copying_data():
+    gate = "\n".join(scripts(jobs()["gate"]))
+    assert "publish-release family sources must include :<reverse-run-id>" in gate
+    body = "\n".join(scripts(jobs()["publish-release"]))
+    assert '.name == "Build v2 reverse indexes"' in body
+    assert 'reverse-v2-${family}-catalog' in body
+    assert "--reverse-publication" in body
+    assert "copy_within_bucket" not in body
+    assert "promote_construction_slice.py" not in body
 
 
 # --- create-only / no-delete discipline ----------------------------------------
