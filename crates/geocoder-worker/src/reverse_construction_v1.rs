@@ -31,7 +31,9 @@ const SHARD_HEADER_BYTES: usize = 32;
 const SHARD_INDEX_ENTRY_BYTES: usize = 40;
 const CELL_LEVEL: u8 = 8;
 const MAX_CATALOG_SHARD_BYTES: u64 = 1024 * 1024;
-const MAX_SHARD_INDEX_BYTES: u64 = 128 * 1024;
+// A maximally populated Address shard has 4^7 leaves. Its index is
+// 4 + 16,384 * (40-byte entry + 11-byte key) = 835,588 bytes.
+const MAX_SHARD_INDEX_BYTES: u64 = 1024 * 1024;
 const MAX_SHARD_INDEX_ENTRIES: usize = 16_384;
 const MAX_LEAVES_PER_SHARD: usize = 32;
 const MAX_CELLS: usize = 4;
@@ -1223,6 +1225,19 @@ mod tests {
             payload_bytes: payload.len() as u64,
         };
         (header, index, payload, catalog, leaf)
+    }
+
+    #[test]
+    fn index_envelope_covers_every_valid_address_leaf() {
+        let level = ReverseFamily::Addresses.maximum_sub_cell_level();
+        let maximum_entries = 1_usize << (2 * usize::from(level));
+        let maximum_key_bytes = 4 + usize::from(level);
+        let maximum_index_bytes =
+            4 + maximum_entries * (SHARD_INDEX_ENTRY_BYTES + maximum_key_bytes);
+
+        assert_eq!(maximum_entries, MAX_SHARD_INDEX_ENTRIES);
+        assert_eq!(maximum_index_bytes, 835_588);
+        assert!(maximum_index_bytes <= MAX_SHARD_INDEX_BYTES as usize);
     }
 
     #[test]
