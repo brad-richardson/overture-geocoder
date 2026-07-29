@@ -316,6 +316,8 @@ fn parse_address_dictionary(data: &[u8], position: &mut usize) -> Result<Vec<usi
     Ok(counts)
 }
 
+type ParsedEntry = (i64, i64, [u8; 16], u32, u32, u64, usize);
+
 /// Parse one record entry, returning its E7 position, order identity, and the
 /// number of entry bytes consumed. Places entries are length-framed by the
 /// caller. Address entries are self-delimiting through their dictionary-code
@@ -324,7 +326,7 @@ fn parse_entry(
     entry: &[u8],
     family: Family,
     dictionary_counts: Option<&[usize]>,
-) -> Result<(i64, i64, [u8; 16], u32, u32, u64, usize)> {
+) -> Result<ParsedEntry> {
     let mut at = 0;
     let id: [u8; 16] = take(entry, &mut at, 16)?.try_into().unwrap();
     let longitude_e7 = i64::from(i32_at(entry, &mut at)?);
