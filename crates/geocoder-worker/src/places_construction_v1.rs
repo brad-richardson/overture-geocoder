@@ -15,11 +15,12 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use geocoder_core::pages::format_uuid;
+use geocoder_core::pages::{format_uuid, ByteRange};
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 use crate::places_pages::{point_quadkey, PlaceProjection};
+use crate::range_reader::RangeReader;
 use crate::stac::cache::IMMUTABLE_CACHE_TTL;
 use crate::stac::{not_found, ShardLoader};
 
@@ -41,10 +42,22 @@ const PLACES_ROUTING_SUBPARTITION_SCHEME: &str = "token-sha256-nibble-prefix-v1"
 pub(crate) const MAX_PLACES_ROUTING_BYTES: usize = 8 * 1024 * 1024;
 /// Head routing manifest cap: 4,096 shard rows plus digests is about 1.5 MiB.
 pub(crate) const MAX_PLACES_HEAD_ROUTING_BYTES: usize = 8 * 1024 * 1024;
-/// Whole-object cap for one routed `.plrv` artifact. Objects above this fail
-/// closed rather than exhaust the 128 MiB isolate; serving the few planet
-/// partitions above it needs a future range-read routed lane, not a bigger cap.
+/// Whole-object cap retained for fixture/local decode. Live routed serving uses
+/// the range reader below, because planet `.plrv` objects reach ~209 MiB and
+/// cannot be materialized inside the 128 MiB isolate.
 pub(crate) const MAX_ROUTED_OBJECT_BYTES: usize = 64 * 1024 * 1024;
+/// The construction publisher enforces a 5 GiB Places object ceiling. Range
+/// serving accepts that producer envelope without ever materializing the
+/// object, and rejects any larger size before trusting offsets from its header.
+const MAX_ROUTED_ARTIFACT_BYTES: u64 = 5 * 1000 * 1000 * 1000;
+/// Exact mirrors of the serving encoder's directory caps. Only the fixed
+/// 40-byte rows and collision keys are fetched; the full key table is never
+/// retained by a request.
+const MAX_ROUTED_INDEX_ENTRIES: usize = 250_000;
+const MAX_ROUTED_INDEX_KEY_BYTES: u64 = 256 * 1024 * 1024;
+const MAX_ROUTED_INDEX_KEY_ENTRY_BYTES: u64 = 5 + u16::MAX as u64;
+const ROUTED_HEADER_BYTES: u64 = 32;
+const ROUTED_FIXED_INDEX_ROW_BYTES: u64 = 40;
 /// Whole-object cap for one `.plhd` head shard (~2.7 MB at planet scale).
 pub(crate) const MAX_HEAD_SHARD_BYTES: usize = 16 * 1024 * 1024;
 const MAX_ARTIFACT_RECORDS: usize = 5_000_000;
@@ -75,6 +88,38 @@ struct PlacesV1Index {
     payload_offset: usize,
     payload_bytes: usize,
     records: usize,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PlacesV1RangeHeader {
+    expected_records: usize,
+    index_offset: u64,
+    index_count: usize,
+}
+
+impl PlacesV1RangeHeader {
+    fn fixed_index_bytes(&self) -> Result<u64> {
+        (self.index_count as u64)
+            .checked_mul(ROUTED_FIXED_INDEX_ROW_BYTES)
+            .and_then(|bytes| bytes.checked_add(4))
+            .ok_or_else(|| "Places v1 fixed index extent overflows".to_string())
+    }
+
+    fn key_table_offset(&self) -> Result<u64> {
+        self.index_offset
+            .checked_add(self.fixed_index_bytes()?)
+            .ok_or_else(|| "Places v1 key table offset overflows".to_string())
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PlacesV1RangeIndex {
+    hash: u64,
+    key_position: u64,
+    key_length: u64,
+    records: usize,
+    payload_offset: u64,
+    payload_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -319,6 +364,184 @@ fn index_hash(key: &[u8]) -> u64 {
     digest.update(b"overture-places-serving-index-v1\0");
     digest.update(key);
     u64::from_be_bytes(digest.finalize()[..8].try_into().unwrap())
+}
+
+fn parse_routed_range_header(bytes: &[u8], file_size: u64) -> Result<PlacesV1RangeHeader> {
+    if bytes.len() != ROUTED_HEADER_BYTES as usize
+        || &bytes[..8] != PlacesV1Mode::Routed.magic()
+        || !(36..=MAX_ROUTED_ARTIFACT_BYTES).contains(&file_size)
+    {
+        return Err("invalid or over-cap Places v1 ranged artifact".to_string());
+    }
+    let expected_records = usize::try_from(read_u64(bytes, 8)?)
+        .map_err(|_| "Places v1 count overflows".to_string())?;
+    let index_offset = read_u64(bytes, 16)?;
+    let index_count = read_u32(bytes, 24)? as usize;
+    if expected_records > MAX_ARTIFACT_RECORDS
+        || index_count > MAX_ROUTED_INDEX_ENTRIES
+        || read_u32(bytes, 28)? != 0
+        || index_offset < ROUTED_HEADER_BYTES
+        || index_offset >= file_size
+    {
+        return Err("Places v1 ranged header does not reconcile".to_string());
+    }
+    let header = PlacesV1RangeHeader {
+        expected_records,
+        index_offset,
+        index_count,
+    };
+    if header.key_table_offset()? > file_size {
+        return Err("Places v1 ranged index is truncated".to_string());
+    }
+    Ok(header)
+}
+
+fn parse_routed_range_index(
+    bytes: &[u8],
+    header: &PlacesV1RangeHeader,
+    file_size: u64,
+) -> Result<Vec<PlacesV1RangeIndex>> {
+    let expected_fixed_bytes = usize::try_from(header.fixed_index_bytes()?)
+        .map_err(|_| "Places v1 fixed index exceeds platform bounds".to_string())?;
+    if bytes.len() != expected_fixed_bytes {
+        return Err("Places v1 fixed index is truncated".to_string());
+    }
+    let mut position = 0_usize;
+    if read_u32_at(bytes, &mut position)? as usize != header.index_count {
+        return Err("Places v1 ranged index count differs".to_string());
+    }
+    let mut index = Vec::with_capacity(header.index_count);
+    let mut key_position_expected = 0_u64;
+    let mut previous_hash = None;
+    let mut records = 0_usize;
+    let mut payload_ranges = Vec::with_capacity(header.index_count);
+    for _ in 0..header.index_count {
+        let hash = read_u64_at(bytes, &mut position)?;
+        let key_position = read_u64_at(bytes, &mut position)?;
+        let key_length = u64::from(read_u32_at(bytes, &mut position)?);
+        let entry_records = read_u32_at(bytes, &mut position)? as usize;
+        let payload_offset = read_u64_at(bytes, &mut position)?;
+        let payload_bytes = read_u64_at(bytes, &mut position)?;
+        let payload_end = payload_offset
+            .checked_add(payload_bytes)
+            .ok_or_else(|| "Places v1 payload extent overflows".to_string())?;
+        if key_position != key_position_expected
+            || key_length == 0
+            || key_length > MAX_ROUTED_INDEX_KEY_ENTRY_BYTES
+            || entry_records == 0
+            || payload_bytes == 0
+            || payload_offset < ROUTED_HEADER_BYTES
+            || payload_end > header.index_offset
+            || previous_hash.is_some_and(|previous| previous > hash)
+        {
+            return Err("Places v1 ranged index entry is invalid".to_string());
+        }
+        key_position_expected = key_position
+            .checked_add(key_length)
+            .ok_or_else(|| "Places v1 key extent overflows".to_string())?;
+        if key_position_expected > MAX_ROUTED_INDEX_KEY_BYTES {
+            return Err("Places v1 ranged index key byte cap exceeded".to_string());
+        }
+        records = records
+            .checked_add(entry_records)
+            .ok_or_else(|| "Places v1 record count overflows".to_string())?;
+        previous_hash = Some(hash);
+        payload_ranges.push((payload_offset, payload_bytes));
+        index.push(PlacesV1RangeIndex {
+            hash,
+            key_position,
+            key_length,
+            records: entry_records,
+            payload_offset,
+            payload_bytes,
+        });
+    }
+    if position != bytes.len() || records != header.expected_records {
+        return Err("Places v1 ranged index length/count differs".to_string());
+    }
+    let canonical_size = header
+        .key_table_offset()?
+        .checked_add(key_position_expected)
+        .ok_or_else(|| "Places v1 ranged artifact size overflows".to_string())?;
+    if canonical_size != file_size {
+        return Err("Places v1 ranged artifact size differs".to_string());
+    }
+    payload_ranges.sort_unstable();
+    let mut payload_position = ROUTED_HEADER_BYTES;
+    for (offset, length) in payload_ranges {
+        if offset != payload_position {
+            return Err("Places v1 ranged payloads are not contiguous".to_string());
+        }
+        payload_position = payload_position
+            .checked_add(length)
+            .ok_or_else(|| "Places v1 ranged payload extent overflows".to_string())?;
+    }
+    if payload_position != header.index_offset {
+        return Err("Places v1 ranged payload length differs".to_string());
+    }
+    Ok(index)
+}
+
+fn ranged_index_candidates<'a>(
+    index: &'a [PlacesV1RangeIndex],
+    key: &[u8],
+) -> Result<Vec<&'a PlacesV1RangeIndex>> {
+    let hash = index_hash(key);
+    let start = index.partition_point(|item| item.hash < hash);
+    let candidates: Vec<_> = index[start..]
+        .iter()
+        .take_while(|item| item.hash == hash)
+        .collect();
+    if candidates.len() > MAXIMUM_INDEX_PROBES {
+        return Err("Places v1 ranged index probe cap exceeded".to_string());
+    }
+    Ok(candidates)
+}
+
+fn validate_routed_range_payload_extent(selected: &PlacesV1RangeIndex) -> Result<()> {
+    if selected.records > ROUTED_CANDIDATE_CAP {
+        return Err("Places v1 ranged candidate cap exceeded".to_string());
+    }
+    let minimum_payload = (selected.records as u64)
+        .checked_mul(4)
+        .ok_or_else(|| "Places v1 ranged payload minimum overflows".to_string())?;
+    let maximum_payload = (selected.records as u64)
+        .checked_mul(4 + MAX_ARTIFACT_ENTRY_BYTES as u64)
+        .ok_or_else(|| "Places v1 ranged payload cap overflows".to_string())?;
+    if !(minimum_payload..=maximum_payload).contains(&selected.payload_bytes) {
+        return Err("Places v1 ranged payload exceeds its hard bound".to_string());
+    }
+    Ok(())
+}
+
+fn decode_routed_range_payload(
+    bytes: &[u8],
+    selected: &PlacesV1RangeIndex,
+    cell: &str,
+    token: &str,
+) -> Result<Vec<PlacesV1Record>> {
+    validate_routed_range_payload_extent(selected)?;
+    if bytes.len() as u64 != selected.payload_bytes {
+        return Err("Places v1 ranged payload length differs from its index".to_string());
+    }
+    let mut position = 0_usize;
+    let mut output = Vec::with_capacity(selected.records);
+    for _ in 0..selected.records {
+        let length = read_u32_at(bytes, &mut position)? as usize;
+        if length > MAX_ARTIFACT_ENTRY_BYTES {
+            return Err("Places v1 ranged entry cap exceeded".to_string());
+        }
+        let entry = take(bytes, &mut position, length)?;
+        let (record, _) = decode_entry(entry, PlacesV1Mode::Routed)?;
+        if record.token != token || record.partition_cell.as_deref() != Some(cell) {
+            return Err("Places v1 ranged payload key differs".to_string());
+        }
+        output.push(record);
+    }
+    if position != bytes.len() {
+        return Err("Places v1 ranged payload length differs".to_string());
+    }
+    Ok(output)
 }
 
 /// Shard id owning a head `token` under a `shard_bits`-wide top-hash prefix.
@@ -838,14 +1061,11 @@ pub(crate) fn head_shard_lookup(
 }
 
 /// Plan the routed fetches for one proximity query: token indexes grouped by
-/// owning object in first-use order. The serving loop walks this plan holding
-/// exactly ONE routed artifact at a time and drops its bytes before fetching
-/// the next, so the lane's aggregate residency is bounded by one
-/// `MAX_ROUTED_OBJECT_BYTES` (64 MiB) object regardless of token count —
-/// never tokens x cap (up to 4 x 64 MiB), which two near-cap objects alone
-/// would turn into an isolate OOM instead of a fail-closed error. Each object
-/// is still fetched exactly once per query. `Ok(None)` means the cell holds no
-/// Places at all.
+/// owning object in first-use order. The serving loop walks this plan one
+/// object at a time; each object is range-read through its fixed index and
+/// selected <=256-record payloads rather than materialized in full. Each
+/// object's directory is fetched exactly once per query. `Ok(None)` means the
+/// cell holds no Places at all.
 /// One fetch per DISTINCT routed object: `(object name, owned token indexes)`
 /// in first-use order.
 pub(crate) type RoutedFetchPlan<'routing> = Vec<(&'routing str, Vec<usize>)>;
@@ -960,6 +1180,128 @@ impl ShardLoader {
         Ok(manifest)
     }
 
+    /// Resolve one or more exact tokens from a routed construction artifact
+    /// without loading the whole `.plrv` object. The immutable artifact's
+    /// canonical size comes from a one-byte suffix read; then the request reads
+    /// the 32-byte header, fixed index rows, only hash-collision keys, and one
+    /// bounded payload at a time. A 209 MiB planet object therefore has
+    /// request residency proportional to its ~10 MiB fixed index plus one
+    /// <=256-record payload, not its stored size.
+    pub(crate) async fn lookup_places_construction_routed(
+        &self,
+        object_key: &str,
+        cell: &str,
+        tokens: &[String],
+    ) -> worker::Result<Vec<Vec<PlacesV1Record>>> {
+        if cell.len() != 4 || tokens.is_empty() || tokens.len() > 4 {
+            return Err(worker::Error::RustError(
+                "invalid Places ranged query shape".into(),
+            ));
+        }
+        let (file_size, tail) = self
+            .cached_suffix_read(object_key, 1)
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        if tail.len() != 1 {
+            return Err(worker::Error::RustError(
+                "Places ranged suffix length differs".into(),
+            ));
+        }
+        let mut reader = RangeReader::new(self, object_key);
+        let header_bytes = reader
+            .range(0, ROUTED_HEADER_BYTES)
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        let header = parse_routed_range_header(&header_bytes, file_size)
+            .map_err(worker::Error::RustError)?;
+        let fixed_bytes = reader
+            .range(
+                header.index_offset,
+                header
+                    .fixed_index_bytes()
+                    .map_err(worker::Error::RustError)?,
+            )
+            .await?
+            .ok_or_else(|| not_found(object_key))?;
+        let index = parse_routed_range_index(&fixed_bytes, &header, file_size)
+            .map_err(worker::Error::RustError)?;
+        drop(fixed_bytes);
+
+        let query_keys: Vec<Vec<u8>> = tokens
+            .iter()
+            .map(|token| query_key(PlacesV1Mode::Routed, Some(cell), token))
+            .collect();
+        let candidates = query_keys
+            .iter()
+            .map(|key| ranged_index_candidates(&index, key))
+            .collect::<Result<Vec<_>>>()
+            .map_err(worker::Error::RustError)?;
+        let key_table_offset = header
+            .key_table_offset()
+            .map_err(worker::Error::RustError)?;
+        let mut wants = Vec::new();
+        let mut owners = Vec::new();
+        for (token_index, token_candidates) in candidates.iter().enumerate() {
+            for (candidate_index, candidate) in token_candidates.iter().enumerate() {
+                wants.push(ByteRange {
+                    offset: key_table_offset
+                        .checked_add(candidate.key_position)
+                        .ok_or_else(|| {
+                            worker::Error::RustError("Places ranged key offset overflows".into())
+                        })?,
+                    length: candidate.key_length,
+                });
+                owners.push((token_index, candidate_index));
+            }
+        }
+        let key_bytes = if wants.is_empty() {
+            Vec::new()
+        } else {
+            reader
+                .coalesced(&wants, 0, MAX_ROUTED_INDEX_KEY_ENTRY_BYTES)
+                .await?
+        };
+        let mut selected: Vec<Option<&PlacesV1RangeIndex>> =
+            (0..tokens.len()).map(|_| None).collect();
+        for ((token_index, candidate_index), bytes) in owners.into_iter().zip(key_bytes) {
+            let candidate = candidates[token_index][candidate_index];
+            if index_hash(&bytes) != candidate.hash {
+                return Err(worker::Error::RustError(
+                    "Places ranged index key hash differs".into(),
+                ));
+            }
+            if bytes.as_ref() == query_keys[token_index].as_slice()
+                && selected[token_index].replace(candidate).is_some()
+            {
+                return Err(worker::Error::RustError(
+                    "Places ranged index repeats a query key".into(),
+                ));
+            }
+        }
+
+        let mut output = Vec::with_capacity(tokens.len());
+        for (token_index, match_entry) in selected.into_iter().enumerate() {
+            let Some(selected) = match_entry else {
+                output.push(Vec::new());
+                continue;
+            };
+            // Validate the producer-derived count/byte envelope BEFORE asking
+            // R2 or the edge cache to materialize the selected range. A corrupt
+            // index can therefore never turn this bounded lookup into a
+            // multi-gigabyte allocation inside the 128 MiB isolate.
+            validate_routed_range_payload_extent(selected).map_err(worker::Error::RustError)?;
+            let payload = reader
+                .range(selected.payload_offset, selected.payload_bytes)
+                .await?
+                .ok_or_else(|| not_found(object_key))?;
+            output.push(
+                decode_routed_range_payload(&payload, selected, cell, &tokens[token_index])
+                    .map_err(worker::Error::RustError)?,
+            );
+        }
+        Ok(output)
+    }
+
     /// Fetch one whole serving artifact under a hard byte cap, edge-cached
     /// with the immutable TTL like every other content-addressed object.
     pub(crate) async fn places_construction_object(
@@ -1009,10 +1351,13 @@ pub(crate) fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, va
 #[cfg(test)]
 mod tests {
     use super::{
-        construction_cell, head_shard_id, head_shard_lookup, index_hash, intersect_ranked,
-        lookup_head_shard, record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
-        HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1Record,
-        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+        construction_cell, decode_routed_range_payload, head_shard_id, head_shard_lookup,
+        index_hash, intersect_ranked, lookup_head_shard, parse_routed_range_header,
+        parse_routed_range_index, query_key, ranged_index_candidates, record_projection,
+        routed_fetch_plan, routed_lookup, routed_token_hash, validate_routed_range_payload_extent,
+        HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex,
+        PlacesV1Record, MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA,
+        PLACES_ROUTING_SCHEMA,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -1097,6 +1442,34 @@ mod tests {
         output
     }
 
+    fn ranged_lookup_from_bytes(
+        bytes: &[u8],
+        cell: &str,
+        token: &str,
+    ) -> Result<Vec<PlacesV1Record>, String> {
+        let header = parse_routed_range_header(&bytes[..32], bytes.len() as u64)?;
+        let fixed_start = header.index_offset as usize;
+        let fixed_end = fixed_start + header.fixed_index_bytes()? as usize;
+        let index =
+            parse_routed_range_index(&bytes[fixed_start..fixed_end], &header, bytes.len() as u64)?;
+        let key = query_key(PlacesV1Mode::Routed, Some(cell), token);
+        let key_table = header.key_table_offset()? as usize;
+        let mut selected = None;
+        for candidate in ranged_index_candidates(&index, &key)? {
+            let start = key_table + candidate.key_position as usize;
+            let end = start + candidate.key_length as usize;
+            if bytes[start..end] == key && selected.replace(candidate).is_some() {
+                return Err("fixture range index repeats a query key".into());
+            }
+        }
+        let Some(selected) = selected else {
+            return Ok(Vec::new());
+        };
+        let start = selected.payload_offset as usize;
+        let end = start + selected.payload_bytes as usize;
+        decode_routed_range_payload(&bytes[start..end], selected, cell, token)
+    }
+
     #[test]
     fn decodes_and_queries_routed_and_head_bytes_with_caps() {
         let routed = artifact(
@@ -1120,6 +1493,87 @@ mod tests {
         let parsed = PlacesV1Artifact::parse(&head, PlacesV1Mode::Head, 4096, 2, 1024).unwrap();
         assert_eq!(parsed.lookup("cafe", None, 1, 1).unwrap().len(), 1);
         assert!(parsed.lookup("cafe", Some("8080"), 1, 1).is_err());
+    }
+
+    #[test]
+    fn ranged_routed_lookup_matches_whole_object_decode_without_a_whole_object_cap() {
+        let routed = artifact(
+            PlacesV1Mode::Routed,
+            &[
+                entry("cafe", Some("8080"), 255, 1, 0),
+                entry("cafe", Some("8080"), 200, 2, 1),
+                entry("town", Some("8080"), 255, 1, 0),
+            ],
+        );
+        let whole = routed_lookup(&routed, "8080", "cafe").unwrap();
+        let ranged = ranged_lookup_from_bytes(&routed, "8080", "cafe").unwrap();
+        assert_eq!(ranged, whole);
+        assert!(ranged_lookup_from_bytes(&routed, "8080", "missing")
+            .unwrap()
+            .is_empty());
+
+        // The old serving shape fails as soon as the artifact is one byte over
+        // its materialization cap. The ranged shape uses the producer/file
+        // envelope and fetches only directory rows plus the selected payload.
+        assert!(
+            PlacesV1Artifact::parse(&routed, PlacesV1Mode::Routed, routed.len() - 1, 10, 1024,)
+                .is_err()
+        );
+        assert_eq!(ranged.len(), 2);
+    }
+
+    #[test]
+    fn ranged_routed_lookup_rejects_size_index_and_payload_lies() {
+        let routed = artifact(
+            PlacesV1Mode::Routed,
+            &[entry("cafe", Some("8080"), 255, 1, 0)],
+        );
+        assert!(
+            parse_routed_range_header(&routed[..32], routed.len() as u64 + 1)
+                .and_then(|header| {
+                    let start = header.index_offset as usize;
+                    let end = start + header.fixed_index_bytes()? as usize;
+                    parse_routed_range_index(&routed[start..end], &header, routed.len() as u64 + 1)
+                        .map(|_| ())
+                })
+                .is_err()
+        );
+
+        let index_offset = u64::from_le_bytes(routed[16..24].try_into().unwrap()) as usize;
+        let mut wrong_count = routed.clone();
+        wrong_count[index_offset..index_offset + 4].copy_from_slice(&2_u32.to_le_bytes());
+        assert!(ranged_lookup_from_bytes(&wrong_count, "8080", "cafe").is_err());
+
+        let mut trailing = routed.clone();
+        trailing.push(0);
+        assert!(ranged_lookup_from_bytes(&trailing, "8080", "cafe").is_err());
+
+        let mut wrong_key = routed.clone();
+        let key_at = index_offset + 4 + 40;
+        wrong_key[key_at] ^= 1;
+        assert!(ranged_lookup_from_bytes(&wrong_key, "8080", "cafe")
+            .unwrap()
+            .is_empty());
+    }
+
+    #[test]
+    fn ranged_payload_extent_is_bounded_before_any_body_read() {
+        let entry = PlacesV1RangeIndex {
+            hash: 0,
+            key_position: 0,
+            key_length: 1,
+            records: 1,
+            payload_offset: 32,
+            payload_bytes: 5 + MAX_ARTIFACT_ENTRY_BYTES as u64,
+        };
+        assert!(validate_routed_range_payload_extent(&entry).is_err());
+
+        let too_many = PlacesV1RangeIndex {
+            records: 257,
+            payload_bytes: 4,
+            ..entry
+        };
+        assert!(validate_routed_range_payload_extent(&too_many).is_err());
     }
 
     #[test]
