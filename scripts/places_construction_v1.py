@@ -279,8 +279,8 @@ POSITIONS_DIRECTORY_SCHEMA = "overture-places-map-positions-directory-v1"
 # distinct candidate keyed by its provenance (test_places_duplicate_uuid_gate).
 #
 # Self-sufficient by decision, not by drift: a reverse hit has to render a name
-# and a category, the ID index returns neither, and `/v2/features/:gers_id` is
-# being removed -- so a positions-only row could not answer a reverse query.
+# and a category, while `/v2/ids/:id` returns only ID locator metadata -- so a
+# positions-only row could not answer a reverse query.
 POSITIONS_COLUMNS = (
     "feature_id",
     "partition_cell",
@@ -760,9 +760,8 @@ def emit_positions(
 
     The record is SELF-SUFFICIENT: position plus the fields a reverse result has
     to render (`primary_name`, `brand_name`, `category`, `locality`, `region`,
-    `country`, `confidence_rank`). The ID index returns no names and
-    `/v2/features/:gers_id` is being removed, so a positions-only row could not
-    render a reverse hit at all.
+    `country`, `confidence_rank`). The `/v2/ids/:id` lookup returns no names, so
+    a positions-only row could not render a reverse hit at all.
 
     Two things make the artifact worth its bytes, and both are about WHEN it is
     produced rather than what it contains.

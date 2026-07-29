@@ -395,8 +395,9 @@ Do not relitigate these while closing the current blockers:
   planet map.
 - Reverse geocoding is a separate spatial serving index. It must not distort the
   forward partition keys.
-- `/v2/features/:gers_id` is slated for removal and is not a dependency for
-  reverse rendering.
+- `/v2/features/:gers_id` has been removed. `/v2/ids/:id` provides
+  release-pinned ID locator metadata but is not a dependency for reverse
+  rendering.
 
 ## Reverse geocoding fast follow
 
@@ -424,7 +425,7 @@ The accepted requirements are:
    honest `budget_exhausted` / effective-radius reporting.
 5. Use a binary, sharded reverse catalog rather than a large JSON fan-in.
 6. Records are self-sufficient for rendering; do not depend on
-   `/v2/features/:gers_id`.
+   `/v2/ids/:id`.
 7. The reverse finalizer proves total emitted records equal admitted per-record
    inputs before advertising the operation.
 8. The v2 catalog advertises reverse per family only when its verified hashed

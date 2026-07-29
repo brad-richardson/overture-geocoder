@@ -17,7 +17,7 @@ An administrative gazetteer and experimental forward/reverse geocoder built on [
 Base URL: `https://geocoder.bradr.dev`
 
 The current production endpoints are documented below. The staged unified
-`/v2/forward`, `/v2/reverse`, and `/v2/features/:gers_id` contract is documented
+`/v2/forward`, `/v2/reverse`, and `/v2/ids/:id` contract is documented
 in [docs/api-v2.md](docs/api-v2.md). There is no batch endpoint.
 The fixed contracts and remaining executor work for the first undispatched
 global Places/address build are tracked in

@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use geocoder_core::{GeocoderQuery, LocationBias};
+use geocoder_core::{GeocoderQuery, IdLookupResult, LocationBias};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
@@ -1358,6 +1358,23 @@ fn versioned_response(body: &Value, version: &DataVersion, status: u16) -> Resul
     Ok(response)
 }
 
+fn versioned_json_response(body: &Value, version: &DataVersion, status: u16) -> Result<Response> {
+    let mut response = Response::from_json(body)?.with_status(status);
+    response
+        .headers_mut()
+        .set("Content-Type", "application/json; charset=utf-8")?;
+    response
+        .headers_mut()
+        .set("X-Data-Version", &version.geocoder_build)?;
+    response
+        .headers_mut()
+        .set("X-Geocoder-Build", &version.geocoder_build)?;
+    response
+        .headers_mut()
+        .set("X-Overture-Release", &version.overture_release)?;
+    Ok(response)
+}
+
 fn parse_bool(value: Option<&String>, default: bool) -> std::result::Result<bool, String> {
     match value.map(String::as_str) {
         None => Ok(default),
@@ -2219,12 +2236,20 @@ pub(crate) async fn handle_reverse(
     versioned_response(&body, &release.data_version, 200)
 }
 
-pub(crate) async fn handle_feature(
+fn id_response_body(result: &IdLookupResult, version: &DataVersion) -> Value {
+    let mut body = serde_json::to_value(result).unwrap_or_else(|_| json!({}));
+    if let Some(object) = body.as_object_mut() {
+        object.insert("data_version".into(), json!(version));
+    }
+    body
+}
+
+pub(crate) async fn handle_id(
     _req: Request,
     ctx: RouteContext<std::rc::Rc<Context>>,
 ) -> Result<Response> {
     let identity = ctx
-        .param("gers_id")
+        .param("id")
         .ok_or_else(|| Error::RustError("missing GERS ID".into()))?;
     if !valid_gers_id(identity) {
         return json_error(
@@ -2251,15 +2276,8 @@ pub(crate) async fn handle_feature(
     let Some(result) = lookup.result else {
         return json_error("not_found", "GERS ID was not found", 404);
     };
-    let feature = json!({
-        "type": "Feature",
-        "id": result.id,
-        "geometry": Value::Null,
-        "bbox": result.bbox,
-        "properties": result,
-        "data_version": release.data_version.clone(),
-    });
-    versioned_response(&feature, &release.data_version, 200)
+    let body = id_response_body(&result, &release.data_version);
+    versioned_json_response(&body, &release.data_version, 200)
 }
 
 #[cfg(test)]
@@ -3509,10 +3527,37 @@ mod tests {
     }
 
     #[test]
-    fn feature_lookup_accepts_only_uuid_shaped_gers_ids() {
+    fn id_lookup_accepts_only_uuid_shaped_gers_ids() {
         assert!(valid_gers_id("08b2a100d6644b64b2f70e9f6e46886f"));
         assert!(valid_gers_id("08b2a100-d664-4b64-b2f7-0e9f6e46886f"));
         assert!(!valid_gers_id("zzb2a100-d664-4b64-b2f7-0e9f6e46886f"));
         assert!(!valid_gers_id("08b2a100d664-4b64-b2f7-0e9f6e46886f"));
+    }
+
+    #[test]
+    fn v2_id_response_matches_legacy_shape_and_adds_atomic_version() {
+        let body = id_response_body(
+            &IdLookupResult {
+                id: "08b2a100-d664-4b64-b2f7-0e9f6e46886f".into(),
+                bbox: geocoder_core::BBox {
+                    xmin: -122.4,
+                    ymin: 47.5,
+                    xmax: -122.3,
+                    ymax: 47.7,
+                },
+                locator: None,
+            },
+            &DataVersion {
+                overture_release: "2026-06-17.0".into(),
+                geocoder_build: "2026-07-29.0".into(),
+            },
+        );
+        assert_eq!(body["id"], "08b2a100-d664-4b64-b2f7-0e9f6e46886f");
+        assert_eq!(body["bbox"]["xmin"], -122.4);
+        assert_eq!(body["data_version"]["overture_release"], "2026-06-17.0");
+        assert_eq!(body["data_version"]["geocoder_build"], "2026-07-29.0");
+        assert!(body.get("type").is_none());
+        assert!(body.get("geometry").is_none());
+        assert!(body.get("properties").is_none());
     }
 }
