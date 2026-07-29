@@ -1,0 +1,56 @@
+{
+  "schema": "overture-reverse-v2-publication-rehearsal-v1",
+  "date": "2026-07-29",
+  "scope": "local-real-data-slice",
+  "non_promoting": true,
+  "overture_release": "2026-07-22.0",
+  "slice_version": "slice-2026-07-29.2",
+  "geocoder_build": "2026-07-29.2",
+  "families": {
+    "addresses": {
+      "request_sha256": "39611ab2f10728d56834ccb3d28b1b9d1670ddb191616999c2f7cc2cc27b2d54",
+      "reverse_records": 104928,
+      "reverse_cells": 2,
+      "reverse_data_shards": 2,
+      "reverse_prepositioned_artifacts": 19,
+      "reverse_root_sha256": "98e20d1e9b376945886c40a9b5ea8022b473c62f51c04dbe4727b30b988a37e9",
+      "forward_bridge_copies": 1,
+      "verified_family_objects": 22,
+      "verified_family_bytes": 39782163
+    },
+    "places": {
+      "request_sha256": "5df949acfdb648f118b41bc971c4a40983312d520cb420c58e777ec77462c208",
+      "reverse_records": 38172,
+      "reverse_cells": 4,
+      "reverse_data_shards": 4,
+      "reverse_prepositioned_artifacts": 21,
+      "reverse_root_sha256": "37f651e1f21599ad3ece1fc351ed9265443650826306c990256f6b0e1cd90732",
+      "forward_bridge_copies": 21,
+      "verified_family_objects": 44,
+      "verified_family_bytes": 38249278
+    }
+  },
+  "publication": {
+    "reverse_copy_operations": 0,
+    "family_scoped_create_only_claims": 2,
+    "slice_manifest_sha256": "4bf42ce751f3d96118428fd1c5a3193477dcac63b47d0ef7cf0e7c74070a981a",
+    "release_manifest_sha256": "2a81ff3b676ed9944a52f545928e199b93c8f94a57ba03bfa6f9feceecf1c9d3",
+    "release_digest": "04f472acecf373543a9b1e573293424ae5419a272613e74a1ecb4b733e7d1d2f",
+    "catalog_graph_verified": true,
+    "completion_replay_with_missing_encoder_and_verifier": true
+  },
+  "advertised_operations": {
+    "addresses": [
+      "reverse",
+      "structured_forward"
+    ],
+    "places": [
+      "forward",
+      "reverse"
+    ]
+  },
+  "remaining_publication_work": [
+    "The existing forward serving-object bridge still copies its objects; migrate forward producers to the same direct-final contract in a separate concern.",
+    "Require store-computed content_md5 in R2 direct-publication records before the production R2 rung."
+  ]
+}

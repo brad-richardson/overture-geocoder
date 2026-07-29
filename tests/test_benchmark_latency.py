@@ -65,6 +65,21 @@ class TimedFakeSession(FakeSession):
         return super().get(url, timeout)
 
 
+def test_v2_reverse_route_classes_are_distinct_and_use_lon_lat_contract():
+    target = {"name": "place", "lon": -122.4, "lat": 47.6}
+
+    assert benchmark_latency.V2_REVERSE_CLASSES == (
+        ("v2-reverse-poi", "poi"),
+        ("v2-reverse-address", "address"),
+    )
+    assert benchmark_latency.v2_reverse_path(target, "poi") == (
+        "/v2/reverse?lon=-122.4&lat=47.6&types=poi"
+    )
+    assert benchmark_latency.v2_reverse_path(target, "address") == (
+        "/v2/reverse?lon=-122.4&lat=47.6&types=address"
+    )
+
+
 def test_reverse_quality_accepts_context_suffix_and_accents():
     quality = benchmark_latency.evaluate_reverse_quality(
         {"gers_id": "reykjavik", "primary_name": "Reykjavík, IS", "subtype": "locality"},

@@ -71,6 +71,7 @@ import json
 import os
 import re
 import shutil
+import struct
 import sys
 import tempfile
 from pathlib import Path, PurePosixPath
@@ -96,12 +97,26 @@ COPY_READ_TIMEOUT_SECONDS = 15 * 60
 COPY_WORKERS = 4
 PLACES_ROUTING_SCHEMA = "overture-promoted-places-routing-v1"
 ADDRESS_ROUTING_SCHEMA = "overture-promoted-addresses-routing-v1"
+REVERSE_CATALOG_SCHEMA = "overture-reverse-catalog-publication-v1"
+SLICE_CLAIM_SCHEMA = "overture-construction-slice-claim-v1"
 CONSTRUCTION_FAMILY_MANIFEST_SCHEMA = "construction-v1-family-manifest-v1"
 CONSTRUCTION_SLICE_MANIFEST_SCHEMA = "construction-v1-slice-manifest-v1"
 FINALIZE_MARKER_SCHEMA = "overture-construction-v1-create-only-marker-v1"
 HEAD_MANIFEST_SCHEMA = "overture-places-global-head-sharded-v2"
 NIBBLE_OWNERSHIP_KIND = "token-sha256-nibble-prefix-v1"
 FAMILIES = ("addresses", "places")
+REVERSE_ROOT_BYTES = 688
+REVERSE_ROOT_HEADER = struct.Struct("<8sBBBBIiiiiQII")
+REVERSE_ROOT_SHARD = struct.Struct("<Q32s")
+REVERSE_CATALOG_HEADER = struct.Struct("<8sBBBBI")
+REVERSE_CATALOG_ENTRY = struct.Struct("<HBBIQI32s")
+REVERSE_FAMILY_CODE = {"places": 1, "addresses": 2}
+REVERSE_MAX_RADIUS = {"places": 2_000, "addresses": 500}
+REVERSE_MAX_SUB_CELL_LEVEL = {"places": 5, "addresses": 7}
+REVERSE_LON_E7_PER_CELL = 14_062_500
+REVERSE_LAT_E7_PER_CELL = 7_031_250
+REVERSE_LON_E7_ORIGIN = 1_800_000_000
+REVERSE_LAT_E7_ORIGIN = 900_000_000
 
 # The serving-object key each family's reduction record carries
 # (construction_v1_hosted.REDUCTION_SERVING_OBJECTS).
@@ -571,6 +586,350 @@ def _address_routing(
     return routing, serving
 
 
+def _reverse_publication(
+    *,
+    path: Path,
+    family: str,
+    request_sha256: str,
+    version: str,
+    release: str,
+) -> dict[str, Any]:
+    """Validate one directly published reverse exact-set completion record."""
+    publication = _load_json_object(
+        path.read_bytes(), f"{family} reverse publication"
+    )
+    if (
+        publication.get("schema") != REVERSE_CATALOG_SCHEMA
+        or publication.get("family") != family
+        or publication.get("request_sha256") != request_sha256
+    ):
+        raise fail(f"{family} reverse publication identity differs")
+    if (
+        not isinstance(publication.get("records"), int)
+        or isinstance(publication.get("records"), bool)
+        or publication["records"] < 1
+        or not isinstance(publication.get("cells"), int)
+        or isinstance(publication.get("cells"), bool)
+        or publication["cells"] < 1
+    ):
+        raise fail(f"{family} reverse publication has invalid record/cell totals")
+
+    prefix = f"{version}/families/{family}/"
+
+    def normalized(value: Any, what: str) -> dict[str, Any]:
+        identity = require_identity(value, what)
+        if (
+            identity["bytes"] < 1
+            or len(identity["sha256"]) != 64
+            or set(identity["sha256"]) - _HEX
+            or not identity["key"].startswith(prefix)
+        ):
+            raise fail(f"{what} has an invalid final-slice identity")
+        result = {
+            "destination_key": identity["key"],
+            "bytes": identity["bytes"],
+            "sha256": identity["sha256"],
+        }
+        content_md5 = identity.get("content_md5")
+        if content_md5 is not None:
+            if (
+                not isinstance(content_md5, str)
+                or len(content_md5) != 32
+                or set(content_md5) - _HEX
+            ):
+                raise fail(f"{what} has an invalid stored-byte MD5")
+            result["content_md5"] = content_md5
+        return result
+
+    root = normalized(publication.get("root"), f"{family} reverse root")
+    expected_root = f"{prefix}reverse-catalog.rcat"
+    if (
+        root["destination_key"] != expected_root
+        or root["bytes"] != REVERSE_ROOT_BYTES
+    ):
+        raise fail(
+            f"{family} reverse root must be the fixed {REVERSE_ROOT_BYTES}-byte "
+            f"entrypoint at {expected_root}"
+        )
+
+    catalog_shards = [
+        normalized(value, f"{family} reverse catalog shard")
+        for value in publication.get("catalog_shards") or []
+    ]
+    if len(catalog_shards) != 16:
+        raise fail(f"{family} reverse publication must carry 16 catalog shards")
+    if len({item["destination_key"] for item in catalog_shards}) != 16:
+        raise fail(f"{family} reverse publication repeats a catalog shard")
+    catalog_prefix = f"{prefix}reverse/catalog-shards/sha256/"
+    data_prefix = f"{prefix}reverse/shards/sha256/"
+
+    artifacts = [
+        normalized(value, f"{family} reverse artifact")
+        for value in publication.get("artifacts") or []
+    ]
+    if not artifacts:
+        raise fail(f"{family} reverse publication carries no exact artifact set")
+    by_key = {item["destination_key"]: item for item in artifacts}
+    if len(by_key) != len(artifacts):
+        raise fail(f"{family} reverse publication repeats an artifact key")
+    required = {root["destination_key"]: root}
+    required.update(
+        (item["destination_key"], item) for item in catalog_shards
+    )
+    for key, identity in required.items():
+        if by_key.get(key) != identity:
+            raise fail(
+                f"{family} reverse exact set differs from its root/catalog records"
+            )
+    data = [
+        identity
+        for key, identity in by_key.items()
+        if key.startswith(data_prefix)
+    ]
+    if not data:
+        raise fail(f"{family} reverse publication carries no data shards")
+    allowed = {expected_root} | {
+        key
+        for key in by_key
+        if key.startswith(catalog_prefix) or key.startswith(data_prefix)
+    }
+    if set(by_key) != allowed:
+        raise fail(
+            f"{family} reverse publication has an object outside its serving layout"
+        )
+    if {item["destination_key"] for item in catalog_shards} != {
+        key for key in by_key if key.startswith(catalog_prefix)
+    }:
+        raise fail(f"{family} reverse catalog shard exact set differs")
+    for key, identity in by_key.items():
+        if key == expected_root:
+            continue
+        name = PurePosixPath(key).name
+        digest = name.split(".", 1)[0]
+        if digest != identity["sha256"]:
+            raise fail(
+                f"{family} reverse content-addressed key differs from its sha256"
+            )
+    claim_value = require_identity(
+        publication.get("slice_claim"), f"{family} reverse slice claim"
+    )
+    claim_payload = canonical(
+        {
+            "schema": SLICE_CLAIM_SCHEMA,
+            "version": version,
+            "family": family,
+            "request_sha256": request_sha256,
+            "overture_release": release,
+        }
+    )
+    claim = {
+        "destination_key": claim_value["key"],
+        "bytes": claim_value["bytes"],
+        "sha256": claim_value["sha256"],
+    }
+    if (
+        claim["destination_key"] != f"{version}/claims/{family}.json"
+        or claim["bytes"] != len(claim_payload)
+        or claim["sha256"] != sha256_bytes(claim_payload)
+    ):
+        raise fail(
+            f"{family} reverse slice claim does not bind version/request/release"
+        )
+    content_md5 = claim_value.get("content_md5")
+    if content_md5 is not None:
+        if (
+            not isinstance(content_md5, str)
+            or len(content_md5) != 32
+            or set(content_md5) - _HEX
+        ):
+            raise fail(f"{family} reverse slice claim has an invalid MD5")
+        claim["content_md5"] = content_md5
+    return {
+        "artifacts": [by_key[key] for key in sorted(by_key)],
+        "slice_claim": claim,
+        "records": publication["records"],
+        "cells": publication["cells"],
+    }
+
+
+def validate_reverse_graph(
+    *,
+    family: str,
+    version: str,
+    artifacts: list[dict[str, Any]],
+    destination: LocalTree | R2Tree,
+    expected_records: int | None = None,
+    expected_cells: int | None = None,
+) -> dict[str, int]:
+    """Prove root -> 16 catalog shards -> every data identity and total."""
+    prefix = f"families/{family}/"
+    root_relative = f"{prefix}reverse-catalog.rcat"
+    catalog_prefix = f"{prefix}reverse/catalog-shards/sha256/"
+    data_prefix = f"{prefix}reverse/shards/sha256/"
+    by_key = {item["object_key"]: item for item in artifacts}
+    root_identity = by_key.get(root_relative)
+    catalog_identities = {
+        key: value for key, value in by_key.items() if key.startswith(catalog_prefix)
+    }
+    data_identities = {
+        key: value for key, value in by_key.items() if key.startswith(data_prefix)
+    }
+    if (
+        root_identity is None
+        or len(catalog_identities) != 16
+        or not data_identities
+    ):
+        raise fail(f"{family} reverse manifest graph is incomplete")
+
+    def fetched(relative: str, identity: dict[str, Any], what: str) -> bytes:
+        payload = destination.read_bytes(f"{version}/{relative}")
+        if (
+            len(payload) != identity["bytes"]
+            or sha256_bytes(payload) != identity["sha256"]
+        ):
+            raise fail(f"{family} {what} bytes differ from its manifest identity")
+        return payload
+
+    root = fetched(root_relative, root_identity, "reverse root")
+    if len(root) != REVERSE_ROOT_BYTES:
+        raise fail(f"{family} reverse root has the wrong size")
+    (
+        magic,
+        family_code,
+        cell_level,
+        shard_count,
+        flags,
+        max_radius,
+        min_lon,
+        min_lat,
+        max_lon,
+        max_lat,
+        records,
+        cells,
+        reserved,
+    ) = REVERSE_ROOT_HEADER.unpack_from(root)
+    if (
+        magic != b"RCAT0001"
+        or family_code != REVERSE_FAMILY_CODE[family]
+        or cell_level != 8
+        or shard_count != 16
+        or flags != 0
+        or reserved != 0
+        or max_radius != REVERSE_MAX_RADIUS[family]
+        or records < 1
+        or cells < 1
+        or min_lon >= max_lon
+        or min_lat >= max_lat
+        or (expected_records is not None and records != expected_records)
+        or (expected_cells is not None and cells != expected_cells)
+    ):
+        raise fail(f"{family} reverse root contract differs")
+
+    root_catalogs = []
+    offset = REVERSE_ROOT_HEADER.size
+    for _ in range(16):
+        size, digest = REVERSE_ROOT_SHARD.unpack_from(root, offset)
+        offset += REVERSE_ROOT_SHARD.size
+        root_catalogs.append((size, digest.hex()))
+
+    seen_cells: set[int] = set()
+    reached_data: set[str] = set()
+    record_total = 0
+    min_x = min_y = 256
+    max_x = max_y = -1
+    for shard_id, (catalog_bytes, catalog_sha) in enumerate(root_catalogs):
+        relative = f"{catalog_prefix}{catalog_sha}.rcas"
+        identity = catalog_identities.get(relative)
+        if (
+            identity is None
+            or identity["bytes"] != catalog_bytes
+            or identity["sha256"] != catalog_sha
+        ):
+            raise fail(
+                f"{family} reverse root names an unattested catalog shard"
+            )
+        payload = fetched(relative, identity, "catalog shard")
+        if len(payload) < REVERSE_CATALOG_HEADER.size:
+            raise fail(f"{family} reverse catalog shard is truncated")
+        (
+            catalog_magic,
+            catalog_family,
+            catalog_level,
+            catalog_id,
+            catalog_flags,
+            count,
+        ) = REVERSE_CATALOG_HEADER.unpack_from(payload)
+        if (
+            catalog_magic != b"RCAS0001"
+            or catalog_family != family_code
+            or catalog_level != 8
+            or catalog_id != shard_id
+            or catalog_flags != 0
+            or len(payload)
+            != REVERSE_CATALOG_HEADER.size + count * REVERSE_CATALOG_ENTRY.size
+        ):
+            raise fail(f"{family} reverse catalog shard header differs")
+        previous = -1
+        entry_offset = REVERSE_CATALOG_HEADER.size
+        for _ in range(count):
+            (
+                cell,
+                sub_level,
+                entry_flags,
+                cell_records,
+                data_bytes,
+                index_bytes,
+                data_digest,
+            ) = REVERSE_CATALOG_ENTRY.unpack_from(payload, entry_offset)
+            entry_offset += REVERSE_CATALOG_ENTRY.size
+            if (
+                entry_flags != 0
+                or sub_level > REVERSE_MAX_SUB_CELL_LEVEL[family]
+                or cell_records < 1
+                or data_bytes < 1
+                or index_bytes < 1
+                or index_bytes > data_bytes
+                or cell >> 12 != shard_id
+                or cell <= previous
+                or cell in seen_cells
+            ):
+                raise fail(f"{family} reverse catalog cell entry differs")
+            previous = cell
+            seen_cells.add(cell)
+            digest = data_digest.hex()
+            data_relative = f"{data_prefix}{digest}.plrx"
+            data_identity = data_identities.get(data_relative)
+            if (
+                data_identity is None
+                or data_identity["bytes"] != data_bytes
+                or data_identity["sha256"] != digest
+                or data_relative in reached_data
+            ):
+                raise fail(
+                    f"{family} reverse catalog names an unattested data shard"
+                )
+            reached_data.add(data_relative)
+            record_total += cell_records
+            y, x = cell >> 8, cell & 0xFF
+            min_x, max_x = min(min_x, x), max(max_x, x)
+            min_y, max_y = min(min_y, y), max(max_y, y)
+
+    expected_bbox = (
+        min_x * REVERSE_LON_E7_PER_CELL - REVERSE_LON_E7_ORIGIN,
+        min_y * REVERSE_LAT_E7_PER_CELL - REVERSE_LAT_E7_ORIGIN,
+        (max_x + 1) * REVERSE_LON_E7_PER_CELL - REVERSE_LON_E7_ORIGIN,
+        (max_y + 1) * REVERSE_LAT_E7_PER_CELL - REVERSE_LAT_E7_ORIGIN,
+    )
+    if (
+        len(seen_cells) != cells
+        or record_total != records
+        or reached_data != set(data_identities)
+        or expected_bbox != (min_lon, min_lat, max_lon, max_lat)
+    ):
+        raise fail(f"{family} reverse catalog graph totals differ")
+    return {"records": records, "cells": cells}
+
+
 def _plan_family(
     *,
     family: str,
@@ -583,6 +942,7 @@ def _plan_family(
     region: dict[str, Any],
     producer_commit: str,
     versions: dict[str, Any],
+    reverse_catalog: Path | None,
 ) -> dict[str, Any]:
     family_prefix = f"{slice_root}families/{family}/"
 
@@ -773,6 +1133,20 @@ def _plan_family(
                 )
             item["content_md5"] = proof["content_md5"]
 
+    reverse_publication = (
+        _reverse_publication(
+            path=reverse_catalog,
+            family=family,
+            request_sha256=request_sha256,
+            version=version,
+            release=release,
+        )
+        if reverse_catalog is not None
+        else None
+    )
+    prepositioned = (
+        reverse_publication["artifacts"] if reverse_publication else []
+    )
     routing_bytes = canonical(routing)
     manifest_artifacts = [
         {
@@ -788,6 +1162,14 @@ def _plan_family(
             "sha256": sha256_bytes(routing_bytes),
         }
     ]
+    manifest_artifacts.extend(
+        {
+            "object_key": item["destination_key"][len(version) + 1 :],
+            "bytes": item["bytes"],
+            "sha256": item["sha256"],
+        }
+        for item in prepositioned
+    )
     family_manifest = GBM.build_family_manifest(
         family,
         lineage={
@@ -810,6 +1192,20 @@ def _plan_family(
         "slice_root": slice_root,
         "markers_root": markers_root,
         "objects": objects,
+        "prepositioned": prepositioned,
+        "slice_claim": (
+            reverse_publication["slice_claim"]
+            if reverse_publication
+            else None
+        ),
+        "reverse_totals": (
+            {
+                "records": reverse_publication["records"],
+                "cells": reverse_publication["cells"],
+            }
+            if reverse_publication
+            else None
+        ),
         "routing": routing,
         "routing_key": f"{version}/families/{family}/routing.json",
         "routing_sha256": sha256_bytes(routing_bytes),
@@ -819,8 +1215,10 @@ def _plan_family(
         "family_manifest_sha256": sha256_bytes(family_manifest_bytes),
         "family_manifest_bytes": len(family_manifest_bytes),
         "totals": {
-            "objects": len(objects),
-            "bytes": sum(item["bytes"] for item in objects),
+            "objects": len(objects) + len(prepositioned),
+            "copied_objects": len(objects),
+            "prepositioned_objects": len(prepositioned),
+            "bytes": sum(item["bytes"] for item in objects + prepositioned),
         },
     }
 
@@ -846,6 +1244,27 @@ def _per_family_option(values: list[str], families: list[str], what: str) -> dic
     return out
 
 
+def _optional_per_family_option(
+    values: list[str], families: list[str], what: str
+) -> dict[str, str]:
+    """Resolve an optional repeated option without requiring every family."""
+    default: str | None = None
+    resolved: dict[str, str] = {}
+    for value in values:
+        prefix, separator, rest = value.partition("=")
+        if separator and prefix in FAMILIES and rest:
+            if prefix not in families:
+                raise fail(f"{what} given for unselected family {prefix}")
+            resolved[prefix] = rest
+        elif default is None:
+            default = value
+        else:
+            raise fail(f"multiple default {what} values given ({default!r}, {value!r})")
+    if default is not None:
+        return {family: resolved.get(family, default) for family in families}
+    return resolved
+
+
 def cmd_plan(args: argparse.Namespace) -> int:
     version = validate_slice_version(args.version)
     families = sorted(set(args.family))
@@ -853,6 +1272,9 @@ def cmd_plan(args: argparse.Namespace) -> int:
     slice_roots = _per_family_option(args.slice_root, families, "--slice-root")
     markers_roots = _per_family_option(args.markers_root, families, "--markers-root")
     reductions = _per_family_option(args.reductions_dir, families, "--reductions-dir")
+    reverse_catalogs = _optional_per_family_option(
+        args.reverse_catalog, families, "--reverse-catalog"
+    )
     region = GBM.normalize_region(
         {"name": args.region_name, "bbox": args.bbox, "bbox_scope": args.bbox_scope}
     )
@@ -872,6 +1294,11 @@ def cmd_plan(args: argparse.Namespace) -> int:
             region=region,
             producer_commit=args.producer_commit,
             versions=versions,
+            reverse_catalog=(
+                Path(reverse_catalogs[family])
+                if family in reverse_catalogs
+                else None
+            ),
         )
     plan = {
         "schema": PLAN_SCHEMA,
@@ -1036,6 +1463,21 @@ def _execute_object(
     return "copied"
 
 
+def _verify_prepositioned(
+    item: dict[str, Any], destination: LocalTree | R2Tree
+) -> None:
+    expected = {
+        "bytes": item["bytes"],
+        "sha256": item["sha256"],
+        "content_md5": item.get("content_md5"),
+    }
+    if not check_identity(destination.identity(item["destination_key"]), expected):
+        raise fail(
+            f"prepositioned destination {item['destination_key']} is absent "
+            "or differs from its direct-publication record"
+        )
+
+
 def cmd_execute(args: argparse.Namespace) -> int:
     plan = _load_plan(args.plan)
     source = open_tree(args.source, "--source")
@@ -1044,6 +1486,22 @@ def cmd_execute(args: argparse.Namespace) -> int:
     for family in sorted(plan["families"]):
         value = plan["families"][family]
         derived = _derived_members(family, value)
+        prepositioned = value.get("prepositioned") or []
+        slice_claim = value.get("slice_claim")
+        if slice_claim is not None:
+            _verify_prepositioned(slice_claim, destination)
+        for item in prepositioned:
+            _verify_prepositioned(item, destination)
+        reverse_totals = value.get("reverse_totals")
+        if reverse_totals is not None:
+            validate_reverse_graph(
+                family=family,
+                version=plan["version"],
+                artifacts=value["family_manifest"]["artifacts"],
+                destination=destination,
+                expected_records=reverse_totals["records"],
+                expected_cells=reverse_totals["cells"],
+            )
         if isinstance(source, R2Tree) and isinstance(destination, R2Tree):
             # Each task owns one immutable destination key.  executor.map
             # propagates every worker exception; the manifest is written only
@@ -1073,6 +1531,10 @@ def cmd_execute(args: argparse.Namespace) -> int:
         report[family] = {
             "copied": copied,
             "already_present": skipped,
+            "prepositioned_verified": len(prepositioned),
+            "slice_claim": (
+                "verified" if slice_claim is not None else "not-required"
+            ),
             "routing": derived_states[0],
             "family_manifest": derived_states[1],
         }
@@ -1092,6 +1554,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
     for family in sorted(plan["families"]):
         value = plan["families"][family]
         prefix = f"{version}/families/{family}/"
+        slice_claim = value.get("slice_claim")
+        if slice_claim is not None:
+            _verify_prepositioned(slice_claim, destination)
         expected = {
             item["destination_key"]: {
                 "bytes": item["bytes"],
@@ -1100,6 +1565,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
             }
             for item in value["objects"]
         }
+        expected.update(
+            {
+                item["destination_key"]: {
+                    "bytes": item["bytes"],
+                    "sha256": item["sha256"],
+                    "content_md5": item.get("content_md5"),
+                }
+                for item in value.get("prepositioned") or []
+            }
+        )
         # The derived documents' bytes are reproducible from the plan, so their
         # content MD5 is too -- on R2 that turns the per-key HEAD proof into a
         # stored-byte check for them as well.
@@ -1137,6 +1612,16 @@ def cmd_verify(args: argparse.Namespace) -> int:
         for key in listed:
             if not check_identity(destination.identity(key), expected[key]):
                 raise fail(f"{family} destination object {key} identity differs")
+        reverse_totals = value.get("reverse_totals")
+        if reverse_totals is not None:
+            validate_reverse_graph(
+                family=family,
+                version=version,
+                artifacts=value["family_manifest"]["artifacts"],
+                destination=destination,
+                expected_records=reverse_totals["records"],
+                expected_cells=reverse_totals["cells"],
+            )
         # Routing and the family manifest are re-read FROM THE DESTINATION and
         # their DOWNLOADED bytes are hashed against the plan-recorded digests:
         # this pass proves what a reader will actually fetch, not what a HEAD's
@@ -1150,8 +1635,9 @@ def cmd_verify(args: argparse.Namespace) -> int:
         routing = _load_json_object(routing_bytes, f"{family} routing.json")
         object_keys = {
             PurePosixPath(key).name
-            for key in expected
-            if key not in (value["routing_key"], value["family_manifest_key"])
+            for key in (
+                item["destination_key"] for item in value["objects"]
+            )
         }
         routed = _routing_object_names(routing)
         if not routed <= object_keys:
@@ -1388,6 +1874,14 @@ def main(argv: list[str] | None = None) -> int:
     plan_parser.add_argument("--reductions-dir", action="append", required=True,
                              help="directory of reduction *.json records "
                                   "(repeatable; family=path for per-family)")
+    plan_parser.add_argument(
+        "--reverse-catalog",
+        action="append",
+        default=[],
+        help="direct reverse publication completion JSON (repeatable; "
+        "family=path for per-family). Its artifacts are verified in place and "
+        "attested without copying.",
+    )
     plan_parser.add_argument("--version", required=True,
                              help="destination slice-YYYY-MM-DD.N version")
     plan_parser.add_argument("--release", required=True,

@@ -288,7 +288,12 @@ def build_addresses(root: Path) -> SyntheticSlice:
     return built
 
 
-def plan_args(root: Path, slices: list[SyntheticSlice], output: Path) -> list[str]:
+def plan_args(
+    root: Path,
+    slices: list[SyntheticSlice],
+    output: Path,
+    reverse_catalogs: dict[str, Path] | None = None,
+) -> list[str]:
     args = ["plan", "--source", f"local:{root / 'source'}"]
     for built in slices:
         args += [
@@ -297,6 +302,11 @@ def plan_args(root: Path, slices: list[SyntheticSlice], output: Path) -> list[st
             "--markers-root", f"{built.family}={built.markers_root}",
             "--reductions-dir", f"{built.family}={built.reductions_dir}",
         ]
+        if reverse_catalogs and built.family in reverse_catalogs:
+            args += [
+                "--reverse-catalog",
+                f"{built.family}={reverse_catalogs[built.family]}",
+            ]
     args += [
         "--version", VERSION,
         "--release", RELEASE,
@@ -314,6 +324,126 @@ def both(tmp_path):
 def run_plan(root: Path, slices, output: Path) -> dict:
     assert promote.main(plan_args(root, slices, output)) == 0
     return json.loads(output.read_text())
+
+
+def direct_reverse_publication(
+    root: Path, family: str, destination: Path
+) -> Path:
+    prefix = f"{VERSION}/families/{family}"
+    claim_payload = promote.canonical(
+        {
+            "schema": promote.SLICE_CLAIM_SCHEMA,
+            "version": VERSION,
+            "family": family,
+            "request_sha256": REQUEST_SHA,
+            "overture_release": RELEASE,
+        }
+    )
+    claim_key = f"{VERSION}/claims/{family}.json"
+    claim_path = destination / claim_key
+    claim_path.parent.mkdir(parents=True, exist_ok=True)
+    if claim_path.exists():
+        assert claim_path.read_bytes() == claim_payload
+    else:
+        claim_path.write_bytes(claim_payload)
+    claim = {
+        "key": claim_key,
+        "bytes": len(claim_payload),
+        "sha256": _sha(claim_payload),
+    }
+
+    def write_content(relative: str, payload: bytes, suffix: str) -> dict:
+        sha = _sha(payload)
+        key = f"{prefix}/{relative}/sha256/{sha}{suffix}"
+        path = destination / key
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(payload)
+        return {"key": key, "bytes": len(payload), "sha256": sha}
+
+    data = write_content("reverse/shards", f"{family}-data".encode(), ".plrx")
+    family_code = 1 if family == "places" else 2
+    cell = 0xC085 if family == "places" else 0xC328
+    shard_id = cell >> 12
+    catalog_shards = []
+    for index in range(16):
+        count = 1 if index == shard_id else 0
+        payload = bytearray(
+            promote.REVERSE_CATALOG_HEADER.pack(
+                b"RCAS0001", family_code, 8, index, 0, count
+            )
+        )
+        if count:
+            payload.extend(
+                promote.REVERSE_CATALOG_ENTRY.pack(
+                    cell,
+                    0,
+                    0,
+                    1,
+                    data["bytes"],
+                    1,
+                    bytes.fromhex(data["sha256"]),
+                )
+            )
+        catalog_shards.append(
+            write_content(
+                "reverse/catalog-shards", bytes(payload), ".rcas"
+            )
+        )
+    y, x = cell >> 8, cell & 0xFF
+    root_payload = bytearray(
+        promote.REVERSE_ROOT_HEADER.pack(
+            b"RCAT0001",
+            family_code,
+            8,
+            16,
+            0,
+            2_000 if family == "places" else 500,
+            x * promote.REVERSE_LON_E7_PER_CELL
+            - promote.REVERSE_LON_E7_ORIGIN,
+            y * promote.REVERSE_LAT_E7_PER_CELL
+            - promote.REVERSE_LAT_E7_ORIGIN,
+            (x + 1) * promote.REVERSE_LON_E7_PER_CELL
+            - promote.REVERSE_LON_E7_ORIGIN,
+            (y + 1) * promote.REVERSE_LAT_E7_PER_CELL
+            - promote.REVERSE_LAT_E7_ORIGIN,
+            1,
+            1,
+            0,
+        )
+    )
+    for catalog in catalog_shards:
+        root_payload.extend(
+            promote.REVERSE_ROOT_SHARD.pack(
+                catalog["bytes"], bytes.fromhex(catalog["sha256"])
+            )
+        )
+    assert len(root_payload) == promote.REVERSE_ROOT_BYTES
+    root_key = f"{prefix}/reverse-catalog.rcat"
+    root_path = destination / root_key
+    root_path.parent.mkdir(parents=True, exist_ok=True)
+    root_path.write_bytes(root_payload)
+    root_identity = {
+        "key": root_key,
+        "bytes": len(root_payload),
+        "sha256": _sha(root_payload),
+    }
+    publication = {
+        "schema": promote.REVERSE_CATALOG_SCHEMA,
+        "family": family,
+        "request_sha256": REQUEST_SHA,
+        "records": 1,
+        "cells": 1,
+        "root": root_identity,
+        "catalog_shards": catalog_shards,
+        "slice_claim": claim,
+        "artifacts": sorted(
+            [data, *catalog_shards, root_identity],
+            key=lambda item: item["key"],
+        ),
+    }
+    publication_path = root / f"{family}-reverse-publication.json"
+    publication_path.write_text(json.dumps(publication, sort_keys=True))
+    return publication_path
 
 
 def run_execute(root: Path, plan_path: Path, destination: Path) -> None:
@@ -517,6 +647,154 @@ def test_end_to_end_local(both):
     run_execute(root, plan_path, destination)
     run_verify(plan_path, destination)
     assert plan["version"] == VERSION
+
+
+def test_direct_reverse_artifacts_are_attested_without_copy(tmp_path):
+    built = build_places(tmp_path)
+    destination = tmp_path / "dest"
+    publication = direct_reverse_publication(
+        tmp_path, "places", destination
+    )
+    plan_path = tmp_path / "plan.json"
+    assert (
+        promote.main(
+            plan_args(
+                tmp_path,
+                [built],
+                plan_path,
+                reverse_catalogs={"places": publication},
+            )
+        )
+        == 0
+    )
+    plan = json.loads(plan_path.read_text())
+    family = plan["families"]["places"]
+    assert family["totals"]["prepositioned_objects"] == 18
+    assert family["totals"]["copied_objects"] == len(built.serving)
+
+    reverse_before = {
+        item["destination_key"]: (destination / item["destination_key"]).stat().st_ino
+        for item in family["prepositioned"]
+    }
+    run_execute(tmp_path, plan_path, destination)
+    run_verify(plan_path, destination)
+    reverse_after = {
+        key: (destination / key).stat().st_ino for key in reverse_before
+    }
+    assert reverse_after == reverse_before
+
+    manifest = json.loads(
+        (
+            destination
+            / VERSION
+            / "families/places/family-manifest.json"
+        ).read_text()
+    )
+    attested = {artifact["object_key"] for artifact in manifest["artifacts"]}
+    assert "families/places/reverse-catalog.rcat" in attested
+    assert sum(
+        key.startswith("families/places/reverse/")
+        for key in attested
+    ) == 17
+
+
+def test_combined_plan_can_publish_reverse_for_one_family_only(both):
+    root, slices = both
+    publication = direct_reverse_publication(
+        root, "places", root / "dest"
+    )
+    plan_path = root / "plan-partial-reverse.json"
+    assert (
+        promote.main(
+            plan_args(
+                root,
+                slices,
+                plan_path,
+                reverse_catalogs={"places": publication},
+            )
+        )
+        == 0
+    )
+    plan = json.loads(plan_path.read_text())
+    assert len(plan["families"]["places"]["prepositioned"]) == 18
+    assert plan["families"]["addresses"]["prepositioned"] == []
+
+
+def test_execute_refuses_missing_prepositioned_reverse_artifact(tmp_path):
+    built = build_addresses(tmp_path)
+    destination = tmp_path / "dest"
+    publication = direct_reverse_publication(
+        tmp_path, "addresses", destination
+    )
+    plan_path = tmp_path / "plan.json"
+    assert (
+        promote.main(
+            plan_args(
+                tmp_path,
+                [built],
+                plan_path,
+                reverse_catalogs={"addresses": publication},
+            )
+        )
+        == 0
+    )
+    plan = json.loads(plan_path.read_text())
+    missing = plan["families"]["addresses"]["prepositioned"][0][
+        "destination_key"
+    ]
+    (destination / missing).unlink()
+    with pytest.raises(SystemExit, match="prepositioned destination"):
+        run_execute(tmp_path, plan_path, destination)
+    assert not (
+        destination
+        / VERSION
+        / "families/addresses/family-manifest.json"
+    ).exists()
+
+
+def test_execute_refuses_malformed_reverse_catalog_graph(tmp_path):
+    built = build_places(tmp_path)
+    destination = tmp_path / "dest"
+    publication_path = direct_reverse_publication(
+        tmp_path, "places", destination
+    )
+    publication = json.loads(publication_path.read_text())
+    root_key = publication["root"]["key"]
+    root_path = destination / root_key
+    malformed = bytearray(root_path.read_bytes())
+    malformed[9] = 0  # cell level must be 8
+    root_path.write_bytes(malformed)
+    identity = {
+        "key": root_key,
+        "bytes": len(malformed),
+        "sha256": _sha(malformed),
+    }
+    publication["root"] = identity
+    publication["artifacts"] = [
+        identity if item["key"] == root_key else item
+        for item in publication["artifacts"]
+    ]
+    publication_path.write_text(json.dumps(publication, sort_keys=True))
+
+    plan_path = tmp_path / "plan.json"
+    assert (
+        promote.main(
+            plan_args(
+                tmp_path,
+                [built],
+                plan_path,
+                reverse_catalogs={"places": publication_path},
+            )
+        )
+        == 0
+    )
+    with pytest.raises(SystemExit, match="reverse root contract differs"):
+        run_execute(tmp_path, plan_path, destination)
+    assert not (
+        destination
+        / VERSION
+        / "families/places/family-manifest.json"
+    ).exists()
 
 
 def test_execute_fails_on_tampered_source_bytes(tmp_path):
@@ -1041,6 +1319,64 @@ def test_slice_manifest_end_to_end_feeds_v2_assemble(both):
             "manifest_key": f"{VERSION}/slice-manifest.json",
             "manifest_sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
         }
+
+
+def test_no_copy_reverse_publication_feeds_v2_assemble(both):
+    root, slices = both
+    destination = root / "dest"
+    plan_paths = []
+    for built in slices:
+        publication = direct_reverse_publication(
+            root, built.family, destination
+        )
+        plan_path = root / f"plan-reverse-{built.family}.json"
+        assert (
+            promote.main(
+                plan_args(
+                    root,
+                    [built],
+                    plan_path,
+                    reverse_catalogs={built.family: publication},
+                )
+            )
+            == 0
+        )
+        run_execute(root, plan_path, destination)
+        run_verify(plan_path, destination)
+        plan_paths.append(plan_path)
+
+    source_output = root / "slice-manifest-reverse.json"
+    assert _run_slice_manifest(
+        plan_paths, destination, source_output
+    ) == 0
+    legacy = v2_fixtures.legacy_release(LEGACY, release=RELEASE)
+    legacy_path = destination / LEGACY / "release-manifest.json"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    legacy_path.write_bytes(v2.gbm.canonical_json(legacy))
+    release_out = root / "release-reverse.json"
+    v2.main(
+        [
+            "assemble",
+            "--store", f"local:{destination}",
+            "--geocoder-build", "2026-07-29.0",
+            "--overture-release", RELEASE,
+            "--slice-version", VERSION,
+            "--legacy-core", LEGACY,
+            "--output", str(release_out),
+        ]
+    )
+    release = json.loads(release_out.read_text())
+    v2.validate_release_manifest(release)
+    for family, forward_operation in (
+        ("places", "forward"),
+        ("addresses", "structured_forward"),
+    ):
+        assert release["families"][family]["operations"] == sorted(
+            [forward_operation, "reverse"]
+        )
+        assert release["families"][family]["entrypoints"]["reverse"][
+            "object_key"
+        ] == f"{VERSION}/families/{family}/reverse-catalog.rcat"
 
 
 def test_slice_manifest_is_deterministic_and_republish_is_benign(both):

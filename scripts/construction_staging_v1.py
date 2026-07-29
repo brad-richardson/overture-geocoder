@@ -307,6 +307,24 @@ class StagedObjectStore:
             self._account_released(size)
             path.unlink()
 
+    def release_marker(self, key: str) -> None:
+        """Drop one hydrated marker from the local cache, keeping R2 authoritative.
+
+        Reverse planning streams the full map-marker set once. Address markers are
+        deliberately too large to retain as one fan-in, so this marker-specific
+        method keeps that read bounded without weakening ``release``'s refusal to
+        treat a non-content-addressed marker like an ordinary data object.
+        """
+        if content_addressed_digest(key) is not None:
+            raise ValueError(
+                f"release_marker requires a non-content-addressed marker: {key}"
+            )
+        path = self.local.path(key)
+        if path.is_file():
+            size = path.stat().st_size
+            self._account_released(size)
+            path.unlink()
+
     def read_json(self, key: str) -> dict[str, Any] | None:
         local = self.local.read_json(key)
         if local is not None:

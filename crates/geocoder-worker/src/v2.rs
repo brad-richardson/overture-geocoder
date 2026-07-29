@@ -25,6 +25,7 @@ use crate::places_construction_v1::{
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
 };
+use crate::reverse_construction_v1::{ReverseFamily, ReverseHit};
 use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL, TEXT_MEMO_TTL_MS};
 use crate::stac::{ShardLoader, UserLocation, NOT_FOUND_SENTINEL};
 
@@ -40,9 +41,11 @@ const MAX_V2_CATALOG_BYTES: usize = 1024 * 1024;
 const MAX_V2_RELEASE_BYTES: usize = 1024 * 1024;
 const MAX_READINESS_MANIFEST_BYTES: u64 = 32 * 1024 * 1024;
 const MAX_PLACES_FAMILY_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
+const MAX_REVERSE_CATALOG_OBJECT_BYTES: usize = 688;
 const MAX_FAMILY_MANIFEST_ARTIFACTS: usize = 65_536;
 const FAMILY_MANIFEST_SCHEMA: &str = "overture-global-family-manifest-v1";
 const PLACES_HEAD_ARTIFACT_KEY: &str = "families/places/head.phrp";
+const CAPABILITY_INVALID_SENTINEL: &str = "[v2-capability-invalid]";
 const V2_RELEASE_CACHE_MAX_ENTRIES: usize = 1;
 const MAX_QUERY_BYTES: usize = 200;
 const MAX_RESULTS: usize = 10;
@@ -103,8 +106,8 @@ struct LegacyCore {
 #[derive(Debug, Clone, Deserialize)]
 pub(crate) struct ArtifactIdentity {
     pub object_key: String,
-    bytes: usize,
-    sha256: String,
+    pub(crate) bytes: usize,
+    pub(crate) sha256: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -448,14 +451,24 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
     } else {
         ADDRESS_NORMALIZATION_VERSION
     };
+    let valid_places_operations = name != "places"
+        || (operation_set.contains("forward")
+            && operation_set
+                .iter()
+                .all(|operation| matches!(*operation, "forward" | "reverse")));
+    let valid_address_operations = name != "addresses"
+        || (operation_set.contains("structured_forward")
+            && operation_set
+                .iter()
+                .all(|operation| matches!(*operation, "structured_forward" | "reverse")));
     if (name == "places"
         && ((!places_construction && family.versions.format != PLACES_FORMAT_VERSION)
-            || family.operations != ["forward"]
+            || !valid_places_operations
             || family.versions.tokenizer.as_deref() != Some(TOKENIZER_VERSION)
             || family.versions.normalization.is_some()))
         || (name == "addresses"
             && ((!address_construction && family.versions.format != ADDRESS_FORMAT_VERSION)
-                || family.operations != ["structured_forward"]
+                || !valid_address_operations
                 || family.versions.normalization.as_deref()
                     != Some(expected_address_normalization)
                 || family.versions.tokenizer.is_some()))
@@ -487,14 +500,27 @@ fn validate_family(name: &str, family: &FamilyReference) -> std::result::Result<
     };
     for (operation, identity) in &family.entrypoints {
         let prefix = format!("{}/families/{name}/", family.source.version);
+        let (expected_key, maximum_bytes) = match (name, operation.as_str()) {
+            ("places", "forward") => (places_entrypoint_key.clone(), places_entrypoint_cap),
+            ("addresses", "structured_forward") => {
+                (address_entrypoint_key.clone(), address_entrypoint_cap)
+            }
+            ("places" | "addresses", "reverse") => (
+                format!(
+                    "{}/families/{name}/reverse-catalog.rcat",
+                    family.source.version
+                ),
+                MAX_REVERSE_CATALOG_OBJECT_BYTES,
+            ),
+            _ => return Err(format!("invalid v2 {name} operation")),
+        };
         if !identity.object_key.starts_with(&prefix)
             || !safe_key(&identity.object_key)
             || identity.bytes == 0
             || !valid_sha256(&identity.sha256)
-            || (name == "places" && identity.bytes > places_entrypoint_cap)
-            || (name == "addresses" && identity.bytes > address_entrypoint_cap)
-            || (name == "places" && identity.object_key != places_entrypoint_key)
-            || (name == "addresses" && identity.object_key != address_entrypoint_key)
+            || identity.bytes > maximum_bytes
+            || (operation == "reverse" && identity.bytes != MAX_REVERSE_CATALOG_OBJECT_BYTES)
+            || identity.object_key != expected_key
         {
             return Err(format!("invalid v2 {name} {operation} entrypoint"));
         }
@@ -544,10 +570,13 @@ fn validate_release(
         return Err("v2 release core capabilities are inconsistent".into());
     }
     for (name, family) in &release.families {
-        validate_family(name, family)?;
+        validate_family(name, family)
+            .map_err(|error| format!("{CAPABILITY_INVALID_SENTINEL} {error}"))?;
         for operation in &family.operations {
             if !release.supports(operation, name) {
-                return Err(format!("v2 {name} capability is absent at top level"));
+                return Err(format!(
+                    "{CAPABILITY_INVALID_SENTINEL} v2 {name} capability is absent at top level"
+                ));
             }
         }
     }
@@ -724,6 +753,33 @@ fn family_manifest_artifacts(
     Ok(artifacts)
 }
 
+/// Require every release-advertised family entrypoint to be attested by the
+/// family manifest under its source-relative key. The release readiness gate
+/// still hashes each entrypoint from R2; this closes the other side of the
+/// identity chain without duplicating the expensive data-object verification.
+fn attest_family_entrypoints(
+    artifacts: &AttestedArtifacts,
+    family: &FamilyReference,
+    name: &str,
+) -> std::result::Result<(), String> {
+    let source_prefix = format!("{}/", family.source.version);
+    for (operation, entrypoint) in &family.entrypoints {
+        let relative_key = entrypoint
+            .object_key
+            .strip_prefix(&source_prefix)
+            .ok_or_else(|| format!("v2 {name} {operation} entrypoint is outside its source"))?;
+        let attested = artifacts
+            .get(relative_key)
+            .ok_or_else(|| format!("v2 {name} family manifest omits its {operation} entrypoint"))?;
+        if attested.0 != entrypoint.bytes as u64 || attested.1 != entrypoint.sha256 {
+            return Err(format!(
+                "v2 {name} {operation} identity differs between manifest and release"
+            ));
+        }
+    }
+    Ok(())
+}
+
 /// Admission for the promoted construction layout: authenticate the family
 /// manifest, prove routing.json's bytes against the release-pinned entrypoint
 /// identity, parse and validate the routing table, and require every object it
@@ -734,6 +790,7 @@ fn places_construction_admission(
     family: &FamilyReference,
 ) -> std::result::Result<(AttestedArtifacts, PlacesRouting), String> {
     let artifacts = family_manifest_artifacts(manifest_text, family, "places")?;
+    attest_family_entrypoints(&artifacts, family, "places")?;
     let entrypoint = family
         .entrypoints
         .get("forward")
@@ -834,6 +891,7 @@ fn address_construction_admission(
     family: &FamilyReference,
 ) -> std::result::Result<(AttestedArtifacts, AddressRouting), String> {
     let artifacts = family_manifest_artifacts(manifest_text, family, "addresses")?;
+    attest_family_entrypoints(&artifacts, family, "addresses")?;
     let entrypoint = family
         .entrypoints
         .get("structured_forward")
@@ -1138,6 +1196,13 @@ enum ReleaseAvailability {
 async fn load_available_release(loader: &ShardLoader) -> Result<ReleaseAvailability> {
     match loader.load_v2_release().await {
         Ok(release) => Ok(ReleaseAvailability::Ready(release)),
+        Err(error) if format!("{error:?}").contains(CAPABILITY_INVALID_SENTINEL) => {
+            Ok(ReleaseAvailability::Unavailable(json_error(
+                "capability_unavailable",
+                "the requested v2 capability is not currently available",
+                503,
+            )?))
+        }
         Err(error) if format!("{error:?}").contains(NOT_FOUND_SENTINEL) => {
             Ok(ReleaseAvailability::Unavailable(json_error(
                 "release_unavailable",
@@ -1240,6 +1305,35 @@ fn parse_limit(value: Option<&String>) -> std::result::Result<usize, String> {
         return Err(format!("limit must be between 1 and {MAX_RESULTS}"));
     }
     Ok(limit)
+}
+
+fn parse_reverse_limit(value: Option<&String>) -> std::result::Result<usize, String> {
+    let limit = value.map_or(Ok(1), |raw| {
+        raw.parse::<usize>()
+            .map_err(|_| "limit must be an integer".to_string())
+    })?;
+    if !(1..=MAX_RESULTS).contains(&limit) {
+        return Err(format!("limit must be between 1 and {MAX_RESULTS}"));
+    }
+    Ok(limit)
+}
+
+fn parse_reverse_radius(
+    value: Option<&String>,
+    family: ReverseFamily,
+) -> std::result::Result<u32, String> {
+    let radius = value.map_or(Ok(family.default_radius_m()), |raw| {
+        raw.parse::<u32>()
+            .map_err(|_| "radius must be an integer number of metres".to_string())
+    })?;
+    if radius == 0 || radius > family.maximum_radius_m() {
+        return Err(format!(
+            "radius {radius} is outside the 1..={} metre range for {}",
+            family.maximum_radius_m(),
+            family.feature_type()
+        ));
+    }
+    Ok(radius)
 }
 
 fn normalized_type(value: &str) -> String {
@@ -1403,6 +1497,50 @@ fn place_feature(place: &PlaceProjection) -> (f64, Value) {
             },
         }),
     )
+}
+
+fn reverse_hit_feature(hit: ReverseHit) -> Value {
+    let record = hit.record;
+    match record.family {
+        ReverseFamily::Places => json!({
+            "type": "Feature",
+            "id": record.id,
+            "geometry": {
+                "type": "Point",
+                "coordinates": [record.longitude, record.latitude],
+            },
+            "properties": {
+                "feature_type": "poi",
+                "name": record.primary_name,
+                "brand": record.brand_name,
+                "category": record.category,
+                "locality": record.locality,
+                "region": record.region,
+                "country": record.country,
+                "confidence_rank": record.confidence_rank,
+                "distance_m": hit.distance_m,
+            },
+        }),
+        ReverseFamily::Addresses => json!({
+            "type": "Feature",
+            "id": record.id,
+            "geometry": {
+                "type": "Point",
+                "coordinates": [record.longitude, record.latitude],
+            },
+            "properties": {
+                "feature_type": "address",
+                "street": record.street,
+                "number": record.number,
+                "unit": record.unit,
+                "postcode": record.postcode,
+                "postal_city": record.postal_city,
+                "address_levels": record.address_levels,
+                "display_country": record.display_country,
+                "distance_m": hit.distance_m,
+            },
+        }),
+    }
 }
 
 fn haversine_km(latitude_a: f64, longitude_a: f64, latitude_b: f64, longitude_b: f64) -> f64 {
@@ -1878,26 +2016,60 @@ pub(crate) async fn handle_reverse(
             .map(|value| (*value).to_string())
             .collect()
     };
-    if types.contains("poi") || types.contains("address") {
+    let wants_places = types.contains("poi");
+    let wants_addresses = types.contains("address");
+    let wants_point_reverse = wants_places || wants_addresses;
+    if !wants_point_reverse && params.contains_key("radius") {
         return json_error(
-            "capability_unavailable",
-            "v2 reverse currently supports division types only",
+            "invalid_request",
+            "radius applies only when types includes poi or address",
             400,
         );
     }
+    let limit = if wants_point_reverse {
+        match parse_reverse_limit(params.get("limit")) {
+            Ok(value) => value,
+            Err(message) => return json_error("invalid_request", &message, 400),
+        }
+    } else {
+        1
+    };
+    let places_radius = if wants_places {
+        match parse_reverse_radius(params.get("radius"), ReverseFamily::Places) {
+            Ok(value) => Some(value),
+            Err(message) => return json_error("invalid_request", &message, 400),
+        }
+    } else {
+        None
+    };
+    let address_radius = if wants_addresses {
+        match parse_reverse_radius(params.get("radius"), ReverseFamily::Addresses) {
+            Ok(value) => Some(value),
+            Err(message) => return json_error("invalid_request", &message, 400),
+        }
+    } else {
+        None
+    };
     let loader = ShardLoader::with_context(&ctx.env, ctx.data.clone())?;
     let release = match load_available_release(&loader).await? {
         ReleaseAvailability::Ready(release) => release,
         ReleaseAvailability::Unavailable(response) => return Ok(response),
     };
-    let search = loader
-        .reverse_geocode_version(release.core_version(), latitude, longitude)
-        .await?;
-    let features = search
-        .result
-        .filter(|result| types.contains(&normalized_type(&result.subtype)))
-        .map_or_else(Vec::new, |result| {
-            vec![json!({
+    let division_types: HashSet<_> = types
+        .iter()
+        .filter(|value| DIVISION_TYPES.contains(&value.as_str()))
+        .cloned()
+        .collect();
+    let mut features = Vec::new();
+    if !division_types.is_empty() {
+        let search = loader
+            .reverse_geocode_version(release.core_version(), latitude, longitude)
+            .await?;
+        if let Some(result) = search
+            .result
+            .filter(|result| division_types.contains(&normalized_type(&result.subtype)))
+        {
+            features.push(json!({
                 "type": "Feature",
                 "id": result.gers_id,
                 "geometry": {"type": "Point", "coordinates": [result.lon, result.lat]},
@@ -1909,12 +2081,69 @@ pub(crate) async fn handle_reverse(
                     "confidence": result.confidence,
                     "hierarchy": result.hierarchy,
                 },
-            })]
-        });
+            }));
+        }
+    }
+    let mut reverse_metadata = serde_json::Map::new();
+    for (family_name, family_type, radius) in [
+        ("places", ReverseFamily::Places, places_radius),
+        ("addresses", ReverseFamily::Addresses, address_radius),
+    ] {
+        let Some(radius) = radius else {
+            continue;
+        };
+        let family = release
+            .families
+            .get(family_name)
+            .filter(|family| family.operations.iter().any(|value| value == "reverse"));
+        let Some(family) = family else {
+            return json_error(
+                "capability_unavailable",
+                &format!("{} reverse data is unavailable", family_type.feature_type()),
+                503,
+            );
+        };
+        let Some(entrypoint) = family.entrypoints.get("reverse") else {
+            return json_error(
+                "capability_unavailable",
+                &format!("{} reverse data is unavailable", family_type.feature_type()),
+                503,
+            );
+        };
+        let search = loader
+            .reverse_construction_family(
+                &family.source.version,
+                family_type,
+                &entrypoint.object_key,
+                entrypoint.bytes,
+                &entrypoint.sha256,
+                longitude,
+                latitude,
+                radius,
+                limit,
+            )
+            .await;
+        let search = match search {
+            Ok(value) => value,
+            Err(_) => {
+                return json_error(
+                    "capability_unavailable",
+                    &format!("{} reverse data is unavailable", family_type.feature_type()),
+                    503,
+                )
+            }
+        };
+        features.extend(search.hits.into_iter().map(reverse_hit_feature));
+        reverse_metadata.insert(family_type.feature_type().into(), json!(search.metadata));
+    }
     let body = data_version_body(
         &release.data_version,
         features,
-        json!({"mode": "reverse", "query": {"longitude": longitude, "latitude": latitude}}),
+        json!({
+            "mode": "reverse",
+            "query": {"longitude": longitude, "latitude": latitude},
+            "reverse": reverse_metadata,
+        }),
     );
     versioned_response(&body, &release.data_version, 200)
 }
@@ -2227,6 +2456,37 @@ mod tests {
     #[test]
     fn release_validation_accepts_only_capabilities_the_worker_can_serve() {
         validate_release(&release(), &catalog().releases[0]).unwrap();
+
+        let mut reverse = release_value();
+        for family in ["places", "addresses"] {
+            reverse["families"][family]["operations"]
+                .as_array_mut()
+                .unwrap()
+                .push(json!("reverse"));
+            reverse["families"][family]["entrypoints"]["reverse"] = json!({
+                "object_key": format!(
+                    "slice-2026-07-19.0/families/{family}/reverse-catalog.rcat"
+                ),
+                "bytes": MAX_REVERSE_CATALOG_OBJECT_BYTES,
+                "sha256": sha(),
+            });
+        }
+        reverse["operations"]["reverse"] = json!(["addresses", "divisions", "places"]);
+        let reverse: V2Release = serde_json::from_value(reverse).unwrap();
+        validate_release(&reverse, &catalog().releases[0]).unwrap();
+
+        let mut malformed_reverse = reverse;
+        malformed_reverse
+            .families
+            .get_mut("places")
+            .unwrap()
+            .entrypoints
+            .get_mut("reverse")
+            .unwrap()
+            .bytes -= 1;
+        assert!(validate_release(&malformed_reverse, &catalog().releases[0])
+            .unwrap_err()
+            .contains(CAPABILITY_INVALID_SENTINEL));
 
         let mut bad_format = release();
         bad_format
@@ -2573,6 +2833,45 @@ mod tests {
                 &"f".repeat(64)
             ));
         }
+    }
+
+    #[test]
+    fn construction_admission_requires_reverse_root_manifest_attestation() {
+        let mut fixture = construction_fixture();
+        let mut artifacts =
+            family_manifest_artifacts(&fixture.manifest_text, &fixture.family, "places").unwrap();
+        let reverse_sha = "a".repeat(64);
+        let reverse = ArtifactIdentity {
+            object_key: "slice-2026-07-19.0/families/places/reverse-catalog.rcat".to_string(),
+            bytes: MAX_REVERSE_CATALOG_OBJECT_BYTES,
+            sha256: reverse_sha.clone(),
+        };
+        fixture
+            .family
+            .entrypoints
+            .insert("reverse".to_string(), reverse);
+
+        assert!(
+            attest_family_entrypoints(&artifacts, &fixture.family, "places")
+                .unwrap_err()
+                .contains("omits its reverse entrypoint")
+        );
+
+        artifacts.insert(
+            "families/places/reverse-catalog.rcat".to_string(),
+            (MAX_REVERSE_CATALOG_OBJECT_BYTES as u64, reverse_sha),
+        );
+        attest_family_entrypoints(&artifacts, &fixture.family, "places").unwrap();
+
+        artifacts
+            .get_mut("families/places/reverse-catalog.rcat")
+            .unwrap()
+            .0 -= 1;
+        assert!(
+            attest_family_entrypoints(&artifacts, &fixture.family, "places")
+                .unwrap_err()
+                .contains("identity differs")
+        );
     }
 
     #[test]
@@ -3035,6 +3334,22 @@ mod tests {
         let parsed = parse_types(Some(&raw)).unwrap();
         assert_eq!(parsed, HashSet::from(["poi".into(), "neighborhood".into()]));
         assert!(parse_types(Some(&"planet".to_string())).is_err());
+    }
+
+    #[test]
+    fn reverse_radius_and_limit_defaults_are_family_specific_and_bounded() {
+        assert_eq!(parse_reverse_limit(None).unwrap(), 1);
+        assert_eq!(
+            parse_reverse_radius(None, ReverseFamily::Places).unwrap(),
+            250
+        );
+        assert_eq!(
+            parse_reverse_radius(None, ReverseFamily::Addresses).unwrap(),
+            100
+        );
+        assert!(parse_reverse_radius(Some(&"501".into()), ReverseFamily::Addresses).is_err());
+        assert!(parse_reverse_radius(Some(&"0".into()), ReverseFamily::Places).is_err());
+        assert!(parse_reverse_limit(Some(&"11".into())).is_err());
     }
 
     #[test]

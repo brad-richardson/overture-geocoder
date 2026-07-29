@@ -1,0 +1,405 @@
+name: Build v2 reverse indexes
+
+# Manual, non-promoting reverse construction over the durable per-record
+# artifacts produced by construction-v1. This workflow never reruns a forward
+# map and never updates v2/catalog.json. Execute mode writes immutable reverse
+# shards directly into the named slice namespace, writes request-scoped range
+# completion markers, and writes the catalog completion marker last.
+#
+# A dry run performs the expensive-marker fan-in once, producing the compact
+# authenticated plan and no writes. Execute requires an exact typed
+# confirmation binding the request, family, slice, fixed range count,
+# concurrency, and runner-minute ceiling. Merely merging this workflow launches
+# nothing; workflow_dispatch on main is the only trigger.
+on:
+  workflow_dispatch:
+    inputs:
+      family:
+        description: Point family whose existing per-record artifacts are reduced.
+        required: true
+        type: choice
+        options: [places, addresses]
+      source:
+        description: "<request-sha256>:<construction-run-id> for the completed construction-v1 source."
+        required: true
+        type: string
+      slice_version:
+        description: Immutable destination slice-YYYY-MM-DD.N namespace.
+        required: true
+        type: string
+      mode:
+        description: dry-run plans only; execute publishes create-only reverse artifacts and completion markers.
+        required: true
+        default: dry-run
+        type: choice
+        options: [dry-run, execute]
+      max_parallel:
+        description: Maximum simultaneous bucket-range jobs.
+        required: true
+        default: "2"
+        type: choice
+        options: ["1", "2", "4"]
+      max_total_runner_minutes:
+        description: Operator ceiling carried into the exact execute confirmation.
+        required: true
+        default: "1200"
+        type: string
+      confirmation:
+        description: >-
+          Execute only:
+          EXECUTE_REVERSE_V2::<request-sha256>::FAMILY=<family>::SLICE=<slice_version>::RANGES=16::MAX_PARALLEL=<n>::MAX_TOTAL_RUNNER_MINUTES=<n>
+        required: false
+        default: ""
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  # Reverse writes directly under slice-*/families/* and therefore shares the
+  # same control-plane lock as every other v2/slice publisher.
+  group: r2-v2-publication
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET: geocoder-shards
+  RANGE_COUNT: "16"
+  # Exact sum of every execute-mode job timeout:
+  # plan 180 + 16 range jobs * 45 + catalog 30.
+  EXECUTE_MAX_RUNNER_MINUTES: "930"
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  plan:
+    name: Authenticate construction inputs and stream one compact reverse plan
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    outputs:
+      request_sha256: ${{ steps.plan.outputs.request_sha256 }}
+      construction_run_id: ${{ steps.plan.outputs.construction_run_id }}
+      overture_release: ${{ steps.plan.outputs.overture_release }}
+      expected_records: ${{ steps.plan.outputs.expected_records }}
+      range_matrix: ${{ steps.plan.outputs.range_matrix }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      FAMILY: ${{ inputs.family }}
+      SOURCE: ${{ inputs.source }}
+      SLICE_VERSION: ${{ inputs.slice_version }}
+      MODE: ${{ inputs.mode }}
+      MAX_PARALLEL: ${{ inputs.max_parallel }}
+      MAX_TOTAL_RUNNER_MINUTES: ${{ inputs.max_total_runner_minutes }}
+      CONFIRMATION: ${{ inputs.confirmation }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Validate the exact non-promoting dispatch
+        run: |
+          set -euo pipefail
+          case "$SOURCE" in
+            [0-9a-f][0-9a-f]*:*) ;;
+            *) echo "::error::source must be <request-sha256>:<construction-run-id>"; exit 1 ;;
+          esac
+          REQUEST_SHA256="${SOURCE%%:*}"
+          CONSTRUCTION_RUN_ID="${SOURCE##*:}"
+          printf '%s' "$REQUEST_SHA256" | grep -Eq '^[0-9a-f]{64}$' || {
+            echo "::error::source request digest is not canonical"; exit 1; }
+          printf '%s' "$CONSTRUCTION_RUN_ID" | grep -Eq '^[0-9]+$' || {
+            echo "::error::source construction run id is not numeric"; exit 1; }
+          printf '%s' "$SLICE_VERSION" \
+            | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' || {
+              echo "::error::slice_version must match slice-YYYY-MM-DD.N"; exit 1; }
+          printf '%s' "$MAX_TOTAL_RUNNER_MINUTES" | grep -Eq '^[1-9][0-9]*$' || {
+            echo "::error::max_total_runner_minutes must be positive"; exit 1; }
+          if [ "$MODE" = execute ] \
+            && [ "$MAX_TOTAL_RUNNER_MINUTES" -lt "$EXECUTE_MAX_RUNNER_MINUTES" ]; then
+            echo "::error::max_total_runner_minutes must cover the fail-closed ${EXECUTE_MAX_RUNNER_MINUTES}-minute sum of all job timeouts"
+            exit 1
+          fi
+          EXPECTED="EXECUTE_REVERSE_V2::${REQUEST_SHA256}::FAMILY=${FAMILY}::SLICE=${SLICE_VERSION}::RANGES=${RANGE_COUNT}::MAX_PARALLEL=${MAX_PARALLEL}::MAX_TOTAL_RUNNER_MINUTES=${MAX_TOTAL_RUNNER_MINUTES}"
+          if [ "$MODE" = execute ] && [ "$CONFIRMATION" != "$EXPECTED" ]; then
+            echo "::error::execute confirmation must be exactly: $EXPECTED"
+            exit 1
+          fi
+          {
+            echo "REQUEST_SHA256=$REQUEST_SHA256"
+            echo "CONSTRUCTION_RUN_ID=$CONSTRUCTION_RUN_ID"
+          } >> "$GITHUB_ENV"
+          {
+            echo "## Reverse v2 ${MODE}: ${FAMILY}"
+            echo
+            echo "- Source request: \`${REQUEST_SHA256}\`"
+            echo "- Construction run: \`${CONSTRUCTION_RUN_ID}\`"
+            echo "- Destination: \`${SLICE_VERSION}/families/${FAMILY}/reverse/\`"
+            echo "- Fixed ranges: ${RANGE_COUNT}; max parallel: ${MAX_PARALLEL}"
+            echo "- Execute timeout ceiling: ${EXECUTE_MAX_RUNNER_MINUTES} runner-minutes; operator ceiling: ${MAX_TOTAL_RUNNER_MINUTES}"
+            echo "- This workflow never reruns a forward map and never promotes a catalog."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Authenticate the construction run and task set
+        run: |
+          set -euo pipefail
+          mkdir -p control plan-cache out
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CONSTRUCTION_RUN_ID}" > construction-run.json
+          jq -e '
+            .name == "Construction v1 planet build"
+            and .event == "workflow_dispatch"
+            and .head_branch == "main"
+          ' construction-run.json >/dev/null || {
+            echo "::error::source is not a main-branch construction-v1 dispatch"
+            exit 1
+          }
+          gh run download "$CONSTRUCTION_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name cv1-control --dir control
+          test "$(jq -er '.request_sha256' control/contract.json)" = "$REQUEST_SHA256" || {
+            echo "::error::construction contract request digest differs"; exit 1; }
+          OVERTURE_RELEASE="$(jq -er '.release' control/contract.json)"
+          MATRIX_NAME="${FAMILY}_matrix"
+          [ "$FAMILY" = addresses ] && MATRIX_NAME=address_matrix
+          sed -n "s/^${MATRIX_NAME}=//p" control/matrices.env \
+            | jq -er '.include[].task_id' > task-ids.txt
+          test -s task-ids.txt
+
+          # Forward finalize is the prerequisite marker. It is read and checked,
+          # never modified; reverse consumes only already-published per-record data.
+          MARKERS_ROOT="$(jq -er '.namespaces.markers' control/contract.json)"
+          aws s3api get-object \
+            --bucket "$R2_BUCKET" \
+            --key "${MARKERS_ROOT}finalize/${FAMILY}.json" \
+            --endpoint-url "$R2_ENDPOINT" \
+            --region auto \
+            forward-finalize.json >/dev/null
+          jq -e --arg request "$REQUEST_SHA256" '
+            .schema == "overture-construction-v1-create-only-marker-v1"
+            and .request_sha256 == $request
+            and (.artifacts | type) == "array"
+            and (.artifacts | length) > 0
+          ' forward-finalize.json >/dev/null || {
+            echo "::error::forward finalize marker does not attest this source"; exit 1; }
+          echo "OVERTURE_RELEASE=$OVERTURE_RELEASE" >> "$GITHUB_ENV"
+
+      - name: Refuse finalized destinations and bind execute to one fresh slice
+        run: |
+          set -euo pipefail
+          python -u scripts/reverse_r2_v1.py admit \
+            --family "$FAMILY" \
+            --request-sha256 "$REQUEST_SHA256" \
+            --publish-destination "r2:${R2_BUCKET}" \
+            --version "$SLICE_VERSION" \
+            --overture-release "$OVERTURE_RELEASE" \
+            --mode "$MODE" | tee out/publication-admission.json
+
+      - name: Stream durable map markers once into a compact authenticated plan
+        id: plan
+        run: |
+          set -euo pipefail
+          python -u scripts/reverse_r2_v1.py plan \
+            --family "$FAMILY" \
+            --request-sha256 "$REQUEST_SHA256" \
+            --store-root plan-cache \
+            --staging-bucket "$R2_BUCKET" \
+            --staging-endpoint-url "$R2_ENDPOINT" \
+            --task-ids-file task-ids.txt \
+            --output out/reverse-plan.json | tee out/plan-summary.json
+          EXPECTED_RECORDS="$(jq -er '.expected_records' out/reverse-plan.json)"
+          RANGE_MATRIX="$(jq -cn '
+            {include: [
+              range(0; 16) as $range
+              | {
+                  range_id: $range,
+                  bucket_start: ($range * 16),
+                  bucket_end: ($range * 16 + 15)
+                }
+            ]}')"
+          {
+            echo "request_sha256=$REQUEST_SHA256"
+            echo "construction_run_id=$CONSTRUCTION_RUN_ID"
+            echo "overture_release=$OVERTURE_RELEASE"
+            echo "expected_records=$EXPECTED_RECORDS"
+            echo "range_matrix=$RANGE_MATRIX"
+          } >> "$GITHUB_OUTPUT"
+          {
+            echo "- Compact plan records: ${EXPECTED_RECORDS}"
+            echo "- Marker cache after streaming: $(du -sb plan-cache | awk '{print $1}') bytes"
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ "$MODE" = dry-run ]; then
+            echo "- Dry run complete: no reverse shard, claim, or marker was written." \
+              >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Upload compact plan evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reverse-v2-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            out/
+            task-ids.txt
+            forward-finalize.json
+
+  reduce:
+    name: ${{ inputs.family }} reverse buckets ${{ matrix.bucket_start }}-${{ matrix.bucket_end }}
+    needs: plan
+    if: inputs.mode == 'execute' && needs.plan.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ fromJSON(inputs.max_parallel) }}
+      matrix: ${{ fromJSON(needs.plan.outputs.range_matrix) }}
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Download the compact reverse plan
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: reverse-v2-plan-${{ github.run_id }}-${{ github.run_attempt }}
+          path: plan
+
+      - name: Free disk before bounded range reduction
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Build the reverse encoder and verifier
+        run: >-
+          cargo build --manifest-path crates/Cargo.toml
+          -p geocoder-construction --bin reverse-encode-v1
+          --bin reverse-verify-v1 --release
+
+      - name: Reduce one exact bucket range and publish create-only
+        run: |
+          set -euo pipefail
+          mkdir -p store scratch reductions
+          python -u scripts/reverse_r2_v1.py reduce \
+            --family '${{ inputs.family }}' \
+            --request-sha256 '${{ needs.plan.outputs.request_sha256 }}' \
+            --store-root store \
+            --staging-bucket "$R2_BUCKET" \
+            --staging-endpoint-url "$R2_ENDPOINT" \
+            --publish-destination "r2:${R2_BUCKET}" \
+            --version '${{ inputs.slice_version }}' \
+            --overture-release '${{ needs.plan.outputs.overture_release }}' \
+            --plan plan/out/reverse-plan.json \
+            --bucket-start '${{ matrix.bucket_start }}' \
+            --bucket-end '${{ matrix.bucket_end }}' \
+            --scratch-dir scratch \
+            --encoder-binary crates/target/release/reverse-encode-v1 \
+            --verifier-binary crates/target/release/reverse-verify-v1 \
+            --output 'reductions/range-${{ matrix.range_id }}.json'
+
+      - name: Upload the exact range record
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reverse-v2-range-${{ matrix.range_id }}
+          if-no-files-found: error
+          retention-days: 30
+          path: reductions/
+
+  catalog:
+    name: Reconcile all ranges and publish the binary reverse catalog last
+    needs: [plan, reduce]
+    if: always() && inputs.mode == 'execute' && needs.plan.result == 'success' && needs.reduce.result == 'success'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Download every exact range record
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          pattern: reverse-v2-range-*
+          path: reductions
+          merge-multiple: true
+
+      - name: Assemble and directly publish the fixed binary catalog
+        run: |
+          set -euo pipefail
+          test "$(find reductions -maxdepth 1 -name '*.json' | wc -l)" -eq "$RANGE_COUNT"
+          mkdir -p store scratch out
+          python -u scripts/reverse_r2_v1.py catalog \
+            --family '${{ inputs.family }}' \
+            --request-sha256 '${{ needs.plan.outputs.request_sha256 }}' \
+            --store-root store \
+            --staging-bucket "$R2_BUCKET" \
+            --staging-endpoint-url "$R2_ENDPOINT" \
+            --publish-destination "r2:${R2_BUCKET}" \
+            --version '${{ inputs.slice_version }}' \
+            --overture-release '${{ needs.plan.outputs.overture_release }}' \
+            --reductions-dir reductions \
+            --expected-records '${{ needs.plan.outputs.expected_records }}' \
+            --scratch-dir scratch \
+            --output out/reverse-catalog.json
+          jq -e --argjson expected '${{ needs.plan.outputs.expected_records }}' '
+            .schema == "overture-reverse-catalog-publication-v1"
+            and .records == $expected
+            and .cells > 0
+            and (.catalog_shards | length) == 16
+          ' out/reverse-catalog.json >/dev/null
+
+      - name: Upload durable publication evidence for slice promotion
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reverse-v2-${{ inputs.family }}-catalog
+          if-no-files-found: error
+          retention-days: 90
+          path: out/reverse-catalog.json
