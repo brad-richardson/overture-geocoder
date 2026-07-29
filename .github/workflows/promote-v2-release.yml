@@ -96,16 +96,16 @@ on:
         type: string
       places_source:
         description: >-
-          promote-slice only. "<request-sha256>:<construction-run-id>" naming
-          the Places construction source, optionally followed by
-          ":<reverse-run-id>" to authenticate its completed reverse catalog
-          without copying reverse data. Leave empty to promote no Places family.
+          promote-slice or publish-release. "<request-sha256>:<construction-run-id>"
+          naming the Places construction source, optionally followed by
+          ":<reverse-run-id>". publish-release attaches that completed direct
+          reverse publication without copying forward or reverse data.
         required: false
         default: ""
         type: string
       addresses_source:
         description: >-
-          promote-slice only. Address family in the same
+          promote-slice or publish-release. Address family in the same
           "<request-sha256>:<construction-run-id>[:<reverse-run-id>]" shape as
           places_source. Leave empty to promote no Address family.
         required: false
@@ -238,6 +238,16 @@ jobs:
               require_build geocoder_build "$GEOCODER_BUILD"
               require_build overture_release "$OVERTURE_RELEASE"
               require_build legacy_core "$LEGACY_CORE"
+              require_source places_source "$PLACES_SOURCE"
+              require_source addresses_source "$ADDRESSES_SOURCE"
+              for SOURCE in "$PLACES_SOURCE" "$ADDRESSES_SOURCE"; do
+                [ -z "$SOURCE" ] && continue
+                RUN_AND_REVERSE="${SOURCE#*:}"
+                if [ "${RUN_AND_REVERSE#*:}" = "$RUN_AND_REVERSE" ]; then
+                  echo "::error::publish-release family sources must include :<reverse-run-id>"
+                  exit 1
+                fi
+              done
               require_confirm PUBLISH-RELEASE "$GEOCODER_BUILD"
               ;;
             promote-catalog)
@@ -715,6 +725,11 @@ jobs:
     if: inputs.stage == 'publish-release' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 30
+    permissions:
+      contents: read
+      # Read only the completed reverse-run publication evidence named by the
+      # operator. No GitHub state is mutated.
+      actions: read
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -726,6 +741,8 @@ jobs:
       GEOCODER_BUILD: ${{ inputs.geocoder_build }}
       OVERTURE_RELEASE: ${{ inputs.overture_release }}
       LEGACY_CORE: ${{ inputs.legacy_core }}
+      PLACES_SOURCE: ${{ inputs.places_source }}
+      ADDRESSES_SOURCE: ${{ inputs.addresses_source }}
     steps:
       - name: Check out main without persisted credentials
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
@@ -741,6 +758,49 @@ jobs:
         run: >-
           python -m pip install --only-binary=:all: --require-hashes
           -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Fetch and authenticate optional direct reverse publications
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          mkdir -p reverse
+          fetch_reverse () {
+            local family="$1" source="$2"
+            [ -n "$source" ] || return 0
+            local request="${source%%:*}"
+            local run_and_reverse="${source#*:}"
+            local reverse_run="${run_and_reverse#*:}"
+            mkdir -p "reverse/${family}"
+            gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${reverse_run}" \
+              > "reverse/${family}/run.json"
+            jq -e '
+              .name == "Build v2 reverse indexes"
+              and .event == "workflow_dispatch"
+              and .head_branch == "main"
+              and .status == "completed"
+              and .conclusion == "success"
+            ' "reverse/${family}/run.json" >/dev/null || {
+              echo "::error::${family}: reverse run ${reverse_run} is not a successful main run"
+              exit 1
+            }
+            gh run download "$reverse_run" --repo "$GITHUB_REPOSITORY" \
+              --name "reverse-v2-${family}-catalog" \
+              --dir "reverse/${family}"
+            local publication="reverse/${family}/reverse-catalog.json"
+            jq -e --arg family "$family" --arg request "$request" '
+              .schema == "overture-reverse-catalog-publication-v1"
+              and .family == $family
+              and .request_sha256 == $request
+              and .records > 0
+              and .cells > 0
+            ' "$publication" >/dev/null || {
+              echo "::error::${family}: reverse publication differs from its source"
+              exit 1
+            }
+          }
+          fetch_reverse places "$PLACES_SOURCE"
+          fetch_reverse addresses "$ADDRESSES_SOURCE"
 
       - name: Read the promoted slice manifest and derive its family set
         run: |
@@ -760,9 +820,20 @@ jobs:
         run: |
           set -euo pipefail
           FAMILY_ARGS=()
+          REVERSE_ARGS=()
           while IFS= read -r FAMILY; do
             FAMILY_ARGS+=(--family "$FAMILY")
           done < families.txt
+          if [ -n "$PLACES_SOURCE" ]; then
+            REVERSE_ARGS+=(
+              --reverse-publication "places=reverse/places/reverse-catalog.json"
+            )
+          fi
+          if [ -n "$ADDRESSES_SOURCE" ]; then
+            REVERSE_ARGS+=(
+              --reverse-publication "addresses=reverse/addresses/reverse-catalog.json"
+            )
+          fi
           python -u scripts/v2_release_manifest.py assemble \
             --store "r2:${R2_BUCKET}" \
             --geocoder-build "$GEOCODER_BUILD" \
@@ -770,6 +841,7 @@ jobs:
             --slice-version "$SLICE_VERSION" \
             --legacy-core "$LEGACY_CORE" \
             "${FAMILY_ARGS[@]}" \
+            "${REVERSE_ARGS[@]}" \
             --output release.json | tee assemble.json
           RELEASE_SHA="$(jq -er '.sha256' assemble.json)"
           {

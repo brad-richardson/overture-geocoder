@@ -83,6 +83,8 @@ DEFAULT_FAMILY_OPERATIONS = {
     "addresses": ["structured_forward"],
     "places": ["forward"],
 }
+EXTERNAL_OPERATION_KIND = "reverse_slice"
+SLICE_CLAIM_SCHEMA = "overture-construction-slice-claim-v1"
 # Operation dependencies are keyed by (family, operation, versions.format):
 # the worker's admission requires the canonical global head for the legacy
 # PCSH0001 Places layout, and the routing.json entrypoint for the promoted
@@ -162,6 +164,72 @@ def _require_published_family_artifact_key(
     if not key.startswith(prefix):
         raise ValueError(f"{field} must remain under {prefix}")
     return key
+
+
+def _validate_operation_sources(
+    family: str,
+    reference: dict[str, Any],
+    overture_release: str,
+) -> dict[str, dict[str, Any]]:
+    """Validate the optional, independently claimed source of reverse data."""
+    sources = reference.get("operation_sources", {})
+    if not isinstance(sources, dict) or set(sources) - {"reverse"}:
+        raise ValueError(f"{family} operation_sources may contain only reverse")
+    if set(sources) - set(reference["operations"]):
+        raise ValueError(f"{family} operation_sources advertise an absent operation")
+    normalized: dict[str, dict[str, Any]] = {}
+    for operation, source in sources.items():
+        if not isinstance(source, dict):
+            raise ValueError(f"{family} {operation} operation source must be an object")
+        _require_exact_fields(
+            source,
+            {"kind", "version", "request_sha256", "slice_claim"},
+            f"{family} {operation} operation source",
+        )
+        if source["kind"] != EXTERNAL_OPERATION_KIND:
+            raise ValueError(f"{family} {operation} operation source kind is unsupported")
+        version = _require_key_component(
+            source["version"], f"{family} {operation} source version"
+        )
+        if not SLICE_RE.fullmatch(version):
+            raise ValueError(
+                f"{family} {operation} source version must use slice-YYYY-MM-DD.N"
+            )
+        if version == reference["source"]["version"]:
+            raise ValueError(
+                f"{family} {operation} source must differ from the finalized family source"
+            )
+        request_sha256 = _require_sha256(
+            source["request_sha256"], f"{family} {operation} request SHA-256"
+        )
+        claim = source["slice_claim"]
+        if not isinstance(claim, dict):
+            raise ValueError(f"{family} {operation} slice claim must be an object")
+        _require_exact_fields(
+            claim,
+            {"object_key", "bytes", "sha256"},
+            f"{family} {operation} slice claim",
+        )
+        expected_claim_payload = gbm.canonical_json(
+            {
+                "schema": SLICE_CLAIM_SCHEMA,
+                "version": version,
+                "family": family,
+                "request_sha256": request_sha256,
+                "overture_release": overture_release,
+            }
+        )
+        expected_claim = {
+            "object_key": f"{version}/claims/{family}.json",
+            "bytes": len(expected_claim_payload),
+            "sha256": hashlib.sha256(expected_claim_payload).hexdigest(),
+        }
+        if claim != expected_claim:
+            raise ValueError(
+                f"{family} {operation} slice claim does not bind its release source"
+            )
+        normalized[operation] = source
+    return normalized
 
 
 def _validate_core_object(value: Any, label: str) -> tuple[str, int]:
@@ -453,6 +521,9 @@ def build_release_manifest(
     family_source_manifests: dict[str, tuple[Any, str]] | None = None,
     family_operations: dict[str, list[str]] | None = None,
     family_entrypoints: dict[str, dict[str, str]] | None = None,
+    family_external_operations: (
+        dict[str, dict[str, dict[str, Any]]] | None
+    ) = None,
     generated_at: str | None = None,
 ) -> dict[str, Any]:
     """Bind one legacy core and zero or more optional family manifests."""
@@ -464,6 +535,7 @@ def build_release_manifest(
 
     supplied_operations = family_operations or {}
     supplied_entrypoints = family_entrypoints or {}
+    supplied_external = family_external_operations or {}
     supplied_sources = family_source_manifests or {}
     if set(supplied_sources) != set(family_manifests or {}):
         raise ValueError("every family must have exactly one verified source manifest")
@@ -478,6 +550,12 @@ def build_release_manifest(
         raise ValueError(
             "entrypoints supplied for absent families: "
             f"{sorted(unknown_entrypoint_families)}"
+        )
+    unknown_external_families = set(supplied_external) - set(family_manifests or {})
+    if unknown_external_families:
+        raise ValueError(
+            "external operations supplied for absent families: "
+            f"{sorted(unknown_external_families)}"
         )
 
     references: dict[str, dict[str, Any]] = {}
@@ -506,6 +584,15 @@ def build_release_manifest(
         operations = _normalize_family_operations(
             family, supplied_operations.get(family)
         )
+        external_operations = supplied_external.get(family, {})
+        if not isinstance(external_operations, dict):
+            raise ValueError(f"{family} external operations must be an object")
+        if set(external_operations) - set(operations):
+            raise ValueError(
+                f"{family} external operations advertise an absent operation"
+            )
+        if set(external_operations) - {"reverse"}:
+            raise ValueError(f"{family} only reverse may use an external source")
         entrypoints = supplied_entrypoints.get(family)
         if not isinstance(entrypoints, dict) or set(entrypoints) != set(operations):
             raise ValueError(
@@ -525,6 +612,33 @@ def build_release_manifest(
                     )
         normalized_entrypoints: dict[str, dict[str, Any]] = {}
         for operation, key in sorted(entrypoints.items()):
+            external = external_operations.get(operation)
+            if external is not None:
+                if not isinstance(external, dict):
+                    raise ValueError(
+                        f"{family} {operation} external operation must be an object"
+                    )
+                _require_exact_fields(
+                    external,
+                    {"source", "entrypoint"},
+                    f"{family} {operation} external operation",
+                )
+                identity = external["entrypoint"]
+                if not isinstance(identity, dict):
+                    raise ValueError(
+                        f"{family} {operation} external entrypoint must be an object"
+                    )
+                _require_exact_fields(
+                    identity,
+                    {"object_key", "bytes", "sha256"},
+                    f"{family} {operation} external entrypoint",
+                )
+                if key != identity["object_key"]:
+                    raise ValueError(
+                        f"{family} {operation} external entrypoint key differs"
+                    )
+                normalized_entrypoints[operation] = identity
+                continue
             safe_key = _require_family_artifact_key(
                 key, family, f"{family} {operation} entrypoint"
             )
@@ -541,7 +655,7 @@ def build_release_manifest(
                 "bytes": artifact["bytes"],
                 "sha256": artifact["sha256"],
             }
-        references[family] = {
+        reference = {
             "source": source,
             "manifest_key": (
                 f"{source['version']}/families/{family}/family-manifest.json"
@@ -555,6 +669,13 @@ def build_release_manifest(
             "operations": operations,
             "entrypoints": normalized_entrypoints,
         }
+        if external_operations:
+            reference["operation_sources"] = {
+                operation: external["source"]
+                for operation, external in sorted(external_operations.items())
+            }
+        _validate_operation_sources(family, reference, overture_release)
+        references[family] = reference
 
     _require_consistent_family_source_keys(references)
 
@@ -581,7 +702,7 @@ def build_release_manifest(
         "operations": _derive_operations(references),
     }
     manifest["release_digest"] = gbm.digest(manifest)
-    return manifest
+    return validate_release_manifest(manifest)
 
 
 def validate_release_manifest(manifest: Any) -> dict[str, Any]:
@@ -642,9 +763,7 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
     for family, reference in families.items():
         if family not in gbm.FAMILIES or not isinstance(reference, dict):
             raise ValueError(f"unsupported v2 family reference: {family}")
-        _require_exact_fields(
-            reference,
-            {
+        required_reference_fields = {
                 "source",
                 "manifest_key",
                 "manifest_digest",
@@ -653,9 +772,16 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
                 "coverage",
                 "operations",
                 "entrypoints",
-            },
-            f"{family} family reference",
-        )
+        }
+        if set(reference) not in (
+            required_reference_fields,
+            required_reference_fields | {"operation_sources"},
+        ):
+            raise ValueError(
+                f"{family} family reference fields differ: "
+                f"missing={sorted(required_reference_fields - set(reference))}, "
+                f"unknown={sorted(set(reference) - required_reference_fields - {'operation_sources'})}"
+            )
         source = reference["source"]
         if not isinstance(source, dict):
             raise ValueError(f"{family} source must be an object")
@@ -705,6 +831,9 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
             raise ValueError(
                 f"{family} entrypoints must name exactly its advertised operations"
             )
+        operation_sources = _validate_operation_sources(
+            family, reference, release
+        )
         for operation, identity in entrypoints.items():
             if not isinstance(identity, dict):
                 raise ValueError(f"{family} {operation} entrypoint must be an object")
@@ -713,9 +842,14 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
                 {"object_key", "bytes", "sha256"},
                 f"{family} {operation} entrypoint",
             )
+            entrypoint_version = (
+                operation_sources[operation]["version"]
+                if operation in operation_sources
+                else source_version
+            )
             _require_published_family_artifact_key(
                 identity["object_key"],
-                source_version,
+                entrypoint_version,
                 family,
                 f"{family} {operation} entrypoint",
             )
@@ -725,6 +859,15 @@ def validate_release_manifest(manifest: Any) -> dict[str, Any]:
             _require_sha256(
                 identity["sha256"], f"{family} {operation} entrypoint SHA-256"
             )
+            if operation in operation_sources and (
+                operation != "reverse"
+                or identity["object_key"]
+                != f"{entrypoint_version}/families/{family}/reverse-catalog.rcat"
+                or identity["bytes"] != REVERSE_ROOT_BYTES
+            ):
+                raise ValueError(
+                    f"{family} external reverse entrypoint differs from its fixed layout"
+                )
         normalized_references[family] = reference
 
     _require_consistent_family_source_keys(normalized_references)
@@ -820,7 +963,12 @@ def verify_release_sources(
             }
             for artifact in family_manifest["artifacts"]
         }
+        operation_sources = _validate_operation_sources(
+            family, reference, release
+        )
         for operation, identity in reference["entrypoints"].items():
+            if operation in operation_sources:
+                continue
             if artifacts_by_key.get(identity["object_key"]) != identity:
                 raise ValueError(
                     f"{family} {operation} entrypoint differs from its source artifact"
@@ -1292,6 +1440,19 @@ def _release_sources_from_store(
                     f"{identity['object_key']} does not match its "
                     "release-pinned identity"
                 )
+        for operation, source_reference in sorted(
+            reference.get("operation_sources", {}).items()
+        ):
+            claim = source_reference["slice_claim"]
+            payload, payload_sha = _fetch(
+                store, claim["object_key"], f"{family} {operation} slice claim"
+            )
+            if len(payload) != claim["bytes"] or payload_sha != claim["sha256"]:
+                raise _fail(
+                    f"{family} {operation} slice claim at "
+                    f"{claim['object_key']} does not match its "
+                    "release-pinned identity"
+                )
         family_manifests[family] = (manifest, manifest_sha)
         family_sources[family] = (source, source_sha)
     return {
@@ -1319,6 +1480,95 @@ def _write_catalog_verified(
     written = store.get(catalog_key)
     if written is None or _sha256_bytes(written[0]) != _sha256_bytes(payload):
         raise _fail(f"post-write verification failed for {catalog_key}")
+
+
+def _load_external_reverse_operation(
+    *,
+    family: str,
+    path: Path,
+    overture_release: str,
+    expected_request_sha256: str,
+    publication_tree: Any,
+    promotion: Any,
+) -> dict[str, Any]:
+    """Admit one completed direct reverse publication without copying it."""
+    try:
+        raw = json.loads(path.read_bytes())
+    except (OSError, ValueError) as error:
+        raise _fail(f"{family} reverse publication is unreadable: {path}") from error
+    if not isinstance(raw, dict):
+        raise _fail(f"{family} reverse publication must be a JSON object")
+    request_sha256 = _require_sha256(
+        raw.get("request_sha256"), f"{family} reverse request SHA-256"
+    )
+    if request_sha256 != expected_request_sha256:
+        raise _fail(
+            f"{family} reverse request differs from its forward family build identity"
+        )
+    claim = raw.get("slice_claim")
+    if not isinstance(claim, dict):
+        raise _fail(f"{family} reverse publication omits its slice claim")
+    claim_key = _require_safe_key(
+        claim.get("key"), f"{family} reverse slice claim key"
+    )
+    suffix = f"/claims/{family}.json"
+    if not claim_key.endswith(suffix):
+        raise _fail(f"{family} reverse slice claim key differs from its family")
+    version = claim_key[: -len(suffix)]
+    if not SLICE_RE.fullmatch(version):
+        raise _fail(f"{family} reverse slice version is invalid")
+    try:
+        admitted = promotion._reverse_publication(
+            path=path,
+            family=family,
+            request_sha256=request_sha256,
+            version=version,
+            release=overture_release,
+        )
+        relative_artifacts = [
+            {
+                "object_key": artifact["destination_key"][len(version) + 1 :],
+                "bytes": artifact["bytes"],
+                "sha256": artifact["sha256"],
+            }
+            for artifact in admitted["artifacts"]
+        ]
+        promotion.validate_reverse_graph(
+            family=family,
+            version=version,
+            artifacts=relative_artifacts,
+            destination=publication_tree,
+            expected_records=admitted["records"],
+            expected_cells=admitted["cells"],
+        )
+    except SystemExit as error:
+        raise _fail(
+            f"{family} external reverse catalog graph failed admission: {error}"
+        ) from error
+    root = next(
+        artifact
+        for artifact in admitted["artifacts"]
+        if artifact["destination_key"]
+        == f"{version}/families/{family}/reverse-catalog.rcat"
+    )
+    slice_claim = admitted["slice_claim"]
+    return {
+        "source": {
+            "kind": EXTERNAL_OPERATION_KIND,
+            "version": version,
+            "request_sha256": request_sha256,
+            "slice_claim": {
+                "object_key": slice_claim["destination_key"],
+                "bytes": slice_claim["bytes"],
+                "sha256": slice_claim["sha256"],
+            },
+        },
+        "entrypoint": {
+            "object_key": root["destination_key"],
+            "bytes": root["bytes"],
+            "sha256": root["sha256"],
+        },
+    }
 
 
 def cmd_assemble(args: argparse.Namespace) -> None:
@@ -1353,6 +1603,17 @@ def cmd_assemble(args: argparse.Namespace) -> None:
     family_source_manifests: dict[str, tuple[Any, str]] = {}
     operations: dict[str, list[str]] = {}
     entrypoints: dict[str, dict[str, str]] = {}
+    external_operations: dict[str, dict[str, dict[str, Any]]] = {}
+    reverse_publications: dict[str, Path] = {}
+    for assignment in args.reverse_publication:
+        if "=" not in assignment:
+            raise _fail("--reverse-publication must use FAMILY=PATH")
+        family, path_value = assignment.split("=", 1)
+        if family not in gbm.FAMILIES or not path_value or family in reverse_publications:
+            raise _fail("--reverse-publication must name each supported family once")
+        reverse_publications[family] = Path(path_value)
+    if set(reverse_publications) - set(families):
+        raise _fail("reverse publication supplied for an unselected family")
     for family in families:
         manifest_key = f"{args.slice_version}/families/{family}/family-manifest.json"
         manifest, _, manifest_sha = _fetch_document(
@@ -1458,6 +1719,22 @@ def cmd_assemble(args: argparse.Namespace) -> None:
                 ) from error
             family_operations.append("reverse")
             family_entrypoints["reverse"] = reverse_key
+        if family in reverse_publications:
+            if reverse_recorded is not None:
+                raise _fail(
+                    f"{family} has both in-source and external reverse entrypoints"
+                )
+            external = _load_external_reverse_operation(
+                family=family,
+                path=reverse_publications[family],
+                overture_release=args.overture_release,
+                expected_request_sha256=validated["lineage"]["build_id"],
+                publication_tree=publication_tree,
+                promotion=promotion,
+            )
+            family_operations.append("reverse")
+            family_entrypoints["reverse"] = external["entrypoint"]["object_key"]
+            external_operations[family] = {"reverse": external}
 
         family_manifests[family] = (manifest, manifest_sha)
         family_source_manifests[family] = (source, source_sha)
@@ -1476,6 +1753,7 @@ def cmd_assemble(args: argparse.Namespace) -> None:
         family_source_manifests=family_source_manifests,
         family_operations=operations,
         family_entrypoints=entrypoints,
+        family_external_operations=external_operations,
         generated_at=generated_at,
     )
     for family, reference in release["families"].items():
@@ -1874,6 +2152,13 @@ def main(argv: list[str] | None = None) -> None:
     )
     assemble.add_argument(
         "--family", action="append", choices=sorted(gbm.FAMILIES)
+    )
+    assemble.add_argument(
+        "--reverse-publication",
+        action="append",
+        default=[],
+        metavar="FAMILY=PATH",
+        help="completed direct reverse publication to attach without copying data",
     )
     assemble.add_argument(
         "--generated-at",
