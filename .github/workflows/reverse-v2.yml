@@ -242,41 +242,60 @@ jobs:
             jq -er '.positions.records' forward-family-manifest.json
           )"
 
-          # cv1-control intentionally contains only the durable request/contract
-          # documents, not the admission job's transient matrices.env. Discover
-          # candidate tasks from the request- and family-scoped durable map marker
-          # prefix instead. Every selected marker is re-read and request/task-
-          # validated by reverse_r2_v1.py, then the resulting record total is
-          # reconciled with the authenticated forward manifest above.
-          STAGING_PREFIX="staging/global-v2/${REQUEST_SHA256}/construction-v1/${FAMILY}"
-          if [ "$FAMILY" = places ]; then
-            MAP_MARKER_PREFIX="${STAGING_PREFIX}/map/places-v1/tasks/"
-          else
-            MAP_MARKER_PREFIX="${STAGING_PREFIX}/map/address/tasks/"
-          fi
-          aws s3api list-objects-v2 \
-            --bucket "$R2_BUCKET" \
-            --prefix "$MAP_MARKER_PREFIX" \
-            --endpoint-url "$R2_ENDPOINT" \
-            --region auto \
-            --query 'Contents[].Key' \
-            --output json > durable-map-marker-keys.json
-          jq -er --arg prefix "$MAP_MARKER_PREFIX" '
-            .[]
-            | select(startswith($prefix) and endswith("/complete.json"))
-            | .[($prefix | length):-("/complete.json" | length)]
-            | select(test("^[a-z0-9_-]+$"))
-          ' durable-map-marker-keys.json | sort -u > task-ids.txt
-          LISTED_MARKERS="$(jq -er 'length' durable-map-marker-keys.json)"
+          # cv1-control intentionally contains only durable request/contract
+          # documents, not the admission job's transient matrices.env. Regenerate
+          # that matrix from the authenticated canonical request instead of listing
+          # its staging prefix: the prefix can retain valid markers from superseded
+          # attempts, while admission defines the one exact task set construction
+          # finalized. admit-dispatch also re-verifies the request against the
+          # checked-out inventories, evidence and construction source hashes.
+          CONSTRUCTION_CONFIRMATION="$(
+            jq -er --arg request "$REQUEST_SHA256" '
+              "EXECUTE_CONSTRUCTION_V1::" + $request
+              + "::MODE=execute::MAX_PARALLEL="
+              + (.caps.max_parallel | tostring)
+              + "::MAX_TOTAL_RUNNER_MINUTES="
+              + (.caps.max_total_runner_minutes | tostring)
+              + "::PRIOR_RUNNER_MINUTES="
+              + (.caps.prior_runner_minutes | tostring)
+              + "::MAX_COST_USD="
+              + (.caps.max_cost_usd | tostring)
+            ' control/request.json
+          )"
+          python scripts/construction_v1_control.py admit-dispatch \
+            --request control/request.json \
+            --request-sha256 "$REQUEST_SHA256" \
+            --confirmation "$CONSTRUCTION_CONFIRMATION" \
+            --run-attempt 1 \
+            --github-output control/matrices.env
+          case "$FAMILY" in
+            places)    MATRIX_KEY=places_matrix ;;
+            addresses) MATRIX_KEY=address_matrix ;;
+          esac
+          MAP_MATRIX="$(sed -n "s/^${MATRIX_KEY}=//p" control/matrices.env)"
+          jq -e '
+            (.include | type) == "array"
+            and (.include | length) > 0
+            and all(
+              .include[];
+              (.task_id | type) == "string"
+              and (.task_id | test("^[a-z0-9_-]+$"))
+              and (.task_index | type) == "number"
+              and .task_index >= 0
+            )
+            and (
+              [.include[].task_id] as $task_ids
+              | ($task_ids | length) == ($task_ids | unique | length)
+            )
+          ' <<<"$MAP_MATRIX" >/dev/null || {
+            echo "::error::regenerated construction task matrix is malformed"; exit 1; }
+          jq -er '.include[].task_id' <<<"$MAP_MATRIX" > task-ids.txt
           TASKS="$(wc -l < task-ids.txt)"
-          test "$TASKS" -gt 0 || {
-            echo "::error::durable map marker prefix is empty"; exit 1; }
-          test "$TASKS" -eq "$LISTED_MARKERS" || {
-            echo "::error::durable map marker prefix contains a non-canonical key"; exit 1; }
           {
             echo "OVERTURE_RELEASE=$OVERTURE_RELEASE"
             echo "FORWARD_POSITIONS_RECORDS=$FORWARD_POSITIONS_RECORDS"
           } >> "$GITHUB_ENV"
+          echo "- Canonical construction tasks: ${TASKS}" >> "$GITHUB_STEP_SUMMARY"
 
       - name: Refuse finalized destinations and bind execute to one fresh slice
         run: |
