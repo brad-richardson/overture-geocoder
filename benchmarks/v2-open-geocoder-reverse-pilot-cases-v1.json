@@ -1,0 +1,146 @@
+{
+  "schema": "benchmark-v2-reverse-cases-v1",
+  "meta": {
+    "purpose": "Ad hoc open-geocoder reverse comparison pilot",
+    "source": "Preserved Overture Monaco Places and Seattle Address construction slice artifacts",
+    "limitations": [
+      "Source-derived cases are suitable for harness validation, not an independent quality claim.",
+      "Places are limited to Monaco and Addresses are limited to Seattle."
+    ]
+  },
+  "cases": [
+    {
+      "id": "pilot:place:casino-monte-carlo",
+      "family": "places",
+      "longitude": 7.4280031,
+      "latitude": 43.7390934,
+      "radius_m": 250,
+      "expected_name": "Casino de Monte-Carlo",
+      "alt_names": ["Monte Carlo Casino", "Casino Monte-Carlo"],
+      "tolerance_m": 100
+    },
+    {
+      "id": "pilot:place:monaco-cathedral",
+      "family": "places",
+      "longitude": 7.4222222,
+      "latitude": 43.73,
+      "radius_m": 250,
+      "expected_name": "Cathédrale Notre-Dame-Immaculée de Monaco",
+      "alt_names": [
+        "Cathédrale de Monaco",
+        "Monaco Cathedral",
+        "Saint Nicholas Cathedral"
+      ],
+      "tolerance_m": 100
+    },
+    {
+      "id": "pilot:place:grimaldi-forum",
+      "family": "places",
+      "longitude": 7.4313388,
+      "latitude": 43.7439455,
+      "radius_m": 250,
+      "expected_name": "Grimaldi Forum",
+      "alt_names": ["Grimaldi Forum Monaco"],
+      "tolerance_m": 100
+    },
+    {
+      "id": "pilot:place:stade-louis-ii",
+      "family": "places",
+      "longitude": 7.415771,
+      "latitude": 43.7274599,
+      "radius_m": 250,
+      "expected_name": "Stade Louis II",
+      "alt_names": ["Stade Louis-II", "Louis II Stadium"],
+      "tolerance_m": 100
+    },
+    {
+      "id": "pilot:place:princess-grace-japanese-garden",
+      "family": "places",
+      "longitude": 7.4308396,
+      "latitude": 43.7423317,
+      "radius_m": 250,
+      "expected_name": "Princess Grace Japanese Garden",
+      "alt_names": [
+        "Jardin Japonais Princesse Grace",
+        "Jardin japonais de Monaco",
+        "Japanese Garden"
+      ],
+      "tolerance_m": 100
+    },
+    {
+      "id": "pilot:address:1801-terry",
+      "family": "addresses",
+      "longitude": -122.3327472,
+      "latitude": 47.6155572,
+      "radius_m": 100,
+      "expected_address": {
+        "number": "1801",
+        "street": ["Terry Avenue", "Terry Ave"],
+        "postcode": "98101",
+        "locality": "Seattle",
+        "country_code": "US"
+      },
+      "tolerance_m": 60
+    },
+    {
+      "id": "pilot:address:502-n-47th",
+      "family": "addresses",
+      "longitude": -122.3525017,
+      "latitude": 47.6630978,
+      "radius_m": 100,
+      "expected_address": {
+        "number": "502",
+        "street": ["North 47th Street", "N 47th Street", "N 47th St"],
+        "postcode": "98103",
+        "locality": "Seattle",
+        "country_code": "US"
+      },
+      "tolerance_m": 60
+    },
+    {
+      "id": "pilot:address:7703-11th-sw",
+      "family": "addresses",
+      "longitude": -122.3495291,
+      "latitude": 47.5338875,
+      "radius_m": 100,
+      "expected_address": {
+        "number": "7703",
+        "street": ["11th Avenue Southwest", "11th Ave SW"],
+        "postcode": "98106",
+        "locality": "Seattle",
+        "country_code": "US"
+      },
+      "tolerance_m": 60
+    },
+    {
+      "id": "pilot:address:5602-1st-s",
+      "family": "addresses",
+      "longitude": -122.3339009,
+      "latitude": 47.5525987,
+      "radius_m": 100,
+      "expected_address": {
+        "number": "5602",
+        "street": ["1st Avenue South", "1st Ave S"],
+        "postcode": "98108",
+        "locality": "Seattle",
+        "country_code": "US"
+      },
+      "tolerance_m": 60
+    },
+    {
+      "id": "pilot:address:2207-5th-n",
+      "family": "addresses",
+      "longitude": -122.347348,
+      "latitude": 47.6385615,
+      "radius_m": 100,
+      "expected_address": {
+        "number": "2207",
+        "street": ["5th Avenue North", "5th Ave N"],
+        "postcode": "98109",
+        "locality": "Seattle",
+        "country_code": "US"
+      },
+      "tolerance_m": 60
+    }
+  ]
+}

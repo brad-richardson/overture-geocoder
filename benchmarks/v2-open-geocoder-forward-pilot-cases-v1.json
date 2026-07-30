@@ -1,0 +1,162 @@
+{
+  "schema": "benchmark-v2-forward-cases-v1",
+  "meta": {
+    "purpose": "Ad hoc open-geocoder forward comparison pilot",
+    "source": "Preserved Overture Monaco/Nice Places and Seattle Address construction slice artifacts",
+    "limitations": [
+      "Source-derived cases are suitable for harness validation, not an independent quality claim.",
+      "Places are limited to Monaco/Nice and Addresses are limited to Seattle."
+    ]
+  },
+  "cases": [
+    {
+      "id": "pilot:place:casino-monte-carlo",
+      "kind": "place",
+      "query": "Casino de Monte-Carlo",
+      "query_style": "name",
+      "expected_name": "Casino de Monte-Carlo",
+      "alt_names": ["Casino de Monte Carlo", "Monte Carlo Casino"],
+      "expected_gers_id": "bfb92878-2ecd-422b-a0ad-80acf17e36e8",
+      "expected_lat": 43.73909339,
+      "expected_lon": 7.42800311,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:place:stade-louis-ii-locality",
+      "kind": "place",
+      "query": "Stade Louis II Monaco",
+      "query_style": "name_locality",
+      "expected_name": "Stade Louis II",
+      "alt_names": ["Louis II Stadium"],
+      "expected_gers_id": "e80042b0-dc83-496a-92f5-0b6b73bce102",
+      "expected_lat": 43.72745994,
+      "expected_lon": 7.41577104,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:place:matisse-museum-locality",
+      "kind": "place",
+      "query": "Matisse Museum Nice",
+      "query_style": "name_locality",
+      "expected_name": "Matisse Museum",
+      "alt_names": ["Musée Matisse", "Musee Matisse"],
+      "expected_gers_id": "b98a9bfe-9e3b-48bc-b49a-3ab4b7b2badd",
+      "expected_lat": 43.7195322,
+      "expected_lon": 7.27570599,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:place:marc-chagall-museum",
+      "kind": "place",
+      "query": "Marc Chagall National Museum",
+      "query_style": "name",
+      "expected_name": "Marc Chagall National Museum",
+      "alt_names": [
+        "Musée National Marc Chagall",
+        "Musee National Marc Chagall",
+        "National Marc Chagall Museum"
+      ],
+      "expected_gers_id": "9ed6c571-b1cc-4967-87cc-dc8bc677c305",
+      "expected_lat": 43.70931755,
+      "expected_lon": 7.26976111,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:place:aldi-nord-nice-biased",
+      "kind": "place",
+      "query": "ALDI Nord Nice",
+      "query_style": "name_locality",
+      "expected_name": "ALDI Nord",
+      "alt_names": ["ALDI"],
+      "expected_gers_id": "7e2494dc-1853-45ad-82b7-943a2d2bad7f",
+      "expected_lat": 43.73498985,
+      "expected_lon": 7.29697249,
+      "tolerance_km": 1.0,
+      "proximity": [7.29697249, 43.73498985]
+    },
+    {
+      "id": "pilot:place:theatre-princesse-grace",
+      "kind": "place",
+      "query": "Théâtre Princesse Grace",
+      "query_style": "name",
+      "expected_name": "Théâtre Princesse Grace",
+      "alt_names": ["Theatre Princesse Grace", "Princess Grace Theatre"],
+      "expected_gers_id": "33d4f45d-f2cd-4313-950b-5affda981fd5",
+      "expected_lat": 43.73773997,
+      "expected_lon": 7.42604984,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:address:space-needle",
+      "kind": "address",
+      "query": "400 Broad Street, Seattle, WA 98109, US",
+      "query_style": "structured",
+      "params": {
+        "country": "us",
+        "state": "WA",
+        "city": "Seattle",
+        "postcode": "98109",
+        "street": "BROAD Street",
+        "number": "400"
+      },
+      "expected_gers_id": "a92897f6-a72f-473e-b28d-2bf1b473883d",
+      "expected_lat": 47.6204928,
+      "expected_lon": -122.3493013,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:address:seattle-central-library",
+      "kind": "address",
+      "query": "1000 4th Avenue, Seattle, WA 98104, US",
+      "query_style": "structured",
+      "params": {
+        "country": "us",
+        "state": "WA",
+        "city": "Seattle",
+        "postcode": "98104",
+        "street": "4TH Avenue",
+        "number": "1000"
+      },
+      "expected_gers_id": "fb0bda83-8c20-48a1-be5f-40f992386868",
+      "expected_lat": 47.6064853,
+      "expected_lon": -122.3329682,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:address:lumen-field",
+      "kind": "address",
+      "query": "800 Occidental Avenue South, Seattle, WA 98104, US",
+      "query_style": "structured",
+      "params": {
+        "country": "us",
+        "state": "WA",
+        "city": "Seattle",
+        "postcode": "98104",
+        "street": "OCCIDENTAL Avenue South",
+        "number": "800"
+      },
+      "expected_gers_id": "540c2842-1d61-4110-8e97-f26424b9f525",
+      "expected_lat": 47.5954381,
+      "expected_lon": -122.3315931,
+      "tolerance_km": 1.0
+    },
+    {
+      "id": "pilot:address:t-mobile-park",
+      "kind": "address",
+      "query": "1250 1st Avenue South, Seattle, WA 98134, US",
+      "query_style": "structured",
+      "params": {
+        "country": "us",
+        "state": "WA",
+        "city": "Seattle",
+        "postcode": "98134",
+        "street": "1ST Avenue South",
+        "number": "1250"
+      },
+      "expected_gers_id": "c0616b45-194a-4bbc-8de1-6269c9f0ad48",
+      "expected_lat": 47.5915056,
+      "expected_lon": -122.3330468,
+      "tolerance_km": 1.0
+    }
+  ]
+}

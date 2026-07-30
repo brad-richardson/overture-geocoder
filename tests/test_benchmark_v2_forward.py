@@ -507,6 +507,24 @@ def test_nominatim_omits_bias_box_at_antimeridian():
     assert "bounded" not in params
 
 
+def test_nominatim_maps_conventional_address_locality_aliases():
+    address_case = {
+        "kind": "address",
+        "params": {
+            "country": "us", "state": "WA", "city": "Seattle",
+            "postcode": "98101", "street": "Main St", "number": "12",
+        },
+    }
+    url, params = bench.provider_case_request(
+        "nominatim", address_case, "https://nominatim.test", 10)
+    assert url == "https://nominatim.test/search"
+    assert params == {
+        "format": "jsonv2", "limit": "10", "addressdetails": "1",
+        "street": "12 Main St", "city": "Seattle", "state": "WA",
+        "postalcode": "98101", "countrycodes": "us",
+    }
+
+
 def test_photon_request_shapes_free_text_bias_and_structured_address():
     url, params = bench.provider_case_request(
         "photon", PLACE_CASE, "https://photon.test/", 10)
@@ -530,6 +548,24 @@ def test_photon_request_shapes_free_text_bias_and_structured_address():
     assert params == {
         "limit": "10", "city": "Seattle", "postcode": "98101",
         "housenumber": "12",
+        "street": "Main St", "countrycode": "US",
+    }
+
+
+def test_photon_maps_conventional_address_locality_aliases():
+    address_case = {
+        "kind": "address",
+        "params": {
+            "country": "us", "region": "WA", "city": "Seattle",
+            "postcode": "98101", "street": "Main St", "number": "12",
+        },
+    }
+    url, params = bench.provider_case_request(
+        "photon", address_case, "https://photon.test", 10)
+    assert url == "https://photon.test/structured"
+    assert params == {
+        "limit": "10", "city": "Seattle", "state": "WA",
+        "postcode": "98101", "housenumber": "12",
         "street": "Main St", "countrycode": "US",
     }
 
