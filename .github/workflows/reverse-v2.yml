@@ -72,9 +72,12 @@ env:
   # Leave five minutes inside each 45-minute matrix timeout for setup,
   # artifact upload, and cancellation-safe teardown.
   REDUCE_WALL_SECONDS: "2400"
-  # The Address dictionary projects the largest range at 1.96 GiB from the
-  # measured Seattle slice. A 3 GiB hard cap leaves 53% headroom and bounds all
-  # 16 ranges to 48 GiB before the catalog can be advertised.
+  # The measured Seattle slice projects the largest Address range at 1.96 GiB.
+  # The 3 GiB value is a hard failure bound, not planet-scale admission:
+  # Address execution still requires the operator-authorized representative
+  # probe for densest-cell dictionary cardinality/bytes and a conservative
+  # output projection. The cap bounds all 16 ranges to 48 GiB before the
+  # catalog can be advertised.
   REDUCE_MAX_OUTPUT_BYTES: "3221225472"
   AWS_REQUEST_CHECKSUM_CALCULATION: when_required
   AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
