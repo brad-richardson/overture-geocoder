@@ -166,7 +166,9 @@ def _semantic_expectation(case: dict[str, Any], index: int) -> dict[str, Any] | 
     return expected
 
 
-def validate_cases(value: Any) -> list[dict[str, Any]]:
+def validate_cases(
+    value: Any, *, require_exact_id: bool = True
+) -> list[dict[str, Any]]:
     if not isinstance(value, dict) or value.get("schema") != CASES_SCHEMA:
         raise ValueError(f"case file schema must be {CASES_SCHEMA}")
     cases = value.get("cases")
@@ -187,8 +189,14 @@ def validate_cases(value: Any) -> list[dict[str, Any]]:
             or not case_id
             or case_id in seen
             or family not in FAMILY_TYPES
-            or not isinstance(expected_id, str)
-            or not expected_id
+            or (
+                require_exact_id
+                and (not isinstance(expected_id, str) or not expected_id)
+            )
+            or (
+                expected_id is not None
+                and (not isinstance(expected_id, str) or not expected_id)
+            )
             or isinstance(longitude, bool)
             or not isinstance(longitude, (int, float))
             or not -180 <= longitude <= 180
@@ -203,15 +211,18 @@ def validate_cases(value: Any) -> list[dict[str, Any]]:
         normalized_case = {
             "id": case_id,
             "family": family,
-            "expected_gers_id": expected_id.lower(),
             "longitude": float(longitude),
             "latitude": float(latitude),
             "radius_m": radius,
         }
+        if expected_id is not None:
+            normalized_case["expected_gers_id"] = expected_id.lower()
         semantic_case = {**case, **normalized_case}
         normalized_case["semantic_expectation"] = _semantic_expectation(
             semantic_case, index
         )
+        if not require_exact_id and normalized_case["semantic_expectation"] is None:
+            raise ValueError(f"case {index} lacks semantic gold")
         normalized.append(normalized_case)
         seen.add(case_id)
     return normalized
@@ -805,7 +816,10 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--assert-gates applies only to Overture exact-ID self-recall")
 
     try:
-        cases = validate_cases(json.loads(args.cases.read_text()))
+        cases = validate_cases(
+            json.loads(args.cases.read_text()),
+            require_exact_id=not comparison_mode,
+        )
     except (OSError, ValueError, json.JSONDecodeError) as error:
         parser.error(str(error))
     if comparison_mode:

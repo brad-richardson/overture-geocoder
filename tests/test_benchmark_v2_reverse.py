@@ -89,6 +89,32 @@ def test_case_validation_and_paths_are_family_specific():
         bench.validate_cases(duplicate)
 
 
+def test_provider_neutral_cases_do_not_require_overture_ids():
+    provider_neutral = quality_case("places")
+    provider_neutral.pop("expected_gers_id")
+    value = {"schema": bench.CASES_SCHEMA, "cases": [provider_neutral]}
+
+    normalized = bench.validate_cases(value, require_exact_id=False)
+    assert "expected_gers_id" not in normalized[0]
+    assert normalized[0]["semantic_expectation"]["names"] == [
+        "Central Cafe",
+        "Cafe Central",
+    ]
+
+    with pytest.raises(ValueError, match="case 0 is invalid"):
+        bench.validate_cases(value)
+
+
+def test_provider_neutral_cases_still_require_semantic_gold():
+    provider_neutral = case("places")
+    provider_neutral.pop("expected_gers_id")
+    with pytest.raises(ValueError, match="lacks semantic gold"):
+        bench.validate_cases(
+            {"schema": bench.CASES_SCHEMA, "cases": [provider_neutral]},
+            require_exact_id=False,
+        )
+
+
 def test_server_timing_parser_is_bounded_and_tolerant():
     assert bench.server_timing_ms("total;dur=12.5") == 12.5
     assert bench.server_timing_ms("cache;dur=2, total;dur=8") == 8

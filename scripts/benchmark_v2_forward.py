@@ -576,11 +576,15 @@ def provider_case_request(provider, case, base_url, limit):
             street = " ".join(
                 value for value in (gold.get("number"), gold.get("street")) if value
             )
-            # admin_level_general/specific are opaque first/last Overture
-            # address_levels, not guaranteed state/county semantics.
+            # Canonical admin_level_general/specific remain opaque first/last
+            # Overture address_levels. Only the explicit conventional aliases
+            # are relabeled as state/city for the comparison providers.
+            city = gold.get("city") or gold.get("postal_city")
+            state = gold.get("state") or gold.get("region")
             mappings = (
                 ("street", street),
-                ("city", gold.get("postal_city")),
+                ("city", city),
+                ("state", state),
                 ("postalcode", gold.get("postcode")),
             )
             params.update({key: value for key, value in mappings if value})
@@ -616,8 +620,11 @@ def provider_case_request(provider, case, base_url, limit):
         if case["kind"] == "address":
             gold = case["params"]
             # Do not relabel Overture's opaque address_levels as state/county.
+            city = gold.get("city") or gold.get("postal_city")
+            state = gold.get("state") or gold.get("region")
             mappings = (
-                ("city", gold.get("postal_city")),
+                ("city", city),
+                ("state", state),
                 ("postcode", gold.get("postcode")),
                 ("housenumber", gold.get("number")),
                 ("street", gold.get("street")),
