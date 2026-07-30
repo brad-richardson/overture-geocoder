@@ -166,11 +166,12 @@ jobs:
             echo "- This workflow never reruns a forward map and never promotes a catalog."
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Authenticate the construction run and task set
+      - name: Authenticate the construction source revision
+        id: construction_source
         run: |
           set -euo pipefail
-          mkdir -p control plan-cache out
-          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CONSTRUCTION_RUN_ID}" > construction-run.json
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${CONSTRUCTION_RUN_ID}" \
+            > construction-run.json
           jq -e '
             .name == "Construction v1 planet build"
             and .event == "workflow_dispatch"
@@ -179,6 +180,27 @@ jobs:
             echo "::error::source is not a main-branch construction-v1 dispatch"
             exit 1
           }
+          SOURCE_HEAD_SHA="$(
+            jq -er '.head_sha | select(test("^[0-9a-f]{40}$"))' construction-run.json
+          )"
+          echo "head_sha=$SOURCE_HEAD_SHA" >> "$GITHUB_OUTPUT"
+          echo "SOURCE_HEAD_SHA=$SOURCE_HEAD_SHA" >> "$GITHUB_ENV"
+          echo "- Construction source revision: \`${SOURCE_HEAD_SHA}\`" \
+            >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check out the immutable construction source revision
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ steps.construction_source.outputs.head_sha }}
+          path: construction-source
+          persist-credentials: false
+
+      - name: Authenticate the construction run and task set
+        run: |
+          set -euo pipefail
+          mkdir -p control plan-cache out
+          test "$(git -C construction-source rev-parse HEAD)" = "$SOURCE_HEAD_SHA" || {
+            echo "::error::construction source checkout differs from its run"; exit 1; }
           gh run download "$CONSTRUCTION_RUN_ID" --repo "$GITHUB_REPOSITORY" \
             --name cv1-control --dir control
           test "$(jq -er '.request_sha256' control/contract.json)" = "$REQUEST_SHA256" || {
@@ -260,7 +282,8 @@ jobs:
           # its staging prefix: the prefix can retain valid markers from superseded
           # attempts, while admission defines the one exact task set construction
           # finalized. admit-dispatch also re-verifies the request against the
-          # checked-out inventories, evidence and construction source hashes.
+          # exact historical inventories, evidence, and construction source hashes
+          # used by that run. Reverse planning itself remains on current main.
           CONSTRUCTION_CONFIRMATION="$(
             jq -er --arg request "$REQUEST_SHA256" '
               "EXECUTE_CONSTRUCTION_V1::" + $request
@@ -274,7 +297,7 @@ jobs:
               + (.caps.max_cost_usd | tostring)
             ' control/request.json
           )"
-          python scripts/construction_v1_control.py admit-dispatch \
+          python construction-source/scripts/construction_v1_control.py admit-dispatch \
             --request control/request.json \
             --request-sha256 "$REQUEST_SHA256" \
             --confirmation "$CONSTRUCTION_CONFIRMATION" \
@@ -371,6 +394,7 @@ jobs:
           path: |
             out/
             task-ids.txt
+            construction-run.json
             forward-finalize.json
             forward-family-manifest.json
 

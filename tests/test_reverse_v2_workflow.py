@@ -75,7 +75,30 @@ def test_execute_confirmation_binds_cost_shape_and_destination():
 
 
 def test_plan_regenerates_exact_admitted_tasks_then_streams_the_compact_plan():
+    steps = jobs()["plan"]["steps"]
     script = body("plan")
+    source = next(
+        step
+        for step in steps
+        if step.get("id") == "construction_source"
+    )
+    assert "actions/runs/${CONSTRUCTION_RUN_ID}" in source["run"]
+    assert '.head_sha | select(test("^[0-9a-f]{40}$"))' in source["run"]
+    assert 'echo "head_sha=$SOURCE_HEAD_SHA" >> "$GITHUB_OUTPUT"' in source["run"]
+    historical_checkout = next(
+        step
+        for step in steps
+        if step.get("name") == "Check out the immutable construction source revision"
+    )
+    assert historical_checkout["with"] == {
+        "ref": "${{ steps.construction_source.outputs.head_sha }}",
+        "path": "construction-source",
+        "persist-credentials": False,
+    }
+    assert (
+        'test "$(git -C construction-source rev-parse HEAD)" = "$SOURCE_HEAD_SHA"'
+        in script
+    )
     assert "reverse_r2_v1.py admit" in script
     assert "--publish-destination" in script
     assert '--mode "$MODE"' in script
@@ -94,13 +117,24 @@ def test_plan_regenerates_exact_admitted_tasks_then_streams_the_compact_plan():
     assert "wc -c < forward-family-manifest.json" in script
     assert "FORWARD_POSITIONS_RECORDS" in script
     assert 'test "$EXPECTED_RECORDS" = "$FORWARD_POSITIONS_RECORDS"' in script
-    assert "construction_v1_control.py admit-dispatch" in script
+    assert (
+        "construction-source/scripts/construction_v1_control.py admit-dispatch"
+        in script
+    )
+    assert "python scripts/construction_v1_control.py admit-dispatch" not in script
+    assert "construction-source/scripts/reverse_r2_v1.py" not in script
     assert "--request control/request.json" in script
     assert "--run-attempt 1" in script
     assert "--github-output control/matrices.env" in script
     assert "MATRIX_KEY=places_matrix" in script
     assert "MATRIX_KEY=address_matrix" in script
     assert "list-objects-v2" not in script
+    upload = next(
+        step
+        for step in steps
+        if step.get("name") == "Upload compact plan evidence"
+    )
+    assert "construction-run.json" in upload["with"]["path"]
 
 
 def test_execute_is_sixteen_bounded_ranges_then_one_catalog():
