@@ -59,6 +59,7 @@ const DIVISION_TYPES: &[&str] = &[
     "neighborhood",
     "macrohood",
 ];
+const LOCALITY_SUFFIX_TYPES: &[&str] = &["localadmin", "locality", "neighborhood", "macrohood"];
 
 thread_local! {
     /// Short-lived mutable discovery pointer, aligned with the text memo TTL.
@@ -1684,6 +1685,129 @@ fn place_feature(place: &PlaceProjection) -> (f64, Value) {
     )
 }
 
+#[derive(Debug, Clone, PartialEq)]
+struct LocalitySuffixCandidate {
+    place_query: String,
+    locality_query: String,
+    locality_tokens: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+struct PlacesLocalityInference {
+    locality_query: String,
+    division_id: String,
+    division_type: String,
+    longitude: f64,
+    latitude: f64,
+}
+
+fn locality_suffix_candidates(
+    tokens: &[String],
+    explicit_proximity: bool,
+    global_head_nonempty: bool,
+) -> Vec<LocalitySuffixCandidate> {
+    if explicit_proximity || global_head_nonempty || !(3..=4).contains(&tokens.len()) {
+        return Vec::new();
+    }
+    (1..=2)
+        .rev()
+        .filter(|suffix_length| *suffix_length < tokens.len())
+        .map(|suffix_length| {
+            let split = tokens.len() - suffix_length;
+            let locality_tokens = tokens[split..].to_vec();
+            LocalitySuffixCandidate {
+                place_query: tokens[..split].join(" "),
+                locality_query: locality_tokens.join(" "),
+                locality_tokens,
+            }
+        })
+        .collect()
+}
+
+fn exact_locality_result<'a>(
+    candidate: &LocalitySuffixCandidate,
+    results: &'a [geocoder_core::GeocoderResult],
+) -> Option<&'a geocoder_core::GeocoderResult> {
+    results.iter().find(|result| {
+        LOCALITY_SUFFIX_TYPES.contains(&normalized_type(&result.division_type).as_str())
+            && query_terms(result.primary_name.split(',').next().unwrap_or(""))
+                == candidate.locality_tokens
+    })
+}
+
+fn places_locality_inference(
+    candidate: &LocalitySuffixCandidate,
+    result: &geocoder_core::GeocoderResult,
+) -> (String, PlacesLocalityInference) {
+    (
+        candidate.place_query.clone(),
+        PlacesLocalityInference {
+            locality_query: candidate.locality_query.clone(),
+            division_id: result.gers_id.clone(),
+            division_type: normalized_type(&result.division_type),
+            longitude: result.lon,
+            latitude: result.lat,
+        },
+    )
+}
+
+async fn infer_places_locality(
+    loader: &ShardLoader,
+    core_version: &str,
+    candidates: &[LocalitySuffixCandidate],
+) -> Result<Option<(String, PlacesLocalityInference)>> {
+    let allowed_types: HashSet<String> = LOCALITY_SUFFIX_TYPES
+        .iter()
+        .map(|value| (*value).to_string())
+        .collect();
+    for candidate in candidates {
+        let query = GeocoderQuery::new(&candidate.locality_query)
+            .with_limit(MAX_RESULTS)
+            .with_autocomplete(false)
+            .with_allowed_types(Some(allowed_types.clone()));
+        let search = loader
+            .search_version(core_version, &query, &UserLocation::default(), false)
+            .await?;
+        if let Some(result) = exact_locality_result(candidate, &search.results) {
+            return Ok(Some(places_locality_inference(candidate, result)));
+        }
+    }
+    Ok(None)
+}
+
+fn apply_places_locality_inference(
+    places: &mut [PlaceProjection],
+    inference: &PlacesLocalityInference,
+) -> Value {
+    // The centroid is an inferred routing point, not user proximity. Do not
+    // expose distance from it through the public user-distance field.
+    for place in places {
+        place.distance_km = None;
+    }
+    json!({
+        "query": inference.locality_query,
+        "division_id": inference.division_id,
+        "division_type": inference.division_type,
+        "routing": "locality_centroid",
+    })
+}
+
+fn text_metadata(
+    types: &HashSet<String>,
+    proximity: Option<(f64, f64)>,
+    places_locality_inference: Option<Value>,
+) -> Value {
+    let mut metadata = json!({
+        "mode": "text",
+        "types": types,
+        "proximity": proximity,
+    });
+    if let Some(inference) = places_locality_inference {
+        metadata["places_locality_inference"] = inference;
+    }
+    metadata
+}
+
 fn reverse_hit_feature(hit: ReverseHit) -> Value {
     let record = hit.record;
     match record.family {
@@ -2146,6 +2270,7 @@ pub(crate) async fn handle_forward(
             .await?;
         ranked.extend(search.results.iter().map(division_feature));
     }
+    let mut places_locality_inference = None;
     if types.contains("poi") {
         let places_family = release
             .families
@@ -2163,7 +2288,7 @@ pub(crate) async fn handle_forward(
             );
             return versioned_response(&body, &release.data_version, 200);
         };
-        let places = search_places(
+        let mut places = search_places(
             &loader,
             family,
             query.as_str(),
@@ -2172,6 +2297,24 @@ pub(crate) async fn handle_forward(
             limit,
         )
         .await?;
+        let tokens = query_terms(query);
+        let suffix_candidates =
+            locality_suffix_candidates(&tokens, proximity.is_some(), !places.is_empty());
+        if let Some((place_query, inference)) =
+            infer_places_locality(&loader, release.core_version(), &suffix_candidates).await?
+        {
+            places = search_places(
+                &loader,
+                family,
+                &place_query,
+                Some((inference.longitude, inference.latitude)),
+                false,
+                limit,
+            )
+            .await?;
+            places_locality_inference =
+                Some(apply_places_locality_inference(&mut places, &inference));
+        }
         ranked.extend(places.iter().map(place_feature));
     }
     ranked.sort_by(|left, right| right.0.total_cmp(&left.0));
@@ -2186,7 +2329,7 @@ pub(crate) async fn handle_forward(
     let body = data_version_body(
         &release.data_version,
         features,
-        json!({"mode": "text", "types": types, "proximity": proximity}),
+        text_metadata(&types, proximity, places_locality_inference),
     );
     versioned_response(&body, &release.data_version, 200)
 }
@@ -3786,6 +3929,124 @@ mod tests {
     fn proximity_uses_standard_longitude_latitude_order() {
         let params = HashMap::from([("proximity".into(), "-71.1,42.48".into())]);
         assert_eq!(parse_proximity(&params).unwrap(), Some((-71.1, 42.48)));
+    }
+
+    fn division_result(
+        id: &str,
+        name: &str,
+        division_type: &str,
+        longitude: f64,
+        latitude: f64,
+    ) -> geocoder_core::GeocoderResult {
+        geocoder_core::GeocoderResult {
+            gers_id: id.into(),
+            primary_name: name.into(),
+            lat: latitude,
+            lon: longitude,
+            bbox: [longitude, latitude, longitude, latitude],
+            importance: 1.0,
+            division_type: division_type.into(),
+            country: None,
+            region: None,
+            population: None,
+        }
+    }
+
+    #[test]
+    fn locality_suffix_fallback_is_only_for_empty_context_free_long_heads() {
+        let tokens = query_terms("Museum of Modern Art New York");
+        assert!(locality_suffix_candidates(&tokens, false, false).is_empty());
+
+        let tokens = query_terms("Modern Art New York");
+        let candidates = locality_suffix_candidates(&tokens, false, false);
+        assert_eq!(
+            candidates,
+            vec![
+                LocalitySuffixCandidate {
+                    place_query: "modern art".into(),
+                    locality_query: "new york".into(),
+                    locality_tokens: vec!["new".into(), "york".into()],
+                },
+                LocalitySuffixCandidate {
+                    place_query: "modern art new".into(),
+                    locality_query: "york".into(),
+                    locality_tokens: vec!["york".into()],
+                },
+            ]
+        );
+        assert!(locality_suffix_candidates(&tokens, true, false).is_empty());
+        assert!(locality_suffix_candidates(&tokens, false, true).is_empty());
+        assert!(locality_suffix_candidates(&query_terms("Eiffel Tower"), false, false).is_empty());
+    }
+
+    #[test]
+    fn locality_suffix_match_is_exact_and_locality_like() {
+        let candidate = LocalitySuffixCandidate {
+            place_query: "museum modern art".into(),
+            locality_query: "new york".into(),
+            locality_tokens: vec!["new".into(), "york".into()],
+        };
+        let results = vec![
+            division_result("region", "New York", "region", -75.0, 43.0),
+            division_result("partial", "York", "locality", -1.08, 53.96),
+            division_result("exact", "New York, NY", "locality", -74.006, 40.7128),
+        ];
+        assert_eq!(
+            exact_locality_result(&candidate, &results).map(|result| result.gers_id.as_str()),
+            Some("exact")
+        );
+    }
+
+    #[test]
+    fn locality_suffix_plan_routes_remaining_name_at_the_centroid() {
+        let candidate =
+            locality_suffix_candidates(&query_terms("Matisse Museum Nice"), false, false)
+                .pop()
+                .unwrap();
+        let division = division_result("nice", "Nice", "locality", 7.262, 43.71);
+        let (place_query, inference) = places_locality_inference(&candidate, &division);
+        assert_eq!(place_query, "matisse museum");
+        assert_eq!(inference.locality_query, "nice");
+        assert_eq!((inference.longitude, inference.latitude), (7.262, 43.71));
+    }
+
+    #[test]
+    fn inferred_centroid_distance_is_cleared_and_metadata_is_explicit() {
+        let inference = PlacesLocalityInference {
+            locality_query: "nice".into(),
+            division_id: "nice".into(),
+            division_type: "locality".into(),
+            longitude: 7.262,
+            latitude: 43.71,
+        };
+        let mut places = vec![PlaceProjection {
+            id: "museum".into(),
+            latitude: 43.71,
+            longitude: 7.276,
+            confidence: 0.9,
+            name: "Matisse Museum".into(),
+            category: "museum".into(),
+            locality: "Nice".into(),
+            region: "Provence-Alpes-Cote d'Azur".into(),
+            country: "FR".into(),
+            distance_km: Some(1.1),
+        }];
+        let marker = apply_places_locality_inference(&mut places, &inference);
+        assert_eq!(places[0].distance_km, None);
+        assert_eq!(marker["query"], "nice");
+        assert_eq!(marker["division_id"], "nice");
+        assert_eq!(marker["routing"], "locality_centroid");
+
+        let types = HashSet::from(["poi".into()]);
+        let metadata = text_metadata(&types, None, Some(marker));
+        assert_eq!(
+            metadata["places_locality_inference"]["division_type"],
+            "locality"
+        );
+        assert!(metadata["proximity"].is_null());
+        assert!(text_metadata(&types, None, None)
+            .get("places_locality_inference")
+            .is_none());
     }
 
     #[test]
