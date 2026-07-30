@@ -133,7 +133,7 @@ confirmation.
    adjudication, and report point-biased cases separately: Overture and Photon
    accept point bias while Nominatim's closest portable option is a soft
    viewbox.
-3. Fix the measured forward locality planning issue first, then the
+3. Fix the measured name-only global Places retrieval gap first, then the
    division/POI seam, rerunning this pilot after each scoped change.
 4. Satisfy the Address densest-cell projection gate, then execute and deploy
    the reviewed reverse plans before spending requests on an Overture reverse
