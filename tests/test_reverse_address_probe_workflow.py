@@ -67,6 +67,27 @@ def test_probe_invokes_local_measurement_with_hard_caps_and_no_r2_writes():
         assert forbidden not in script.lower()
 
 
+def test_probe_summarizes_and_uploads_blocked_evidence_after_failure():
+    steps = load()["jobs"]["probe"]["steps"]
+    summary = next(
+        step for step in steps if step["name"] == "Summarize the fail-closed measurement"
+    )
+    upload = next(
+        step for step in steps if step["name"] == "Upload the exact read-only probe evidence"
+    )
+    assert "always()" in summary["if"]
+    assert ".densest_cell.dictionary_cardinalities" in summary["run"]
+    assert ".densest_cell.pre_encoding_dictionary.total_bytes" in summary["run"]
+    assert (
+        ".densest_cell.pre_encoding_dictionary.exceeds_serving_cap"
+        in summary["run"]
+    )
+    assert '.measurement_status == "complete"' in summary["run"]
+    assert "always()" in upload["if"]
+    assert "out/reverse-address-probe.json" in upload["with"]["path"]
+    assert upload["with"]["if-no-files-found"] == "error"
+
+
 def test_every_action_is_sha_pinned():
     for step in load()["jobs"]["probe"]["steps"]:
         uses = step.get("uses")

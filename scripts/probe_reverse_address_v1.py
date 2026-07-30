@@ -20,6 +20,7 @@ import argparse
 import hashlib
 import importlib.util
 import json
+import subprocess
 import sys
 import tempfile
 import time
@@ -59,6 +60,10 @@ DICTIONARY_FIELDS = (
 RANGE_WIDTH = 16
 RANGE_COUNT = 16
 OUTPUT_CAP_BYTES = 3 * 1024**3
+ADDRESS_DICTIONARY_FORMAT = REVERSE.ADDRESS_DICTIONARY_MAGIC.decode("ascii")
+ADDRESS_DICTIONARY_HEADER_BYTES = len(REVERSE.ADDRESS_DICTIONARY_MAGIC) + 4
+ADDRESS_DICTIONARY_FIELD_HEADER_BYTES = 4
+ADDRESS_DICTIONARY_TEXT_LENGTH_BYTES = 2
 
 # Preserved real Seattle execution evidence in
 # docs/plans/2026-07-25-reverse-v2-design.md: the production dictionary encoder
@@ -305,6 +310,69 @@ def dictionary_cardinalities(shard: Any) -> dict[str, int]:
     return values
 
 
+def pre_encoding_dictionary_metrics(connection: Any) -> dict[str, Any]:
+    """Measure the exact ARDX0001 dictionary shape before invoking Rust."""
+    # One aggregation at a time keeps the diagnostic bounded even when several
+    # fields have millions of distinct values.
+    fields = {}
+    for field in DICTIONARY_FIELDS:
+        if field == "address_levels":
+            source = (
+                "SELECT DISTINCT address_level AS value "
+                "FROM reverse_probe, "
+                "UNNEST(address_levels) AS levels(address_level) "
+                "WHERE address_level IS NOT NULL"
+            )
+        else:
+            source = (
+                f"SELECT DISTINCT {field} AS value FROM reverse_probe "
+                f"WHERE {field} IS NOT NULL"
+            )
+        cardinality, value_bytes, max_value_bytes = connection.execute(
+            "SELECT count(*), "
+            "coalesce(sum(octet_length(encode(value))), 0), "
+            "coalesce(max(octet_length(encode(value))), 0) "
+            f"FROM ({source})"
+        ).fetchone()
+        cardinality = int(cardinality)
+        value_bytes = int(value_bytes)
+        fields[field] = {
+            "cardinality": cardinality,
+            "utf8_value_bytes": value_bytes,
+            "encoded_entry_bytes": (
+                value_bytes
+                + cardinality * ADDRESS_DICTIONARY_TEXT_LENGTH_BYTES
+            ),
+            "max_utf8_value_bytes": int(max_value_bytes),
+        }
+    field_header_bytes = (
+        len(DICTIONARY_FIELDS) * ADDRESS_DICTIONARY_FIELD_HEADER_BYTES
+    )
+    encoded_entry_bytes = sum(
+        metrics["encoded_entry_bytes"] for metrics in fields.values()
+    )
+    total_bytes = (
+        ADDRESS_DICTIONARY_HEADER_BYTES
+        + field_header_bytes
+        + encoded_entry_bytes
+    )
+    return {
+        "format": ADDRESS_DICTIONARY_FORMAT,
+        "header_bytes": ADDRESS_DICTIONARY_HEADER_BYTES,
+        "field_header_bytes": field_header_bytes,
+        "encoded_entry_bytes": encoded_entry_bytes,
+        "total_bytes": total_bytes,
+        "serving_cap_bytes": R2.MAX_ADDRESS_DICTIONARY_BYTES,
+        "exceeds_serving_cap": total_bytes > R2.MAX_ADDRESS_DICTIONARY_BYTES,
+        "fields": fields,
+    }
+
+
+def write_result(path: Path, result: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(R2.canonical_json(result) + b"\n")
+
+
 def run_probe(args: argparse.Namespace) -> dict[str, Any]:
     import duckdb
     import pyarrow.ipc as ipc
@@ -385,6 +453,8 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         )
         encode_evidence: dict[str, Any]
         verify_evidence: dict[str, Any]
+        encoder_failure: dict[str, Any] | None = None
+        encoder_succeeded = False
         try:
             with watchdog:
                 columns = ", ".join(R2.R1.ADDRESS_COLUMNS)
@@ -429,6 +499,11 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
                 if observed != (dense_cell, dense_cell):
                     raise ValueError("reverse Address probe loaded another cell")
 
+                dictionary_metrics = pre_encoding_dictionary_metrics(connection)
+                cardinalities = {
+                    field: metrics["cardinality"]
+                    for field, metrics in dictionary_metrics["fields"].items()
+                }
                 level = REVERSE.sub_cell_level(
                     dense_records,
                     dense_cell,
@@ -477,6 +552,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
                         limits, wall_seconds=R2.remaining_wall(started, limits)
                     ),
                 )
+                encoder_succeeded = True
                 verify_evidence = ADDRESS.run_bounded(
                     [
                         str(args.verifier_binary),
@@ -499,11 +575,16 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
                 shard = REVERSE.ReverseShard(shard_path.read_bytes())
                 sidecar = json.loads(sidecar_path.read_text())
                 total_bytes = shard_path.stat().st_size
-                cardinalities = dictionary_cardinalities(shard)
+                if dictionary_cardinalities(shard) != cardinalities:
+                    raise ValueError(
+                        "pre-encoding Address dictionary cardinalities "
+                        "differ from the encoded shard"
+                    )
                 if (
                     shard.cell != dense_cell
                     or shard.records != loaded
                     or shard.dictionary_bytes != sidecar.get("dictionary_bytes")
+                    or shard.dictionary_bytes != dictionary_metrics["total_bytes"]
                     or shard.dictionary_bytes > R2.MAX_ADDRESS_DICTIONARY_BYTES
                     or total_bytes > limits.max_output_bytes
                 ):
@@ -530,15 +611,17 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
                         "reverse Address probe shard framing does not reconcile"
                     )
                 leaves = len(shard.leaf_ranges())
+        except subprocess.CalledProcessError as error:
+            if encoder_succeeded:
+                raise
+            encoder_failure = {
+                "status": "failed",
+                "exit_code": error.returncode,
+                "reason": "production reverse Address encoder exited nonzero",
+            }
         finally:
             connection.close()
 
-    projection = conservative_projection(
-        ranges=ranges,
-        probe_records=dense_records,
-        probe_bytes=framing["total_bytes"],
-        cap_bytes=limits.max_output_bytes,
-    )
     staging_evidence = store.evidence()
     if (
         staging_evidence["staged_objects_published"] != 0
@@ -546,7 +629,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         or staging_evidence["staged_peak_resident_bytes"] > limits.max_scratch_bytes
     ):
         raise ValueError("reverse Address probe violated its read-only staging bounds")
-    result = {
+    base_result = {
         "schema": SCHEMA,
         "read_only": True,
         "family": "addresses",
@@ -558,28 +641,77 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             "source_bytes": sum(pack["object"]["bytes"] for pack in plan["packs"]),
         },
         "directory_scan": directory_evidence,
+    }
+    base_dense_cell = {
+        "partition_cell": dense_cell,
+        "shuffle_bucket": dense_bucket,
+        "records": dense_records,
+        "sub_cell_level": level,
+        "source_packs": len(selected),
+        "source_bytes": source_bytes,
+        "source_objects": source_objects,
+        "loaded_records": loaded,
+        "dictionary_cardinalities": cardinalities,
+        "pre_encoding_dictionary": dictionary_metrics,
+        "dictionary_cardinality_cap": 65_536,
+        "oversized_dictionary_fields": [
+            field for field, count in cardinalities.items() if count > 65_536
+        ],
+    }
+    base_resources = {
+        "whole_probe_wall_seconds": time.monotonic() - started,
+        "watchdog": watchdog.evidence(),
+        "staging": staging_evidence,
+    }
+    if encoder_failure is not None:
+        result = {
+            **base_result,
+            "measurement_status": "encoder_failed",
+            "densest_cell": {
+                **base_dense_cell,
+                "encoded_records": None,
+                "framing": None,
+                "leaves": None,
+                "bytes_per_record": None,
+            },
+            "projection": None,
+            "resources": {
+                **base_resources,
+                "encoder": encoder_failure,
+                "verifier": {
+                    "status": "not_run",
+                    "reason": "production encoder did not produce a verified shard",
+                },
+            },
+            "execute_gate": {
+                "status": "blocked",
+                "reason": "production reverse Address encoder exited nonzero",
+            },
+        }
+        write_result(args.output, result)
+        return result
+
+    projection = conservative_projection(
+        ranges=ranges,
+        probe_records=dense_records,
+        probe_bytes=framing["total_bytes"],
+        cap_bytes=limits.max_output_bytes,
+    )
+    result = {
+        **base_result,
+        "measurement_status": "complete",
         "densest_cell": {
-            "partition_cell": dense_cell,
-            "shuffle_bucket": dense_bucket,
-            "records": dense_records,
-            "sub_cell_level": level,
-            "source_packs": len(selected),
-            "source_bytes": source_bytes,
-            "source_objects": source_objects,
-            "loaded_records": loaded,
+            **base_dense_cell,
             "encoded_records": shard.records,
-            "dictionary_cardinalities": cardinalities,
             "framing": framing,
             "leaves": leaves,
             "bytes_per_record": framing["total_bytes"] / dense_records,
         },
         "projection": projection,
         "resources": {
-            "whole_probe_wall_seconds": time.monotonic() - started,
-            "watchdog": watchdog.evidence(),
+            **base_resources,
             "encoder": encode_evidence,
             "verifier": verify_evidence,
-            "staging": staging_evidence,
         },
         "execute_gate": {
             "status": "pass" if projection["within_cap"] else "blocked",
@@ -592,8 +724,7 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
             ),
         },
     }
-    args.output.parent.mkdir(parents=True, exist_ok=True)
-    args.output.write_bytes(R2.canonical_json(result) + b"\n")
+    write_result(args.output, result)
     return result
 
 
@@ -633,26 +764,37 @@ def main(argv: list[str] | None = None) -> int:
     if args.staging_root and args.staging_endpoint_url:
         raise SystemExit("--staging-endpoint-url is only valid with --staging-bucket")
     result = run_probe(args)
+    summary = {
+        "output": str(args.output),
+        "request_sha256": result["request_sha256"],
+        "plan_sha256": result["plan_sha256"],
+        "densest_cell": result["densest_cell"]["partition_cell"],
+        "densest_records": result["densest_cell"]["records"],
+        "dictionary_cardinalities": result["densest_cell"][
+            "dictionary_cardinalities"
+        ],
+        "projected_ardx0001_dictionary_bytes": result["densest_cell"][
+            "pre_encoding_dictionary"
+        ]["total_bytes"],
+        "ardx0001_dictionary_exceeds_serving_cap": result["densest_cell"][
+            "pre_encoding_dictionary"
+        ]["exceeds_serving_cap"],
+        "measurement_status": result["measurement_status"],
+        "execute_gate": result["execute_gate"]["status"],
+    }
+    if result["measurement_status"] == "complete":
+        summary["dictionary_bytes"] = result["densest_cell"]["framing"][
+            "dictionary_bytes"
+        ]
+        summary["projected_max_range_bytes"] = result["projection"]["maximum_range"][
+            "projected_output_bytes"
+        ]
+    else:
+        summary["encoder_exit_code"] = result["resources"]["encoder"]["exit_code"]
     print(
-        json.dumps(
-            {
-                "output": str(args.output),
-                "request_sha256": result["request_sha256"],
-                "plan_sha256": result["plan_sha256"],
-                "densest_cell": result["densest_cell"]["partition_cell"],
-                "densest_records": result["densest_cell"]["records"],
-                "dictionary_bytes": result["densest_cell"]["framing"][
-                    "dictionary_bytes"
-                ],
-                "projected_max_range_bytes": result["projection"]["maximum_range"][
-                    "projected_output_bytes"
-                ],
-                "execute_gate": result["execute_gate"]["status"],
-            },
-            sort_keys=True,
-        )
+        json.dumps(summary, sort_keys=True)
     )
-    return 0 if result["projection"]["within_cap"] else 2
+    return 0 if result["execute_gate"]["status"] == "pass" else 2
 
 
 if __name__ == "__main__":

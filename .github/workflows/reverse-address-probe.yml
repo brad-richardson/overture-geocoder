@@ -167,10 +167,29 @@ jobs:
             jq -r '
               "- Densest cell: `" + .densest_cell.partition_cell
               + "` (" + (.densest_cell.records | tostring) + " records)",
-              "- Dictionary bytes: " + (.densest_cell.framing.dictionary_bytes | tostring),
-              "- Total shard bytes: " + (.densest_cell.framing.total_bytes | tostring),
-              "- Projected maximum range bytes: "
-                + (.projection.maximum_range.projected_output_bytes | tostring),
+              "- Dictionary cardinalities: "
+                + (.densest_cell.dictionary_cardinalities
+                  | to_entries
+                  | map(.key + "=" + (.value | tostring))
+                  | join(", ")),
+              "- Projected ARDX0001 dictionary bytes: "
+                + (.densest_cell.pre_encoding_dictionary.total_bytes | tostring)
+                + " (8 MiB cap exceeded: `"
+                + (.densest_cell.pre_encoding_dictionary.exceeds_serving_cap
+                  | tostring)
+                + "`)",
+              if .measurement_status == "complete" then
+                "- Dictionary bytes: "
+                  + (.densest_cell.framing.dictionary_bytes | tostring),
+                "- Total shard bytes: "
+                  + (.densest_cell.framing.total_bytes | tostring),
+                "- Projected maximum range bytes: "
+                  + (.projection.maximum_range.projected_output_bytes | tostring)
+              else
+                "- Encoder: `failed` (exit "
+                  + (.resources.encoder.exit_code | tostring) + ")",
+                "- Verifier: `not_run`"
+              end,
               "- 3 GiB gate: `" + .execute_gate.status + "`"
             ' out/reverse-address-probe.json
           } >> "$GITHUB_STEP_SUMMARY"
