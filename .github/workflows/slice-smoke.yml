@@ -608,10 +608,10 @@ jobs:
           # slice exists to span (c328/c329, the level-8 boundary at
           # longitude -122.34375): one shard each, pinned as an exact set so a
           # layout change cannot silently reduce this to a single-cell
-          # fixture. The address model is the measured 122 B/record (design
-          # 104 B plus the 16-byte locator and the u16 level-count prefix);
-          # real Seattle rows run shorter, so only the model identity is
-          # pinned here -- the places job carries the mean-size band.
+          # fixture. The address model is the measured 84 B/record after
+          # repeated strings moved into shard dictionaries. Real Seattle rows
+          # can run shorter, so only the model identity is pinned here -- the
+          # places job carries the mean-size band.
           python scripts/reverse_r1_slice_v1.py \
             --work "$ADDRESS_SLICE_WORK" --family addresses --output slice/address-reverse
           jq -e '
@@ -622,7 +622,7 @@ jobs:
             and .records > 0
             and .records == .artifact_records
             and .artifact_records == .admitted_rows
-            and .model_record_bytes == 122
+            and .model_record_bytes == 84
             and (.mean_record_bytes | numbers) > 0
             and (.per_cell | length) == .shards
           ' slice/address-reverse/summary.json >/dev/null || {
