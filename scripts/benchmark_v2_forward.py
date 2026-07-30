@@ -17,14 +17,16 @@ gers_id, expected coordinates, the query, and a location-bias point jittered
 near the record. Planet-scale sampling straight from R2 (``--r2-prefix``) is a
 stub until credentials/scope are decided.
 
-``run`` executes a case file against ``/v2/forward``. Per case: found@1 and
-found@10 (exact gers_id for self-recall cases, name+distance for the built-in
-sets), rank, distance-km to the expected point, latency. Also runs built-in
-blend-seam cases (names that are both a division and a POI, with and without
-bias), a small multilingual exonym set, and geocoder-tester world cases when
-that checkout exists. Requests are paced under the worker's 60 req/min per-IP
-limit. A 503 ``release_unavailable`` aborts with a clear message and exit
-code 3 — the endpoint answers only after a v2 release is promoted.
+``run`` executes a case file against Overture by default, or against manually
+selected Overture, Nominatim, and Photon providers. Overture-only self-recall
+uses exact gers_id; a multi-provider run scores every provider with the same
+provider-neutral name/address semantics plus distance and never treats provider
+IDs as truth. Nominatim and Photon get their documented structured Address
+requests. Requests are
+sequential, carry an identifiable User Agent, and are paced conservatively for
+public instances. A 503
+``release_unavailable`` from Overture aborts with a clear message and exit code
+3 — the endpoint answers only after a v2 release is promoted.
 
 Usage:
     # Build slice artifacts first (fast loop, ~13 s, no credentials):
@@ -37,6 +39,9 @@ Usage:
         --output v2-cases.json
     python scripts/benchmark_v2_forward.py run --cases v2-cases.json \\
         --output results.json
+    python scripts/benchmark_v2_forward.py run --cases v2-cases.json \\
+        --provider overture --provider nominatim --provider photon \\
+        --output open-geocoders.json
     python scripts/benchmark_v2_forward.py run --cases v2-cases.json \\
         --compare baseline.json --assert-recall 0.9
 
@@ -59,15 +64,30 @@ from pathlib import Path
 import requests
 
 DEFAULT_BASE_URL = "https://geocoder.bradr.dev"
+DEFAULT_NOMINATIM_URL = "https://nominatim.openstreetmap.org"
+DEFAULT_PHOTON_URL = "https://photon.komoot.io"
+USER_AGENT = (
+    "OvertureGeocoderBenchmark/1.0 "
+    "(github.com/brad-richardson/overture-geocoder)"
+)
+PROVIDERS = ("overture", "nominatim", "photon")
+PROVIDER_MIN_INTERVALS = {
+    "overture": 0.0,
+    "nominatim": 1.1,
+    "photon": 1.0,
+}
 CASES_SCHEMA = "benchmark-v2-forward-cases-v1"
 RESULTS_SCHEMA = "benchmark-v2-forward-results-v1"
 GEOCODER_TESTER_DIR = Path.home() / "dev" / "geocoder-tester" / "geocoder_tester" / "world"
 # search_places drops queries above four tokens, so longer names can never
 # self-recall through the POI path; they are excluded at sampling time.
 MAX_QUERY_TOKENS = 4
-# Self-recall kinds are scored by exact gers_id; the rest by name + distance.
+# Overture self-recall kinds are scored by exact gers_id. External providers
+# use the semantic fields and expected coordinates stored in the case.
 SELF_RECALL_KINDS = ("place", "address")
 FOUND_AT = 10
+PLACE_TOLERANCE_KM = 1.0
+ADDRESS_TOLERANCE_KM = 1.0
 
 # The eight structured-address key fields, in the worker's FIELD_NAMES order.
 # admin_level_general/admin_level_specific are the first/last address_levels
@@ -281,9 +301,12 @@ def build_place_cases(records, seed, per_stratum, max_cases):
                 "kind": "place",
                 "query": query,
                 "query_style": style,
+                "expected_name": name,
+                "alt_names": [],
                 "expected_gers_id": gers,
                 "expected_lat": lat,
                 "expected_lon": lon,
+                "tolerance_km": PLACE_TOLERANCE_KM,
                 "proximity": [bias_lon, bias_lat],
                 "strata": place_stratum(record, frequencies),
             })
@@ -369,6 +392,7 @@ def build_address_cases(records, seed, per_stratum, max_cases):
                 "expected_gers_id": gers,
                 "expected_lat": lat,
                 "expected_lon": lon,
+                "tolerance_km": ADDRESS_TOLERANCE_KM,
                 "strata": address_stratum(record),
             })
     cases.sort(key=lambda case: case["id"])
@@ -524,43 +548,305 @@ def load_geocoder_tester_cases(directory, limit, seed):
 
 
 def case_request(case, base_url, limit):
-    """(url, params) for one case."""
-    url = f"{base_url.rstrip('/')}/v2/forward"
-    if case["kind"] == "address":
-        return url, dict(case["params"])
-    params = {"q": case["query"], "limit": str(limit), "autocomplete": "false"}
-    if case.get("proximity"):
-        lon, lat = case["proximity"]
-        params["proximity"] = f"{lon},{lat}"
-    return url, params
+    """Legacy Overture request helper retained for callers and old tests."""
+    return provider_case_request("overture", case, base_url, limit)
+
+
+def provider_case_request(provider, case, base_url, limit):
+    """Return ``(url, params)`` using the provider's closest public contract."""
+    base_url = base_url.rstrip("/")
+    if provider == "overture":
+        url = f"{base_url}/v2/forward"
+        if case["kind"] == "address":
+            return url, dict(case["params"])
+        params = {"q": case["query"], "limit": str(limit), "autocomplete": "false"}
+        if case.get("proximity"):
+            lon, lat = case["proximity"]
+            params["proximity"] = f"{lon},{lat}"
+        return url, params
+
+    if provider == "nominatim":
+        params = {
+            "format": "jsonv2",
+            "limit": str(limit),
+            "addressdetails": "1",
+        }
+        if case["kind"] == "address":
+            gold = case["params"]
+            street = " ".join(
+                value for value in (gold.get("number"), gold.get("street")) if value
+            )
+            # admin_level_general/specific are opaque first/last Overture
+            # address_levels, not guaranteed state/county semantics.
+            mappings = (
+                ("street", street),
+                ("city", gold.get("postal_city")),
+                ("postalcode", gold.get("postcode")),
+            )
+            params.update({key: value for key, value in mappings if value})
+            country = gold.get("country")
+            if country:
+                if re.fullmatch(r"[A-Za-z]{2}", country):
+                    params["countrycodes"] = country.lower()
+                else:
+                    params["country"] = country
+        else:
+            params["q"] = case["query"]
+            if case.get("proximity"):
+                # Nominatim has no point-bias argument. An unbounded viewbox is
+                # its documented soft preference and does not exclude results.
+                lon, lat = case["proximity"]
+                delta = 0.25
+                # Omit the soft bias when this simple box would cross a pole or
+                # the antimeridian; an out-of-range box is not portable.
+                if (
+                    -180 <= lon - delta
+                    and lon + delta <= 180
+                    and -90 <= lat - delta
+                    and lat + delta <= 90
+                ):
+                    params["viewbox"] = (
+                        f"{lon - delta},{lat + delta},{lon + delta},{lat - delta}"
+                    )
+                    params["bounded"] = "0"
+        return f"{base_url}/search", params
+
+    if provider == "photon":
+        params = {"limit": str(limit)}
+        if case["kind"] == "address":
+            gold = case["params"]
+            # Do not relabel Overture's opaque address_levels as state/county.
+            mappings = (
+                ("city", gold.get("postal_city")),
+                ("postcode", gold.get("postcode")),
+                ("housenumber", gold.get("number")),
+                ("street", gold.get("street")),
+            )
+            params.update({key: value for key, value in mappings if value})
+            country = gold.get("country")
+            if country and re.fullmatch(r"[A-Za-z]{2}", country):
+                params["countrycode"] = country.upper()
+            return f"{base_url}/structured", params
+        params["q"] = case["query"]
+        if case.get("proximity"):
+            lon, lat = case["proximity"]
+            params.update({"lon": str(lon), "lat": str(lat)})
+        return f"{base_url}/api/", params
+
+    raise ValueError(f"unknown provider: {provider}")
+
+
+def case_capability(provider, case, semantic_scoring=None):
+    """``(state, reason)`` before spending a public-provider request."""
+    if semantic_scoring is None:
+        semantic_scoring = provider != "overture"
+    if (semantic_scoring and case["kind"] != "address"
+            and not case.get("expected_name")):
+        return (
+            "unscorable",
+            "semantic place scoring requires expected_name; regenerate this case file",
+        )
+    return "supported", None
+
+
+def _float_or_none(value):
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _normalized_feature(name, lon, lat, address=None, feature_id=None):
+    properties = {"name": name or ""}
+    if address:
+        properties["address"] = {
+            key: value for key, value in address.items()
+            if value is not None and value != ""
+        }
+    feature = {
+        "type": "Feature",
+        "geometry": (
+            {"type": "Point", "coordinates": [lon, lat]}
+            if lon is not None and lat is not None else None
+        ),
+        "properties": properties,
+    }
+    if feature_id is not None:
+        feature["id"] = str(feature_id)
+    return feature
+
+
+def normalize_provider_response(provider, body):
+    """Convert public response shapes to a small provider-neutral GeoJSON form."""
+    if provider == "overture":
+        return body.get("features", []) if isinstance(body, dict) else []
+
+    if provider == "nominatim":
+        if not isinstance(body, list):
+            return []
+        features = []
+        for row in body:
+            if not isinstance(row, dict):
+                continue
+            address = row.get("address") if isinstance(row.get("address"), dict) else {}
+            locality = next(
+                (address.get(key) for key in (
+                    "city", "town", "village", "municipality", "hamlet",
+                    "suburb", "neighbourhood",
+                ) if address.get(key)),
+                None,
+            )
+            features.append(_normalized_feature(
+                row.get("name") or (row.get("display_name") or "").split(",")[0],
+                _float_or_none(row.get("lon")),
+                _float_or_none(row.get("lat")),
+                {
+                    "country_code": address.get("country_code"),
+                    "region": address.get("state"),
+                    "county": address.get("county"),
+                    "locality": locality,
+                    "postcode": address.get("postcode"),
+                    "street": (
+                        address.get("road") or address.get("pedestrian")
+                        or address.get("footway") or address.get("path")
+                    ),
+                    "number": address.get("house_number"),
+                    "unit": address.get("unit"),
+                },
+                row.get("place_id"),
+            ))
+        return features
+
+    if provider == "photon":
+        rows = body.get("features", []) if isinstance(body, dict) else []
+        features = []
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            props = row.get("properties") if isinstance(row.get("properties"), dict) else {}
+            geometry = row.get("geometry")
+            coordinates = (
+                geometry.get("coordinates") if isinstance(geometry, dict) else []
+            ) or []
+            lon = _float_or_none(coordinates[0]) if len(coordinates) >= 2 else None
+            lat = _float_or_none(coordinates[1]) if len(coordinates) >= 2 else None
+            features.append(_normalized_feature(
+                props.get("name"),
+                lon,
+                lat,
+                {
+                    "country_code": props.get("countrycode"),
+                    "region": props.get("state"),
+                    "county": props.get("county"),
+                    "locality": (
+                        props.get("city") or props.get("locality")
+                        or props.get("district")
+                    ),
+                    "postcode": props.get("postcode"),
+                    "street": props.get("street"),
+                    "number": props.get("housenumber"),
+                },
+                props.get("osm_id"),
+            ))
+        return features
+
+    raise ValueError(f"unknown provider: {provider}")
+
+
+def provider_response_valid(provider, body):
+    """Whether a successful HTTP response has the provider's result envelope."""
+    if provider == "nominatim":
+        return isinstance(body, list)
+    return (
+        isinstance(body, dict)
+        and isinstance(body.get("features"), list)
+    )
 
 
 def feature_point(feature):
-    coordinates = (feature.get("geometry") or {}).get("coordinates") or []
+    geometry = feature.get("geometry")
+    coordinates = (
+        geometry.get("coordinates") if isinstance(geometry, dict) else []
+    ) or []
     if len(coordinates) < 2:
         return None
     return float(coordinates[1]), float(coordinates[0])
 
 
 def _name_matches(case, feature):
-    observed = (feature.get("properties") or {}).get("name")
+    properties = feature.get("properties")
+    properties = properties if isinstance(properties, dict) else {}
+    observed = properties.get("name")
     if not isinstance(observed, str) or not observed:
         return False
     observed = normalize_name(observed.split(",")[0])
-    accepted = [case["expected_name"], *case.get("alt_names", [])]
-    return any(observed.startswith(normalize_name(name))
-               or normalize_name(name).startswith(observed)
-               for name in accepted if name)
+    accepted = [case.get("expected_name"), *case.get("alt_names", [])]
+    return any(
+        observed == normalize_name(name)
+        for name in accepted
+        if name
+    )
 
 
-def score_case(case, features):
+def _address_matches(case, feature):
+    point = feature_point(feature)
+    expected = (case["expected_lat"], case["expected_lon"])
+    if point is None or haversine_km(*expected, *point) > case.get(
+            "tolerance_km", ADDRESS_TOLERANCE_KM):
+        return False
+    properties = feature.get("properties")
+    properties = properties if isinstance(properties, dict) else {}
+    observed = properties.get("address")
+    # External responses are normalized to a nested address object. Overture's
+    # v2 forward response exposes the same fields directly on properties.
+    if not isinstance(observed, dict):
+        observed = properties
+    gold = case.get("params") or {}
+    number = _normalize_address_number(gold.get("number"))
+    street = _normalize_street(gold.get("street"))
+    observed_number = _normalize_address_number(observed.get("number"))
+    observed_street = _normalize_street(observed.get("street"))
+    # Sampled Address cases always have number and street. Requiring both keeps
+    # a nearby street centroid from counting as the requested address.
+    return bool(
+        number and street
+        and number == observed_number
+        and street == observed_street
+    )
+
+
+def _normalize_address_number(value):
+    return "".join(tokenize(normalize_name(str(value or ""))))
+
+
+def _normalize_street(value):
+    tokens = tokenize(normalize_name(str(value or "")))
+    suffixes = {
+        "ave": "avenue",
+        "blvd": "boulevard",
+        "dr": "drive",
+        "hwy": "highway",
+        "ln": "lane",
+        "rd": "road",
+        "st": "street",
+    }
+    if tokens:
+        tokens[-1] = suffixes.get(tokens[-1], tokens[-1])
+    return " ".join(tokens)
+
+
+def score_case(case, features, provider="overture", semantic_scoring=None):
     """rank (1-based or None), distance to matched feature, top-1 distance."""
+    if semantic_scoring is None:
+        semantic_scoring = provider != "overture"
     expected = (case["expected_lat"], case["expected_lon"])
     rank = matched_distance = None
     for index, feature in enumerate(features):
         point = feature_point(feature)
-        if case["kind"] in SELF_RECALL_KINDS:
+        if not semantic_scoring and case["kind"] in SELF_RECALL_KINDS:
             hit = (feature.get("id") or "").lower() == case["expected_gers_id"]
+        elif case["kind"] == "address":
+            hit = _address_matches(case, feature)
         else:
             hit = (_name_matches(case, feature) and point is not None
                    and haversine_km(*expected, *point) <= case.get("tolerance_km", 50.0))
@@ -581,15 +867,24 @@ def check_release_unavailable(status, body):
 
 
 class Runner:
-    """Paced /v2/forward executor (same pacing scheme as benchmark_latency)."""
+    """Sequential paced forward executor for one provider."""
 
     def __init__(self, base_url, interval, timeout, limit=FOUND_AT,
                  sleep_fn=time.sleep, monotonic_fn=time.monotonic,
-                 rate_limit_retries=1):
+                 rate_limit_retries=1, provider="overture",
+                 user_agent=USER_AGENT, semantic_scoring=None):
+        if provider not in PROVIDERS:
+            raise ValueError(f"unknown provider: {provider}")
+        self.provider = provider
+        self.semantic_scoring = (
+            provider != "overture"
+            if semantic_scoring is None else bool(semantic_scoring)
+        )
         self.base_url = base_url.rstrip("/")
         self.interval = interval
         self.timeout = timeout
         self.limit = limit
+        self.user_agent = user_agent
         self.session = requests.Session()
         self._sleep = sleep_fn
         self._monotonic = monotonic_fn
@@ -609,7 +904,38 @@ class Runner:
         self._last_request = self._monotonic()
 
     def execute(self, case):
-        url, params = case_request(case, self.base_url, self.limit)
+        capability, capability_reason = case_capability(
+            self.provider, case, self.semantic_scoring)
+        if capability != "supported":
+            result = {
+                "provider": self.provider,
+                "scoring_mode": (
+                    "semantic" if self.semantic_scoring else "exact_gers_id"
+                ),
+                "capability": capability,
+                "capability_reason": capability_reason,
+                "case_id": case["id"],
+                "kind": case["kind"],
+                "query": case.get("query"),
+                "query_style": case.get("query_style"),
+                "status": None,
+                "ms": 0.0,
+                "error": None,
+                "rank": None,
+                "found_at_1": False,
+                "found_at_10": False,
+                "matched_distance_km": None,
+                "top1_distance_km": None,
+            }
+            if "strata" in case:
+                result["strata"] = case["strata"]
+            self.results.append(result)
+            print(f"  {case['kind']:<12} {str(case.get('query'))[:40]:<42} "
+                  f"{capability}: {capability_reason}")
+            return result
+
+        url, params = provider_case_request(
+            self.provider, case, self.base_url, self.limit)
         status, body, error = None, None, None
         ms = 0.0
         for attempt in range(self.rate_limit_retries + 1):
@@ -618,7 +944,12 @@ class Runner:
             self._pace()
             start = time.perf_counter()
             try:
-                resp = self.session.get(url, params=params, timeout=self.timeout)
+                resp = self.session.get(
+                    url,
+                    params=params,
+                    headers={"User-Agent": self.user_agent},
+                    timeout=self.timeout,
+                )
                 ms = (time.perf_counter() - start) * 1000
                 status = resp.status_code
                 if status == 429 and attempt < self.rate_limit_retries:
@@ -632,23 +963,34 @@ class Runner:
                     body = resp.json()
                 except ValueError:
                     body = None
-                if self.data_version is None:
+                if self.provider == "overture" and self.data_version is None:
                     self.data_version = resp.headers.get("X-Geocoder-Build")
                 break
             except requests.RequestException as exception:
                 ms = (time.perf_counter() - start) * 1000
                 error = str(exception)
                 break
-        check_release_unavailable(status, body)
+        if self.provider == "overture":
+            check_release_unavailable(status, body)
 
-        features = body.get("features", []) if isinstance(body, dict) else []
+        features = normalize_provider_response(self.provider, body)
         ok = status is not None and 200 <= status < 400
+        if ok and not provider_response_valid(self.provider, body):
+            ok = False
+            error = "invalid response shape"
         rank = matched_distance = top1_distance = None
         if ok:
-            rank, matched_distance, top1_distance = score_case(case, features)
+            rank, matched_distance, top1_distance = score_case(
+                case, features, self.provider, self.semantic_scoring)
         elif error is None:
             error = f"http {status}"
         result = {
+            "provider": self.provider,
+            "scoring_mode": (
+                "semantic" if self.semantic_scoring else "exact_gers_id"
+            ),
+            "capability": "supported",
+            "capability_reason": None,
             "case_id": case["id"],
             "kind": case["kind"],
             "query": case.get("query"),
@@ -687,6 +1029,10 @@ def _percentile(values, percentile):
 
 
 def _aggregate(rows):
+    requested = len(rows)
+    unsupported = sum(row.get("capability") == "unsupported" for row in rows)
+    unscorable = sum(row.get("capability") == "unscorable" for row in rows)
+    rows = [row for row in rows if row.get("capability", "supported") == "supported"]
     successful = [row for row in rows if row["error"] is None]
     found1 = sum(row["found_at_1"] for row in rows)
     found5 = sum(
@@ -700,6 +1046,9 @@ def _aggregate(rows):
     latencies = [row["ms"] for row in successful]
     denominator = len(rows)
     return {
+        "requested": requested,
+        "unsupported": unsupported,
+        "unscorable": unscorable,
         "n": denominator,
         "errors": denominator - len(successful),
         "found_at_1": found1,
@@ -804,7 +1153,17 @@ def print_comparison(baseline_payload, current_summary, threshold):
     return regressions
 
 
-def print_summary(summary):
+def print_summary(summary, provider=None):
+    if provider:
+        print(f"\n=== {provider} ===")
+    overall = summary["overall"]
+    excluded = overall.get("requested", overall["n"]) - overall["n"]
+    if excluded:
+        print(
+            f"capability exclusions: {excluded} "
+            f"({overall.get('unsupported', 0)} unsupported, "
+            f"{overall.get('unscorable', 0)} unscorable)"
+        )
     print(f"\n{'group':<44}{'n':>4}{'err':>4}{'r@1':>7}{'r@5':>7}{'r@10':>7}"
           f"{'mrr':>7}{'med km':>8}{'p50ms':>7}{'p95ms':>7}")
     print("-" * 92)
@@ -933,20 +1292,78 @@ def run_run(args):
         print("no cases to run", file=sys.stderr)
         return 2
 
-    print(f"{len(cases)} cases at {args.interval}s spacing "
-          f"(~{len(cases) * args.interval / 60:.1f} min) against {args.base_url}\n")
-    runner = Runner(args.base_url, args.interval, args.timeout)
-    try:
-        for case in cases:
-            runner.execute(case)
-    except ReleaseUnavailableError as exception:
-        print(f"\nAborting: /v2/forward returned 503 release_unavailable "
-              f"({exception}).\nThe v2 endpoint answers only after a v2 release "
-              f"is promoted; re-run once promotion lands.", file=sys.stderr)
-        return 3
+    providers = list(dict.fromkeys(args.provider or ["overture"]))
+    comparison_mode = any(provider != "overture" for provider in providers)
+    if comparison_mode and (
+            args.compare is not None or args.assert_recall is not None):
+        print(
+            "--compare and --assert-recall apply only to Overture-only "
+            "exact-ID self-recall runs",
+            file=sys.stderr,
+        )
+        return 2
+    provider_urls = {
+        "overture": args.base_url,
+        "nominatim": args.nominatim_url,
+        "photon": args.photon_url,
+    }
+    intervals = {
+        provider: max(args.interval, PROVIDER_MIN_INTERVALS[provider])
+        for provider in providers
+    }
+    estimate_s = sum(len(cases) * intervals[provider] for provider in providers)
+    print(f"{len(cases)} cases across {', '.join(providers)} "
+          f"(~{estimate_s / 60:.1f} min, sequential)\n")
 
-    summary = summarize_results(runner.results)
-    print_summary(summary)
+    all_results = []
+    provider_summaries = {}
+    provider_metadata = {}
+    for provider in providers:
+        interval = intervals[provider]
+        print(f"=== {provider} ({interval}s minimum spacing, "
+              f"{provider_urls[provider]}) ===")
+        runner = Runner(
+            provider_urls[provider],
+            interval,
+            args.timeout,
+            provider=provider,
+            user_agent=args.user_agent,
+            # A multi-provider report must judge Overture by the same semantic
+            # gold as the external providers. Overture-only runs retain the
+            # stricter exact-GERS-ID self-recall contract.
+            semantic_scoring=comparison_mode,
+        )
+        try:
+            for case in cases:
+                runner.execute(case)
+        except ReleaseUnavailableError as exception:
+            print(f"\nAborting: /v2/forward returned 503 release_unavailable "
+                  f"({exception}).\nThe v2 endpoint answers only after a v2 release "
+                  f"is promoted; re-run once promotion lands.", file=sys.stderr)
+            return 3
+        summary = summarize_results(runner.results)
+        print_summary(summary, provider)
+        provider_summaries[provider] = summary
+        provider_metadata[provider] = {
+            "base_url": provider_urls[provider],
+            "interval_s": interval,
+            "capabilities": {
+                "places_free_text": True,
+                "address_structured": True,
+            },
+            "scoring_mode": (
+                "semantic" if comparison_mode else "exact_gers_id"
+            ),
+        }
+        if provider == "overture":
+            provider_metadata[provider]["data_version"] = runner.data_version
+        all_results.extend(runner.results)
+
+    # Keep the legacy top-level summary meaningful for existing Overture-only
+    # baselines. In a multi-provider report it remains the first selected
+    # provider; provider_summaries is the comparison authority.
+    primary_provider = providers[0]
+    summary = provider_summaries[primary_provider]
 
     payload = {
         "schema": RESULTS_SCHEMA,
@@ -954,12 +1371,19 @@ def run_run(args):
             "timestamp": datetime.now(timezone.utc).isoformat(timespec="seconds"),
             "base_url": args.base_url,
             "git_sha": git_sha(),
-            "data_version": runner.data_version,
-            "interval_s": args.interval,
+            "data_version": provider_metadata.get("overture", {}).get("data_version"),
+            "interval_s": intervals[primary_provider],
+            "primary_provider": primary_provider,
+            "benchmark_mode": (
+                "provider_neutral_semantic"
+                if comparison_mode else "exact_id_self_recall"
+            ),
+            "providers": provider_metadata,
             "case_counts": case_counts(cases),
         },
         "summary": summary,
-        "results": runner.results,
+        "provider_summaries": provider_summaries,
+        "results": all_results,
     }
     if args.compare:
         with open(args.compare) as handle:
@@ -1009,9 +1433,19 @@ def main(argv=None):
     run.add_argument("--cases", action="append", type=Path, default=[],
                      help="cases JSON from sample mode; repeatable")
     run.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    run.add_argument(
+        "--provider", action="append", choices=PROVIDERS,
+        help="provider to run; repeatable (default: overture only)",
+    )
+    run.add_argument("--nominatim-url", default=DEFAULT_NOMINATIM_URL)
+    run.add_argument("--photon-url", default=DEFAULT_PHOTON_URL)
+    run.add_argument(
+        "--user-agent", default=USER_AGENT,
+        help="identifiable User-Agent sent to every provider",
+    )
     run.add_argument("--interval", type=float, default=1.2,
-                     help="seconds between requests; keep >1.0 to stay under "
-                          "the 60 req/min rate limit (default: 1.2)")
+                     help="requested seconds between calls; public-provider "
+                          "minimums are enforced (default: 1.2)")
     run.add_argument("--timeout", type=float, default=20.0)
     run.add_argument("--seed", type=int, default=42,
                      help="seed for geocoder-tester case selection")
@@ -1022,12 +1456,16 @@ def main(argv=None):
     run.add_argument("--tester-limit", type=int, default=25,
                      help="max geocoder-tester cases (default: 25)")
     run.add_argument("--output", type=str, help="write results JSON here")
-    run.add_argument("--compare", type=str, help="baseline results JSON to diff against")
+    run.add_argument(
+        "--compare", type=str,
+        help="Overture-only exact-ID baseline results JSON to diff against",
+    )
     run.add_argument("--regression-threshold", type=float, default=0.05,
                      help="absolute recall drop flagged as regression "
                           "(default: 0.05)")
     run.add_argument("--assert-recall", type=float,
-                     help="exit non-zero if self-recall found@10 is below this")
+                     help="Overture-only: exit non-zero if exact-ID "
+                          "self-recall found@10 is below this")
     run.set_defaults(func=run_run)
 
     args = parser.parse_args(argv)

@@ -128,6 +128,8 @@ def test_place_case_shape_and_bias_point_is_near_the_record():
     records = [place_record(bytes([1] * 16), "Cafe de Paris", lon=7.42, lat=43.73)]
     (case,) = bench.build_place_cases(records, seed=1, per_stratum=1, max_cases=10)
     assert case["kind"] == "place"
+    assert case["expected_name"] == "Cafe de Paris"
+    assert case["tolerance_km"] == bench.PLACE_TOLERANCE_KM
     assert case["expected_gers_id"] == "01010101-0101-0101-0101-010101010101"
     assert case["query"].startswith("Cafe de Paris")
     assert case["query_style"] in ("name", "name_locality")
@@ -366,6 +368,22 @@ def test_aggregate_with_only_errors_counts_them_as_misses():
     assert bench.self_recall_at_10(stats) == 0.0
 
 
+def test_aggregate_excludes_explicitly_unscorable_cases():
+    rows = [
+        {"kind": "place", "capability": "unscorable", "error": None,
+         "rank": None, "found_at_1": False, "found_at_10": False,
+         "top1_distance_km": None, "ms": 0.0},
+        {"kind": "place", "capability": "supported", "error": None,
+         "rank": 1, "found_at_1": True, "found_at_10": True,
+         "top1_distance_km": 0.0, "ms": 10.0},
+    ]
+    stats = bench.summarize_results(rows)["overall"]
+    assert stats["requested"] == 2
+    assert stats["unscorable"] == 1
+    assert stats["n"] == 1
+    assert stats["recall_at_1"] == 1.0
+
+
 # ---------------------------------------------------------------------------
 # Comparison / regression logic
 
@@ -420,14 +438,15 @@ class FakeSession:
         self.responses = responses if isinstance(responses, list) else [responses]
         self.calls = []
 
-    def get(self, url, params, timeout):
-        self.calls.append((url, dict(params)))
+    def get(self, url, params, timeout, headers=None):
+        self.calls.append((url, dict(params), dict(headers or {})))
         return self.responses[min(len(self.calls) - 1, len(self.responses) - 1)]
 
 
-def make_runner(responses):
+def make_runner(responses, provider="overture"):
     runner = bench.Runner("https://example.test", interval=0, timeout=1,
-                          sleep_fn=lambda _s: None, monotonic_fn=lambda: 0.0)
+                          sleep_fn=lambda _s: None, monotonic_fn=lambda: 0.0,
+                          provider=provider)
     runner.session = FakeSession(responses)
     return runner
 
@@ -451,6 +470,160 @@ def test_case_request_shapes():
     assert params == {"country": "us", "street": "Main St", "number": "12"}
 
 
+def test_nominatim_request_shapes_free_text_bias_and_structured_address():
+    url, params = bench.provider_case_request(
+        "nominatim", PLACE_CASE, "https://nominatim.test/", 10)
+    assert url == "https://nominatim.test/search"
+    assert params["q"] == "Cafe de Paris"
+    assert params["format"] == "jsonv2"
+    assert params["addressdetails"] == "1"
+    assert params["viewbox"] == "7.171,43.981,7.671,43.481"
+    assert params["bounded"] == "0"
+
+    address_case = {
+        "kind": "address",
+        "params": {
+            "country": "us", "admin_level_general": "Washington",
+            "admin_level_specific": "King County", "postal_city": "Seattle",
+            "postcode": "98101", "street": "Main St", "number": "12",
+            "unit": "B",
+        },
+    }
+    url, params = bench.provider_case_request(
+        "nominatim", address_case, "https://nominatim.test", 10)
+    assert url == "https://nominatim.test/search"
+    assert params == {
+        "format": "jsonv2", "limit": "10", "addressdetails": "1",
+        "street": "12 Main St", "city": "Seattle", "postalcode": "98101",
+        "countrycodes": "us",
+    }
+
+
+def test_nominatim_omits_bias_box_at_antimeridian():
+    case = dict(PLACE_CASE, proximity=[179.9, 0.0])
+    _, params = bench.provider_case_request(
+        "nominatim", case, "https://nominatim.test", 10)
+    assert "viewbox" not in params
+    assert "bounded" not in params
+
+
+def test_photon_request_shapes_free_text_bias_and_structured_address():
+    url, params = bench.provider_case_request(
+        "photon", PLACE_CASE, "https://photon.test/", 10)
+    assert url == "https://photon.test/api/"
+    assert params == {
+        "q": "Cafe de Paris", "limit": "10",
+        "lon": "7.421", "lat": "43.731",
+    }
+    address_case = {
+        "kind": "address",
+        "params": {
+            "country": "us", "admin_level_general": "Washington",
+            "admin_level_specific": "King County", "postal_city": "Seattle",
+            "postcode": "98101", "street": "Main St", "number": "12",
+            "unit": "B",
+        },
+    }
+    url, params = bench.provider_case_request(
+        "photon", address_case, "https://photon.test", 10)
+    assert url == "https://photon.test/structured"
+    assert params == {
+        "limit": "10", "city": "Seattle", "postcode": "98101",
+        "housenumber": "12",
+        "street": "Main St", "countrycode": "US",
+    }
+
+
+def test_provider_response_normalization_is_provider_neutral():
+    nominatim = bench.normalize_provider_response("nominatim", [{
+        "place_id": 99, "name": "Cafe de Paris", "lat": "43.73", "lon": "7.42",
+        "address": {
+            "road": "Main St", "house_number": "12", "city": "Monaco",
+            "postcode": "98000", "country_code": "mc",
+        },
+    }])
+    assert nominatim == [{
+        "type": "Feature", "id": "99",
+        "geometry": {"type": "Point", "coordinates": [7.42, 43.73]},
+        "properties": {
+            "name": "Cafe de Paris",
+            "address": {
+                "country_code": "mc", "locality": "Monaco",
+                "postcode": "98000", "street": "Main St", "number": "12",
+            },
+        },
+    }]
+    photon = bench.normalize_provider_response("photon", {
+        "features": [{
+            "geometry": {"coordinates": [7.42, 43.73]},
+            "properties": {
+                "name": "Cafe de Paris", "osm_id": 7, "countrycode": "MC",
+                "street": "Main St", "housenumber": "12",
+            },
+        }],
+    })
+    assert photon[0]["properties"]["address"]["number"] == "12"
+    assert photon[0]["geometry"]["coordinates"] == [7.42, 43.73]
+
+
+def test_external_scoring_uses_semantics_not_provider_ids():
+    case = dict(PLACE_CASE, expected_name="Cafe de Paris", tolerance_km=1.0)
+    features = [
+        feature("aa-bb", 50.0, 50.0, name="Unrelated"),
+        feature("provider-specific-id", 7.42, 43.73, name="Cafe de Paris"),
+    ]
+    rank, matched, _ = bench.score_case(case, features, provider="nominatim")
+    assert rank == 2
+    assert matched == pytest.approx(0.0, abs=1e-6)
+
+
+def test_semantic_place_scoring_does_not_accept_name_prefixes():
+    case = dict(PLACE_CASE, expected_name="Starbucks Reserve", tolerance_km=1.0)
+    result = feature("provider-id", 7.42, 43.73, name="Starbucks")
+    rank, _, _ = bench.score_case(case, [result], provider="nominatim")
+    assert rank is None
+
+
+def test_overture_comparison_scoring_uses_the_same_semantic_gold():
+    case = dict(PLACE_CASE, expected_name="Cafe de Paris", tolerance_km=1.0)
+    features = [
+        feature(case["expected_gers_id"], 50.0, 50.0, name="Unrelated"),
+        feature("different-overture-id", 7.42, 43.73, name="Cafe de Paris"),
+    ]
+    exact_rank, _, _ = bench.score_case(case, features, provider="overture")
+    semantic_rank, _, _ = bench.score_case(
+        case, features, provider="overture", semantic_scoring=True)
+    assert exact_rank == 1
+    assert semantic_rank == 2
+
+
+def test_external_address_scoring_requires_number_street_and_distance():
+    case = {
+        "kind": "address", "params": {"number": "12", "street": "Main St"},
+        "expected_gers_id": "overture-only", "expected_lat": 47.61,
+        "expected_lon": -122.33, "tolerance_km": 1.0,
+    }
+    wrong = feature("overture-only", -122.33, 47.61)
+    wrong["properties"]["address"] = {"number": "13", "street": "Main St"}
+    right = feature("external", -122.33, 47.61)
+    right["properties"]["address"] = {"number": "12", "street": "Main Street"}
+    rank, _, _ = bench.score_case(case, [wrong, right], provider="photon")
+    assert rank == 2
+
+
+def test_overture_semantic_address_scoring_accepts_flat_v2_properties():
+    case = {
+        "kind": "address", "params": {"number": "12", "street": "Main St"},
+        "expected_gers_id": "different-id", "expected_lat": 47.61,
+        "expected_lon": -122.33, "tolerance_km": 1.0,
+    }
+    result = feature("overture-id", -122.33, 47.61)
+    result["properties"].update({"number": "12", "street": "Main Street"})
+    rank, _, _ = bench.score_case(
+        case, [result], provider="overture", semantic_scoring=True)
+    assert rank == 1
+
+
 def test_runner_scores_a_hit_and_captures_data_version():
     body = {"type": "FeatureCollection",
             "features": [feature("AA-BB", 7.42, 43.73, name="Cafe de Paris")]}
@@ -462,6 +635,47 @@ def test_runner_scores_a_hit_and_captures_data_version():
     assert result["found_at_10"] is True
     assert result["error"] is None
     assert runner.data_version == "2026-07-27.1"
+    assert runner.session.calls[0][2]["User-Agent"] == bench.USER_AGENT
+
+
+def test_external_runner_normalizes_and_scores_a_hit():
+    body = [{
+        "place_id": 5, "name": "Cafe de Paris", "lat": "43.73", "lon": "7.42",
+        "address": {"city": "Monaco"},
+    }]
+    runner = make_runner(FakeResponse(200, body), provider="nominatim")
+    case = dict(PLACE_CASE, expected_name="Cafe de Paris", tolerance_km=1.0)
+    result = runner.execute(case)
+    assert result["provider"] == "nominatim"
+    assert result["capability"] == "supported"
+    assert result["rank"] == 1
+
+
+def test_external_old_place_case_is_unscorable_without_http_request():
+    runner = make_runner(FakeResponse(200, []), provider="nominatim")
+    result = runner.execute(PLACE_CASE)
+    assert result["capability"] == "unscorable"
+    assert "regenerate" in result["capability_reason"]
+    assert runner.session.calls == []
+
+
+def test_external_tester_case_without_name_is_explicitly_unscorable():
+    case = {
+        "id": "tester:empty-name", "kind": "tester", "query": "12 Main St",
+        "expected_name": "", "expected_lat": 47.61, "expected_lon": -122.33,
+    }
+    runner = make_runner(FakeResponse(200, []), provider="nominatim")
+    result = runner.execute(case)
+    assert result["capability"] == "unscorable"
+    assert runner.session.calls == []
+
+
+def test_success_with_wrong_response_shape_is_an_error():
+    runner = make_runner(FakeResponse(200, {"unexpected": []}), provider="photon")
+    case = dict(PLACE_CASE, expected_name="Cafe de Paris", tolerance_km=1.0)
+    result = runner.execute(case)
+    assert result["error"] == "invalid response shape"
+    assert result["found_at_10"] is False
 
 
 def test_runner_aborts_on_release_unavailable():
@@ -512,6 +726,56 @@ def test_runner_paces_requests_by_interval():
     runner.execute(PLACE_CASE)
     runner.execute(PLACE_CASE)
     assert sleeps == [1.5]
+
+
+def test_overture_allows_zero_interval_for_local_runs():
+    assert bench.PROVIDER_MIN_INTERVALS["overture"] == 0.0
+
+
+def test_cli_defaults_to_overture_only_and_preserves_legacy_summary(
+        tmp_path, monkeypatch):
+    case = dict(PLACE_CASE, expected_name="Cafe de Paris", tolerance_km=1.0)
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps({
+        "schema": bench.CASES_SCHEMA, "meta": {}, "cases": [case],
+    }), encoding="utf-8")
+    output_path = tmp_path / "results.json"
+    session = FakeSession(FakeResponse(
+        200,
+        {"features": [feature("AA-BB", 7.42, 43.73, name="Cafe de Paris")]},
+        {"X-Geocoder-Build": "test-build"},
+    ))
+    monkeypatch.setattr(bench.requests, "Session", lambda: session)
+    assert bench.main([
+        "run", "--cases", str(cases_path), "--skip-builtin",
+        "--geocoder-tester", str(tmp_path / "missing"),
+        "--output", str(output_path),
+    ]) == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert list(payload["provider_summaries"]) == ["overture"]
+    assert payload["summary"] == payload["provider_summaries"]["overture"]
+    assert payload["meta"]["primary_provider"] == "overture"
+    assert payload["meta"]["providers"]["overture"]["data_version"] == "test-build"
+    assert {row["provider"] for row in payload["results"]} == {"overture"}
+
+
+@pytest.mark.parametrize(
+    "exact_only_option", [("--compare", "baseline.json"), ("--assert-recall", "0.9")])
+def test_cli_rejects_exact_only_gates_in_provider_comparison(
+        tmp_path, exact_only_option):
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps({
+        "schema": bench.CASES_SCHEMA,
+        "meta": {},
+        "cases": [dict(
+            PLACE_CASE, expected_name="Cafe de Paris", tolerance_km=1.0)],
+    }), encoding="utf-8")
+    assert bench.main([
+        "run", "--cases", str(cases_path), "--skip-builtin",
+        "--geocoder-tester", str(tmp_path / "missing"),
+        "--provider", "overture", "--provider", "nominatim",
+        *exact_only_option,
+    ]) == 2
 
 
 # ---------------------------------------------------------------------------
