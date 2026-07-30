@@ -254,6 +254,7 @@ def test_probe_encodes_only_authenticated_densest_cell_without_staging_writes(
 
     assert before == after
     assert result["read_only"] is True
+    assert result["measurement_status"] == "complete"
     assert result["directory_scan"]["records"] == 7
     assert result["densest_cell"]["partition_cell"] == "8080"
     assert result["densest_cell"]["records"] == 4
@@ -263,6 +264,23 @@ def test_probe_encodes_only_authenticated_densest_cell_without_staging_writes(
     assert set(result["densest_cell"]["dictionary_cardinalities"]) == set(
         PROBE.DICTIONARY_FIELDS
     )
+    dictionary = result["densest_cell"]["pre_encoding_dictionary"]
+    assert dictionary["format"] == "ARDX0001"
+    assert dictionary["total_bytes"] == result["densest_cell"]["framing"][
+        "dictionary_bytes"
+    ]
+    assert dictionary["exceeds_serving_cap"] is False
+    assert set(dictionary["fields"]) == set(PROBE.DICTIONARY_FIELDS)
+    assert all(
+        set(metrics)
+        == {
+            "cardinality",
+            "utf8_value_bytes",
+            "encoded_entry_bytes",
+            "max_utf8_value_bytes",
+        }
+        for metrics in dictionary["fields"].values()
+    )
     assert (
         result["densest_cell"]["framing"]["header_bytes"]
         + result["densest_cell"]["framing"]["dictionary_bytes"]
@@ -271,3 +289,215 @@ def test_probe_encodes_only_authenticated_densest_cell_without_staging_writes(
         == result["densest_cell"]["framing"]["total_bytes"]
     )
     assert output.is_file()
+
+
+def test_probe_retains_cardinalities_and_read_only_evidence_when_encoder_fails(
+    monkeypatch, tmp_path
+):
+    staging_root = tmp_path / "staging"
+    prefix = (
+        staging_root
+        / PROBE.STAGING.staging_prefix(REQUEST, "addresses")
+    )
+    staging_store = PROBE.ADDRESS.LocalObjectStore(prefix)
+    rows = [_row("8080", index) for index in (1, 2, 3)]
+    rows[1]["postal_city"] = "Tacóma"
+    rows[2]["postcode"] = rows[1]["postcode"]
+    rows[1]["street"] = "Pike Street"
+    rows[1]["unit"] = "A"
+    rows[0]["address_levels"] = ["Washington", "King"]
+    rows[1]["address_levels"] = ["Washington", "Pierce"]
+    pack = _pack(
+        staging_store=staging_store,
+        root=tmp_path,
+        task_id="addresses-map-a",
+        cell="8080",
+        rows=rows,
+    )
+    plan = {
+        "schema": PROBE.R2.PLAN_SCHEMA,
+        "family": "addresses",
+        "request_sha256": REQUEST,
+        "shuffle_bucket_bits": PROBE.R2.SHUFFLE_BUCKET_BITS,
+        "task_ids": [pack["task_id"]],
+        "expected_records": len(rows),
+        "packs": [pack],
+    }
+    plan_path = tmp_path / "plan.json"
+    plan_path.write_bytes(PROBE.R2.canonical_json(plan) + b"\n")
+    plan_sha256 = hashlib.sha256(plan_path.read_bytes()).hexdigest()
+    before = sorted(
+        (path.relative_to(staging_root), path.read_bytes())
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    )
+    commands = []
+
+    def fail_encoder(command, *, scratch_roots, limits):
+        commands.append(command)
+        raise subprocess.CalledProcessError(7, command)
+
+    monkeypatch.setattr(PROBE.ADDRESS, "run_bounded", fail_encoder)
+    output = tmp_path / "out" / "probe.json"
+    defaults = PROBE.ADDRESS.Limits()
+    args = argparse.Namespace(
+        plan=plan_path,
+        expected_plan_sha256=plan_sha256,
+        store_root=tmp_path / "cache",
+        staging_root=staging_root,
+        staging_bucket=None,
+        staging_endpoint_url=None,
+        scratch_dir=tmp_path / "scratch",
+        encoder_binary=tmp_path / "encoder",
+        verifier_binary=tmp_path / "verifier",
+        output=output,
+        max_rss_bytes=defaults.max_rss_bytes,
+        max_scratch_bytes=defaults.max_scratch_bytes,
+        max_output_bytes=PROBE.OUTPUT_CAP_BYTES,
+        wall_seconds=defaults.wall_seconds,
+        duckdb_memory_limit=defaults.duckdb_memory_limit,
+        duckdb_threads=defaults.duckdb_threads,
+        required_duckdb_version=defaults.required_duckdb_version,
+        allow_unpinned_duckdb=True,
+    )
+
+    result = PROBE.run_probe(args)
+    after = sorted(
+        (path.relative_to(staging_root), path.read_bytes())
+        for path in staging_root.rglob("*")
+        if path.is_file()
+    )
+
+    assert before == after
+    assert len(commands) == 1
+    assert output.is_file()
+    assert json.loads(output.read_text()) == result
+    assert result["read_only"] is True
+    assert result["measurement_status"] == "encoder_failed"
+    assert result["densest_cell"]["dictionary_cardinalities"] == {
+        "display_country": 1,
+        "postal_city": 2,
+        "postcode": 2,
+        "street": 2,
+        "number": 3,
+        "unit": 2,
+        "address_levels": 3,
+    }
+    dictionary = result["densest_cell"]["pre_encoding_dictionary"]
+    assert dictionary == {
+        "format": "ARDX0001",
+        "header_bytes": 12,
+        "field_header_bytes": 28,
+        "encoded_entry_bytes": 113,
+        "total_bytes": 153,
+        "serving_cap_bytes": 8 * 1024 * 1024,
+        "exceeds_serving_cap": False,
+        "fields": {
+            "display_country": {
+                "cardinality": 1,
+                "utf8_value_bytes": 13,
+                "encoded_entry_bytes": 15,
+                "max_utf8_value_bytes": 13,
+            },
+            "postal_city": {
+                "cardinality": 2,
+                "utf8_value_bytes": 14,
+                "encoded_entry_bytes": 18,
+                "max_utf8_value_bytes": 7,
+            },
+            "postcode": {
+                "cardinality": 2,
+                "utf8_value_bytes": 10,
+                "encoded_entry_bytes": 14,
+                "max_utf8_value_bytes": 5,
+            },
+            "street": {
+                "cardinality": 2,
+                "utf8_value_bytes": 22,
+                "encoded_entry_bytes": 26,
+                "max_utf8_value_bytes": 11,
+            },
+            "number": {
+                "cardinality": 3,
+                "utf8_value_bytes": 3,
+                "encoded_entry_bytes": 9,
+                "max_utf8_value_bytes": 1,
+            },
+            "unit": {
+                "cardinality": 2,
+                "utf8_value_bytes": 1,
+                "encoded_entry_bytes": 5,
+                "max_utf8_value_bytes": 1,
+            },
+            "address_levels": {
+                "cardinality": 3,
+                "utf8_value_bytes": 20,
+                "encoded_entry_bytes": 26,
+                "max_utf8_value_bytes": 10,
+            },
+        },
+    }
+    assert result["densest_cell"]["encoded_records"] is None
+    assert result["densest_cell"]["framing"] is None
+    assert result["projection"] is None
+    assert result["resources"]["encoder"]["exit_code"] == 7
+    assert result["resources"]["verifier"]["status"] == "not_run"
+    assert result["resources"]["staging"]["staged_objects_published"] == 0
+    assert result["execute_gate"]["status"] == "blocked"
+
+
+def test_main_reports_blocked_encoder_evidence_without_assuming_a_shard(
+    monkeypatch, capsys, tmp_path
+):
+    monkeypatch.setattr(
+        PROBE,
+        "run_probe",
+        lambda _args: {
+            "request_sha256": REQUEST,
+            "plan_sha256": "b" * 64,
+            "measurement_status": "encoder_failed",
+            "densest_cell": {
+                "partition_cell": "5e5e",
+                "records": 6_489_932,
+                "dictionary_cardinalities": {
+                    field: index
+                    for index, field in enumerate(PROBE.DICTIONARY_FIELDS, 1)
+                },
+                "pre_encoding_dictionary": {
+                    "total_bytes": 9_000_000,
+                    "exceeds_serving_cap": True,
+                },
+            },
+            "resources": {"encoder": {"exit_code": 1}},
+            "execute_gate": {"status": "blocked"},
+        },
+    )
+
+    status = PROBE.main(
+        [
+            "--plan",
+            str(tmp_path / "plan.json"),
+            "--expected-plan-sha256",
+            "b" * 64,
+            "--store-root",
+            str(tmp_path / "cache"),
+            "--staging-root",
+            str(tmp_path / "staging"),
+            "--scratch-dir",
+            str(tmp_path / "scratch"),
+            "--encoder-binary",
+            str(tmp_path / "encoder"),
+            "--verifier-binary",
+            str(tmp_path / "verifier"),
+            "--output",
+            str(tmp_path / "out.json"),
+        ]
+    )
+
+    summary = json.loads(capsys.readouterr().out)
+    assert status == 2
+    assert summary["measurement_status"] == "encoder_failed"
+    assert summary["encoder_exit_code"] == 1
+    assert summary["projected_ardx0001_dictionary_bytes"] == 9_000_000
+    assert summary["ardx0001_dictionary_exceeds_serving_cap"] is True
+    assert "dictionary_bytes" not in summary
