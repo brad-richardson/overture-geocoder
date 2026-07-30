@@ -73,6 +73,14 @@ fields default to the literal empty string:
 | `postcode` | `postalcode` |
 | `number` | `address_number` |
 
+Explicit canonical context fields use one literal exact key. When a request
+instead supplies `state` (or `region`) plus `city`, with no canonical context
+field or `county`, the Worker tries three bounded exact source representations:
+city in the last address level, in `postal_city`, then in both. The first
+non-empty result wins. It does not infer a missing state or treat omitted
+context as a wildcard. Structured response metadata reports
+`resolution_variant` and `lookup_attempts`.
+
 If `types` is supplied it must be exactly `address`. `limit`, `autocomplete`,
 and `proximity` are rejected in structured mode because an exact lookup returns
 every duplicate candidate up to the hard 512-candidate safety cap; it does not
