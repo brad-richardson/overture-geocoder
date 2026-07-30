@@ -53,10 +53,10 @@ REVERSE = _load("reverse_shard_module", "scripts/reverse_shard_v1.py")
 
 L_LON_FIXTURE = ROOT / "tests/fixtures/reverse/l-lon-by-row-v1.json"
 
-# Section-5 record size models plus the 16-byte source locator the design's own
-# within-leaf order requires (and, for addresses, the u16 level-count prefix).
+# Places retain the section-5 model plus the 16-byte source locator. Addresses
+# use the measured mean after repeated strings moved into shard dictionaries.
 PLACES_MODEL_BYTES = 96 + 16
-ADDRESS_MODEL_BYTES = 104 + 16 + 2
+ADDRESS_MODEL_BYTES = 84
 
 PLACES_SCHEMA = pa.schema(
     [

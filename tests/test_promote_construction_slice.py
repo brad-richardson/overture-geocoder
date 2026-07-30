@@ -360,7 +360,11 @@ def direct_reverse_publication(
         path.write_bytes(payload)
         return {"key": key, "bytes": len(payload), "sha256": sha}
 
-    data = write_content("reverse/shards", f"{family}-data".encode(), ".plrx")
+    data = write_content(
+        "reverse/shards",
+        f"{family}-data".encode().ljust(64, b"\0"),
+        ".plrx",
+    )
     family_code = 1 if family == "places" else 2
     cell = 0xC085 if family == "places" else 0xC328
     shard_id = cell >> 12
@@ -369,7 +373,7 @@ def direct_reverse_publication(
         count = 1 if index == shard_id else 0
         payload = bytearray(
             promote.REVERSE_CATALOG_HEADER.pack(
-                b"RCAS0001", family_code, 8, index, 0, count
+                b"RCAS0002", family_code, 8, index, 0, count
             )
         )
         if count:
@@ -377,10 +381,11 @@ def direct_reverse_publication(
                 promote.REVERSE_CATALOG_ENTRY.pack(
                     cell,
                     0,
-                    0,
+                    1 if family == "addresses" else 0,
                     1,
                     data["bytes"],
                     1,
+                    1 if family == "addresses" else 0,
                     bytes.fromhex(data["sha256"]),
                 )
             )

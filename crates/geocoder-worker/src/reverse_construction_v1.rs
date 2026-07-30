@@ -18,15 +18,18 @@ use crate::stac::cache::IMMUTABLE_CACHE_TTL;
 use crate::stac::{not_found, ShardLoader};
 
 const CATALOG_ROOT_MAGIC: &[u8; 8] = b"RCAT0001";
-const CATALOG_SHARD_MAGIC: &[u8; 8] = b"RCAS0001";
+const CATALOG_SHARD_MAGIC: &[u8; 8] = b"RCAS0002";
 const SHARD_MAGIC: &[u8; 8] = b"PLRX0001";
+const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0001";
+const ADDRESS_DICTIONARY_FLAG: u8 = 1;
+const ADDRESS_DICTIONARY_FIELDS: usize = 7;
 const INDEX_DOMAIN: &[u8] = b"overture-reverse-index-v1\0";
 const CATALOG_ROOT_BYTES: usize = 688;
 const CATALOG_ROOT_HEADER_BYTES: usize = 48;
 const CATALOG_ROOT_SHARDS: usize = 16;
 const CATALOG_ROOT_SHARD_BYTES: usize = 40;
 const CATALOG_SHARD_HEADER_BYTES: usize = 16;
-const CATALOG_CELL_ENTRY_BYTES: usize = 52;
+const CATALOG_CELL_ENTRY_BYTES: usize = 56;
 const SHARD_HEADER_BYTES: usize = 32;
 const SHARD_INDEX_ENTRY_BYTES: usize = 40;
 const CELL_LEVEL: u8 = 8;
@@ -34,6 +37,9 @@ const MAX_CATALOG_SHARD_BYTES: u64 = 1024 * 1024;
 // A maximally populated Address shard has 4^7 leaves. Its index is
 // 4 + 16,384 * (40-byte entry + 11-byte key) = 835,588 bytes.
 const MAX_SHARD_INDEX_BYTES: u64 = 1024 * 1024;
+const MAX_ADDRESS_DICTIONARY_BYTES: u64 = 8 * 1024 * 1024;
+const MAX_SHARD_ENVELOPE_RANGE_BYTES: u64 =
+    SHARD_HEADER_BYTES as u64 + MAX_ADDRESS_DICTIONARY_BYTES;
 const MAX_SHARD_INDEX_ENTRIES: usize = 16_384;
 const MAX_LEAVES_PER_SHARD: usize = 32;
 const MAX_CELLS: usize = 4;
@@ -93,6 +99,13 @@ impl ReverseFamily {
         match self {
             Self::Places => 0,
             Self::Addresses => 1,
+        }
+    }
+
+    fn dictionary_flag(self) -> u8 {
+        match self {
+            Self::Places => 0,
+            Self::Addresses => ADDRESS_DICTIONARY_FLAG,
         }
     }
 
@@ -179,6 +192,7 @@ struct CatalogCell {
     records: u32,
     object: ObjectIdentity,
     index_bytes: u32,
+    dictionary_bytes: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -193,6 +207,11 @@ struct LeafIndex {
 #[derive(Debug, Clone)]
 struct ShardIndex {
     entries: Vec<LeafIndex>,
+}
+
+#[derive(Debug, Clone)]
+struct AddressDictionary {
+    fields: Vec<Vec<String>>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -385,13 +404,25 @@ fn parse_catalog_shard(
         let records = u32_at(bytes, offset + 4)?;
         let size = u64_at(bytes, offset + 8)?;
         let index_bytes = u32_at(bytes, offset + 16)?;
-        if flags != 0
+        let dictionary_bytes = u32_at(bytes, offset + 20)?;
+        if flags != family.dictionary_flag()
             || level > family.maximum_sub_cell_level()
             || records == 0
             || size <= SHARD_HEADER_BYTES as u64
             || index_bytes == 0
             || u64::from(index_bytes) > size
             || u64::from(index_bytes) > MAX_SHARD_INDEX_BYTES
+            || (family == ReverseFamily::Places && dictionary_bytes != 0)
+            || (family == ReverseFamily::Addresses
+                && (dictionary_bytes == 0
+                    || u64::from(dictionary_bytes) > MAX_ADDRESS_DICTIONARY_BYTES))
+            || u64::from(dictionary_bytes)
+                .checked_add(u64::from(index_bytes))
+                .is_none_or(|envelope| {
+                    envelope
+                        .checked_add(SHARD_HEADER_BYTES as u64)
+                        .is_none_or(|minimum| minimum >= size)
+                })
             || (cell >> 12) as u8 != shard_id
             || previous.is_some_and(|old| old >= cell)
         {
@@ -404,9 +435,10 @@ fn parse_catalog_shard(
             records,
             object: ObjectIdentity {
                 bytes: size,
-                sha256: digest_at(bytes, offset + 20)?,
+                sha256: digest_at(bytes, offset + 24)?,
             },
             index_bytes,
+            dictionary_bytes,
         });
     }
     Ok(cells)
@@ -430,7 +462,7 @@ impl ShardIndex {
             || header[28] != family.shard_code()
             || header[29] != CELL_LEVEL
             || header[30] != catalog.sub_cell_level
-            || header[31] != 0
+            || header[31] != family.dictionary_flag()
             || u64_at(header, 8)? != u64::from(catalog.records)
         {
             return Err("reverse shard header differs from its catalog".into());
@@ -456,6 +488,9 @@ impl ShardIndex {
         if key_start > index_bytes.len() {
             return Err("reverse shard index is truncated".into());
         }
+        let payload_start = (SHARD_HEADER_BYTES as u64)
+            .checked_add(u64::from(catalog.dictionary_bytes))
+            .ok_or_else(|| "reverse shard dictionary offset overflows".to_string())?;
         let mut entries = Vec::with_capacity(index_count);
         let mut key_position_expected = 0_u64;
         let mut previous_key: Option<(u64, Vec<u8>)> = None;
@@ -480,7 +515,7 @@ impl ShardIndex {
                 || hash != index_hash(&key)
                 || entry_records == 0
                 || payload_bytes == 0
-                || payload_offset < SHARD_HEADER_BYTES as u64
+                || payload_offset < payload_start
                 || payload_offset
                     .checked_add(payload_bytes)
                     .is_none_or(|end| end > index_offset)
@@ -515,7 +550,7 @@ impl ShardIndex {
         }
         let mut payload_order: Vec<_> = entries.iter().collect();
         payload_order.sort_by_key(|entry| entry.payload_offset);
-        let mut expected_offset = SHARD_HEADER_BYTES as u64;
+        let mut expected_offset = payload_start;
         for entry in payload_order {
             if entry.payload_offset != expected_offset {
                 return Err("reverse shard payload extents are not contiguous".into());
@@ -749,14 +784,61 @@ fn text_at(bytes: &[u8], position: &mut usize) -> std::result::Result<String, St
     String::from_utf8(value.to_vec()).map_err(|_| "reverse text is not UTF-8".into())
 }
 
+impl AddressDictionary {
+    fn parse(bytes: &[u8]) -> std::result::Result<Self, String> {
+        if bytes.len() as u64 > MAX_ADDRESS_DICTIONARY_BYTES
+            || bytes.len() < 12
+            || checked_slice(bytes, 0, 8)? != ADDRESS_DICTIONARY_MAGIC
+            || bytes[8] != ADDRESS_DICTIONARY_FIELDS as u8
+            || bytes[9] != 0
+            || u16_at(bytes, 10)? != 0
+        {
+            return Err("reverse address dictionary header is malformed".into());
+        }
+        let mut position = 12_usize;
+        let mut fields = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
+        for _ in 0..ADDRESS_DICTIONARY_FIELDS {
+            let count = u32_at(bytes, position)? as usize;
+            position = position
+                .checked_add(4)
+                .ok_or_else(|| "reverse address dictionary offset overflows".to_string())?;
+            if count > usize::from(u16::MAX) + 1 {
+                return Err("reverse address dictionary exceeds u16 codes".into());
+            }
+            let mut values = Vec::with_capacity(count);
+            for _ in 0..count {
+                let value = text_at(bytes, &mut position)?;
+                if values.last().is_some_and(|old| old >= &value) {
+                    return Err("reverse address dictionary is not unique and sorted".into());
+                }
+                values.push(value);
+            }
+            fields.push(values);
+        }
+        if position != bytes.len() {
+            return Err("reverse address dictionary carries trailing bytes".into());
+        }
+        Ok(Self { fields })
+    }
+
+    fn value(&self, field: usize, code: u16) -> std::result::Result<String, String> {
+        self.fields
+            .get(field)
+            .and_then(|values| values.get(usize::from(code)))
+            .cloned()
+            .ok_or_else(|| "reverse address dictionary code is out of range".into())
+    }
+}
+
 fn decode_record(
     bytes: &[u8],
     family: ReverseFamily,
     cell: u16,
     level: u8,
     expected_key: &[u8],
-) -> std::result::Result<ReverseRecord, String> {
-    if bytes.len() < 40 || bytes.len() > MAX_RECORD_BYTES {
+    dictionary: Option<&AddressDictionary>,
+) -> std::result::Result<(ReverseRecord, usize), String> {
+    if bytes.len() < 40 || (family == ReverseFamily::Places && bytes.len() > MAX_RECORD_BYTES) {
         return Err("reverse record is outside hard bounds".into());
     }
     let id: [u8; 16] = checked_slice(bytes, 0, 16)?
@@ -815,25 +897,39 @@ fn decode_record(
         record.region = text_at(bytes, &mut position)?;
         record.country = text_at(bytes, &mut position)?;
     } else {
-        record.display_country = text_at(bytes, &mut position)?;
-        record.postal_city = text_at(bytes, &mut position)?;
-        record.postcode = text_at(bytes, &mut position)?;
-        record.street = text_at(bytes, &mut position)?;
-        record.number = text_at(bytes, &mut position)?;
-        record.unit = text_at(bytes, &mut position)?;
+        let dictionary =
+            dictionary.ok_or_else(|| "reverse address dictionary is absent".to_string())?;
+        record.display_country = dictionary.value(0, u16_at(bytes, position)?)?;
+        position += 2;
+        record.postal_city = dictionary.value(1, u16_at(bytes, position)?)?;
+        position += 2;
+        record.postcode = dictionary.value(2, u16_at(bytes, position)?)?;
+        position += 2;
+        record.street = dictionary.value(3, u16_at(bytes, position)?)?;
+        position += 2;
+        record.number = dictionary.value(4, u16_at(bytes, position)?)?;
+        position += 2;
+        record.unit = dictionary.value(5, u16_at(bytes, position)?)?;
+        position += 2;
         let count = u16_at(bytes, position)? as usize;
         position += 2;
         if count > 256 {
             return Err("reverse address level count exceeds cap".into());
         }
         for _ in 0..count {
-            record.address_levels.push(text_at(bytes, &mut position)?);
+            record
+                .address_levels
+                .push(dictionary.value(6, u16_at(bytes, position)?)?);
+            position += 2;
         }
     }
-    if position != bytes.len() {
+    if position > MAX_RECORD_BYTES {
+        return Err("reverse record is outside hard bounds".into());
+    }
+    if family == ReverseFamily::Places && position != bytes.len() {
         return Err("reverse record carries trailing bytes".into());
     }
-    Ok(record)
+    Ok((record, position))
 }
 
 fn decode_leaf(
@@ -843,20 +939,37 @@ fn decode_leaf(
     cell: u16,
     level: u8,
     query: ReverseQueryPoint,
+    dictionary: Option<&AddressDictionary>,
 ) -> std::result::Result<Vec<ReverseHit>, String> {
     let mut position = 0_usize;
     let mut decoded = 0_u32;
     let mut hits = Vec::new();
     while position < bytes.len() {
-        let length = u32_at(bytes, position)? as usize;
+        let (record, consumed) = if family == ReverseFamily::Places {
+            let length = u32_at(bytes, position)? as usize;
+            position = position
+                .checked_add(4)
+                .ok_or_else(|| "reverse leaf position overflows".to_string())?;
+            let record_bytes = checked_slice(bytes, position, length)?;
+            let (record, consumed) =
+                decode_record(record_bytes, family, cell, level, &entry.key, None)?;
+            if consumed != record_bytes.len() {
+                return Err("reverse record carries trailing bytes".into());
+            }
+            (record, length)
+        } else {
+            decode_record(
+                &bytes[position..],
+                family,
+                cell,
+                level,
+                &entry.key,
+                dictionary,
+            )?
+        };
         position = position
-            .checked_add(4)
+            .checked_add(consumed)
             .ok_or_else(|| "reverse leaf position overflows".to_string())?;
-        let record_bytes = checked_slice(bytes, position, length)?;
-        position = position
-            .checked_add(length)
-            .ok_or_else(|| "reverse leaf position overflows".to_string())?;
-        let record = decode_record(record_bytes, family, cell, level, &entry.key)?;
         let distance_m = haversine_m(
             query.longitude,
             query.latitude,
@@ -955,13 +1068,21 @@ impl ShardLoader {
             .bytes
             .checked_sub(index_bytes)
             .ok_or_else(|| Error::RustError("reverse shard index offset underflows".into()))?;
+        let prefix_bytes = (SHARD_HEADER_BYTES as u64)
+            .checked_add(u64::from(catalog.dictionary_bytes))
+            .ok_or_else(|| Error::RustError("reverse shard prefix overflows".into()))?;
+        if prefix_bytes > MAX_SHARD_ENVELOPE_RANGE_BYTES {
+            return Err(Error::RustError(
+                "reverse shard dictionary exceeds its read budget".into(),
+            ));
+        }
         let mut reader = RangeReader::new(self, &key);
         let envelope = reader
             .coalesced_with_ttl(
                 &[
                     ByteRange {
                         offset: 0,
-                        length: SHARD_HEADER_BYTES as u64,
+                        length: prefix_bytes,
                     },
                     ByteRange {
                         offset: index_offset,
@@ -969,12 +1090,22 @@ impl ShardLoader {
                     },
                 ],
                 0,
-                MAX_SHARD_INDEX_BYTES,
+                MAX_SHARD_ENVELOPE_RANGE_BYTES,
                 IMMUTABLE_CACHE_TTL,
             )
             .await?;
-        let index = ShardIndex::parse(&envelope[0], &envelope[1], family, &catalog)
-            .map_err(Error::RustError)?;
+        let header =
+            checked_slice(&envelope[0], 0, SHARD_HEADER_BYTES).map_err(Error::RustError)?;
+        let dictionary = if family == ReverseFamily::Addresses {
+            Some(
+                AddressDictionary::parse(&envelope[0][SHARD_HEADER_BYTES..])
+                    .map_err(Error::RustError)?,
+            )
+        } else {
+            None
+        };
+        let index =
+            ShardIndex::parse(header, &envelope[1], family, &catalog).map_err(Error::RustError)?;
         let leaves = plan_leaves(
             &plan,
             catalog.sub_cell_level,
@@ -1025,6 +1156,7 @@ impl ShardLoader {
                     catalog.cell,
                     catalog.sub_cell_level,
                     query,
+                    dictionary.as_ref(),
                 )
                 .map_err(Error::RustError)?,
             );
@@ -1216,6 +1348,7 @@ mod tests {
                 sha256: [0; 32],
             },
             index_bytes: index.len() as u32,
+            dictionary_bytes: 0,
         };
         let leaf = LeafIndex {
             hash: index_hash(&key),
@@ -1225,6 +1358,18 @@ mod tests {
             payload_bytes: payload.len() as u64,
         };
         (header, index, payload, catalog, leaf)
+    }
+
+    fn address_dictionary_fixture() -> Vec<u8> {
+        let mut dictionary = Vec::new();
+        dictionary.extend_from_slice(ADDRESS_DICTIONARY_MAGIC);
+        dictionary.extend_from_slice(&[ADDRESS_DICTIONARY_FIELDS as u8, 0]);
+        dictionary.extend_from_slice(&0_u16.to_le_bytes());
+        for value in ["XX", "Test", "12345", "Main Street", "12", "", "Region"] {
+            dictionary.extend_from_slice(&1_u32.to_le_bytes());
+            put_text(&mut dictionary, value);
+        }
+        dictionary
     }
 
     #[test]
@@ -1271,6 +1416,7 @@ mod tests {
         shard.extend_from_slice(&1_u32.to_le_bytes());
         shard.extend_from_slice(&100_u64.to_le_bytes());
         shard.extend_from_slice(&48_u32.to_le_bytes());
+        shard.extend_from_slice(&0_u32.to_le_bytes());
         shard.extend_from_slice(&[7; 32]);
         let cells = parse_catalog_shard(&shard, ReverseFamily::Places, 8).unwrap();
         assert_eq!(cells.len(), 1);
@@ -1298,6 +1444,7 @@ mod tests {
                 latitude: 0.0,
                 radius_m: 250.0,
             },
+            None,
         )
         .unwrap();
         assert_eq!(hits.len(), 1);
@@ -1308,6 +1455,47 @@ mod tests {
         let mut corrupt = index_bytes;
         corrupt[4] ^= 1;
         assert!(ShardIndex::parse(&header, &corrupt, ReverseFamily::Places, &catalog).is_err());
+    }
+
+    #[test]
+    fn dictionary_coded_address_preserves_display_and_raw_levels() {
+        let dictionary = AddressDictionary::parse(&address_dictionary_fixture()).unwrap();
+        let mut record = vec![2_u8; 16];
+        record.extend_from_slice(&0_i32.to_le_bytes());
+        record.extend_from_slice(&0_i32.to_le_bytes());
+        record.extend_from_slice(&8_u32.to_le_bytes());
+        record.extend_from_slice(&4_u32.to_le_bytes());
+        record.extend_from_slice(&9_u64.to_le_bytes());
+        for _ in 0..6 {
+            record.extend_from_slice(&0_u16.to_le_bytes());
+        }
+        record.extend_from_slice(&1_u16.to_le_bytes());
+        record.extend_from_slice(&0_u16.to_le_bytes());
+        let (decoded, consumed) = decode_record(
+            &record,
+            ReverseFamily::Addresses,
+            0x8080,
+            0,
+            b"8080",
+            Some(&dictionary),
+        )
+        .unwrap();
+        assert_eq!(consumed, record.len());
+        assert_eq!(decoded.display_country, "XX");
+        assert_eq!(decoded.street, "Main Street");
+        assert_eq!(decoded.number, "12");
+        assert_eq!(decoded.address_levels, ["Region"]);
+
+        record[40] = 1;
+        assert!(decode_record(
+            &record,
+            ReverseFamily::Addresses,
+            0x8080,
+            0,
+            b"8080",
+            Some(&dictionary),
+        )
+        .is_err());
     }
 
     #[test]

@@ -338,11 +338,21 @@ def test_address_reduce_uses_the_same_spatial_r2_path(binaries, tmp_path):
     )
     assert reduction["records"] == 17
     assert reduction["shards"][0]["partition_cell"] == "c328"
+    assert 0 < reduction["shards"][0]["dictionary_bytes"] <= 8 * 1024 * 1024
     shard = R2.REVERSE.ReverseShard(
         store.path(reduction["shards"][0]["object"]["key"]).read_bytes()
     )
     assert shard.family == "addresses"
     assert shard.records == 17
+    assert shard.dictionary_bytes == reduction["shards"][0]["dictionary_bytes"]
+    decoded = [
+        record
+        for leaf in shard.leaf_ranges()
+        for record in shard.decode_leaf(leaf.key)
+    ]
+    assert len(decoded) == 17
+    assert decoded[0]["street"] == "Main Street"
+    assert decoded[0]["address_levels"] == ["Region"]
 
     catalog = R2.assemble_catalog(
         family="addresses",
@@ -355,6 +365,27 @@ def test_address_reduce_uses_the_same_spatial_r2_path(binaries, tmp_path):
     root = R2.parse_catalog_root(store.path(catalog["root"]["key"]).read_bytes())
     assert root["family"] == "addresses"
     assert root["max_radius_m"] == 500
+    catalog_shard = R2.parse_catalog_shard(
+        store.path(
+            catalog["catalog_shards"][R2.catalog_shard_id("c328")]["key"]
+        ).read_bytes()
+    )
+    assert catalog_shard["cells"][0]["dictionary_bytes"] == shard.dictionary_bytes
+
+    oversized = copy.deepcopy(reduction["shards"][0])
+    oversized["dictionary_bytes"] = R2.MAX_ADDRESS_DICTIONARY_BYTES + 1
+    oversized["object"]["bytes"] = (
+        R2.SHARD_HEADER_BYTES
+        + oversized["dictionary_bytes"]
+        + oversized["index_bytes"]
+        + 1
+    )
+    with pytest.raises(ValueError, match="catalog cell fields"):
+        R2.encode_catalog_shard(
+            family="addresses",
+            shard_id=R2.catalog_shard_id("c328"),
+            cells=[oversized],
+        )
 
 
 def test_compact_plan_drops_embedded_directories_and_drives_reduce(

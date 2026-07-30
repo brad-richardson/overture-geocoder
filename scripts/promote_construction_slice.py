@@ -109,7 +109,9 @@ REVERSE_ROOT_BYTES = 688
 REVERSE_ROOT_HEADER = struct.Struct("<8sBBBBIiiiiQII")
 REVERSE_ROOT_SHARD = struct.Struct("<Q32s")
 REVERSE_CATALOG_HEADER = struct.Struct("<8sBBBBI")
-REVERSE_CATALOG_ENTRY = struct.Struct("<HBBIQI32s")
+REVERSE_CATALOG_ENTRY = struct.Struct("<HBBIQII32s")
+REVERSE_SHARD_HEADER_BYTES = 32
+REVERSE_MAX_ADDRESS_DICTIONARY_BYTES = 8 * 1024 * 1024
 REVERSE_FAMILY_CODE = {"places": 1, "addresses": 2}
 REVERSE_MAX_RADIUS = {"places": 2_000, "addresses": 500}
 REVERSE_MAX_SUB_CELL_LEVEL = {"places": 5, "addresses": 7}
@@ -860,7 +862,7 @@ def validate_reverse_graph(
             count,
         ) = REVERSE_CATALOG_HEADER.unpack_from(payload)
         if (
-            catalog_magic != b"RCAS0001"
+            catalog_magic != b"RCAS0002"
             or catalog_family != family_code
             or catalog_level != 8
             or catalog_id != shard_id
@@ -879,16 +881,29 @@ def validate_reverse_graph(
                 cell_records,
                 data_bytes,
                 index_bytes,
+                dictionary_bytes,
                 data_digest,
             ) = REVERSE_CATALOG_ENTRY.unpack_from(payload, entry_offset)
             entry_offset += REVERSE_CATALOG_ENTRY.size
             if (
-                entry_flags != 0
+                entry_flags != (1 if family == "addresses" else 0)
                 or sub_level > REVERSE_MAX_SUB_CELL_LEVEL[family]
                 or cell_records < 1
                 or data_bytes < 1
                 or index_bytes < 1
                 or index_bytes > data_bytes
+                or (
+                    family == "places"
+                    and dictionary_bytes != 0
+                )
+                or (
+                    family == "addresses"
+                    and not 0
+                    < dictionary_bytes
+                    <= REVERSE_MAX_ADDRESS_DICTIONARY_BYTES
+                )
+                or REVERSE_SHARD_HEADER_BYTES + dictionary_bytes + index_bytes
+                >= data_bytes
                 or cell >> 12 != shard_id
                 or cell <= previous
                 or cell in seen_cells

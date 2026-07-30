@@ -63,11 +63,11 @@ PLAN_SCHEMA = "overture-reverse-r2-plan-v1"
 ADMISSION_SCHEMA = "overture-reverse-publication-admission-v1"
 SLICE_CLAIM_SCHEMA = "overture-construction-slice-claim-v1"
 CATALOG_ROOT_MAGIC = b"RCAT0001"
-CATALOG_SHARD_MAGIC = b"RCAS0001"
+CATALOG_SHARD_MAGIC = b"RCAS0002"
 CATALOG_ROOT_HEADER = struct.Struct("<8sBBBBIiiiiQII")
 CATALOG_ROOT_SHARD = struct.Struct("<Q32s")
 CATALOG_SHARD_HEADER = struct.Struct("<8sBBBBI")
-CATALOG_CELL_ENTRY = struct.Struct("<HBBIQI32s")
+CATALOG_CELL_ENTRY = struct.Struct("<HBBIQII32s")
 CATALOG_SHARDS = 16
 CELL_LEVEL = 8
 SHUFFLE_BUCKET_BITS = 8
@@ -77,6 +77,9 @@ CODE_FAMILY = {value: key for key, value in FAMILY_CODE.items()}
 MAX_RADIUS_M = {"places": 2_000, "addresses": 500}
 MAX_U32 = (1 << 32) - 1
 MAX_U64 = (1 << 64) - 1
+SHARD_HEADER_BYTES = 32
+ADDRESS_DICTIONARY_FLAG = 1
+MAX_ADDRESS_DICTIONARY_BYTES = 8 * 1024 * 1024
 
 
 def canonical_json(value: Any) -> bytes:
@@ -1079,6 +1082,16 @@ def reduce_bucket_range(
                         or decoded.cell != cell
                         or decoded.records != count
                         or decoded.sub_cell_level != level
+                        or (
+                            family == "addresses"
+                            and not 0
+                            < decoded.dictionary_bytes
+                            <= MAX_ADDRESS_DICTIONARY_BYTES
+                        )
+                        or (
+                            family == "places"
+                            and decoded.dictionary_bytes != 0
+                        )
                     ):
                         raise ValueError(f"reverse shard {cell} header differs")
                     size = shard.stat().st_size
@@ -1104,6 +1117,7 @@ def reduce_bucket_range(
                             "sub_cell_level": level,
                             "leaves": len(decoded.leaf_ranges()),
                             "index_bytes": size - decoded.index_offset,
+                            "dictionary_bytes": decoded.dictionary_bytes,
                             "object": identity,
                         }
                     )
@@ -1181,6 +1195,8 @@ def encode_catalog_shard(
         level = cell.get("sub_cell_level")
         records = cell.get("records")
         index_bytes = cell.get("index_bytes")
+        dictionary_bytes = cell.get("dictionary_bytes")
+        entry_flags = ADDRESS_DICTIONARY_FLAG if family == "addresses" else 0
         maximum_level = REVERSE.FAMILIES[
             REVERSE.DEPTH_FAMILY_BY_SERVING[family]
         ].l_lat
@@ -1194,6 +1210,20 @@ def encode_catalog_shard(
             or isinstance(index_bytes, bool)
             or not isinstance(index_bytes, int)
             or not 0 < index_bytes <= min(identity["bytes"], MAX_U32)
+            or isinstance(dictionary_bytes, bool)
+            or not isinstance(dictionary_bytes, int)
+            or (
+                family == "places"
+                and dictionary_bytes != 0
+            )
+            or (
+                family == "addresses"
+                and not 0
+                < dictionary_bytes
+                <= min(MAX_ADDRESS_DICTIONARY_BYTES, MAX_U32)
+            )
+            or SHARD_HEADER_BYTES + dictionary_bytes + index_bytes
+            >= identity["bytes"]
             or identity["bytes"] > MAX_U64
         ):
             raise ValueError("reverse catalog cell fields are out of range")
@@ -1201,10 +1231,11 @@ def encode_catalog_shard(
             CATALOG_CELL_ENTRY.pack(
                 cell_id,
                 level,
-                0,
+                entry_flags,
                 records,
                 identity["bytes"],
                 index_bytes,
+                dictionary_bytes,
                 bytes.fromhex(identity["sha256"]),
             )
         )
@@ -1235,18 +1266,37 @@ def parse_catalog_shard(data: bytes) -> dict[str, Any]:
         REVERSE.DEPTH_FAMILY_BY_SERVING[family]
     ].l_lat
     for _ in range(count):
-        cell, level, entry_flags, records, size, index_bytes, digest = (
+        (
+            cell,
+            level,
+            entry_flags,
+            records,
+            size,
+            index_bytes,
+            dictionary_bytes,
+            digest,
+        ) = (
             CATALOG_CELL_ENTRY.unpack_from(data, offset)
         )
         offset += CATALOG_CELL_ENTRY.size
         name = f"{cell:04x}"
         if (
-            entry_flags != 0
+            entry_flags
+            != (ADDRESS_DICTIONARY_FLAG if family == "addresses" else 0)
             or level > maximum_level
             or records < 1
             or size < 1
             or index_bytes < 1
             or index_bytes > size
+            or (
+                family == "places"
+                and dictionary_bytes != 0
+            )
+            or (
+                family == "addresses"
+                and not 0 < dictionary_bytes <= MAX_ADDRESS_DICTIONARY_BYTES
+            )
+            or SHARD_HEADER_BYTES + dictionary_bytes + index_bytes >= size
             or catalog_shard_id(name) != shard_id
             or (previous is not None and cell <= previous)
         ):
@@ -1259,6 +1309,7 @@ def parse_catalog_shard(data: bytes) -> dict[str, Any]:
                 "records": records,
                 "bytes": size,
                 "index_bytes": index_bytes,
+                "dictionary_bytes": dictionary_bytes,
                 "sha256": digest.hex(),
             }
         )

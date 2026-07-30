@@ -61,12 +61,11 @@ DIRECTORY_SCHEMA = {
 }
 ADMITTED_KEY = {"places": "admitted_features", "addresses": "admitted_rows"}
 
-# MEASURED mean payload bytes per record from the merged R1-b encoder
+# MEASURED mean payload bytes per record from the current encoder
 # (tests/test_reverse_shard_v1.py::test_mean_record_size_matches_the_size_model):
-# the design section-5 models (96/104) plus the 16-byte source locator the
-# format carries, and for addresses the u16 level-count prefix. Deliberately
-# NOT the design doc's 96/104.
-MODEL_RECORD_BYTES = {"places": 112, "addresses": 122}
+# Places retain the design model plus the 16-byte source locator. Address
+# records average 84 bytes after repeated strings moved into shard dictionaries.
+MODEL_RECORD_BYTES = {"places": 112, "addresses": 84}
 
 # Column projections mirroring the encoder's expected Arrow IPC input
 # (crates/geocoder-construction/src/bin/reverse_encode_v1.rs,

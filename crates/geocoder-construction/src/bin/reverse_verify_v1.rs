@@ -35,6 +35,10 @@ const CELL_LEVEL: u8 = 8;
 const INDEX_DOMAIN: &[u8] = b"overture-reverse-index-v1\0";
 const DIGEST_DOMAIN_A: &[u8] = b"overture-reverse-shard-v1\0";
 const DIGEST_DOMAIN_B: &[u8] = b"overture-reverse-shard-v1\x01";
+const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0001";
+const ADDRESS_DICTIONARY_FLAG: u8 = 1;
+const ADDRESS_DICTIONARY_FIELDS: usize = 7;
+const MAX_ADDRESS_DICTIONARY_BYTES: usize = 8 * 1024 * 1024;
 
 const LONGITUDE_E7_ORIGIN: i64 = 1_800_000_000;
 const LATITUDE_E7_ORIGIN: i64 = 900_000_000;
@@ -220,6 +224,7 @@ fn text_at<'a>(data: &'a [u8], position: &mut usize) -> Result<&'a str> {
 struct Sidecar {
     records: u64,
     index_entries: u64,
+    dictionary_bytes: u64,
     sum_a: String,
     sum_b: String,
 }
@@ -284,10 +289,44 @@ fn args() -> Result<Args> {
     })
 }
 
-/// Parse one record entry, returning its E7 position and order identity.
-/// Family-specific tail: places carries rank + 6 texts; addresses carries
-/// 6 texts + a count-prefixed address-level list.
-fn parse_entry(entry: &[u8], family: Family) -> Result<(i64, i64, [u8; 16], u32, u32, u64)> {
+fn parse_address_dictionary(data: &[u8], position: &mut usize) -> Result<Vec<usize>> {
+    if take(data, position, 8)? != ADDRESS_DICTIONARY_MAGIC
+        || take(data, position, 1)? != [ADDRESS_DICTIONARY_FIELDS as u8]
+        || take(data, position, 1)? != [0]
+        || u16_at(data, position)? != 0
+    {
+        bail!("reverse address dictionary header is malformed")
+    }
+    let mut counts = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
+    for _ in 0..ADDRESS_DICTIONARY_FIELDS {
+        let count = u32_at(data, position)? as usize;
+        if count > usize::from(u16::MAX) + 1 {
+            bail!("reverse address dictionary exceeds u16 codes")
+        }
+        let mut previous = None;
+        for _ in 0..count {
+            let value = text_at(data, position)?;
+            if previous.is_some_and(|old| old >= value) {
+                bail!("reverse address dictionary is not unique and sorted")
+            }
+            previous = Some(value);
+        }
+        counts.push(count);
+    }
+    Ok(counts)
+}
+
+type ParsedEntry = (i64, i64, [u8; 16], u32, u32, u64, usize);
+
+/// Parse one record entry, returning its E7 position, order identity, and the
+/// number of entry bytes consumed. Places entries are length-framed by the
+/// caller. Address entries are self-delimiting through their dictionary-code
+/// count, so they need no per-record u32 framing.
+fn parse_entry(
+    entry: &[u8],
+    family: Family,
+    dictionary_counts: Option<&[usize]>,
+) -> Result<ParsedEntry> {
     let mut at = 0;
     let id: [u8; 16] = take(entry, &mut at, 16)?.try_into().unwrap();
     let longitude_e7 = i64::from(i32_at(entry, &mut at)?);
@@ -298,22 +337,34 @@ fn parse_entry(entry: &[u8], family: Family) -> Result<(i64, i64, [u8; 16], u32,
     let object = u32_at(entry, &mut at)?;
     let row_group = u32_at(entry, &mut at)?;
     let row = u64_at(entry, &mut at)?;
-    for _ in 0..6 {
-        text_at(entry, &mut at)?;
-    }
-    if family == Family::Addresses {
-        let levels = u16_at(entry, &mut at)?;
-        for _ in 0..levels {
+    if family == Family::Places {
+        for _ in 0..6 {
             text_at(entry, &mut at)?;
         }
-    }
-    if at != entry.len() {
-        bail!("reverse entry has trailing bytes")
+        if at != entry.len() {
+            bail!("reverse entry has trailing bytes")
+        }
+    } else {
+        let counts = dictionary_counts.context("reverse address dictionary is absent")?;
+        if counts.len() != ADDRESS_DICTIONARY_FIELDS {
+            bail!("reverse address dictionary field count differs")
+        }
+        for count in counts.iter().take(6) {
+            if usize::from(u16_at(entry, &mut at)?) >= *count {
+                bail!("reverse address dictionary code is out of range")
+            }
+        }
+        let levels = u16_at(entry, &mut at)?;
+        for _ in 0..levels {
+            if usize::from(u16_at(entry, &mut at)?) >= counts[6] {
+                bail!("reverse address-level dictionary code is out of range")
+            }
+        }
     }
     if longitude_e7.abs() > LONGITUDE_E7_ORIGIN || latitude_e7.abs() > LATITUDE_E7_ORIGIN {
         bail!("reverse entry coordinate is out of world range")
     }
-    Ok((longitude_e7, latitude_e7, id, object, row_group, row))
+    Ok((longitude_e7, latitude_e7, id, object, row_group, row, at))
 }
 
 fn verify(data: &[u8], args: &Args) -> Result<()> {
@@ -326,10 +377,15 @@ fn verify(data: &[u8], args: &Args) -> Result<()> {
     let index_count = u32::from_le_bytes(data[24..28].try_into().unwrap()) as usize;
     let (family_code, cell_level, level, flags) = (data[28], data[29], data[30], data[31]);
     let expected_level = sub_cell_level(args.records, &args.cell, args.family)?;
+    let expected_flags = if args.family == Family::Addresses {
+        ADDRESS_DICTIONARY_FLAG
+    } else {
+        0
+    };
     if family_code != args.family.code()
         || cell_level != CELL_LEVEL
         || level != expected_level
-        || flags != 0
+        || flags != expected_flags
         || index_offset < 32
         || index_offset > data.len()
     {
@@ -340,6 +396,18 @@ fn verify(data: &[u8], args: &Args) -> Result<()> {
     }
     let (cell_y, cell_x) = cell_yx(&args.cell)?;
     let mut position = 32;
+    let dictionary_counts = if args.family == Family::Addresses {
+        Some(parse_address_dictionary(
+            &data[..index_offset],
+            &mut position,
+        )?)
+    } else {
+        None
+    };
+    let dictionary_bytes = position - 32;
+    if dictionary_bytes > MAX_ADDRESS_DICTIONARY_BYTES {
+        bail!("reverse address dictionary exceeds serving read cap")
+    }
     let mut observed = 0_u64;
     let mut previous: Option<OrderKey> = None;
     let mut expected_index = Vec::<(u64, Vec<u8>, u64, u64, u32)>::new();
@@ -348,12 +416,28 @@ fn verify(data: &[u8], args: &Args) -> Result<()> {
     let mut sum_b = [0_u8; 32];
     while position < index_offset {
         let payload_offset = position as u64;
-        let length = u32_at(data, &mut position)? as usize;
-        let entry = take(data, &mut position, length)?;
+        let (entry, encoded_bytes) = if args.family == Family::Places {
+            let length = u32_at(data, &mut position)? as usize;
+            (take(data, &mut position, length)?, 4_u64 + length as u64)
+        } else {
+            let start = position;
+            let parsed = parse_entry(
+                &data[start..index_offset],
+                args.family,
+                dictionary_counts.as_deref(),
+            )?;
+            position = position
+                .checked_add(parsed.6)
+                .context("reverse address entry offset overflows")?;
+            (&data[start..position], parsed.6 as u64)
+        };
         add_256(&mut sum_a, &record_digest(DIGEST_DOMAIN_A, entry));
         add_256(&mut sum_b, &record_digest(DIGEST_DOMAIN_B, entry));
-        let (longitude_e7, latitude_e7, id, object, row_group, row) =
-            parse_entry(entry, args.family)?;
+        let (longitude_e7, latitude_e7, id, object, row_group, row, consumed) =
+            parse_entry(entry, args.family, dictionary_counts.as_deref())?;
+        if consumed != entry.len() {
+            bail!("reverse entry has trailing bytes")
+        }
         // Re-derive the leaf key from the record's own E7 coordinates clamped
         // into the authoritative cell -- never trust the stored index keys.
         let (sub_y, sub_x) = leaf_sub(longitude_e7, latitude_e7, cell_x, cell_y, level);
@@ -364,7 +448,6 @@ fn verify(data: &[u8], args: &Args) -> Result<()> {
         previous = Some(key);
         let mut serving_key = args.cell.clone().into_bytes();
         serving_key.extend_from_slice(leaf_digits(sub_y, sub_x, level).as_bytes());
-        let encoded_bytes = 4_u64 + length as u64;
         if active_key.as_ref() != Some(&serving_key) {
             expected_index.push((
                 index_hash(&serving_key),
@@ -437,6 +520,7 @@ fn verify(data: &[u8], args: &Args) -> Result<()> {
         .context("parse reverse digest sidecar")?;
         if sidecar.records != count
             || sidecar.index_entries != index_count as u64
+            || sidecar.dictionary_bytes != dictionary_bytes as u64
             || parse_hex_256(&sidecar.sum_a)? != sum_a
             || parse_hex_256(&sidecar.sum_b)? != sum_b
         {

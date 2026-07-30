@@ -60,10 +60,13 @@ def test_execute_confirmation_binds_cost_shape_and_destination():
         "::RANGES=${RANGE_COUNT}",
         "::MAX_PARALLEL=${MAX_PARALLEL}",
         "::MAX_TOTAL_RUNNER_MINUTES=${MAX_TOTAL_RUNNER_MINUTES}",
+        "::MAX_OUTPUT_BYTES_PER_RANGE=${REDUCE_MAX_OUTPUT_BYTES}",
     ):
         assert token in script
     assert 'if [ "$MODE" = execute ] && [ "$CONFIRMATION" != "$EXPECTED" ]' in script
     assert load()["env"]["EXECUTE_MAX_RUNNER_MINUTES"] == "930"
+    assert load()["env"]["REDUCE_WALL_SECONDS"] == "2400"
+    assert load()["env"]["REDUCE_MAX_OUTPUT_BYTES"] == "3221225472"
     assert '16 range jobs * 45' in WORKFLOW.read_text()
     assert (
         '[ "$MAX_TOTAL_RUNNER_MINUTES" -lt "$EXECUTE_MAX_RUNNER_MINUTES" ]'
@@ -112,6 +115,8 @@ def test_execute_is_sixteen_bounded_ranges_then_one_catalog():
     assert "reverse_r2_v1.py reduce" in reduce
     assert "--publish-destination" in reduce
     assert "--plan plan/out/reverse-plan.json" in reduce
+    assert '--wall-seconds "$REDUCE_WALL_SECONDS"' in reduce
+    assert '--max-output-bytes "$REDUCE_MAX_OUTPUT_BYTES"' in reduce
     catalog = body("catalog")
     assert "reverse_r2_v1.py catalog" in catalog
     assert "reverse-v2-${{ inputs.family }}-catalog" in str(
