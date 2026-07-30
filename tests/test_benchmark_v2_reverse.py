@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 import types
 from pathlib import Path
@@ -30,6 +31,41 @@ def case(family="places"):
         "latitude": 43.74 if family == "places" else 47.61,
         "radius_m": 250 if family == "places" else 100,
     }
+
+
+def quality_case(family="places", suffix="one"):
+    value = {**case(family), "id": f"{family}:{suffix}", "tolerance_m": 50}
+    if family == "places":
+        value.update({"expected_name": "Central Cafe", "alt_names": ["Cafe Central"]})
+    else:
+        value["expected_address"] = {
+            "number": "12",
+            "street": ["Main Street", "Main St"],
+            "postcode": "98101",
+            "locality": "Seattle",
+            "country_code": "us",
+        }
+    return value
+
+
+class FakeResponse:
+    def __init__(self, body, status=200):
+        self.status_code = status
+        self.headers = {}
+        self._body = body
+
+    def json(self):
+        return self._body
+
+
+class FakeSession:
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses.pop(0)
 
 
 def test_case_validation_and_paths_are_family_specific():
@@ -110,3 +146,173 @@ def test_summary_separates_families_and_phases():
     assert summary["addresses"]["errors"] == 1
     assert summary["places/warm"]["client_ms"]["p50"] == 20.0
     assert "addresses: HTTP/shape errors" in bench.gate_failures(summary)
+
+
+def test_provider_request_builders_are_family_specific_and_identified():
+    places = bench.validate_cases(
+        {"schema": bench.CASES_SCHEMA, "cases": [quality_case("places")]}
+    )[0]
+    addresses = bench.validate_cases(
+        {"schema": bench.CASES_SCHEMA, "cases": [quality_case("addresses")]}
+    )[0]
+
+    nominatim = bench.provider_request(
+        "nominatim", places, base_url="https://nominatim.example/base/"
+    )
+    assert nominatim["url"] == "https://nominatim.example/base/reverse"
+    assert nominatim["params"]["layer"] == "poi"
+    assert "overture-geocoder" in nominatim["headers"]["User-Agent"]
+
+    photon_places = bench.provider_request(
+        "photon", places, base_url="https://photon.example/"
+    )
+    assert photon_places["url"] == "https://photon.example/reverse"
+    assert photon_places["params"]["radius"] == pytest.approx(0.25)
+    assert photon_places["capability"]["type_equivalence"] == "generic-reverse"
+    assert "limitation" in photon_places["capability"]
+
+    photon_addresses = bench.provider_request(
+        "photon", addresses, base_url="https://unused.example"
+    )
+    assert photon_addresses["params"]["layer"] == ["house", "street"]
+
+
+def test_semantic_scoring_uses_names_address_components_and_distance_not_ids():
+    places = bench.validate_cases(
+        {"schema": bench.CASES_SCHEMA, "cases": [quality_case("places")]}
+    )[0]
+    nominatim_body = {
+        "place_id": 123,
+        "osm_id": 999,
+        "name": "Cafe Central",
+        "lat": str(places["latitude"]),
+        "lon": str(places["longitude"]),
+        "category": "amenity",
+        "type": "cafe",
+        "address": {},
+    }
+    place_score = bench.score_semantic_response(
+        places, 200, nominatim_body, None, "nominatim"
+    )
+    assert place_score["quality_at_1"] is True
+    assert place_score["top_distance_m"] == pytest.approx(0)
+
+    addresses = bench.validate_cases(
+        {"schema": bench.CASES_SCHEMA, "cases": [quality_case("addresses")]}
+    )[0]
+    photon_body = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "id": "provider-specific-and-ignored",
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [
+                        addresses["longitude"],
+                        addresses["latitude"],
+                    ],
+                },
+                "properties": {
+                    "housenumber": "12",
+                    "street": "Main St",
+                    "postcode": "98101",
+                    "city": "Seattle",
+                    "countrycode": "US",
+                },
+            }
+        ],
+    }
+    address_score = bench.score_semantic_response(
+        addresses, 200, photon_body, None, "photon"
+    )
+    assert address_score["quality_at_1"] is True
+    assert address_score["top_component_accuracy"] == 1.0
+
+
+def test_null_geometry_is_a_miss_instead_of_aborting():
+    assert bench._coordinates({"geometry": None}) is None
+
+
+def test_external_legacy_cases_are_explicitly_unscorable_without_requests():
+    legacy = bench.validate_cases(
+        {"schema": bench.CASES_SCHEMA, "cases": [case()]}
+    )
+    session = FakeSession([])
+    rows = bench.run_external_provider(
+        provider="nominatim",
+        base_url="https://overture.example",
+        cases=legacy,
+        interval_s=0,
+        timeout_s=5,
+        session=session,
+    )
+    assert session.calls == []
+    assert rows[0]["scorable"] is False
+    assert "semantic gold" in rows[0]["unscorable_reason"]
+    summary = bench.summarize(rows)
+    assert summary["provider/nominatim"]["unscorable"] == 1
+    assert summary["provider/nominatim"]["errors"] == 0
+
+
+def test_external_provider_runs_sequentially_at_provider_minimum(monkeypatch):
+    cases = bench.validate_cases(
+        {
+            "schema": bench.CASES_SCHEMA,
+            "cases": [
+                quality_case("places", "one"),
+                quality_case("places", "two"),
+            ],
+        }
+    )
+    response = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "geometry": {
+                    "type": "Point",
+                    "coordinates": [cases[0]["longitude"], cases[0]["latitude"]],
+                },
+                "properties": {"name": "Central Cafe"},
+            }
+        ],
+    }
+    session = FakeSession([FakeResponse(response), FakeResponse(response)])
+    sleeps = []
+    monkeypatch.setattr(bench.time, "sleep", sleeps.append)
+
+    rows = bench.run_external_provider(
+        provider="photon",
+        base_url="https://overture.example",
+        cases=cases,
+        interval_s=0,
+        timeout_s=5,
+        session=session,
+    )
+
+    assert len(session.calls) == 2
+    assert sleeps == [bench.PROVIDER_MIN_INTERVAL_S["photon"]]
+    assert all(row["provider"] == "photon" for row in rows)
+    assert all(row["phase"] == "external" for row in rows)
+
+
+def test_comparison_report_records_overridden_provider_urls(tmp_path, monkeypatch):
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps({
+        "schema": bench.CASES_SCHEMA,
+        "cases": [quality_case("places")],
+    }))
+    output_path = tmp_path / "results.json"
+    monkeypatch.setattr(bench, "run_external_provider", lambda **_kwargs: [])
+    assert bench.main([
+        "--base-url", "https://overture.example",
+        "--nominatim-url", "https://nominatim.example",
+        "--cases", str(cases_path),
+        "--provider", "overture",
+        "--provider", "nominatim",
+        "--output", str(output_path),
+    ]) == 0
+    payload = json.loads(output_path.read_text())
+    assert payload["provider_urls"] == {
+        "overture": "https://overture.example",
+        "nominatim": "https://nominatim.example",
+    }
