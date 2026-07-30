@@ -50,11 +50,19 @@ search is intentionally not advertised yet. An explicit `types=address` with
 different family.
 
 The first Places reader has bounded, explicit recall limits. A query without
-`proximity` consults only the packed global head and supports one or two exact
-normalized tokens. A located query routes to exactly one stable world-quadkey
-shard and supports up to four tokens, with optional last-token prefix matching.
-Reported distance is diagnostic within that bounded candidate set; it is not a
-claim of exhaustive global nearest-POI ranking.
+`proximity` first consults only the packed global head, which supports one or
+two exact normalized tokens. When a three- or four-token global-head query is
+empty solely because of that token limit, the reader may interpret the final
+one or two exact tokens as a locality-like division and route the remaining
+name once at that division's centroid. This fallback does not run for explicit
+proximity or a non-empty global-head result. The inference is recorded in
+`metadata.places_locality_inference`; distance from its routing centroid is not
+exposed as user-proximity distance.
+
+A located query routes to exactly one stable world-quadkey shard and supports
+up to four tokens, with optional last-token prefix matching. Reported distance
+is diagnostic within that bounded candidate set; it is not a claim of
+exhaustive global nearest-POI ranking.
 
 The index also stores CJK bigrams for later substring work, but v2 query
 planning currently uses full normalized word tokens. This keeps ordinary long
@@ -88,7 +96,9 @@ silently truncate ambiguity.
 
 Forward responses are GeoJSON `FeatureCollection` objects. `metadata.mode` is
 `text` or `structured_address`. Structured responses also report coverage,
-normalization version, candidate count, and ambiguity.
+normalization version, candidate count, and ambiguity. Text responses include
+`metadata.places_locality_inference` only when the bounded locality-suffix
+fallback supplied an internal routing centroid.
 
 ## `GET /v2/reverse`
 
