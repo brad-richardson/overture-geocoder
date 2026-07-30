@@ -1,0 +1,187 @@
+name: Probe v2 reverse Address density
+
+# Manual, ad hoc, read-only representative-scale evidence for the Address
+# reverse execute gate. The exact plan must come from a successful Addresses
+# dry run of reverse-v2.yml. This workflow reads authenticated construction
+# staging objects into ephemeral runner scratch, encodes and verifies one local
+# densest-cell shard, uploads only its JSON evidence as a GitHub artifact, and
+# never writes an R2 object, completion marker, slice claim, or catalog.
+on:
+  workflow_dispatch:
+    inputs:
+      plan_run_id:
+        description: Successful reverse-v2 dry-run ID whose exact Address plan is probed.
+        required: true
+        type: string
+      plan_sha256:
+        description: Expected lowercase SHA-256 of out/reverse-plan.json from that run.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: reverse-v2-address-read-only-probe
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET: geocoder-shards
+  PROBE_MAX_OUTPUT_BYTES: "3221225472"
+  PROBE_WALL_SECONDS: "2400"
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  probe:
+    name: Authenticate the dry-run plan and probe its densest Address cell
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    env:
+      GH_TOKEN: ${{ github.token }}
+      AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      PLAN_RUN_ID: ${{ inputs.plan_run_id }}
+      EXPECTED_PLAN_SHA256: ${{ inputs.plan_sha256 }}
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Authenticate and download the exact successful Address dry-run plan
+        run: |
+          set -euo pipefail
+          printf '%s' "$PLAN_RUN_ID" | grep -Eq '^[1-9][0-9]*$' || {
+            echo "::error::plan_run_id must be numeric"; exit 1; }
+          printf '%s' "$EXPECTED_PLAN_SHA256" | grep -Eq '^[0-9a-f]{64}$' || {
+            echo "::error::plan_sha256 must be canonical lowercase SHA-256"; exit 1; }
+          gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${PLAN_RUN_ID}" \
+            > plan-run.json
+          jq -e --arg repository "$GITHUB_REPOSITORY" '
+            .name == "Build v2 reverse indexes"
+            and .path == ".github/workflows/reverse-v2.yml"
+            and .event == "workflow_dispatch"
+            and .head_branch == "main"
+            and .head_repository.full_name == $repository
+            and .status == "completed"
+            and .conclusion == "success"
+            and (.head_sha | test("^[0-9a-f]{40}$"))
+            and (.run_attempt | type) == "number"
+            and .run_attempt >= 1
+          ' plan-run.json >/dev/null || {
+            echo "::error::plan source is not a successful main reverse-v2 run"; exit 1; }
+          RUN_ATTEMPT="$(jq -er '.run_attempt' plan-run.json)"
+          ARTIFACT_NAME="reverse-v2-plan-${PLAN_RUN_ID}-${RUN_ATTEMPT}"
+          gh run download "$PLAN_RUN_ID" --repo "$GITHUB_REPOSITORY" \
+            --name "$ARTIFACT_NAME" --dir plan
+          test -f plan/out/reverse-plan.json || {
+            echo "::error::exact reverse plan is absent from the source artifact"; exit 1; }
+          test "$(sha256sum plan/out/reverse-plan.json | cut -d ' ' -f1)" \
+            = "$EXPECTED_PLAN_SHA256" || {
+              echo "::error::downloaded reverse plan differs from plan_sha256"; exit 1; }
+          REQUEST_SHA256="$(jq -er '
+            select(
+              .schema == "overture-reverse-r2-plan-v1"
+              and .family == "addresses"
+              and (.request_sha256 | test("^[0-9a-f]{64}$"))
+              and (.expected_records | type) == "number"
+              and .expected_records > 0
+              and (.packs | type) == "array"
+              and (.packs | length) > 0
+            )
+            | .request_sha256
+          ' plan/out/reverse-plan.json)"
+          jq -e --arg request "$REQUEST_SHA256" '
+            .schema == "overture-reverse-publication-admission-v1"
+            and .mode == "dry-run"
+            and .state == "fresh"
+            and .family == "addresses"
+            and .request_sha256 == $request
+            and .slice_claim == null
+          ' plan/out/publication-admission.json >/dev/null || {
+            echo "::error::plan artifact is not an unwritten Address dry run"; exit 1; }
+          {
+            echo "## Read-only reverse Address probe"
+            echo
+            echo "- Dry-run source: \`${PLAN_RUN_ID}\` attempt \`${RUN_ATTEMPT}\`"
+            echo "- Plan SHA-256: \`${EXPECTED_PLAN_SHA256}\`"
+            echo "- Construction request: \`${REQUEST_SHA256}\`"
+            echo "- R2 operations: verified content-addressed GETs only"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Free disk before the bounded local probe
+        uses: jlumbroso/free-disk-space@54081f138730dfa15788a46383842cd2f914a1be
+        with:
+          tool-cache: false
+          android: true
+          dotnet: true
+          haskell: true
+          large-packages: false
+          docker-images: true
+          swap-storage: false
+
+      - name: Build the production reverse encoder and verifier
+        run: >-
+          cargo build --manifest-path crates/Cargo.toml
+          -p geocoder-construction --bin reverse-encode-v1
+          --bin reverse-verify-v1 --release
+
+      - name: Probe the exact global densest Address cell without remote writes
+        run: |
+          set -euo pipefail
+          mkdir -p cache scratch out
+          python -u scripts/probe_reverse_address_v1.py \
+            --plan plan/out/reverse-plan.json \
+            --expected-plan-sha256 "$EXPECTED_PLAN_SHA256" \
+            --store-root cache \
+            --staging-bucket "$R2_BUCKET" \
+            --staging-endpoint-url "$R2_ENDPOINT" \
+            --scratch-dir scratch \
+            --encoder-binary crates/target/release/reverse-encode-v1 \
+            --verifier-binary crates/target/release/reverse-verify-v1 \
+            --wall-seconds "$PROBE_WALL_SECONDS" \
+            --max-output-bytes "$PROBE_MAX_OUTPUT_BYTES" \
+            --output out/reverse-address-probe.json
+
+      - name: Summarize the fail-closed measurement
+        if: always() && hashFiles('out/reverse-address-probe.json') != ''
+        run: |
+          {
+            echo
+            echo "### Result"
+            echo
+            jq -r '
+              "- Densest cell: `" + .densest_cell.partition_cell
+              + "` (" + (.densest_cell.records | tostring) + " records)",
+              "- Dictionary bytes: " + (.densest_cell.framing.dictionary_bytes | tostring),
+              "- Total shard bytes: " + (.densest_cell.framing.total_bytes | tostring),
+              "- Projected maximum range bytes: "
+                + (.projection.maximum_range.projected_output_bytes | tostring),
+              "- 3 GiB gate: `" + .execute_gate.status + "`"
+            ' out/reverse-address-probe.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload the exact read-only probe evidence
+        if: always() && hashFiles('out/reverse-address-probe.json') != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: reverse-v2-address-probe-${{ github.run_id }}-${{ github.run_attempt }}
+          if-no-files-found: error
+          retention-days: 30
+          path: |
+            out/reverse-address-probe.json
+            plan-run.json
