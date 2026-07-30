@@ -1536,6 +1536,103 @@ fn address_params(params: &HashMap<String, String>) -> HashMap<String, String> {
         .collect()
 }
 
+#[derive(Debug, PartialEq, Eq)]
+struct AddressLookupKey {
+    variant: &'static str,
+    key: [String; 8],
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum AddressLookupDisposition {
+    Continue,
+    Match,
+    OutOfCoverage,
+}
+
+fn address_lookup_disposition(
+    outcome: &AddressOutcome,
+    geocoder_build: &str,
+) -> Result<AddressLookupDisposition> {
+    match outcome {
+        AddressOutcome::Resolved {
+            data_version,
+            candidates,
+            ..
+        } if data_version == geocoder_build => {
+            if candidates.is_empty() {
+                Ok(AddressLookupDisposition::Continue)
+            } else {
+                Ok(AddressLookupDisposition::Match)
+            }
+        }
+        AddressOutcome::OutOfCoverage { data_version, .. } if data_version == geocoder_build => {
+            Ok(AddressLookupDisposition::OutOfCoverage)
+        }
+        AddressOutcome::Resolved { .. } | AddressOutcome::OutOfCoverage { .. } => Err(
+            Error::RustError("v2 address outcome differs from geocoder build".into()),
+        ),
+    }
+}
+
+/// Plan a bounded set of exact source-key representations for conventional
+/// `state`/`region` + `city` input.
+///
+/// Overture sources commonly encode a city in either the last
+/// `address_levels` value, `postal_city`, or both. The canonical fields expose
+/// those source values literally, so an explicit canonical context always
+/// remains a one-key exact lookup. Only the less-specific public aliases opt
+/// into this compatibility bridge. A supplied `county` also keeps the exact
+/// one-key interpretation because silently dropping it would weaken context.
+fn address_lookup_plan(
+    params: &HashMap<String, String>,
+) -> std::result::Result<Vec<AddressLookupKey>, crate::address::ValidationError> {
+    let exact = build_lookup_key(&address_params(params))?;
+    let has_explicit_canonical_context =
+        ["admin_level_general", "admin_level_specific", "postal_city"]
+            .iter()
+            .any(|name| params.contains_key(*name));
+    let has_state_alias = ["state", "region"]
+        .iter()
+        .any(|name| params.contains_key(*name));
+    let has_city_alias = params.contains_key("city");
+    if has_explicit_canonical_context
+        || !has_state_alias
+        || !has_city_alias
+        || params.contains_key("county")
+        || exact[1].is_empty()
+        || exact[3].is_empty()
+    {
+        return Ok(vec![AddressLookupKey {
+            variant: "exact",
+            key: exact,
+        }]);
+    }
+
+    let city = exact[3].clone();
+    let mut level_city = exact.clone();
+    level_city[2] = city.clone();
+    level_city[3].clear();
+    let postal_city = exact.clone();
+    let mut level_and_postal_city = exact;
+    level_and_postal_city[2] = city;
+
+    let candidates = [
+        ("address_level_city", level_city),
+        ("postal_city", postal_city),
+        ("address_level_and_postal_city", level_and_postal_city),
+    ];
+    let mut plan = Vec::with_capacity(candidates.len());
+    for (variant, key) in candidates {
+        if !plan
+            .iter()
+            .any(|planned: &AddressLookupKey| planned.key == key)
+        {
+            plan.push(AddressLookupKey { variant, key });
+        }
+    }
+    Ok(plan)
+}
+
 fn data_version_body(version: &DataVersion, features: Vec<Value>, metadata: Value) -> Value {
     json!({
         "type": "FeatureCollection",
@@ -1866,7 +1963,7 @@ pub(crate) async fn handle_forward(
                 400,
             );
         }
-        let key = match build_lookup_key(&address_params(&params)) {
+        let lookup_plan = match address_lookup_plan(&params) {
             Ok(value) => value,
             Err(error) => return json_error("invalid_request", &error.message(), 400),
         };
@@ -1882,15 +1979,39 @@ pub(crate) async fn handle_forward(
             );
         };
         let entrypoint = &family.entrypoints["structured_forward"];
-        let outcome = if family.versions.format == ADDRESS_CONSTRUCTION_FORMAT {
-            loader
-                .lookup_address_construction(&key, &entrypoint.object_key, &release.geocoder_build)
-                .await?
-        } else {
-            loader
-                .lookup_address_entrypoint(&key, &entrypoint.object_key, &release.geocoder_build)
-                .await?
-        };
+        let mut lookup_attempts = 0;
+        let mut resolution_variant = "none";
+        let mut final_outcome = None;
+        for planned in &lookup_plan {
+            lookup_attempts += 1;
+            let outcome = if family.versions.format == ADDRESS_CONSTRUCTION_FORMAT {
+                loader
+                    .lookup_address_construction(
+                        &planned.key,
+                        &entrypoint.object_key,
+                        &release.geocoder_build,
+                    )
+                    .await?
+            } else {
+                loader
+                    .lookup_address_entrypoint(
+                        &planned.key,
+                        &entrypoint.object_key,
+                        &release.geocoder_build,
+                    )
+                    .await?
+            };
+            let disposition = address_lookup_disposition(&outcome, &release.geocoder_build)?;
+            if disposition == AddressLookupDisposition::Match {
+                resolution_variant = planned.variant;
+            }
+            final_outcome = Some(outcome);
+            if disposition != AddressLookupDisposition::Continue {
+                break;
+            }
+        }
+        let outcome = final_outcome
+            .ok_or_else(|| Error::RustError("v2 address lookup plan unexpectedly empty".into()))?;
         let (coverage, normalization_version, records) = match outcome {
             AddressOutcome::Resolved {
                 data_version,
@@ -1952,6 +2073,8 @@ pub(crate) async fn handle_forward(
                 "mode": "structured_address",
                 "coverage": coverage,
                 "normalization_version": normalization_version,
+                "resolution_variant": resolution_variant,
+                "lookup_attempts": lookup_attempts,
                 "candidate_count": candidate_count,
                 "ambiguous": candidate_count > 1,
             }),
@@ -3518,6 +3641,145 @@ mod tests {
         assert_eq!(key[1], "ma");
         assert_eq!(key[2], "");
         assert_eq!(key[6], "10");
+    }
+
+    #[test]
+    fn structured_address_state_city_aliases_plan_measured_source_encodings() {
+        let params = HashMap::from([
+            ("country".into(), "US".into()),
+            ("state".into(), " WA ".into()),
+            ("city".into(), " Seattle ".into()),
+            ("postcode".into(), "98109".into()),
+            ("street".into(), "Broad Street".into()),
+            ("number".into(), "400".into()),
+        ]);
+        let plan = address_lookup_plan(&params).unwrap();
+        assert_eq!(
+            plan.iter().map(|item| item.variant).collect::<Vec<_>>(),
+            vec![
+                "address_level_city",
+                "postal_city",
+                "address_level_and_postal_city"
+            ]
+        );
+        assert_eq!(
+            plan.iter()
+                .map(|item| item.key[1..4].to_vec())
+                .collect::<Vec<_>>(),
+            vec![
+                ["wa", "seattle", ""].map(str::to_string).to_vec(),
+                ["wa", "", "seattle"].map(str::to_string).to_vec(),
+                ["wa", "seattle", "seattle"].map(str::to_string).to_vec(),
+            ]
+        );
+    }
+
+    #[test]
+    fn structured_address_region_city_aliases_use_the_same_bounded_plan() {
+        let params = HashMap::from([
+            ("country".into(), "US".into()),
+            ("region".into(), "WA".into()),
+            ("city".into(), "Seattle".into()),
+            ("postcode".into(), "98109".into()),
+            ("street".into(), "Broad Street".into()),
+            ("number".into(), "400".into()),
+        ]);
+        let plan = address_lookup_plan(&params).unwrap();
+        assert_eq!(plan.len(), 3);
+        assert!(plan.iter().all(|item| item.key[1] == "wa"));
+    }
+
+    #[test]
+    fn structured_address_explicit_context_keeps_one_exact_key() {
+        for explicit in [
+            ("admin_level_general", "WA"),
+            ("admin_level_specific", "Seattle"),
+            ("postal_city", ""),
+        ] {
+            let mut params = HashMap::from([
+                ("country".into(), "US".into()),
+                ("state".into(), "WA".into()),
+                ("city".into(), "Seattle".into()),
+                ("postcode".into(), "98109".into()),
+                ("street".into(), "Broad Street".into()),
+                ("number".into(), "400".into()),
+            ]);
+            params.insert(explicit.0.into(), explicit.1.into());
+            let plan = address_lookup_plan(&params).unwrap();
+            assert_eq!(plan.len(), 1);
+            assert_eq!(plan[0].variant, "exact");
+        }
+    }
+
+    #[test]
+    fn structured_address_alias_plan_does_not_infer_or_drop_context() {
+        let base = HashMap::from([
+            ("country".into(), "US".into()),
+            ("city".into(), "Seattle".into()),
+            ("postcode".into(), "98109".into()),
+            ("street".into(), "Broad Street".into()),
+            ("number".into(), "400".into()),
+        ]);
+        let without_state = address_lookup_plan(&base).unwrap();
+        assert_eq!(without_state.len(), 1);
+        assert_eq!(without_state[0].variant, "exact");
+        assert_eq!(without_state[0].key[1], "");
+
+        let mut with_county = base;
+        with_county.insert("state".into(), "WA".into());
+        with_county.insert("county".into(), "King".into());
+        let with_county = address_lookup_plan(&with_county).unwrap();
+        assert_eq!(with_county.len(), 1);
+        assert_eq!(with_county[0].variant, "exact");
+        assert_eq!(with_county[0].key[2], "king");
+    }
+
+    #[test]
+    fn structured_address_lookup_continues_only_after_a_current_empty_result() {
+        let empty = AddressOutcome::Resolved {
+            data_version: "build-1".into(),
+            normalization_version: "normalization-1",
+            candidates: Vec::new(),
+        };
+        assert_eq!(
+            address_lookup_disposition(&empty, "build-1").unwrap(),
+            AddressLookupDisposition::Continue
+        );
+
+        let matched = AddressOutcome::Resolved {
+            data_version: "build-1".into(),
+            normalization_version: "normalization-1",
+            candidates: vec![crate::address_pages::AddressPageRecord {
+                key: Default::default(),
+                id: "00000000-0000-0000-0000-000000000001".into(),
+                longitude: -122.3,
+                latitude: 47.6,
+                source_object_index: 0,
+                source_row_group: 0,
+                source_row_index: 0,
+                country: "US".into(),
+                postal_city: String::new(),
+                postcode: "98109".into(),
+                street: "Broad Street".into(),
+                number: "400".into(),
+                unit: String::new(),
+                address_levels: vec!["WA".into(), "SEATTLE".into()],
+            }],
+        };
+        assert_eq!(
+            address_lookup_disposition(&matched, "build-1").unwrap(),
+            AddressLookupDisposition::Match
+        );
+
+        let out_of_coverage = AddressOutcome::OutOfCoverage {
+            data_version: "build-1".into(),
+            normalization_version: "normalization-1",
+        };
+        assert_eq!(
+            address_lookup_disposition(&out_of_coverage, "build-1").unwrap(),
+            AddressLookupDisposition::OutOfCoverage
+        );
+        assert!(address_lookup_disposition(&empty, "other-build").is_err());
     }
 
     #[test]

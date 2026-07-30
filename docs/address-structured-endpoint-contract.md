@@ -37,6 +37,17 @@ equivalent non-ASCII sequences are merged, but this slice does not promise
 Unicode case folding. The response echoes the data version and normalization
 version so a client can diagnose a miss.
 
+Explicit canonical context fields retain that literal, one-key contract. A
+request using only the conventional `state` (or `region`) plus `city` aliases
+has a bounded compatibility bridge for source variation: it tries the city as
+the last address level, as `postal_city`, then as both, stopping at the first
+non-empty exact result. It never infers a missing state, scans a shard, or treats
+an empty value as a wildcard. Supplying `county` or any canonical context field
+keeps the one-key interpretation rather than silently weakening context.
+The bridge makes at most three exact key attempts in aggregate. Each attempt is
+an independently routed and bounded exact lookup; the first non-empty result
+stops the sequence.
+
 ## Results and ambiguity
 
 Every retained feature with the exact normalized eight-field key is returned in
@@ -48,7 +59,8 @@ The initial hard response cap is 512 candidates. This is above the measured
 maximum fanout of 252. If a future release exceeds the cap, the Worker returns a
 bounded overflow error with the observed count; it must not silently truncate.
 An exact miss is a successful empty result, not permission to issue an
-unbounded fallback.
+unbounded fallback. The conventional alias bridge above is the sole bounded
+multi-key exception.
 
 Rows missing `street` or `number`, or with invalid point geometry, remain in the
 producer coverage report but are not representable in this exact family. They
@@ -59,8 +71,10 @@ must not be inferred, repaired, or discarded without per-task accounting.
 Route by a stable hash of the complete
 normalized eight-field key, nested under country. The versioned address catalog
 maps `(country, hash range)` to exactly one immutable shard. Consequently every
-exact lookup reads one shard and all duplicate candidates for a key remain
-together.
+exact key attempt reads at most one shard and all duplicate candidates for that
+key remain together. A canonical request makes one such attempt. The bounded
+alias bridge may route its maximum three attempts to different shards; it does
+not weaken any individual lookup's read or candidate cap.
 
 The stable partition scheme is `country-fnv1a-high-bits-v1`. Each country starts
 as one full 64-bit range. A leaf above the one-million-row cap splits by the next
@@ -98,7 +112,9 @@ would make each of them worse and would not make the public API more standard.
 - free-form address parsing;
 - street, house-number, or unit prefix search;
 - omission-as-wildcard semantics;
-- cross-shard fallback after an exact miss;
+- unbounded or open-ended cross-shard fallback after an exact miss (the
+  conventional alias bridge is the sole exception, capped at three
+  independently bounded exact key attempts);
 - destructive duplicate removal;
 - request-path access to Overture source data; and
 - independent address promotion outside the shared release finalizer.
