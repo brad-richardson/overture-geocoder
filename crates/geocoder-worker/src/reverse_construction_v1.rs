@@ -20,7 +20,19 @@ use crate::stac::{not_found, ShardLoader};
 const CATALOG_ROOT_MAGIC: &[u8; 8] = b"RCAT0001";
 const CATALOG_SHARD_MAGIC: &[u8; 8] = b"RCAS0002";
 const SHARD_MAGIC: &[u8; 8] = b"PLRX0001";
-const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0001";
+const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0002";
+
+/// Mirror of the construction encoder's per-field dictionary code width.
+/// ARDX0001 fixed every code at u16; the planet densest Address cell overflows
+/// that on `street` and `postcode`, so each field now declares the narrowest
+/// width its own cardinality admits.
+fn address_code_width(count: usize) -> usize {
+    match count {
+        0..=0x100 => 1,
+        0x101..=0x1_0000 => 2,
+        _ => 4,
+    }
+}
 const ADDRESS_DICTIONARY_FLAG: u8 = 1;
 const ADDRESS_DICTIONARY_FIELDS: usize = 7;
 const INDEX_DOMAIN: &[u8] = b"overture-reverse-index-v1\0";
@@ -212,6 +224,7 @@ struct ShardIndex {
 #[derive(Debug, Clone)]
 struct AddressDictionary {
     fields: Vec<Vec<String>>,
+    widths: Vec<usize>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -797,15 +810,24 @@ impl AddressDictionary {
         }
         let mut position = 12_usize;
         let mut fields = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
+        let mut widths = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
         for _ in 0..ADDRESS_DICTIONARY_FIELDS {
             let count = u32_at(bytes, position)? as usize;
+            let width = usize::from(
+                *checked_slice(bytes, position + 4, 1)?
+                    .first()
+                    .ok_or_else(|| "reverse address dictionary is truncated".to_string())?,
+            );
             position = position
-                .checked_add(4)
+                .checked_add(5)
                 .ok_or_else(|| "reverse address dictionary offset overflows".to_string())?;
-            if count > usize::from(u16::MAX) + 1 {
-                return Err("reverse address dictionary exceeds u16 codes".into());
+            // Derived from the count, so any other value would admit two
+            // encodings of one dictionary and break the shard digest.
+            if width != address_code_width(count) {
+                return Err("reverse address dictionary code width is not canonical".into());
             }
-            let mut values = Vec::with_capacity(count);
+            widths.push(width);
+            let mut values = Vec::with_capacity(count.min(4096));
             for _ in 0..count {
                 let value = text_at(bytes, &mut position)?;
                 if values.last().is_some_and(|old| old >= &value) {
@@ -818,15 +840,39 @@ impl AddressDictionary {
         if position != bytes.len() {
             return Err("reverse address dictionary carries trailing bytes".into());
         }
-        Ok(Self { fields })
+        Ok(Self { fields, widths })
     }
 
-    fn value(&self, field: usize, code: u16) -> std::result::Result<String, String> {
+    fn value(&self, field: usize, code: usize) -> std::result::Result<String, String> {
         self.fields
             .get(field)
-            .and_then(|values| values.get(usize::from(code)))
+            .and_then(|values| values.get(code))
             .cloned()
             .ok_or_else(|| "reverse address dictionary code is out of range".into())
+    }
+
+    fn width(&self, field: usize) -> std::result::Result<usize, String> {
+        self.widths
+            .get(field)
+            .copied()
+            .ok_or_else(|| "reverse address dictionary field is absent".into())
+    }
+
+    /// Read one code at `position` in its field's declared width and advance.
+    fn take(
+        &self,
+        bytes: &[u8],
+        position: &mut usize,
+        field: usize,
+    ) -> std::result::Result<String, String> {
+        let width = self.width(field)?;
+        let slice = checked_slice(bytes, *position, width)?;
+        let mut value = [0_u8; 4];
+        value[..width].copy_from_slice(slice);
+        *position = position
+            .checked_add(width)
+            .ok_or_else(|| "reverse address code offset overflows".to_string())?;
+        self.value(field, u32::from_le_bytes(value) as usize)
     }
 }
 
@@ -899,28 +945,20 @@ fn decode_record(
     } else {
         let dictionary =
             dictionary.ok_or_else(|| "reverse address dictionary is absent".to_string())?;
-        record.display_country = dictionary.value(0, u16_at(bytes, position)?)?;
-        position += 2;
-        record.postal_city = dictionary.value(1, u16_at(bytes, position)?)?;
-        position += 2;
-        record.postcode = dictionary.value(2, u16_at(bytes, position)?)?;
-        position += 2;
-        record.street = dictionary.value(3, u16_at(bytes, position)?)?;
-        position += 2;
-        record.number = dictionary.value(4, u16_at(bytes, position)?)?;
-        position += 2;
-        record.unit = dictionary.value(5, u16_at(bytes, position)?)?;
-        position += 2;
+        record.display_country = dictionary.take(bytes, &mut position, 0)?;
+        record.postal_city = dictionary.take(bytes, &mut position, 1)?;
+        record.postcode = dictionary.take(bytes, &mut position, 2)?;
+        record.street = dictionary.take(bytes, &mut position, 3)?;
+        record.number = dictionary.take(bytes, &mut position, 4)?;
+        record.unit = dictionary.take(bytes, &mut position, 5)?;
         let count = u16_at(bytes, position)? as usize;
         position += 2;
         if count > 256 {
             return Err("reverse address level count exceeds cap".into());
         }
         for _ in 0..count {
-            record
-                .address_levels
-                .push(dictionary.value(6, u16_at(bytes, position)?)?);
-            position += 2;
+            let level = dictionary.take(bytes, &mut position, 6)?;
+            record.address_levels.push(level);
         }
     }
     if position > MAX_RECORD_BYTES {
@@ -1367,6 +1405,7 @@ mod tests {
         dictionary.extend_from_slice(&0_u16.to_le_bytes());
         for value in ["XX", "Test", "12345", "Main Street", "12", "", "Region"] {
             dictionary.extend_from_slice(&1_u32.to_le_bytes());
+            dictionary.push(address_code_width(1) as u8);
             put_text(&mut dictionary, value);
         }
         dictionary
@@ -1458,6 +1497,74 @@ mod tests {
     }
 
     #[test]
+    fn address_code_width_switches_at_the_exact_cardinality_bounds() {
+        assert_eq!(address_code_width(0), 1);
+        assert_eq!(address_code_width(0x100), 1);
+        assert_eq!(address_code_width(0x101), 2);
+        assert_eq!(address_code_width(0x1_0000), 2);
+        // 65,537 is the first cardinality ARDX0001 could not represent.
+        assert_eq!(address_code_width(0x1_0001), 4);
+    }
+
+    /// Planet cell `5e5e` carries 96,738 distinct streets against ARDX0001's
+    /// 65,536 ceiling, which is the exact failure that blocked the Address
+    /// reverse build. Pin a shard whose street field needs four-byte codes.
+    #[test]
+    fn address_dictionary_encodes_a_field_beyond_the_u16_ceiling() {
+        const STREETS: usize = 0x1_0001;
+        let mut dictionary = Vec::new();
+        dictionary.extend_from_slice(ADDRESS_DICTIONARY_MAGIC);
+        dictionary.extend_from_slice(&[ADDRESS_DICTIONARY_FIELDS as u8, 0]);
+        dictionary.extend_from_slice(&0_u16.to_le_bytes());
+        // Sorted distinct street names, then six single-value fields.
+        let mut streets: Vec<String> = (0..STREETS).map(|n| format!("{n:06}")).collect();
+        streets.sort();
+        for field in 0..ADDRESS_DICTIONARY_FIELDS {
+            if field == 3 {
+                dictionary.extend_from_slice(&(STREETS as u32).to_le_bytes());
+                dictionary.push(address_code_width(STREETS) as u8);
+                for street in &streets {
+                    put_text(&mut dictionary, street);
+                }
+            } else {
+                dictionary.extend_from_slice(&1_u32.to_le_bytes());
+                dictionary.push(address_code_width(1) as u8);
+                put_text(&mut dictionary, "x");
+            }
+        }
+        let parsed = AddressDictionary::parse(&dictionary).unwrap();
+        assert_eq!(parsed.width(3).unwrap(), 4);
+        assert_eq!(parsed.width(0).unwrap(), 1);
+
+        let last = STREETS - 1;
+        let mut record = vec![2_u8; 16];
+        record.extend_from_slice(&0_i32.to_le_bytes());
+        record.extend_from_slice(&0_i32.to_le_bytes());
+        record.extend_from_slice(&8_u32.to_le_bytes());
+        record.extend_from_slice(&4_u32.to_le_bytes());
+        record.extend_from_slice(&9_u64.to_le_bytes());
+        record.push(0); // display_country
+        record.push(0); // postal_city
+        record.push(0); // postcode
+        record.extend_from_slice(&(last as u32).to_le_bytes()); // street, 4 bytes
+        record.push(0); // number
+        record.push(0); // unit
+        record.extend_from_slice(&0_u16.to_le_bytes()); // no address levels
+        let (decoded, consumed) = decode_record(
+            &record,
+            ReverseFamily::Addresses,
+            0x8080,
+            0,
+            b"8080",
+            Some(&parsed),
+        )
+        .unwrap();
+        assert_eq!(consumed, record.len());
+        assert_eq!(decoded.street, streets[last]);
+        assert_eq!(decoded.display_country, "x");
+    }
+
+    #[test]
     fn dictionary_coded_address_preserves_display_and_raw_levels() {
         let dictionary = AddressDictionary::parse(&address_dictionary_fixture()).unwrap();
         let mut record = vec![2_u8; 16];
@@ -1466,11 +1573,10 @@ mod tests {
         record.extend_from_slice(&8_u32.to_le_bytes());
         record.extend_from_slice(&4_u32.to_le_bytes());
         record.extend_from_slice(&9_u64.to_le_bytes());
-        for _ in 0..6 {
-            record.extend_from_slice(&0_u16.to_le_bytes());
-        }
+        // Every fixture field holds one value, so each code is a single byte.
+        record.extend_from_slice(&[0_u8; 6]);
         record.extend_from_slice(&1_u16.to_le_bytes());
-        record.extend_from_slice(&0_u16.to_le_bytes());
+        record.push(0);
         let (decoded, consumed) = decode_record(
             &record,
             ReverseFamily::Addresses,

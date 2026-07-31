@@ -35,7 +35,7 @@ const CELL_LEVEL: u8 = 8;
 const INDEX_DOMAIN: &[u8] = b"overture-reverse-index-v1\0";
 const DIGEST_DOMAIN_A: &[u8] = b"overture-reverse-shard-v1\0";
 const DIGEST_DOMAIN_B: &[u8] = b"overture-reverse-shard-v1\x01";
-const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0001";
+const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0002";
 const ADDRESS_DICTIONARY_FLAG: u8 = 1;
 const ADDRESS_DICTIONARY_FIELDS: usize = 7;
 const MAX_ADDRESS_DICTIONARY_BYTES: usize = 8 * 1024 * 1024;
@@ -289,7 +289,24 @@ fn args() -> Result<Args> {
     })
 }
 
-fn parse_address_dictionary(data: &[u8], position: &mut usize) -> Result<Vec<usize>> {
+/// Mirror of the encoder's per-field dictionary code width.
+fn code_width(count: usize) -> u8 {
+    match count {
+        0..=0x100 => 1,
+        0x101..=0x1_0000 => 2,
+        _ => 4,
+    }
+}
+
+/// Read one little-endian dictionary code of the given 1/2/4-byte width.
+fn code_at(data: &[u8], position: &mut usize, width: usize) -> Result<usize> {
+    let bytes = take(data, position, width)?;
+    let mut value = [0_u8; 4];
+    value[..width].copy_from_slice(bytes);
+    Ok(u32::from_le_bytes(value) as usize)
+}
+
+fn parse_address_dictionary(data: &[u8], position: &mut usize) -> Result<Vec<(usize, usize)>> {
     if take(data, position, 8)? != ADDRESS_DICTIONARY_MAGIC
         || take(data, position, 1)? != [ADDRESS_DICTIONARY_FIELDS as u8]
         || take(data, position, 1)? != [0]
@@ -297,11 +314,14 @@ fn parse_address_dictionary(data: &[u8], position: &mut usize) -> Result<Vec<usi
     {
         bail!("reverse address dictionary header is malformed")
     }
-    let mut counts = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
+    let mut fields = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
     for _ in 0..ADDRESS_DICTIONARY_FIELDS {
         let count = u32_at(data, position)? as usize;
-        if count > usize::from(u16::MAX) + 1 {
-            bail!("reverse address dictionary exceeds u16 codes")
+        let width = usize::from(*take(data, position, 1)?.first().expect("one-byte slice"));
+        // The width is derived from the count, so accepting any other value
+        // would admit two encodings of one dictionary and break the digest.
+        if width != usize::from(code_width(count)) {
+            bail!("reverse address dictionary code width is not canonical")
         }
         let mut previous = None;
         for _ in 0..count {
@@ -311,9 +331,9 @@ fn parse_address_dictionary(data: &[u8], position: &mut usize) -> Result<Vec<usi
             }
             previous = Some(value);
         }
-        counts.push(count);
+        fields.push((count, width));
     }
-    Ok(counts)
+    Ok(fields)
 }
 
 type ParsedEntry = (i64, i64, [u8; 16], u32, u32, u64, usize);
@@ -325,7 +345,7 @@ type ParsedEntry = (i64, i64, [u8; 16], u32, u32, u64, usize);
 fn parse_entry(
     entry: &[u8],
     family: Family,
-    dictionary_counts: Option<&[usize]>,
+    dictionary_counts: Option<&[(usize, usize)]>,
 ) -> Result<ParsedEntry> {
     let mut at = 0;
     let id: [u8; 16] = take(entry, &mut at, 16)?.try_into().unwrap();
@@ -349,14 +369,15 @@ fn parse_entry(
         if counts.len() != ADDRESS_DICTIONARY_FIELDS {
             bail!("reverse address dictionary field count differs")
         }
-        for count in counts.iter().take(6) {
-            if usize::from(u16_at(entry, &mut at)?) >= *count {
+        for (count, width) in counts.iter().take(6) {
+            if code_at(entry, &mut at, *width)? >= *count {
                 bail!("reverse address dictionary code is out of range")
             }
         }
         let levels = u16_at(entry, &mut at)?;
+        let (level_count, level_width) = counts[6];
         for _ in 0..levels {
-            if usize::from(u16_at(entry, &mut at)?) >= counts[6] {
+            if code_at(entry, &mut at, level_width)? >= level_count {
                 bail!("reverse address-level dictionary code is out of range")
             }
         }

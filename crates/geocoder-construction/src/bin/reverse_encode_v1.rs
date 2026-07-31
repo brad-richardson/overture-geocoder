@@ -49,10 +49,26 @@ const INDEX_DOMAIN: &[u8] = b"overture-reverse-index-v1\0";
 // forward head digest so the sum is partition-independent.
 const DIGEST_DOMAIN_A: &[u8] = b"overture-reverse-shard-v1\0";
 const DIGEST_DOMAIN_B: &[u8] = b"overture-reverse-shard-v1\x01";
-const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0001";
+const ADDRESS_DICTIONARY_MAGIC: &[u8; 8] = b"ARDX0002";
 const ADDRESS_DICTIONARY_FLAG: u8 = 1;
 const ADDRESS_DICTIONARY_FIELDS: usize = 7;
 const MAX_ADDRESS_DICTIONARY_BYTES: usize = 8 * 1024 * 1024;
+
+/// Per-field dictionary code width in bytes. ARDX0001 fixed every code at u16,
+/// which the real planet densest cell overflows: `5e5e` carries 96,738 distinct
+/// streets and 95,865 distinct postcodes against a 65,536 ceiling, while
+/// `number` sits at 62,582 with under 3,000 codes of headroom. Widening every
+/// code to u32 would cost roughly 13 B/record against a 59.58 B/record
+/// baseline. Instead each field stores the narrowest width its own cardinality
+/// admits, so low-cardinality fields (a single country, a single postal city)
+/// shrink to one byte and pay for the two fields that must widen.
+fn code_width(count: usize) -> u8 {
+    match count {
+        0..=0x100 => 1,
+        0x101..=0x1_0000 => 2,
+        _ => 4,
+    }
+}
 
 const LONGITUDE_E7_ORIGIN: i64 = 1_800_000_000;
 const LATITUDE_E7_ORIGIN: i64 = 900_000_000;
@@ -288,7 +304,8 @@ fn address_levels(array: &ListArray, row: usize) -> Result<Vec<String>> {
 }
 
 struct AddressDictionary {
-    codes: Vec<BTreeMap<String, u16>>,
+    codes: Vec<BTreeMap<String, u32>>,
+    widths: Vec<u8>,
     bytes: Vec<u8>,
 }
 
@@ -329,37 +346,54 @@ impl AddressDictionary {
         bytes.push(0);
         bytes.extend_from_slice(&0_u16.to_le_bytes());
         let mut codes = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
+        let mut widths = Vec::with_capacity(ADDRESS_DICTIONARY_FIELDS);
         for field in values {
-            if field.len() > usize::from(u16::MAX) + 1 {
-                bail!("reverse address dictionary field exceeds u16 codes")
-            }
             let count: u32 = field
                 .len()
                 .try_into()
                 .context("reverse address dictionary count exceeds u32")?;
+            let width = code_width(field.len());
             bytes.extend_from_slice(&count.to_le_bytes());
+            bytes.push(width);
             let mut mapping = BTreeMap::new();
             for (index, value) in field.into_iter().enumerate() {
-                let code: u16 = index
+                let code: u32 = index
                     .try_into()
-                    .context("reverse address dictionary code exceeds u16")?;
+                    .context("reverse address dictionary code exceeds u32")?;
                 put_text(&mut bytes, &value)?;
                 mapping.insert(value, code);
             }
             codes.push(mapping);
+            widths.push(width);
         }
         if bytes.len() > MAX_ADDRESS_DICTIONARY_BYTES {
             bail!("reverse address dictionary exceeds serving read cap")
         }
-        Ok(Self { codes, bytes })
+        Ok(Self {
+            codes,
+            widths,
+            bytes,
+        })
     }
 
-    fn code(&self, field: usize, value: &str) -> Result<u16> {
+    fn code(&self, field: usize, value: &str) -> Result<u32> {
         self.codes
             .get(field)
             .and_then(|codes| codes.get(value))
             .copied()
             .context("reverse address value is absent from its dictionary")
+    }
+
+    /// Append one code in exactly the width its field declared. The dictionary
+    /// guarantees the code indexes that field, so the width always holds it.
+    fn put_code(&self, entry: &mut Vec<u8>, field: usize, value: &str) -> Result<()> {
+        let code = self.code(field, value)?;
+        let width = *self
+            .widths
+            .get(field)
+            .context("reverse address dictionary field is absent")?;
+        entry.extend_from_slice(&code.to_le_bytes()[..usize::from(width)]);
+        Ok(())
     }
 }
 
@@ -615,7 +649,7 @@ fn encode_addresses_batch(
         entry.extend_from_slice(&locator.1.to_le_bytes());
         entry.extend_from_slice(&locator.2.to_le_bytes());
         for (field, value) in display.iter().enumerate() {
-            entry.extend_from_slice(&dictionary.code(field, text(value, row)?)?.to_le_bytes());
+            dictionary.put_code(&mut entry, field, text(value, row)?)?;
         }
         let levels = address_levels(levels, row)?;
         let count: u16 = levels
@@ -624,7 +658,7 @@ fn encode_addresses_batch(
             .context("address level count exceeds u16")?;
         entry.extend_from_slice(&count.to_le_bytes());
         for level in &levels {
-            entry.extend_from_slice(&dictionary.code(6, level)?.to_le_bytes());
+            dictionary.put_code(&mut entry, 6, level)?;
         }
         encoder.push(
             longitude_e7,
