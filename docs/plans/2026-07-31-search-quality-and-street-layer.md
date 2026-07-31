@@ -387,6 +387,53 @@ the current one — so they belong after Stages 1-3, if at all.
 
 ---
 
+## Part 6b — MEASURED: Stage 1 fix 1 landed and moved nothing
+
+Deployed 2026-07-31 (`291d243`, deploy run `30666821930`) and re-measured
+against the committed baseline. Evidence:
+`benchmarks/2026-07-31-forward-gold-after-field-mask.json`.
+
+**Every metric is byte-identical to baseline.** seam t@1 0.000 (10/10 starved),
+name 0.400 (6 starved), name_locality 0.700 (3 starved), inverse_seam 0.200
+(4 starved), multilingual 0.000 (5 starved). The prediction that `name` and
+`inverse_seam` would improve was WRONG.
+
+The fix is nonetheless live and demonstrably correct. `q=paris` changed by
+exactly one position:
+
+```
+before: Dessirier, Galeries du Diamant, Rexel, New Jawad, Midas
+after:  Mercure Paris Opéra Garnier, Dessirier, Galeries du Diamant, Rexel, New Jawad
+```
+
+Exactly one of the ten head entries for "paris" was name-identified; it moved to
+rank 1 and the nine context-only records shifted down intact. That is precisely
+the designed behaviour, at precisely the available scale.
+
+**Why it cannot do more, and the general lesson.** Query-time reranking is
+bounded by what the build-time cap admitted. The head stores **ten** entries per
+token, chosen during construction by `(confidence_rank DESC, feature_id ASC)`.
+For `eiffel`, all ten are *already* name matches — "Hotel Eiffel Blomet",
+"Hôtel Eiffel Trocadéro", "Pasticceria La Tour Eiffel" — so there is nothing to
+demote and the ordering is unchanged. The Eiffel Tower is not among the ten and
+no query-time change can retrieve it.
+
+This confirms the review's warning verbatim: *"otherwise query-time reranking
+cannot recover what the cap already discarded."*
+
+Consequences for the plan, all of them sharpening rather than contradicting it:
+
+- **Fix 1 is necessary but not sufficient.** Keep it — it is correct, free, and
+  it is a precondition for the cap reorder paying off — but do not expect it to
+  move a metric on its own.
+- **The gold set could not have seen this even if it were larger.** Seam cases
+  expect a *locality*, and reordering within Places cannot produce one. The
+  measurement was right; the prediction was wrong.
+- **Stage 2 item 5 (reorder the 256-cap eviction to prefer the name bit) is
+  promoted**: it is what makes fix 1 pay, and it is build-side.
+- **Fix 2 (seam calibration) is the only Stage 1 item that can move `seam`**,
+  because only it changes how a Places score compares with a division score.
+
 ## Part 7 — Recommended sequencing
 
 Ordered by (impact ÷ effort), with correctness before capability and
