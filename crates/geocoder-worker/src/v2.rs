@@ -1762,7 +1762,20 @@ fn locality_suffix_candidates(
     explicit_proximity: bool,
     global_head_nonempty: bool,
 ) -> Vec<LocalitySuffixCandidate> {
-    if explicit_proximity || global_head_nonempty || !(3..=4).contains(&tokens.len()) {
+    // Two tokens are included (RC6): `IKEA Berlin` returned nothing at all,
+    // because two tokens got no routing and then died intersecting two ten-deep
+    // head lists.
+    //
+    // Widening is safe by CONSTRUCTION, not by luck. `global_head_nonempty` is
+    // passed as `!places.is_empty()`, so this fallback runs only when Places
+    // came back EMPTY -- it can convert "no results" into "some results" and can
+    // never displace an answer the head already found. On top of that,
+    // `exact_locality_result` requires a locality-typed division whose whole
+    // name equals the suffix, so a candidate like `tower` from "Eiffel Tower"
+    // simply finds nothing and costs one bounded division lookup. Probed
+    // 2026-07-31: tower/needle/square/park/bridge/palace/museum/garden resolve
+    // to zero exact-name divisions.
+    if explicit_proximity || global_head_nonempty || !(2..=4).contains(&tokens.len()) {
         return Vec::new();
     }
     (1..=2)
@@ -4139,7 +4152,33 @@ mod tests {
         );
         assert!(locality_suffix_candidates(&tokens, true, false).is_empty());
         assert!(locality_suffix_candidates(&tokens, false, true).is_empty());
-        assert!(locality_suffix_candidates(&query_terms("Eiffel Tower"), false, false).is_empty());
+        // Two tokens now DO produce a candidate. `Eiffel Tower` yields the
+        // suffix `tower`, which matches no locality-typed division, so the
+        // inference finds nothing and the result is unchanged -- while the same
+        // widening is what lets `IKEA Berlin` resolve at all (RC6).
+        assert_eq!(
+            locality_suffix_candidates(&query_terms("Eiffel Tower"), false, false),
+            vec![LocalitySuffixCandidate {
+                place_query: "eiffel".into(),
+                locality_query: "tower".into(),
+                locality_tokens: vec!["tower".into()],
+            }]
+        );
+        assert_eq!(
+            locality_suffix_candidates(&query_terms("IKEA Berlin"), false, false),
+            vec![LocalitySuffixCandidate {
+                place_query: "ikea".into(),
+                locality_query: "berlin".into(),
+                locality_tokens: vec!["berlin".into()],
+            }]
+        );
+        // A single token still cannot be split.
+        assert!(locality_suffix_candidates(&query_terms("Berlin"), false, false).is_empty());
+        // And the fallback still never runs when the head already answered.
+        assert!(
+            locality_suffix_candidates(&query_terms("IKEA Berlin"), false, true).is_empty(),
+            "a non-empty head must suppress the fallback so it can never displace a real answer"
+        );
     }
 
     #[test]
