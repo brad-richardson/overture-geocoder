@@ -25,8 +25,10 @@ name: Promote v2 Release
 #                    v2_release_manifest.py assemble fails closed without.
 #                    Reduction records and the construction contract are
 #                    downloaded from the named construction-v1 run's
-#                    cv1-control / cv1-reduce-* artifacts (cv1-reduce-*
-#                    retention is 7 days; a lapsed run fails loudly here).
+#                    cv1-control plus either its cv1-reduce-* batches or, for
+#                    a finalize-only recovery run that ran no reducers, its
+#                    cv1-resume-reductions set (both retain for 7 days; a
+#                    lapsed run fails loudly here).
 #                    The slice manifest freezes the slice version's family
 #                    set forever: promote every family that should serve
 #                    from this slice in ONE dispatch.
@@ -450,7 +452,7 @@ jobs:
     timeout-minutes: 300
     permissions:
       contents: read
-      # gh run download of the construction run's cv1-control / cv1-reduce-*
+      # gh run download of the construction run's cv1-control and reduction
       # artifacts; nothing here writes back to GitHub.
       actions: read
     env:
@@ -508,8 +510,24 @@ jobs:
             }
             gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
               --name cv1-control --dir "cv1/${family}/control"
-            gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-              --pattern 'cv1-reduce-*' --dir "cv1/${family}/reducers"
+            # A run that executed its reducers carries one cv1-reduce-<batch>
+            # artifact per batch. A finalize-only recovery run skips every paid
+            # upstream phase, so it carries no cv1-reduce-*; it re-uploads the
+            # flattened reduction set it authenticated and reused as
+            # cv1-resume-reductions instead. Both hold the same
+            # reductions/<partition>.json layout the flatten below walks, so
+            # prefer the per-batch artifacts and fall back to the resume set.
+            # Preferring rather than merging keeps a run that somehow carries
+            # both from tripping the duplicate-partition check.
+            if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+              --pattern 'cv1-reduce-*' --dir "cv1/${family}/reducers" 2>/dev/null
+            then
+              gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+                --name cv1-resume-reductions --dir "cv1/${family}/reducers" || {
+                  echo "::error::${family}: run ${run_id} carries neither cv1-reduce-* batches nor cv1-resume-reductions"
+                  exit 1
+                }
+            fi
             local contract="cv1/${family}/control/contract.json"
             local contract_sha
             contract_sha="$(jq -er '.request_sha256' "$contract")"

@@ -175,6 +175,20 @@ def test_promote_slice_authenticates_the_construction_request_sha():
     assert "cv1-control" in body and "cv1-reduce-" in body
 
 
+def test_promote_slice_accepts_a_finalize_only_runs_resume_reductions():
+    # A finalize-only recovery run skips every paid upstream phase, so it
+    # publishes no cv1-reduce-* batches; the reduction set it authenticated and
+    # reused rides as cv1-resume-reductions. promote-slice must accept that
+    # run, and must still fail closed when a run carries neither.
+    body = "\n".join(scripts(jobs()["promote-slice"]))
+    assert "--name cv1-resume-reductions" in body
+    assert "carries neither cv1-reduce-* batches nor cv1-resume-reductions" in body
+    # The per-batch artifacts stay preferred, so a run carrying both cannot
+    # trip the duplicate-partition check below.
+    reduce_at = body.index("--pattern 'cv1-reduce-*'")
+    assert reduce_at < body.index("--name cv1-resume-reductions")
+
+
 def test_promote_slice_authenticates_optional_reverse_runs_without_copying_them():
     gate = "\n".join(scripts(jobs()["gate"]))
     assert "<request-sha256>:<construction-run-id>[:<reverse-run-id>]" in gate
