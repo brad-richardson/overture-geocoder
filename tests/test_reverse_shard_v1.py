@@ -55,8 +55,14 @@ L_LON_FIXTURE = ROOT / "tests/fixtures/reverse/l-lon-by-row-v1.json"
 
 # Places retain the section-5 model plus the 16-byte source locator. Addresses
 # use the measured mean after repeated strings moved into shard dictionaries.
+#
+# ARDX0002 sizes each field's codes from its own cardinality, so this fixture's
+# low-cardinality fields encode as one byte each rather than a fixed two. That
+# drops the measured address mean from 84 to 78 bytes here. Real planet cells
+# widen their two highest-cardinality fields instead, so this fixture's gain is
+# not the planet number -- see PR #218 for the per-field byte accounting.
 PLACES_MODEL_BYTES = 96 + 16
-ADDRESS_MODEL_BYTES = 84
+ADDRESS_MODEL_BYTES = 78
 
 PLACES_SCHEMA = pa.schema(
     [
