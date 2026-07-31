@@ -4,6 +4,7 @@ use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
+use geocoder_core::query::NormalizedQuery;
 use geocoder_core::{GeocoderQuery, IdLookupResult, LocationBias};
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
@@ -1663,8 +1664,47 @@ fn division_feature(result: &geocoder_core::GeocoderResult) -> (f64, Value) {
     )
 }
 
-fn place_feature(place: &PlaceProjection) -> (f64, Value) {
-    let score = f64::from(place.confidence).clamp(0.0, 1.0);
+/// Ceiling on what a POI's static prior may contribute, before the shared /2.
+///
+/// Overture's per-place `confidence` is an EXISTENCE signal, not a prominence
+/// one, and it saturates at 1.0 for an enormous number of records -- which is
+/// why `q=Seattle` returned ten chain stores at relevance 1.0 with the city
+/// absent entirely.
+///
+/// The value is derived, not chosen. `match_quality` is a ladder whose closest
+/// rungs are 0.05 apart (1.0 exact, 0.95 whole-word, 0.9 word-boundary prefix,
+/// 0.85 alt-name prefix, 0.8 bare prefix). For confidence to order ties without
+/// ever overturning a better text match, its maximum contribution
+/// `0.5 * POI_PRIOR_CAP` must stay under that gap: 0.5 * 0.08 = 0.04 < 0.05.
+///
+/// The design note in `2026-07-31-search-quality-and-street-layer.md` proposed
+/// "capped ~0.4"; that would contribute up to 0.2 and let a confident prefix
+/// match beat an exact one. `the_poi_prior_cannot_outvote_a_match_quality_step`
+/// pins the corrected relationship.
+///
+/// Divisions deliberately keep the wider 0.5 band, because their `importance`
+/// IS a calibrated prominence signal (Wikidata, type prior, damped population)
+/// and is supposed to separate Paris, France from Paris, Texas.
+const POI_PRIOR_CAP: f64 = 0.08;
+
+/// Score a POI on the SAME composition divisions already use:
+/// `(match_quality + 0.5 * static_prior) / 2`, clamped.
+///
+/// Without a text query -- reverse, or a proximity-only lookup -- there is
+/// nothing to match against, so the previous confidence score stands.
+fn place_score(place: &PlaceProjection, query: Option<&NormalizedQuery>) -> f64 {
+    let confidence = f64::from(place.confidence).clamp(0.0, 1.0);
+    match query {
+        Some(query) => {
+            let quality = geocoder_core::query::match_quality(&place.name, query);
+            ((quality + 0.5 * POI_PRIOR_CAP * confidence) / 2.0).clamp(0.0, 1.0)
+        }
+        None => confidence,
+    }
+}
+
+fn place_feature(place: &PlaceProjection, query: Option<&NormalizedQuery>) -> (f64, Value) {
+    let score = place_score(place, query);
     (
         score,
         json!({
@@ -2300,6 +2340,12 @@ pub(crate) async fn handle_forward(
         let tokens = query_terms(query);
         let suffix_candidates =
             locality_suffix_candidates(&tokens, proximity.is_some(), !places.is_empty());
+        // Match quality is scored against the query the places lane actually
+        // ran. When locality inference fires, that is the query MINUS the
+        // locality suffix -- "Eiffel Tower Paris" searches places for "eiffel
+        // tower", and scoring the full string against a POI named "Eiffel
+        // Tower" would understate the match.
+        let mut effective_query = query.to_string();
         if let Some((place_query, inference)) =
             infer_places_locality(&loader, release.core_version(), &suffix_candidates).await?
         {
@@ -2312,10 +2358,17 @@ pub(crate) async fn handle_forward(
                 limit,
             )
             .await?;
+            effective_query = place_query;
             places_locality_inference =
                 Some(apply_places_locality_inference(&mut places, &inference));
         }
-        ranked.extend(places.iter().map(place_feature));
+        let normalized = NormalizedQuery::new(&effective_query);
+        let normalized = (!normalized.is_empty()).then_some(normalized);
+        ranked.extend(
+            places
+                .iter()
+                .map(|place| place_feature(place, normalized.as_ref())),
+        );
     }
     ranked.sort_by(|left, right| right.0.total_cmp(&left.0));
     let mut seen = HashSet::new();
@@ -2544,6 +2597,99 @@ pub(crate) async fn handle_id(
     };
     let body = id_response_body(&result, &release.data_version);
     versioned_json_response(&body, &release.data_version, 200)
+}
+
+#[cfg(test)]
+mod seam_tests {
+    use super::{place_score, NormalizedQuery, POI_PRIOR_CAP};
+    use crate::places_pages::PlaceProjection;
+
+    fn place(name: &str, confidence: f32) -> PlaceProjection {
+        PlaceProjection {
+            id: "id".into(),
+            latitude: 47.6,
+            longitude: -122.3,
+            confidence,
+            name: name.into(),
+            category: "bank".into(),
+            locality: "Seattle".into(),
+            region: "WA".into(),
+            country: "US".into(),
+            distance_km: None,
+        }
+    }
+
+    /// The live `q=Seattle` failure: ten POIs at a saturated confidence of 1.0
+    /// buried the city entirely. The city scored 0.8408; every POI scored 1.0
+    /// purely because Overture marks it as existing.
+    const SEATTLE_DIVISION_SCORE: f64 = 0.8408;
+
+    #[test]
+    fn a_saturated_non_matching_poi_no_longer_outranks_a_division() {
+        let query = NormalizedQuery::new("Seattle");
+        let ups_store = place("The UPS Store", 1.0);
+        let score = place_score(&ups_store, Some(&query));
+        assert!(
+            score < SEATTLE_DIVISION_SCORE,
+            "a confidence-1.0 POI that does not match the query text scored {score}, \
+             which must be below the division's {SEATTLE_DIVISION_SCORE}"
+        );
+        // It matches nothing, so only the capped prior contributes.
+        assert!((score - 0.5 * POI_PRIOR_CAP / 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn an_exactly_named_poi_still_loses_to_a_prominent_division_but_leads_the_pack() {
+        let query = NormalizedQuery::new("Seattle");
+        let exact = place_score(&place("Seattle", 1.0), Some(&query));
+        let unrelated = place_score(&place("The UPS Store", 1.0), Some(&query));
+        assert!(
+            exact > unrelated,
+            "an exact name match must lead other POIs"
+        );
+        assert!(
+            exact < SEATTLE_DIVISION_SCORE,
+            "a POI named Seattle should not outrank the city of Seattle"
+        );
+    }
+
+    #[test]
+    fn a_landmark_poi_outranks_a_weak_division_score() {
+        // Nothing is called "Eiffel Tower" among divisions, so the POI must
+        // win outright rather than being suppressed by the calibration.
+        let query = NormalizedQuery::new("Eiffel Tower");
+        let tower = place_score(&place("Eiffel Tower", 0.8), Some(&query));
+        let hotel = place_score(&place("Hotel Eiffel Blomet", 1.0), Some(&query));
+        assert!(
+            tower > hotel,
+            "exact beats a longer name containing the query"
+        );
+        assert!(
+            tower >= 0.5,
+            "an exact landmark match stays strongly ranked"
+        );
+    }
+
+    #[test]
+    fn without_a_text_query_the_previous_confidence_score_stands() {
+        // Reverse and proximity-only lookups have nothing to match against.
+        let unchanged = place_score(&place("The UPS Store", 0.75), None);
+        assert!((unchanged - 0.75).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_poi_prior_cannot_outvote_a_match_quality_step() {
+        // The whole point of the cap: the best possible prior contribution must
+        // be smaller than the gap between adjacent match-quality rungs, so
+        // confidence can order ties but never overturn a better text match.
+        let query = NormalizedQuery::new("Seattle");
+        let weak_match_high_confidence = place_score(&place("Seattle Bank", 1.0), Some(&query));
+        let strong_match_zero_confidence = place_score(&place("Seattle", 0.0), Some(&query));
+        assert!(
+            strong_match_zero_confidence > weak_match_high_confidence,
+            "an exact match at confidence 0 must beat a prefix match at confidence 1"
+        );
+    }
 }
 
 #[cfg(test)]
