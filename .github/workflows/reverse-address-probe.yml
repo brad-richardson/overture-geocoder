@@ -172,7 +172,7 @@ jobs:
                   | to_entries
                   | map(.key + "=" + (.value | tostring))
                   | join(", ")),
-              "- Projected ARDX0001 dictionary bytes: "
+              "- Projected ARDX0002 dictionary bytes: "
                 + (.densest_cell.pre_encoding_dictionary.total_bytes | tostring)
                 + " (8 MiB cap exceeded: `"
                 + (.densest_cell.pre_encoding_dictionary.exceeds_serving_cap

@@ -265,7 +265,7 @@ def test_probe_encodes_only_authenticated_densest_cell_without_staging_writes(
         PROBE.DICTIONARY_FIELDS
     )
     dictionary = result["densest_cell"]["pre_encoding_dictionary"]
-    assert dictionary["format"] == "ARDX0001"
+    assert dictionary["format"] == "ARDX0002"
     assert dictionary["total_bytes"] == result["densest_cell"]["framing"][
         "dictionary_bytes"
     ]
@@ -385,11 +385,12 @@ def test_probe_retains_cardinalities_and_read_only_evidence_when_encoder_fails(
     }
     dictionary = result["densest_cell"]["pre_encoding_dictionary"]
     assert dictionary == {
-        "format": "ARDX0001",
+        "format": "ARDX0002",
         "header_bytes": 12,
-        "field_header_bytes": 28,
+        # Seven fields, each a u32 count plus a one-byte code width.
+        "field_header_bytes": 35,
         "encoded_entry_bytes": 113,
-        "total_bytes": 153,
+        "total_bytes": 160,
         "serving_cap_bytes": 8 * 1024 * 1024,
         "exceeds_serving_cap": False,
         "fields": {

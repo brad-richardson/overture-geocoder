@@ -62,7 +62,8 @@ RANGE_COUNT = 16
 OUTPUT_CAP_BYTES = 3 * 1024**3
 ADDRESS_DICTIONARY_FORMAT = REVERSE.ADDRESS_DICTIONARY_MAGIC.decode("ascii")
 ADDRESS_DICTIONARY_HEADER_BYTES = len(REVERSE.ADDRESS_DICTIONARY_MAGIC) + 4
-ADDRESS_DICTIONARY_FIELD_HEADER_BYTES = 4
+# ARDX0002 field header: u32 count + u8 code width.
+ADDRESS_DICTIONARY_FIELD_HEADER_BYTES = 5
 ADDRESS_DICTIONARY_TEXT_LENGTH_BYTES = 2
 
 # Preserved real Seattle execution evidence in
@@ -305,13 +306,17 @@ def dictionary_cardinalities(shard: Any) -> dict[str, int]:
             DICTIONARY_FIELDS, dictionaries, strict=True
         )
     }
-    if any(not 1 <= count <= 65_536 for count in values.values()):
-        raise ValueError("reverse Address probe dictionary cardinality exceeds u16")
+    # ARDX0002 sizes each field's codes from its own cardinality, so there is no
+    # upper ceiling here: the densest planet cell carries 96,738 streets, and the
+    # real bound is the 8 MiB dictionary cap checked separately. Every field
+    # still holds at least one value because the encoder codes every row.
+    if any(count < 1 for count in values.values()):
+        raise ValueError("reverse Address probe dictionary field is empty")
     return values
 
 
 def pre_encoding_dictionary_metrics(connection: Any) -> dict[str, Any]:
-    """Measure the exact ARDX0001 dictionary shape before invoking Rust."""
+    """Measure the exact ARDX0002 dictionary shape before invoking Rust."""
     # One aggregation at a time keeps the diagnostic bounded even when several
     # fields have millions of distinct values.
     fields = {}
@@ -653,9 +658,17 @@ def run_probe(args: argparse.Namespace) -> dict[str, Any]:
         "loaded_records": loaded,
         "dictionary_cardinalities": cardinalities,
         "pre_encoding_dictionary": dictionary_metrics,
-        "dictionary_cardinality_cap": 65_536,
-        "oversized_dictionary_fields": [
-            field for field, count in cardinalities.items() if count > 65_536
+        # ARDX0002 sizes each field's codes independently, so a cardinality
+        # above 65,536 widens that field to four bytes instead of failing.
+        # Report the chosen widths rather than an overflow list.
+        "dictionary_code_widths": {
+            field: REVERSE.address_code_width(count)
+            for field, count in cardinalities.items()
+        },
+        "wide_code_fields": [
+            field
+            for field, count in cardinalities.items()
+            if REVERSE.address_code_width(count) == 4
         ],
     }
     base_resources = {
