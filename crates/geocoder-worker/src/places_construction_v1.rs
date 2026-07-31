@@ -1124,7 +1124,10 @@ fn field_mask_union(per_token: &[Vec<PlacesV1Record>]) -> HashMap<String, u8> {
 
 /// Order identifying matches ahead of context-only ones, then by the producer
 /// order (`confidence_rank DESC, feature_id, locator`) within each group.
-fn sort_by_identity_then_producer_order(records: &mut [PlacesV1Record], union: &HashMap<String, u8>) {
+fn sort_by_identity_then_producer_order(
+    records: &mut [PlacesV1Record],
+    union: &HashMap<String, u8>,
+) {
     records.sort_by(|left, right| {
         let left_identifying = identifying(union.get(&left.id).copied().unwrap_or(left.field_mask));
         let right_identifying =
@@ -2321,7 +2324,10 @@ mod tests {
         let branded = masked_record("paris", super::FIELD_BRAND, 5, 3);
         let ranked = intersect_ranked(vec![vec![context_only, named, branded]]);
         assert_eq!(
-            ranked.iter().map(|record| record.id.clone()).collect::<Vec<_>>(),
+            ranked
+                .iter()
+                .map(|record| record.id.clone())
+                .collect::<Vec<_>>(),
             vec![format_uuid_of(2), format_uuid_of(3), format_uuid_of(1)],
             "name (255-ranked context loses), then brand, then context-only"
         );
@@ -2342,7 +2348,11 @@ mod tests {
             vec![store_context, bystander_b],
         ]);
         assert_eq!(ranked.len(), 2);
-        assert_eq!(ranked[0].id, format_uuid_of(1), "brand-identified store wins");
+        assert_eq!(
+            ranked[0].id,
+            format_uuid_of(1),
+            "brand-identified store wins"
+        );
         assert_eq!(ranked[1].id, format_uuid_of(2));
     }
 
