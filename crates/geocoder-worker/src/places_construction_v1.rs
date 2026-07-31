@@ -30,7 +30,33 @@ const MAXIMUM_INDEX_PROBES: usize = 32;
 /// The promoted construction-v1 Places family format identity
 /// (`scripts/promote_construction_slice.py` `DEFAULT_VERSIONS["places"]`):
 /// routed `.plrv` artifacts plus the 4,096-way sharded `.plhd` head.
-pub(crate) const PLACES_CONSTRUCTION_FORMAT: &str = "PLRV0002+PLHD0002";
+/// The format this worker's encoder produces. `0003` adds a `prominence_rank`
+/// u8 immediately after `confidence_rank`.
+pub(crate) const PLACES_CONSTRUCTION_FORMAT: &str = "PLRV0003+PLHD0003";
+
+/// Every promoted format this worker can SERVE, newest first.
+///
+/// `0002` is not legacy cruft -- it is what is live right now. The deploy that
+/// carries this change reaches production long before any `0003` build is
+/// promoted, so a worker that accepted only `0003` would stop serving Places
+/// the moment it shipped. `0002` shards simply decode with a zero prominence
+/// prior, which is exactly the ranking they were built with.
+pub(crate) const SUPPORTED_PLACES_CONSTRUCTION_FORMATS: [&str; 2] =
+    ["PLRV0003+PLHD0003", "PLRV0002+PLHD0002"];
+
+/// Whether a promoted family's declared format is one this worker can decode.
+pub(crate) fn supports_places_construction_format(format: &str) -> bool {
+    SUPPORTED_PLACES_CONSTRUCTION_FORMATS.contains(&format)
+}
+
+/// Which entry layout a shard's magic declares.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum PlacesV1Version {
+    /// `field_mask, confidence_rank, ...`
+    V2,
+    /// `field_mask, confidence_rank, prominence_rank, ...`
+    V3,
+}
 pub(crate) const PLACES_ROUTING_SCHEMA: &str = "overture-promoted-places-routing-v1";
 pub(crate) const PLACES_HEAD_MANIFEST_SCHEMA: &str = "overture-places-global-head-sharded-v2";
 const PLACES_ROUTING_CELL_SCHEME: &str = "level-4-quadkey-yx-hex";
@@ -95,6 +121,9 @@ struct PlacesV1RangeHeader {
     expected_records: usize,
     index_offset: u64,
     index_count: usize,
+    /// Entry layout declared by this artifact's magic, carried to the payload
+    /// decode so a ranged read uses the same decoder as a whole-shard read.
+    version: PlacesV1Version,
 }
 
 impl PlacesV1RangeHeader {
@@ -129,11 +158,26 @@ pub(crate) enum PlacesV1Mode {
 }
 
 impl PlacesV1Mode {
-    fn magic(self) -> &'static [u8; 8] {
+    /// Accepted magics for this mode, newest first. Returned with the layout
+    /// version each one implies so `parse` can pick the entry decoder.
+    fn magics(self) -> [(&'static [u8; 8], PlacesV1Version); 2] {
         match self {
-            Self::Routed => b"PLRV0002",
-            Self::Head => b"PLHD0002",
+            Self::Routed => [
+                (b"PLRV0003", PlacesV1Version::V3),
+                (b"PLRV0002", PlacesV1Version::V2),
+            ],
+            Self::Head => [
+                (b"PLHD0003", PlacesV1Version::V3),
+                (b"PLHD0002", PlacesV1Version::V2),
+            ],
         }
+    }
+
+    fn version_of(self, bytes: &[u8]) -> Option<PlacesV1Version> {
+        self.magics()
+            .into_iter()
+            .find(|(magic, _)| bytes.len() >= 8 && &bytes[..8] == magic.as_slice())
+            .map(|(_, version)| version)
     }
 }
 
@@ -143,6 +187,9 @@ pub(crate) struct PlacesV1Record {
     pub partition_cell: Option<String>,
     pub field_mask: u8,
     pub confidence_rank: u8,
+    /// Static category prominence prior. Always 0 on a `0002` shard, which
+    /// carried no such byte -- that is the ranking those shards were built with.
+    pub prominence_rank: u8,
     pub id: String,
     pub longitude: f64,
     pub latitude: f64,
@@ -160,6 +207,7 @@ pub(crate) struct PlacesV1Record {
 pub(crate) struct PlacesV1Artifact<'a> {
     bytes: &'a [u8],
     mode: PlacesV1Mode,
+    version: PlacesV1Version,
     index: Vec<PlacesV1Index>,
     maximum_entry_bytes: usize,
 }
@@ -172,9 +220,12 @@ impl<'a> PlacesV1Artifact<'a> {
         maximum_records: usize,
         maximum_entry_bytes: usize,
     ) -> Result<Self> {
-        if bytes.len() > maximum_bytes || bytes.len() < 36 || &bytes[..8] != mode.magic() {
+        if bytes.len() > maximum_bytes || bytes.len() < 36 {
             return Err("invalid or over-cap Places v1 artifact".to_string());
         }
+        let Some(version) = mode.version_of(bytes) else {
+            return Err("invalid or over-cap Places v1 artifact".to_string());
+        };
         let expected = usize::try_from(read_u64(bytes, 8)?)
             .map_err(|_| "Places v1 count overflows".to_string())?;
         if expected > maximum_records {
@@ -279,6 +330,7 @@ impl<'a> PlacesV1Artifact<'a> {
         Ok(Self {
             bytes,
             mode,
+            version,
             index,
             maximum_entry_bytes,
         })
@@ -333,7 +385,7 @@ impl<'a> PlacesV1Artifact<'a> {
                 return Err("Places v1 entry cap exceeded".to_string());
             }
             let entry = take(self.bytes, &mut position, length)?;
-            let (record, _) = decode_entry(entry, self.mode)?;
+            let (record, _) = decode_entry(entry, self.mode, self.version)?;
             if record.token != token || record.partition_cell.as_deref() != partition_cell {
                 return Err("Places v1 indexed payload key differs".to_string());
             }
@@ -368,7 +420,7 @@ fn index_hash(key: &[u8]) -> u64 {
 
 fn parse_routed_range_header(bytes: &[u8], file_size: u64) -> Result<PlacesV1RangeHeader> {
     if bytes.len() != ROUTED_HEADER_BYTES as usize
-        || &bytes[..8] != PlacesV1Mode::Routed.magic()
+        || PlacesV1Mode::Routed.version_of(bytes).is_none()
         || !(36..=MAX_ROUTED_ARTIFACT_BYTES).contains(&file_size)
     {
         return Err("invalid or over-cap Places v1 ranged artifact".to_string());
@@ -385,10 +437,14 @@ fn parse_routed_range_header(bytes: &[u8], file_size: u64) -> Result<PlacesV1Ran
     {
         return Err("Places v1 ranged header does not reconcile".to_string());
     }
+    let version = PlacesV1Mode::Routed
+        .version_of(bytes)
+        .ok_or_else(|| "Places v1 ranged magic is unknown".to_string())?;
     let header = PlacesV1RangeHeader {
         expected_records,
         index_offset,
         index_count,
+        version,
     };
     if header.key_table_offset()? > file_size {
         return Err("Places v1 ranged index is truncated".to_string());
@@ -519,6 +575,7 @@ fn decode_routed_range_payload(
     selected: &PlacesV1RangeIndex,
     cell: &str,
     token: &str,
+    version: PlacesV1Version,
 ) -> Result<Vec<PlacesV1Record>> {
     validate_routed_range_payload_extent(selected)?;
     if bytes.len() as u64 != selected.payload_bytes {
@@ -532,7 +589,7 @@ fn decode_routed_range_payload(
             return Err("Places v1 ranged entry cap exceeded".to_string());
         }
         let entry = take(bytes, &mut position, length)?;
-        let (record, _) = decode_entry(entry, PlacesV1Mode::Routed)?;
+        let (record, _) = decode_entry(entry, PlacesV1Mode::Routed, version)?;
         if record.token != token || record.partition_cell.as_deref() != Some(cell) {
             return Err("Places v1 ranged payload key differs".to_string());
         }
@@ -590,7 +647,11 @@ pub(crate) fn lookup_head_shard(
     artifact.lookup(token, None, maximum_candidates, result_cap)
 }
 
-fn decode_entry(data: &[u8], mode: PlacesV1Mode) -> Result<(PlacesV1Record, [u8; 16])> {
+fn decode_entry(
+    data: &[u8],
+    mode: PlacesV1Mode,
+    version: PlacesV1Version,
+) -> Result<(PlacesV1Record, [u8; 16])> {
     let mut position = 0;
     let token = read_text(data, &mut position)?;
     let partition_cell = match mode {
@@ -599,6 +660,12 @@ fn decode_entry(data: &[u8], mode: PlacesV1Mode) -> Result<(PlacesV1Record, [u8;
     };
     let field_mask = take(data, &mut position, 1)?[0];
     let confidence_rank = take(data, &mut position, 1)?[0];
+    // `0002` shards predate this byte. They decode with a zero prior, which is
+    // the ranking they were actually built with -- not a silent downgrade.
+    let prominence_rank = match version {
+        PlacesV1Version::V3 => take(data, &mut position, 1)?[0],
+        PlacesV1Version::V2 => 0,
+    };
     let raw_id: [u8; 16] = take(data, &mut position, 16)?.try_into().unwrap();
     let longitude = f64::from_le_bytes(take(data, &mut position, 8)?.try_into().unwrap());
     let latitude = f64::from_le_bytes(take(data, &mut position, 8)?.try_into().unwrap());
@@ -623,6 +690,7 @@ fn decode_entry(data: &[u8], mode: PlacesV1Mode) -> Result<(PlacesV1Record, [u8;
             partition_cell,
             field_mask,
             confidence_rank,
+            prominence_rank,
             id: format_uuid(raw_id),
             longitude,
             latitude,
@@ -1134,6 +1202,12 @@ fn sort_by_identity_then_producer_order(
             identifying(union.get(&right.id).copied().unwrap_or(right.field_mask));
         right_identifying
             .cmp(&left_identifying)
+            // Prominence outranks confidence for the same reason the build-side
+            // caps order by it first: Overture confidence is an existence
+            // signal that anti-correlates with fame. On a 0002 shard every
+            // prominence is 0, so this degrades to the previous ordering
+            // exactly.
+            .then_with(|| right.prominence_rank.cmp(&left.prominence_rank))
             .then_with(|| right.confidence_rank.cmp(&left.confidence_rank))
             .then_with(|| left.id.cmp(&right.id))
             .then_with(|| left.source_object_index.cmp(&right.source_object_index))
@@ -1261,6 +1335,7 @@ pub(crate) fn merge_routed_candidates(
     results.sort_by(|(left, left_mask), (right, right_mask)| {
         identifying(*right_mask)
             .cmp(&identifying(*left_mask))
+            .then_with(|| right.prominence_rank.cmp(&left.prominence_rank))
             .then_with(|| right.confidence_rank.cmp(&left.confidence_rank))
             .then_with(|| left.id.cmp(&right.id))
             .then_with(|| left.source_object_index.cmp(&right.source_object_index))
@@ -1277,6 +1352,7 @@ pub(crate) fn record_projection(record: &PlacesV1Record) -> PlaceProjection {
         latitude: record.latitude as f32,
         longitude: record.longitude as f32,
         confidence: f32::from(record.confidence_rank) / 255.0,
+        prominence: f32::from(record.prominence_rank) / 255.0,
         name: record.primary_name.clone(),
         category: record.category.clone(),
         locality: record.locality.clone(),
@@ -1463,8 +1539,14 @@ impl ShardLoader {
                 .await?
                 .ok_or_else(|| not_found(object_key))?;
             output.push(
-                decode_routed_range_payload(&payload, selected, cell, &tokens[token_index])
-                    .map_err(worker::Error::RustError)?,
+                decode_routed_range_payload(
+                    &payload,
+                    selected,
+                    cell,
+                    &tokens[token_index],
+                    header.version,
+                )
+                .map_err(worker::Error::RustError)?,
             );
         }
         Ok(output)
@@ -1524,8 +1606,8 @@ mod tests {
         parse_routed_range_header, parse_routed_range_index, query_key, ranged_index_candidates,
         record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
         validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
-        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, MAX_ARTIFACT_ENTRY_BYTES,
-        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, PlacesV1Version,
+        MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -1555,7 +1637,7 @@ mod tests {
         if let Some(cell) = cell {
             text(&mut output, cell);
         }
-        output.extend_from_slice(&[field_mask, rank]);
+        output.extend_from_slice(&[field_mask, rank, 0]);
         output.extend_from_slice(&id.to_be_bytes());
         output.extend_from_slice(&1.25_f64.to_le_bytes());
         output.extend_from_slice(&2.5_f64.to_le_bytes());
@@ -1569,7 +1651,21 @@ mod tests {
     }
 
     fn artifact(mode: PlacesV1Mode, entries: &[Vec<u8>]) -> Vec<u8> {
-        let mut output = mode.magic().to_vec();
+        artifact_versioned(mode, entries, PlacesV1Version::V3)
+    }
+
+    fn artifact_versioned(
+        mode: PlacesV1Mode,
+        entries: &[Vec<u8>],
+        version: PlacesV1Version,
+    ) -> Vec<u8> {
+        let magic = mode
+            .magics()
+            .into_iter()
+            .find(|(_, candidate)| *candidate == version)
+            .map(|(magic, _)| magic)
+            .expect("mode has this version");
+        let mut output = magic.to_vec();
         output.extend_from_slice(&(entries.len() as u64).to_le_bytes());
         output.extend_from_slice(&0_u64.to_le_bytes());
         output.extend_from_slice(&0_u32.to_le_bytes());
@@ -1648,7 +1744,7 @@ mod tests {
         };
         let start = selected.payload_offset as usize;
         let end = start + selected.payload_bytes as usize;
-        decode_routed_range_payload(&bytes[start..end], selected, cell, token)
+        decode_routed_range_payload(&bytes[start..end], selected, cell, token, header.version)
     }
 
     #[test]
@@ -2432,19 +2528,145 @@ mod tests {
         );
     }
 
+    /// A `0002` entry: the byte layout that is LIVE right now, with no
+    /// prominence byte between the confidence rank and the id.
+    fn entry_v2(token: &str, cell: Option<&str>, rank: u8, id: u128) -> Vec<u8> {
+        let mut output = Vec::new();
+        text(&mut output, token);
+        if let Some(cell) = cell {
+            text(&mut output, cell);
+        }
+        output.extend_from_slice(&[1, rank]);
+        output.extend_from_slice(&id.to_be_bytes());
+        output.extend_from_slice(&1.25_f64.to_le_bytes());
+        output.extend_from_slice(&2.5_f64.to_le_bytes());
+        output.extend_from_slice(&3_u32.to_le_bytes());
+        output.extend_from_slice(&4_u32.to_le_bytes());
+        output.extend_from_slice(&0_u64.to_le_bytes());
+        for value in ["Cafe", "", "restaurant", "Town", "Region", "XX"] {
+            text(&mut output, value);
+        }
+        output
+    }
+
+    /// The deploy that carries the prominence byte reaches production long
+    /// before any 0003 build is promoted. If this fails, shipping it takes
+    /// Places search down until a full planet rebuild completes.
+    #[test]
+    fn still_decodes_the_live_0002_head_layout() {
+        let bytes = entry_v2("cafe", None, 200, 7);
+        let (record, _) =
+            super::decode_entry(&bytes, PlacesV1Mode::Head, PlacesV1Version::V2).unwrap();
+        assert_eq!(record.token, "cafe");
+        assert_eq!(record.confidence_rank, 200);
+        assert_eq!(
+            record.prominence_rank, 0,
+            "a 0002 shard carries no prominence byte and must read as zero, \
+             which is the ranking it was actually built with"
+        );
+        assert_eq!(record.primary_name, "Cafe");
+        assert_eq!(record.country, "XX");
+    }
+
+    #[test]
+    fn parse_accepts_both_shard_generations_and_rejects_others() {
+        for (version, expected) in [(PlacesV1Version::V2, 0_u8), (PlacesV1Version::V3, 9)] {
+            let entry = match version {
+                PlacesV1Version::V2 => entry_v2("cafe", None, 200, 7),
+                PlacesV1Version::V3 => entry_masked_with_prominence("cafe", 1, 200, 7, expected),
+            };
+            let shard = artifact_versioned(PlacesV1Mode::Head, &[entry], version);
+            let parsed = PlacesV1Artifact::parse(
+                &shard,
+                PlacesV1Mode::Head,
+                1 << 20,
+                16,
+                MAX_ARTIFACT_ENTRY_BYTES,
+            )
+            .unwrap_or_else(|error| panic!("{version:?} must parse: {error}"));
+            let found = parsed.lookup("cafe", None, 16, 8).unwrap();
+            assert_eq!(found.len(), 1);
+            assert_eq!(found[0].prominence_rank, expected, "{version:?}");
+        }
+
+        // A magic from neither generation still fails closed.
+        let mut bogus = artifact(
+            PlacesV1Mode::Head,
+            &[entry_masked("cafe", None, 1, 200, 7, 0)],
+        );
+        bogus[..8].copy_from_slice(b"PLHD9999");
+        assert!(PlacesV1Artifact::parse(
+            &bogus,
+            PlacesV1Mode::Head,
+            1 << 20,
+            16,
+            MAX_ARTIFACT_ENTRY_BYTES
+        )
+        .is_err());
+    }
+
+    fn entry_masked_with_prominence(
+        token: &str,
+        field_mask: u8,
+        rank: u8,
+        id: u128,
+        prominence: u8,
+    ) -> Vec<u8> {
+        let mut output = Vec::new();
+        text(&mut output, token);
+        output.extend_from_slice(&[field_mask, rank, prominence]);
+        output.extend_from_slice(&id.to_be_bytes());
+        output.extend_from_slice(&1.25_f64.to_le_bytes());
+        output.extend_from_slice(&2.5_f64.to_le_bytes());
+        output.extend_from_slice(&3_u32.to_le_bytes());
+        output.extend_from_slice(&4_u32.to_le_bytes());
+        output.extend_from_slice(&0_u64.to_le_bytes());
+        for value in ["Cafe", "", "restaurant", "Town", "Region", "XX"] {
+            text(&mut output, value);
+        }
+        output
+    }
+
+    /// The measured failure this whole change exists for: on one token, a
+    /// landmark with LOWER confidence than the commodity records around it.
+    #[test]
+    fn prominence_outranks_confidence_within_a_token() {
+        let landmark = entry_masked_with_prominence("sagrada", 1, 252, 1, 153);
+        let starbucks = entry_masked_with_prominence("sagrada", 1, 255, 2, 0);
+        let shard = artifact(PlacesV1Mode::Head, &[landmark, starbucks]);
+        let parsed = PlacesV1Artifact::parse(
+            &shard,
+            PlacesV1Mode::Head,
+            1 << 20,
+            16,
+            MAX_ARTIFACT_ENTRY_BYTES,
+        )
+        .unwrap();
+        let found = parsed.lookup("sagrada", None, 16, 8).unwrap();
+        assert_eq!(found.len(), 2);
+        let ranked = super::intersect_ranked(vec![found]);
+        assert_eq!(
+            ranked[0].id,
+            format_uuid_of(1),
+            "the prominent record must lead despite its lower confidence"
+        );
+    }
+
     fn entry_record(token: &str, rank: u8, id: u128) -> PlacesV1Record {
         entry_record_at(token, rank, id, 0)
     }
 
     fn masked_record(token: &str, field_mask: u8, rank: u8, id: u128) -> PlacesV1Record {
         let bytes = entry_masked(token, None, field_mask, rank, id, 0);
-        let (record, _) = super::decode_entry(&bytes, PlacesV1Mode::Head).unwrap();
+        let (record, _) =
+            super::decode_entry(&bytes, PlacesV1Mode::Head, PlacesV1Version::V3).unwrap();
         record
     }
 
     fn entry_record_at(token: &str, rank: u8, id: u128, row: u64) -> PlacesV1Record {
         let bytes = entry(token, None, rank, id, row);
-        let (record, _) = super::decode_entry(&bytes, PlacesV1Mode::Head).unwrap();
+        let (record, _) =
+            super::decode_entry(&bytes, PlacesV1Mode::Head, PlacesV1Version::V3).unwrap();
         record
     }
 

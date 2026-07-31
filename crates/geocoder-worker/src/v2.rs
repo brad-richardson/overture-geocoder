@@ -20,8 +20,9 @@ use crate::address_construction_v1::{
 };
 use crate::places_construction_v1::{
     construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, merge_routed_candidates,
-    record_projection, routed_fetch_plan, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
-    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES, PLACES_CONSTRUCTION_FORMAT,
+    record_projection, routed_fetch_plan, supports_places_construction_format, HeadRoutingManifest,
+    PlacesRouting, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
+    PLACES_CONSTRUCTION_FORMAT,
 };
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
@@ -493,7 +494,9 @@ fn validate_family(
             return Err(format!("invalid v2 {name} {operation} operation source"));
         }
     }
-    // The promoted construction formats (`PLRV0002+PLHD0002` for Places,
+    // The promoted construction formats (`PLRV0002+PLHD0002` and
+    // `PLRV0003+PLHD0003` for Places -- 0003 adds the prominence byte, and both
+    // are served so a deploy never outruns a rebuild -- and
     // `OAV1ART` for addresses) are accepted only for `family_slice` sources;
     // every other source keeps the exact PCSH0001 / address-reduce-2
     // contract. A construction format on a core_release source, a legacy
@@ -501,7 +504,7 @@ fn validate_family(
     // format string all fail closed below.
     let places_construction = name == "places"
         && family.source.kind == "family_slice"
-        && family.versions.format == PLACES_CONSTRUCTION_FORMAT;
+        && supports_places_construction_format(&family.versions.format);
     let address_construction = name == "addresses"
         && family.source.kind == "family_slice"
         && family.versions.format == ADDRESS_CONSTRUCTION_FORMAT;
@@ -1158,7 +1161,7 @@ impl ShardLoader {
             self.verify_readiness_object(&requirement).await?;
         }
         if let Some(places) = release.families.get("places") {
-            if places.versions.format == PLACES_CONSTRUCTION_FORMAT {
+            if supports_places_construction_format(&places.versions.format) {
                 self.verify_places_construction_readiness(places).await?;
             } else {
                 let head = self.verified_places_head_requirement(places).await?;
@@ -1694,10 +1697,23 @@ const POI_PRIOR_CAP: f64 = 0.08;
 /// nothing to match against, so the previous confidence score stands.
 fn place_score(place: &PlaceProjection, query: Option<&NormalizedQuery>) -> f64 {
     let confidence = f64::from(place.confidence).clamp(0.0, 1.0);
+    let prominence = f64::from(place.prominence).clamp(0.0, 1.0);
     match query {
         Some(query) => {
             let quality = geocoder_core::query::match_quality(&place.name, query);
-            ((quality + 0.5 * POI_PRIOR_CAP * confidence) / 2.0).clamp(0.0, 1.0)
+            // A real prominence prior gets the SAME 0.5 static band divisions
+            // get, because it is the same kind of signal -- a calibrated
+            // category prior. POI_PRIOR_CAP exists only to defend against
+            // `confidence`, which is an existence byte; it stays in force
+            // wherever no prominence is available (PCSH pages, PLHD0002
+            // shards), so this reproduces the measured fix-2 behaviour there
+            // exactly rather than silently re-ranking already-published data.
+            let prior = if prominence > 0.0 {
+                prominence
+            } else {
+                POI_PRIOR_CAP * confidence
+            };
+            ((quality + 0.5 * prior) / 2.0).clamp(0.0, 1.0)
         }
         None => confidence,
     }
@@ -2025,7 +2041,7 @@ async fn search_places(
         .entrypoints
         .get("forward")
         .ok_or_else(|| Error::RustError("v2 Places family omits its forward entrypoint".into()))?;
-    if family.versions.format == PLACES_CONSTRUCTION_FORMAT {
+    if supports_places_construction_format(&family.versions.format) {
         return search_places_construction(loader, entrypoint, query, proximity, limit).await;
     }
     const SUFFIX: &str = "/catalog.pcat";
@@ -2610,6 +2626,7 @@ mod seam_tests {
             latitude: 47.6,
             longitude: -122.3,
             confidence,
+            prominence: 0.0,
             name: name.into(),
             category: "bank".into(),
             locality: "Seattle".into(),
@@ -4170,6 +4187,7 @@ mod tests {
             latitude: 43.71,
             longitude: 7.276,
             confidence: 0.9,
+            prominence: 0.0,
             name: "Matisse Museum".into(),
             category: "museum".into(),
             locality: "Nice".into(),

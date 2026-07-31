@@ -255,6 +255,10 @@ pub(crate) struct PlaceProjection {
     pub latitude: f32,
     pub longitude: f32,
     pub confidence: f32,
+    /// Static category prominence prior in 0..=1. Zero on every PCSH page and
+    /// on `PLHD0002` construction shards, neither of which carries the byte.
+    #[serde(skip)]
+    pub prominence: f32,
     pub name: String,
     pub category: String,
     pub locality: String,
@@ -837,6 +841,7 @@ fn decode_projection(bytes: &[u8]) -> PageResult<PlaceProjection> {
         latitude,
         longitude,
         confidence,
+        prominence: 0.0,
         name,
         category,
         locality,
@@ -890,6 +895,7 @@ fn decode_head_projection(bytes: &[u8]) -> PageResult<PlaceProjection> {
         latitude,
         longitude,
         confidence,
+        prominence: 0.0,
         name,
         category,
         locality,

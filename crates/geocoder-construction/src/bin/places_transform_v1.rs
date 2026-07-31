@@ -14,6 +14,7 @@ use arrow_array::builder::{
 };
 use arrow_array::{
     Array, ArrayRef, BinaryArray, Float64Array, Int32Array, ListArray, RecordBatch, StringArray,
+    UInt8Array,
 };
 use arrow_ipc::reader::StreamReader;
 use arrow_ipc::writer::StreamWriter;
@@ -93,6 +94,7 @@ struct TermRow {
     token: String,
     field_mask: u8,
     confidence_rank: u8,
+    prominence_rank: u8,
     feature_id: [u8; 16],
     longitude: f64,
     latitude: f64,
@@ -147,6 +149,7 @@ fn output_schema() -> Arc<Schema> {
         Field::new("token_hash", DataType::UInt64, false),
         Field::new("field_mask", DataType::UInt8, false),
         Field::new("confidence_rank", DataType::UInt8, false),
+        Field::new("prominence_rank", DataType::UInt8, false),
         Field::new("feature_id", DataType::FixedSizeBinary(16), false),
         Field::new("longitude", DataType::Float64, false),
         Field::new("latitude", DataType::Float64, false),
@@ -171,6 +174,17 @@ fn required<'a, T: Array + 'static>(batch: &'a RecordBatch, name: &str) -> Resul
         .as_any()
         .downcast_ref::<T>()
         .with_context(|| format!("input column {name} has the wrong Arrow type"))
+}
+
+/// Like `required`, but returns None when the column is absent.
+///
+/// `prominence_rank` is projected by the current
+/// `project_places_construction_v1.py` but is deliberately tolerated as absent:
+/// `categories.alternate` is not a required source-contract path (its
+/// fingerprint is bound into frozen planet evidence), so a projection produced
+/// before this change must still transform, with a zero prior throughout.
+fn optional<'a, T: Array + 'static>(batch: &'a RecordBatch, name: &str) -> Option<&'a T> {
+    batch.column_by_name(name)?.as_any().downcast_ref::<T>()
 }
 
 fn text(array: &StringArray, index: usize) -> &str {
@@ -318,6 +332,7 @@ fn payload(row: &TermRow) -> Vec<u8> {
     output.extend_from_slice(&row.partition_key.to_be_bytes());
     output.push(row.field_mask);
     output.push(row.confidence_rank);
+    output.push(row.prominence_rank);
     output.extend_from_slice(&row.feature_id);
     output.extend_from_slice(&row.longitude.to_bits().to_be_bytes());
     output.extend_from_slice(&row.latitude.to_bits().to_be_bytes());
@@ -380,6 +395,7 @@ fn transform_batch(
     let regions = required::<StringArray>(batch, "region")?;
     let countries = required::<StringArray>(batch, "country")?;
     let confidences = required::<Float64Array>(batch, "confidence")?;
+    let prominences = optional::<UInt8Array>(batch, "prominence_rank");
     let statuses = required::<StringArray>(batch, "operating_status")?;
     let geometries = required::<BinaryArray>(batch, "geometry")?;
     let objects = required::<Int32Array>(batch, "source_object_index")?;
@@ -479,6 +495,9 @@ fn transform_batch(
         }
         let (partition_key, execution_group, partition_cell) = route(longitude, latitude);
         let rank = (confidences.value(index) * 255.0).round() as u8;
+        let prominence = prominences
+            .filter(|array| !array.is_null(index))
+            .map_or(0, |array| array.value(index));
         let template = TermRow {
             execution_group,
             partition_cell,
@@ -486,6 +505,7 @@ fn transform_batch(
             token: String::new(),
             field_mask: 0,
             confidence_rank: rank,
+            prominence_rank: prominence,
             feature_id: *identifier.as_bytes(),
             longitude,
             latitude,
@@ -522,6 +542,7 @@ fn transform_batch(
     let mut token_hashes = UInt64Builder::new();
     let mut masks = UInt8Builder::new();
     let mut ranks = UInt8Builder::new();
+    let mut prominences = UInt8Builder::new();
     let mut ids = FixedSizeBinaryBuilder::new(16);
     let mut longitudes = Float64Builder::new();
     let mut latitudes = Float64Builder::new();
@@ -549,6 +570,7 @@ fn transform_batch(
         token_hashes.append_value(token_hash(&row.token));
         masks.append_value(row.field_mask);
         ranks.append_value(row.confidence_rank);
+        prominences.append_value(row.prominence_rank);
         ids.append_value(row.feature_id)?;
         longitudes.append_value(row.longitude);
         latitudes.append_value(row.latitude);
@@ -571,6 +593,7 @@ fn transform_batch(
         Arc::new(token_hashes.finish()),
         Arc::new(masks.finish()),
         Arc::new(ranks.finish()),
+        Arc::new(prominences.finish()),
         Arc::new(ids.finish()),
         Arc::new(longitudes.finish()),
         Arc::new(latitudes.finish()),

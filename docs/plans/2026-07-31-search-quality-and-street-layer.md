@@ -592,6 +592,50 @@ anti-correlation, one level down.
 - **`common_names` is dead weight in the projection** — always empty, consumed
   only by `baseline_places_construction_v1.py`. Free to drop.
 
+## Part 6e — WIRED: prominence now drives both caps and query-time scoring
+
+The signal from Part 6d is now consumed end to end. Head/serving entries carry a
+`prominence_rank` u8 and both build-side caps rank by it before confidence.
+
+**The head entry layout changed, so the format is versioned.** `PLHD0002` ->
+`PLHD0003` (and `PLRV0002` -> `PLRV0003`), and the worker decodes **both**:
+
+- `SUPPORTED_PLACES_CONSTRUCTION_FORMATS` lists 0003 and 0002; the three
+  `v2.rs` gates call `supports_places_construction_format` instead of comparing
+  to one string.
+- `decode_entry` takes the version detected from the magic and reads the
+  prominence byte only for 0003. A 0002 entry decodes with prominence 0, which
+  is exactly the ranking it was built with.
+
+This is not defensive politeness. The deploy carrying this change reaches
+production long before any 0003 build is promoted — a worker that accepted only
+0003 would take Places search down the moment it shipped. Pinned by
+`still_decodes_the_live_0002_head_layout`.
+
+**The head-cap ranking was four inline literals.** The per-task cap, the fan-in
+merge, the sharded head and the merged head each spelled out
+`confidence_rank DESC, feature_id, ...`. The merge argument
+`top_n(A u B) = top_n(top_n(A) u top_n(B))` holds only while all four agree, so
+changing three would have produced a different head with no row lost, no binding
+violated and no test failing. They are now one `HEAD_CAP_ORDER` constant, the
+same treatment `SERVING_ORDER` already had.
+
+`SERVING_ORDER` (the 256 cap) also leads with prominence, and that matters more
+than the head cap: it runs first, so a landmark evicted there can never be
+recovered downstream however the head is ranked.
+
+**Query time:** `place_score` gives a real prominence the same 0.5 static band
+divisions get, because it is now the same kind of signal. `POI_PRIOR_CAP = 0.08`
+stays in force wherever no prominence exists (PCSH pages, 0002 shards), so the
+measured Part 6c behaviour is reproduced exactly on already-published data
+rather than silently re-ranked.
+
+**Status: unmeasurable until a rebuild.** Every published shard is 0002, so
+prominence is 0 everywhere in production today and the gold set cannot move.
+The tests pin the mechanism (`prominence_outranks_confidence_within_a_token`
+puts a prominence-153/confidence-252 landmark above a prominence-0/confidence-255
+commodity record); the metric can only follow a 0003 build.
+
 ## Part 7 — Recommended sequencing
 
 Ordered by (impact ÷ effort), with correctness before capability and

@@ -136,7 +136,10 @@ REDUCE_SCHEMAS = {
 # are CLI-overridable.
 DEFAULT_VERSIONS = {
     "places": {
-        "format": "PLRV0002+PLHD0002",
+        # What the CURRENT encoder produces. A slice built before the
+        # prominence byte must be promoted with --places-format
+        # PLRV0002+PLHD0002; the worker serves both.
+        "format": "PLRV0003+PLHD0003",
         "tokenizer": "nfkd-lower-stripmark-cjk-bigram-v4",
         "normalization": None,
     },

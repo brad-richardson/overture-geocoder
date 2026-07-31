@@ -94,6 +94,9 @@ SLICE_CLAIM_SCHEMA = "overture-construction-slice-claim-v1"
 FAMILY_OPERATION_DEPENDENCIES = {
     ("places", "forward", "PCSH0001"): ["families/places/head.phrp"],
     ("places", "forward", "PLRV0002+PLHD0002"): ["families/places/routing.json"],
+    # 0003 adds the prominence byte. Both are listed because the worker serves
+    # both, so an already-promoted 0002 release stays valid after a 0003 build.
+    ("places", "forward", "PLRV0003+PLHD0003"): ["families/places/routing.json"],
     ("addresses", "structured_forward", "OAV1ART"): [
         "families/addresses/routing.json"
     ],
@@ -1181,7 +1184,10 @@ def validate_unavailable_catalog(
 # crates/geocoder-worker/src/v2.rs validate_family (the worker is FROZEN; this
 # producer conforms to it, never the reverse):
 #
-#   format strings : "PLRV0002+PLHD0002" (places_construction_v1.rs:32) and
+#   format strings : "PLRV0002+PLHD0002" / "PLRV0003+PLHD0003"
+#                    (places_construction_v1.rs SUPPORTED_PLACES_CONSTRUCTION_FORMATS
+#                    -- 0003 adds a prominence_rank byte and the worker decodes
+#                    both, so both remain promotable) and
 #                    "OAV1ART" (address_construction_v1.rs:47), accepted only
 #                    on family_slice sources (v2.rs:397-402).
 #   tokenizer      : places must carry exactly TOKENIZER_VERSION
@@ -1196,6 +1202,13 @@ def validate_unavailable_catalog(
 #                    reverse-catalog.rcat for reverse.
 WORKER_CONSTRUCTION_CONTRACTS = {
     ("places", "PLRV0002+PLHD0002"): {
+        "operations": ("forward",),
+        "tokenizer": "nfkd-lower-stripmark-cjk-bigram-v4",
+        "normalization": None,
+        "entrypoint": "routing.json",
+        "entrypoint_cap": 8 * 1024 * 1024,
+    },
+    ("places", "PLRV0003+PLHD0003"): {
         "operations": ("forward",),
         "tokenizer": "nfkd-lower-stripmark-cjk-bigram-v4",
         "normalization": None,

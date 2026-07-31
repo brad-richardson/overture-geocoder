@@ -12,8 +12,11 @@ use arrow_array::{
 use arrow_ipc::reader::StreamReader;
 use sha2::{Digest, Sha256};
 
-const ROUTED_MAGIC: &[u8; 8] = b"PLRV0002";
-const HEAD_MAGIC: &[u8; 8] = b"PLHD0002";
+// 0003 adds a `prominence_rank` u8 immediately after `confidence_rank`.
+// The worker decodes 0002 and 0003 both, so a live deployment keeps serving
+// already-published 0002 shards until a 0003 build is promoted.
+const ROUTED_MAGIC: &[u8; 8] = b"PLRV0003";
+const HEAD_MAGIC: &[u8; 8] = b"PLHD0003";
 const HEADER_BYTES: u64 = 32;
 const MAX_INDEX_ENTRIES: usize = 250_000;
 const MAX_INDEX_KEY_BYTES: usize = 268_435_456;
@@ -22,7 +25,9 @@ const MAX_INDEX_KEY_BYTES: usize = 268_435_456;
 // the sum over a set of head shards equals the sum over the un-sharded head.
 const HEAD_DIGEST_DOMAIN_A: &[u8] = b"overture-places-head-shard-v1\0";
 const HEAD_DIGEST_DOMAIN_B: &[u8] = b"overture-places-head-shard-v1\x01";
-type OrderKey = (String, String, String, u8, [u8; 16], u32, u32, u64);
+// The `u8, u8` pair is `255 - prominence_rank, 255 - confidence_rank`: the
+// input order is DESC on both, and this key is compared ascending.
+type OrderKey = (String, String, String, u8, u8, [u8; 16], u32, u32, u64);
 
 fn head_digest(domain: &[u8], payload: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -168,6 +173,7 @@ fn main() -> Result<()> {
         let tokens = required::<StringArray>(&batch, "token")?;
         let masks = required::<UInt8Array>(&batch, "field_mask")?;
         let ranks = required::<UInt8Array>(&batch, "confidence_rank")?;
+        let prominences = required::<UInt8Array>(&batch, "prominence_rank")?;
         let lons = required::<Float64Array>(&batch, "longitude")?;
         let lats = required::<Float64Array>(&batch, "latitude")?;
         let objects = required::<UInt32Array>(&batch, "source_object_index")?;
@@ -183,6 +189,7 @@ fn main() -> Result<()> {
             if [
                 masks.is_null(row),
                 ranks.is_null(row),
+                prominences.is_null(row),
                 lons.is_null(row),
                 lats.is_null(row),
                 objects.is_null(row),
@@ -213,6 +220,7 @@ fn main() -> Result<()> {
                     group.to_owned(),
                     cell.to_owned(),
                     token.to_owned(),
+                    255 - prominences.value(row),
                     255 - ranks.value(row),
                     id,
                     objects.value(row),
@@ -224,6 +232,7 @@ fn main() -> Result<()> {
                     String::new(),
                     String::new(),
                     token.to_owned(),
+                    255 - prominences.value(row),
                     255 - ranks.value(row),
                     id,
                     objects.value(row),
@@ -242,6 +251,7 @@ fn main() -> Result<()> {
             }
             entry.push(masks.value(row));
             entry.push(ranks.value(row));
+            entry.push(prominences.value(row));
             entry.extend_from_slice(&id);
             entry.extend_from_slice(&lons.value(row).to_le_bytes());
             entry.extend_from_slice(&lats.value(row).to_le_bytes());

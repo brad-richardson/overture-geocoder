@@ -89,10 +89,25 @@ TOTAL_ORDER = (
     "execution_group, partition_cell, token, confidence_rank DESC, feature_id, "
     "source_object_index, source_row_group, source_row_index"
 )
-HEAD_ORDER = (
-    "token, confidence_rank DESC, feature_id, source_object_index, "
-    "source_row_group, source_row_index"
+# The head-cap ranking: which `head_result_cap` rows of a token survive.
+#
+# This was FOUR inline literals before it was a constant -- the per-task cap, the
+# fan-in merge, the sharded head, and the merged head each spelled it out. The
+# merge argument `top_n(A u B) = top_n(top_n(A) u top_n(B))` holds only while all
+# four agree, so a change to three of them would silently produce a different
+# head with no row lost, no binding violated, and no test failing. Same reasoning
+# as SERVING_ORDER below; see its comment.
+#
+# `prominence_rank` leads because `confidence_rank` CANNOT rank POIs: Overture
+# confidence is an existence signal that anti-correlates with fame (measured --
+# the Basilica de la Sagrada Familia scores 0.9897 against 0.9998 for the
+# Starbucks next door). Ranking by confidence alone is what evicted every
+# landmark from the head. See scripts/places_type_prior_v1.py.
+HEAD_CAP_ORDER = (
+    "prominence_rank DESC, confidence_rank DESC, feature_id, "
+    "source_object_index, source_row_group, source_row_index"
 )
+HEAD_ORDER = f"token, {HEAD_CAP_ORDER}"
 # The serving-candidate ranking, used in EXACTLY two places: the map-side
 # combiner and the reducer's serving QUALIFY. It must be one constant, not two
 # literals. The map combiner is only exact because it ranks rows the same way
@@ -100,9 +115,14 @@ HEAD_ORDER = (
 # wrong candidates and the reducer would serve them, with no row lost, no
 # binding violated, and no test failing. A shared constant makes that class of
 # bug impossible rather than merely unobserved.
+#
+# `prominence_rank` leads here for the same reason it leads HEAD_CAP_ORDER, and
+# it matters MORE here: this cap runs first and is 33x tighter in reach. A
+# landmark evicted at the serving cap can never be recovered by the head cap
+# downstream, however the head is ranked.
 SERVING_ORDER = (
-    "confidence_rank DESC, feature_id, source_object_index, "
-    "source_row_group, source_row_index"
+    "prominence_rank DESC, confidence_rank DESC, feature_id, "
+    "source_object_index, source_row_group, source_row_index"
 )
 SERVING_PARTITION = "PARTITION BY partition_cell, token"
 # The combiner deletes rows outside the top-N of each (partition_cell, token)
@@ -1023,8 +1043,7 @@ def map_task(
         head_candidates_path = workspace / "head-candidates.parquet"
         connection.execute(
             f"COPY (SELECT * FROM terms QUALIFY row_number() OVER (PARTITION BY token "
-            f"ORDER BY confidence_rank DESC, feature_id, source_object_index, "
-            f"source_row_group, source_row_index)<={limits.head_result_cap} ORDER BY {HEAD_ORDER}) "
+            f"ORDER BY {HEAD_CAP_ORDER})<={limits.head_result_cap} ORDER BY {HEAD_ORDER}) "
             f"TO '{head_candidates_path}' (FORMAT PARQUET, COMPRESSION ZSTD, COMPRESSION_LEVEL 6, "
             f"ROW_GROUP_SIZE {limits.parquet_row_group_rows}, PARQUET_VERSION V2, PRESERVE_ORDER true)"
         )
@@ -2256,8 +2275,7 @@ def build_global_head(
         A.write_arrow_query(
             connection,
             f"SELECT * FROM (SELECT *, row_number() OVER (PARTITION BY token ORDER BY "
-            f"confidence_rank DESC, feature_id, source_object_index, source_row_group, "
-            f"source_row_index) AS head_position FROM read_parquet([{literals}])) "
+            f"{HEAD_CAP_ORDER}) AS head_position FROM read_parquet([{literals}])) "
             f"WHERE head_position<={result_cap} "
             f"ORDER BY {HEAD_ORDER}",
             arrow,
@@ -2344,8 +2362,7 @@ def build_global_head_from_markers(
         output_rows = A.write_arrow_query(
             connection,
             f"SELECT * FROM read_parquet([{_sql_paths(paths)}]) QUALIFY row_number() OVER "
-            f"(PARTITION BY token ORDER BY confidence_rank DESC, feature_id, "
-            f"source_object_index, source_row_group, source_row_index)<={limits.head_result_cap} "
+            f"(PARTITION BY token ORDER BY {HEAD_CAP_ORDER})<={limits.head_result_cap} "
             f"ORDER BY {HEAD_ORDER}",
             arrow,
             MAX_IPC_BATCH_ROWS,
@@ -2405,8 +2422,7 @@ def _head_merge_stage(
     """
     connection.execute(
         f"COPY (SELECT * FROM read_parquet([{_sql_paths(inputs)}]) QUALIFY "
-        f"row_number() OVER (PARTITION BY token ORDER BY confidence_rank DESC, "
-        f"feature_id, source_object_index, source_row_group, source_row_index)"
+        f"row_number() OVER (PARTITION BY token ORDER BY {HEAD_CAP_ORDER})"
         f"<={result_cap} ORDER BY {HEAD_ORDER}) TO '{output}' (FORMAT PARQUET, "
         f"COMPRESSION ZSTD, COMPRESSION_LEVEL 6, PARQUET_VERSION V2, PRESERVE_ORDER true)"
     )
@@ -2441,6 +2457,7 @@ def _encode_head_entry(row: dict[str, Any]) -> bytes:
     put_text(entry, row["token"])
     entry.append(row["field_mask"])
     entry.append(row["confidence_rank"])
+    entry.append(row["prominence_rank"])
     feature_id = bytes(row["feature_id"])
     if len(feature_id) != 16:
         raise ValueError("head feature id is not 16 bytes")
@@ -2464,7 +2481,8 @@ def _independent_merged_head_binding(merged_path: Path) -> dict[str, Any]:
     records = 0
     tokens: set[str] = set()
     columns = [
-        "token", "field_mask", "confidence_rank", "feature_id", "longitude",
+        "token", "field_mask", "confidence_rank", "prominence_rank", "feature_id",
+        "longitude",
         "latitude", "source_object_index", "source_row_group", "source_row_index",
         "primary_name", "brand_name", "category", "locality", "region", "country",
     ]

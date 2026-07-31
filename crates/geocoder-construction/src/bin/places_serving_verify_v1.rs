@@ -120,9 +120,9 @@ struct Verified {
 /// index keys and dual-lane head digest for cross-shard reconciliation.
 fn verify_artifact(data: &[u8], mode: &str) -> Result<Verified> {
     let magic: &[u8; 8] = if mode == "routed" {
-        b"PLRV0002"
+        b"PLRV0003"
     } else if mode == "head" {
-        b"PLHD0002"
+        b"PLHD0003"
     } else {
         bail!("invalid mode")
     };
@@ -491,7 +491,7 @@ mod tests {
         // head payload order is by token; single tokens per shard keep it simple.
         let mut ordered: Vec<&str> = tokens.to_vec();
         ordered.sort();
-        let mut out = b"PLHD0002".to_vec();
+        let mut out = b"PLHD0003".to_vec();
         out.extend_from_slice(&(ordered.len() as u64).to_le_bytes());
         out.extend_from_slice(&0_u64.to_le_bytes());
         out.extend_from_slice(&0_u32.to_le_bytes());
