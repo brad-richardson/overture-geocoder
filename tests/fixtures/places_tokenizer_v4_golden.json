@@ -166,8 +166,8 @@
     "multilingual_features": 2,
     "cjk_features": 1,
     "emitted_term_rows": 30,
-    "semantic_sum_a": "b01555008067a8a956101629084bf02d3e60d8dfbc8005958ff87829d914d86c",
-    "semantic_sum_b": "0392f7ae39e9147aa5d77744a2d0fa51f77b8701046c55c9dea4087f2ed8debd",
+    "semantic_sum_a": "650e413663d33f5a652fb41d859c5ebb487d711283691d7dd56d2c42ce3cdfb3",
+    "semantic_sum_b": "fbfb39600b76dbc010eaa7a1741108dfcf91d556fbfaa182bc0e83c0e6ef02a4",
     "per_feature_tokens": {
       "00000000-0000-0000-0000-000000000001": [
         "attica",
@@ -210,5 +210,6 @@
         "xevoσ"
       ]
     }
-  }
+  },
+  "semantic_payload_note": "semantic_sum_a/b regenerated 2026-07-31 for the 0003 payload, which adds a prominence_rank byte after confidence_rank. Every COUNT and every token vector is byte-identical to the 0002 golden -- tokenization did not move, only the payload layout. Both the Rust transform and the independent Python baseline agree on these values, which is the cross-check this fixture exists to support."
 }

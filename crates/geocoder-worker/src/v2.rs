@@ -22,7 +22,6 @@ use crate::places_construction_v1::{
     construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, merge_routed_candidates,
     record_projection, routed_fetch_plan, supports_places_construction_format, HeadRoutingManifest,
     PlacesRouting, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
-    PLACES_CONSTRUCTION_FORMAT,
 };
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
@@ -3223,7 +3222,8 @@ mod tests {
 
     fn construction_release_value() -> Value {
         let mut value = release_value();
-        value["families"]["places"]["versions"]["format"] = json!(PLACES_CONSTRUCTION_FORMAT);
+        value["families"]["places"]["versions"]["format"] =
+            json!(crate::places_construction_v1::PLACES_CONSTRUCTION_FORMAT);
         value["families"]["places"]["entrypoints"]["forward"]["object_key"] =
             json!("slice-2026-07-19.0/families/places/routing.json");
         value

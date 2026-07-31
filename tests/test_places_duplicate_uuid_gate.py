@@ -80,7 +80,9 @@ def write_fixture(path: Path, rows: list[dict], *, row_group_size: int = 4) -> N
 
 def decode_serving(path: Path, mode: str) -> list[dict]:
     data = path.read_bytes()
-    assert data[:8] == (b"PLRV0002" if mode == "routed" else b"PLHD0002")
+    # 0003 adds the prominence_rank byte; the producer emits only the current
+    # generation, while the worker still decodes 0002.
+    assert data[:8] == (b"PLRV0003" if mode == "routed" else b"PLHD0003")
     expected = struct.unpack_from("<Q", data, 8)[0]
     index_offset = struct.unpack_from("<Q", data, 16)[0]
     position = 32
@@ -101,8 +103,9 @@ def decode_serving(path: Path, mode: str) -> list[dict]:
         cell = None
         if mode == "routed":
             cell, at = text(entry, at)
-        _mask, _rank = struct.unpack_from("<BB", entry, at)
-        at += 2
+        # 0003 layout: field_mask, confidence_rank, prominence_rank.
+        _mask, _rank, _prominence = struct.unpack_from("<BBB", entry, at)
+        at += 3
         identifier = str(uuid.UUID(bytes=entry[at : at + 16]))
         at += 16
         _lon, _lat, object_index, row_group, row_index = struct.unpack_from(

@@ -351,7 +351,9 @@ def test_tokenizer_v4_golden_rust_baseline_equivalence(
 
 def decode_serving(path: Path, mode: str) -> list[dict]:
     data = path.read_bytes()
-    assert data[:8] == (b"PLRV0002" if mode == "routed" else b"PLHD0002")
+    # 0003 adds the prominence_rank byte. The worker still decodes 0002, but the
+    # producer only ever emits the current generation.
+    assert data[:8] == (b"PLRV0003" if mode == "routed" else b"PLHD0003")
     expected = struct.unpack_from("<Q", data, 8)[0]
     index_offset = struct.unpack_from("<Q", data, 16)[0]
     assert struct.unpack_from("<I", data, 28)[0] == 0
@@ -373,8 +375,9 @@ def decode_serving(path: Path, mode: str) -> list[dict]:
         cell = None
         if mode == "routed":
             cell, at = text(entry, at)
-        mask, rank = struct.unpack_from("<BB", entry, at)
-        at += 2
+        # 0003 layout: field_mask, confidence_rank, prominence_rank.
+        mask, rank, prominence = struct.unpack_from("<BBB", entry, at)
+        at += 3
         identifier = str(uuid.UUID(bytes=entry[at : at + 16]))
         at += 16
         longitude, latitude, object_index, row_group, row_index = struct.unpack_from(
@@ -391,6 +394,7 @@ def decode_serving(path: Path, mode: str) -> list[dict]:
                 "token": token,
                 "cell": cell,
                 "mask": mask,
+                "prominence": prominence,
                 "rank": rank,
                 "id": identifier,
                 "longitude": longitude,

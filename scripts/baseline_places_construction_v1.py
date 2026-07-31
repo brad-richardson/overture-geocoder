@@ -201,6 +201,7 @@ def payload(
     token: str,
     field_mask: int,
     rank: int,
+    prominence: int,
     identifier: uuid.UUID,
     longitude: float,
     latitude: float,
@@ -215,7 +216,7 @@ def payload(
         output.extend(len(encoded).to_bytes(4, "big"))
         output.extend(encoded)
     output.extend(partition_key.to_bytes(4, "big"))
-    output.extend((field_mask, rank))
+    output.extend((field_mask, rank, prominence))
     output.extend(identifier.bytes)
     output.extend(
         struct.pack(">Q", struct.unpack(">Q", struct.pack(">d", longitude))[0])
@@ -314,6 +315,15 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
             longitude, latitude = coordinates
             partition_key, execution_group, partition_cell = route(longitude, latitude)
             rank = math.floor(confidence * 255 + 0.5)
+            # Mirrors the Rust transform's optional read: the projection carries
+            # `prominence_rank` when it was produced by a projector that knows
+            # about it, and zero otherwise.
+            prominence_column = columns.get("prominence_rank")
+            prominence = 0
+            if prominence_column is not None:
+                value = prominence_column[index].as_py()
+                if isinstance(value, int) and 0 <= value <= 255:
+                    prominence = value
             display = [
                 primary,
                 text(columns["brand_name"], index),
@@ -330,6 +340,7 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
                     token=token,
                     field_mask=mask,
                     rank=rank,
+                    prominence=prominence,
                     identifier=identifier,
                     longitude=longitude,
                     latitude=latitude,
