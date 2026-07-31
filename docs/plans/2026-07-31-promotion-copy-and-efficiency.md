@@ -174,6 +174,49 @@ deadline, the artifact-shape coupling, and the recovery-run special case in one
 move. Promotion would then depend only on R2, which is where the data it
 promotes lives.
 
+## 7. Reverse ran 16 ranges at `max_parallel=2`; the workflow already allows 4
+
+Both planet reverse runs were dispatched at `max_parallel=2` over a fixed
+16-range matrix — eight sequential waves. Places took **2h15m**, Addresses
+**2h33m**, about 4h48m combined.
+
+`reverse-v2.yml` already offers `max_parallel` options `["1", "2", "4"]`, so
+4-way needs **no code change and no new request identity**. Ranges are disjoint
+bucket ranges writing to disjoint content-addressed keys, so the correctness
+argument is the same one that already justifies 2-way. ESTIMATED: four waves
+instead of eight, roughly halving both runs.
+
+This item did not exist when `2026-07-28-planet-build-wall-clock-review.md` was
+written; reverse had not run at planet scale.
+
+## 8. Reverse does not depend on forward reduce, head, or finalize
+
+`scripts/reverse_r2_v1.py` states it: *"Reverse R2 consumes the per-record
+artifacts already emitted by the forward map."* Task discovery is from durable
+map markers (#206) bound to admitted construction tasks (#207). The one place it
+touches a forward family manifest is `_admit_slice`, and that is a **negative**
+check — it refuses a destination slice that is already finalized.
+
+So the dependency is `map -> reverse`, not `map -> plan -> reduce -> head ->
+finalize -> reverse`. Today reverse is a separate manual dispatch that runs
+strictly after the whole forward build.
+
+For Places the overlap window behind map is plan 60.8 + reduce 213.3 + head
+206.4 + finalize 57 ≈ **8.9 hours**, against a 2h15m reverse run. Sequencing
+reverse to launch on map completion would take it off the end-to-end critical
+path entirely.
+
+Two caveats before anyone schedules it:
+
+- Reverse's fan-in needs the **complete** map marker set, so it starts after map
+  finishes, not while maps are still running. The window is real but it begins
+  at the map barrier.
+- Reverse writes into the destination slice under a per-family claim, and
+  `promote-slice` writes the slice manifest last. Overlapping does not violate
+  marker-last, but the interaction with a *failed* forward build — reverse
+  output already in a slice that forward never reaches — needs the same unmarked
+  namespace cleanup rule item 1 requires.
+
 ## Already recorded elsewhere — do not re-derive
 
 These stay owned by their existing docs; listed so this queue does not
@@ -190,12 +233,55 @@ duplicate them.
 - `2026-07-24-construction-v1-follow-ups.md`: the address map shuffle is
   DECIDED not-ported; the address partition key is FROZEN.
 
+## Execution status of the wall-clock plan, as of 2026-07-31
+
+Recorded because it is easy to assume otherwise. **Nothing in Tracks A, B, or C
+has been executed beyond Wave 0.**
+
+- Wave 0 items 1-4: **done**, via PR #185, measured in run `30323929757`
+  (finalize 56m50s).
+- Wave 0 items 5-6 (head substage timing, post-#184 cold control): not started.
+- Waves 1-5: not started. Verified against the tree, not inferred —
+  `max_parallel` is still `4` (`scripts/construction_v1_control.py:69`); there is
+  no shared request-pinned binary artifact; `max_reduce_jobs` still defaults to
+  today's behaviour; the only "selective" in `places_construction_v1.py` is the
+  reduce schema name, not a selective binding pass; there is no radix stage in
+  the head path; and promotion still copies.
+- Every PR merged since the review (#186-#219) is reverse-v2, promotion and
+  publication, serving, or benchmarks. The single optimization among them is
+  #200, which parallelized the promotion **copies** — and left the three HEAD
+  loops in item 2 serial.
+
+Track C is not planned; the adopted direction is staged A-to-B. "Do not stream
+uncheckpointed records directly between Actions runners" remains in the
+review's not-recommended list.
+
+## Free knobs for the next planet rebuild
+
+No code change, therefore no new request identity:
+
+- `max_reduce_jobs` (construction-v1 dispatch). Lowering the cap makes larger
+  contiguous partition batches. The workflow's own comment records the measured
+  curve: batch 3 (today's default) = 12.7x object amplification / ~0.63 TB of
+  Address R2 reads; batch 12 = 4.2x / ~0.21 TB. Median Address reducer job was
+  255 s against its timeout, so the headroom is real.
+- `max_parallel` on `reverse-v2.yml` — see item 7.
+
+By contrast, `max_parallel` for construction lives in the control caps, so
+raising it 4->8 is a code change. Per the review's Wave 0 note, changes to
+`places_construction_v1.py`, `address_construction_v1.py`, `Cargo.lock`,
+canonical caps, or the producer commit mint a **new request identity and staging
+namespace**. Batch every accepted optimization into one reviewed request rather
+than paying for a new planet namespace per change.
+
 ## Suggested order
 
 1. **Item 6** first — it is small, it removes a recurring deadline, and it is a
    prerequisite for treating promotion as an R2-only operation.
 2. **Item 2** next — pure win, no semantics change, no design decision needed.
-3. **Item 1** as the architecture change, sequenced with wall-clock review §7 so
+3. **Items 7 and 8** before the next rebuild — item 7 is a dispatch flag, and
+   item 8 changes only when reverse is launched, not what it computes.
+4. **Item 1** as the architecture change, sequenced with wall-clock review §7 so
    finalize and promotion are re-pointed once rather than twice. Items 3 and 4
    become moot if it lands; do them only if it slips.
-4. **Item 5** only after a deliberate call on the proof it trades away.
+5. **Item 5** only after a deliberate call on the proof it trades away.
