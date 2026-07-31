@@ -1088,17 +1088,71 @@ pub(crate) fn routed_fetch_plan<'routing>(
     Ok(Some(plan))
 }
 
-/// AND-intersect per-token record lists by feature id, keeping the first
-/// token's producer order (`confidence_rank DESC, feature_id, locator`).
+/// Field classes a token matched, as emitted by `places_transform_v1`:
+/// primary and common names are 1, brand 2, category 4, and
+/// locality/region/country context 8.
+pub(crate) const FIELD_NAME: u8 = 1;
+pub(crate) const FIELD_BRAND: u8 = 2;
+
+/// Whether the matched fields IDENTIFY the record rather than merely describe
+/// it.
+///
+/// A token matching a name or a brand says *this is the thing you asked for*. A
+/// token matching only the category or the locality/region/country context says
+/// *this is a thing of that sort, or a thing that happens to be there* — which
+/// is why `q=paris` returned Dessirier, Rexel and Midas, all POIs whose sole
+/// relation to the query is being located in Paris. The mask was already stored
+/// and decoded on every record; it was simply never consulted when ranking.
+pub(crate) fn identifying(field_mask: u8) -> bool {
+    field_mask & (FIELD_NAME | FIELD_BRAND) != 0
+}
+
+/// The OR of the field masks of every query token a record matched.
+///
+/// Taken across tokens, not per token: for `IKEA Berlin` the record's "ikea"
+/// posting carries the brand bit while its "berlin" posting carries only
+/// context, and the record is still brand-identified.
+fn field_mask_union(per_token: &[Vec<PlacesV1Record>]) -> HashMap<String, u8> {
+    let mut union: HashMap<String, u8> = HashMap::new();
+    for records in per_token {
+        for record in records {
+            *union.entry(record.id.clone()).or_default() |= record.field_mask;
+        }
+    }
+    union
+}
+
+/// Order identifying matches ahead of context-only ones, then by the producer
+/// order (`confidence_rank DESC, feature_id, locator`) within each group.
+fn sort_by_identity_then_producer_order(records: &mut [PlacesV1Record], union: &HashMap<String, u8>) {
+    records.sort_by(|left, right| {
+        let left_identifying = identifying(union.get(&left.id).copied().unwrap_or(left.field_mask));
+        let right_identifying =
+            identifying(union.get(&right.id).copied().unwrap_or(right.field_mask));
+        right_identifying
+            .cmp(&left_identifying)
+            .then_with(|| right.confidence_rank.cmp(&left.confidence_rank))
+            .then_with(|| left.id.cmp(&right.id))
+            .then_with(|| left.source_object_index.cmp(&right.source_object_index))
+            .then_with(|| left.source_row_group.cmp(&right.source_row_group))
+            .then_with(|| left.source_row_index.cmp(&right.source_row_index))
+    });
+}
+
+/// AND-intersect per-token record lists by feature id, ordering identifying
+/// matches ahead of context-only ones and then by producer order
+/// (`confidence_rank DESC, feature_id, locator`).
 pub(crate) fn intersect_ranked(mut per_token: Vec<Vec<PlacesV1Record>>) -> Vec<PlacesV1Record> {
     if per_token.is_empty() {
         return Vec::new();
     }
+    let union = field_mask_union(&per_token);
     let mut results = per_token.remove(0);
     for other in per_token {
         let ids: HashSet<String> = other.into_iter().map(|record| record.id).collect();
         results.retain(|record| ids.contains(&record.id));
     }
+    sort_by_identity_then_producer_order(&mut results, &union);
     results
 }
 
@@ -1140,6 +1194,8 @@ pub(crate) fn merge_routed_candidates(
     struct Candidate {
         record: PlacesV1Record,
         posting_membership: u8,
+        /// OR of the field masks of every query token this record matched.
+        field_mask_union: u8,
     }
 
     let saturated: Vec<bool> = per_token
@@ -1155,11 +1211,14 @@ pub(crate) fn merge_routed_candidates(
                 record.source_row_group,
                 record.source_row_index,
             );
+            let field_mask = record.field_mask;
             let candidate = candidates.entry(identity).or_insert_with(|| Candidate {
                 record,
                 posting_membership: 0,
+                field_mask_union: 0,
             });
             candidate.posting_membership |= 1 << token_index;
+            candidate.field_mask_union |= field_mask;
         }
     }
 
@@ -1189,19 +1248,23 @@ pub(crate) fn merge_routed_candidates(
             tokens.contains(token)
         });
         if matches {
-            results.push(candidate.record);
+            results.push((candidate.record, candidate.field_mask_union));
         }
     }
-    results.sort_by(|left, right| {
-        right
-            .confidence_rank
-            .cmp(&left.confidence_rank)
+    // Identifying matches first, then producer order within each group. A
+    // record admitted only by the saturated-posting display-token fallback
+    // above contributes no mask for that token, which is correct: it was not
+    // in the posting, so it supplies no evidence of how it matched.
+    results.sort_by(|(left, left_mask), (right, right_mask)| {
+        identifying(*right_mask)
+            .cmp(&identifying(*left_mask))
+            .then_with(|| right.confidence_rank.cmp(&left.confidence_rank))
             .then_with(|| left.id.cmp(&right.id))
             .then_with(|| left.source_object_index.cmp(&right.source_object_index))
             .then_with(|| left.source_row_group.cmp(&right.source_row_group))
             .then_with(|| left.source_row_index.cmp(&right.source_row_index))
     });
-    Ok(results)
+    Ok(results.into_iter().map(|(record, _)| record).collect())
 }
 
 /// Project one construction record into the shared serving projection.
@@ -1471,12 +1534,25 @@ mod tests {
     }
 
     fn entry(token: &str, cell: Option<&str>, rank: u8, id: u128, row: u64) -> Vec<u8> {
+        entry_masked(token, cell, super::FIELD_NAME, rank, id, row)
+    }
+
+    /// `entry` with an explicit field mask: 1 name, 2 brand, 4 category,
+    /// 8 locality/region/country context.
+    fn entry_masked(
+        token: &str,
+        cell: Option<&str>,
+        field_mask: u8,
+        rank: u8,
+        id: u128,
+        row: u64,
+    ) -> Vec<u8> {
         let mut output = Vec::new();
         text(&mut output, token);
         if let Some(cell) = cell {
             text(&mut output, cell);
         }
-        output.extend_from_slice(&[1, rank]);
+        output.extend_from_slice(&[field_mask, rank]);
         output.extend_from_slice(&id.to_be_bytes());
         output.extend_from_slice(&1.25_f64.to_le_bytes());
         output.extend_from_slice(&2.5_f64.to_le_bytes());
@@ -2235,6 +2311,69 @@ mod tests {
     }
 
     #[test]
+    fn intersect_ranks_identifying_matches_above_context_only_ones() {
+        // The live failure: `q=paris` returned Dessirier, Rexel and Midas --
+        // maximum-confidence POIs whose only relation to the query is being
+        // located in Paris -- ahead of anything actually named Paris. Context
+        // must lose to name or brand even at a saturated confidence of 255.
+        let context_only = masked_record("paris", 8, 255, 1);
+        let named = masked_record("paris", super::FIELD_NAME, 10, 2);
+        let branded = masked_record("paris", super::FIELD_BRAND, 5, 3);
+        let ranked = intersect_ranked(vec![vec![context_only, named, branded]]);
+        assert_eq!(
+            ranked.iter().map(|record| record.id.clone()).collect::<Vec<_>>(),
+            vec![format_uuid_of(2), format_uuid_of(3), format_uuid_of(1)],
+            "name (255-ranked context loses), then brand, then context-only"
+        );
+    }
+
+    #[test]
+    fn intersect_unions_masks_across_tokens() {
+        // `IKEA Berlin`: the record's "ikea" posting carries the brand bit and
+        // its "berlin" posting carries only context. The union identifies it,
+        // so it must outrank a record that is context-only for BOTH tokens
+        // despite the latter's higher confidence.
+        let store_brand = masked_record("ikea", super::FIELD_BRAND, 10, 1);
+        let store_context = masked_record("berlin", 8, 10, 1);
+        let bystander_a = masked_record("ikea", 8, 255, 2);
+        let bystander_b = masked_record("berlin", 8, 255, 2);
+        let ranked = intersect_ranked(vec![
+            vec![store_brand, bystander_a],
+            vec![store_context, bystander_b],
+        ]);
+        assert_eq!(ranked.len(), 2);
+        assert_eq!(ranked[0].id, format_uuid_of(1), "brand-identified store wins");
+        assert_eq!(ranked[1].id, format_uuid_of(2));
+    }
+
+    #[test]
+    fn routed_merge_ranks_identifying_matches_first() {
+        let tokens = vec!["paris".to_string()];
+        let records = vec![
+            masked_record("paris", 8, 255, 1),
+            masked_record("paris", super::FIELD_NAME, 1, 2),
+        ];
+        let merged = merge_routed_candidates(&tokens, vec![records]).unwrap();
+        assert_eq!(merged.len(), 2);
+        assert_eq!(
+            merged[0].id,
+            format_uuid_of(2),
+            "a name match at confidence 1 outranks context-only at 255"
+        );
+    }
+
+    #[test]
+    fn identifying_covers_name_and_brand_only() {
+        assert!(super::identifying(super::FIELD_NAME));
+        assert!(super::identifying(super::FIELD_BRAND));
+        assert!(super::identifying(super::FIELD_NAME | 8));
+        assert!(!super::identifying(8), "context alone does not identify");
+        assert!(!super::identifying(4), "category alone does not identify");
+        assert!(!super::identifying(4 | 8));
+        assert!(!super::identifying(0));
+    }
+
+    #[test]
     fn routed_merge_treats_only_saturated_posting_absence_as_recoverable() {
         let target = entry_record("cafe", 200, 999);
         let selective = vec![target];
@@ -2285,6 +2424,12 @@ mod tests {
 
     fn entry_record(token: &str, rank: u8, id: u128) -> PlacesV1Record {
         entry_record_at(token, rank, id, 0)
+    }
+
+    fn masked_record(token: &str, field_mask: u8, rank: u8, id: u128) -> PlacesV1Record {
+        let bytes = entry_masked(token, None, field_mask, rank, id, 0);
+        let (record, _) = super::decode_entry(&bytes, PlacesV1Mode::Head).unwrap();
+        record
     }
 
     fn entry_record_at(token: &str, rank: u8, id: u128, row: u64) -> PlacesV1Record {
