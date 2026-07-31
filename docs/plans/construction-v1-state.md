@@ -18,18 +18,70 @@ it no longer returns `capability_unavailable`. Both reverse builds, the slice
 promotion, the release publication, and the catalog CAS are all done. See
 "Promotion result, 2026-07-31".
 
-**The next milestone is not yet agreed.** The two strongest candidates, both
-already measured rather than speculative:
+**The next milestone is AGREED (2026-07-31): forward search correctness.**
+Operator approved Stages 0 and 1 of
+`docs/plans/2026-07-31-search-quality-and-street-layer.md` (merged #220). The
+planet rebuild and the street layer both wait behind it.
 
-- **Forward Places name-only global retrieval** (open gate 2). `Eiffel Tower`
-  and `Space Needle` return zero features while the same names with a locality
-  return results. This is the most visible quality gap in the live product and
-  it is what keeps every promotion's smoke red.
-- **Another full planet rebuild**, for which the failure modes and efficiency
-  queue are recorded in
-  `2026-07-31-promotion-copy-and-efficiency.md` and
-  `2026-07-28-planet-build-wall-clock-review.md`. Nothing in Tracks A/B/C has
-  been executed beyond Wave 0.
+The justification is measured, not aesthetic. Against the build promoted today:
+
+- `q=Seattle&limit=10` returns ten POIs at relevance 1.0 -- UPS Store, Verizon,
+  KeyBank -- and **the city of Seattle does not appear at all**;
+  `types=locality` returns it at 0.8408.
+- `q=paris` returns Dessirier, Rexel, Midas; **Paris is absent from its own
+  query**.
+- `q=Eiffel Tower`, `q=Space Needle`, `q=Statue of Liberty` all return zero.
+
+### QUEUED: Stage 0 -- make improvement measurable
+
+Prerequisite for claiming any Stage 1 result. Nothing below is falsifiable
+without it, and today's promotion smoke was red for months on an assertion
+nobody could evaluate.
+
+1. Curated global gold set (~20+20), still unbuilt. Balanced regions/scripts,
+   gold from open primary/government sources, never from a compared provider.
+2. **Seam stratum** (~10 cases): queries that are simultaneously a division name
+   and a POI context token -- Seattle, Paris, Berlin, Monaco. Assert the
+   division wins at rank 1 and named POIs may follow.
+3. **Inverse seam** (~5 cases): a POI must beat a same-named division.
+4. **Type-composition metric** alongside rank@k: fraction of untyped queries
+   whose top-1 has the expected feature_type, plus a starvation check. rank@k
+   alone scores `q=Seattle` as an ordinary miss and never reveals that the city
+   was displaced by ten tied results.
+
+Harness exists: `scripts/benchmark_v2_forward.py` (rank@1/@10, MRR, `--compare`,
+`--assert-recall`). The metric and strata are what is missing.
+
+### QUEUED: Stage 1 -- Worker-only fixes
+
+No rebuild, no format change, no new R2 reads, no new request identity. All four
+are query-path changes gated by Stage 0 measurement.
+
+1. **Field-mask-aware rerank.** `field_mask` (name 1 / brand 2 / category 4 /
+   context 8) is emitted at `places_transform_v1.rs:449-475`, stored, and
+   decoded at `places_construction_v1.rs:144, 600, 624` -- then never consulted
+   when ranking. Demote candidates whose query tokens matched only the context
+   bit. Fixes the `q=paris` / `q=Seattle` pollution.
+2. **Division/POI seam calibration.** Division score is `importance / 2` clamped
+   (`v2.rs:1646-1647`), capping near 0.9; POI score is raw saturated
+   `confidence` (`v2.rs:1667`), so any confidence-1.0 POI buries every division
+   at the merge sort (`v2.rs:2320`). Put POI confidence in the same static-prior
+   band so an exact division match cannot be starved out.
+3. **Two-token locality routing.** `locality_suffix_candidates` gates on
+   `(3..=4).contains(&tokens.len())` (`v2.rs:1709`, PR #214); widen to `2..=4`
+   with suffix length 1 when `len == 2`, keeping the existing "only when head
+   returned empty" and "no explicit proximity" guards. Fixes `IKEA Berlin`.
+   Exact-locality match is required, so `Eiffel Tower` cannot misroute on
+   "tower".
+4. **P6 for divisions:** relative score cutoff and deterministic tie-breaks
+   (`query/merge.rs`). The only ranking-research item never landed; also kills
+   the arbitrary ordering inside the ten-way 1.0 tie.
+
+**Not in Stage 1** (recorded so scope does not creep): the head cap of 10, the
+saturating confidence byte, the missing fame signal, and famous-unique `e2:`
+admission are all Stages 2-3 and need a planet head rebuild plus a
+`PLHD0002 -> PLHD0003` format bump. The street layer is Stage 4 and is the only
+genuine one-way door in the plan.
 
 All construction work runs under operator request
 `88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`.
@@ -495,10 +547,18 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    live and correct. Replace the context-free `Eiffel Tower` global-head
    assertion with one reliable global-head POI plus one located routed-Places
    assertion. Until then every promotion ends red.
-2. **Forward Places quality**, in order: name-only global retrieval, then the
-   division-versus-POI seam admission, then remaining token-intersection /
-   candidate-cap / ranking loss. Locality-token overconstraint is FIXED
-   (PR #214); the conventional address locality aliases are bridged (PR #213).
+2. **Forward Places quality — NOW THE AGREED MILESTONE**, root-caused in
+   `2026-07-31-search-quality-and-street-layer.md` and queued as Stages 0/1 in
+   "Current milestone" above. The mechanism is confirmed in source: head entries
+   keep only the top 10 per token by `(confidence_rank DESC, feature_id ASC)`
+   where `confidence_rank` is a saturating u8, so an entry is effectively the
+   ten UUID-smallest confidence-1.0 records; two-token queries intersect two
+   such lists and get the empty set; three-token queries never touch the head
+   (`v2.rs:1946-1948`); and the Places projection carries no fame signal at all
+   (`project_places_construction_v1.py:151-180`). `ranking-research.md` P0-P5
+   landed for divisions only — that asymmetry is the bug. Locality-token
+   overconstraint is FIXED (PR #214); address locality aliases bridged
+   (PR #213).
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.
