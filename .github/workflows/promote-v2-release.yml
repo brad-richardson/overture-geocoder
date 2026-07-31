@@ -986,21 +986,66 @@ jobs:
               echo "  FAIL divisions: no features for Berlin"; return 1; }
             echo "  OK   divisions (q=Berlin, build $GEOCODER_BUILD)"
 
-            body=$(fetch --data-urlencode "q=Eiffel Tower" --data-urlencode "limit=3") || {
-              echo "  FAIL places: request error"; return 1; }
-            check_envelope "$body" places || return 1
-            echo "$body" | jq -e '(.features | length) >= 1' > /dev/null || {
-              echo "  FAIL places: no features for Eiffel Tower"; return 1; }
-            echo "  OK   places (q=Eiffel Tower)"
+            # Global head, context-free. A worldwide brand is the reliable
+            # shape: head recall for a single famous landmark name is an OPEN
+            # quality gate (name-only global retrieval), so the former
+            # `q=Eiffel Tower` assertion reported red on promotions that were
+            # live and correct. Requiring places_locality_inference to be
+            # ABSENT is what keeps this a head assertion -- without it, a
+            # regression that silently routed every query would still pass.
+            body=$(fetch --data-urlencode "q=IKEA" --data-urlencode "limit=3") || {
+              echo "  FAIL places head: request error"; return 1; }
+            check_envelope "$body" "places head" || return 1
+            echo "$body" | jq -e '
+              (.features | length) >= 1
+              and (.features | all(.properties.feature_type == "poi"))
+              and (.metadata.places_locality_inference == null)
+            ' > /dev/null || {
+              echo "  FAIL places head: no context-free POI for IKEA"; return 1; }
+            echo "  OK   places head (q=IKEA, context-free)"
 
-            body=$(fetch --data-urlencode "number=350" \
-              --data-urlencode "street=5th Avenue" \
-              --data-urlencode "city=New York") || {
+            # Located routed Places. Requiring the locality inference to be
+            # PRESENT proves the routed path actually ran, rather than merely
+            # that some feature came back. The two assertions are mutually
+            # discriminating: each body fails the other's check.
+            body=$(fetch --data-urlencode "q=Eiffel Tower Paris" \
+              --data-urlencode "limit=3") || {
+              echo "  FAIL places routed: request error"; return 1; }
+            check_envelope "$body" "places routed" || return 1
+            echo "$body" | jq -e '
+              (.features | length) >= 1
+              and (.features | all(.properties.feature_type == "poi"))
+              and (.metadata.places_locality_inference.routing != null)
+            ' > /dev/null || {
+              echo "  FAIL places routed: no located POI for Eiffel Tower Paris"
+              return 1; }
+            echo "  OK   places routed (q=Eiffel Tower Paris, locality-routed)"
+
+            # Structured exact-address lookup. The former request omitted the
+            # REQUIRED `country` field, so it could only ever return
+            # invalid_request; it never ran, because the Places check above
+            # returned first. It also used an address that does not resolve.
+            # This is `pilot:address:space-needle` from
+            # benchmarks/v2-open-geocoder-forward-pilot-cases-v1.json -- an
+            # exact lookup needs the full context set, postcode included.
+            # Re-derive from that file if this ever goes red.
+            body=$(fetch --data-urlencode "country=us" \
+              --data-urlencode "state=WA" \
+              --data-urlencode "city=Seattle" \
+              --data-urlencode "postcode=98109" \
+              --data-urlencode "street=BROAD Street" \
+              --data-urlencode "number=400") || {
               echo "  FAIL addresses: request error"; return 1; }
             check_envelope "$body" addresses || return 1
-            if ! echo "$body" | jq -e '(.features | length) >= 1' > /dev/null; then
-              echo "  WARN addresses: 200 on the promoted build but no feature for 350 5th Avenue"
-            fi
+            # A hard assertion, not the former warn-only check: with a verified
+            # case a warn that can never fail is not a check at all.
+            echo "$body" | jq -e '
+              .metadata.mode == "structured_address"
+              and (.features | length) >= 1
+              and (.features | all(.properties.feature_type == "address"))
+            ' > /dev/null || {
+              echo "  FAIL addresses: no exact match for 400 BROAD Street, Seattle WA 98109"
+              return 1; }
             echo "  OK   addresses (structured forward, build $GEOCODER_BUILD)"
             return 0
           }

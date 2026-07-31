@@ -329,6 +329,45 @@ def test_smoke_is_bounded_and_checks_the_promoted_build():
     assert "for ATTEMPT in 1 2 3 4 5 6 7 8 9 10" in run
 
 
+def test_smoke_separates_the_places_head_and_routed_paths():
+    # The context-free `q=Eiffel Tower` assertion was a false red: head recall
+    # for a lone landmark name is an open quality gate, so every correct
+    # promotion reported failure. It is replaced by two checks that pin which
+    # path served the request -- absent locality inference for the global head,
+    # present for the located routed query -- so neither can pass by accident
+    # nor silently absorb the other's regression.
+    run = next(
+        step["run"]
+        for step in jobs()["promote-catalog"]["steps"]
+        if "/v2/forward" in (step.get("run") or "")
+    )
+    assert 'q=Eiffel Tower"' not in run  # the bare landmark assertion is gone
+    assert 'q=IKEA' in run
+    assert 'q=Eiffel Tower Paris' in run
+    assert ".metadata.places_locality_inference == null" in run
+    assert ".metadata.places_locality_inference.routing != null" in run
+    # Both Places checks prove they returned POIs, not divisions.
+    assert run.count('.properties.feature_type == "poi"') == 2
+
+
+def test_smoke_structured_address_sends_country_and_asserts_a_match():
+    # The structured request omitted the REQUIRED country field, so it could
+    # only ever return invalid_request -- masked because the Places check
+    # returned first. It also used an address that does not resolve, behind a
+    # warn that could never fail.
+    run = next(
+        step["run"]
+        for step in jobs()["promote-catalog"]["steps"]
+        if "/v2/forward" in (step.get("run") or "")
+    )
+    assert 'country=us' in run
+    assert 'postcode=98109' in run  # an exact lookup needs the full context
+    assert '.metadata.mode == "structured_address"' in run
+    assert '.properties.feature_type == "address"' in run
+    # The warn-only escape hatch is gone; an empty result now fails.
+    assert "WARN addresses" not in run
+
+
 # --- action pinning --------------------------------------------------------------
 
 
