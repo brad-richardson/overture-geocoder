@@ -148,8 +148,13 @@ city > street/country > county/state), then population/bbox, then distance, then
 id for determinism.
 
 - **Build time:** replace the raw POI confidence byte with a dampened prior
-  capped near 0.4, so it occupies the same "static prior" band divisions use and
-  can never outvote a match-quality step. Reorder the per-`(cell, token)`
+  capped near 0.08, so it occupies the same "static prior" band divisions use and
+  can never outvote a match-quality step. (This originally read "near 0.4", which
+  is **incompatible with the sentence that follows it**: the closest rungs of the
+  `match_quality` ladder are 0.05 apart, and a 0.4 cap contributes up to 0.2 to a
+  halved score — four rungs. `POI_PRIOR_CAP = 0.08` is the largest value that
+  cannot outvote one rung; it was derived from a failing test, see Part 6c.)
+  Reorder the per-`(cell, token)`
   256-cap eviction to `(name-or-brand bit) DESC, confidence DESC` — otherwise
   query-time reranking cannot recover what the cap already discarded.
 - **Query time:** compute `Q` for POIs with the *existing* `geocoder-core`
@@ -433,6 +438,59 @@ Consequences for the plan, all of them sharpening rather than contradicting it:
   promoted**: it is what makes fix 1 pay, and it is build-side.
 - **Fix 2 (seam calibration) is the only Stage 1 item that can move `seam`**,
   because only it changes how a Places score compares with a division score.
+
+## Part 6c — MEASURED: Stage 1 fix 2 fixed the seam, and cost one POI case
+
+Deployed 2026-07-31 (`2389871`, deploy run `30668828219`) and re-measured.
+Evidence: `benchmarks/2026-07-31-forward-gold-after-seam-calibration.json`.
+
+| group | t@1 before | t@1 after | starved before | starved after |
+|---|---|---|---|---|
+| `place:seam` | 0.000 | **0.900** | 10 | **0** |
+| `kind:multilingual` | 0.000 | **0.600** | 5 | **2** |
+| `place:name_locality` | 0.700 | 0.700 | 3 | 3 |
+| `place:inverse_seam` | 0.200 | 0.200 | 4 | 4 |
+| `place:name` | 0.400 | **0.300** | 6 | 6 |
+
+Overall t@1 0.261 → 0.587; type starvation 34 → 15 of 46. Overall exact-id
+self-recall r@1 0.000 → 0.370, r@10 0.065 → 0.413 — the first non-zero recall
+this gold set has ever produced.
+
+The prediction that `seam` would move substantially **held**. The prediction
+that `name` would be unaffected was **wrong** — it regressed, and the multilingual
+gain was not predicted at all.
+
+**The regression is one case and it is diagnostic, not noise.**
+`q=Sagrada Familia` returns:
+
+```
+locality  Sagrada Família, BR-RS
+locality  Sagrada Família, BR-ES
+poi       La Cachapera Sagrada Familia
+```
+
+Two obscure Brazilian localities now outrank every POI, and the Barcelona
+basilica is absent entirely (that part is the build-time head cap, Part 6b, not
+this fix). The mechanism: locality and POI both score `match_quality = 1.0` on an
+exact name hit, so the *only* remaining discriminator is the static prior — and
+`POI_PRIOR_CAP = 0.08` now guarantees the division wins every such tie.
+
+This is the same defect as before with the sign flipped. Previously any
+confidence-1.0 POI beat any locality; now any locality beats any POI. Both are
+wrong for the same reason: **neither side carries a prominence signal**, so an
+exact-name tie is decided by feature class instead of by which feature anyone
+was actually looking for.
+
+The fix is not to retune the cap — no scalar makes "Sagrada Família, BR-RS" lose
+to a basilica while "Paris, TX" still beats a Paris hotel. It needs the
+prominence term Part 6 already specifies (`P`: population/bbox for divisions,
+Wikidata importance or equivalent for POIs). Until that exists, the current
+setting is the correct trade: it converts 18 broken cases into working ones and
+breaks 1.
+
+Net for Stage 1: fix 2 is the first change in this workstream to move a metric,
+and it moved several. Stage 2 item 5 (cap eviction) and the `P` prominence term
+are now both load-bearing rather than nice-to-have.
 
 ## Part 7 — Recommended sequencing
 
