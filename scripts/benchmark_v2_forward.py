@@ -104,24 +104,24 @@ ADDRESS_FIELDS = (
 SEAM_CASES = [
     {"id": "seam:paris", "kind": "seam", "query": "Paris",
      "expected_name": "Paris", "alt_names": [],
-     "expected_lat": 48.8566, "expected_lon": 2.3522, "tolerance_km": 50.0},
+     "expected_lat": 48.8566, "expected_lon": 2.3522, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "seam:paris:biased", "kind": "seam", "query": "Paris",
      "expected_name": "Paris", "alt_names": [],
-     "expected_lat": 48.8566, "expected_lon": 2.3522, "tolerance_km": 50.0,
+     "expected_lat": 48.8566, "expected_lon": 2.3522, "tolerance_km": 50.0, "expected_feature_type": "locality",
      "proximity": [2.3522, 48.8566]},
     {"id": "seam:monaco", "kind": "seam", "query": "Monaco",
      "expected_name": "Monaco", "alt_names": [],
-     "expected_lat": 43.7384, "expected_lon": 7.4246, "tolerance_km": 50.0},
+     "expected_lat": 43.7384, "expected_lon": 7.4246, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "seam:monaco:biased", "kind": "seam", "query": "Monaco",
      "expected_name": "Monaco", "alt_names": [],
-     "expected_lat": 43.7384, "expected_lon": 7.4246, "tolerance_km": 50.0,
+     "expected_lat": 43.7384, "expected_lon": 7.4246, "tolerance_km": 50.0, "expected_feature_type": "locality",
      "proximity": [7.4246, 43.7384]},
     {"id": "seam:nice", "kind": "seam", "query": "Nice",
      "expected_name": "Nice", "alt_names": [],
-     "expected_lat": 43.7102, "expected_lon": 7.2620, "tolerance_km": 50.0},
+     "expected_lat": 43.7102, "expected_lon": 7.2620, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "seam:nice:biased", "kind": "seam", "query": "Nice",
      "expected_name": "Nice", "alt_names": [],
-     "expected_lat": 43.7102, "expected_lon": 7.2620, "tolerance_km": 50.0,
+     "expected_lat": 43.7102, "expected_lon": 7.2620, "tolerance_km": 50.0, "expected_feature_type": "locality",
      "proximity": [7.2620, 43.7102]},
 ]
 
@@ -130,19 +130,19 @@ SEAM_CASES = [
 MULTILINGUAL_CASES = [
     {"id": "ml:moscou", "kind": "multilingual", "query": "moscou",
      "expected_name": "Москва", "alt_names": ["Moscow", "Moscou", "Moskva"],
-     "expected_lat": 55.7558, "expected_lon": 37.6173, "tolerance_km": 50.0},
+     "expected_lat": 55.7558, "expected_lon": 37.6173, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "ml:londres", "kind": "multilingual", "query": "londres",
      "expected_name": "London", "alt_names": ["Londres"],
-     "expected_lat": 51.5074, "expected_lon": -0.1278, "tolerance_km": 50.0},
+     "expected_lat": 51.5074, "expected_lon": -0.1278, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "ml:tokio", "kind": "multilingual", "query": "tokio",
      "expected_name": "東京都", "alt_names": ["Tokyo", "東京", "Tokio"],
-     "expected_lat": 35.6762, "expected_lon": 139.6503, "tolerance_km": 50.0},
+     "expected_lat": 35.6762, "expected_lon": 139.6503, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "ml:praga", "kind": "multilingual", "query": "praga",
      "expected_name": "Praha", "alt_names": ["Prague", "Praga"],
-     "expected_lat": 50.0875, "expected_lon": 14.4213, "tolerance_km": 50.0},
+     "expected_lat": 50.0875, "expected_lon": 14.4213, "tolerance_km": 50.0, "expected_feature_type": "locality"},
     {"id": "ml:pekin", "kind": "multilingual", "query": "pekin",
      "expected_name": "北京市", "alt_names": ["Beijing", "北京", "Pekin", "Pékin"],
-     "expected_lat": 39.9042, "expected_lon": 116.4074, "tolerance_km": 50.0},
+     "expected_lat": 39.9042, "expected_lon": 116.4074, "tolerance_km": 50.0, "expected_feature_type": "locality"},
 ]
 
 
@@ -848,9 +848,19 @@ def score_case(case, features, provider="overture", semantic_scoring=None):
         semantic_scoring = provider != "overture"
     expected = (case["expected_lat"], case["expected_lon"])
     rank = matched_distance = None
+    # Exact-GERS-ID scoring applies only when the case actually carries an id.
+    # Curated gold cases are authored from open sources and deliberately have
+    # none -- an id could only have come from the system under test, which is
+    # what makes self-recall a retrievability claim rather than a quality one.
+    # Those cases fall through to name-plus-distance matching.
+    exact_id = (
+        not semantic_scoring
+        and case["kind"] in SELF_RECALL_KINDS
+        and case.get("expected_gers_id")
+    )
     for index, feature in enumerate(features):
         point = feature_point(feature)
-        if not semantic_scoring and case["kind"] in SELF_RECALL_KINDS:
+        if exact_id:
             hit = (feature.get("id") or "").lower() == case["expected_gers_id"]
         elif case["kind"] == "address":
             hit = _address_matches(case, feature)
@@ -866,6 +876,33 @@ def score_case(case, features, provider="overture", semantic_scoring=None):
     if features and (point := feature_point(features[0])) is not None:
         top1_distance = haversine_km(*expected, *point)
     return rank, matched_distance, top1_distance
+
+
+def feature_type_of(feature):
+    properties = feature.get("properties")
+    properties = properties if isinstance(properties, dict) else {}
+    value = properties.get("feature_type")
+    return value if isinstance(value, str) and value else None
+
+
+def score_type_composition(case, features, provider="overture"):
+    """``(top1_type, type_at_1, type_present)`` for a case that expects a type.
+
+    Answers a question rank@k cannot: *what kind of thing* came back first, and
+    did the expected kind survive truncation at all. A query whose expected type
+    is absent from the whole response was starved, not merely misranked -- the
+    live `q=Seattle` case returns ten POIs at relevance 1.0 with the city
+    nowhere in the response, which rank@k alone reports as an ordinary miss.
+
+    Only scored for Overture: `feature_type` is this API's vocabulary, and the
+    public comparators do not share it.
+    """
+    expected = case.get("expected_feature_type")
+    if not expected or provider != "overture":
+        return None, None, None
+    top1_type = feature_type_of(features[0]) if features else None
+    present = any(feature_type_of(feature) == expected for feature in features)
+    return top1_type, top1_type == expected, present
 
 
 def check_release_unavailable(status, body):
@@ -933,6 +970,10 @@ class Runner:
                 "found_at_10": False,
                 "matched_distance_km": None,
                 "top1_distance_km": None,
+                "expected_feature_type": case.get("expected_feature_type"),
+                "top1_feature_type": None,
+                "type_at_1": None,
+                "type_present": None,
             }
             if "strata" in case:
                 result["strata"] = case["strata"]
@@ -986,9 +1027,12 @@ class Runner:
             ok = False
             error = "invalid response shape"
         rank = matched_distance = top1_distance = None
+        top1_type = type_at_1 = type_present = None
         if ok:
             rank, matched_distance, top1_distance = score_case(
                 case, features, self.provider, self.semantic_scoring)
+            top1_type, type_at_1, type_present = score_type_composition(
+                case, features, self.provider)
         elif error is None:
             error = f"http {status}"
         result = {
@@ -1010,6 +1054,10 @@ class Runner:
             "found_at_10": rank is not None and rank <= FOUND_AT if ok else False,
             "matched_distance_km": _round_or_none(matched_distance),
             "top1_distance_km": _round_or_none(top1_distance),
+            "expected_feature_type": case.get("expected_feature_type"),
+            "top1_feature_type": top1_type,
+            "type_at_1": type_at_1,
+            "type_present": type_present,
         }
         if "strata" in case:
             result["strata"] = case["strata"]
@@ -1052,6 +1100,10 @@ def _aggregate(rows):
                  if row["top1_distance_km"] is not None]
     latencies = [row["ms"] for row in successful]
     denominator = len(rows)
+    # Type composition is scored only over rows that declared an expected type
+    # (Overture only), so a mixed file does not dilute it with unscored cases.
+    typed = [row for row in rows if row.get("type_at_1") is not None]
+    starved = [row for row in typed if row.get("type_present") is False]
     return {
         "requested": requested,
         "unsupported": unsupported,
@@ -1067,6 +1119,15 @@ def _aggregate(rows):
         "recall_at_5": round(found5 / denominator, 3) if rows else None,
         "recall_at_10": round(found10 / denominator, 3) if rows else None,
         "mrr": round(sum(1 / rank for rank in ranks) / denominator, 3) if rows else None,
+        # Type composition: what KIND came back first, and did the expected kind
+        # survive truncation at all. `type_starved` counts responses where it
+        # did not appear anywhere -- displaced, not merely misranked.
+        "type_scored": len(typed),
+        "type_at_1": (round(sum(bool(row["type_at_1"]) for row in typed) / len(typed), 3)
+                      if typed else None),
+        "type_present": (round(sum(bool(row["type_present"]) for row in typed) / len(typed), 3)
+                         if typed else None),
+        "type_starved": len(starved),
         "median_top1_distance_km": (round(statistics.median(distances), 3)
                                     if distances else None),
         "p50_ms": round(statistics.median(latencies), 1) if latencies else None,
@@ -1172,8 +1233,8 @@ def print_summary(summary, provider=None):
             f"{overall.get('unscorable', 0)} unscorable)"
         )
     print(f"\n{'group':<44}{'n':>4}{'err':>4}{'r@1':>7}{'r@5':>7}{'r@10':>7}"
-          f"{'mrr':>7}{'med km':>8}{'p50ms':>7}{'p95ms':>7}")
-    print("-" * 92)
+          f"{'mrr':>7}{'t@1':>7}{'strv':>6}{'med km':>8}{'p50ms':>7}{'p95ms':>7}")
+    print("-" * 105)
     rows = [("overall", summary["overall"]), ("self_recall", summary["self_recall"])]
     rows += [(f"kind:{key}", stats) for key, stats in summary["by_kind"].items()]
     rows += [(f"style:{key}", stats)
@@ -1186,6 +1247,10 @@ def print_summary(summary, provider=None):
               f"{cell(stats['recall_at_1'], 7)}{cell(stats['recall_at_5'], 7)}"
               f"{cell(stats['recall_at_10'], 7)}"
               f"{cell(stats['mrr'], 7)}"
+              # t@1 = expected feature_type at rank 1; strv = responses with the
+              # expected type absent ENTIRELY (starved, not merely misranked).
+              f"{cell(stats.get('type_at_1'), 7)}"
+              f"{stats.get('type_starved', 0):>6}"
               f"{cell(stats['median_top1_distance_km'], 8)}"
               f"{cell(stats['p50_ms'], 7, 1)}"
               f"{cell(stats['p95_ms'], 7, 1)}")

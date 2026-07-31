@@ -1,0 +1,453 @@
+{
+  "schema": "benchmark-v2-forward-cases-v1",
+  "meta": {
+    "purpose": "Curated forward gold set for cross-type ranking (Stage 0)",
+    "provenance": "Authored from widely published open references. Deliberately carries NO expected_gers_id: an id could only have come from the system under test, which is what makes self-recall a retrievability claim rather than a quality one. Not derived from Nominatim or Photon either, so it stays usable for provider-neutral comparison.",
+    "strata": {
+      "seam": "query is simultaneously a division name and a POI context token; the division must win rank 1",
+      "inverse_seam": "a POI must beat any same-named or homonym division",
+      "name": "context-free global landmark retrieval (the known open gap)",
+      "name_locality": "same landmark with a locality token; the control that should already pass"
+    },
+    "limitations": [
+      "35 cases is a seam and regression instrument, NOT the balanced multilingual gold set: coverage is Latin-script and Europe/North-America heavy.",
+      "Coordinates are approximate landmark/city centroids with deliberately loose tolerances (25 km localities, 2 km POIs); this set scores type composition and retrieval, not positional accuracy.",
+      "Overture may legitimately hold a landmark under a local-language primary name; alt_names cover the common cases but a miss should be inspected before it is called a regression."
+    ]
+  },
+  "cases": [
+    {
+      "id": "gold:seam:seattle",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Seattle",
+      "expected_name": "Seattle",
+      "expected_feature_type": "locality",
+      "expected_lat": 47.6062,
+      "expected_lon": -122.3321,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:paris",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Paris",
+      "expected_name": "Paris",
+      "expected_feature_type": "locality",
+      "expected_lat": 48.8566,
+      "expected_lon": 2.3522,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:berlin",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Berlin",
+      "expected_name": "Berlin",
+      "expected_feature_type": "locality",
+      "expected_lat": 52.52,
+      "expected_lon": 13.405,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:monaco",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Monaco",
+      "expected_name": "Monaco",
+      "expected_feature_type": "locality",
+      "expected_lat": 43.7384,
+      "expected_lon": 7.4246,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:chicago",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Chicago",
+      "expected_name": "Chicago",
+      "expected_feature_type": "locality",
+      "expected_lat": 41.8781,
+      "expected_lon": -87.6298,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:melbourne",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Melbourne",
+      "expected_name": "Melbourne",
+      "expected_feature_type": "locality",
+      "expected_lat": -37.8136,
+      "expected_lon": 144.9631,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:toronto",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Toronto",
+      "expected_name": "Toronto",
+      "expected_feature_type": "locality",
+      "expected_lat": 43.6532,
+      "expected_lon": -79.3832,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:dublin",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Dublin",
+      "expected_name": "Dublin",
+      "expected_feature_type": "locality",
+      "expected_lat": 53.3498,
+      "expected_lon": -6.2603,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:manchester",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Manchester",
+      "expected_name": "Manchester",
+      "expected_feature_type": "locality",
+      "expected_lat": 53.4808,
+      "expected_lon": -2.2426,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:seam:phoenix",
+      "kind": "place",
+      "query_style": "seam",
+      "query": "Phoenix",
+      "expected_name": "Phoenix",
+      "expected_feature_type": "locality",
+      "expected_lat": 33.4484,
+      "expected_lon": -112.074,
+      "tolerance_km": 25.0
+    },
+    {
+      "id": "gold:name:eiffel-tower",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Eiffel Tower",
+      "expected_name": "Eiffel Tower",
+      "expected_feature_type": "poi",
+      "expected_lat": 48.8584,
+      "expected_lon": 2.2945,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Tour Eiffel"
+      ]
+    },
+    {
+      "id": "gold:name_locality:eiffel-tower",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Eiffel Tower Paris",
+      "expected_name": "Eiffel Tower",
+      "expected_feature_type": "poi",
+      "expected_lat": 48.8584,
+      "expected_lon": 2.2945,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Tour Eiffel"
+      ]
+    },
+    {
+      "id": "gold:name:statue-of-liberty",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Statue of Liberty",
+      "expected_name": "Statue of Liberty",
+      "expected_feature_type": "poi",
+      "expected_lat": 40.6892,
+      "expected_lon": -74.0445,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Liberty Enlightening the World"
+      ]
+    },
+    {
+      "id": "gold:name_locality:statue-of-liberty",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Statue of Liberty New York",
+      "expected_name": "Statue of Liberty",
+      "expected_feature_type": "poi",
+      "expected_lat": 40.6892,
+      "expected_lon": -74.0445,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Liberty Enlightening the World"
+      ]
+    },
+    {
+      "id": "gold:name:colosseum",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Colosseum",
+      "expected_name": "Colosseum",
+      "expected_feature_type": "poi",
+      "expected_lat": 41.8902,
+      "expected_lon": 12.4922,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Colosseo",
+        "Coliseum"
+      ]
+    },
+    {
+      "id": "gold:name_locality:colosseum",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Colosseum Rome",
+      "expected_name": "Colosseum",
+      "expected_feature_type": "poi",
+      "expected_lat": 41.8902,
+      "expected_lon": 12.4922,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Colosseo",
+        "Coliseum"
+      ]
+    },
+    {
+      "id": "gold:name:big-ben",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Big Ben",
+      "expected_name": "Big Ben",
+      "expected_feature_type": "poi",
+      "expected_lat": 51.5007,
+      "expected_lon": -0.1246,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Elizabeth Tower"
+      ]
+    },
+    {
+      "id": "gold:name_locality:big-ben",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Big Ben London",
+      "expected_name": "Big Ben",
+      "expected_feature_type": "poi",
+      "expected_lat": 51.5007,
+      "expected_lon": -0.1246,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Elizabeth Tower"
+      ]
+    },
+    {
+      "id": "gold:name:taj-mahal",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Taj Mahal",
+      "expected_name": "Taj Mahal",
+      "expected_feature_type": "poi",
+      "expected_lat": 27.1751,
+      "expected_lon": 78.0421,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name_locality:taj-mahal",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Taj Mahal Agra",
+      "expected_name": "Taj Mahal",
+      "expected_feature_type": "poi",
+      "expected_lat": 27.1751,
+      "expected_lon": 78.0421,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name:machu-picchu",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Machu Picchu",
+      "expected_name": "Machu Picchu",
+      "expected_feature_type": "poi",
+      "expected_lat": -13.1631,
+      "expected_lon": -72.545,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name_locality:machu-picchu",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Machu Picchu Cusco",
+      "expected_name": "Machu Picchu",
+      "expected_feature_type": "poi",
+      "expected_lat": -13.1631,
+      "expected_lon": -72.545,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name:sagrada-familia",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Sagrada Familia",
+      "expected_name": "Sagrada Familia",
+      "expected_feature_type": "poi",
+      "expected_lat": 41.4036,
+      "expected_lon": 2.1744,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Basílica de la Sagrada Família",
+        "Sagrada Família"
+      ]
+    },
+    {
+      "id": "gold:name_locality:sagrada-familia",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Sagrada Familia Barcelona",
+      "expected_name": "Sagrada Familia",
+      "expected_feature_type": "poi",
+      "expected_lat": 41.4036,
+      "expected_lon": 2.1744,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Basílica de la Sagrada Família",
+        "Sagrada Família"
+      ]
+    },
+    {
+      "id": "gold:name:empire-state-building",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Empire State Building",
+      "expected_name": "Empire State Building",
+      "expected_feature_type": "poi",
+      "expected_lat": 40.7484,
+      "expected_lon": -73.9857,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name_locality:empire-state-building",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Empire State Building New York",
+      "expected_name": "Empire State Building",
+      "expected_feature_type": "poi",
+      "expected_lat": 40.7484,
+      "expected_lon": -73.9857,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name:buckingham-palace",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Buckingham Palace",
+      "expected_name": "Buckingham Palace",
+      "expected_feature_type": "poi",
+      "expected_lat": 51.5014,
+      "expected_lon": -0.1419,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name_locality:buckingham-palace",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Buckingham Palace London",
+      "expected_name": "Buckingham Palace",
+      "expected_feature_type": "poi",
+      "expected_lat": 51.5014,
+      "expected_lon": -0.1419,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:name:brandenburg-gate",
+      "kind": "place",
+      "query_style": "name",
+      "query": "Brandenburg Gate",
+      "expected_name": "Brandenburg Gate",
+      "expected_feature_type": "poi",
+      "expected_lat": 52.5163,
+      "expected_lon": 13.3777,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Brandenburger Tor"
+      ]
+    },
+    {
+      "id": "gold:name_locality:brandenburg-gate",
+      "kind": "place",
+      "query_style": "name_locality",
+      "query": "Brandenburg Gate Berlin",
+      "expected_name": "Brandenburg Gate",
+      "expected_feature_type": "poi",
+      "expected_lat": 52.5163,
+      "expected_lon": 13.3777,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Brandenburger Tor"
+      ]
+    },
+    {
+      "id": "gold:inverse_seam:sydney-opera-house",
+      "kind": "place",
+      "query_style": "inverse_seam",
+      "query": "Sydney Opera House",
+      "expected_name": "Sydney Opera House",
+      "expected_feature_type": "poi",
+      "expected_lat": -33.8568,
+      "expected_lon": 151.2153,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:inverse_seam:golden-gate-bridge",
+      "kind": "place",
+      "query_style": "inverse_seam",
+      "query": "Golden Gate Bridge",
+      "expected_name": "Golden Gate Bridge",
+      "expected_feature_type": "poi",
+      "expected_lat": 37.8199,
+      "expected_lon": -122.4783,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:inverse_seam:casino-de-monte-carlo",
+      "kind": "place",
+      "query_style": "inverse_seam",
+      "query": "Casino de Monte-Carlo",
+      "expected_name": "Casino de Monte-Carlo",
+      "expected_feature_type": "poi",
+      "expected_lat": 43.7396,
+      "expected_lon": 7.4287,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Casino de Monte Carlo",
+        "Monte Carlo Casino"
+      ]
+    },
+    {
+      "id": "gold:inverse_seam:times-square",
+      "kind": "place",
+      "query_style": "inverse_seam",
+      "query": "Times Square",
+      "expected_name": "Times Square",
+      "expected_feature_type": "poi",
+      "expected_lat": 40.758,
+      "expected_lon": -73.9855,
+      "tolerance_km": 2.0
+    },
+    {
+      "id": "gold:inverse_seam:louvre-museum",
+      "kind": "place",
+      "query_style": "inverse_seam",
+      "query": "Louvre Museum",
+      "expected_name": "Louvre Museum",
+      "expected_feature_type": "poi",
+      "expected_lat": 48.8606,
+      "expected_lon": 2.3376,
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Musée du Louvre",
+        "Louvre"
+      ]
+    }
+  ]
+}
