@@ -61,6 +61,23 @@ REQUIRED_FIELD_TYPES: dict[str, str] = {
     "brand.names.primary": "string",
     "categories": "struct",
     "categories.primary": "string",
+    # DELIBERATELY ABSENT: `categories.alternate`.
+    #
+    # It carries the POI prominence signal and the projection DOES read it (see
+    # `_prominence_rank_array` in project_places_construction_v1.py); `categories`
+    # is already in PROJECTED_COLUMN_ROOTS so the column group costs nothing
+    # extra. It is not listed here because this contract is matched by exact set
+    # equality, and its fingerprint is bound into FROZEN EVIDENCE from real
+    # planet runs -- `benchmarks/places-construction-v1-data/evidence/*.json`
+    # and the pinned `readiness-v2.json` all record
+    # inventory_sha256 b1830aee... / schema_fingerprint 49453ed2....
+    #
+    # Requiring the field would invalidate that whole attestation chain and the
+    # only honest way to restore it is to RE-RUN the readiness/evidence
+    # production, not to rewrite the files. The projection therefore treats
+    # `alternate` as optional and falls back to a primary-only prior when a
+    # source lacks it. Promote it to required in the same change that
+    # regenerates evidence for the next planet build.
     "confidence": "float64",
     "geometry": "binary",
     "id": "string",
@@ -217,6 +234,8 @@ def _canonical_arrow_type(data_type: Any) -> str:
         return "struct"
     if pa.types.is_list(data_type) and pa.types.is_struct(data_type.value_type):
         return "list<struct>"
+    if pa.types.is_list(data_type) and pa.types.is_string(data_type.value_type):
+        return "list<string>"
     if pa.types.is_map(data_type):
         if pa.types.is_string(data_type.key_type) and pa.types.is_string(
             data_type.item_type

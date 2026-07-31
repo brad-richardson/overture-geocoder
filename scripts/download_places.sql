@@ -26,6 +26,10 @@ COPY (
         COALESCE(addresses[1].postcode, '') as postcode,
         COALESCE(addresses[1].freeform, '') as freeform_address,
         categories.primary as category_primary,
+        -- Carries the POI prominence signal: `monument`,
+        -- `landmark_and_historical_building`, `tourist_attraction`. Non-empty on
+        -- 61-73% of places. See scripts/places_type_prior_v1.py.
+        categories.alternate as category_alternate,
         basic_category,
         taxonomy.primary as taxonomy_primary,
         taxonomy.hierarchy as taxonomy_hierarchy,

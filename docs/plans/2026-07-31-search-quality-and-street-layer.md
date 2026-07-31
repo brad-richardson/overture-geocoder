@@ -503,7 +503,7 @@ S3 parquet, three token/bbox slices: `sagrada`/Barcelona n=214,
 
 | column | hypothesis | measured |
 |---|---|---|
-| `LEN(names.common)` | multilingual notability, the Wikidata-importance proxy | **0 for every record in all three cities.** The map is empty in the places theme. |
+| `LEN(names.common)` | multilingual notability, the Wikidata-importance proxy | **0 for every record.** Re-measured over 772,341 places across Barcelona / Paris / Seattle / Tokyo: **0.0% non-empty in all four.** The field is entirely unpopulated in the places theme. |
 | `root_source_count` | independent corroboration | **1 for every record.** No variance. |
 | `websites` / `socials` / `phones` | web presence | ~1/1/1 almost everywhere; where it varies it is *anti*-correlated — "Bruce Jones SEO Services Seattle" ranked 2nd. |
 
@@ -564,17 +564,33 @@ anti-correlation, one level down.
 
 - **Part 6's `P` term must be sourced from `categories`, not from counts.** The
   count-based design in Part 6 should not be implemented as written.
-- **`categories.alternate` must be added to `download_places.sql`.** It is the
-  field carrying the landmark signal and it is currently discarded.
+- **`categories.alternate` is now projected, as an OPTIONAL field.** It carries
+  the landmark signal and is non-empty on **61-73%** of places in all four
+  cities measured. It costs **zero extra parquet I/O**: `categories` is already
+  in `places_inventory_v1.PROJECTED_COLUMN_ROOTS`, so the column group is read
+  either way.
+
+  It is deliberately **not** added to `REQUIRED_FIELD_TYPES`. That contract is
+  matched by exact set equality and its fingerprint is bound into frozen
+  evidence from real planet runs — every
+  `benchmarks/places-construction-v1-data/evidence/*.json` and the pinned
+  `readiness-v2.json` record `inventory_sha256 b1830aee...` /
+  `schema_fingerprint 49453ed2...`. Adding a required path invalidates that
+  attestation chain, and the only honest repair is to **re-run** readiness and
+  evidence production, not to rewrite the files. Verified by regenerating the
+  inventory: the diff was 19 leaves, all contract-or-hash, map plan and totals
+  byte-identical — but it broke `test_control_pins_match_the_real_committed_evidence_files`,
+  which is the gate working as designed. Promote the field to required in the
+  same change that regenerates evidence for the next planet build.
+- **The prominence byte is settled: add a dedicated u8**, +0.60% of the head.
+  See item 10 of `2026-07-31-promotion-copy-and-efficiency.md`.
 - **The type prior and the Stage 2 cap-eviction reorder are one work item.** The
   prior is the eviction key; it does nothing at query time until eviction uses
   it. Both are build-side and want to land before the next planet rebuild.
 - **Duplicate collapse is a newly-identified, separately-tracked defect.** It
   bounds Eiffel-class queries independently of ranking.
-- **How to carry the byte is unsettled and deliberately not decided here.** See
-  item 10 of `2026-07-31-promotion-copy-and-efficiency.md`; packing 4 bits into
-  the spare high bits of the existing `field_mask` looks likeliest and costs no
-  format change.
+- **`common_names` is dead weight in the projection** — always empty, consumed
+  only by `baseline_places_construction_v1.py`. Free to drop.
 
 ## Part 7 — Recommended sequencing
 

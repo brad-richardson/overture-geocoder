@@ -26,6 +26,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import places_inventory_v1 as inventory  # noqa: E402
+import places_type_prior_v1 as type_prior  # noqa: E402
 from experiment_hosted_rowgroups import (  # noqa: E402
     BoundedWriter,
     network_received_bytes,
@@ -130,6 +131,57 @@ def _first_address_field(addresses: Any, name: str) -> Any:
     return pc.if_else(pa.array(valid), _text(selected), pa.scalar(""))
 
 
+def _optional_struct_field(array: Any, name: str) -> Any:
+    """`_struct_field`, but returns None when the struct lacks the field.
+
+    `categories.alternate` is deliberately NOT in
+    `places_inventory_v1.REQUIRED_FIELD_TYPES` -- that contract's fingerprint is
+    bound into frozen planet evidence, and requiring a new path would invalidate
+    it (see the note there). So the prominence prior degrades to primary-only
+    rather than failing closed on a source that predates the field.
+    """
+    import pyarrow as pa
+
+    data_type = array.type
+    if not pa.types.is_struct(data_type):
+        return None
+    if data_type.get_field_index(name) < 0:
+        return None
+    return _struct_field(array, name)
+
+
+def _prominence_rank_array(primary: Any, basic: Any, alternate: Any) -> Any:
+    """Per-row POI prominence prior, quantized to the u8 the head entry carries.
+
+    Deliberately a Python loop over the three category columns rather than an
+    Arrow kernel: the prior is a dictionary lookup with a commodity-primary
+    override, which has no vectorized spelling, and the projection is already
+    I/O-bound on the parquet read. Keeping ONE implementation of the table
+    (`places_type_prior_v1`) matters more here than the loop cost -- a second
+    vectorized copy could drift from the tested one.
+    """
+    import pyarrow as pa
+
+    primary_values = primary.to_pylist()
+    basic_values = basic.to_pylist()
+    rows = len(primary_values)
+    alternate_values = (
+        [None] * rows if alternate is None else alternate.to_pylist()
+    )
+    return pa.array(
+        [
+            type_prior.prominence_rank(
+                primary_values[index],
+                basic_values[index],
+                None,
+                alternate_values[index],
+            )
+            for index in range(rows)
+        ],
+        type=pa.uint8(),
+    )
+
+
 def flatten_batch(
     batch: Any, *, object_index: int, row_group: int, row_offset: int
 ) -> Any:
@@ -146,6 +198,15 @@ def flatten_batch(
     category = _text(_struct_field(batch["categories"], "primary"))
     basic_category = _text(batch["basic_category"])
     category = pc.if_else(pc.not_equal(category, ""), category, basic_category)
+    # POI prominence. Overture `confidence` is an EXISTENCE signal and
+    # anti-correlates with fame (the Sagrada Familia scores below the Starbucks
+    # next door), so the category is the only usable prior. See
+    # scripts/places_type_prior_v1.py for the measurement behind the table.
+    prominence_rank = _prominence_rank_array(
+        _struct_field(batch["categories"], "primary"),
+        batch["basic_category"],
+        _optional_struct_field(batch["categories"], "alternate"),
+    )
     rows = batch.num_rows
     return pa.RecordBatch.from_arrays(
         [
@@ -158,6 +219,7 @@ def flatten_batch(
             _first_address_field(batch["addresses"], "region"),
             _first_address_field(batch["addresses"], "country"),
             pc.cast(batch["confidence"], pa.float64()),
+            prominence_rank,
             _text(batch["operating_status"]),
             pc.cast(batch["geometry"], pa.binary()),
             pa.array(np.full(rows, object_index, dtype=np.int32)),
@@ -174,6 +236,7 @@ def flatten_batch(
             "region",
             "country",
             "confidence",
+            "prominence_rank",
             "operating_status",
             "geometry",
             "source_object_index",
