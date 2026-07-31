@@ -343,6 +343,48 @@ Note the Worker **already runs SQLite** against the runtime's built-in engine vi
 databases served from R2. The binding constraint was never "cannot run SQLite",
 it is the 48 MiB DB cache.
 
+### Can anything serve the larger FTS SQLite?
+
+The 2026-07-10 spike measured ~1.1 GB for a full-CA Places SQLite FTS and
+recorded it as "too large for CF Worker"
+(`docs/plans/2026-07-10-places-prototype.md:118, 213`). Asked whether any
+Cloudflare product lifts that:
+
+**Workers: no, permanently.** 128 MB per isolate on **both** Free and Paid. It
+cannot be raised by plan upgrade and has no announced increase — a foundational
+platform constraint. The spike's conclusion stands for the Worker path forever.
+
+**Durable Objects: partially, but for the wrong reason.** A 10 GB SQLite-backed
+DO is *disk-backed and queried by SQL*, not deserialized into RAM, so "bigger
+than memory" is genuinely solved. But loading it is billed per row written
+($1.00/million), which is the wall that killed D1 — see above.
+
+**Cloudflare Containers: YES — this is the real answer.** Instance types reach
+**standard-4: 4 vCPU, 12 GiB memory, 20 GB disk**, and they **scale to zero**
+(billed per 10 ms while running; charges stop when the instance sleeps), which
+satisfies the near-zero-when-idle requirement natively. Included in the $5/month
+Workers Paid plan: 25 GiB-hours memory, 375 vCPU-minutes, 200 GB-hours disk;
+overage $0.0000025/GiB-s memory, $0.000020/vCPU-s, $0.00000007/GB-s disk. A
+1.1 GB FTS — or an order of magnitude more — fits comfortably.
+
+Three caveats decide usability, and none of them is the bill:
+
+1. **Hydration/cold start is the real engineering problem.** Container disk is
+   ephemeral per instance, so each wake must either pull the FTS from R2 (slow
+   at GB scale) or bake it into the image — which means building and pushing a
+   container image per release, a pipeline that does not exist today.
+2. **Regional, not edge.** Containers run in specific locations rather than
+   every PoP, so the edge-latency property of the current design is lost.
+   Acceptable only while latency is explicitly not the priority.
+3. **It departs from the immutable-object model.** Create-only R2 objects,
+   exact-set verification, CAS catalog flip and 64-release instant rollback all
+   need a container-image equivalent. Design it deliberately, not by accident.
+
+**Crucially, this fixes none of Part 1.** `q=Seattle` returning ten bank
+branches is a build-time ranking and admission bug; more memory does not touch
+it. Containers are an **enabler for a future richer index**, not a remedy for
+the current one — so they belong after Stages 1-3, if at all.
+
 ---
 
 ## Part 7 — Recommended sequencing
@@ -399,6 +441,11 @@ near-zero risk. **Do these first.**
 
 **Deferred, with triggers rather than dates:**
 - Durable Object partition map — trigger: routing outgrows the 8 MiB cap.
+- Cloudflare Containers for a heavier FTS index — trigger: Stages 1-3 land and
+  measured recall is *still* the binding limit, i.e. the index shape itself is
+  the constraint rather than its ranking. Requires solving image/hydration and a
+  container release-and-rollback story first. Do not start here: it fixes none
+  of Part 1.
 - Free-text address search with house numbers — needs a parser; street-only
   free text sidesteps it and should ship first.
 - Address-derived `street_dim` as an interim recall aid — only if Stage 4 slips
