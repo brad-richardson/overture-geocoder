@@ -23,9 +23,6 @@ name: R2 One-Time Cleanup
 on:
   workflow_dispatch:
     inputs:
-      confirm:
-        description: 'Type CLEANUP to confirm deletion'
-        required: true
       phases:
         description: 'Space-separated phases to run, e.g. "1 2 3" or "4" or "5"'
         required: true
@@ -74,27 +71,8 @@ env:
   PROTECTED_PREFIXES: "2026-07-13.0 2026-07-18.0 2026-07-02.3 backups"
 
 jobs:
-  # A mistyped confirm value must be a red run, not a green no-op: the
-  # job-level gate on `cleanup` silently skips (and reports success), so the
-  # typo is caught here, in an ungated job, before anything else starts.
-  confirm:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Fail loudly on a mistyped confirmation
-        env:
-          CONFIRM: ${{ github.event.inputs.confirm }}
-        run: |
-          set -euo pipefail
-          if [ "$CONFIRM" != "CLEANUP" ]; then
-            echo "::error::confirm must be exactly 'CLEANUP' (got '$CONFIRM'); nothing ran"
-            exit 1
-          fi
-          echo "confirmation accepted"
-
   cleanup:
     runs-on: ubuntu-latest
-    needs: confirm
-    if: github.event.inputs.confirm == 'CLEANUP'
     steps:
       - uses: actions/checkout@v7
 

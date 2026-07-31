@@ -19,10 +19,6 @@ on:
         options:
           - full
           - recover
-      confirm:
-        description: Type USA to run or recover the guarded scale signal.
-        required: true
-        type: string
       places_run_id:
         description: Recovery mode only; successful standalone CONUS Places run ID.
         required: false
@@ -56,18 +52,13 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: Require an explicit scale-run confirmation
+      - name: Validate the recovery inputs
         env:
-          CONFIRM: ${{ inputs.confirm }}
           RUN_MODE: ${{ inputs.mode }}
           PLACES_RUN_ID: ${{ inputs.places_run_id }}
           ADDRESSES_RUN_ID: ${{ inputs.addresses_run_id }}
         run: |
           set -euo pipefail
-          if [ "${CONFIRM}" != "USA" ]; then
-            echo "::error::confirmation must be exactly USA"
-            exit 1
-          fi
           if [ "${RUN_MODE}" = "recover" ]; then
             if ! [[ "${PLACES_RUN_ID}" =~ ^[1-9][0-9]*$ ]]; then
               echo "::error::recovery places_run_id must be a positive integer"

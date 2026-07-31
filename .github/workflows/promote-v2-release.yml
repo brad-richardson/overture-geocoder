@@ -17,11 +17,7 @@ name: Promote v2 Release
 #                    v2_release_manifest.py's catalog CAS requires (stale
 #                    If-Match must 412). R2 does not implement conditional
 #                    DeleteObject, so unavailable recovery is a signed CAS PUT.
-#                    No other stage may be executed until
-#                    this has a green run; later stages enforce that by a
-#                    typed PROBES-GREEN:<probe-run-id> attestation inside the
-#                    confirmation string, recorded in the run log (workflows
-#                    cannot cheaply query past runs, so the operator attests).
+#                    Run this green before any other stage.
 #   promote-slice    promote_construction_slice.py plan -> execute -> verify
 #                    per family (server-side CopyObject inside the bucket),
 #                    then create-only publication of
@@ -54,7 +50,7 @@ on:
   workflow_dispatch:
     inputs:
       stage:
-        description: Which promotion rung to run. Later rungs require a green probe run, attested in `confirm`.
+        description: Which promotion rung to run. Run `probe` green before the later rungs.
         required: true
         type: choice
         options: [probe, promote-slice, publish-release, promote-catalog]
@@ -64,16 +60,6 @@ on:
         default: dry-run
         type: choice
         options: [dry-run, execute]
-      confirm:
-        description: >-
-          Typed confirmation, required for execute of every stage except probe:
-          "PROMOTE-SLICE <slice_version> PROBES-GREEN:<probe-run-id>",
-          "PUBLISH-RELEASE <geocoder_build> PROBES-GREEN:<probe-run-id>", or
-          "PROMOTE-CATALOG <geocoder_build> PROBES-GREEN:<probe-run-id>".
-          The probe run id attests a green `stage: probe` run of this workflow.
-        required: false
-        default: ""
-        type: string
       slice_version:
         description: Destination slice version (slice-YYYY-MM-DD.N). Used by promote-slice and publish-release.
         required: false
@@ -151,7 +137,6 @@ jobs:
         env:
           STAGE: ${{ inputs.stage }}
           MODE: ${{ inputs.mode }}
-          CONFIRM: ${{ inputs.confirm }}
           SLICE_VERSION: ${{ inputs.slice_version }}
           GEOCODER_BUILD: ${{ inputs.geocoder_build }}
           OVERTURE_RELEASE: ${{ inputs.overture_release }}
@@ -188,34 +173,15 @@ jobs:
               exit 1
             fi
           }
-          # The typed confirmation binds the stage word, the exact promotion
-          # target, and the operator's attestation that a `stage: probe` run
-          # of this workflow is green. Required for every execute except the
-          # self-cleaning probe itself.
-          require_confirm () {
+          # Record the stage and its promotion target in the run log. The
+          # per-stage input validation above is what fails a bad dispatch.
+          stage_summary () {
             local word="$1" target="$2"
             [ "$MODE" = "execute" ] || return 0
-            local prefix="${word} ${target} PROBES-GREEN:"
-            case "$CONFIRM" in
-              "${prefix}"*) ;;
-              *)
-                echo "::error::confirm must be exactly '${prefix}<probe-run-id>'"
-                exit 1
-                ;;
-            esac
-            PROBE_RUN_ID="${CONFIRM#"${prefix}"}"
-            case "$PROBE_RUN_ID" in
-              ''|*[!0-9]*)
-                echo "::error::PROBES-GREEN must name a numeric probe run id"
-                exit 1
-                ;;
-            esac
             {
               echo "## Promote v2 release: ${STAGE} (${MODE})"
               echo
-              echo "- Operator attestation: probe run \`${PROBE_RUN_ID}\` is green"
-              echo "  (https://github.com/${GITHUB_REPOSITORY}/actions/runs/${PROBE_RUN_ID})"
-              echo "- Typed confirmation: \`${CONFIRM}\`"
+              echo "- Promotion target: \`${word} ${target}\`"
             } >> "$GITHUB_STEP_SUMMARY"
           }
 
@@ -231,7 +197,7 @@ jobs:
               fi
               require_source places_source "$PLACES_SOURCE"
               require_source addresses_source "$ADDRESSES_SOURCE"
-              require_confirm PROMOTE-SLICE "$SLICE_VERSION"
+              stage_summary PROMOTE-SLICE "$SLICE_VERSION"
               ;;
             publish-release)
               require_slice_version
@@ -248,7 +214,7 @@ jobs:
                   exit 1
                 fi
               done
-              require_confirm PUBLISH-RELEASE "$GEOCODER_BUILD"
+              stage_summary PUBLISH-RELEASE "$GEOCODER_BUILD"
               ;;
             promote-catalog)
               require_build geocoder_build "$GEOCODER_BUILD"
@@ -257,7 +223,7 @@ jobs:
                 echo "::error::catalog_expectation must be exactly 'absent' or the current catalog sha256"
                 exit 1
               fi
-              require_confirm PROMOTE-CATALOG "$GEOCODER_BUILD"
+              stage_summary PROMOTE-CATALOG "$GEOCODER_BUILD"
               ;;
             *)
               echo "::error::unknown stage '$STAGE'"

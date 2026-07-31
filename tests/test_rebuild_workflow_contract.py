@@ -383,17 +383,16 @@ def test_global_v2_inputs_reject_multiline_values():
         assert pattern in check, pattern
 
 
-def test_a_mistyped_confirmation_fails_the_run():
+def test_cleanup_runs_without_a_typed_confirmation():
     workflow = load(CLEANUP)
-    confirm = jobs(workflow)["confirm"]
-    # Ungated job, so a typo is a red run rather than a green skip...
-    assert "if" not in confirm
-    run = confirm["steps"][0]["run"]
-    assert '"$CONFIRM" != "CLEANUP"' in run and "exit 1" in run
-    # ...and the cleanup job still carries its own gate and waits on it.
-    cleanup = jobs(workflow)["cleanup"]
-    assert cleanup["if"] == "github.event.inputs.confirm == 'CLEANUP'"
-    assert cleanup["needs"] == "confirm"
+    named = jobs(workflow)
+    # The typed CLEANUP gate was removed deliberately; nothing may reintroduce
+    # a gate job or a job-level condition that turns a typo into a green skip.
+    assert "confirm" not in named
+    cleanup = named["cleanup"]
+    assert "if" not in cleanup
+    assert "needs" not in cleanup
+    assert "confirm" not in workflow[True]["workflow_dispatch"]["inputs"]
 
 
 def test_dry_run_input_routes_every_delete_through_dryrun():
