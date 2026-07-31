@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-31 after the ARDX0002 dictionary fix cleared the Address
-reverse encode gate and the Places reverse execute run began.
+Last updated 2026-07-31 after v2 release `2026-07-31.0` was promoted and
+point-family `/v2/reverse` went live for both Places and Addresses.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -11,17 +11,25 @@ here.
 
 ## Current milestone
 
-Forward is live and benchmarked in v2 release `2026-07-28.0`. The current
-milestone is **reverse serving for both families**: build the reverse indexes
-over the already published per-record artifacts, attach them to a successor
-release, and flip the catalog so `/v2/reverse` stops returning
-`capability_unavailable` for `poi` and `address`.
+The previous milestone -- **reverse serving for both families** -- is **MET**
+as of 2026-07-31T19:05Z. v2 release `2026-07-31.0` is live and `/v2/reverse`
+answers `types=poi` and `types=address` from planet-scale point-family indexes;
+it no longer returns `capability_unavailable`. Both reverse builds, the slice
+promotion, the release publication, and the catalog CAS are all done. See
+"Promotion result, 2026-07-31".
 
-Both reverse families are unblocked as of 2026-07-31:
+**The next milestone is not yet agreed.** The two strongest candidates, both
+already measured rather than speculative:
 
-- **Places** reverse execute is running (see Current snapshot).
-- **Addresses** cleared its last gate when probe `30598079732` passed on merged
-  `main`; the execute has not been dispatched.
+- **Forward Places name-only global retrieval** (open gate 2). `Eiffel Tower`
+  and `Space Needle` return zero features while the same names with a locality
+  return results. This is the most visible quality gap in the live product and
+  it is what keeps every promotion's smoke red.
+- **Another full planet rebuild**, for which the failure modes and efficiency
+  queue are recorded in
+  `2026-07-31-promotion-copy-and-efficiency.md` and
+  `2026-07-28-planet-build-wall-clock-review.md`. Nothing in Tracks A/B/C has
+  been executed beyond Wave 0.
 
 All construction work runs under operator request
 `88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`.
@@ -66,12 +74,32 @@ run `30215529919` keeps the per-batch path at 117 batches and 581 records.
 
 ### Live serving
 
-v2 release `2026-07-28.0` is live, backed by protected core `2026-07-18.0` and
-Overture `2026-06-17.0`. Global-head `/v2/forward`, routed `/v2/forward`,
-structured Address `/v2/forward`, division `/v2/reverse`, and release-pinned ID
-lookup all return the advertised build. Point-family `/v2/reverse` returns
-`capability_unavailable` for both `poi` and `address` because no reverse data
-has been published yet — that is the current milestone, not a defect.
+**v2 release `2026-07-31.0` is live as of 2026-07-31T19:05Z**, backed by
+protected core `2026-07-18.0` and Overture `2026-06-17.0`, with both families
+served from `slice-2026-07-30.0`. Global-head `/v2/forward`, routed
+`/v2/forward`, structured Address `/v2/forward`, division `/v2/reverse`, and
+release-pinned ID lookup all return the advertised build.
+
+**Point-family `/v2/reverse` is live.** The milestone is met. Verified against
+the public endpoint, not only by the workflow's own smoke:
+
+- `types=poi` at 47.6205,-122.3493 returns Space Needle,
+  `landmark_and_historical_building`, `distance_m` 0.53;
+- `types=address` at the same point returns 400 BROAD Street, Seattle WA 98109,
+  `distance_m` 0.81;
+- `types=poi,address` returns both; an untyped query still answers from
+  divisions.
+
+`docs/api-v2.md` was updated in the same change — it still claimed `poi` and
+`address` were rejected.
+
+The promotion's own `/v2/forward` smoke FAILED, and it is the recorded
+false-red: 10/10 attempts logged `OK divisions (q=Berlin, build 2026-07-31.0)`
+followed by `FAIL places: no features for Eiffel Tower`. Live probes confirm
+the shape is name-only global retrieval, not a promotion defect — `Eiffel
+Tower` and `Space Needle` each return zero features while `Eiffel Tower Paris`
+returns 3 and `Space Needle Seattle` returns 2. The catalog CAS itself
+succeeded and nothing auto-recovered. See open gates 3 and 4.
 
 ### Reverse execution, 2026-07-31
 
@@ -320,77 +348,50 @@ measurement for Places. Address measured it successfully in run `30215529919`:
 292.66 GiB of reducer hydration plus marker-last publication and whole-slice
 verification of 10,931 objects.
 
-## Fastest path
+## Promotion result, 2026-07-31
 
-Forward is complete and live. Reverse R1 through R4 are all merged. The
-remaining path to a working point-family reverse endpoint is operational, not
-implementation:
+**The milestone is met.** All three rungs executed; `v2/catalog.json` now points
+at build `2026-07-31.0`. See "Live serving" above for the endpoint evidence.
 
-Steps 1 and 2, both reverse execute runs, are DONE and green — see "Reverse
-execution, 2026-07-31" above. What remains is the three-rung promotion. With
-`REQ=88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`:
+| rung | run | result |
+|---|---|---|
+| `promote-slice` | `30647191487` | 42,058 objects / 188.4 GiB bound; slice manifest published 18:52:39Z |
+| `publish-release` | `30657455505` | `v2/releases/2026-07-31.0/release.json`, sha256 `b1677f4c...d827e` |
+| `promote-catalog` | `30657619881` | CAS succeeded against `5c9a9e7e...88184`; smoke false-red |
 
-1. **Promote the slice — BOTH families in one dispatch.** `slice-2026-07-30.0`
-   holds only reverse output today; its forward objects have never been copied
-   and no `slice-manifest.json` exists (which is exactly why reverse could still
-   admit into it). `promote-slice` does the forward CopyObject *and* publishes
-   the slice manifest, and that manifest freezes the slice's family set forever
-   — promoting one family alone would strand the other.
+Measured promotion evidence:
 
-   ```
-   gh workflow run promote-v2-release.yml --ref main \
-     -f stage=promote-slice -f mode=execute \
-     -f slice_version=slice-2026-07-30.0 \
-     -f places_source=$REQ:30323929757:30595904973 \
-     -f addresses_source=$REQ:30215529919:30599227663
-   ```
+- Places `already_present=20698 copied=0 prepositioned=16528 claim=verified`,
+  verified 37,228 objects / 56,754,975,464 bytes;
+- Addresses `already_present=531 copied=50 prepositioned=4247 claim=verified`,
+  verified 4,830 objects / 145,534,552,085 bytes.
 
-   Dry-run `30605936253` is green and is the evidence this is ready. It
-   authenticated both reverse completions and planned, for Places, 20,698
-   forward objects to copy against 16,528 already-prepositioned reverse objects
-   (37,226 total, 52.85 GiB); for Addresses, 581 copied against 4,247
-   prepositioned (4,828 total, 135.5 GiB). Each family's planned
-   `reverse_totals` equals its published reverse catalog exactly. The reverse
-   output is recognized as prepositioned and bound without being recopied.
-2. **Attach and publish the release**:
+The release document is deterministic: the dry-run and the execute assemble
+produced the same 2,947 bytes and the same sha256. Composition is Places
+`forward`+`reverse`, Addresses `structured_forward`+`reverse`, legacy core
+`2026-07-18.0` referenced in place for `feature_lookup`/`forward`/`reverse`.
 
-   ```
-   gh workflow run promote-v2-release.yml --ref main \
-     -f stage=publish-release -f mode=execute \
-     -f slice_version=slice-2026-07-30.0 \
-     -f geocoder_build=2026-07-31.0 \
-     -f overture_release=2026-06-17.0 -f legacy_core=2026-07-18.0 \
-     -f places_source=$REQ:30323929757:30595904973 \
-     -f addresses_source=$REQ:30215529919:30599227663
-   ```
-3. **Flip the live catalog.** As of 2026-07-31T05:08Z `v2/catalog.json` is 508
-   bytes with sha256
-   `5c9a9e7e328c1230c58d5f5295b75b545654912e2c7125aefb73b8a8cb188184`; that is
-   the CAS expectation. Re-read it with `r2-object-sha.yml` if anything else
-   promoted in between.
+**Three failures were paid on the way, all now understood:**
 
-   ```
-   gh workflow run promote-v2-release.yml --ref main \
-     -f stage=promote-catalog -f mode=execute \
-     -f geocoder_build=2026-07-31.0 \
-     -f catalog_expectation=5c9a9e7e328c1230c58d5f5295b75b545654912e2c7125aefb73b8a8cb188184
-   ```
+1. `30629402228` (promote-slice) died after 4h17m -- 42 minutes inside its
+   timeout -- on one transient R2 `InternalError` during the Addresses copy,
+   discarding a fully verified Places family. The copy client cannot retry even
+   a definite 5xx. Addresses had already landed 531 of 581 objects; the rerun
+   copied the remaining 50. See item 9 of
+   `2026-07-31-promotion-copy-and-efficiency.md`.
+2. `30656950804` (publish-release) failed assembling: `addresses has both
+   in-source and external reverse entrypoints`. PR #202 binds a prepositioned
+   reverse set into the family manifest; PR #205 added the external
+   `--reverse-publication` path plus a mutual-exclusion check, but the workflow
+   attached the external record unconditionally. Any promotion that ran
+   `promote-slice` with `--reverse-catalog` -- the normal path -- would have
+   failed. Fixed in `17e1a9d`: read the promoted family manifest, since the
+   dispatch inputs cannot distinguish the two cases.
+3. `30657619881`'s `/v2/forward` smoke is the recorded false-red. Nothing
+   auto-recovered; the CAS had already succeeded.
 
-The construction contract's `namespaces.slice` is
-`construction-v1/8655821.../slice/slice-20260726145910-dryrun/`. The `-dryrun`
-suffix is an operator label frozen into the 2026-07-26 request, not a mode
-flag; nothing in the code generates it. Renaming it would change the request
-sha256 and invalidate every downstream artifact, so it stays.
-4. **Verify** with `benchmark_v2_reverse.py` self-recall against the published
-   artifacts, then the external comparison — the two are different claims, see
-   the benchmark note below.
-
-**Deadline: `promote-slice` must run before 2026-08-02T20:38Z.** It reads
-reduction records from the construction runs' GitHub artifacts, which have
-7-day retention. Address run `30215529919`'s earliest `cv1-reduce-*` expires
-2026-08-02T20:38Z; the Places `cv1-resume-reductions` set expires
-2026-08-04T02:45Z. Past those, promotion fails closed and the only recovery is
-re-running construction.
+The GitHub artifact retention deadline that governed this promotion
+(2026-08-02T20:38Z) is now spent and no longer applies.
 
 Wall-clock optimization of the forward build is an adopted secondary track,
 run within the two-active-PR budget and never ahead of reverse R1. The adopted
@@ -409,33 +410,25 @@ ingest, not a dedicated measurement run.
 ### Open gates, 2026-07-31
 
 **No forward availability blocker.** No reverse implementation blocker.
+**Both reverse execute gates are CLOSED** — both planet builds ran green and
+their output is promoted and serving (see "Promotion result, 2026-07-31"). The
+ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
+57.65 the probe measured on the densest cell and a 59.58 ARDX0001 basis.
 
-1. **Address reverse execute — cleared, not dispatched.** Read-only probe
-   `30598079732` on merged `main` measured the global densest Address cell
-   `5e5e` (6,489,932 records) end to end: encoder and verifier both green,
-   `execute_gate: pass`.
-   - Code widths chosen: `postcode` 4, `street` 4, `number` 2, and
-     `display_country` / `postal_city` / `unit` / `address_levels` 1.
-   - Dictionary 4,064,521 B, 48% of the 8 MiB serving cap.
-   - **57.65 bytes/record**, below the ARDX0001 Seattle basis of 59.58: the
-     narrowed single-value fields more than pay for the two widened ones.
-   - Projection 35.9 GiB aggregate against the 48 GiB ceiling. The binding
-     range is 9 (buckets 144-159, 35,388,179 records) at 3,162,663,190
-     projected bytes, 98.2% of the 3 GiB per-range cap — but that projection
-     bakes in a 1.5x reserve, so real expected utilization is about 63% and a
-     range only fails closed above 91.0 B/record, ~53% over measured.
-2. **Places reverse execute — running** (`30595904973`). No failures.
-3. **Promotion smoke fixture.** Replace the false-red context-free
-   `Eiffel Tower` global-head assertion with one reliable global-head POI plus
-   one located routed-Places assertion.
-4. **Forward Places quality**, in order: name-only global retrieval, then the
+1. **Promotion smoke fixture — now demonstrated false-red on a real
+   promotion.** Run `30657619881` logged `OK divisions` and `FAIL places: no
+   features for Eiffel Tower` on 10 of 10 attempts while the promoted build was
+   live and correct. Replace the context-free `Eiffel Tower` global-head
+   assertion with one reliable global-head POI plus one located routed-Places
+   assertion. Until then every promotion ends red.
+2. **Forward Places quality**, in order: name-only global retrieval, then the
    division-versus-POI seam admission, then remaining token-intersection /
    candidate-cap / ranking loss. Locality-token overconstraint is FIXED
    (PR #214); the conventional address locality aliases are bridged (PR #213).
-5. **Structured Address serving latency.** The 211-case run measured p50
+3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.
-6. **Single-write publication / storage cleanup**, unchanged — see
+4. **Single-write publication / storage cleanup**, unchanged — see
    "Deferred, not active".
 
 The former Address marker fan-in, Address publication aggregate, watchdog

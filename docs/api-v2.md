@@ -102,10 +102,15 @@ fallback supplied an internal routing centroid.
 
 ## `GET /v2/reverse`
 
-`lat` and `lon` are required. Reverse currently serves divisions only. Missing
-`types` means all division types; an explicit division subset is honored by
-filtering the returned subtype. `poi` and `address` are rejected until their
-spatial reverse indexes exist.
+`lat` and `lon` are required. Missing `types` means all division types, and an
+explicit division subset is honored by filtering the returned subtype.
+
+`poi` and `address` are served from build `2026-07-31.0` onward, from the
+point-family spatial reverse indexes built by `reverse-v2.yml`. Each is
+requested explicitly by `types`; neither is returned by an untyped query, which
+still answers from divisions. A release whose family manifest does not record
+`families/<family>/reverse-catalog.rcat` rejects that family's type, so the
+behavior is per-release, not global.
 
 The response is a GeoJSON `FeatureCollection` containing zero or one feature.
 
