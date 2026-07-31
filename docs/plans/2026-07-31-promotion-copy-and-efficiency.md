@@ -217,6 +217,60 @@ Two caveats before anyone schedules it:
   output already in a slice that forward never reaches — needs the same unmarked
   namespace cleanup rule item 1 requires.
 
+## 9. The copy client cannot retry a *definite* 5xx, and that cost 4h17m
+
+MEASURED. Run `30629402228` failed at 16:24:02Z after 4h17m, 42 minutes inside
+its 300-minute job timeout:
+
+```
+botocore.exceptions.ClientError: An error occurred (InternalError) when calling
+the CopyObject operation (reached max retries: 0): We encountered an internal
+error. Please try again.
+```
+
+Places had already fully succeeded — 20,698 copied, 16,528 prepositioned
+verified, routing and family manifest written at 14:45:18Z, and an independent
+verify of 37,228 objects / 56,754,975,464 bytes at 15:51:55Z. The whole run was
+discarded by one transient error on the Addresses copy.
+
+`reached max retries: 0` is deliberate: `scripts/r2_verified_store.py:643` sets
+`retries={"total_max_attempts": 1}` on the dedicated long-timeout copy client,
+added by PR #198 after run `30388252232` measured "six ambiguous automatic
+replays followed by ReadTimeoutError" on a 2 GiB server-side copy. The comment
+states the intended recovery: *"a lost response is reconciled by the promotion's
+exact-identity rerun instead of replaying an overwrite inside one process."*
+
+That reasoning is sound for the case it was written for, and too wide for this
+one. Two different failures are being treated identically:
+
+- **Ambiguous** — a read timeout after the request was sent. The write may have
+  landed; a blind replay is genuinely unsafe. PR #198 is correct here.
+- **Definite** — a parsed HTTP 5xx `InternalError` response, which is what
+  happened here. The server answered. Nothing is in flight.
+
+A bounded retry of the definite class is safe on this specific path, for a
+reason stronger than "5xx is usually retryable": the destination keys are
+content-addressed by the source's own sha256 and immutable, `_execute_object`
+performs its create-only destination check before copying, and the post-copy
+ETag proof runs regardless. Re-copying the same source to the same key writes
+identical bytes by construction.
+
+The fix is to distinguish the two rather than to relax the rule — retry on a
+parsed `ClientError` carrying a 5xx status with bounded exponential backoff and
+a small attempt cap, and keep `total_max_attempts: 1` for read timeouts and any
+response that cannot be parsed. Seconds instead of a discarded 4h17m run.
+
+**This is the highest-value item here for the next planet rebuild.** Items 1 and
+2 make promotion faster; this one makes it *finish*. A promotion that copies
+21,279 objects has 21,279 chances to draw one transient InternalError, and today
+any single draw discards every hour spent before it.
+
+Related, and why this compounds: a retry re-pays for work that already passed.
+The rerun re-HEADs all 37,228 Places keys in verify — measured at 66 minutes,
+107 ms per serial HEAD — to re-prove a family that succeeded an hour earlier.
+There is no per-family skip, so item 2 and item 4 both directly reduce the cost
+of every future retry.
+
 ## Already recorded elsewhere — do not re-derive
 
 These stay owned by their existing docs; listed so this queue does not
@@ -276,12 +330,16 @@ than paying for a new planet namespace per change.
 
 ## Suggested order
 
-1. **Item 6** first — it is small, it removes a recurring deadline, and it is a
+1. **Item 9** first. It is the only item here that changes whether a planet
+   promotion completes at all, it is small, and it has already cost one
+   4h17m run.
+2. **Item 6** next — it removes a recurring deadline, and it is a
    prerequisite for treating promotion as an R2-only operation.
-2. **Item 2** next — pure win, no semantics change, no design decision needed.
-3. **Items 7 and 8** before the next rebuild — item 7 is a dispatch flag, and
+3. **Item 2** — pure win, no semantics change, no design decision needed, and it
+   cuts the cost of every retry item 9 does not prevent.
+4. **Items 7 and 8** before the next rebuild — item 7 is a dispatch flag, and
    item 8 changes only when reverse is launched, not what it computes.
-4. **Item 1** as the architecture change, sequenced with wall-clock review §7 so
+5. **Item 1** as the architecture change, sequenced with wall-clock review §7 so
    finalize and promotion are re-pointed once rather than twice. Items 3 and 4
    become moot if it lands; do them only if it slips.
-5. **Item 5** only after a deliberate call on the proof it trades away.
+6. **Item 5** only after a deliberate call on the proof it trades away.
