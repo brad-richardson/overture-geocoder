@@ -805,19 +805,37 @@ jobs:
           set -euo pipefail
           FAMILY_ARGS=()
           REVERSE_ARGS=()
+          # A family can carry reverse two ways, and assemble refuses both at
+          # once (#205). IN-SOURCE: promote-slice was given --reverse-catalog,
+          # so it validated the prepositioned reverse exact set and bound it
+          # into the family manifest, whose artifacts then record
+          # families/<family>/reverse-catalog.rcat. EXTERNAL: the slice was
+          # promoted without it, and the authenticated reverse publication
+          # record supplies the entrypoint instead. The promoted manifest is
+          # the only authority on which happened, so read it rather than
+          # inferring from the dispatch inputs.
           while IFS= read -r FAMILY; do
             FAMILY_ARGS+=(--family "$FAMILY")
+            aws s3api get-object \
+              --bucket "$R2_BUCKET" \
+              --key "${SLICE_VERSION}/families/${FAMILY}/family-manifest.json" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --region auto \
+              "family-manifest-${FAMILY}.json" > /dev/null
+            if jq -e --arg key "families/${FAMILY}/reverse-catalog.rcat" \
+                'any(.artifacts[]?; .object_key == $key)' \
+                "family-manifest-${FAMILY}.json" > /dev/null
+            then
+              echo "${FAMILY}: reverse is in-source from the promoted family manifest"
+            elif [ -f "reverse/${FAMILY}/reverse-catalog.json" ]; then
+              echo "${FAMILY}: attaching the authenticated external reverse record"
+              REVERSE_ARGS+=(
+                --reverse-publication "${FAMILY}=reverse/${FAMILY}/reverse-catalog.json"
+              )
+            else
+              echo "${FAMILY}: no reverse operation in this release"
+            fi
           done < families.txt
-          if [ -n "$PLACES_SOURCE" ]; then
-            REVERSE_ARGS+=(
-              --reverse-publication "places=reverse/places/reverse-catalog.json"
-            )
-          fi
-          if [ -n "$ADDRESSES_SOURCE" ]; then
-            REVERSE_ARGS+=(
-              --reverse-publication "addresses=reverse/addresses/reverse-catalog.json"
-            )
-          fi
           python -u scripts/v2_release_manifest.py assemble \
             --store "r2:${R2_BUCKET}" \
             --geocoder-build "$GEOCODER_BUILD" \

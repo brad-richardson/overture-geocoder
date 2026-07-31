@@ -211,6 +211,22 @@ def test_publish_release_attaches_authenticated_reverse_without_copying_data():
     assert "promote_construction_slice.py" not in body
 
 
+def test_publish_release_attaches_external_reverse_only_when_not_in_source():
+    # promote-slice binds a prepositioned reverse exact set INTO the family
+    # manifest, and assemble refuses a family that declares reverse both
+    # in-source and externally. So the external record may be attached only for
+    # a family whose PROMOTED manifest does not already record its reverse root
+    # -- decided from the manifest, never from the dispatch inputs.
+    body = "\n".join(scripts(jobs()["publish-release"]))
+    probe = 'any(.artifacts[]?; .object_key == $key)'
+    assert probe in body
+    assert 'families/${FAMILY}/reverse-catalog.rcat' in body
+    assert body.index(probe) < body.index('--reverse-publication "${FAMILY}=')
+    # The old unconditional per-family attachment is gone.
+    assert '--reverse-publication "places=' not in body
+    assert '--reverse-publication "addresses=' not in body
+
+
 # --- create-only / no-delete discipline ----------------------------------------
 
 
