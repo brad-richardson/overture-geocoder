@@ -306,8 +306,12 @@ def dictionary_cardinalities(shard: Any) -> dict[str, int]:
             DICTIONARY_FIELDS, dictionaries, strict=True
         )
     }
-    if any(not 1 <= count <= 65_536 for count in values.values()):
-        raise ValueError("reverse Address probe dictionary cardinality exceeds u16")
+    # ARDX0002 sizes each field's codes from its own cardinality, so there is no
+    # upper ceiling here: the densest planet cell carries 96,738 streets, and the
+    # real bound is the 8 MiB dictionary cap checked separately. Every field
+    # still holds at least one value because the encoder codes every row.
+    if any(count < 1 for count in values.values()):
+        raise ValueError("reverse Address probe dictionary field is empty")
     return values
 
 
