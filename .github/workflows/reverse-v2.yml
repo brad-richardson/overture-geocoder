@@ -45,13 +45,6 @@ on:
         required: true
         default: "1200"
         type: string
-      confirmation:
-        description: >-
-          Execute only:
-          EXECUTE_REVERSE_V2::<request-sha256>::FAMILY=<family>::SLICE=<slice_version>::RANGES=16::MAX_PARALLEL=<n>::MAX_TOTAL_RUNNER_MINUTES=<n>::MAX_OUTPUT_BYTES_PER_RANGE=3221225472
-        required: false
-        default: ""
-        type: string
 
 permissions:
   contents: read
@@ -104,7 +97,6 @@ jobs:
       MODE: ${{ inputs.mode }}
       MAX_PARALLEL: ${{ inputs.max_parallel }}
       MAX_TOTAL_RUNNER_MINUTES: ${{ inputs.max_total_runner_minutes }}
-      CONFIRMATION: ${{ inputs.confirmation }}
       GH_TOKEN: ${{ github.token }}
     steps:
       - name: Check out main without persisted credentials
@@ -143,11 +135,6 @@ jobs:
           if [ "$MODE" = execute ] \
             && [ "$MAX_TOTAL_RUNNER_MINUTES" -lt "$EXECUTE_MAX_RUNNER_MINUTES" ]; then
             echo "::error::max_total_runner_minutes must cover the fail-closed ${EXECUTE_MAX_RUNNER_MINUTES}-minute sum of all job timeouts"
-            exit 1
-          fi
-          EXPECTED="EXECUTE_REVERSE_V2::${REQUEST_SHA256}::FAMILY=${FAMILY}::SLICE=${SLICE_VERSION}::RANGES=${RANGE_COUNT}::MAX_PARALLEL=${MAX_PARALLEL}::MAX_TOTAL_RUNNER_MINUTES=${MAX_TOTAL_RUNNER_MINUTES}::MAX_OUTPUT_BYTES_PER_RANGE=${REDUCE_MAX_OUTPUT_BYTES}"
-          if [ "$MODE" = execute ] && [ "$CONFIRMATION" != "$EXPECTED" ]; then
-            echo "::error::execute confirmation must be exactly: $EXPECTED"
             exit 1
           fi
           {

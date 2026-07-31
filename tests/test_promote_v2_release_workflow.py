@@ -1,7 +1,7 @@
 """Structural contract tests for .github/workflows/promote-v2-release.yml.
 
 Like test_rebuild_workflow_contract.py these parse the workflow YAML and pin
-*structural* invariants -- stage gating, typed confirmation strings, the
+*structural* invariants -- stage gating, the
 exactly-one-of catalog CAS expectation, create-only discipline, probe cleanup,
 and the no-auto-recover smoke -- rather than raw text, so they do not go
 vacuous when step names or wording drift.
@@ -22,7 +22,6 @@ STAGES = ["probe", "promote-slice", "publish-release", "promote-catalog"]
 INPUTS = {
     "stage",
     "mode",
-    "confirm",
     "slice_version",
     "geocoder_build",
     "overture_release",
@@ -95,16 +94,13 @@ def test_every_stage_job_needs_the_gate_and_is_main_only():
         assert "github.ref == 'refs/heads/main'" in job["if"], stage
 
 
-def test_gate_pins_the_typed_confirmations_and_probe_attestation():
+def test_gate_records_the_stage_target_and_validates_the_cas_expectation():
     gate = "\n".join(scripts(jobs()["gate"]))
-    for token in (
-        "PROMOTE-SLICE",
-        "PUBLISH-RELEASE",
-        "PROMOTE-CATALOG",
-        "PROBES-GREEN:",
-    ):
+    for token in ("PROMOTE-SLICE", "PUBLISH-RELEASE", "PROMOTE-CATALOG"):
         assert token in gate, token
-    # The attestation is recorded in the run log, not merely accepted.
+    # The typed PROBES-GREEN attestation was removed deliberately.
+    assert "PROBES-GREEN:" not in gate
+    # The stage target is still recorded in the run log.
     assert "GITHUB_STEP_SUMMARY" in gate
     # Exactly-one-of CAS expectation is validated before any credential.
     assert "catalog_expectation must be exactly 'absent'" in gate

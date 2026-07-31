@@ -5,17 +5,16 @@ ROOT = Path(__file__).parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "usa-scale-signal.yml"
 
 
-def test_usa_scale_signal_is_manual_confirmed_main_only_and_non_promoting():
+def test_usa_scale_signal_is_manual_main_only_and_non_promoting():
     workflow = WORKFLOW.read_text()
     trigger = workflow[workflow.index("on:") : workflow.index("permissions:")]
 
     assert "workflow_dispatch:" in trigger
     assert "push:" not in trigger
     assert "pull_request:" not in trigger
-    assert "confirm:" in trigger
     assert "- full" in trigger and "- recover" in trigger
     assert "places_run_id:" in trigger and "addresses_run_id:" in trigger
-    assert 'if [ "${CONFIRM}" != "USA" ]; then' in workflow
+    assert "${CONFIRM}" not in workflow
     assert "if: github.ref == 'refs/heads/main'" in workflow
     assert "persist-credentials: false" in workflow
     assert "cancel-in-progress: false" in workflow

@@ -35,7 +35,6 @@ def test_dispatch_is_manual_main_only_and_exactly_scoped():
         "mode",
         "max_parallel",
         "max_total_runner_minutes",
-        "confirmation",
     }
     assert inputs["family"]["options"] == ["places", "addresses"]
     assert inputs["mode"]["options"] == ["dry-run", "execute"]
@@ -51,19 +50,12 @@ def test_reverse_writes_share_the_v2_publication_lock_and_never_cancel():
     }
 
 
-def test_execute_confirmation_binds_cost_shape_and_destination():
+def test_execute_keeps_its_cost_and_output_ceilings():
     script = body("plan")
-    for token in (
-        "EXECUTE_REVERSE_V2::",
-        "::FAMILY=${FAMILY}",
-        "::SLICE=${SLICE_VERSION}",
-        "::RANGES=${RANGE_COUNT}",
-        "::MAX_PARALLEL=${MAX_PARALLEL}",
-        "::MAX_TOTAL_RUNNER_MINUTES=${MAX_TOTAL_RUNNER_MINUTES}",
-        "::MAX_OUTPUT_BYTES_PER_RANGE=${REDUCE_MAX_OUTPUT_BYTES}",
-    ):
-        assert token in script
-    assert 'if [ "$MODE" = execute ] && [ "$CONFIRMATION" != "$EXPECTED" ]' in script
+    # The typed EXECUTE_REVERSE_V2 confirmation was removed deliberately; the
+    # runner-minute and per-range byte ceilings it carried are still enforced.
+    assert "EXECUTE_REVERSE_V2::" not in script
+    assert "$CONFIRMATION" not in script
     assert load()["env"]["EXECUTE_MAX_RUNNER_MINUTES"] == "930"
     assert load()["env"]["REDUCE_WALL_SECONDS"] == "2400"
     assert load()["env"]["REDUCE_MAX_OUTPUT_BYTES"] == "3221225472"

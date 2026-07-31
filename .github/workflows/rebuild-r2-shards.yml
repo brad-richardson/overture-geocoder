@@ -31,10 +31,6 @@ on:
           - forward
           - reverse
           - both
-      confirm:
-        description: 'Type "REBUILD" to confirm (not required for scheduled runs)'
-        type: string
-        required: false
       build_id_index:
         description: 'Build GERS ID index (parquet shards)'
         type: boolean
@@ -80,10 +76,10 @@ jobs:
   prep:
     runs-on: ubuntu-24.04-arm
     # Scheduled production writes are disabled unless an explicit repository
-    # variable opts in. Manual runs still require the typed confirmation.
+    # variable opts in. Manual dispatches run unconditionally.
     if: >-
       (github.event_name == 'schedule' && vars.ENABLE_SCHEDULED_REBUILD == 'true') ||
-      (github.event_name == 'workflow_dispatch' && github.event.inputs.confirm == 'REBUILD')
+      github.event_name == 'workflow_dispatch'
     outputs:
       version: ${{ steps.version.outputs.version }}
       release: ${{ steps.release.outputs.release }}
