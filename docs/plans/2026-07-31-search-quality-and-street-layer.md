@@ -492,6 +492,90 @@ Net for Stage 1: fix 2 is the first change in this workstream to move a metric,
 and it moved several. Stage 2 item 5 (cap eviction) and the `P` prominence term
 are now both load-bearing rather than nice-to-have.
 
+## Part 6d — MEASURED: the prominence hypothesis was wrong; categories are the signal
+
+Run 2026-07-31 against Overture places `2026-06-17.0` directly (DuckDB over the
+S3 parquet, three token/bbox slices: `sagrada`/Barcelona n=214,
+`eiffel`/Paris n=299, `seattle`/Seattle n=4058).
+
+**The hypothesis in Part 6 — that count columns already extracted by
+`download_places.sql` carry prominence — is FALSIFIED.**
+
+| column | hypothesis | measured |
+|---|---|---|
+| `LEN(names.common)` | multilingual notability, the Wikidata-importance proxy | **0 for every record in all three cities.** The map is empty in the places theme. |
+| `root_source_count` | independent corroboration | **1 for every record.** No variance. |
+| `websites` / `socials` / `phones` | web presence | ~1/1/1 almost everywhere; where it varies it is *anti*-correlated — "Bruce Jones SEO Services Seattle" ranked 2nd. |
+
+**Worse, `confidence` is anti-correlated with prominence.** Measured:
+
+```
+Basílica de la Sagrada Família   confidence 0.9897
+Starbucks Barcelona Sagrada familia         0.9998
+Clínica Veterinària Sagrada Família         1.0000
+Tour Eiffel                                 0.7700   (rank 202 of 299)
+```
+
+Every count column on the basilica is byte-identical to the Starbucks next
+door: `websites 1, socials 1, phones 1, sources 2, common_names 0`. This is why
+`confidence DESC` eviction discards landmarks — it is not a weak prominence
+signal, it is an *existence* signal that anti-correlates.
+
+**The one field that separates them is `categories`** — and specifically
+`categories.alternate`, which `download_places.sql` does **not** currently
+extract:
+
+```
+basilica  primary=catholic_church  alternate=[landmark_and_historical_building, monument]
+starbucks primary=coffee_shop      alternate=[cafe, restaurant]
+vet       primary=veterinarian     alternate=null
+```
+
+### Measured effect of a category type prior as the eviction key
+
+Tuned table: primary category dominates, alternates at half weight, a commodity
+primary is dispositive (a holiday rental listing `monument` as an alternate is
+not a monument), and `landmark_and_historical_building` demoted to 0.35 —
+Overture tags US apartment blocks with it ("Marq West Seattle", "Neptune SLU
+Apartments"), so it is noisy where `monument` is clean.
+
+| target | rank by `confidence` (today) | rank by type prior | in 10-entry cap? |
+|---|---|---|---|
+| Basílica de la Sagrada Família | 22 / 214 | **5 / 214** | **yes** (was no) |
+| Tour Eiffel | 202 / 299 | 16 / 299 | no (still) |
+| `seattle` top-10 | car dealers, florists, gyms | Space Needle, Chief Seattle Statue, Fishermen's Memorial | — |
+
+So the type prior is **necessary and largely sufficient, but not complete.**
+
+**Eiffel's residual failure is a different defect: duplicates.** The 15 records
+above `Tour Eiffel` are near-duplicates of the same monument, all tagged
+`monument`, all with *higher* confidence than the canonical record:
+
+```
+Eiffel Tower,Paris · La Tour Eiffel · Eiffel tower · Eiffel Tower, Paris France
+Eiffel Tower,,Paris,Fra · Toul Eiffel · 2ème étage de la tour Eiffel
+```
+
+No prior fixes that; it needs duplicate collapse at build time. Note the
+canonical record has the *lowest* confidence of the set — the same
+anti-correlation, one level down.
+
+### Consequences
+
+- **Part 6's `P` term must be sourced from `categories`, not from counts.** The
+  count-based design in Part 6 should not be implemented as written.
+- **`categories.alternate` must be added to `download_places.sql`.** It is the
+  field carrying the landmark signal and it is currently discarded.
+- **The type prior and the Stage 2 cap-eviction reorder are one work item.** The
+  prior is the eviction key; it does nothing at query time until eviction uses
+  it. Both are build-side and want to land before the next planet rebuild.
+- **Duplicate collapse is a newly-identified, separately-tracked defect.** It
+  bounds Eiffel-class queries independently of ranking.
+- **How to carry the byte is unsettled and deliberately not decided here.** See
+  item 10 of `2026-07-31-promotion-copy-and-efficiency.md`; packing 4 bits into
+  the spare high bits of the existing `field_mask` looks likeliest and costs no
+  format change.
+
 ## Part 7 — Recommended sequencing
 
 Ordered by (impact ÷ effort), with correctness before capability and

@@ -343,3 +343,43 @@ than paying for a new planet namespace per change.
    finalize and promotion are re-pointed once rather than twice. Items 3 and 4
    become moot if it lands; do them only if it slips.
 6. **Item 5** only after a deliberate call on the proof it trades away.
+
+## 10. Shard-format alternative for the POI prominence byte (NOT YET DECIDED)
+
+Raised while measuring the POI prominence term (see Part 6d of
+`2026-07-31-search-quality-and-street-layer.md`, which establishes that a
+category type prior is the *only* usable in-data prominence signal). Recording
+the format fork here so the next shard-format change can settle it in one pass
+rather than discovering it mid-rebuild.
+
+The head entry already carries a `confidence_rank` u8. Two ways to carry a
+prominence rank:
+
+**(a) Redefine the existing byte.** Write the composed prominence into
+`confidence_rank` instead of raw confidence. Zero format change, zero worker
+deserialization change, zero shard-size cost — the worker just gets a better
+number in the field it already reads.
+*Cost:* `confidence_rank` is not private. `/v2/reverse` surfaces it (via
+`confidence_band()` in `scripts/benchmark_v2_forward.py:200,254`), and
+`reverse_shard_v1.py:227` documents it as "an extra confidence_rank byte after
+the coordinates". Redefining it silently changes reverse's published
+`confidence` semantics from *existence* to *prominence*. That is an API break
+disguised as a build change.
+
+**(b) Add a second byte.** Clean semantics, reverse keeps existence confidence,
+forward gets prominence.
+*Cost:* one byte per head entry. At the planet head-entry count this is the
+term to actually measure before committing — it is the whole argument for (a).
+
+**Unresolved and load-bearing:** nobody has measured what one extra byte per
+head entry costs at planet scale. Until that number exists, neither option is
+justified. That measurement is the actual first task, and it is cheap — it is a
+count of head entries, already available from the construction reduction
+records.
+
+A third option worth a look if (b) is too expensive: prominence only needs
+enough resolution to *order the cap*, not to score. Four bits would likely do,
+and `field_mask` (`places_construction_v1.rs`) has spare bits — classes 1/2/4/8
+are used, 16..128 are free. Packing a 4-bit prominence into the existing
+`field_mask` byte costs nothing and breaks no published field. This is probably
+the right answer and it should be evaluated first.
