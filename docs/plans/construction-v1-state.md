@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-28 after Places finalize-only run `30323929757`
-completed exact-set R2 publication and marker-last verification.
+Last updated 2026-07-31 after the ARDX0002 dictionary fix cleared the Address
+reverse encode gate and the Places reverse execute run began.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -11,30 +11,68 @@ here.
 
 ## Current milestone
 
-The first non-promoting planet-scale build is complete for both Places and
-Addresses. The next milestone is reverse-geocoding R1 over their already
-published per-record artifacts.
+Forward is live and benchmarked in v2 release `2026-07-28.0`. The current
+milestone is **reverse serving for both families**: build the reverse indexes
+over the already published per-record artifacts, attach them to a successor
+release, and flip the catalog so `/v2/reverse` stops returning
+`capability_unavailable` for `poi` and `address`.
 
-Do not dispatch a planet build without the exact operator-supplied workflow
-confirmation. The operator supplied authorization for request
-`88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`
-with max parallel 4 and a 40,000 runner-minute ceiling. Address completed under
-that authorization; Places runs `30226086949`, `30263207263`, and
-`30288619536` used the same request. Run `30288619536` retains authenticated
-normalized plan/reducer artifacts plus the successful planet head and remains
-the source for a finalize-only resume. Run `30305749838` cannot itself be the
-resume source because its head job was intentionally skipped; the recovery gate
-requires one successful prior head job.
+Both reverse families are unblocked as of 2026-07-31:
+
+- **Places** reverse execute is running (see Current snapshot).
+- **Addresses** cleared its last gate when probe `30598079732` passed on merged
+  `main`; the execute has not been dispatched.
+
+All construction work runs under operator request
+`88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`.
+Forward Address completed under it; Places runs `30226086949`, `30263207263`,
+and `30288619536` used the same request, and `30288619536` remains the
+finalize-only resume source (run `30305749838` cannot be, because its head job
+was intentionally skipped and the recovery gate requires one successful prior
+head job).
+
+The typed per-workflow confirmation strings were removed on 2026-07-31 (PR
+#219). Dispatch cost is not a constraint on public runners. `construction-v1.yml`
+still takes an `EXECUTE_CONSTRUCTION_V1::` string, but that is its **input
+format** — it carries the request digest and every cost parameter, keys the
+concurrency group, and feeds `construction_v1_control.py admit-dispatch` for
+byte-verification. It is not a gate and must not be removed without redesigning
+that contract.
 
 ## Current snapshot
 
-The current construction-v1 workflow checkpoint on `main` is `e981012`: PR
-#178's bounded R2 publisher, PR #181's live R2 probe, PR #182's compact Address
-consumer projections, PR #183's authenticated same-request resume plus the
-missing plan contract artifact, the subsequent Places head resource
-compatibility and finalize-only recovery work, PR #184's bounded/retriable R2
-finalizer, and PR #185's reviewed finalizer transport overlay.
-There are no open construction-v1 code PRs.
+The checkpoint on `main` is `8f0b56d`. On top of the forward publisher and
+finalizer series it carries the v2 promotion series (#194, #197-#201), the
+reverse construction/serving series (#202, #204-#210, #212), the forward
+quality fixes (#213 address locality aliases, #214 Places locality suffixes),
+the ID-lookup route (#209), the open-geocoder benchmark harness (#211, #216),
+the read-only Address density probe (#215, #217), the ARDX0002 per-field
+dictionary code widths (#218), and the workflow confirmation-gate removal
+(#219). There are no open construction-v1 code PRs.
+
+### Live serving
+
+v2 release `2026-07-28.0` is live, backed by protected core `2026-07-18.0` and
+Overture `2026-06-17.0`. Global-head `/v2/forward`, routed `/v2/forward`,
+structured Address `/v2/forward`, division `/v2/reverse`, and release-pinned ID
+lookup all return the advertised build. Point-family `/v2/reverse` returns
+`capability_unavailable` for both `poi` and `address` because no reverse data
+has been published yet — that is the current milestone, not a defect.
+
+### Reverse execution, 2026-07-31
+
+- **Places reverse execute** run `30595904973`, dispatched from `main`, writes
+  into `slice-2026-07-30.0/families/places/reverse/`. Source
+  `88b7f171...5332614:30323929757`, 75,631,061 records over 10,119 packs, 89
+  task IDs, 16 ranges at `max_parallel=2`. Plan job green in 54 seconds; ranges
+  complete in 12-21 minutes each with no failures.
+- **Address reverse execute** is authorized by evidence but not dispatched.
+  Source `88b7f171...5332614:30215529919`, 431,705,590 records over 5,174
+  packs, admitted fresh into the same slice. The slice claim key is
+  `{version}/claims/{family}.json`, so the two families claim independently and
+  Addresses can still join `slice-2026-07-30.0` — but only until a
+  `{version}/slice-manifest.json` exists, which `_admit_slice` treats as
+  finalized.
 
 Both families passed the preserved Europe execution rung through publication
 and marker-last completion. Address has now also passed the hosted planet rung
@@ -253,18 +291,30 @@ verification of 10,931 objects.
 
 ## Fastest path
 
-The forward planet milestone is complete. Reverse R1 is also complete
-(2026-07-28): the shared leaf-key contract and Python oracle (PR #187), the
-`.plrx` encoder/verifier pair (PR #190), the cell-identifier parity vectors
-consumed by Python, the worker, and the encoder (PR #191), and the slice
-harness with fail-closed CI gates on the Monaco/Seattle slices (PR #192, clean
-adversarial review). Follow this sequence:
+Forward is complete and live. Reverse R1 through R4 are all merged. The
+remaining path to a working point-family reverse endpoint is operational, not
+implementation:
 
-1. **Advance to the reverse bucket-range reducer (R2)** over the published
-   per-record artifacts; do not rerun either forward map. Carry PR #192's two
-   recorded P2s into the R2 design: add a genuine `COUNT(*) over packs ==
-   sum(directory records)` cross-check, and note the address size band is
-   deliberately absent (real mean 101 B vs the 122 B model).
+1. **Let Places reverse execute finish** (`30595904973`). Do not rerun either
+   forward map.
+2. **Dispatch Address reverse execute** — its gate is cleared:
+
+   ```
+   gh workflow run reverse-v2.yml --ref main \
+     -f family=addresses \
+     -f source=88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614:30215529919 \
+     -f slice_version=slice-2026-07-30.0 \
+     -f mode=execute -f max_parallel=2 -f max_total_runner_minutes=1200
+   ```
+
+   It queues behind Places on the shared `r2-v2-publication` concurrency group
+   rather than racing it, so dispatching early is safe.
+3. **Attach and promote**: `promote-v2-release.yml` `publish-release` with
+   per-family `<request>:<construction-run>:<reverse-run>` sources (PR #205
+   attaches reverse without copying forward data), then `promote-catalog`.
+4. **Verify** with `benchmark_v2_reverse.py` self-recall against the published
+   artifacts, then the external comparison — the two are different claims, see
+   the benchmark note below.
 
 Wall-clock optimization of the forward build is an adopted secondary track,
 run within the two-active-PR budget and never ahead of reverse R1. The adopted
@@ -280,65 +330,37 @@ ingest, not a dedicated measurement run.
 
 ## Open blockers and gates
 
-### Paused checkpoint, 2026-07-28 evening (resume here)
+### Open gates, 2026-07-31
 
-Work paused by the operator with two open PRs and one production retry pending.
-State of each thread:
+**No forward availability blocker.** No reverse implementation blocker.
 
-1. **v1 divisions/ID rebuild `2026-07-28.0` — built, verified, NOT promoted.**
-   Both promotion attempts failed on a FALSE NEGATIVE: the Cloudflare edge
-   returns HTTP 403 to promotion smoke requests from GitHub runners. Proven by
-   run `30375533399` (finalize-only mode + per-check diagnostics from PR #195):
-   every `Python-urllib` smoke request 403'd, while in the same minutes a
-   deploy run's curl-based post-deploy verification from the same runner pool
-   passed, and a residential poller watched production serve `2026-07-28.0`
-   correctly from 15:58:26Z until auto-rollback at 16:03:43Z. The edge is
-   UA/fingerprint-matching (Browser Integrity Check or AI-scraper heuristics —
-   bot fight mode is already off per operator), not IP-blocking. Worker has no
-   403 path; its rate limiter returns 429. Production is healthy on
-   `2026-07-13.0`.
-   - **PR #196 (open, review APPROVE at 7189e25)**: `REBUILD_SMOKE_AUTH`
-     secret header + (commit `52c59a8`, small, unreviewed) a pinned
-     non-urllib User-Agent, which may fix the 403 on its own.
-   - Resume: merge #196 → optionally create the `REBUILD_SMOKE_AUTH`
-     secret + edge skip rule (may be unnecessary if the UA pin suffices) →
-     re-dispatch finalize-only (`finalize_only=true, version=2026-07-28.0,
-     promote=true, confirm=REBUILD`). TIME-SENSITIVE: becomes un-dispatchable
-     once the next Overture release publishes (prep re-discovers latest).
-2. **v2 promotion series — 4 of 5 code rungs merged** (#188 slice promotion
-   tool, #191 Places serving, #193 Addresses serving, #194 release
-   publication tooling with ETag CAS). **PR #197 (open)**: the staged
-   `promote-v2-release.yml` workflow (probe / promote-slice / publish-release
-   / promote-catalog) + `slice-manifest` emitter. Its adversarial review was
-   CANCELLED mid-run by the pause — resume by relaunching the one review pass
-   before merge. Two review questions to carry into it: whether its
-   post-promote `/v2/forward` smoke needs the same 403 mitigation as #196,
-   and the 2 GiB probe's runner feasibility.
-   - TIME-SENSITIVE: promote-slice consumes `cv1-control`/`cv1-reduce-*`
-     artifacts with 7-day retention; the Address planet run's are nearest
-     expiry (~2026-08-01). Dispatch the slice promotion soon after #197
-     merges, else the reduction records must be regenerated.
-3. **After both**: ops rungs — probe stage, slice promotion
-   (`slice-2026-07-28.0`, both families in ONE dispatch), publish-release,
-   promote-catalog (`--expect-absent`), then verify `/v2/forward` end to end
-   and run `benchmark_v2_forward.py` for the accuracy baseline (head
-   truncation and blend calibration are the predicted top risks).
-4. **Scheduled rebuilds**: operator re-enabled `ENABLE_SCHEDULED_REBUILD` via
-   web UI (unverifiable locally; provable at the Aug 25 scheduled run).
-5. **Reverse R1 complete** (PRs #187/#190/#191/#192); next reverse rung is
-   the bucket-range reducer (R2) — see the Fastest path section. Deferred:
-   PR #192's two P2s (recorded on the PR), PR #194's four P2s (worker's
-   64-release catalog cap, promote-not-full-admission-gate, entrypoint-drift
-   test gap, live If-Match probe precondition), PR #195's three P2s
-   (`!cancelled()` on finalize gate, missing-generated_at adoption oddity),
-   PR #196's two P2s (newline-in-secret log leak, fail-late malformed
-   secret), range-read routed `.plrv` lane for oversize planet cells
-   (largest ~209 MB > 64 MiB cap, fails closed today).
-
-
-There are no measured construction-v1 forward planet blockers. Reverse R1
-passed on 2026-07-28; the reverse bucket-range reducer (R2) is the active
-execution rung.
+1. **Address reverse execute — cleared, not dispatched.** Read-only probe
+   `30598079732` on merged `main` measured the global densest Address cell
+   `5e5e` (6,489,932 records) end to end: encoder and verifier both green,
+   `execute_gate: pass`.
+   - Code widths chosen: `postcode` 4, `street` 4, `number` 2, and
+     `display_country` / `postal_city` / `unit` / `address_levels` 1.
+   - Dictionary 4,064,521 B, 48% of the 8 MiB serving cap.
+   - **57.65 bytes/record**, below the ARDX0001 Seattle basis of 59.58: the
+     narrowed single-value fields more than pay for the two widened ones.
+   - Projection 35.9 GiB aggregate against the 48 GiB ceiling. The binding
+     range is 9 (buckets 144-159, 35,388,179 records) at 3,162,663,190
+     projected bytes, 98.2% of the 3 GiB per-range cap — but that projection
+     bakes in a 1.5x reserve, so real expected utilization is about 63% and a
+     range only fails closed above 91.0 B/record, ~53% over measured.
+2. **Places reverse execute — running** (`30595904973`). No failures.
+3. **Promotion smoke fixture.** Replace the false-red context-free
+   `Eiffel Tower` global-head assertion with one reliable global-head POI plus
+   one located routed-Places assertion.
+4. **Forward Places quality**, in order: name-only global retrieval, then the
+   division-versus-POI seam admission, then remaining token-intersection /
+   candidate-cap / ranking loss. Locality-token overconstraint is FIXED
+   (PR #214); the conventional address locality aliases are bridged (PR #213).
+5. **Structured Address serving latency.** The 211-case run measured p50
+   1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
+   public comparators. Next serving-latency measurement.
+6. **Single-write publication / storage cleanup**, unchanged — see
+   "Deferred, not active".
 
 The former Address marker fan-in, Address publication aggregate, watchdog
 diagnosis, and missing reducer-cap gates closed in PR #182 plus the successful
@@ -395,6 +417,11 @@ Do not relitigate these while closing the current blockers:
   planet map.
 - Reverse geocoding is a separate spatial serving index. It must not distort the
   forward partition keys.
+- The `PLRX0001` shard container version is independent of the `ARDX` dictionary
+  version and was deliberately NOT bumped for ARDX0002. Places shards carry no
+  dictionary, so bumping the container would have invalidated Places reverse
+  output for an Addresses-only format change. Keep dictionary-format changes
+  inside the `ARDX` block.
 - `/v2/features/:gers_id` has been removed. `/v2/ids/:id` provides
   release-pinned ID locator metadata but is not a dependency for reverse
   rendering.
@@ -433,17 +460,56 @@ The accepted requirements are:
 
 Keep reverse work off the critical path by sequencing it as:
 
-- **R0, requirements only:** keep the contract and byte-format decisions
-  current while forward blockers are being removed.
-- **R1:** shared encoder, verifier, cell parity gate, and small real-data harness.
-- **R2:** bucket-range reverse reducer and binary catalog.
-- **R3:** Worker range reader, bounded query planner, and API capability wiring.
-- **R4:** exact-set publication integration and end-to-end release rehearsal.
+- **R0, requirements only** — DONE.
+- **R1:** shared encoder, verifier, cell parity gate, small real-data harness —
+  DONE 2026-07-28 (PRs #187, #190, #191, #192).
+- **R2:** bucket-range reverse reducer and binary catalog — DONE.
+- **R3:** Worker range reader, bounded query planner, API capability wiring —
+  DONE.
+- **R4:** exact-set publication integration and release rehearsal — DONE
+  (PRs #202, #204-#210, #212).
 
-R1 may begin now: the forward blocker PR count is zero and both Europe
-publications proved the required per-record artifacts. R2–R4 should follow the
-first non-promoting forward planet run unless a measured dependency requires
-otherwise.
+All implementation rungs are merged. What remains is execution and promotion,
+tracked under "Fastest path".
+
+### Address shard dictionary: ARDX0002
+
+The Address reverse shard dictionary format was bumped on 2026-07-31 (PR #218).
+ARDX0001 fixed every dictionary code at u16, which the real planet densest cell
+overflows: `street` carries 96,738 distinct values and `postcode` 95,865
+against a 65,536 ceiling, and `number` sits at 62,582 with under 3,000 codes of
+headroom. Probe run `30593777237` measured it and fail-closed.
+
+ARDX0002 gives each of the seven fields a one-byte code width chosen from its
+own cardinality (1 / 2 / 4). Readers in all four independent implementations —
+encoder, verifier, Worker, Python oracle — reject any width that is not the
+canonical function of the count, so one logical dictionary has exactly one byte
+encoding and the dual-lane additive digest stays unambiguous. A uniform u32
+would have cost roughly +13 B/record against a 59.58 B/record baseline and
+penalized every cell to fix one.
+
+Places shards are unaffected: they carry no dictionary, and the `PLRX0001`
+container version is deliberately unchanged.
+
+### Benchmarks: two different claims
+
+Do not conflate these.
+
+- **Index self-recall / serving correctness** (`benchmark_v2_reverse.py`
+  against the exact published artifacts, queried at each record's own
+  coordinates) proves round-trip indexing and serving. The 2026-07-29 run was
+  240/240 valid, recall@1 = recall@5 = 1.00 for both families, warm p50 8.5 ms
+  Places / 32.8 ms Addresses. **This is not external accuracy.**
+- **External quality** needs an independent, geography- and density-stratified
+  gold set with external geocoders used only as comparators, scoring semantic
+  agreement and spatial error rather than provider IDs.
+
+The 2026-07-30 open-geocoder pilot (`benchmarks/2026-07-30-v2-open-geocoder-pilot-report.md`)
+is plumbing validation, not a baseline: 10 forward and 10 reverse cases, all
+Overture-selected, and Nominatim and Photon are separate implementations but
+both derive from OpenStreetMap, so they are not independent source datasets.
+The curated global set (~20 Places + 20 Addresses, gold from open primary or
+government sources) has not been built.
 
 The full reviewed design, including geometry and API details, is
 `docs/plans/2026-07-25-reverse-v2-design.md`.
@@ -463,6 +529,20 @@ Do not substitute more rung-1 or rung-2 checks for a rung-3 or rung-4 risk.
 
 These remain useful but do not block the next measured milestone:
 
+- **PR #218 recorded P2s:** the probe still names two summary keys
+  `projected_ardx0001_dictionary_bytes` / `ardx0001_dictionary_exceeds_serving_cap`;
+  `reverse-address-probe.yml` does not surface the new `dictionary_code_widths`
+  / `wide_code_fields` in its job summary, so widths must be read from the
+  evidence artifact; the 59.5804 B/record Seattle projection basis is an
+  ARDX0001 measurement and now over-projects (conservative direction);
+  `reverse_shard_v1.py` raises `IndexError` and short-reads on truncation where
+  the old `struct.unpack_from` failed fast (still fails closed via the
+  trailing-byte check);
+- **width-4 end-to-end encoder coverage.** The `test_reverse_shard_v1.py`
+  address fixture exercises widths 1 and 2 through the real encoder, verifier,
+  and oracle (`street` and `number` each carry 2,100 distinct values). Width 4
+  is covered only by the Worker's decode unit test and the boundary test;
+  closing it end to end needs a 65,537-value fixture field;
 - range-owning address reducer and row-group range reads, unless the resumed
   Europe run proves them necessary;
 - a narrower staging-only R2 credential;
