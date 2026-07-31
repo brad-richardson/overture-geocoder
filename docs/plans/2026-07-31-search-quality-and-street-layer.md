@@ -636,6 +636,40 @@ The tests pin the mechanism (`prominence_outranks_confidence_within_a_token`
 puts a prominence-153/confidence-252 landmark above a prominence-0/confidence-255
 commodity record); the metric can only follow a 0003 build.
 
+## Part 6f — VALIDATED end to end on the Monaco slice, and it caught two real bugs
+
+Ran the full five-phase fast loop on real Overture places `2026-07-22.0`
+(task 33, 38,182 Monaco places) against the `0003` format. **The unit tests all
+passed while the pipeline was broken in two places.** Both were found in the
+13-second loop, neither by `cargo test`:
+
+1. **`TOTAL_ORDER` was left on `confidence_rank DESC`.** I had reasoned it was
+   "layout, not selection" and deliberately skipped it. Wrong:
+   `places-serving-encode-v1` ASSERTS its routed input arrives in exactly that
+   order and failed closed with *"serving input is not in unique total order"*.
+   The producer order and the encoder's `OrderKey` must move together.
+2. **`places-serving-verify-v1` still parsed the `0002` entry layout.** I bumped
+   its magic without widening its entry walk or its own `OrderKey`, so it read
+   past the end: *"truncated entry"*.
+
+Both now fixed and pinned by the slice run: `reconciles=True`,
+`marker_written_last=True`, 38,182 records, 4 partitions, 16 head shards,
+69,069 head records, 36.23 MB published.
+
+### The measured effect, on real data through the real pipeline
+
+Prominence is populated with a genuine distribution (46 records at 255, then
+230/217/153/140/128/115/…). What the two cap orderings actually retain:
+
+| cap ordering | what it keeps |
+|---|---|
+| `confidence DESC` (before) | Aubade (lingerie store), Autogrill, Burger King x3, Carglass x3 — every one at confidence **1.0**, prominence 0 |
+| `prominence DESC` (after) | Trophy of Augustus, Memoriale della deportazione, Collégiale Notre-Dame-de-l'Assomption, Porte d'Italie, Statua della Regina Margherita — every one a `monument`, and **every one at lower confidence than Burger King** |
+
+That is Part 6d's anti-correlation reproduced end to end rather than argued: the
+records the old cap kept are chains, and the landmarks it discarded are exactly
+the ones a user searching Monaco would want.
+
 ## Part 7 — Recommended sequencing
 
 Ordered by (impact ÷ effort), with correctness before capability and

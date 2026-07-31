@@ -27,7 +27,9 @@ use std::fs::File;
 use std::io::{BufReader, Read};
 use std::path::{Path, PathBuf};
 
-type OrderKey = (String, String, u8, [u8; 16], u32, u32, u64);
+// The `u8, u8` pair is `255 - prominence_rank, 255 - confidence_rank`: the
+// artifact is ordered DESC on both and this key is compared ascending.
+type OrderKey = (String, String, u8, u8, [u8; 16], u32, u32, u64);
 
 const HEAD_DIGEST_DOMAIN_A: &[u8] = b"overture-places-head-shard-v1\0";
 const HEAD_DIGEST_DOMAIN_B: &[u8] = b"overture-places-head-shard-v1\x01";
@@ -162,6 +164,8 @@ fn verify_artifact(data: &[u8], mode: &str) -> Result<Verified> {
         };
         let mask = take(entry, &mut at, 1)?[0];
         let rank = take(entry, &mut at, 1)?[0];
+        // 0003 layout: prominence_rank follows confidence_rank.
+        let prominence = take(entry, &mut at, 1)?[0];
         let id: [u8; 16] = take(entry, &mut at, 16)?.try_into().unwrap();
         let lon = f64::from_le_bytes(take(entry, &mut at, 8)?.try_into().unwrap());
         let lat = f64::from_le_bytes(take(entry, &mut at, 8)?.try_into().unwrap());
@@ -180,7 +184,18 @@ fn verify_artifact(data: &[u8], mode: &str) -> Result<Verified> {
         {
             bail!("invalid serving entry")
         };
-        let key = (cell, token, 255 - rank, id, object, group, row);
+        // Must mirror the encoder's OrderKey and the producer's TOTAL_ORDER /
+        // HEAD_ORDER: prominence DESC, then confidence DESC.
+        let key = (
+            cell,
+            token,
+            255 - prominence,
+            255 - rank,
+            id,
+            object,
+            group,
+            row,
+        );
         if previous.as_ref().is_some_and(|value| value > &key) {
             bail!("serving order regressed")
         };
@@ -470,7 +485,7 @@ mod tests {
         let mut entry = Vec::new();
         entry.extend_from_slice(&(token.len() as u16).to_le_bytes());
         entry.extend_from_slice(token.as_bytes());
-        entry.extend_from_slice(&[1, rank]);
+        entry.extend_from_slice(&[1, rank, 0]);
         entry.extend_from_slice(&id.to_be_bytes());
         entry.extend_from_slice(&1.5_f64.to_le_bytes());
         entry.extend_from_slice(&2.5_f64.to_le_bytes());

@@ -85,9 +85,16 @@ MARKER_SCHEMA = "overture-places-construction-task-marker-v1"
 PLAN_SCHEMA = "overture-places-genesis-plan-v1"
 REDUCE_SCHEMA = "overture-places-selective-reduce-v1"
 REDUCE_RANGE_SCHEMA = "overture-places-bucket-range-reduce-v1"
+# The routed total order. This is NOT merely a layout choice: it is the order
+# `places-serving-encode-v1` ASSERTS its routed input arrives in
+# ("serving input is not in unique total order"), so it must stay in lockstep
+# with that encoder's OrderKey. Leaving it on confidence while the caps moved to
+# prominence is exactly what the Monaco slice caught -- reduce failed closed at
+# the first routed leaf rather than emitting a mis-sorted artifact.
 TOTAL_ORDER = (
-    "execution_group, partition_cell, token, confidence_rank DESC, feature_id, "
-    "source_object_index, source_row_group, source_row_index"
+    "execution_group, partition_cell, token, prominence_rank DESC, "
+    "confidence_rank DESC, feature_id, source_object_index, source_row_group, "
+    "source_row_index"
 )
 # The head-cap ranking: which `head_result_cap` rows of a token survive.
 #
