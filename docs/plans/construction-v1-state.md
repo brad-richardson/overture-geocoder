@@ -75,18 +75,35 @@ has been published yet — that is the current milestone, not a defect.
 
 ### Reverse execution, 2026-07-31
 
-- **Places reverse execute** run `30595904973`, dispatched from `main`, writes
-  into `slice-2026-07-30.0/families/places/reverse/`. Source
-  `88b7f171...5332614:30323929757`, 75,631,061 records over 10,119 packs, 89
-  task IDs, 16 ranges at `max_parallel=2`. Plan job green in 54 seconds; ranges
-  complete in 12-21 minutes each with no failures.
-- **Address reverse execute** is authorized by evidence but not dispatched.
-  Source `88b7f171...5332614:30215529919`, 431,705,590 records over 5,174
-  packs, admitted fresh into the same slice. The slice claim key is
-  `{version}/claims/{family}.json`, so the two families claim independently and
-  Addresses can still join `slice-2026-07-30.0` — but only until a
-  `{version}/slice-manifest.json` exists, which `_admit_slice` treats as
-  finalized.
+**Both planet reverse builds are complete and green.** Every job on both runs
+succeeded: the plan job, all 16 bucket ranges, and the marker-last
+"reconcile all ranges and publish the binary reverse catalog" job.
+
+- **Places reverse execute** run `30595904973`, source
+  `88b7f171...5332614:30323929757`, into
+  `slice-2026-07-30.0/families/places/reverse/`. 16 ranges at `max_parallel=2`,
+  2h 15m wall. Published catalog: 75,631,061 records over 16,511 cells and
+  16,528 artifacts, 7.82 GiB, 111.03 B/record, largest object 97.6 MB.
+- **Address reverse execute** run `30599227663`, source
+  `88b7f171...5332614:30215529919`, into the same slice, 2h 33m wall. Published
+  catalog: 431,705,590 records over 4,230 cells and 4,247 artifacts, 21.85 GiB,
+  largest object 374 MB.
+
+Both catalogs' record counts match their plans exactly. The slice claim key is
+`{version}/claims/{family}.json`, so the two families claimed independently and
+both now sit in `slice-2026-07-30.0` — which still has no
+`{version}/slice-manifest.json`, so it is not yet finalized.
+
+**ARDX0002 is validated at planet scale.** Addresses measured **54.36
+B/record**, below both the probe's 57.65 B/record on the densest cell and the
+ARDX0001 Seattle basis of 59.58 — the per-field widths came out cheaper than
+the fixed-u16 format they replaced, not merely survivable. Aggregate 21.85 GiB
+against the 48 GiB ceiling (45%), and the largest single object is 374 MB
+against the 2 GiB serving cap. The probe's 35.9 GiB projection carried a 1.5x
+reserve; 35.9/1.5 = 23.9 GiB against 21.85 GiB actual, so the projection model
+was accurate rather than lucky. Addresses also finished faster than its record
+count suggests because it has 4,230 cells to Places' 16,511 — fewer, larger
+objects amortize per-object overhead.
 
 Both families passed the preserved Europe execution rung through publication
 and marker-last completion. Address has now also passed the hosted planet rung
@@ -309,32 +326,62 @@ Forward is complete and live. Reverse R1 through R4 are all merged. The
 remaining path to a working point-family reverse endpoint is operational, not
 implementation:
 
-1. **Let Places reverse execute finish** (`30595904973`). Do not rerun either
-   forward map.
-2. **Address reverse execute** is dispatched as run `30599227663`:
+Steps 1 and 2, both reverse execute runs, are DONE and green — see "Reverse
+execution, 2026-07-31" above. What remains is the three-rung promotion. With
+`REQ=88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`:
 
-   ```
-   gh workflow run reverse-v2.yml --ref main \
-     -f family=addresses \
-     -f source=88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614:30215529919 \
-     -f slice_version=slice-2026-07-30.0 \
-     -f mode=execute -f max_parallel=2 -f max_total_runner_minutes=1200
-   ```
-
-   It queues behind Places on the shared `r2-v2-publication` concurrency group
-   rather than racing it, so dispatching early is safe.
-3. **Promote the slice — BOTH families in one dispatch.** `slice-2026-07-30.0`
+1. **Promote the slice — BOTH families in one dispatch.** `slice-2026-07-30.0`
    holds only reverse output today; its forward objects have never been copied
    and no `slice-manifest.json` exists (which is exactly why reverse could still
-   admit into it). `promote-v2-release.yml` `promote-slice` does the forward
-   CopyObject *and* publishes the slice manifest, and that manifest freezes the
-   slice's family set forever — promoting one family now would strand the other.
-   Run it only after both reverse runs are green.
-4. **Attach and promote**: `promote-v2-release.yml` `publish-release` with
-   per-family `<request>:<construction-run>:<reverse-run>` sources (PR #205
-   attaches reverse without copying forward data), then `promote-catalog`
-   with `catalog_expectation` set to the current `v2/catalog.json` sha256.
-5. **Verify** with `benchmark_v2_reverse.py` self-recall against the published
+   admit into it). `promote-slice` does the forward CopyObject *and* publishes
+   the slice manifest, and that manifest freezes the slice's family set forever
+   — promoting one family alone would strand the other.
+
+   ```
+   gh workflow run promote-v2-release.yml --ref main \
+     -f stage=promote-slice -f mode=execute \
+     -f slice_version=slice-2026-07-30.0 \
+     -f places_source=$REQ:30323929757:30595904973 \
+     -f addresses_source=$REQ:30215529919:30599227663
+   ```
+
+   Dry-run `30605936253` is green and is the evidence this is ready. It
+   authenticated both reverse completions and planned, for Places, 20,698
+   forward objects to copy against 16,528 already-prepositioned reverse objects
+   (37,226 total, 52.85 GiB); for Addresses, 581 copied against 4,247
+   prepositioned (4,828 total, 135.5 GiB). Each family's planned
+   `reverse_totals` equals its published reverse catalog exactly. The reverse
+   output is recognized as prepositioned and bound without being recopied.
+2. **Attach and publish the release**:
+
+   ```
+   gh workflow run promote-v2-release.yml --ref main \
+     -f stage=publish-release -f mode=execute \
+     -f slice_version=slice-2026-07-30.0 \
+     -f geocoder_build=2026-07-31.0 \
+     -f overture_release=2026-06-17.0 -f legacy_core=2026-07-18.0 \
+     -f places_source=$REQ:30323929757:30595904973 \
+     -f addresses_source=$REQ:30215529919:30599227663
+   ```
+3. **Flip the live catalog.** As of 2026-07-31T05:08Z `v2/catalog.json` is 508
+   bytes with sha256
+   `5c9a9e7e328c1230c58d5f5295b75b545654912e2c7125aefb73b8a8cb188184`; that is
+   the CAS expectation. Re-read it with `r2-object-sha.yml` if anything else
+   promoted in between.
+
+   ```
+   gh workflow run promote-v2-release.yml --ref main \
+     -f stage=promote-catalog -f mode=execute \
+     -f geocoder_build=2026-07-31.0 \
+     -f catalog_expectation=5c9a9e7e328c1230c58d5f5295b75b545654912e2c7125aefb73b8a8cb188184
+   ```
+
+The construction contract's `namespaces.slice` is
+`construction-v1/8655821.../slice/slice-20260726145910-dryrun/`. The `-dryrun`
+suffix is an operator label frozen into the 2026-07-26 request, not a mode
+flag; nothing in the code generates it. Renaming it would change the request
+sha256 and invalidate every downstream artifact, so it stays.
+4. **Verify** with `benchmark_v2_reverse.py` self-recall against the published
    artifacts, then the external comparison — the two are different claims, see
    the benchmark note below.
 
