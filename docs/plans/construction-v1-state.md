@@ -605,6 +605,16 @@ Do not substitute more rung-1 or rung-2 checks for a rung-3 or rung-4 risk.
 
 These remain useful but do not block the next measured milestone:
 
+- **promotion should copy zero bytes, and five other efficiencies measured off
+  the 2026-07-31 promotion** — see
+  `docs/plans/2026-07-31-promotion-copy-and-efficiency.md`. Headline: forward
+  promotion server-side-copies 21,279 objects / 158.68 GiB from the construction
+  namespace into the release slice namespace and leaves both copies in place,
+  while reverse and the v2 catalog's division/ID references already move zero
+  bytes. Also queued there: ~84,000 sequential HEAD requests across three loops
+  (one of them measured at 17-36 minutes), unsized `COPY_WORKERS = 4`, serial
+  per-family promotion, and moving reduction records out of 7-day GitHub
+  artifacts into R2;
 - **PR #218 recorded P2s:** the probe still names two summary keys
   `projected_ardx0001_dictionary_bytes` / `ardx0001_dictionary_exceeds_serving_cap`;
   `reverse-address-probe.yml` does not surface the new `dictionary_code_widths`
@@ -646,6 +656,9 @@ These remain useful but do not block the next measured milestone:
 
 ## Evidence and history
 
+- `docs/plans/2026-07-31-promotion-copy-and-efficiency.md` — measured cost of
+  the forward promotion copy, the path to a zero-copy promotion, and the rest of
+  the efficiency queue for the next planet run.
 - `docs/plans/2026-07-28-planet-build-wall-clock-review.md` — wall-clock
   review of all planet attempts, Tracks A/B/C, and the adopted staged
   A-to-B optimization sequence (see its addendum).

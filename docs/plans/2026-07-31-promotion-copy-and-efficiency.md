@@ -1,0 +1,201 @@
+# Promotion without a copy, and other efficiencies for the next planet run
+
+Status: **recorded and deferred.** Nothing here blocks the 2026-07-31.0
+promotion or the next measured milestone. This is the queue to draw from once a
+planet blocker is not open, per `CLAUDE.md` §1.
+
+Every number below is MEASURED from the 2026-07-31 promotion of
+`slice-2026-07-30.0` unless marked ESTIMATED. Sources: dry-run
+`30605936253`, execute `30629402228`, and the two reverse runs `30595904973`
+(Places) / `30599227663` (Addresses).
+
+## 1. Promotion should not copy any bytes
+
+### What it does today
+
+`promote-slice` server-side `CopyObject`s every forward serving object from the
+construction namespace into the release slice namespace:
+
+```
+construction-v1/8655821.../slice/slice-20260726145910-dryrun/families/{family}/objects/<sha256>.<ext>
+  ->  slice-2026-07-30.0/families/{family}/objects/<sha256>.<ext>
+```
+
+Both keys are already content-addressed by the object's own sha256 —
+`object_name()` in `scripts/promote_construction_slice.py` refuses a store key
+whose basename is not `<sha256><ext>`. The copy therefore changes the prefix and
+nothing else.
+
+| | objects copied | bytes copied |
+|---|---|---|
+| Places | 20,698 | 45.03 GiB |
+| Addresses | 581 | 113.65 GiB |
+| **total** | **21,279** | **158.68 GiB** |
+
+(Family totals from the plan are 52.85 GiB / 135.5 GiB; the reverse halves,
+7.82 GiB and 21.85 GiB, are prepositioned and not copied.)
+
+Two costs follow:
+
+- **Wall clock.** The copy is the long pole of the whole promotion.
+- **Storage.** Nothing deletes the construction-side original. `r2-cleanup.yml`
+  is manual and prefix-gated by design, so both copies persist until an operator
+  removes one. 158.68 GiB is a large fraction of the post-cleanup bucket.
+
+The dollar cost of the operations themselves is small — the problem is wall
+clock and duplicated bytes, not the class-A charges.
+
+### The model to copy: reverse already does this
+
+`reverse-v2.yml` takes `slice_version` as a dispatch input and writes its
+immutable shards **directly** into
+`{slice_version}/families/{family}/reverse/shards/sha256/<sha256>.plrx`, marker
+last. `promote-slice` then treats them as *prepositioned*: `_reverse_publication`
+validates the exact set, `_verify_prepositioned` proves each destination
+identity, and the objects are bound into the family manifest without being
+touched. 20,775 reverse objects / 29.67 GiB moved zero bytes at promotion time
+this run.
+
+This is also what the v2 catalog already does one layer up. From
+`docs/v2-release-catalog-contract.md`: *"The v2 release references existing
+immutable keys; it does not copy division or ID objects."* Forward Places and
+Addresses are the only things in the system that still get copied.
+
+### The change
+
+Have construction's finalize phase publish forward serving objects create-only
+into the release slice namespace under their final content-addressed names, and
+have `promote-slice` bind them as prepositioned — the code path already exists
+and is exercised every run by reverse.
+
+This extends, rather than duplicates,
+`2026-07-28-planet-build-wall-clock-review.md` §7 ("Write final immutable
+objects once"). That item removes the *finalize* staging round trip and lands
+objects in the **construction** slice namespace, which is what the request
+digest freezes. The promotion copy survives it. Closing both means the
+destination has to be the **release** slice namespace.
+
+Late binding is the crux, and reverse shows how: the release slice version is
+chosen after the forward build, so it cannot be frozen into `namespaces.slice`
+at request time. Reverse takes it as a dispatch input and restores the
+authenticated binding with the per-family slice claim at
+`{version}/claims/{family}.json`, whose payload binds `version`, `family`,
+`request_sha256`, and `overture_release`. Forward can use the same claim.
+
+**What must be preserved.** Be explicit about what the copy currently buys, so
+the rework does not quietly weaken it:
+
+- *Independent byte fidelity.* Today the destination's own single-part ETag is
+  compared against the plan-recorded source MD5, which is what makes the
+  post-copy check a byte proof rather than a metadata echo (see the `R2Tree`
+  docstring). A prepositioned object is proved instead by its producer-recorded
+  identity plus a destination HEAD. Forward objects are content-addressed by
+  sha256 exactly as reverse's are, so the same key-equals-digest check applies —
+  but the chain is genuinely different and should be reviewed, not assumed
+  equivalent.
+- *Namespace hygiene.* A failed or abandoned construction run would leave debris
+  in the release namespace instead of a disposable construction prefix.
+  Marker-last plus the per-family claim plus `_admit_slice` keeps it
+  non-promoting, but §7 of the wall-clock review is right that this needs
+  explicit cleanup for unmarked namespaces before the path is taken.
+
+## 2. Three serial HEAD loops on the promotion critical path
+
+Independent of item 1, and much cheaper to fix. `promote_construction_slice.py`
+issues roughly **84,000 sequential HEAD requests** across three loops:
+
+| loop | requests | code |
+|---|---|---|
+| plan: source identity per object | 21,279 | `_plan_family`, `for item in objects: source.identity(...)` |
+| execute: prepositioned verification | 20,777 | `cmd_execute`, `for item in prepositioned: _verify_prepositioned(...)` |
+| verify: per-key destination identity | 42,058 | `cmd_verify`, `for key in listed: destination.identity(key)` |
+
+The plan loop is measured twice on identical input, and it is the only
+meaningful R2 traffic that step performs:
+
+- dry-run `30605936253`: **17m10s** → 48.4 ms/HEAD
+- execute `30629402228`: **36m21s** → 102.5 ms/HEAD
+
+So one of the three loops alone costs 17–36 minutes, varying ~2x with network
+conditions, for work that is embarrassingly parallel over immutable keys.
+`COPY_WORKERS` already provides the pool; these loops just do not use it.
+ESTIMATED: all three at 8–16 way concurrency reclaims something close to an hour
+of promotion wall clock.
+
+Item 1 deletes the first two loops outright. The third survives it, because
+verify must still prove the destination.
+
+## 3. `COPY_WORKERS = 4` has never been sized
+
+`scripts/promote_construction_slice.py:97`. Addresses copies 581 objects
+averaging ~196 MB each; a 113.65 GiB server-side transfer four at a time is not
+obviously the right point. Each task owns one immutable destination key, so
+concurrency is safe for correctness — the ceiling is R2 throughput, which has
+not been probed. Worth a bounded probe if item 1 does not land first, and
+worthless afterwards.
+
+## 4. `promote-slice` runs both families serially in one job
+
+The two families are independent up to the slice manifest: separate plans,
+separate objects, separate destinations. A 2-way matrix with the manifest write
+in a dependent job would halve the promotion critical path while keeping the
+manifest single-writer and strictly last. The manifest is already a separate
+workflow step, so the seam exists.
+
+## 5. Verify re-HEADs what the list response already partly answers
+
+`cmd_verify` lists the destination prefix and then HEADs every key — 42,058
+round trips. `ListObjectsV2` returns `Size` and `ETag` for every key in ~42
+pages. It does **not** return the sha256 user metadata, so this cannot be a
+drop-in replacement.
+
+Worth noting that the sha256 metadata is the *weaker* of the two signals on the
+copy path — after `CopyObject` with `MetadataDirective: COPY` it is an echo of
+the source, and the ETag is what proves the destination's stored bytes. A
+list-derived verify would keep the load-bearing check for every key and reduce
+the metadata check to a sample or to the non-copied members. Record as
+*investigate*, not *do*: it trades a per-key proof for a per-page one and needs
+a deliberate decision, not an optimization reflex.
+
+## 6. Reduction records should not live only in GitHub artifacts
+
+Not a speed item, but it bit us today and belongs in the queue.
+
+`promote-slice` authenticates reduction records by downloading `cv1-reduce-*`
+(or, for a finalize-only recovery run, `cv1-resume-reductions`) from the
+construction run's GitHub artifacts. Those retain 7 days. That produced a hard
+promotion deadline of 2026-08-02T20:38Z, and commit `8aea031` had to be written
+mid-flight because the Places source was a finalize-only run carrying no
+`cv1-reduce-*` at all.
+
+Writing the reduction set durably into the construction namespace alongside the
+markers — where every other authenticated input already lives — removes the
+deadline, the artifact-shape coupling, and the recovery-run special case in one
+move. Promotion would then depend only on R2, which is where the data it
+promotes lives.
+
+## Already recorded elsewhere — do not re-derive
+
+These stay owned by their existing docs; listed so this queue does not
+duplicate them.
+
+- `2026-07-28-planet-build-wall-clock-review.md` §§1–8 and Waves 0–5: matrix
+  concurrency 4→8, build Rust binaries once per architecture, marker discovery
+  before expensive resume work, Address reducer fan-out near 60 jobs, remove the
+  second full Places planning read, Places head radix + bounded parallel tails,
+  single-write finalize publication, runner-image tax.
+- `construction-v1-state.md` → "Deferred, not active": range-owning address
+  reducer, narrower staging-only R2 credential, runner-minute ledger
+  completeness, finalize double-hydration profiling.
+- `2026-07-24-construction-v1-follow-ups.md`: the address map shuffle is
+  DECIDED not-ported; the address partition key is FROZEN.
+
+## Suggested order
+
+1. **Item 6** first — it is small, it removes a recurring deadline, and it is a
+   prerequisite for treating promotion as an R2-only operation.
+2. **Item 2** next — pure win, no semantics change, no design decision needed.
+3. **Item 1** as the architecture change, sequenced with wall-clock review §7 so
+   finalize and promotion are re-pointed once rather than twice. Items 3 and 4
+   become moot if it lands; do them only if it slips.
+4. **Item 5** only after a deliberate call on the proof it trades away.
