@@ -443,6 +443,42 @@ only. The curated global gold set (~20+20) is still unbuilt, and the
 provider-neutral comparison against Nominatim/Photon is a separate claim that
 has not been run on this build.
 
+### Provider-neutral reverse comparison, 2026-07-31
+
+First Overture reverse score against the public services. In the 2026-07-30
+pilot every Overture reverse case returned `capability_unavailable`; this run
+scores. 5 Monaco Places + 5 Seattle Addresses, semantic scoring, 2 warm
+repeats, zero HTTP errors on any provider. Evidence:
+`benchmarks/2026-07-31-reverse-external-comparison.json`.
+
+| provider | Places q@1 | Places q@5 | Addresses q@1 | Addresses q@5 | client p50 |
+|---|---:|---:|---:|---:|---:|
+| Overture | **0.40** | **0.60** | **1.00** | **1.00** | 195.4 ms |
+| Nominatim | 0.20 | 0.20 | 0.80 | 0.80 | 369.3 ms |
+| Photon | 0.20 | 0.20 | **1.00** | **1.00** | 138.1 ms |
+
+Read this narrowly:
+
+- **Addresses is a genuine tie at the top** with Photon, both perfect, with
+  Nominatim one case behind.
+- **The Places column is not apples-to-apples and the lead is inside the
+  noise.** Five cases means one case is 0.20. Nominatim reverse returns a
+  single result, so its q@5 is necessarily its q@1; Photon has no portable
+  generic POI layer, so its Places row uses the unfiltered reverse response.
+  All three providers miss `monaco-cathedral` and
+  `princess-grace-japanese-garden`.
+- **Latency is client-observed for all three.** Only Overture reports
+  `worker_ms` (places p50 43 ms, addresses 228 ms); comparing that against the
+  others' client times would flatter it, because theirs include public-internet
+  RTT. On the like-for-like client number Overture sits between Photon and
+  Nominatim.
+- Nominatim and Photon both derive from OpenStreetMap: separate
+  implementations, not independent source datasets.
+
+This is a plumbing and case-review pilot, not a quality baseline. The curated
+global gold set (~20+20) remains unbuilt and is the prerequisite for any
+defensible comparative claim.
+
 ## Open blockers and gates
 
 ### Open gates, 2026-07-31
