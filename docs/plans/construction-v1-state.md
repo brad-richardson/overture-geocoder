@@ -405,6 +405,44 @@ the Places critical path because measured finalize (57 minutes) is about 3x its
 budget. The post-change cold control should ride the next real Overture release
 ingest, not a dedicated measurement run.
 
+### Reverse self-recall against the live build, 2026-07-31
+
+Ran `benchmark_v2_reverse.py` in its default `exact_id_self_recall` mode against
+`https://geocoder.bradr.dev` on build `2026-07-31.0`, 3 warm repeats.
+Cases: `benchmarks/v2-reverse-self-recall-cases-v1.json` (6 Places, 4
+Addresses), derived from the forward pilot set — each case probes a feature's
+own published coordinates and expects its own GERS ID back. Results:
+`benchmarks/2026-07-31-reverse-self-recall-live.json`.
+
+| family | recall@1 | recall@5 | MRR | errors | worker p50 | worker p95 |
+|---|---:|---:|---:|---:|---:|---:|
+| Addresses | **1.000** | **1.000** | 1.000 | 0 | 15.5 ms | 28 ms |
+| Places | 0.667 | **1.000** | 0.806 | 0 | 13.0 ms | 18 ms |
+
+**recall@5 = 1.000 on both families with zero errors is the load-bearing
+result:** every probed feature is present and retrievable from the published
+index at its own coordinates. That is the index-integrity claim the promotion
+needed.
+
+Places recall@1 is depressed by **duplicate POI records in the source data**,
+not by an index or ranking defect. Both misses were verified by hand and the
+nearest-first ordering is correct in each:
+
+- `stade-louis-ii` — three representations of the same stadium within 50 m
+  (`Stade Louis II` at 0.01 m, a styled-unicode duplicate at 24.74 m, and
+  `Stade Louis II Stadium, Monaco` at 49.15 m). The expected ID is the third.
+- `aldi-nord-nice` — `ALDI Nord` at 9.79 m and `Aldi` at 10.35 m; the expected
+  ID is the second.
+
+Reverse latency is excellent and stands in sharp contrast to structured Address
+forward (open gate 3, p50 ~1,300-1,600 ms): reverse worker p50 is 13-15.5 ms.
+
+**This is not a quality claim.** Self-recall draws its expectations from the
+same data it queries, and coverage is Monaco/Nice Places plus Seattle Addresses
+only. The curated global gold set (~20+20) is still unbuilt, and the
+provider-neutral comparison against Nominatim/Photon is a separate claim that
+has not been run on this build.
+
 ## Open blockers and gates
 
 ### Open gates, 2026-07-31

@@ -1,0 +1,1233 @@
+{
+  "base_url": "https://geocoder.bradr.dev",
+  "benchmark_mode": "exact_id_self_recall",
+  "generated_at": "2026-07-31T19:28:34+00:00",
+  "provider_urls": {
+    "overture": "https://geocoder.bradr.dev"
+  },
+  "providers": [
+    "overture"
+  ],
+  "rows": [
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:casino-monte-carlo",
+      "client_ms": 2881.706233980367,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42800311&lat=43.73909339&types=poi&radius=250&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 2319.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:stade-louis-ii-locality",
+      "client_ms": 80.53303399356082,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.41577104&lat=43.72745994&types=poi&radius=250&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 3,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.3333333333333333,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 23.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:matisse-museum-locality",
+      "client_ms": 401.871003996348,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.27570599&lat=43.7195322&types=poi&radius=250&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 360.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:marc-chagall-museum",
+      "client_ms": 84.43852301570587,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.26976111&lat=43.70931755&types=poi&radius=250&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:aldi-nord-nice-biased",
+      "client_ms": 84.00806001736782,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.29697249&lat=43.73498985&types=poi&radius=250&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 2,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.5,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:theatre-princesse-grace",
+      "client_ms": 45.05747102666646,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42604984&lat=43.73773997&types=poi&radius=250&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:space-needle",
+      "client_ms": 71.35470601497218,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3493013&lat=47.6204928&types=address&radius=100&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 20.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:seattle-central-library",
+      "client_ms": 901.1214399943128,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3329682&lat=47.6064853&types=address&radius=100&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 866.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:lumen-field",
+      "client_ms": 84.68439301941544,
+      "error": null,
+      "family": "addresses",
+      "features": 1,
+      "path": "/v2/reverse?lon=-122.3315931&lat=47.5954381&types=address&radius=100&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 19.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:t-mobile-park",
+      "client_ms": 258.8665059884079,
+      "error": null,
+      "family": "addresses",
+      "features": 2,
+      "path": "/v2/reverse?lon=-122.3330468&lat=47.5915056&types=address&radius=100&limit=5",
+      "phase": "cold",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 0,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 223.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:casino-monte-carlo",
+      "client_ms": 51.285366993397474,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42800311&lat=43.73909339&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 15.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:stade-louis-ii-locality",
+      "client_ms": 56.38824397465214,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.41577104&lat=43.72745994&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 3,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.3333333333333333,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 13.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:matisse-museum-locality",
+      "client_ms": 97.55404002498835,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.27570599&lat=43.7195322&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:marc-chagall-museum",
+      "client_ms": 99.43576599471271,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.26976111&lat=43.70931755&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 14.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:aldi-nord-nice-biased",
+      "client_ms": 91.6518570156768,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.29697249&lat=43.73498985&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 2,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.5,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 15.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:theatre-princesse-grace",
+      "client_ms": 41.830178000964224,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42604984&lat=43.73773997&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:space-needle",
+      "client_ms": 84.25044000614434,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3493013&lat=47.6204928&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 15.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:seattle-central-library",
+      "client_ms": 71.15015599993058,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3329682&lat=47.6064853&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 16.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:lumen-field",
+      "client_ms": 62.60931200813502,
+      "error": null,
+      "family": "addresses",
+      "features": 1,
+      "path": "/v2/reverse?lon=-122.3315931&lat=47.5954381&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 14.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:t-mobile-park",
+      "client_ms": 58.60703098005615,
+      "error": null,
+      "family": "addresses",
+      "features": 2,
+      "path": "/v2/reverse?lon=-122.3330468&lat=47.5915056&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 1,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 14.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:casino-monte-carlo",
+      "client_ms": 47.00979799963534,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42800311&lat=43.73909339&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 13.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:stade-louis-ii-locality",
+      "client_ms": 56.34827198809944,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.41577104&lat=43.72745994&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 3,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.3333333333333333,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 13.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:matisse-museum-locality",
+      "client_ms": 83.3929119980894,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.27570599&lat=43.7195322&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:marc-chagall-museum",
+      "client_ms": 84.16754400241189,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.26976111&lat=43.70931755&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 18.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:aldi-nord-nice-biased",
+      "client_ms": 96.65649299859069,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.29697249&lat=43.73498985&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 2,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.5,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:theatre-princesse-grace",
+      "client_ms": 44.30857300758362,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42604984&lat=43.73773997&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:space-needle",
+      "client_ms": 63.97286397987045,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3493013&lat=47.6204928&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 15.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:seattle-central-library",
+      "client_ms": 60.695600986946374,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3329682&lat=47.6064853&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 15.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:lumen-field",
+      "client_ms": 80.90122099383734,
+      "error": null,
+      "family": "addresses",
+      "features": 1,
+      "path": "/v2/reverse?lon=-122.3315931&lat=47.5954381&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 28.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:t-mobile-park",
+      "client_ms": 62.28282701340504,
+      "error": null,
+      "family": "addresses",
+      "features": 2,
+      "path": "/v2/reverse?lon=-122.3330468&lat=47.5915056&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 2,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 14.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:casino-monte-carlo",
+      "client_ms": 51.45650100894272,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42800311&lat=43.73909339&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 13.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:stade-louis-ii-locality",
+      "client_ms": 41.7786129983142,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.41577104&lat=43.72745994&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 3,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.3333333333333333,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 12.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:matisse-museum-locality",
+      "client_ms": 102.08168701501563,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.27570599&lat=43.7195322&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 16.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:marc-chagall-museum",
+      "client_ms": 92.38172299228609,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.26976111&lat=43.70931755&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 13.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:aldi-nord-nice-biased",
+      "client_ms": 89.95277897338383,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.29697249&lat=43.73498985&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 2,
+      "recall_at_1": false,
+      "recall_at_5": true,
+      "reciprocal_rank": 0.5,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 13.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:place:theatre-princesse-grace",
+      "client_ms": 42.899705993477255,
+      "error": null,
+      "family": "places",
+      "features": 5,
+      "path": "/v2/reverse?lon=7.42604984&lat=43.73773997&types=poi&radius=250&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 15.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:space-needle",
+      "client_ms": 66.18611898738891,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3493013&lat=47.6204928&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 16.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:seattle-central-library",
+      "client_ms": 60.47565198969096,
+      "error": null,
+      "family": "addresses",
+      "features": 5,
+      "path": "/v2/reverse?lon=-122.3329682&lat=47.6064853&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 16.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:lumen-field",
+      "client_ms": 77.12124998215586,
+      "error": null,
+      "family": "addresses",
+      "features": 1,
+      "path": "/v2/reverse?lon=-122.3315931&lat=47.5954381&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 18.0
+    },
+    {
+      "capability": {
+        "type_equivalence": "exact"
+      },
+      "case_id": "selfrecall:address:t-mobile-park",
+      "client_ms": 66.52621101238765,
+      "error": null,
+      "family": "addresses",
+      "features": 2,
+      "path": "/v2/reverse?lon=-122.3330468&lat=47.5915056&types=address&radius=100&limit=5",
+      "phase": "warm",
+      "provider": "overture",
+      "rank": 1,
+      "recall_at_1": true,
+      "recall_at_5": true,
+      "reciprocal_rank": 1.0,
+      "repeat": 3,
+      "status": 200,
+      "supported": true,
+      "valid_response": true,
+      "worker_ms": 16.0
+    }
+  ],
+  "schema": "benchmark-v2-reverse-results-v1",
+  "summary": {
+    "addresses": {
+      "client_ms": {
+        "max": 901.1214399943128,
+        "min": 58.60703098005615,
+        "n": 16,
+        "p50": 68.83818350615911,
+        "p95": 901.1214399943128
+      },
+      "errors": 0,
+      "mrr": 1.0,
+      "n": 16,
+      "recall_at_1": 1.0,
+      "recall_at_5": 1.0,
+      "scorable": 16,
+      "supported": 16,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 16,
+      "worker_ms": {
+        "n": 16,
+        "p50": 16.0,
+        "p95": 866.0
+      }
+    },
+    "addresses/cold": {
+      "client_ms": {
+        "max": 901.1214399943128,
+        "min": 71.35470601497218,
+        "n": 4,
+        "p50": 171.77544950391166,
+        "p95": 901.1214399943128
+      },
+      "errors": 0,
+      "mrr": 1.0,
+      "n": 4,
+      "recall_at_1": 1.0,
+      "recall_at_5": 1.0,
+      "scorable": 4,
+      "supported": 4,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 4,
+      "worker_ms": {
+        "n": 4,
+        "p50": 121.5,
+        "p95": 866.0
+      }
+    },
+    "addresses/warm": {
+      "client_ms": {
+        "max": 84.25044000614434,
+        "min": 58.60703098005615,
+        "n": 12,
+        "p50": 65.07949148362968,
+        "p95": 84.25044000614434
+      },
+      "errors": 0,
+      "mrr": 1.0,
+      "n": 12,
+      "recall_at_1": 1.0,
+      "recall_at_5": 1.0,
+      "scorable": 12,
+      "supported": 12,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 12,
+      "worker_ms": {
+        "n": 12,
+        "p50": 15.5,
+        "p95": 28.0
+      }
+    },
+    "all": {
+      "client_ms": {
+        "max": 2881.706233980367,
+        "min": 41.7786129983142,
+        "n": 40,
+        "p50": 74.23797799856402,
+        "p95": 901.1214399943128
+      },
+      "errors": 0,
+      "mrr": 0.8833333333333334,
+      "n": 40,
+      "recall_at_1": 0.8,
+      "recall_at_5": 1.0,
+      "scorable": 40,
+      "supported": 40,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 40,
+      "worker_ms": {
+        "n": 40,
+        "p50": 15.0,
+        "p95": 866.0
+      }
+    },
+    "places": {
+      "client_ms": {
+        "max": 2881.706233980367,
+        "min": 41.7786129983142,
+        "n": 24,
+        "p50": 83.70048600772861,
+        "p95": 401.871003996348
+      },
+      "errors": 0,
+      "mrr": 0.8055555555555555,
+      "n": 24,
+      "recall_at_1": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "scorable": 24,
+      "supported": 24,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 24,
+      "worker_ms": {
+        "n": 24,
+        "p50": 13.0,
+        "p95": 360.0
+      }
+    },
+    "places/cold": {
+      "client_ms": {
+        "max": 2881.706233980367,
+        "min": 45.05747102666646,
+        "n": 6,
+        "p50": 84.22329151653685,
+        "p95": 2881.706233980367
+      },
+      "errors": 0,
+      "mrr": 0.8055555555555555,
+      "n": 6,
+      "recall_at_1": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "scorable": 6,
+      "supported": 6,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 6,
+      "worker_ms": {
+        "n": 6,
+        "p50": 17.5,
+        "p95": 2319.0
+      }
+    },
+    "places/warm": {
+      "client_ms": {
+        "max": 102.08168701501563,
+        "min": 41.7786129983142,
+        "n": 18,
+        "p50": 69.89057798637077,
+        "p95": 102.08168701501563
+      },
+      "errors": 0,
+      "mrr": 0.8055555555555556,
+      "n": 18,
+      "recall_at_1": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "scorable": 18,
+      "supported": 18,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 18,
+      "worker_ms": {
+        "n": 18,
+        "p50": 13.0,
+        "p95": 18.0
+      }
+    },
+    "provider/overture": {
+      "client_ms": {
+        "max": 2881.706233980367,
+        "min": 41.7786129983142,
+        "n": 40,
+        "p50": 74.23797799856402,
+        "p95": 901.1214399943128
+      },
+      "errors": 0,
+      "mrr": 0.8833333333333334,
+      "n": 40,
+      "recall_at_1": 0.8,
+      "recall_at_5": 1.0,
+      "scorable": 40,
+      "supported": 40,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 40,
+      "worker_ms": {
+        "n": 40,
+        "p50": 15.0,
+        "p95": 866.0
+      }
+    },
+    "provider/overture/addresses": {
+      "client_ms": {
+        "max": 901.1214399943128,
+        "min": 58.60703098005615,
+        "n": 16,
+        "p50": 68.83818350615911,
+        "p95": 901.1214399943128
+      },
+      "errors": 0,
+      "mrr": 1.0,
+      "n": 16,
+      "recall_at_1": 1.0,
+      "recall_at_5": 1.0,
+      "scorable": 16,
+      "supported": 16,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 16,
+      "worker_ms": {
+        "n": 16,
+        "p50": 16.0,
+        "p95": 866.0
+      }
+    },
+    "provider/overture/addresses/cold": {
+      "client_ms": {
+        "max": 901.1214399943128,
+        "min": 71.35470601497218,
+        "n": 4,
+        "p50": 171.77544950391166,
+        "p95": 901.1214399943128
+      },
+      "errors": 0,
+      "mrr": 1.0,
+      "n": 4,
+      "recall_at_1": 1.0,
+      "recall_at_5": 1.0,
+      "scorable": 4,
+      "supported": 4,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 4,
+      "worker_ms": {
+        "n": 4,
+        "p50": 121.5,
+        "p95": 866.0
+      }
+    },
+    "provider/overture/addresses/warm": {
+      "client_ms": {
+        "max": 84.25044000614434,
+        "min": 58.60703098005615,
+        "n": 12,
+        "p50": 65.07949148362968,
+        "p95": 84.25044000614434
+      },
+      "errors": 0,
+      "mrr": 1.0,
+      "n": 12,
+      "recall_at_1": 1.0,
+      "recall_at_5": 1.0,
+      "scorable": 12,
+      "supported": 12,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 12,
+      "worker_ms": {
+        "n": 12,
+        "p50": 15.5,
+        "p95": 28.0
+      }
+    },
+    "provider/overture/places": {
+      "client_ms": {
+        "max": 2881.706233980367,
+        "min": 41.7786129983142,
+        "n": 24,
+        "p50": 83.70048600772861,
+        "p95": 401.871003996348
+      },
+      "errors": 0,
+      "mrr": 0.8055555555555555,
+      "n": 24,
+      "recall_at_1": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "scorable": 24,
+      "supported": 24,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 24,
+      "worker_ms": {
+        "n": 24,
+        "p50": 13.0,
+        "p95": 360.0
+      }
+    },
+    "provider/overture/places/cold": {
+      "client_ms": {
+        "max": 2881.706233980367,
+        "min": 45.05747102666646,
+        "n": 6,
+        "p50": 84.22329151653685,
+        "p95": 2881.706233980367
+      },
+      "errors": 0,
+      "mrr": 0.8055555555555555,
+      "n": 6,
+      "recall_at_1": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "scorable": 6,
+      "supported": 6,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 6,
+      "worker_ms": {
+        "n": 6,
+        "p50": 17.5,
+        "p95": 2319.0
+      }
+    },
+    "provider/overture/places/warm": {
+      "client_ms": {
+        "max": 102.08168701501563,
+        "min": 41.7786129983142,
+        "n": 18,
+        "p50": 69.89057798637077,
+        "p95": 102.08168701501563
+      },
+      "errors": 0,
+      "mrr": 0.8055555555555556,
+      "n": 18,
+      "recall_at_1": 0.6666666666666666,
+      "recall_at_5": 1.0,
+      "scorable": 18,
+      "supported": 18,
+      "unscorable": 0,
+      "unsupported": 0,
+      "valid_responses": 18,
+      "worker_ms": {
+        "n": 18,
+        "p50": 13.0,
+        "p95": 18.0
+      }
+    }
+  },
+  "warm_repeats": 3
+}

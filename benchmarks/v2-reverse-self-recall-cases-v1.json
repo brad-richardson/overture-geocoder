@@ -1,0 +1,100 @@
+{
+  "schema": "benchmark-v2-reverse-cases-v1",
+  "meta": {
+    "purpose": "Reverse exact-GERS-ID self-recall against published v2 artifacts",
+    "source": "Derived from benchmarks/v2-open-geocoder-forward-pilot-cases-v1.json: each case probes a feature's OWN published coordinates and expects its own GERS ID back.",
+    "limitations": [
+      "Self-recall is a retrievability claim about the published index, NOT an independent accuracy claim -- the expectations come from the same data.",
+      "Places are Monaco/Nice only; Addresses are Seattle only.",
+      "10 cases is a harness and index-integrity check, not a quality measurement. The curated global gold set (~20+20) is still unbuilt."
+    ]
+  },
+  "cases": [
+    {
+      "id": "selfrecall:place:casino-monte-carlo",
+      "family": "places",
+      "longitude": 7.42800311,
+      "latitude": 43.73909339,
+      "radius_m": 250,
+      "expected_gers_id": "bfb92878-2ecd-422b-a0ad-80acf17e36e8",
+      "expected_name": "Casino de Monte-Carlo"
+    },
+    {
+      "id": "selfrecall:place:stade-louis-ii-locality",
+      "family": "places",
+      "longitude": 7.41577104,
+      "latitude": 43.72745994,
+      "radius_m": 250,
+      "expected_gers_id": "e80042b0-dc83-496a-92f5-0b6b73bce102",
+      "expected_name": "Stade Louis II"
+    },
+    {
+      "id": "selfrecall:place:matisse-museum-locality",
+      "family": "places",
+      "longitude": 7.27570599,
+      "latitude": 43.7195322,
+      "radius_m": 250,
+      "expected_gers_id": "b98a9bfe-9e3b-48bc-b49a-3ab4b7b2badd",
+      "expected_name": "Matisse Museum"
+    },
+    {
+      "id": "selfrecall:place:marc-chagall-museum",
+      "family": "places",
+      "longitude": 7.26976111,
+      "latitude": 43.70931755,
+      "radius_m": 250,
+      "expected_gers_id": "9ed6c571-b1cc-4967-87cc-dc8bc677c305",
+      "expected_name": "Marc Chagall National Museum"
+    },
+    {
+      "id": "selfrecall:place:aldi-nord-nice-biased",
+      "family": "places",
+      "longitude": 7.29697249,
+      "latitude": 43.73498985,
+      "radius_m": 250,
+      "expected_gers_id": "7e2494dc-1853-45ad-82b7-943a2d2bad7f",
+      "expected_name": "ALDI Nord"
+    },
+    {
+      "id": "selfrecall:place:theatre-princesse-grace",
+      "family": "places",
+      "longitude": 7.42604984,
+      "latitude": 43.73773997,
+      "radius_m": 250,
+      "expected_gers_id": "33d4f45d-f2cd-4313-950b-5affda981fd5",
+      "expected_name": "Théâtre Princesse Grace"
+    },
+    {
+      "id": "selfrecall:address:space-needle",
+      "family": "addresses",
+      "longitude": -122.3493013,
+      "latitude": 47.6204928,
+      "radius_m": 100,
+      "expected_gers_id": "a92897f6-a72f-473e-b28d-2bf1b473883d"
+    },
+    {
+      "id": "selfrecall:address:seattle-central-library",
+      "family": "addresses",
+      "longitude": -122.3329682,
+      "latitude": 47.6064853,
+      "radius_m": 100,
+      "expected_gers_id": "fb0bda83-8c20-48a1-be5f-40f992386868"
+    },
+    {
+      "id": "selfrecall:address:lumen-field",
+      "family": "addresses",
+      "longitude": -122.3315931,
+      "latitude": 47.5954381,
+      "radius_m": 100,
+      "expected_gers_id": "540c2842-1d61-4110-8e97-f26424b9f525"
+    },
+    {
+      "id": "selfrecall:address:t-mobile-park",
+      "family": "addresses",
+      "longitude": -122.3330468,
+      "latitude": 47.5915056,
+      "radius_m": 100,
+      "expected_gers_id": "c0616b45-194a-4bbc-8de1-6269c9f0ad48"
+    }
+  ]
+}
