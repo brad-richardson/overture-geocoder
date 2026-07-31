@@ -41,14 +41,28 @@ that contract.
 
 ## Current snapshot
 
-The checkpoint on `main` is `8f0b56d`. On top of the forward publisher and
+The checkpoint on `main` is `8aea031`. On top of the forward publisher and
 finalizer series it carries the v2 promotion series (#194, #197-#201), the
 reverse construction/serving series (#202, #204-#210, #212), the forward
 quality fixes (#213 address locality aliases, #214 Places locality suffixes),
 the ID-lookup route (#209), the open-geocoder benchmark harness (#211, #216),
 the read-only Address density probe (#215, #217), the ARDX0002 per-field
-dictionary code widths (#218), and the workflow confirmation-gate removal
-(#219). There are no open construction-v1 code PRs.
+dictionary code widths (#218), the workflow confirmation-gate removal (#219),
+and the `promote-slice` reduction-artifact fallback (`8aea031`). There are no
+open construction-v1 code PRs.
+
+`8aea031` matters for the promotion immediately ahead. `promote-slice` fetched
+reduction records with `gh run download --pattern 'cv1-reduce-*'` only, but a
+finalize-only recovery run runs no reducers and so publishes no such artifact —
+it carries the reduction set it authenticated and reused as
+`cv1-resume-reductions`. The named Places source, run `30323929757`, is exactly
+that shape: `cv1-control` plus `cv1-resume-reductions`, zero `cv1-reduce-*`.
+Promotion would have failed at the download step, after both planet reverse
+builds were already paid for. The fetch now prefers the per-batch artifacts and
+falls back to the resume set, and still fails closed when a run carries
+neither. Verified against the real artifacts: `30323929757` falls back and
+flattens 16,601 Places records with no duplicate partition id, while Address
+run `30215529919` keeps the per-batch path at 117 batches and 581 records.
 
 ### Live serving
 
@@ -297,7 +311,7 @@ implementation:
 
 1. **Let Places reverse execute finish** (`30595904973`). Do not rerun either
    forward map.
-2. **Dispatch Address reverse execute** — its gate is cleared:
+2. **Address reverse execute** is dispatched as run `30599227663`:
 
    ```
    gh workflow run reverse-v2.yml --ref main \
@@ -309,12 +323,27 @@ implementation:
 
    It queues behind Places on the shared `r2-v2-publication` concurrency group
    rather than racing it, so dispatching early is safe.
-3. **Attach and promote**: `promote-v2-release.yml` `publish-release` with
+3. **Promote the slice — BOTH families in one dispatch.** `slice-2026-07-30.0`
+   holds only reverse output today; its forward objects have never been copied
+   and no `slice-manifest.json` exists (which is exactly why reverse could still
+   admit into it). `promote-v2-release.yml` `promote-slice` does the forward
+   CopyObject *and* publishes the slice manifest, and that manifest freezes the
+   slice's family set forever — promoting one family now would strand the other.
+   Run it only after both reverse runs are green.
+4. **Attach and promote**: `promote-v2-release.yml` `publish-release` with
    per-family `<request>:<construction-run>:<reverse-run>` sources (PR #205
-   attaches reverse without copying forward data), then `promote-catalog`.
-4. **Verify** with `benchmark_v2_reverse.py` self-recall against the published
+   attaches reverse without copying forward data), then `promote-catalog`
+   with `catalog_expectation` set to the current `v2/catalog.json` sha256.
+5. **Verify** with `benchmark_v2_reverse.py` self-recall against the published
    artifacts, then the external comparison — the two are different claims, see
    the benchmark note below.
+
+**Deadline: `promote-slice` must run before 2026-08-02T20:38Z.** It reads
+reduction records from the construction runs' GitHub artifacts, which have
+7-day retention. Address run `30215529919`'s earliest `cv1-reduce-*` expires
+2026-08-02T20:38Z; the Places `cv1-resume-reductions` set expires
+2026-08-04T02:45Z. Past those, promotion fails closed and the only recovery is
+re-running construction.
 
 Wall-clock optimization of the forward build is an adopted secondary track,
 run within the two-active-PR budget and never ahead of reverse R1. The adopted
