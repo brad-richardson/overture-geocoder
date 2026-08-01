@@ -92,10 +92,16 @@ REDUCE_RANGE_SCHEMA = "overture-places-bucket-range-reduce-v1"
 # prominence is exactly what the Monaco slice caught -- reduce failed closed at
 # the first routed leaf rather than emitting a mis-sorted artifact.
 TOTAL_ORDER = (
-    "execution_group, partition_cell, token, prominence_rank DESC, "
-    "confidence_rank DESC, feature_id, source_object_index, source_row_group, "
-    "source_row_index"
+    "execution_group, partition_cell, token, ((field_mask & 3) != 0) DESC, "
+    "prominence_rank DESC, confidence_rank DESC, feature_id, "
+    "source_object_index, source_row_group, source_row_index"
 )
+# Whether a token matched a field that IDENTIFIES the record (primary/common
+# name = 1, brand = 2) rather than merely describing or locating it (category =
+# 4, locality/region/country context = 8). Must stay identical to
+# `identifying()` in crates/geocoder-worker/src/places_construction_v1.rs, which
+# applies the same rule at query time.
+IDENTIFYING_FIRST = "((field_mask & 3) != 0) DESC"
 # The head-cap ranking: which `head_result_cap` rows of a token survive.
 #
 # This was FOUR inline literals before it was a constant -- the per-task cap, the
@@ -110,9 +116,19 @@ TOTAL_ORDER = (
 # the Basilica de la Sagrada Familia scores 0.9897 against 0.9998 for the
 # Starbucks next door). Ranking by confidence alone is what evicted every
 # landmark from the head. See scripts/places_type_prior_v1.py.
+#
+# IDENTITY LEADS, and it must. `prominence_rank` is a per-RECORD category prior,
+# so it applies to every token a record emits -- including the locality/region/
+# country context tokens. Ranking by prominence alone therefore promotes a
+# famous building's CONTEXT match over a record actually named for the token.
+# Measured on the Monaco slice before this was added: the top six entries for
+# `monte` were all context-only (Princesse Grace Monument, Villa Sauber, three
+# churches) and `Novotel Monte Carlo` -- an actual name match -- was displaced.
+# This is Stage 2 item 5, and it is what makes the query-time field-mask rerank
+# (PR #221) reachable at all.
 HEAD_CAP_ORDER = (
-    "prominence_rank DESC, confidence_rank DESC, feature_id, "
-    "source_object_index, source_row_group, source_row_index"
+    f"{IDENTIFYING_FIRST}, prominence_rank DESC, confidence_rank DESC, "
+    "feature_id, source_object_index, source_row_group, source_row_index"
 )
 HEAD_ORDER = f"token, {HEAD_CAP_ORDER}"
 # The serving-candidate ranking, used in EXACTLY two places: the map-side
@@ -128,8 +144,8 @@ HEAD_ORDER = f"token, {HEAD_CAP_ORDER}"
 # landmark evicted at the serving cap can never be recovered by the head cap
 # downstream, however the head is ranked.
 SERVING_ORDER = (
-    "prominence_rank DESC, confidence_rank DESC, feature_id, "
-    "source_object_index, source_row_group, source_row_index"
+    f"{IDENTIFYING_FIRST}, prominence_rank DESC, confidence_rank DESC, "
+    "feature_id, source_object_index, source_row_group, source_row_index"
 )
 SERVING_PARTITION = "PARTITION BY partition_cell, token"
 # The combiner deletes rows outside the top-N of each (partition_cell, token)

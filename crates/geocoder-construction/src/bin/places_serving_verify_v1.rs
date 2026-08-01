@@ -29,7 +29,7 @@ use std::path::{Path, PathBuf};
 
 // The `u8, u8` pair is `255 - prominence_rank, 255 - confidence_rank`: the
 // artifact is ordered DESC on both and this key is compared ascending.
-type OrderKey = (String, String, u8, u8, [u8; 16], u32, u32, u64);
+type OrderKey = (String, String, bool, u8, u8, [u8; 16], u32, u32, u64);
 
 const HEAD_DIGEST_DOMAIN_A: &[u8] = b"overture-places-head-shard-v1\0";
 const HEAD_DIGEST_DOMAIN_B: &[u8] = b"overture-places-head-shard-v1\x01";
@@ -189,6 +189,8 @@ fn verify_artifact(data: &[u8], mode: &str) -> Result<Verified> {
         let key = (
             cell,
             token,
+            // Identity leads: name/brand matches before context-only ones.
+            mask & 3 == 0,
             255 - prominence,
             255 - rank,
             id,

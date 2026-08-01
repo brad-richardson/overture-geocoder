@@ -670,6 +670,42 @@ That is Part 6d's anti-correlation reproduced end to end rather than argued: the
 records the old cap kept are chains, and the landmarks it discarded are exactly
 the ones a user searching Monaco would want.
 
+## Part 6g — CAUGHT BY REVIEW: prominence alone made name retrieval WORSE
+
+An external review flagged that the build caps rank only by `prominence_rank`,
+`confidence_rank` and identity-of-row, and still do not prefer name/brand field
+matches — even though Stage 2 item 5 says they must, and Part 6b concluded item
+5 "is what makes fix 1 pay". **The claim is correct, and the consequence is
+worse than incomplete: it was a regression I introduced.**
+
+`prominence_rank` is a per-RECORD category prior, so it attaches to *every*
+token a record emits — including the locality/region/country CONTEXT tokens
+(field_mask 8). Ranking a cap by prominence therefore promotes a famous
+building's context match above a record actually named for the token. Measured
+on the Monaco slice, token `monte`:
+
+| order | top 6 |
+|---|---|
+| `confidence DESC` (original) | 5/6 context-only; `Novotel Monte Carlo` (a name match) survived at 6 |
+| `prominence DESC` (my change) | **6/6 context-only** — Princesse Grace Monument, Villa Sauber, three churches. Every name match displaced. |
+| `identity, prominence, confidence` (fixed) | **6/6 name matches** — Gare SNCF Monaco Monte Carlo, Monte Carlo Monaco Train Station, Santuario Monte Bruno … |
+
+`nice` behaved the same way: two context-only churches outranked
+`Aéroport de Nice` and `Base aérienne 943 Nice` until identity led.
+
+The fix is Stage 2 item 5, now implemented as `IDENTIFYING_FIRST`
+(`((field_mask & 3) != 0) DESC`) leading `TOTAL_ORDER`, `HEAD_CAP_ORDER` and
+`SERVING_ORDER`, mirrored in the encoder and verifier `OrderKey`s, and matching
+`identifying()` in the worker so build order and query order finally agree.
+
+**Lesson, and it is the same one twice.** Part 6f recorded that the Monaco slice
+caught what the unit tests could not. This time the slice ran green — the
+pipeline was *correct*, it just ranked the wrong things — and only inspecting
+what the cap actually retained exposed it. A passing pipeline is not evidence of
+a good ranking. The cheap check that found it (dump the top-N per token by each
+candidate order, on real data) should run for every future cap change, and
+should be widened to many tokens across regions before a planet run is paid for.
+
 ## Part 7 — Recommended sequencing
 
 Ordered by (impact ÷ effort), with correctness before capability and

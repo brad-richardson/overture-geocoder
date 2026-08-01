@@ -25,9 +25,29 @@ const MAX_INDEX_KEY_BYTES: usize = 268_435_456;
 // the sum over a set of head shards equals the sum over the un-sharded head.
 const HEAD_DIGEST_DOMAIN_A: &[u8] = b"overture-places-head-shard-v1\0";
 const HEAD_DIGEST_DOMAIN_B: &[u8] = b"overture-places-head-shard-v1\x01";
-// The `u8, u8` pair is `255 - prominence_rank, 255 - confidence_rank`: the
-// input order is DESC on both, and this key is compared ascending.
-type OrderKey = (String, String, String, u8, u8, [u8; 16], u32, u32, u64);
+/// The leading `bool` is `!identifying(field_mask)`: false sorts first, so
+/// name/brand matches lead. The `u8, u8` pair is
+/// `255 - prominence_rank, 255 - confidence_rank` -- the input is DESC on both
+/// and this key is compared ascending. Must mirror TOTAL_ORDER / HEAD_ORDER in
+/// scripts/places_construction_v1.py.
+type OrderKey = (
+    String,
+    String,
+    String,
+    bool,
+    u8,
+    u8,
+    [u8; 16],
+    u32,
+    u32,
+    u64,
+);
+
+/// Name (1) or brand (2) -- the fields that IDENTIFY a record rather than
+/// describe or locate it. Mirrors `identifying()` in the worker.
+fn identifying(field_mask: u8) -> bool {
+    field_mask & 3 != 0
+}
 
 fn head_digest(domain: &[u8], payload: &[u8]) -> [u8; 32] {
     let mut hasher = Sha256::new();
@@ -220,6 +240,7 @@ fn main() -> Result<()> {
                     group.to_owned(),
                     cell.to_owned(),
                     token.to_owned(),
+                    !identifying(masks.value(row)),
                     255 - prominences.value(row),
                     255 - ranks.value(row),
                     id,
@@ -232,6 +253,7 @@ fn main() -> Result<()> {
                     String::new(),
                     String::new(),
                     token.to_owned(),
+                    !identifying(masks.value(row)),
                     255 - prominences.value(row),
                     255 - ranks.value(row),
                     id,
