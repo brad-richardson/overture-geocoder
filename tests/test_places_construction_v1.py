@@ -1795,6 +1795,126 @@ def test_per_task_combining_then_global_topn_equals_a_single_global_topn():
     assert staged == direct
 
 
+# --------------------------------------------------------------------------- #
+# The ranking key has FIVE independent spellings across three languages. They are
+# not all gated against each other, so these tests are the gate.
+#
+# What was already enforced before them: the Rust encoder asserts its input
+# arrives in TOTAL_ORDER ("serving input is not in unique total order") and the
+# verifier re-derives its own key ("serving order regressed"). That covers
+# TOTAL_ORDER, but NOT the two caps and NOT the worker.
+#
+# The specific hole: the reducer SELECTS by SERVING_ORDER and emits
+# `ORDER BY TOTAL_ORDER`. Diverge the two tails and a different set of 256 rows
+# is retained -- then re-sorted into a valid layout, so the encoder accepts it,
+# every binding still matches, and no test fails. The 256-cap is the earliest
+# and tightest selection in the pipeline; a row dropped there is unrecoverable.
+# --------------------------------------------------------------------------- #
+
+# One canonical key, most significant first, written out ONCE here so a
+# reordering has to be made deliberately in two places to pass.
+CANONICAL_RANK_KEY = [
+    "identity",     # name/brand match before context-only
+    "prominence",   # category prior, DESC
+    "confidence",   # DESC -- and see CAP_ORDER's comment on what it really is
+    "feature_id",
+    "source_object_index",
+    "source_row_group",
+    "source_row_index",
+]
+
+
+def _signal_order(text: str, markers: dict[str, list[str]]) -> list[str]:
+    """Return the canonical fields in the order they first appear in `text`."""
+    found: list[tuple[int, str]] = []
+    for field, alternatives in markers.items():
+        positions = [text.index(m) for m in alternatives if m in text]
+        assert positions, f"no marker for {field!r} found in:\n{text}"
+        found.append((min(positions), field))
+    return [field for _, field in sorted(found)]
+
+
+def test_python_orderings_all_derive_from_one_constant(construction_module):
+    """No ordering in the producer may spell the rank key out again."""
+    module = construction_module
+    cap = module.CAP_ORDER
+
+    # The two caps must be the SAME object-equal string, not merely similar:
+    # both are asserted against the same tail of the encoder's OrderKey.
+    assert module.SERVING_ORDER == cap
+    assert module.HEAD_CAP_ORDER == cap
+    # The layout orders must END with it, so selection and layout agree.
+    assert module.TOTAL_ORDER.endswith(cap)
+    assert module.HEAD_ORDER.endswith(cap)
+    assert module.TOTAL_ORDER == f"execution_group, partition_cell, token, {cap}"
+    assert module.HEAD_ORDER == f"token, {cap}"
+    assert cap.startswith(module.IDENTIFYING_FIRST)
+
+    # And the sequence must appear exactly once in the source. This is what
+    # actually prevents the four inline copies from growing back: a re-inlined
+    # ordering would satisfy every assertion above and still fail here.
+    source = (ROOT / "scripts/places_construction_v1.py").read_text()
+    assert source.count("prominence_rank DESC, confidence_rank DESC") == 1
+
+
+def test_rust_encoder_and_verifier_order_keys_match_the_python_key():
+    """places-serving-encode-v1 and -verify-v1 must build the same key."""
+    markers = {
+        "identity": ["!identifying(masks.value(row))", "mask & 3 == 0"],
+        "prominence": ["255 - prominences.value(row)", "255 - prominence"],
+        "confidence": ["255 - ranks.value(row)", "255 - rank"],
+        "feature_id": ["id,"],
+        "source_object_index": ["objects.value(row)", "object,"],
+        "source_row_group": ["row_groups.value(row)", "group,"],
+        "source_row_index": ["rows.value(row)", "row,"],
+    }
+
+    encoder = (
+        ROOT / "crates/geocoder-construction/src/bin/places_serving_encode_v1.rs"
+    ).read_text()
+    # The encoder builds a routed key and a head key from one if/else. Both
+    # tails must match, which is exactly why SERVING_ORDER == HEAD_CAP_ORDER.
+    routed = encoder.split('let key = if mode == "routed" {', 1)[1]
+    head = routed.split("} else {", 1)[1].split("};", 1)[0]
+    routed = routed.split("} else {", 1)[0]
+    for label, block in (("routed", routed), ("head", head)):
+        assert _signal_order(block, markers) == CANONICAL_RANK_KEY, label
+
+    verifier = (
+        ROOT / "crates/geocoder-construction/src/bin/places_serving_verify_v1.rs"
+    ).read_text()
+    block = verifier.split("let key = (", 1)[1].split(");", 1)[0]
+    assert _signal_order(block, markers) == CANONICAL_RANK_KEY
+
+
+def test_worker_query_time_sorts_match_the_build_time_key():
+    """Build order and query order must agree, or the cap and the ranking fight.
+
+    Neither of these is covered by the encoder/verifier assertions -- the worker
+    sorts records it has already decoded, so a divergence here is invisible at
+    build time and shows up only as bad results.
+    """
+    markers = {
+        "identity": ["identifying("],
+        "prominence": ["prominence_rank.cmp"],
+        "confidence": ["confidence_rank.cmp"],
+        "feature_id": ["id.cmp"],
+        "source_object_index": ["source_object_index.cmp"],
+        "source_row_group": ["source_row_group.cmp"],
+        "source_row_index": ["source_row_index.cmp"],
+    }
+    worker = (
+        ROOT / "crates/geocoder-worker/src/places_construction_v1.rs"
+    ).read_text()
+
+    for anchor in (
+        "fn sort_by_identity_then_producer_order",   # head lane
+        "results.sort_by(|(left, left_mask), (right, right_mask)|",  # routed lane
+    ):
+        block = worker.split(anchor, 1)[1].split("});", 1)[0]
+        assert _signal_order(block, markers) == CANONICAL_RANK_KEY, anchor
+
+
 def test_shuffle_bucket_python_mirror_matches_the_sql(construction_module):
     # The bucket is computed in SQL during map and in Python everywhere else.
     # If they disagree, a consumer looks in the wrong shard and silently sees no

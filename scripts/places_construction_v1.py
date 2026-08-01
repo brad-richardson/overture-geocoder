@@ -85,37 +85,31 @@ MARKER_SCHEMA = "overture-places-construction-task-marker-v1"
 PLAN_SCHEMA = "overture-places-genesis-plan-v1"
 REDUCE_SCHEMA = "overture-places-selective-reduce-v1"
 REDUCE_RANGE_SCHEMA = "overture-places-bucket-range-reduce-v1"
-# The routed total order. This is NOT merely a layout choice: it is the order
-# `places-serving-encode-v1` ASSERTS its routed input arrives in
-# ("serving input is not in unique total order"), so it must stay in lockstep
-# with that encoder's OrderKey. Leaving it on confidence while the caps moved to
-# prominence is exactly what the Monaco slice caught -- reduce failed closed at
-# the first routed leaf rather than emitting a mis-sorted artifact.
-TOTAL_ORDER = (
-    "execution_group, partition_cell, token, ((field_mask & 3) != 0) DESC, "
-    "prominence_rank DESC, confidence_rank DESC, feature_id, "
-    "source_object_index, source_row_group, source_row_index"
-)
 # Whether a token matched a field that IDENTIFIES the record (primary/common
 # name = 1, brand = 2) rather than merely describing or locating it (category =
 # 4, locality/region/country context = 8). Must stay identical to
 # `identifying()` in crates/geocoder-worker/src/places_construction_v1.rs, which
 # applies the same rule at query time.
 IDENTIFYING_FIRST = "((field_mask & 3) != 0) DESC"
-# The head-cap ranking: which `head_result_cap` rows of a token survive.
+# THE one ranking key. Every cap, every layout order, and both Rust `OrderKey`s
+# are this sequence; nothing in this file may spell it out again.
 #
-# This was FOUR inline literals before it was a constant -- the per-task cap, the
-# fan-in merge, the sharded head, and the merged head each spelled it out. The
-# merge argument `top_n(A u B) = top_n(top_n(A) u top_n(B))` holds only while all
-# four agree, so a change to three of them would silently produce a different
-# head with no row lost, no binding violated, and no test failing. Same reasoning
-# as SERVING_ORDER below; see its comment.
+# It was previously written out four separate times, and two of those copies
+# were NOT gated against each other -- see the SERVING_ORDER comment below for
+# the specific hole that left. Deriving all four from one constant is what makes
+# the decomposability argument `top_n(A u B) = top_n(top_n(A) u top_n(B))` true
+# by construction rather than by inspection.
 #
-# `prominence_rank` leads because `confidence_rank` CANNOT rank POIs: Overture
-# confidence is an existence signal that anti-correlates with fame (measured --
-# the Basilica de la Sagrada Familia scores 0.9897 against 0.9998 for the
-# Starbucks next door). Ranking by confidence alone is what evicted every
-# landmark from the head. See scripts/places_type_prior_v1.py.
+# `prominence_rank` outranks `confidence_rank` because confidence CANNOT rank
+# POIs. It is a PER-SOURCE value and, for most sources, a flat constant:
+# Foursquare stamps exactly 0.7700 on 100% of its records, PinMeTo and DAC
+# exactly 1.0, AllThePlaces floors at 0.80; only `meta` is continuous. So
+# `confidence_rank DESC` orders a tie by which upstream dataset supplied the
+# row. Measured 2026-08-01 across seven regions --
+# benchmarks/2026-08-01-confidence-and-duplicates.json. It is kept as the last
+# discriminator before identity only because the alternative is `feature_id`,
+# i.e. UUID order. See scripts/places_type_prior_v1.py for the prior that
+# replaced it at the top of the key.
 #
 # IDENTITY LEADS, and it must. `prominence_rank` is a per-RECORD category prior,
 # so it applies to every token a record emits -- including the locality/region/
@@ -126,27 +120,45 @@ IDENTIFYING_FIRST = "((field_mask & 3) != 0) DESC"
 # churches) and `Novotel Monte Carlo` -- an actual name match -- was displaced.
 # This is Stage 2 item 5, and it is what makes the query-time field-mask rerank
 # (PR #221) reachable at all.
-HEAD_CAP_ORDER = (
+CAP_ORDER = (
     f"{IDENTIFYING_FIRST}, prominence_rank DESC, confidence_rank DESC, "
     "feature_id, source_object_index, source_row_group, source_row_index"
 )
-HEAD_ORDER = f"token, {HEAD_CAP_ORDER}"
-# The serving-candidate ranking, used in EXACTLY two places: the map-side
-# combiner and the reducer's serving QUALIFY. It must be one constant, not two
-# literals. The map combiner is only exact because it ranks rows the same way
-# the reducer does -- if the two ever disagreed, every map task would retain the
-# wrong candidates and the reducer would serve them, with no row lost, no
-# binding violated, and no test failing. A shared constant makes that class of
-# bug impossible rather than merely unobserved.
+# The routed total order. This is NOT merely a layout choice: it is the order
+# `places-serving-encode-v1` ASSERTS its routed input arrives in
+# ("serving input is not in unique total order"), so it must stay in lockstep
+# with that encoder's OrderKey. Leaving it on confidence while the caps moved to
+# prominence is exactly what the Monaco slice caught -- reduce failed closed at
+# the first routed leaf rather than emitting a mis-sorted artifact.
 #
-# `prominence_rank` leads here for the same reason it leads HEAD_CAP_ORDER, and
-# it matters MORE here: this cap runs first and is 33x tighter in reach. A
-# landmark evicted at the serving cap can never be recovered by the head cap
-# downstream, however the head is ranked.
-SERVING_ORDER = (
-    f"{IDENTIFYING_FIRST}, prominence_rank DESC, confidence_rank DESC, "
-    "feature_id, source_object_index, source_row_group, source_row_index"
-)
+# Its tail IS `CAP_ORDER`, and that is load-bearing rather than tidy: the
+# reducer SELECTS by SERVING_ORDER and then emits `ORDER BY TOTAL_ORDER`. If the
+# two tails disagreed, the rows retained would not be the rows the layout order
+# describes -- and because the output is re-sorted either way, the encoder would
+# accept the stream and nothing would fail. That is the hole this constant
+# closes.
+TOTAL_ORDER = f"execution_group, partition_cell, token, {CAP_ORDER}"
+# The head-cap ranking: which `head_result_cap` rows of a token survive. Used by
+# the per-task cap, the fan-in merge, the sharded head, and the merged head --
+# four call sites whose agreement is what makes the merge argument
+# `top_n(A u B) = top_n(top_n(A) u top_n(B))` hold.
+HEAD_CAP_ORDER = CAP_ORDER
+HEAD_ORDER = f"token, {CAP_ORDER}"
+# The serving-candidate ranking, used in EXACTLY two places: the map-side
+# combiner and the reducer's serving QUALIFY. The map combiner is only exact
+# because it ranks rows the same way the reducer does -- if the two ever
+# disagreed, every map task would retain the wrong candidates and the reducer
+# would serve them, with no row lost, no binding violated, and no test failing.
+#
+# This cap runs FIRST and is 33x tighter in reach than the head cap, so it is
+# the most consequential ordering in the system: a landmark evicted here can
+# never be recovered downstream, however the head is ranked.
+#
+# It is `CAP_ORDER` itself, not a copy of it, and it must equal HEAD_CAP_ORDER
+# rather than merely resemble it -- both are asserted against the SAME tail of
+# the Rust encoder's `OrderKey`, which builds routed and head keys from one
+# expression.
+SERVING_ORDER = CAP_ORDER
 SERVING_PARTITION = "PARTITION BY partition_cell, token"
 # The combiner deletes rows outside the top-N of each (partition_cell, token)
 # group. That is exact ONLY while a group is never split across two reduce

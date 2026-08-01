@@ -1191,7 +1191,10 @@ fn field_mask_union(per_token: &[Vec<PlacesV1Record>]) -> HashMap<String, u8> {
 }
 
 /// Order identifying matches ahead of context-only ones, then by the producer
-/// order (`confidence_rank DESC, feature_id, locator`) within each group.
+/// order (`prominence_rank DESC, confidence_rank DESC, feature_id, locator`)
+/// within each group. This is `CAP_ORDER` in scripts/places_construction_v1.py
+/// and is pinned against it by
+/// `test_worker_query_time_sorts_match_the_build_time_key`.
 fn sort_by_identity_then_producer_order(
     records: &mut [PlacesV1Record],
     union: &HashMap<String, u8>,
