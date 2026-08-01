@@ -565,6 +565,99 @@ def _reduce_marker_key(family: str, index: int) -> str:
     return f"reduce/{family}/tasks/{index:04d}/complete.json"
 
 
+def _reduce_marker_value(
+    family: str, index: int, reduction: dict[str, Any]
+) -> dict[str, Any]:
+    """The durable completion marker, now carrying the FULL reduction record.
+
+    Item 6. Promotion authenticates reductions by downloading `cv1-reduce-*`
+    from the construction run's GitHub artifacts, which retain 7 days. That
+    produced a hard promotion deadline (2026-08-02T20:38Z for the last run) and
+    forced commit 8aea031 to be written mid-flight because a finalize-only
+    recovery run carries no `cv1-reduce-*` at all. The reduction set now lives
+    in the construction namespace beside every other authenticated input, so
+    promotion can depend on R2 alone.
+
+    The record rides INSIDE the existing marker rather than under a key of its
+    own, and that is load-bearing. `write_marker_last` is create-only: a second
+    write of DIFFERENT bytes raises. A reduction record is NOT byte-stable
+    across runs -- `StageWatchdog.evidence()` carries `wall_seconds`,
+    `peak_rss_bytes` and sweep counts -- so a separate record write would leave
+    a resume trap: die between the record and the marker, and every retry of
+    that partition raises forever on the differing bytes. One write, still
+    written last, has neither problem.
+
+    `partition_index` and `artifact` are retained so anything already reading
+    them keeps working; the marker's only current reader treats it as an
+    existence check.
+
+    WATCHDOG TELEMETRY IS STRIPPED, and that is required for correctness rather
+    than tidiness. `StageWatchdog.evidence()` reports `wall_seconds`,
+    `peak_rss_bytes`, `observations` and `peak_sweep_seconds` -- none of them
+    reproducible. Carrying them made the marker differ between two executions of
+    the SAME partition, which `write_marker_last` correctly rejects
+    (test_execute_sequence_places_end_to_end_with_head_no_network caught exactly
+    that: 3340 bytes against 3325). Promotion never reads them either: it uses
+    `schema`, `partition.id` and the serving-object key only
+    (promote_construction_slice._load_reductions, _places_routing,
+    _artifact_keys). The full record including telemetry still travels in the
+    GitHub artifact for debugging; what has to be DURABLE is the authenticating
+    subset, and that subset is deterministic.
+    """
+    return {
+        "partition_index": index,
+        "artifact": reduction.get(REDUCTION_SERVING_OBJECTS[family]),
+        "reduction": _authenticating_reduction(reduction),
+    }
+
+
+# The fields of a reduction record that are invariant across HOW the reduce was
+# executed. An allowlist, not a denylist, because the failure mode of getting
+# this wrong is a marker that cannot be rewritten on a legitimate re-execution.
+#
+# This is exactly the set
+# test_execute_sequence_places_end_to_end_with_head_no_network asserts is
+# identical between a bucket-range reduce and a per-partition reduce of the same
+# partitions, plus the schema and the emit verification. What is deliberately
+# EXCLUDED:
+#
+#   *_evidence           StageWatchdog telemetry -- wall_seconds, peak RSS, peak
+#                        disk, sweep counts. Not reproducible at all.
+#   streaming_ingestion  describes the PASS, not the partition: a bucket-range
+#                        job ingests every partition in its range in one go, so
+#                        `scope` reads "bucket-range-job" there and differs for a
+#                        single-partition run of the same work. The record's own
+#                        comment says so.
+#
+# Promotion reads only `schema`, `partition.id` and the serving-object key
+# (promote_construction_slice._load_reductions / _places_routing /
+# _artifact_keys), so everything it authenticates against is here.
+_AUTHENTICATING_REDUCTION_FIELDS = (
+    "schema",
+    "partition",
+    "binding",
+    "leaf_object",
+    "routed_object",
+    "artifact",
+    "reconciled_row_groups",
+    "serving_candidate_rows",
+    "emit_verification",
+)
+
+
+def _authenticating_reduction(reduction: dict[str, Any]) -> dict[str, Any]:
+    """The execution-grouping-invariant subset of a reduction record.
+
+    The durable marker is create-only, so whatever goes in it must be identical
+    for two runs of the same partition however the reduce was grouped.
+    """
+    return {
+        key: reduction[key]
+        for key in _AUTHENTICATING_REDUCTION_FIELDS
+        if key in reduction
+    }
+
+
 def _head_marker_key() -> str:
     return "head/places/complete.json"
 
@@ -2158,8 +2251,7 @@ def _reduce_one_partition(
     # byte-identical to the unbatched plan.
     store.write_marker_last(
         _reduce_marker_key(args.family, partition_index),
-        {"partition_index": partition_index,
-         "artifact": reduction.get(REDUCTION_SERVING_OBJECTS[args.family])},
+        _reduce_marker_value(args.family, partition_index, reduction),
     )
     return reduction
 
@@ -2225,8 +2317,7 @@ def _reduce_bucket_range(
         write_json(output_dir / f"{partition_index:04d}.json", reduction)
         store.write_marker_last(
             _reduce_marker_key(args.family, partition_index),
-            {"partition_index": partition_index,
-             "artifact": reduction.get(REDUCTION_SERVING_OBJECTS[args.family])},
+            _reduce_marker_value(args.family, partition_index, reduction),
         )
     return result
 
@@ -2962,6 +3053,57 @@ def cmd_finalize(args: argparse.Namespace) -> int:
 # --------------------------------------------------------------------------- #
 # ledger
 # --------------------------------------------------------------------------- #
+def cmd_export_reductions(args: argparse.Namespace) -> int:
+    """Rebuild the reduction set from the durable R2 markers.
+
+    Item 6, consumer half. Promotion previously authenticated reductions from
+    `cv1-reduce-*` GitHub artifacts, which retain 7 days -- a hard promotion
+    deadline, plus a special case because a finalize-only recovery run carries
+    no `cv1-reduce-*` at all and had to re-upload `cv1-resume-reductions`.
+
+    Every reduce marker now carries its full reduction record, so the set can be
+    reconstructed from the construction namespace alone. Fails closed on a gap
+    rather than emitting a short set: a promotion built from a partial reduction
+    set would bind a partial routing table.
+    """
+    contract = read_json(args.contract)
+    store = _store(args, request_sha256=contract["request_sha256"])
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    missing: list[int] = []
+    written = 0
+    for index in range(args.partitions):
+        marker = store.read_json(_reduce_marker_key(args.family, index))
+        if marker is None:
+            missing.append(index)
+            continue
+        reduction = marker.get("reduction")
+        if not isinstance(reduction, dict):
+            raise SystemExit(
+                f"{args.family} reduce marker {index:04d} carries no full "
+                "reduction record. It was written by a producer predating item "
+                "6; promote from that run's GitHub artifacts instead."
+            )
+        write_json(output_dir / f"{index:04d}.json", reduction)
+        written += 1
+
+    if missing:
+        raise SystemExit(
+            f"{args.family} reduction set is incomplete: {len(missing)} of "
+            f"{args.partitions} partitions have no durable marker "
+            f"(first missing: {missing[:8]}). Refusing to emit a partial set."
+        )
+    print(
+        json.dumps(
+            {"family": args.family, "partitions": args.partitions,
+             "reductions_written": written, "source": "r2-construction-namespace"},
+            sort_keys=True,
+        )
+    )
+    return 0
+
+
 def cmd_ledger_append(args: argparse.Namespace) -> int:
     ledger = read_json(args.ledger)
     ledger.setdefault("phases", []).append({"phase": args.phase, "runner_minutes": args.minutes})
@@ -3167,6 +3309,15 @@ def build_parser() -> argparse.ArgumentParser:
     final.add_argument("--output", type=Path, required=True)
     _add_staging_arguments(final)
     final.set_defaults(func=cmd_finalize)
+
+    export = sub.add_parser("export-reductions")
+    export.add_argument("--contract", type=Path, required=True)
+    export.add_argument("--family", choices=FAMILIES, required=True)
+    export.add_argument("--partitions", type=int, required=True)
+    export.add_argument("--output-dir", type=Path, required=True)
+    export.add_argument("--store-root", required=True)
+    _add_staging_arguments(export)
+    export.set_defaults(func=cmd_export_reductions)
 
     append = sub.add_parser("ledger-append")
     append.add_argument("--ledger", type=Path, required=True)

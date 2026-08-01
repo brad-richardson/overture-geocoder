@@ -1618,3 +1618,128 @@ def test_prior_runner_minutes_bind_into_the_typed_confirmation():
         prior_runner_minutes=resumed["request"]["caps"]["prior_runner_minutes"]))
     assert regen["request"] == resumed["request"]
     assert regen["typed_confirmation"] == resumed["typed_confirmation"]
+
+
+def test_reduce_marker_carries_the_grouping_invariant_reduction():
+    """Item 6. Promotion authenticated reductions from `cv1-reduce-*` GitHub
+    artifacts, which retain 7 days -- a hard promotion deadline plus a special
+    case for finalize-only recovery runs, which carry no such artifact.
+
+    The record rides inside the existing marker rather than under its own key,
+    and that placement forces a constraint: `write_marker_last` is create-only,
+    so whatever goes in must be identical for two runs of the SAME partition
+    however the reduce was grouped. Two things are therefore excluded, both
+    found by tests rather than by inspection:
+
+      *_evidence           StageWatchdog telemetry (wall_seconds, peak RSS).
+      streaming_ingestion  describes the PASS, not the partition -- `scope` is
+                           "bucket-range-job" for a ranged reduce and differs for
+                           a per-partition reduce of identical work.
+    """
+    module = HOSTED
+    reduction = {
+        "schema": "overture-places-selective-reduce-v1",
+        "partition": {"id": "p-0000"},
+        "binding": {"records": 720},
+        "routed_object": {"key": "serve/places-v1/routed/abc.plrv"},
+        "reconciled_row_groups": 3,
+        "serving_candidate_rows": 12,
+        "emit_verification": {"binds_published_bytes": True},
+        "streaming_ingestion": {"scope": "bucket-range-job"},
+        "encode_evidence": {"wall_seconds": 1.234, "peak_rss_bytes": 999},
+        "ingest_evidence": {"wall_seconds": 5.678},
+    }
+    value = module._reduce_marker_value("places", 7, reduction)
+    durable = value["reduction"]
+
+    # What promotion authenticates against must survive.
+    assert durable["schema"] == reduction["schema"]
+    assert durable["partition"] == reduction["partition"]
+    assert durable["routed_object"] == reduction["routed_object"]
+    assert durable["binding"] == reduction["binding"]
+
+    # What is not reproducible must not.
+    assert "encode_evidence" not in durable
+    assert "ingest_evidence" not in durable
+    assert "streaming_ingestion" not in durable
+
+    # Retained so anything already reading the marker keeps working.
+    assert value["partition_index"] == 7
+    assert value["artifact"] == {"key": "serve/places-v1/routed/abc.plrv"}
+
+
+def test_durable_reduction_is_identical_across_execution_groupings():
+    """The create-only marker makes this a correctness requirement, not a nicety:
+    a bucket-range reduce and a per-partition reduce of the same partition must
+    produce byte-identical durable records, or the second one can never write."""
+    module = HOSTED
+    base = {
+        "schema": "overture-places-selective-reduce-v1",
+        "partition": {"id": "p-0000"},
+        "binding": {"records": 720},
+        "routed_object": {"key": "serve/places-v1/routed/abc.plrv"},
+    }
+    ranged = {
+        **base,
+        "streaming_ingestion": {"scope": "bucket-range-job"},
+        "ingest_evidence": {"wall_seconds": 9.1, "peak_rss_bytes": 111},
+    }
+    single = {
+        **base,
+        "streaming_ingestion": {"scope": "single-partition"},
+        "ingest_evidence": {"wall_seconds": 2.7, "peak_rss_bytes": 222},
+    }
+    assert (
+        module._reduce_marker_value("places", 0, ranged)
+        == module._reduce_marker_value("places", 0, single)
+    )
+
+
+def test_export_reductions_refuses_a_partial_set(tmp_path, monkeypatch):
+    """A promotion built from a short reduction set would bind a partial routing
+    table, so a gap must fail closed rather than emit fewer files."""
+    import argparse
+
+    module = HOSTED
+
+    class Store:
+        def read_json(self, key):
+            # Partition 0002 never completed.
+            return None if "0002" in key else {
+                "partition_index": 0,
+                "reduction": {"schema": "s", "partition": {"id": "x"}},
+            }
+
+    monkeypatch.setattr(module, "_store", lambda *_a, **_k: Store())
+    monkeypatch.setattr(module, "read_json", lambda _p: {"request_sha256": "a" * 64})
+    args = argparse.Namespace(
+        contract=tmp_path / "contract.json", family="places", partitions=4,
+        output_dir=tmp_path / "out", store_root=str(tmp_path / "store"),
+        staging_root=None, staging_bucket=None, staging_endpoint_url=None,
+        staging_report=None,
+    )
+    with pytest.raises(SystemExit, match="incomplete"):
+        module.cmd_export_reductions(args)
+
+
+def test_export_reductions_rejects_a_pre_item6_marker(tmp_path, monkeypatch):
+    """A marker written by an older producer carries no `reduction`. Say so
+    explicitly instead of emitting an empty record."""
+    import argparse
+
+    module = HOSTED
+
+    class Store:
+        def read_json(self, _key):
+            return {"partition_index": 0, "artifact": {"key": "k"}}
+
+    monkeypatch.setattr(module, "_store", lambda *_a, **_k: Store())
+    monkeypatch.setattr(module, "read_json", lambda _p: {"request_sha256": "a" * 64})
+    args = argparse.Namespace(
+        contract=tmp_path / "contract.json", family="places", partitions=1,
+        output_dir=tmp_path / "out", store_root=str(tmp_path / "store"),
+        staging_root=None, staging_bucket=None, staging_endpoint_url=None,
+        staging_report=None,
+    )
+    with pytest.raises(SystemExit, match="predating item"):
+        module.cmd_export_reductions(args)
