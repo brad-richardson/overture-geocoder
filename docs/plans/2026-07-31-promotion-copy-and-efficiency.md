@@ -382,3 +382,89 @@ Overture places** — measured over 772,341 places across Barcelona, Paris,
 Seattle, and Tokyo, 0.0% non-empty in every one. It is consumed only by
 `baseline_places_construction_v1.py`, not by the serving path. Dropping it from
 the projection is free and removes a per-row list allocation.
+
+
+## 11. OPERATOR PRIORITY (2026-08-01): one planet job, resumable, copy-free
+
+Raised directly by the operator and marked high priority so it does not get
+lost. Three asks, and they are one architecture:
+
+**(a) Build the whole planet as a single job, not four workflows.** The planet
+path today spans four workflows and 22 jobs:
+
+| workflow | jobs |
+|---|---|
+| `construction-v1.yml` | 8 (admit, project/map, plan, reduce, head, finalize) |
+| `reverse-v2.yml` | 3 |
+| `release-slice-families.yml` | 6 |
+| `promote-v2-release.yml` | 5 (probe, promote-slice, publish-release, promote-catalog) |
+
+Each boundary is a place where state is handed over as GitHub artifacts, a fresh
+environment is provisioned, and identity has to be re-authenticated. The
+existing design work for this is **Track C** of
+`2026-07-28-planet-build-wall-clock-review.md:411`: run the 89 Places / 127
+Address map tasks through a *work-conserving queue on a long-lived worker pool*
+rather than provisioning a fresh runner per matrix entry, with immutable
+content-addressed fragments still the recovery boundary. Track C is Wave 5 and
+is **unexecuted** — Wave 0 items 1-4 landed (PR #185), 5-6 and Waves 1-5 did
+not.
+
+**(b) Easily resumable.** The pieces already exist and are not composed:
+markers are written last, staging is content-addressed, and the Europe stress
+trees prove phases resume. What is missing is a single resume entry point
+spanning the four workflows rather than per-workflow recovery paths (the
+finalize-only recovery run, the `cv1-resume-reductions` special case in item 6).
+
+**(c) Minimize arbitrary copies.** Already itemized and measured:
+- **Item 1** — promotion server-side `CopyObject`s every forward serving object
+  between two content-addressed prefixes that differ only by prefix. Reverse
+  already avoids this by prepositioning. 158 GiB copied for nothing.
+- **Item 6** — reduction records only in GitHub artifacts forces a 7-day
+  promotion deadline and a recovery special case.
+- **Item 9** — the copy that cannot retry a definite 5xx, which discarded a
+  4h17m run.
+
+Items 1, 6 and 9 are the copy-minimization work; (a) and (b) are Track C. They
+should be scoped together, because Track C's long-lived owners are also what
+removes the per-task `cargo build` and the per-task environment provisioning
+(item 12).
+
+## 12. Every matrix task recompiles the Rust binaries from scratch
+
+MEASURED 2026-08-01. `construction-v1.yml` runs
+`cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins
+--release` in **three** jobs — `map` (line 836), `reduce` (line 1150) and
+`head` (line 1273). `map` and `reduce` are **matrix** jobs, so this is paid once
+per task: 89 Places map tasks alone, plus every reduce partition.
+
+There is **no Rust caching anywhere in the repository** — no `actions/cache`,
+no `Swatinem/rust-cache`, no `sccache`, no `CARGO_HOME` restore. Every one of
+those builds is cold, including the crates.io fetch.
+
+A cold release build of `geocoder-construction --bins` measured **9.24 s** on
+the dev machine with a warm cargo registry. A free Actions runner has 2-4 vCPU
+and an empty registry, so its real cost is materially higher; that number has
+NOT been measured and should be before quoting a total.
+
+The fix needs no new machinery: the workflow already uses
+`upload-artifact`/`download-artifact` in ~15 places. Build the binaries once in
+`admit` and download them in `map`/`reduce`/`head`. Track C subsumes this
+entirely by keeping binaries warm on long-lived workers, so do the artifact
+version only if Track C slips.
+
+## 13. Construction runs entirely on x86 while 18 jobs elsewhere already use ARM
+
+`construction-v1.yml` pins **all 8 jobs** to `ubuntu-24.04`. Across the
+repository the runner split is 28 `ubuntu-latest`, 21 `ubuntu-24.04`, and 18
+`ubuntu-24.04-arm` — so ARM is already in use here, just not on the planet path.
+
+**The blocker is concrete**: `.github/requirements-hosted-rowgroup.txt` pins 19
+`sha256` hashes under `--require-hashes`, and contains **zero** aarch64 wheels.
+numpy, pyarrow, duckdb, psutil, unicodedata2 and boto3 all resolve to x86_64
+manylinux wheels. Moving construction to ARM requires adding aarch64 wheel
+hashes for each; the hash pin then covers both architectures. Until that is
+done a runner switch fails closed at install time, which is the pin working
+correctly.
+
+Not obviously worth doing on its own — sequence it behind Track C, and treat any
+wall-clock claim as unmeasured until an ARM slice run exists.
