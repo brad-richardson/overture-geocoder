@@ -135,6 +135,19 @@ It also has to answer a measured problem: on a 38,182-record Monaco slice,
 so the cap falls back to `feature_id` — UUID order, which is RC1 one level down.
 The category prior separates *classes*, not *instances*.
 
+### Wave A/B progress, 2026-08-01
+
+Landed: **item 9** (definite-5xx copy retry), **item 7** (reverse max_parallel
+4), **item 13** (ARM — construction and slice-smoke on `ubuntu-24.04-arm`,
+validated by a green ARM slice-smoke on real data first), **item 12** (binaries
+built once in a `binaries` job from the request-pinned producer commit), and the
+**data half of item 6** (every reduce marker carries its grouping-invariant
+reduction record; `construction_v1_hosted.py export-reductions` rebuilds the set
+from R2 — verified 4/4 on the Monaco slice with an empty local store).
+
+Still open in item 6: `promote-v2-release.yml` still downloads `cv1-reduce-*`,
+so the 7-day deadline applies until the consumer is switched.
+
 ### Wave D — the operator priority
 
 **Item 11 / Track C: one resumable planet job replacing four workflows.** The
@@ -145,8 +158,13 @@ Track C (`2026-07-28-planet-build-wall-clock-review.md:411`, Wave 5,
 **unexecuted**) is the existing design. It subsumes item 12 by keeping binaries
 warm, and pairs with items 1/6/9 as the copy-minimization half.
 
-Next deliverable is a written scope against the current phase boundaries, not an
-implementation.
+**Scope written 2026-08-01: `2026-08-01-one-planet-job-scope.md`.** Its central
+finding: "one job" cannot mean one GitHub job. Measured phase wall clock (Places
+head 207 runner minutes, reverse 2h15m/2h33m, finalize 56m50s) exceeds the
+6-hour job ceiling, and `test_every_phase_carries_the_330_minute_job_timeout`
+pins the per-phase limit. It has to mean one DISPATCH and one RESUME BOUNDARY
+over a long-lived worker pool — which is what Track C says, and the distinction
+needs stating before anyone implements against the phrase.
 
 ### Still open, unscheduled
 
