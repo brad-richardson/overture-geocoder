@@ -41,12 +41,7 @@ pub fn merge_results(
         }
     }
 
-    // Sort by importance (descending)
-    merged.sort_by(|a, b| {
-        b.importance
-            .partial_cmp(&a.importance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    crate::query::ordering::sort_results(&mut merged);
 
     // Truncate to limit
     merged.truncate(limit);
@@ -59,11 +54,7 @@ pub fn merge_results(
 #[allow(dead_code)]
 pub fn merge_single(results: Vec<GeocoderResult>, limit: usize) -> Vec<GeocoderResult> {
     let mut results = results;
-    results.sort_by(|a, b| {
-        b.importance
-            .partial_cmp(&a.importance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    crate::query::ordering::sort_results(&mut results);
     results.truncate(limit);
     results
 }

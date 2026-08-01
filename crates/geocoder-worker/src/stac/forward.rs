@@ -466,11 +466,12 @@ impl ShardLoader {
             }
         }
 
-        all_results.sort_by(|a, b| {
-            b.importance
-                .partial_cmp(&a.importance)
-                .unwrap_or(std::cmp::Ordering::Equal)
-        });
+        // The one total order (geocoder_core::query::ordering): importance
+        // DESC, bbox extent DESC, population DESC, gers_id ASC. Previously this
+        // sorted on importance alone with `unwrap_or(Equal)`, so ties fell back
+        // to whichever shard's future resolved first and a NaN score claimed
+        // equality with everything.
+        geocoder_core::query::sort_results(&mut all_results);
 
         let mut seen = std::collections::HashSet::new();
         all_results.retain(|r| seen.insert(r.gers_id.clone()));

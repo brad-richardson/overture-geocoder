@@ -3,10 +3,12 @@
 mod bias;
 mod fts;
 mod merge;
+mod ordering;
 
 pub use bias::apply_location_bias;
 pub use fts::prepare_fts_query;
 pub use merge::merge_results;
+pub use ordering::{compare_results, sort_results};
 
 // =============================================================================
 // Scoring constants

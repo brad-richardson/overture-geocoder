@@ -50,12 +50,8 @@ pub fn apply_location_bias(results: &mut [GeocoderResult], bias: &LocationBias) 
         result.importance += calculate_bias_boost(result, bias);
     }
 
-    // Re-sort by adjusted importance (descending)
-    results.sort_by(|a, b| {
-        b.importance
-            .partial_cmp(&a.importance)
-            .unwrap_or(std::cmp::Ordering::Equal)
-    });
+    // Re-sort by adjusted importance, through the one total order.
+    crate::query::ordering::sort_results(results);
 }
 
 /// Calculate the bias boost for a single result.
