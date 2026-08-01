@@ -145,8 +145,40 @@ built once in a `binaries` job from the request-pinned producer commit), and the
 reduction record; `construction_v1_hosted.py export-reductions` rebuilds the set
 from R2 — verified 4/4 on the Monaco slice with an empty local store).
 
-Still open in item 6: `promote-v2-release.yml` still downloads `cv1-reduce-*`,
-so the 7-day deadline applies until the consumer is switched.
+**Item 6 is now complete, both halves** (`be48baa`). `promote-slice` reads the
+published family manifest for the expected partition count, rebuilds the set
+from R2 with `export-reductions`, and falls back to `cv1-reduce-*` only for a
+slice built before the marker carried its record — emitting a `::warning::`
+when it does, because a silent fallback is a deadline nobody knows they are
+under. The set must equal the manifest's `partitions` whichever source supplied
+it, which is also the first per-partition check the artifact path ever had.
+Verified on the Monaco slice: promotion planned from the R2-exported reductions
+is **byte-identical** to promotion planned from the full artifact records
+(`dc8e1360…5970`).
+
+**Item 1 landed the same day** (`0a37456`), ahead of its queue position,
+because it is independent of Track C and is the largest single arbitrary copy
+in the system. `construction-v1.yml` takes an optional `release_slice_version`;
+finalize publishes the serving objects straight into
+`<version>/families/<family>/objects/`; `promote-slice` reads the layout off
+the finalize marker's own keys and binds them. Measured on the Monaco slice,
+both layouts promoted end to end:
+
+| | copied | prepositioned | destination |
+|---|---|---|---|
+| construction layout | 21 | 0 | 23 objects, 34,540,148 B |
+| release layout | **0** | 21 | 23 objects, 34,540,148 B |
+
+with **byte-identical** published `routing.json` and family manifest. The slice
+smoke now runs both layouts and asserts that equality on every change
+(`0bf477e`).
+
+**Item 1 has a precondition before planet use, and it is not met.** A wrong
+`release_slice_version` puts ~45 GiB (Places) or ~114 GiB (Addresses) of inert
+objects into a release namespace, and `r2-cleanup.yml`'s phases are prefix-gated
+to `staging/global-v2/<64-hex>/` — no phase matches an abandoned
+`slice-YYYY-MM-DD.N/` prefix. Empty `release_slice_version` keeps the old
+behaviour exactly, so this gates only the new path.
 
 ### Wave D — the operator priority
 
