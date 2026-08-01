@@ -19,7 +19,13 @@ name: Promote v2 Release
 #                    DeleteObject, so unavailable recovery is a signed CAS PUT.
 #                    Run this green before any other stage.
 #   promote-slice    promote_construction_slice.py plan -> execute -> verify
-#                    per family (server-side CopyObject inside the bucket),
+#                    per family. Forward objects are server-side CopyObject'd
+#                    inside the bucket, UNLESS construction already published
+#                    them at their release keys (item 1,
+#                    construction-v1.yml's release_slice_version) -- then they
+#                    are bound in place and nothing is copied. The plan reads
+#                    which it is off the finalize marker's own keys and prints
+#                    it as `forward_layout`.
 #                    then create-only publication of
 #                    {slice}/slice-manifest.json, the #107 source document
 #                    v2_release_manifest.py assemble fails closed without.
@@ -718,8 +724,15 @@ jobs:
               exit 1
             fi
             TOTALS="$(jq -c --arg f "$FAMILY" '.families[$f].totals' "plans/${FAMILY}.json")"
-            echo "planned ${FAMILY}: ${TOTALS} -> ${SLICE_VERSION}/families/${FAMILY}/ (create-only, never deletes)"
-            echo "- \`${FAMILY}\`: ${TOTALS}" >> "$GITHUB_STEP_SUMMARY"
+            # Item 1. `construction-copy` means promotion CopyObjects every
+            # forward serving object into the release namespace;
+            # `release-prepositioned` means construction already published them
+            # there and promotion binds them without moving a byte. The plan
+            # derives this from the finalize marker's own keys, so printing it is
+            # how the operator sees which shape they dispatched into.
+            LAYOUT="$(jq -er --arg f "$FAMILY" '.families[$f].forward_layout' "plans/${FAMILY}.json")"
+            echo "planned ${FAMILY}: ${LAYOUT} ${TOTALS} -> ${SLICE_VERSION}/families/${FAMILY}/ (create-only, never deletes)"
+            echo "- \`${FAMILY}\` (\`${LAYOUT}\`): ${TOTALS}" >> "$GITHUB_STEP_SUMMARY"
           done
           if [ "$MODE" != "execute" ]; then
             echo "dry-run: no execute, no verify, no slice manifest written" | tee -a "$GITHUB_STEP_SUMMARY"
