@@ -265,6 +265,44 @@ def test_only_phase_five_steps_touch_the_root_catalog():
             assert "phase5" in gate, step.get("name")
 
 
+def test_every_prefix_deleting_phase_checks_BOTH_catalog_roots():
+    """docs/v2-release-catalog-contract.md: "Retention must consider both catalog
+    roots before deleting an object."
+
+    prune_catalog.py walks catalog.json child links only and contains no
+    reference to v2 or slice, so on its own it reports *unreferenced* for any
+    bucket-root prefix reachable through the v2 chain -- including a live slice
+    and the legacy core a v2 release binds. Phases 3 and 5 are the two steps that
+    delete a whole bucket-root prefix, so both must run both guards.
+    """
+    deleting = []
+    for step in _cleanup_job()["steps"]:
+        run = step.get("run", "")
+        # The prefix-deleting phases are the ones that RM a target read from the
+        # plan's delete list.
+        if 'RM "$target"' in run and "assert-unreferenced" in run:
+            deleting.append(step)
+            assert "prune_catalog.py assert-unreferenced" in run, step.get("name")
+            assert "v2_retention_guard.py assert-unreferenced" in run, step.get("name")
+    # Guard the guard: if the phases are ever renamed or restructured, this test
+    # must not silently pass by matching nothing.
+    assert len(deleting) == 2, [step.get("name") for step in deleting]
+
+
+def test_the_v2_guard_input_is_fetched_and_fails_closed():
+    """The chain has to be downloaded before either phase can check it, and an
+    unfetchable chain must kill the job rather than read as 'unreferenced'."""
+    fetch = step_by_name(_cleanup_job(), "Fetch the v2 catalog chain for the retention guard")
+    gate = fetch["if"]
+    assert "phase3" in gate and "phase5" in gate
+    run = fetch["run"]
+    # `set -e` plus an unconditional copy is what makes a missing catalog fatal.
+    assert "set -euo pipefail" in run
+    assert 's3 cp "s3://$BUCKET/v2/catalog.json"' in run
+    # Every release the catalog names must be fetched, not just the latest.
+    assert ".releases[]?" in run
+
+
 def test_catalog_prune_is_gated_so_prune_argument_is_never_empty():
     prune = step_by_name(_cleanup_job(), "Prune catalog and verify")
     assert prune["if"] == "steps.plan.outputs.phase5 == 'true'"

@@ -14,6 +14,15 @@ name: R2 One-Time Cleanup
 # catalog-first flow: bucket-side backup, prune_catalog.py allowlist with the
 # retention floor, readback compare, live-worker probe, cache-TTL wait, delete.
 #
+# BOTH CATALOG ROOTS ARE CHECKED before any bucket-root prefix is deleted, which
+# is what docs/v2-release-catalog-contract.md requires. prune_catalog.py walks
+# catalog.json child links only and contains no reference to `v2` or `slice`, so
+# on its own it reports "unreferenced" for anything reachable through the v2
+# chain -- a live slice, or the legacy core a v2 release binds. Phases 3 and 5
+# therefore also run scripts/v2_retention_guard.py, which resolves
+# v2/catalog.json -> every v2/releases/{build}/release.json and fails closed if
+# any of them cannot be read or does not match its recorded sha256.
+#
 # PROTECTED_PREFIXES is asserted against every computed target before any
 # delete in any phase. 2026-07-18.0 is a frozen unpromoted construction-v1
 # core (PENDING_WORK.md forbids cleanup against it), 2026-07-13.0 is the live
@@ -357,6 +366,38 @@ jobs:
             RM "$target"
           done < /tmp/delete-targets.txt
 
+      # Both prefix-deleting phases need this, so it is fetched once. The v1
+      # catalog is NOT the only discovery root: docs/v2-release-catalog-contract.md
+      # says "Retention must consider both catalog roots before deleting an
+      # object", and a bucket-root prefix reachable only through the v2 chain
+      # (any live slice, and the legacy core a v2 release binds) is INVISIBLE to
+      # prune_catalog.py, which walks catalog.json child links only.
+      #
+      # Every copy here is fail-closed on purpose. If the v2 catalog or any
+      # release document it names cannot be fetched, the job dies before any
+      # delete rather than proceeding on a chain it could not read.
+      - name: Fetch the v2 catalog chain for the retention guard
+        if: steps.plan.outputs.phase3 == 'true' || steps.plan.outputs.phase5 == 'true'
+        run: |
+          set -euo pipefail
+          export ENDPOINT="https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com"
+          # shellcheck source=/dev/null
+          source /tmp/r2-rm.sh
+          S3 s3 cp "s3://$BUCKET/v2/catalog.json" /tmp/v2-catalog.json
+          mkdir -p /tmp/v2-releases
+          # An unavailable-schema catalog legitimately has no releases; the guard
+          # distinguishes that from an unreadable one, so `?` here is safe.
+          jq -r '.releases[]? | "\(.geocoder_build) \(.manifest_key)"' \
+            /tmp/v2-catalog.json > /tmp/v2-release-keys.txt
+          while read -r build key; do
+            [ -n "$build" ] || continue
+            mkdir -p "/tmp/v2-releases/$build"
+            S3 s3 cp "s3://$BUCKET/$key" "/tmp/v2-releases/$build/release.json"
+          done < /tmp/v2-release-keys.txt
+          echo "v2 chain references these bucket-root prefixes:"
+          python3 scripts/v2_retention_guard.py list-referenced \
+            --v2-catalog /tmp/v2-catalog.json --releases-dir /tmp/v2-releases
+
       - name: Phase 3 - delete unreferenced orphan version prefixes
         if: steps.plan.outputs.phase3 == 'true'
         run: |
@@ -373,6 +414,10 @@ jobs:
             # a substring grep. Exits non-zero if still referenced.
             python3 scripts/prune_catalog.py assert-unreferenced \
               --catalog /tmp/catalog-live.json --version "$version"
+            # BOTH roots, per the contract. This is the check that sees slices.
+            python3 scripts/v2_retention_guard.py assert-unreferenced \
+              --v2-catalog /tmp/v2-catalog.json \
+              --releases-dir /tmp/v2-releases --target "$version"
             echo "Deleting s3://$BUCKET/$target ..."
             RM "$target"
           done < /tmp/delete-targets.txt
@@ -487,9 +532,12 @@ jobs:
           while IFS='|' read -r phase target; do
             [ "$phase" = "5" ] || continue
             version="${target%/}"
-            # Guard: never delete anything the live catalog still references.
+            # Guard: never delete anything either live catalog still references.
             python3 scripts/prune_catalog.py assert-unreferenced \
               --catalog /tmp/catalog-live.json --version "$version"
+            python3 scripts/v2_retention_guard.py assert-unreferenced \
+              --v2-catalog /tmp/v2-catalog.json \
+              --releases-dir /tmp/v2-releases --target "$version"
             echo "Deleting s3://$BUCKET/$target ..."
             RM "$target"
           done < /tmp/delete-targets.txt
