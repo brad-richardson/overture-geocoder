@@ -350,14 +350,48 @@ def test_cargo_builds_target_the_crates_workspace_manifest():
     # because the build step was execute-gated and dry-run never compiled).
     value = text()
     assert "cargo build -p geocoder-construction" not in value
+    # 3 -> 1 on 2026-08-01 (item 12). map and reduce are MATRIX jobs, so three
+    # build steps meant 89 Places map tasks plus every reduce partition each
+    # recompiling from scratch with no Rust caching anywhere. The single
+    # remaining build lives in the `binaries` job and its output is downloaded by
+    # map/reduce/head. The manifest-path requirement this test exists for is
+    # unchanged -- it just has one site to hold instead of three.
     assert value.count(
         "cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release"
-    ) == 3
-    # The map-job build is unconditional so dry-run certifies compilation.
+    ) == 1
     doc = parsed()
-    for step in doc["jobs"]["map"]["steps"]:
-        if "cargo build" in str(step.get("run", "")):
-            assert "if" not in step
+    jobs = doc["jobs"]
+    # The build MUST stay unconditional so a dry-run still certifies that the
+    # binaries compile on the runner -- planet attempt 1 died there in execute
+    # mode only, because the step was execute-gated and dry-run never compiled.
+    # That property moved from the map job to the binaries job; it did not go
+    # away.
+    assert "if" not in jobs["binaries"]
+    build_steps = [
+        step for step in jobs["binaries"]["steps"]
+        if "cargo build" in str(step.get("run", ""))
+    ]
+    assert len(build_steps) == 1
+    assert "if" not in build_steps[0]
+    # Binaries are built from the SAME request-pinned producer commit the
+    # consuming phases check out, and the artifact name carries that commit so a
+    # rerun cannot pick up another producer's binaries.
+    checkout = [
+        step for step in jobs["binaries"]["steps"]
+        if "actions/checkout" in str(step.get("uses", ""))
+    ]
+    assert len(checkout) == 1
+    assert checkout[0]["with"]["ref"] == "${{ needs.admit.outputs.producer_commit }}"
+    for name in ("map", "reduce", "head"):
+        downloads = [
+            step for step in jobs[name]["steps"]
+            if "cv1-binaries" in str((step.get("with") or {}).get("name", ""))
+        ]
+        assert downloads, f"{name} must download the prebuilt binaries"
+        assert downloads[0]["with"]["name"] == (
+            "cv1-binaries-${{ needs.admit.outputs.producer_commit }}"
+        )
+        assert "binaries" in jobs[name]["needs"], name
 
 
 def test_every_phase_carries_the_330_minute_job_timeout():
@@ -783,4 +817,10 @@ def test_needs_graph_is_connected():
     assert jobs["finalize"]["needs"] == [
         "admit", "plan", "reduce", "resume_inputs", "finalize_resume_inputs", "head"
     ]
-    assert jobs["reduce"]["needs"] == ["admit", "plan"]
+    # `binaries` (item 12) is upstream of every phase that runs a construction
+    # binary. finalize is deliberately absent: it invokes none.
+    assert jobs["reduce"]["needs"] == ["admit", "binaries", "plan"]
+    assert jobs["map"]["needs"] == ["admit", "binaries"]
+    assert jobs["binaries"]["needs"] == "admit"
+    assert "binaries" in jobs["head"]["needs"]
+    assert "binaries" not in jobs["finalize"]["needs"]

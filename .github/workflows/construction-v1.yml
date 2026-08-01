@@ -138,7 +138,7 @@ jobs:
   admit:
     name: Fail-closed admission, contract, and resume ledger (no cloud secrets)
     if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 25
     outputs:
       request_sha256: ${{ steps.gate.outputs.request_sha256 }}
@@ -355,7 +355,7 @@ jobs:
     name: Authenticate and normalize prior Places plan/reducers (no cloud secrets)
     needs: admit
     if: inputs.mode == 'execute' && needs.admit.outputs.head_only_resume == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
       - name: Check out dispatched main without persisted credentials
@@ -533,7 +533,7 @@ jobs:
     name: Authenticate successful prior Places head and finalize inputs (no cloud secrets)
     needs: admit
     if: inputs.mode == 'execute' && needs.admit.outputs.finalize_only_resume == 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 30
     steps:
       - name: Check out dispatched main without persisted credentials
@@ -701,11 +701,44 @@ jobs:
           include-hidden-files: true
           path: resume-head
 
+  # Item 12. Built once, from the request-pinned producer commit, and consumed by
+  # map/reduce/head. The artifact name carries that commit, so a rerun can never
+  # pick up binaries produced from a different producer.
+  #
+  # Runs unconditionally, including in dry-run mode. The steps it replaces were
+  # deliberately unconditional so a dry-run still certified that the binaries
+  # compile on the runner (planet attempt 1 died there in execute mode only);
+  # keeping this one job unconditional preserves exactly that property.
+  binaries:
+    name: build pinned construction binaries
+    needs: admit
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 30
+    steps:
+      - name: Check out the request-pinned producer
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          ref: ${{ needs.admit.outputs.producer_commit }}
+          persist-credentials: false
+      - name: Build the pinned construction binaries
+        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
+      - name: Publish the binaries for every downstream phase
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: cv1-binaries-${{ needs.admit.outputs.producer_commit }}
+          if-no-files-found: error
+          retention-days: 7
+          path: |
+            crates/target/release/places-*
+            crates/target/release/address-*
+            crates/target/release/reverse-*
+            !crates/target/release/*.d
+
   map:
     name: ${{ needs.admit.outputs.family_key }} map ${{ matrix.task_index }}
-    needs: admit
+    needs: [admit, binaries]
     if: needs.admit.outputs.head_only_resume != 'true' && needs.admit.outputs.finalize_only_resume != 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 330
     strategy:
       fail-fast: false
@@ -832,8 +865,17 @@ jobs:
 
       # Unconditional so a dry-run also certifies the binaries compile on the
       # runner (attempt 1 died here in execute mode only).
-      - name: Build the pinned construction binaries
-        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
+      # Item 12: built ONCE by the `binaries` job from the same request-pinned
+      # producer commit this job checks out, not recompiled per matrix task.
+      # `map` and `reduce` are matrix jobs, so the old per-step build was paid 89
+      # times for a planet Places map alone, with no Rust caching anywhere.
+      - name: Download the pinned construction binaries
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-binaries-${{ needs.admit.outputs.producer_commit }}
+          path: crates/target/release
+      - name: Restore the executable bit
+        run: chmod +x crates/target/release/*
 
       - name: Admit, project, map, and publish one task create-only (execute)
         if: inputs.mode == 'execute'
@@ -965,7 +1007,7 @@ jobs:
       inputs.mode == 'execute' &&
       needs.admit.outputs.head_only_resume != 'true' &&
       needs.admit.outputs.finalize_only_resume != 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 330
     outputs:
       reduce_matrix: ${{ steps.plan.outputs.reduce_matrix }}
@@ -1118,12 +1160,12 @@ jobs:
 
   reduce:
     name: ${{ needs.admit.outputs.family_key }} reduce batch ${{ matrix.batch_index }}
-    needs: [admit, plan]
+    needs: [admit, binaries, plan]
     if: >-
       inputs.mode == 'execute' &&
       needs.admit.outputs.head_only_resume != 'true' &&
       needs.admit.outputs.finalize_only_resume != 'true'
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 330
     strategy:
       fail-fast: false
@@ -1146,8 +1188,17 @@ jobs:
         with:
           name: cv1-plan
           path: cv1
-      - name: Build the pinned construction binaries
-        run: cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
+      # Item 12: built ONCE by the `binaries` job from the same request-pinned
+      # producer commit this job checks out, not recompiled per matrix task.
+      # `map` and `reduce` are matrix jobs, so the old per-step build was paid 89
+      # times for a planet Places map alone, with no Rust caching anywhere.
+      - name: Download the pinned construction binaries
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-binaries-${{ needs.admit.outputs.producer_commit }}
+          path: crates/target/release
+      - name: Restore the executable bit
+        run: chmod +x crates/target/release/*
       - name: Run one selective reducer batch create-only
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
@@ -1207,7 +1258,7 @@ jobs:
 
   head:
     name: Global Places head (execute)
-    needs: [admit, plan, reduce, resume_inputs, finalize_resume_inputs]
+    needs: [admit, binaries, plan, reduce, resume_inputs, finalize_resume_inputs]
     if: >-
       always() && inputs.mode == 'execute' && needs.admit.result == 'success' &&
       needs.admit.outputs.finalize_only_resume != 'true' &&
@@ -1215,7 +1266,7 @@ jobs:
         (needs.admit.outputs.head_only_resume == 'true' && needs.resume_inputs.result == 'success') ||
         (needs.admit.outputs.head_only_resume != 'true' && needs.plan.result == 'success' && needs.reduce.result == 'success')
       )
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 330
     steps:
       - name: Check out the request-pinned producer
@@ -1248,6 +1299,15 @@ jobs:
         with:
           name: cv1-resume-plan
           path: cv1plan
+      # Item 12: head consumes BINDIR="crates/target/release" below, so it needs
+      # the same once-built binaries map and reduce download.
+      - name: Download the pinned construction binaries
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: cv1-binaries-${{ needs.admit.outputs.producer_commit }}
+          path: crates/target/release
+      - name: Restore the executable bit
+        run: chmod +x crates/target/release/*
       - name: Build the global Places head (address is a no-op)
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
@@ -1270,7 +1330,7 @@ jobs:
           test "$(df -Pk / | awk 'NR==2 {print $4}')" -ge 25000000
           mkdir -p head head-scratch store
           if [ "$FAMILY_KEY" = places ]; then
-            cargo build --manifest-path crates/Cargo.toml -p geocoder-construction --bins --release
+            # Binaries come from the `binaries` job (item 12); nothing to build.
             python scripts/construction_v1_hosted.py ledger-check \
               --ledger cv1plan/control/ledger.json --next-phase-minutes "$HEAD_PHASE_ESTIMATE_MINUTES"
             BINDIR="crates/target/release"
@@ -1325,7 +1385,7 @@ jobs:
           )
         )
       )
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-24.04-arm
     timeout-minutes: 360
     steps:
       - name: Check out the request-pinned producer
