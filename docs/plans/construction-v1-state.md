@@ -1,7 +1,13 @@
 # construction-v1: current state
 
-Last updated 2026-08-01 after Stage 1 landed end to end and the rebuild-blocker
-queue was agreed with the operator. See "Rebuild queue, 2026-08-01".
+Last updated 2026-08-01 after Stage 1 landed end to end, the rebuild-blocker
+queue was agreed with the operator, and an operator challenge corrected two
+findings the rebuild scope depended on. Read, in order: "Stage 0/1 result",
+"2026-08-01: two Part 6d findings corrected", and "Rebuild queue, 2026-08-01".
+
+**The next decision is rebuild scope, not ranking.** Everything reachable from
+the Worker has landed; the prominence work is implemented and cannot be
+measured until a planet Places rebuild.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -32,7 +38,7 @@ The justification is measured, not aesthetic. Against the build promoted today:
   query**.
 - `q=Eiffel Tower`, `q=Space Needle`, `q=Statue of Liberty` all return zero.
 
-### QUEUED: Stage 0 -- make improvement measurable
+### DONE: Stage 0 -- make improvement measurable
 
 Prerequisite for claiming any Stage 1 result. Nothing below is falsifiable
 without it, and today's promotion smoke was red for months on an assertion
@@ -52,7 +58,7 @@ nobody could evaluate.
 Harness exists: `scripts/benchmark_v2_forward.py` (rank@1/@10, MRR, `--compare`,
 `--assert-recall`). The metric and strata are what is missing.
 
-### QUEUED: Stage 1 -- Worker-only fixes
+### DONE: Stage 1 -- Worker-only fixes
 
 No rebuild, no format change, no new R2 reads, no new request identity. All four
 are query-path changes gated by Stage 0 measurement.
@@ -82,6 +88,120 @@ saturating confidence byte, the missing fame signal, and famous-unique `e2:`
 admission are all Stages 2-3 and need a planet head rebuild plus a
 `PLHD0002 -> PLHD0003` format bump. The street layer is Stage 4 and is the only
 genuine one-way door in the plan.
+
+### Stage 0/1 result, and where the milestone actually stands
+
+All four Stage 1 fixes landed and were measured live on 2026-07-31, and Stage 2
+item 5 landed with them. Fix 2 (seam calibration, `2389871`) is the one that
+moved metrics: overall t@1 **0.261 -> 0.587**, type starvation **34 -> 15** of
+46, `place:seam` t@1 0.000 -> 0.900 with starvation 10 -> 0, and the first
+non-zero exact-id self-recall this gold set has produced. Fix 1 is correct and
+live but moved nothing, for the reason Part 6b records: query-time reranking
+cannot recover what the build-time cap already discarded.
+
+**So the Worker-side milestone is met, and everything left is build-side.** The
+`PLHD0002 -> PLHD0003` prominence bump is implemented, validated end to end on
+the Monaco slice, and **unmeasurable until a planet rebuild** -- every published
+shard is 0002, so prominence is 0 everywhere in production and the gold set
+physically cannot move. That makes the next decision a rebuild-scope decision,
+not a ranking decision.
+
+### 2026-08-01: two Part 6d findings corrected by operator challenge
+
+Probe `benchmarks/probes/2026-08-01-confidence-and-duplicates-probe.py`,
+evidence `benchmarks/2026-08-01-confidence-and-duplicates.json`, written up as
+Part 6h of `2026-07-31-search-quality-and-street-layer.md`. Both change what
+the rebuild should carry.
+
+1. **`confidence` is a per-source value, mostly a flat default.** Foursquare
+   stamps exactly 0.7700 on 100% of its records (confirmed across six non-US
+   regions, n=132,407); PinMeTo and DAC stamp exactly 1.0; Microsoft floors at
+   0.85, AllThePlaces at 0.80. Only `meta` is continuous. Part 6d's
+   "confidence anti-correlates with fame" was reading a source constant --
+   the canonical Tour Eiffel is a Foursquare record. The operational
+   conclusion survives (confidence cannot rank POIs) but the reason changes,
+   and **`confidence_rank` is still the tie-break in `HEAD_CAP_ORDER` and
+   `SERVING_ORDER`**, so tied records are currently ordered by upstream
+   dataset. A confidence floor was tested and is **disqualified at every
+   value** -- it deletes verified flagship retail (Messika Champs-Elysees
+   0.0587, adidas Sao Paulo 0.0145), deletes landmark-class records in every
+   region, and is geographically discriminatory (0.20 removes 7.19% of Lagos
+   vs 1.75% of Tokyo). The US is a separate regime: heavily conflated,
+   `LEN(sources)` up to 7, no flat defaults.
+
+2. **The Eiffel Tower is ~87 records under 53 name-forms**, scattered to
+   17.8 km, against a head cap of 10. `q=Eiffel Tower` loses to itself, not to
+   hotels. Same shape on Colosseum (33/24), Sagrada Familia (17/7), Tokyo
+   Tower (7/4). **A simple dedup heuristic does not reach it**: exact
+   normalised-name equality at unlimited radius still leaves 53 forms, and the
+   fuzzy variant that reaches 17 is unshippable because no Jaro-Winkler
+   threshold exists (Statue of Liberty / Statue of Liberty Deli scores 0.958
+   and must not merge; Colosseo / Coliseo Romano scores 0.830 and must).
+   Measured and deferred. What does work is exact name + tight landmark
+   category + small radius, which is a modest cleanup, not a fix.
+
+**Consequence for Stage 3.** The famous-unique design
+(`2026-07-17-famous-unique-head-admission.md`) names quantized confidence as
+its fame proxy. That is falsified twice over and the design must be re-specced
+onto `prominence_rank` before it is built.
+
+**Two ordering defects found while tracing this, both cheap and both worth
+fixing before a rebuild:**
+
+- **`SERVING_ORDER` vs `TOTAL_ORDER` is ungated.** The map-side 256-row
+  combiner selects by `SERVING_ORDER` then re-sorts the output by
+  `TOTAL_ORDER`, so if the two tails diverged, a *different set of 256 rows*
+  would be retained with no row lost, no binding violated and no test failing.
+  It is the earliest and most irreversible cap in the system.
+- **The ordering has nine textual spellings, not four** (four Python, two in
+  the Rust encoder, one in the verifier, two in the Worker), and no test
+  asserts they agree. The encoder/verifier assertions cover `TOTAL_ORDER` only.
+
+**Also recorded: the obvious name normaliser destroys CJK.**
+`regexp_replace(lower(strip_accents(n)),'[^a-z]','','g')` collapses **67% of
+Tokyo records to the empty string** (Paris 0.27%, Seattle 0.11%) -- invisible in
+Latin-script testing. Use `[^\p{L}\p{N}]`. Applies to any name normalisation in
+the pipeline, not only to dedup.
+
+### 2026-08-01: DuckDB 1.5.5 is prepared but HELD
+
+1.5.5 is the current release and the bump is written (22 files; `1.5.1` also
+appears in `construction_v1_control.py:56`, inside the hashed request, so it
+moves the request digest and the staging namespace -- but that cost is already
+sunk, because `places_source_sha256` is in the same contract and
+`places_construction_v1.py` changed three times on 2026-07-31).
+
+**It is held, not landed, because 1.5.5 changes the address forward pack
+bytes.** `test_forward_packs_are_byte_identical_to_before_the_artifact` moves
+pack 0 from `bd6c2984...` to `f740ad2c...`. Isolated: the same edits on 1.5.1
+pass, on 1.5.5 fail. `test_committed_monaco_evidence_is_current` also fails,
+against regenerated evidence. Both are pinned attestations, and the standing
+rule from `cfb9601` is that rewriting frozen evidence to match falsifies an
+attestation of a run that really happened. **Operator decision 2026-08-01: hold
+the bump and land it with the planet rebuild**, where the packs are re-measured
+and additivity re-proven under 1.5.5 anyway. Baseline for comparison: 14
+pre-existing test failures on a clean tree in the local uv environment.
+
+To redo it, the mechanical part is `1.5.1 -> 1.5.5` across
+`.github/requirements-hosted-rowgroup.txt`, `construction_v1_control.py`,
+`places_construction_v1.py`, `address_construction_v1.py`,
+`run_slice_construction_v1.py`, `census_places_construction_v1.py`,
+`census_address_construction.py`, `spike_address_construction.py`,
+`verify_monaco_evidence.py`, the `smoketest-r2-id` / `build-places-region` /
+`smoketest-r2-pipeline` / `release-slice-families` workflows, and the tests that
+assert the pin. Leave `rebuild-r2-shards.yml` and `patch-id-stage.yml` alone --
+they build the frozen legacy core, so re-versioning them is risk with no
+benefit. The three cp311/cp312 wheel hashes are:
+
+    x86_64  b9b6f86ed85d4ef5e0211eaebf75d057bd8bb520bba438a95dd0f4e42234bbfe
+    aarch64 2e72f9e1a4f90a5c8483ad4d540e495bf0834ba61c360b52499a573d7ed62a3f
+    macos   f0b88535a5d86fdd63dba6ea02ab68c003dfb9e4892b11256ef24c4da208baae
+
+`test_workflow_pins_actions_and_dependency` asserts the aarch64 hash by value
+and an exact total hash count, so both move with the pin. Two behavioural
+comments are also attributed to 1.5.1 observations that were not re-measured on
+1.5.5 (`download_divisions_smoke.py` and `verify_monaco_evidence.py`, both on
+the non-gating `rows_scanned` double-count).
 
 All construction work runs under operator request
 `88b7f17149fd5d75bf64720f0640d2cbe8aeb5ead750d279c1881f9bd5332614`.
@@ -134,6 +254,17 @@ It also has to answer a measured problem: on a 38,182-record Monaco slice,
 **98 `(token, prominence)` groups already hold more than 10 tied name matches**,
 so the cap falls back to `feature_id` — UUID order, which is RC1 one level down.
 The category prior separates *classes*, not *instances*.
+
+**Sharpened 2026-08-01.** Two things now make Wave C more valuable, not less:
+the tie-break below prominence is `confidence_rank`, which is an upstream
+*source identifier* for roughly a fifth of the corpus, and the 98 tied groups
+are substantially the duplicate phenomenon (the Eiffel Tower alone is ~87
+records under 53 name-forms). Wave C should therefore emit, per token, **which
+level of the cap key actually decided** — identity / prominence / confidence /
+`feature_id` — and cross-tab the confidence level by `sources[].dataset`. The
+probe queries Overture directly, so `sources` is available to it even though
+the construction pipeline drops it. That converts "confidence is a source id"
+from a background finding into a measured eviction rate.
 
 ### Wave A/B progress, 2026-08-01
 
@@ -648,12 +779,17 @@ their output is promoted and serving (see "Promotion result, 2026-07-31"). The
 ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
 57.65 the probe measured on the densest cell and a 59.58 ARDX0001 basis.
 
-1. **Promotion smoke fixture — now demonstrated false-red on a real
-   promotion.** Run `30657619881` logged `OK divisions` and `FAIL places: no
-   features for Eiffel Tower` on 10 of 10 attempts while the promoted build was
-   live and correct. Replace the context-free `Eiffel Tower` global-head
-   assertion with one reliable global-head POI plus one located routed-Places
-   assertion. Until then every promotion ends red.
+1. **Promotion smoke fixture — CLOSED 2026-07-31 in `1e2c0ab`.** Run
+   `30657619881` had logged `OK divisions` and `FAIL places: no features for
+   Eiffel Tower` on 10 of 10 attempts while the promoted build was live and
+   correct. The context-free `Eiffel Tower` assertion is replaced by two checks
+   that pin *which path* served the request — `q=IKEA` with
+   `places_locality_inference` absent for the global head, `q=Eiffel Tower
+   Paris` with it present for the located routed path — so neither can pass by
+   accident nor absorb the other's regression. Fixing it unmasked a second
+   broken fixture: the structured address check omitted the required country
+   field and had never actually executed. Verified against live production,
+   all four checks pass on attempt 1.
 2. **Forward Places quality — NOW THE AGREED MILESTONE**, root-caused in
    `2026-07-31-search-quality-and-street-layer.md` and queued as Stages 0/1 in
    "Current milestone" above. The mechanism is confirmed in source: head entries

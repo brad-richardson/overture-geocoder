@@ -1,0 +1,157 @@
+{
+  "schema": "overture-places-confidence-and-duplicates-evidence-v1",
+  "date": "2026-08-01",
+  "overture_release": "2026-06-17.0",
+  "duckdb": "1.5.5",
+  "probe": "benchmarks/probes/2026-08-01-confidence-and-duplicates-probe.py",
+  "corrects": "docs/plans/2026-07-31-search-quality-and-street-layer.md Part 6d",
+  "origin": "Operator challenge 2026-08-01: confidence is the source's confidence from various signals, not importance; and the Eiffel Tower entry may itself be a duplicate. Both held.",
+
+  "finding_1_confidence_is_per_source": {
+    "claim": "Overture `confidence` is a per-source value and mostly a flat default, so it is not comparable across datasets. For roughly a fifth of the corpus it is an upstream source identifier quantized into a u8.",
+    "method": "Seven bbox-bounded city regions, admitted rows only (names.primary NOT NULL, operating_status != permanently_closed), grouped by sources[1].dataset.",
+    "flat_default_sources": {
+      "Foursquare": {"value": 0.77, "distinct_values": 1, "pct_of_its_records": 100.0,
+                     "confirmed_in": ["paris_fr", "berlin_de", "tokyo_jp", "mumbai_in", "lagos_ng", "sao_paulo_br"],
+                     "combined_n_non_us": 132407},
+      "PinMeTo": {"value": 1.0, "distinct_values": 1, "pct_of_its_records": 100.0},
+      "DAC": {"value": 1.0, "distinct_values": 1, "pct_of_its_records": 100.0},
+      "Microsoft": {"floor": 0.85, "shape": "hard floor plus tail"},
+      "AllThePlaces": {"floor": 0.80, "shape": "hard floor plus tail"},
+      "meta": {"shape": "genuinely continuous", "paris_distinct_of_n": "125198 of 130049"}
+    },
+    "paris_fr_detail": {
+      "admitted": 165576,
+      "by_dataset": [
+        {"dataset": "meta", "n": 130049, "distinct_conf": 125198, "lo": 0.0129, "p50": 0.7223, "hi": 0.9999},
+        {"dataset": "Foursquare", "n": 30102, "distinct_conf": 1, "lo": 0.77, "p50": 0.77, "hi": 0.77},
+        {"dataset": "AllThePlaces", "n": 4743, "distinct_conf": 281, "lo": 0.80, "hi": 0.9908},
+        {"dataset": "PinMeTo", "n": 573, "distinct_conf": 1, "lo": 1.0, "hi": 1.0},
+        {"dataset": "DAC", "n": 109, "distinct_conf": 1, "lo": 1.0, "hi": 1.0}
+      ]
+    },
+    "invalidates": "Part 6d read `Tour Eiffel confidence 0.7700, rank 202 of 299` as evidence that confidence anti-correlates with fame. The canonical Tour Eiffel is a Foursquare record and EVERY Foursquare record is 0.7700. It ranked 202nd because 201 meta records scored above another source's constant. It was never a fame measurement.",
+    "survives": "The operational conclusion of Part 6d still holds for a different reason: confidence cannot rank POIs. It is now known to be un-rankable because it is source-relative, not because it is inversely related to fame."
+  },
+
+  "finding_1b_the_us_is_a_different_regime": {
+    "claim": "US metros are heavily conflated and do not show the flat-default pattern. Any rule keyed on it behaves differently there.",
+    "source_array_width_pct_exactly_two": {
+      "paris_fr": 100.0, "berlin_de": 100.0, "tokyo_jp": 100.0,
+      "mumbai_in": 100.0, "lagos_ng": 100.0, "sao_paulo_br": 100.0,
+      "seattle_us": 39.58
+    },
+    "seattle_max_sources": 7,
+    "note": "An earlier reading that LEN(sources) is always 2 was a non-US artifact. In Seattle and NYC even single-source Foursquare records carry a real distribution (Seattle 24 distinct, min 0.0537; NYC 74 distinct, min 0.0587), and 0.9199 recurs as a conflation-derived mode across every dataset."
+  },
+
+  "finding_2_confidence_floor_is_disqualified": {
+    "claim": "No confidence floor is safe, at any value, including a meta-only floor.",
+    "verified_false_positives": [
+      {"name": "Boutique Messika - Champs Elysees", "address": "52 Avenue des Champs-Elysees", "confidence": 0.0587,
+       "note": "has website and phone; three other Messika stores in the same city score 0.803, 0.905, 0.996"},
+      {"name": "adidas Originals Store SAO PAULO", "address": "Rua Frei Caneca, 569", "confidence": 0.0145,
+       "note": "another adidas Originals Store in the same city scores 0.982"},
+      {"name": "Citibank (Sao Paulo branches)", "confidence": [0.11, 0.1103]},
+      {"name": "7-Eleven (Tokyo)", "confidence": 0.2139}
+    ],
+    "landmark_class_loss_pct_by_floor": {
+      "_comment": "percent of landmark-class records deleted; non-zero at every floor in every region",
+      "paris_fr":     {"0.10": 0.39, "0.15": 0.52, "0.20": 0.69, "0.25": 1.02, "0.30": 1.56},
+      "seattle_us":   {"0.10": 0.20, "0.15": 0.47, "0.20": 0.93, "0.25": 1.73, "0.30": 3.20},
+      "tokyo_jp":     {"0.10": 0.34, "0.15": 0.45, "0.20": 0.66, "0.25": 1.04, "0.30": 1.81},
+      "sao_paulo_br": {"0.10": 0.87, "0.15": 1.36, "0.20": 1.94, "0.25": 2.86, "0.30": 4.52},
+      "lagos_ng":     {"0.10": 0.33, "0.15": 0.33, "0.20": 1.32, "0.25": 3.64, "0.30": 5.30},
+      "mumbai_in":    {"0.10": 1.41, "0.15": 2.43, "0.20": 3.92, "0.25": 6.42, "0.30": 10.08},
+      "berlin_de":    {"0.10": 0.16, "0.15": 0.21, "0.20": 0.43, "0.25": 0.69, "0.30": 1.65}
+    },
+    "geographic_bias": "At a 0.20 floor the region drop rate ranges from 1.75% (Tokyo) to 7.19% (Lagos) -- roughly 4x -- and meta is the dominant source exactly where the loss is worst (Lagos 97.8%, Sao Paulo 90.6%, Mumbai 83.9% of records).",
+    "low_confidence_is_regionally_different": "Paris/Berlin sub-0.20 skews to B2B services and individual practitioners. Lagos and Mumbai sub-0.20 is dominated by real small retail (Aman Footwear 0.0549, Bhavani General Store 0.3004, a church_cathedral named Church at 0.0960). Low confidence there tracks thinness of corroborating evidence, not fakeness.",
+    "recommendation": "Do not ship a confidence floor. If a junk filter is wanted, the axis worth probing is absence of corroboration in combination (category-vs-name coherence, missing address freeform, single-source AND low confidence). That combination was not measured."
+  },
+
+  "finding_3_the_eiffel_tower_is_its_own_competition": {
+    "claim": "q=Eiffel Tower is not losing to hotels. It is losing to itself.",
+    "canonical_record": {"name": "Tour Eiffel", "category": "monument", "source": "Foursquare",
+                         "confidence": 0.77, "distance_from_true_coords_m": 12.7},
+    "landmark_class_census_paris_bbox": {"records": 69, "distinct_name_forms": 49,
+      "_comment": "probe bbox, landmark/monument/tourist_attraction class only"},
+    "wider_truth_set": {"records": 87, "distinct_name_forms": 53, "max_pairwise_separation_m": 17775,
+      "_comment": "12 km radius, any category, name fully consumed by landmark name-forms plus geo/language filler"},
+    "head_result_cap": 10,
+    "duplicate_shapes": ["multilingual (Thai/Japanese/Persian/Hebrew/Ukrainian stacked at 16.6 m)",
+                         "transliteration (Torre Eiffel, Eiffelturm, Turnul Eiffel, Eifel Torenparijs)",
+                         "typos (Efiel Tower, Paris Toureffeil, Toul Eiffel, Tour Eifell)",
+                         "punctuation/format noise (Eiffel Tower,,Paris,Fra)",
+                         "parts of the structure (Sommet de la Tour Eiffel, Tour Eiffel - 1er Etage, Eiffel Tower Second Floor)"],
+    "other_landmarks": {
+      "colosseum_rome":     {"records": 33, "name_forms": 24, "max_separation_m": 10713},
+      "sagrada_familia":    {"records": 17, "name_forms": 7,  "max_separation_m": 7411},
+      "tokyo_tower":        {"records": 7,  "name_forms": 4,  "max_separation_m": 12708},
+      "statue_of_liberty":  {"records": 6,  "name_forms": 5,  "max_separation_m": 9156},
+      "space_needle":       {"records": 3,  "name_forms": 3,  "max_separation_m": 466}
+    }
+  },
+
+  "finding_4_simple_dedup_does_not_reach_it": {
+    "claim": "A simple heuristic clears about a third of the clear outliers and does not fix q=Eiffel Tower. The fuzzy variant that would is unshippable.",
+    "exact_normalised_name_survivors_from_87": {"R_100m": 87, "R_500m": 86, "R_2km": 78, "R_5km": 59},
+    "note_on_radius": "At R <= 500 m the heuristic is inert -- it removes 1 of 87. The duplicates are not co-located.",
+    "jaro_winkler_at_0_9": {"eiffel": "87 -> 17 (80%)", "colosseum": "33 -> 4 (88%)"},
+    "jaro_winkler_inversion": {
+      "_comment": "The threshold would have to exceed 0.958 and be at most 0.830 simultaneously. Jaro-Winkler's prefix bonus is structurally wrong here: shared prefixes are how distinct places are named.",
+      "must_not_merge": [
+        {"pair": "Statue of Liberty / Statue of Liberty Deli", "jw": 0.958},
+        {"pair": "Space Needle / Space Needle Park", "jw": 0.947},
+        {"pair": "Eglise Saint-Roch / Eglise Saint-Merri", "jw": 0.910},
+        {"pair": "Colosseo / Colosseo di Irving", "jw": 0.900}
+      ],
+      "must_merge": [{"pair": "Colosseo / Coliseo Romano", "jw": 0.830}]
+    },
+    "observed_fuzzy_false_merges_at_r2km": {
+      "Placa de X (Barcelona)": 73, "Eglise Saint-X (Paris)": 28,
+      "The <Name> apartment buildings (NYC)": 20, "Japanese church names (Tokyo)": 15,
+      "Hotel de X hotels particuliers (Paris)": 10, "Discovery Park X (Seattle)": 9,
+      "Central Park X (NYC)": 103
+    },
+    "what_does_work": {
+      "category_gate": "Exact name + tight landmark category + R=500 m across six cities gives 31 merges over 64 records, all reviewed, all genuine same-place duplicates (Chateau de Versailles x3, Empire State Building x2, Citicorp Center x2). False positives ~0-13%, all on generic single-token names (Home, Paris, Casa, Pavillon) that a stopword or min-token guard would remove.",
+      "chains_are_handled_by_the_category_gate_not_geometry": "Without it, R=500 m in NYC merges Western Union (2409 pairs), Starbucks (1845), LibertyX ATM (1624). Broadening the category set to include travel/tours re-admits them (Hertz x6 over 922 m).",
+      "named_businesses_containing_the_landmark_name_are_safe_under_exact_matching": [
+        {"pair": "Tour Eiffel / Restaurant 58 Tour Eiffel", "jw": 0.442},
+        {"pair": "Tour Eiffel / Brasserie de la Tour Eiffel", "jw": 0.572},
+        {"pair": "Tour Eiffel / Bureau de Gustave Eiffel", "jw": 0.530}
+      ]
+    },
+    "representative_selection_correct_picks_of_6": {
+      "prefer_Foursquare_then_confidence": 5,
+      "highest_confidence": 5,
+      "modal_category_then_confidence": 5,
+      "shortest_name": 3,
+      "nearest_cluster_centroid": 2
+    },
+    "representative_selection_caveat": "Highest-confidence fails Paris, picking `France Eiffel` (0.9697, 912 m) over `Tour Eiffel` (0.7700, 13 m) -- a direct consequence of finding 1. Foursquare is flat 0.7700 in Paris/Tokyo/Rome but genuinely distributed in Seattle (296 distinct) and NYC (755), so `highest confidence` works in the US and fails in Europe/Japan for the same source. Not a rule that ships globally.",
+    "decisive_number": "Exact-name dedup at UNLIMITED radius still leaves 53 distinct Eiffel Tower name-forms against a head cap of 10.",
+    "recommendation": "Measured and deferred. Shipping the simple version buys a modest data cleanup, not a fix for q=Eiffel Tower. The structural fix remains Stage 3 famous-unique admission plus a real fame signal."
+  },
+
+  "landmine_normaliser": {
+    "claim": "The obvious normaliser destroys CJK names and the failure is invisible in Latin-script testing.",
+    "expression": "regexp_replace(lower(strip_accents(name)),'[^a-z]','','g')",
+    "pct_collapsing_to_empty_string": {"tokyo_jp": 67.1, "paris_fr": 0.27, "seattle_us": 0.11},
+    "wider_measurement": "292285 of 420726 Tokyo records (69.47%) on a 15 km bbox",
+    "consequence": "Under exact-name equality that is one cluster containing most of Tokyo.",
+    "fix": "Use [^\\p{L}\\p{N}], which RE2 supports in DuckDB 1.5.5. Measured empties then fall to 0.0007% in Tokyo, and distinct names rise from 88208 to 365948.",
+    "applies_regardless": "Worth recording even if dedup is never built -- any name normalisation in the pipeline has this hazard."
+  },
+
+  "not_measured": [
+    "No planet-wide or country-wide scan. Seven city bboxes for confidence, six for duplicates, one release.",
+    "No ground-truth gazetteer. Real-place judgements are qualitative from name/category/address, except the four brand cases verified against known street addresses.",
+    "No token-set/Jaccard, trigram, phonetic, or embedding matching -- only exact and Jaro-Winkler. A token-set rule would likely beat JW on the `Placa de X` failure mode and is the obvious next probe.",
+    "No transliteration, so cross-script duplicates were never merge candidates. They are a large share of the residual.",
+    "How often the confidence tie-break actually decides a cap eviction. That is Wave C and remains unmeasured.",
+    "Whether low-confidence meta records are geometric duplicates of higher-confidence records, which would change the floor cost calculus.",
+    "Rural and small-town areas. All bboxes are metro."
+  ]
+}

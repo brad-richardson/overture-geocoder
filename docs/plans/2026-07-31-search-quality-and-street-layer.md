@@ -494,6 +494,14 @@ are now both load-bearing rather than nice-to-have.
 
 ## Part 6d — MEASURED: the prominence hypothesis was wrong; categories are the signal
 
+> **PARTIALLY CORRECTED 2026-08-01 — read Part 6h before citing this section.**
+> The conclusion ("confidence cannot rank POIs; categories are the signal")
+> stands and the category prior remains right. The *reason* given below —
+> that confidence anti-correlates with fame — is wrong. Confidence is a
+> per-source value that is a flat default for most sources, and the
+> `Tour Eiffel 0.7700, rank 202 of 299` line is not a fame measurement at all.
+> The `LEN(names.common)` row also has a type bug. See Part 6h.
+
 Run 2026-07-31 against Overture places `2026-06-17.0` directly (DuckDB over the
 S3 parquet, three token/bbox slices: `sagrada`/Barcelona n=214,
 `eiffel`/Paris n=299, `seattle`/Seattle n=4058).
@@ -705,6 +713,134 @@ what the cap actually retained exposed it. A passing pipeline is not evidence of
 a good ranking. The cheap check that found it (dump the top-N per token by each
 candidate order, on real data) should run for every future cap change, and
 should be widened to many tokens across regions before a planet run is paid for.
+
+## Part 6h — CORRECTED BY OPERATOR CHALLENGE: confidence is a source value, and the Eiffel Tower is its own competition
+
+Operator, 2026-08-01: *"the confidence isn't the importance, it's the source's
+confidence from various signals"* and *"is it possible that eiffel tower entry
+is actually a duplicate?"* Both were right. Probe:
+`benchmarks/probes/2026-08-01-confidence-and-duplicates-probe.py`; evidence:
+`benchmarks/2026-08-01-confidence-and-duplicates.json`.
+
+### What Part 6d got wrong
+
+**`confidence` is per-source, and for most sources it is a flat constant.**
+Central Paris, 165,576 admitted places:
+
+| dataset | n | distinct confidence values | shape |
+|---|---:|---:|---|
+| meta | 130,049 | 125,198 | genuinely continuous, 0.0129–0.9999 |
+| **Foursquare** | 30,102 | **1** | **exactly 0.7700 on 100% of records** |
+| AllThePlaces | 4,743 | 281 | hard floor 0.80 plus tail |
+| PinMeTo | 573 | **1** | exactly 1.0000 |
+| DAC | 109 | **1** | exactly 1.0000 |
+
+Confirmed across Berlin, Tokyo, Mumbai, Lagos and São Paulo: Foursquare is
+0.7700 at 100% in all six non-US regions (n=132,407 combined), PinMeTo and DAC
+are 1.0 at 100%, Microsoft floors at 0.85.
+
+So `Tour Eiffel confidence 0.7700, rank 202 of 299` was never a fame
+measurement. The canonical Tour Eiffel is a **Foursquare** record, and every
+Foursquare record is 0.7700. It ranked 202nd because 201 `meta` records scored
+above another source's constant. "Confidence anti-correlates with fame" should
+read: **meta's computed score outranks other sources' flat defaults**, and
+`meta` is the source that also carries the social-page noise.
+
+**The operational conclusion is unchanged.** Confidence still cannot rank POIs,
+and the category prior is still the right fix. It is un-rankable because it is
+source-relative, not because it is inversely related to fame. Part 6e/6f/6g
+stand as written.
+
+**Two smaller corrections.** `LEN(names.common)` in Part 6d's table is a type
+bug — `names.common` is a MAP, and `LEN(MAP)` raises `BinderException` on
+DuckDB 1.5.5. `CARDINALITY` confirms the field genuinely is 0 of 165,576
+populated, so the conclusion holds, but the expression at
+`scripts/download_places.sql:46` is version-fragile. And `root_source_count = 1
+for every record` is a **non-US artifact**: `LEN(sources)` is exactly 2 for
+100% of records in all six non-US regions, but Seattle is 39.58% and reaches 7.
+US metros are heavily conflated and do not show the flat-default pattern at all
+— even single-source Foursquare has 296 distinct values there. Any rule keyed
+on source behaves differently in the US.
+
+### A confidence floor is disqualified
+
+Tested at 0.10 / 0.15 / 0.20 / 0.25 / 0.30, meta-only, seven regions. Rejected:
+
+- **It deletes verified flagship retail.** `Boutique Messika - Champs Élysées`,
+  52 Avenue des Champs-Élysées, confidence **0.0587**, with website and phone —
+  three other Messika stores in the same city score 0.803 / 0.905 / 0.996.
+  `adidas Originals Store SÃO PAULO`, Rua Frei Caneca 569, **0.0145**.
+- **It deletes landmark-class records in every region at every floor**, worst in
+  Mumbai: 1.41% of landmarks at a 0.10 floor, 10.08% at 0.30.
+- **It is geographically discriminatory.** A 0.20 floor removes 7.19% of Lagos
+  against 1.75% of Tokyo, and `meta` is the dominant source precisely where the
+  loss is worst (Lagos 97.8%, São Paulo 90.6%, Mumbai 83.9%). Sub-0.20 content
+  in Lagos and Mumbai is mostly *real small retail* — low confidence there
+  tracks thinness of corroborating evidence, not fakeness.
+
+If a junk filter is wanted, the axis is absence of corroboration **in
+combination** (category-vs-name coherence, missing address freeform,
+single-source AND low confidence). That combination is unmeasured.
+
+### The Eiffel Tower is ~87 records under 53 name-forms
+
+The canonical record — `Tour Eiffel`, `monument`, Foursquare, 0.7700 — sits
+12.7 m from the true coordinates. Around it, within 12 km, are **87 records
+across 53 distinct normalised name-forms**, scattered up to **17.8 km**:
+multilingual duplicates stacked at 16.6 m (`หอคอยไอเฟล`, `エッフェル塔`,
+`برج ایفل`), transliterations (`Torre Eiffel`, `Eiffelturm`, `Turnul Eiffel`,
+`Eifel Torenparijs`), typos (`Efiel Tower`, `Paris Toureffeil`, `Toul Eiffel`),
+format noise (`Eiffel Tower,,Paris,Fra`), and parts of the structure
+(`Sommet de la Tour Eiffel`, `Tour Eiffel - 1er Étage`).
+
+**`q=Eiffel Tower` is not losing to hotels. It is losing to itself**, ~87 times,
+into a 10-entry head cap. Same shape elsewhere: Colosseum 33 records / 24
+name-forms, Sagrada Família 17 / 7, Tokyo Tower 7 / 4, Statue of Liberty 6 / 5.
+This is also the same phenomenon as the 98 tied-name-match groups on the
+38,182-record Monaco slice, and as the Places reverse recall@1 misses.
+
+### But a simple dedup heuristic does NOT reach it — measured
+
+Scoped deliberately narrow at the operator's instruction (clear outliers only,
+not the general dedup problem).
+
+- **Exact normalised-name equality at unlimited radius still leaves 53
+  name-forms** against a head cap of 10. At R ≤ 500 m the heuristic is inert:
+  it removes 1 of 87. The duplicates are not co-located.
+- **Fuzzy matching reaches 87 → 17, and is unshippable.** No Jaro-Winkler
+  threshold exists, because the score ordering is inverted: `Statue of Liberty`
+  / `Statue of Liberty Deli` scores **0.958** and must NOT merge, while
+  `Colosseo` / `Coliseo Romano` scores **0.830** and MUST. The prefix bonus is
+  structurally wrong here — shared prefixes are how distinct places are named.
+  Observed false merges at jw≥0.9, R=2 km: 103 `Central Park X` (NYC), 73
+  `Plaça de X` (Barcelona), 28 `Église Saint-X` (Paris).
+- **What does work is the category gate, not geometry.** Exact name + tight
+  landmark category + R=500 m over six cities gives 31 merges / 64 records,
+  every one reviewed and genuine (`Château de Versailles` ×3, `Empire State
+  Building` ×2). Chains are handled entirely by that gate — drop it and NYC
+  merges Western Union (2,409 pairs) and Starbucks (1,845) at R=500 m.
+  Residual false positives are generic single-token names (`Home`, `Paris`,
+  `Casa`, `Pavillon`) that a min-token guard would remove.
+- **Representative selection is contaminated by finding 1.** "Highest
+  confidence" picks `France Eiffel` (0.9697, 912 m) over `Tour Eiffel` (0.7700,
+  13 m). It works in the US and fails in Europe/Japan for the same source, so
+  it does not ship globally.
+
+**Verdict: measured and deferred.** The simple version buys a modest data
+cleanup, not a fix for `q=Eiffel Tower`. The structural fix is still Stage 3
+famous-unique admission plus a real fame signal — and Stage 3's design must be
+re-specced, because it names quantized confidence as its fame proxy, which this
+part falsifies twice over.
+
+### Landmine, recorded regardless
+
+The obvious normaliser
+`regexp_replace(lower(strip_accents(name)),'[^a-z]','','g')` collapses **67% of
+Tokyo records to the empty string** (0.27% Paris, 0.11% Seattle). Under exact-name
+equality that is one cluster containing most of Tokyo, and it is invisible in
+Latin-script testing. Use `[^\p{L}\p{N}]`, which RE2 supports — measured empties
+then fall to 0.0007%. This applies to *any* name normalisation in the pipeline,
+not only to dedup.
 
 ## Part 7 — Recommended sequencing
 
