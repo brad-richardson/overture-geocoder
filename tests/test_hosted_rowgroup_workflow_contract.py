@@ -57,7 +57,11 @@ def test_workflow_pins_actions_and_dependency():
     # The tokenizer contract pins one Unicode version across both
     # implementations; unicodedata2 supplies it independently of the
     # interpreter's own tables (CPython 3.11 embeds 14.0, Rust carries 17.0).
-    assert "unicodedata2==17.0.0" in requirements
+    # x86_64-only by wheel availability: unicodedata2 publishes no cp311 aarch64
+    # wheel at any version, and --only-binary=:all: forbids the sdist. Safe to
+    # exclude on ARM because no hosted entrypoint imports it -- only
+    # baseline_places_construction_v1.py does, for test-time digest parity.
+    assert 'unicodedata2==17.0.0 ; platform_machine == "x86_64"' in requirements
     # The persistent-client S3/R2 backend, plus its transitive closure. It is pinned
     # here rather than left to the `aws` CLI because `aws` v2 spends 0.339 s of CPU
     # per invocation before doing any work, and finalize makes two calls per
@@ -68,14 +72,25 @@ def test_workflow_pins_actions_and_dependency():
         "urllib3==2.7.0",
     ):
         assert pin in requirements, pin
-    # 12 for the numeric/data stack, one universal wheel each for the seven boto3
+    # 13 for the numeric/data stack, one universal wheel each for the seven boto3
     # packages. A count, not a floor: an unpinned transitive dependency slipping in
     # is exactly what --require-hashes exists to stop.
-    assert requirements.count("--hash=sha256:") == 12 + 7
+    #
+    # 12 -> 13 on 2026-08-01: duckdb gained its cp311 aarch64 wheel so the hosted
+    # workflows can run on ubuntu-24.04-arm. numpy, pyarrow and psutil already
+    # carried theirs. The stack is numpy 3 + pyarrow 3 + duckdb 3 + psutil 2 +
+    # unicodedata2 2.
+    assert requirements.count("--hash=sha256:") == 13 + 7
     # CPython 3.11 manylinux x86_64 + aarch64 wheels used by the hosted
     # rowgroup and ARM Worker workflows.
     assert (
         "3095bdb8dd297e5920b010e96134ed91d852d81d490e787beca7e35ae1d89cf7"
+        in requirements
+    )
+    # duckdb cp311 aarch64. Without this the hosted workflows cannot run on
+    # ubuntu-24.04-arm at all: the install fails closed at hash-check time.
+    assert (
+        "553c273a6a8f140adaa6da6a6135c7f95bdc8c2e5f95252fcdf9832d758e2141"
         in requirements
     )
     assert (
