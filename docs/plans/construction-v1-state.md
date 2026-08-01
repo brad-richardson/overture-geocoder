@@ -282,12 +282,45 @@ attestation of a run that really happened -- the standing rule from `cfb9601`.
   quantized confidence as the fame proxy) plus encoder/verifier/oracle lockstep.
 - **Track C -- pipeline efficiency, fully parallel.** Item 2 (~84,000 sequential
   HEADs, one loop measured at 17-36 minutes, on the promotion critical path) and
-  item 1's precondition (`r2-cleanup.yml` has no phase matching an abandoned
-  `slice-*/` prefix), which is what unlocks zero-copy promotion for this run.
+  item 1's precondition, which is what unlocks zero-copy promotion for this run
+  and is **worse than previously recorded** -- see immediately below.
   **Item 8 (launch reverse at the map barrier) is MOOT for this rebuild** --
   reverse is not re-running, so its -2h15m applies only to a future run that
   does rebuild reverse. Do not spend the week on it.
 - **Track D -- streets, fully parallel and NOT on the rebuild path.** See below.
+
+### Item 1's precondition: the cleanup guard is v1-only, and that is a hazard
+
+Previously recorded as "no `r2-cleanup.yml` phase matches an abandoned
+`slice-YYYY-MM-DD.N/` prefix". Investigated 2026-08-01, and the real shape is
+more dangerous than an absence:
+
+**Phase 3 CAN delete a bucket-root prefix.** It reads the `ORPHAN_PREFIXES`
+allowlist (currently `2026-07-17.0`, a plain version prefix, NOT under
+`staging/global-v2/`), and its only guard is
+`prune_catalog.py assert-unreferenced`.
+
+**That guard cannot see v2 at all.** `is_referenced`
+(`scripts/prune_catalog.py:117-122`) walks child links of the **v1**
+`catalog.json` only; the module contains no reference to `v2` or `slice`
+anywhere. But a live slice is referenced exclusively through the v2 chain:
+`v2/catalog.json` -> `v2/releases/<build>/release.json` -> the family manifest's
+`slice_version` and `{version}/slice-manifest.json`
+(`scripts/v2_release_manifest.py:408-414`, `:804-808`).
+
+So adding a slice prefix to `ORPHAN_PREFIXES` to clean up an abandoned one would
+also report "unreferenced" for a **live, serving** slice. Both phase 3 (`:374`)
+and phase 5 (`:491`) call that guard. `PROTECTED_PREFIXES` lists no slice.
+
+This is latent rather than live -- no slice prefix is in the allowlist today, so
+nothing is currently at risk. But it means the precondition is **two** changes,
+not one: a phase that matches `slice-*/`, AND a v2-aware unreferenced check that
+resolves the release chain before permitting any slice delete. Shipping only the
+first would make a 45 GiB cleanup path whose safety check is blind to the thing
+it is protecting.
+
+Until both land, keep `release_slice_version` EMPTY, which preserves the old
+copy-through behaviour exactly.
 
 ### The street layer is scoped but unimplemented, and is decoupled
 
