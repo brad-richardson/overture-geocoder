@@ -297,6 +297,88 @@ jobs:
           echo "The Monaco slice failed twice; this is a real data-plane failure or a sustained S3 outage." >&2
           exit 1
 
+      # ITEM 1, zero-copy promotion. Promotion used to server-side CopyObject
+      # every forward serving object between two content-addressed prefixes that
+      # differ only by prefix -- 21,279 objects and 158.68 GiB on the 2026-07-31
+      # promotion. Finalize can now publish them straight into the release
+      # namespace instead. The claim that makes that safe is that PROMOTION'S
+      # OUTPUT DOES NOT CHANGE, and this is the cheapest rung that can falsify it
+      # on real Overture data rather than on a synthetic fixture: the same Monaco
+      # slice, published both ways, promoted both ways, documents compared.
+      - name: Promote the slice both ways and prove the published documents match
+        run: |
+          set -euo pipefail
+          WORK="$(realpath "$SLICE_WORK")"
+          VERSION=slice-2026-01-01.0
+          SLICE_ROOT="$(jq -er '.namespaces.slice' "$WORK/contract.json")"
+          MARKERS_ROOT="$(jq -er '.namespaces.markers' "$WORK/contract.json")"
+
+          # (a) The construction layout, which is what a dispatch with an empty
+          #     release_slice_version still produces. Promotion copies.
+          python scripts/promote_construction_slice.py plan \
+            --source "local:$WORK/remote" --family places \
+            --slice-root "places=$SLICE_ROOT" --markers-root "places=$MARKERS_ROOT" \
+            --reductions-dir "places=$WORK/reductions" \
+            --version "$VERSION" --release "$SLICE_RELEASE" \
+            --producer-commit "$GITHUB_SHA" --output slice/promote-copy.json
+          python scripts/promote_construction_slice.py execute \
+            --plan slice/promote-copy.json --source "local:$WORK/remote" \
+            --destination "local:$PWD/slice/promote-copy-dest"
+          python scripts/promote_construction_slice.py verify \
+            --plan slice/promote-copy.json --destination "local:$PWD/slice/promote-copy-dest"
+
+          # (b) The release layout: the SAME five phases on the SAME data, with
+          #     finalize publishing the serving objects at their final keys.
+          #     Source and destination are one tree because in the promotion
+          #     workflow they are one bucket.
+          python scripts/run_slice_construction_v1.py \
+            --inventory slice/inventory.json \
+            --task-index "$SLICE_TASK_INDEX" \
+            --release "$SLICE_RELEASE" \
+            --work slice/work-zero-copy \
+            --release-slice-version "$VERSION" > slice/zero-copy-run.log 2>&1
+          ZW="$(realpath slice/work-zero-copy)"
+          python scripts/promote_construction_slice.py plan \
+            --source "local:$ZW/remote" --family places \
+            --slice-root "places=$(jq -er '.namespaces.slice' "$ZW/contract.json")" \
+            --markers-root "places=$(jq -er '.namespaces.markers' "$ZW/contract.json")" \
+            --reductions-dir "places=$ZW/reductions" \
+            --version "$VERSION" --release "$SLICE_RELEASE" \
+            --producer-commit "$GITHUB_SHA" --output slice/promote-zero-copy.json
+          python scripts/promote_construction_slice.py execute \
+            --plan slice/promote-zero-copy.json --source "local:$ZW/remote" \
+            --destination "local:$ZW/remote"
+          python scripts/promote_construction_slice.py verify \
+            --plan slice/promote-zero-copy.json --destination "local:$ZW/remote"
+
+          # The serving objects must NOT be in the construction namespace under
+          # the release layout, and the per-record packs must still be.
+          test ! -d "$ZW/remote/${SLICE_ROOT%/}/families/places/objects"
+          test -d "$ZW/remote/${SLICE_ROOT%/}/families/places/positions"
+          test -f "$ZW/remote/$VERSION/claims/places.json"
+
+          # The assertion this step exists for. `copied_objects` moves; every
+          # published document stays byte-identical.
+          jq -es '
+            (.[0].families.places) as $copy
+            | (.[1].families.places) as $zero
+            | $copy.forward_layout == "construction-copy"
+            and $zero.forward_layout == "release-prepositioned"
+            and $copy.totals.copied_objects > 0
+            and $zero.totals.copied_objects == 0
+            and $zero.totals.forward_prepositioned_objects == $copy.totals.copied_objects
+            and $zero.totals.bytes == $copy.totals.bytes
+            and $zero.family_manifest_sha256 == $copy.family_manifest_sha256
+            and $zero.routing_sha256 == $copy.routing_sha256
+          ' slice/promote-copy.json slice/promote-zero-copy.json >/dev/null || {
+            echo "Zero-copy promotion does not publish the same documents as the copy path." >&2
+            jq -S '.families.places.totals, {fm: .families.places.family_manifest_sha256, routing: .families.places.routing_sha256}' \
+              slice/promote-copy.json slice/promote-zero-copy.json >&2
+            exit 1
+          }
+          echo "Zero-copy promotion: $(jq -c '.families.places.totals' slice/promote-zero-copy.json)"
+          echo "Copy path:           $(jq -c '.families.places.totals' slice/promote-copy.json)"
+
       - name: Encode and verify reverse shards from the positions artifact
         run: |
           set -euo pipefail
