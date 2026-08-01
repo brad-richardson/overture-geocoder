@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-07-31 after v2 release `2026-07-31.0` was promoted and
-point-family `/v2/reverse` went live for both Places and Addresses.
+Last updated 2026-08-01 after Stage 1 landed end to end and the rebuild-blocker
+queue was agreed with the operator. See "Rebuild queue, 2026-08-01".
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -98,6 +98,63 @@ format** — it carries the request digest and every cost parameter, keys the
 concurrency group, and feeds `construction_v1_control.py admit-dispatch` for
 byte-verification. It is not a gate and must not be removed without redesigning
 that contract.
+
+## Rebuild queue, 2026-08-01 (AGREED WITH OPERATOR)
+
+The next planet rebuild waits behind this queue. Ordered by what it protects,
+not by size. Full detail for every numbered item is in
+`2026-07-31-promotion-copy-and-efficiency.md`.
+
+### Wave A — independent, parallelizable, land first
+
+These three touch disjoint files and can proceed concurrently.
+
+| item | what | where | why now |
+|---|---|---|---|
+| **9** | Bounded retry of a *definite* R2 5xx, kept distinct from an ambiguous read timeout | `scripts/r2_verified_store.py:643` | Already discarded a 4h17m run after Places had fully succeeded |
+| **7** | Reverse `max_parallel` 2 -> 4 | `reverse-v2.yml` dispatch input | Workflow already permits 4; last run used 2 across 16 ranges |
+| **13** | aarch64 wheel hashes, then construction onto `ubuntu-24.04-arm` | `.github/requirements-hosted-rowgroup.txt`, `construction-v1.yml` | **Operator has observed ARM runners faster and wants it in scope.** 18 jobs elsewhere already run ARM; construction's 8 are all x86 |
+
+### Wave B — depends on Wave A
+
+| item | what | blocked by |
+|---|---|---|
+| **12** | Build the construction binaries **once** in `admit`, download in map/reduce/head | 13 — the artifact must be built for the target architecture |
+| **6** | Reduction records into R2 beside the markers, not GitHub artifacts | — (independent, but larger than Wave A) |
+
+### Wave C — decides whether the rebuild is worth paying for
+
+**Wide cap simulation across regions.** Extend
+`benchmarks/probes/2026-07-31-poi-type-prior-probe.py` to every gold-set token
+across diverse regions and apply the admission order to direct Overture source.
+A three-token check on one city already caught a regression (Part 6g), so this
+is the cheapest de-risking available.
+
+It also has to answer a measured problem: on a 38,182-record Monaco slice,
+**98 `(token, prominence)` groups already hold more than 10 tied name matches**,
+so the cap falls back to `feature_id` — UUID order, which is RC1 one level down.
+The category prior separates *classes*, not *instances*.
+
+### Wave D — the operator priority
+
+**Item 11 / Track C: one resumable planet job replacing four workflows.** The
+planet path is 4 workflows and 22 jobs (`construction-v1` 8, `reverse-v2` 3,
+`release-slice-families` 6, `promote-v2-release` 5), each boundary a
+GitHub-artifact hand-off plus a fresh environment plus a re-authentication.
+Track C (`2026-07-28-planet-build-wall-clock-review.md:411`, Wave 5,
+**unexecuted**) is the existing design. It subsumes item 12 by keeping binaries
+warm, and pairs with items 1/6/9 as the copy-minimization half.
+
+Next deliverable is a written scope against the current phase boundaries, not an
+implementation.
+
+### Still open, unscheduled
+
+RC2 (two-token intersection of ten-deep lists), RC3 (three tokens never touch
+the head), duplicate collapse, and `head_result_cap` 10 -> 64. These are why
+`Eiffel Tower`, `Space Needle` and `Statue of Liberty` all still return **0
+features** in production as of 2026-08-01, and a rebuild alone does not fix
+them.
 
 ## Current snapshot
 
