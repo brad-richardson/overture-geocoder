@@ -35,9 +35,14 @@ on:
         type: choice
         options: [dry-run, execute]
       max_parallel:
+        # Raised 2 -> 4 (item 7). The 2026-07-31 reverse builds ran 16 ranges at
+        # 2 for 2h15m (Places) and 2h33m (Addresses) while the workflow already
+        # permitted 4; the cap was the dispatch default, not a measured limit.
+        # Reverse writes prepositioned content-addressed objects, so ranges are
+        # independent and raising concurrency changes only scheduling.
         description: Maximum simultaneous bucket-range jobs.
         required: true
-        default: "2"
+        default: "4"
         type: choice
         options: ["1", "2", "4"]
       max_total_runner_minutes:

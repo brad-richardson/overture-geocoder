@@ -406,3 +406,100 @@ def test_upload_rejects_manifest_key_outside_content_identity(tmp_path):
         shuffle.upload_manifest(
             shuffle.FilesystemStore(tmp_path / "remote"), path, "runs/1"
         )
+
+
+def _copy_store(monkeypatch, client):
+    """A Boto3Store wired for copy_within_bucket only, with sleep disabled."""
+    botocore = pytest.importorskip("botocore.exceptions")
+    store = shuffle.Boto3Store.__new__(shuffle.Boto3Store)
+    store.bucket = "bucket"
+    store.copy_client = client
+    store._client_error = botocore.ClientError
+    monkeypatch.setattr(shuffle.time, "sleep", lambda _seconds: None)
+    return store
+
+
+def _client_error(status, code):
+    botocore = pytest.importorskip("botocore.exceptions")
+    return botocore.ClientError(
+        {
+            "Error": {"Code": code, "Message": "synthetic"},
+            "ResponseMetadata": {"HTTPStatusCode": status},
+        },
+        "CopyObject",
+    )
+
+
+def test_copy_retries_a_definite_internal_error(monkeypatch):
+    """Run 30629402228 lost 4h17m to exactly this: a parsed 500 InternalError
+    on the Addresses copy, after Places had fully succeeded."""
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def copy_object(self, **_kwargs):
+            self.calls += 1
+            if self.calls < 3:
+                raise _client_error(500, "InternalError")
+            return {}
+
+    store = _copy_store(monkeypatch, Client())
+    store.copy_within_bucket("source", "destination")
+    assert store.copy_client.calls == 3
+
+
+def test_copy_does_not_retry_an_ambiguous_timeout(monkeypatch):
+    """PR #198's rule survives: a read timeout may have LANDED the write, so it
+    must not be replayed inside one process. It is not a ClientError, so it
+    propagates on the first occurrence."""
+    botocore = pytest.importorskip("botocore.exceptions")
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def copy_object(self, **_kwargs):
+            self.calls += 1
+            raise botocore.ReadTimeoutError(
+                endpoint_url="https://example.invalid",
+                error=TimeoutError("read timed out"),
+            )
+
+    store = _copy_store(monkeypatch, Client())
+    with pytest.raises(botocore.ReadTimeoutError):
+        store.copy_within_bucket("source", "destination")
+    assert store.copy_client.calls == 1, "an ambiguous failure must not replay"
+
+
+def test_copy_does_not_retry_a_client_side_4xx(monkeypatch):
+    """A 4xx is the server refusing, not failing. Retrying cannot help and
+    would multiply the cost of a genuinely broken promotion."""
+
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def copy_object(self, **_kwargs):
+            self.calls += 1
+            raise _client_error(403, "AccessDenied")
+
+    store = _copy_store(monkeypatch, Client())
+    with pytest.raises(Exception, match="AccessDenied"):
+        store.copy_within_bucket("source", "destination")
+    assert store.copy_client.calls == 1
+
+
+def test_copy_gives_up_after_a_bounded_number_of_definite_errors(monkeypatch):
+    class Client:
+        def __init__(self):
+            self.calls = 0
+
+        def copy_object(self, **_kwargs):
+            self.calls += 1
+            raise _client_error(503, "SlowDown")
+
+    store = _copy_store(monkeypatch, Client())
+    with pytest.raises(RuntimeError, match="copy-object failed after"):
+        store.copy_within_bucket("source", "destination")
+    assert store.copy_client.calls == shuffle.COPY_MAX_ATTEMPTS

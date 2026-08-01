@@ -529,6 +529,14 @@ MAX_ATTEMPTS = 5
 _ABSENT_ERROR_CODES = frozenset({"404", "NoSuchKey", "NotFound"})
 _CONFLICT_ERROR_CODES = frozenset({"412", "PreconditionFailed"})
 
+# Attempts for a server-side copy whose failure is DEFINITE -- see
+# `copy_within_bucket`. Deliberately smaller than MAX_ATTEMPTS: a copy is the
+# most expensive request this store makes, and a genuinely broken destination
+# should surface quickly rather than after five long-timeout stalls.
+COPY_MAX_ATTEMPTS = 4
+# Ceiling on the backoff between those attempts.
+COPY_RETRY_CEILING_SECONDS = 8.0
+
 
 class Boto3Store:
     """Persistent-client S3/R2 adapter: ``S3Store``'s discipline without the process.
@@ -718,13 +726,68 @@ class Boto3Store:
                 ) from error
             raise RuntimeError(f"put-object failed for {key}: {error}") from error
 
+    @staticmethod
+    def _is_definite_server_error(error: Any) -> bool:
+        """True when the server ANSWERED with a 5xx, so nothing is in flight.
+
+        The distinction is the whole point of this retry. Two failures were
+        previously treated identically:
+
+        * **Ambiguous** -- a read timeout after the request was sent. The write
+          may have landed, so a blind replay is unsafe. That is the case PR #198
+          was written for, and it is still not retried here: botocore raises
+          `ReadTimeoutError`/`EndpointConnectionError`, not `ClientError`, so it
+          does not match and propagates on the first occurrence.
+        * **Definite** -- a parsed HTTP 5xx response. The server replied. There
+          is no in-flight write to duplicate.
+
+        Only the definite class is retried.
+        """
+        response = getattr(error, "response", None) or {}
+        metadata = response.get("ResponseMetadata") or {}
+        try:
+            status = int(metadata.get("HTTPStatusCode", 0))
+        except (TypeError, ValueError):
+            return False
+        return 500 <= status < 600
+
     def copy_within_bucket(self, source_key: str, destination_key: str) -> None:
-        self.copy_client.copy_object(
-            Bucket=self.bucket,
-            Key=destination_key,
-            CopySource={"Bucket": self.bucket, "Key": source_key},
-            MetadataDirective="COPY",
-        )
+        """Server-side copy, retrying only a DEFINITE 5xx.
+
+        Run `30629402228` lost 4h17m to a single transient
+        `InternalError ... (reached max retries: 0)` on the Addresses copy,
+        after Places had already fully succeeded.
+
+        Retrying is safe on this specific path for a reason stronger than "5xx
+        is usually retryable": destination keys are content-addressed by the
+        source's own sha256 and immutable, `_execute_object` performs its
+        create-only destination check before copying, and the post-copy ETag
+        proof runs regardless. Re-copying the same source to the same key writes
+        identical bytes by construction, so a duplicated definite-5xx attempt is
+        a no-op rather than an overwrite.
+        """
+        last_error: BaseException | None = None
+        for attempt in range(1, COPY_MAX_ATTEMPTS + 1):
+            try:
+                self.copy_client.copy_object(
+                    Bucket=self.bucket,
+                    Key=destination_key,
+                    CopySource={"Bucket": self.bucket, "Key": source_key},
+                    MetadataDirective="COPY",
+                )
+                return
+            except self._client_error as error:
+                if not self._is_definite_server_error(error):
+                    raise
+                last_error = error
+            if attempt < COPY_MAX_ATTEMPTS:
+                time.sleep(
+                    min(0.5 * (2 ** (attempt - 1)), COPY_RETRY_CEILING_SECONDS)
+                )
+        raise RuntimeError(
+            f"copy-object failed after {COPY_MAX_ATTEMPTS} attempts for "
+            f"{destination_key}: {last_error}"
+        ) from last_error
 
     def open_stream(self, key: str) -> tuple[int, BinaryIO]:
         try:
