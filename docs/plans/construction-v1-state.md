@@ -219,6 +219,96 @@ concurrency group, and feeds `construction_v1_control.py admit-dispatch` for
 byte-verification. It is not a gate and must not be removed without redesigning
 that contract.
 
+## Next planet rebuild: SCOPE AGREED 2026-08-01, targeting early week of 2026-08-03
+
+Operator decisions, taken 2026-08-01:
+
+| decision | value | consequence |
+|---|---|---|
+| families | **Places only** | Addresses need nothing from this rebuild; the promoted Address slice is untouched, and ~114 GiB of republication is avoided |
+| DuckDB 1.5.5 | **held again** | It changes address forward pack bytes, so landing it would drag Addresses into the run for zero quality gain. See the "prepared but HELD" section |
+| Places reverse | **not rebuilt** | `POSITIONS_COLUMNS` carries no `prominence_rank` and the reverse encoder's `OrderKey` is purely spatial, so the existing 7.82 GiB catalog is referenced in place. Saves 2h15m |
+| `head_result_cap` 10 -> 64 | **IN SCOPE** | Direct fix for RC2: two-token queries intersecting two ten-deep lists get the empty set |
+
+**The rebuild exists to make prominence measurable.** Every published shard is
+0002, so `prominence_rank` is 0 in production and the gold set physically cannot
+move. Nothing else justifies the spend.
+
+### The head cap raise is NOT a cheap code change -- it is contract-bound
+
+`head_result_cap` is not a plain default. `acceptance_gates.head.result_cap_per_token`
+(and `candidate_cap_per_task_token`) live in
+`benchmarks/places-construction-v1-evidence-spec-v2.json`, whose sha256
+`5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d` is pinned at
+`scripts/construction_v1_control.py:45` and asserted by
+`test_control_pins_match_the_real_committed_evidence_files`.
+
+**So it hits the same attestation wall as `categories.alternate` and DuckDB, and
+that is good news: all three collapse into ONE re-attestation pass.** Doing them
+separately would mean regenerating and re-attesting the frozen evidence three
+times. The pass must touch, in order:
+
+1. `places_inventory_v1.py` -- promote `categories.alternate` from optional to
+   `REQUIRED_FIELD_TYPES`. The projection currently degrades to a primary-only
+   prior without it, so a rebuild that skips this ships a deliberately weakened
+   prior. Note this also changes every row group's
+   `selected_compressed_bytes` / `selected_uncompressed_bytes`, so the map plan
+   re-partitions -- and `sources` was NOT added, deliberately, because it is a
+   fat nested column and the per-task gates are
+   `selected_uncompressed_bytes_hard_cap` 1 GB and `row_groups_hard_cap` 64.
+2. the evidence spec -- `result_cap_per_token` and
+   `candidate_cap_per_task_token` 10 -> 64, **sized against Wave C Q4 first**.
+   Raising the cap grows head RECORDS, not index entries (entries track distinct
+   tokens: the planet head was 30,841,082 records against 13,971,501 entries),
+   but the real multiplier is a measurement, not an inference -- most tokens hold
+   fewer than 10 candidates. Check against
+   `per_shard_index_entries_hard_cap` 250,000 and
+   `head_output_hard_cap_bytes` 1 GiB.
+3. regenerate inventory / evidence / readiness, then re-pin
+   `inventory_file_sha256`, `inventory_sha256`, `schema_fingerprint_sha256`,
+   `spec_sha256`, `readiness_file_sha256`, `scale_evidence_sha256` in
+   `construction_v1_control.py`.
+
+**Do not rewrite the pins to match without regenerating.** That falsifies an
+attestation of a run that really happened -- the standing rule from `cfb9601`.
+
+### Sequencing, four tracks
+
+- **Gate 0 -- Wave C.** Blocks everything; nothing in Track A is worth doing if
+  it comes back negative. Now also sizes the 10 -> 64 raise.
+- **Track A -- the single re-attestation pass above.** The long pole.
+- **Track B -- build-side quality.** Stage 3 famous-unique is OUT of this
+  rebuild: it needs a re-spec onto `prominence_rank` (its design still names
+  quantized confidence as the fame proxy) plus encoder/verifier/oracle lockstep.
+- **Track C -- pipeline efficiency, fully parallel.** Item 2 (~84,000 sequential
+  HEADs, one loop measured at 17-36 minutes, on the promotion critical path) and
+  item 1's precondition (`r2-cleanup.yml` has no phase matching an abandoned
+  `slice-*/` prefix), which is what unlocks zero-copy promotion for this run.
+  **Item 8 (launch reverse at the map barrier) is MOOT for this rebuild** --
+  reverse is not re-running, so its -2h15m applies only to a future run that
+  does rebuild reverse. Do not spend the week on it.
+- **Track D -- streets, fully parallel and NOT on the rebuild path.** See below.
+
+### The street layer is scoped but unimplemented, and is decoupled
+
+`FAMILIES = {"addresses", "places"}` (`global_build_manifest.py:23`); there is no
+street family and the Worker rejects any other name. The **7 acceptance
+experiments have never been run** -- local transportation artifacts are empty.
+`benchmark_transport_components.py` is the offline experiment that produced the
+Boston sizing (65,176 segments, 22,385 named, 5,832 clusters), and says in its
+own docstring that it is not a shard builder. `build_us_streets.py` is an
+unrelated legacy US radix-trie prototype referenced by no workflow.
+
+Free-text address search returns `capability_unavailable`
+(`v2.rs:2290`); street-only free text is the deferred item designed to ship
+first because it sidesteps the house-number parser.
+
+**It does not gate or ride the rebuild.** The catalog contract supports a new
+family arriving through a non-promoting families-only slice, so streets can be
+built without touching live Places/Addresses. It is also the only genuine
+one-way door in the plan -- first publication is a permanent decode obligation
+across 64 retained releases -- so it should not be rushed into the rebuild week.
+
 ## Rebuild queue, 2026-08-01 (AGREED WITH OPERATOR)
 
 The next planet rebuild waits behind this queue. Ordered by what it protects,
