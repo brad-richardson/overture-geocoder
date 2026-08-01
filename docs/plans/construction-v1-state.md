@@ -228,13 +228,78 @@ Operator decisions, taken 2026-08-01:
 | families | **Places only** | Addresses need nothing from this rebuild; the promoted Address slice is untouched, and ~114 GiB of republication is avoided |
 | DuckDB 1.5.5 | **held again** | It changes address forward pack bytes, so landing it would drag Addresses into the run for zero quality gain. See the "prepared but HELD" section |
 | Places reverse | **not rebuilt** | `POSITIONS_COLUMNS` carries no `prominence_rank` and the reverse encoder's `OrderKey` is purely spatial, so the existing 7.82 GiB catalog is referenced in place. Saves 2h15m |
-| `head_result_cap` 10 -> 64 | **IN SCOPE** | Direct fix for RC2: two-token queries intersecting two ten-deep lists get the empty set |
+| `head_result_cap` | **STAYS AT 10** (revised after Wave C, same day) | Wave C measured the reorder as delivering the whole step change at cap 10, and 64 as the riskiest part of the run. See "Wave C result" |
 
 **The rebuild exists to make prominence measurable.** Every published shard is
 0002, so `prominence_rank` is 0 in production and the gold set physically cannot
 move. Nothing else justifies the spend.
 
-### The head cap raise is NOT a cheap code change -- it is contract-bound
+### Wave C result, 2026-08-01: GATE PASSED, and it resized the run
+
+Evidence: `benchmarks/2026-08-01-wave-c-cap-simulation.json`. 15 bbox-bounded
+metros, 2,552,036 records -> 21,431,034 term rows -> 1,069,840 distinct tokens,
+roughly 3-4% of the planet. Fidelity check worth trusting the rest on: the
+simulation's head-rows-per-token at cap 10 came out **2.174 against the planet's
+actual 2.208** (30,841,082 / 13,971,501), a 1.5% match on a number nobody fitted.
+
+**The rebuild is justified, for a narrower reason than assumed.** The reorder is
+invisible on the routed path and decisive on the head path:
+
+- **Routed path: 23 of 25 gold POI cases admit IDENTICALLY** old vs new, at every
+  cap. `merge_routed_candidates` has a saturated-posting fallback that routes
+  around the cap entirely. If this were the only consumer, the rebuild would not
+  be worth paying for.
+- **Head path (context-free, strict AND, no fallback): 0 of 11 answerable today,
+  6 of 11 under the new ordering AT THE EXISTING CAP OF 10.** That is the step
+  change, and it does not need the cap raise.
+
+**`head_result_cap` therefore stays at 10** (operator decision, same day,
+revising the earlier 10 -> 64). Wave C measured 64 as the riskiest part of the
+change:
+
+- the real multiplier is **1.72x**, not 6.4x -- 69% of tokens have exactly one
+  candidate and only 6.2% exceed 10;
+- it buys **+2 of 11** gold cases, both in the 11-20 band, which a cap of ~24
+  would buy at 1.2-1.4x;
+- it makes the key MORE arbitrary: UUID order decides **34%** of cap decisions at
+  10, **57% at 64**, 71% at 256;
+- **every gate this document named passes with huge margin** -- per-shard index
+  entries 1.4% of cap, per-shard bytes 2.16 MB against 1 GiB, candidate rows 54%
+  of cap -- but **two gates it did not name are where 64 breaks**: head wall clock
+  projects **330-392 min against a 330-min budget and a 360-min job ceiling**, and
+  the DuckDB spill headroom is only 2.02x against 1.72x growth with the cap-10
+  peak **recorded nowhere**. A blown head phase costs the whole run.
+
+Staying at 10 also means the run measures the head timing and spill peak for
+free, so the cap becomes an informed decision next time instead of a projection.
+
+**Consequence for Track A: the evidence spec no longer needs to change for the
+cap.** The re-attestation pass shrinks to `categories.alternate` alone.
+
+**Two things Wave C found that are NOT fixed by this rebuild**, recorded so they
+are not rediscovered: `brandenburg-gate` (31 -> 243) and `louvre-museum`
+(26 -> 455) **regress** under the new ordering -- both match on a generic second
+token (`gate`, `museum`) via a common name and land in a large
+identity+prominence-tied block where a low continuous `meta` confidence buries
+them. And 14 of 25 POI gold cases have more than two tokens, so the head path
+returns nothing regardless of cap (`tokens.len() <= 2` is a hard limit).
+
+**Planet-scale caveat, stated because it cuts against the decision:** required
+head caps grow roughly as sqrt(n). Wave C measured this directly by widening
+from home-region-only to all 15 regions (eiffel 3 -> 5, big-ben 6 -> 15, louvre
+20 -> 455). If planet postings for global tokens are ~30x this union, cap 10 may
+hold only ~3/11 and cap 64 ~6/11 at planet scale. The ordering of the answer
+survives; the counts probably do not.
+
+**One Wave C claim was checked and is WRONG.** It reported Foursquare's flat
+default as 86.2% rather than 100% and attributed the softening to top-level
+`confidence` vs `sources[].confidence`. Re-measured directly on the top-level
+column: Paris 1 distinct value / 100% at 0.77, Tokyo 1 / 100%, but Seattle 299
+distinct / 36.2% and NYC 1,031 / 35.9%. The cause is the **US region mix**, not
+the column. The claim in `2026-08-01-confidence-and-duplicates.json` -- exactly
+0.7700 across six NON-US regions -- stands exactly as scoped.
+
+### If the head cap is ever raised, it is contract-bound
 
 `head_result_cap` is not a plain default. `acceptance_gates.head.result_cap_per_token`
 (and `candidate_cap_per_task_token`) live in
@@ -243,10 +308,14 @@ move. Nothing else justifies the spend.
 `scripts/construction_v1_control.py:45` and asserted by
 `test_control_pins_match_the_real_committed_evidence_files`.
 
-**So it hits the same attestation wall as `categories.alternate` and DuckDB, and
-that is good news: all three collapse into ONE re-attestation pass.** Doing them
-separately would mean regenerating and re-attesting the frozen evidence three
-times. The pass must touch, in order:
+So it would hit the same attestation wall as `categories.alternate` and DuckDB.
+**With the cap staying at 10 this is now moot for the coming rebuild** -- kept
+here because it is the fact that decides how any future raise is scheduled: a
+cap change is an evidence regeneration, not a one-line edit, so it must be
+batched with whatever else re-attests.
+
+The re-attestation pass for THIS rebuild is therefore just step 1 below. Steps 2
+and 3 apply whenever the cap or DuckDB do land:
 
 1. `places_inventory_v1.py` -- promote `categories.alternate` from optional to
    `REQUIRED_FIELD_TYPES`. The projection currently degrades to a primary-only

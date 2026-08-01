@@ -1,0 +1,141 @@
+{
+  "schema": "overture-places-cap-simulation-evidence-v1",
+  "date": "2026-08-01",
+  "overture_release": "2026-06-17.0",
+  "purpose": "Wave C: the decision gate on whether the planet Places rebuild is worth paying for, and how to size head_result_cap.",
+  "verdict": "REBUILD YES. HEAD CAP RAISE: NO -- ship the reorder at the existing cap of 10.",
+
+  "method": {
+    "scope": "15 bbox-bounded metros (Paris, Seattle, Tokyo, Barcelona, Berlin, Sao Paulo, Lagos, New York, London, Rome, Monaco, Agra, Cusco, Sydney, San Francisco)",
+    "records": 2552036,
+    "term_rows": 21431034,
+    "distinct_tokens": 1069840,
+    "fan_out": 8.40,
+    "planet_coverage_estimate": "3-4%",
+    "type_prior": "imported from scripts/places_type_prior_v1.py, not reimplemented",
+    "tokenizer": "reimplemented; reproduces every hand vector in places_transform_v1.rs",
+    "fidelity_check": {
+      "claim": "head rows per token at cap 10",
+      "simulated": 2.174,
+      "planet_actual": 2.208,
+      "planet_basis": "30,841,082 head rows / 13,971,501 index entries",
+      "delta_pct": 1.5,
+      "note": "not a fitted parameter -- this is the strongest evidence the simulation tracks the real pipeline"
+    }
+  },
+
+  "q1_which_key_level_decides": {
+    "claim": "The cap remains arbitrary a third of the time, and widening it makes that WORSE.",
+    "at_the_cap_boundary": {
+      "cap_10_per_token":       {"contested_groups": 66802, "identity_pct": 0.11, "prominence_pct": 3.24, "confidence_pct": 62.6, "feature_id_uuid_pct": 34.0},
+      "cap_64_per_token":       {"contested_groups": 17873, "identity_pct": 0.11, "prominence_pct": 0.66, "confidence_pct": 42.6, "feature_id_uuid_pct": 56.6},
+      "cap_256_per_cell_token": {"contested_groups": 7067,  "identity_pct": 0.06, "prominence_pct": 0.24, "confidence_pct": 28.5, "feature_id_uuid_pct": 71.2}
+    },
+    "key_level_ablation_retained_rows_changed_pct": {
+      "remove_identity": 0.97, "remove_prominence": 18.0, "remove_confidence": 41.9,
+      "remove_whole_new_key_equals_old_ordering": 18.5, "remove_everything_uuid_only": 57.7
+    },
+    "why_identity_looks_inert": "It PRE-EMPTS the boundary rather than deciding it. Of contested tokens 92.0% are all-identifying, 2.0% all-context, 5.9% mixed -- and in 95.3% of the mixed ones identity alone already fills the top 10, so the boundary lands inside the identifying block. It is still what fixed the Monaco `monte` regression."
+  },
+
+  "q2_confidence_decisions_by_source": {
+    "cap_10_boundary_pairs_reaching_confidence": 64562,
+    "of_those_tied_and_falling_through_to_uuid_pct": 35.2,
+    "both_sides_from_a_flat_default_source": {"pairs": 11371, "tied_to_uuid_pct": 87.6},
+    "by_pair": {
+      "meta/meta": {"pairs": 41064, "tied_pct": 25.3},
+      "Foursquare/Foursquare": {"pairs": 5951, "tied_pct": 99.5},
+      "Microsoft/Microsoft": {"pairs": 3497, "tied_pct": 87.7},
+      "Foursquare/meta": {"pairs": 3414, "tied_pct": 11.3},
+      "meta/Microsoft": {"pairs": 2452, "tied_pct": 25.9}
+    },
+    "flat_default_reconciliation": {
+      "wave_c_reported": "Foursquare modal share 86.2% over a 6-metro mix, and attributed the softening to top-level `confidence` vs `sources[].confidence`",
+      "that_attribution_is_WRONG": "verified 2026-08-01 by direct query on the TOP-LEVEL confidence column",
+      "measured_top_level_confidence_foursquare": {
+        "paris_fr":   {"n": 30102, "distinct": 1,    "pct_at_0_77": 100.0},
+        "tokyo_jp":   {"n": 59547, "distinct": 1,    "pct_at_0_77": 100.0},
+        "seattle_us": {"n": 9367,  "distinct": 299,  "pct_at_0_77": 36.24},
+        "nyc_us":     {"n": 31022, "distinct": 1031, "pct_at_0_77": 35.88}
+      },
+      "actual_cause": "US region mix. US metros are conflated, so including them softens the modal share. The claim in benchmarks/2026-08-01-confidence-and-duplicates.json -- exactly 0.7700 across six NON-US regions -- stands exactly as scoped."
+    }
+  },
+
+  "q3_old_vs_new_cap": {
+    "claim": "The reorder is invisible on the routed path and decisive on the head path.",
+    "routed_path": {
+      "mechanism": "merge_routed_candidates AND-intersects but has a saturated-posting fallback -- a record missing from a saturated posting is still admitted if its own display fields carry the token",
+      "gold_poi_cases_admitting_identically_under_every_combination": "23 of 25",
+      "the_2_failures": "statue-of-liberty (with `new york`) and machu-picchu (with `cusco`) are context-field data gaps, identical in BOTH orderings",
+      "consequence": "if the routed path were the only consumer, this rebuild would not be worth paying for"
+    },
+    "head_path": {
+      "mechanism": "intersect_ranked, strict AND, NO fallback, hard-limited to tokens.len() <= 2",
+      "gold_cases_answerable": {
+        "old_ordering_cap_10": 0, "new_ordering_cap_10": 6,
+        "old_ordering_cap_64": 5, "new_ordering_cap_64": 8,
+        "of_total_head_eligible": 11
+      },
+      "required_cap_per_case": {
+        "taj-mahal": {"new": 1, "old": 88},
+        "colosseum": {"new": 2, "old": 48},
+        "sagrada-familia": {"new": 2, "old": 14},
+        "times-square": {"new": 4, "old": 519},
+        "eiffel-tower": {"new": 5, "old": 661},
+        "machu-picchu": {"new": 10, "old": 13},
+        "buckingham-palace": {"new": 14, "old": 158},
+        "big-ben": {"new": 15, "old": 460},
+        "brandenburg-gate": {"new": 243, "old": 31, "REGRESSION": true},
+        "louvre-museum": {"new": 455, "old": 26, "REGRESSION": true}
+      },
+      "regression_mechanism": "both match on a generic second token (`gate`, `museum`) via a common name, landing in a large identity+prominence-tied block where a low continuous meta confidence buries them. The cap raise rescues neither.",
+      "also": "14 of 25 POI gold cases have >2 tokens and the head path returns nothing at all regardless of cap; 10 of 35 gold cases expect a locality and are served by divisions, out of scope for this cap"
+    }
+  },
+
+  "q4_head_cap_10_to_64": {
+    "decision": "NOT DONE. Operator decision 2026-08-01: ship the reorder at cap 10.",
+    "real_multiplier": 1.720,
+    "not_6_4x_because": "69% of tokens have exactly one candidate; only 6.2% exceed 10 and 1.7% exceed 64",
+    "per_region_range": {"min": 1.35, "min_region": "monaco", "max": 1.88, "max_region": "seattle", "tokyo": 1.58, "sao_paulo": 1.87},
+    "gold_gain": "+2 of 11 (buckingham 14, big-ben 15), both in the 11-20 band -- a cap of ~24 buys them at 1.2-1.4x",
+    "gates_that_PASS_with_margin": {
+      "per_shard_index_entries_hard_cap": {"cap": 250000, "projected": 3409, "utilisation_pct": 1.4},
+      "head_output_hard_cap_bytes": {"cap": "1 GiB", "projected_per_shard": "2.16 MB"},
+      "max_head_candidate_rows": {"cap": 200000000, "projected": 108000000, "utilisation_pct": 54}
+    },
+    "gates_the_state_doc_did_NOT_name_and_where_it_breaks": {
+      "head_wall_clock": {"cap_10_measured_min": 206.4, "cap_64_projected_min": [330, 392], "hosted_budget_min": 330, "github_job_ceiling_min": 360, "verdict": "at the central estimate the head phase does not fit in one job"},
+      "duckdb_spill_share": {"failed_at_bytes": 4200000000, "passes_at_bytes": 9126805504, "scratch_cap_bytes": 18253611008, "headroom_ratio": 2.02, "growth": 1.72, "verdict": "UNQUANTIFIED -- the cap-10 run's actual peak temp usage is recorded nowhere"},
+      "pessimistic_worst_task_head_rows": {"cap": 6000000, "projected": 4640000, "utilisation_pct": [72, 86], "verdict": "thin"}
+    },
+    "planet_scale_counterweight": "required caps grow roughly as sqrt(n). Measured directly by widening from home-region-only to all 15 regions: eiffel 3->5, big-ben 6->15, buckingham 5->14, times 2->4, louvre 20->455, brandenburg 17->243. If planet postings for global tokens (tower, palace, museum, gate) are ~30x this union, cap 10 likely holds ~3/11 and cap 64 ~6/11 at planet scale. The ORDERING of the answer survives; the COUNTS probably do not."
+  },
+
+  "q5_tied_groups_persist_and_scale": {
+    "claim": "The Monaco tied-group finding was not a small-slice artifact; it grows with metro size.",
+    "tokens_with_a_tie_group_over_10": {
+      "tokyo": {"tokens": 8538, "groups": 55067, "name_matches": 33330, "largest_group": 102129},
+      "sao_paulo": {"tokens": 1794, "groups": 41314, "name_matches": 19771, "largest_group": 23578},
+      "new_york": {"tokens": 4092, "groups": 15031, "name_matches": 9120, "largest_group": 90506},
+      "london": {"tokens": 3044, "groups": 13184, "name_matches": 8049, "largest_group": 56261},
+      "paris": {"tokens": 1960, "groups": 12095, "name_matches": 5606, "largest_group": 40598},
+      "lagos": {"tokens": 95, "groups": 2502, "name_matches": 811, "largest_group": 713},
+      "monaco": {"tokens": 21, "groups": 114, "name_matches": 15, "largest_group": 145}
+    },
+    "original_shape_remeasured": {"metric": "(token, prominence) groups holding >10 tied NAME matches", "monaco_now": 108, "monaco_previously_reported": 98, "tokyo": 25142, "sao_paulo": 14461, "paris": 6778, "lagos": 1775},
+    "direct": "22,742 of 66,802 cap-10 boundaries (34.0%) fall inside a group tied all the way to the UUID"
+  },
+
+  "not_measured": [
+    "Planet scale. 15 metros is 3-4% of the planet and required head caps are LOWER BOUNDS.",
+    "The DuckDB temp peak and head wall clock at cap 64 -- projected linearly from the cap-10 run, never executed.",
+    "Reimplementation divergence risk: Python str.lower() vs Rust char::to_lowercase differ on a few codepoints (e.g. Turkish dotted I); str.strip() vs str::trim trim different whitespace sets; NFKD comes from Python's table, not the compile-time-pinned unicode-normalization 17.0. All hand vectors pass, so any divergence is in the long tail.",
+    "source_object_index/row_group/row_index are pipeline-internal and absent from a direct S3 query -- they cannot change a result, because feature_id is already unique per record so the locator tail never fires between distinct records.",
+    "Serving-cap edge truncation: the 256 cap is per (partition_cell, token) on a 256x256 global grid, and the bboxes are smaller than one cell, so the 256 numbers are conservative.",
+    "taxonomy.primary is not read, matching project_places_construction_v1.py which passes None for it.",
+    "The gold 'expected feature' definition is the probe's own (alias-token subset within tolerance_km, filtered to exact name match OR prominence_rank > 0). A different alias list moves per-case numbers but not the 0->6 headline.",
+    "The probe counts 43 Eiffel records / 43 name-forms within 500 m against the ~87/53 reported at 12 km in benchmarks/2026-08-01-confidence-and-duplicates.json. Almost certainly a radius/criteria difference rather than a contradiction, but it was not reconciled."
+  ]
+}
