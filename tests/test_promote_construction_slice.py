@@ -27,6 +27,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).parent.parent / "scripts"))
 
+import construction_v1_hosted as hosted
 import global_build_manifest as gbm
 import promote_construction_slice as promote
 
@@ -488,6 +489,41 @@ def test_plan_is_deterministic(both):
     run_plan(root, slices, first)
     run_plan(root, slices, second)
     assert first.read_bytes() == second.read_bytes()
+
+
+def test_plan_is_identical_from_the_durable_markers_reduction_subset(both):
+    """Item 6 consumer: promotion plans identically from the marker's subset.
+
+    The durable reduce marker cannot carry a whole reduction record -- markers
+    are create-only, and a record carries irreproducible watchdog telemetry --
+    so it carries `_AUTHENTICATING_REDUCTION_FIELDS` only. Promotion is the only
+    consumer that has to survive that, and the claim "everything promotion reads
+    is in the allowlist" is asserted here against the real allowlist rather than
+    restated in a comment.
+
+    The records are ENRICHED with excluded fields first, so a plan that silently
+    depended on one of them would differ once they are stripped.
+    """
+    root, slices = both
+    baseline = root / "plan-full.json"
+    run_plan(root, slices, baseline)
+
+    for built in slices:
+        stripped_dir = root / f"reductions-{built.family}-marker-subset"
+        stripped_dir.mkdir(parents=True, exist_ok=True)
+        for path in sorted(built.reductions_dir.glob("*.json")):
+            record = json.loads(path.read_text())
+            record["reduce_evidence"] = {"wall_seconds": 12.5, "peak_rss_bytes": 1}
+            record["streaming_ingestion"] = {"scope": "bucket-range-job"}
+            subset = hosted._authenticating_reduction(record)
+            assert "reduce_evidence" not in subset
+            assert "streaming_ingestion" not in subset
+            (stripped_dir / path.name).write_text(json.dumps(subset, sort_keys=True))
+        built.reductions_dir = stripped_dir
+
+    from_markers = root / "plan-marker-subset.json"
+    run_plan(root, slices, from_markers)
+    assert from_markers.read_bytes() == baseline.read_bytes()
 
 
 def test_plan_runs_via_cli_subprocess(both):

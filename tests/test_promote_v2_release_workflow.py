@@ -175,6 +175,34 @@ def test_promote_slice_authenticates_the_construction_request_sha():
     assert "cv1-control" in body and "cv1-reduce-" in body
 
 
+def test_promote_slice_rebuilds_reductions_from_r2_before_reaching_for_artifacts():
+    # Item 6 consumer. The reduction set is the routing authority, and it used
+    # to reach promotion only through GitHub artifacts that retain 7 days. R2
+    # must now be the source of record, with the artifacts reachable only after
+    # the R2 export has been attempted and failed.
+    body = "\n".join(scripts(jobs()["promote-slice"]))
+    export_at = body.index("construction_v1_hosted.py export-reductions")
+    assert export_at < body.index("--pattern 'cv1-reduce-*'")
+    assert "--staging-bucket" in body and "--staging-endpoint-url" in body
+    # A fallback that is silent is a deadline nobody knows they are under.
+    warning_at = body.index("falling back to the run's GitHub artifacts")
+    assert export_at < warning_at < body.index("--pattern 'cv1-reduce-*'")
+
+
+def test_promote_slice_binds_the_reduction_count_to_the_published_manifest():
+    # Whichever source supplied the records, the set must be exactly the
+    # partition count the published family manifest attests. Counting only the
+    # records that turned up would make a partial set self-consistent -- and
+    # the artifact fallback has no per-partition existence check of its own.
+    body = "\n".join(scripts(jobs()["promote-slice"]))
+    assert "families/${family}/family-manifest.json" in body
+    assert '.schema == "construction-v1-family-manifest-v1"' in body
+    assert ".request_sha256 == $request" in body
+    assert '"$count" -ne "$partitions"' in body
+    count_at = body.index('"$count" -ne "$partitions"')
+    assert body.index("--pattern 'cv1-reduce-*'") < count_at
+
+
 def test_promote_slice_accepts_a_finalize_only_runs_resume_reductions():
     # A finalize-only recovery run skips every paid upstream phase, so it
     # publishes no cv1-reduce-* batches; the reduction set it authenticated and

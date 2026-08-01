@@ -23,12 +23,15 @@ name: Promote v2 Release
 #                    then create-only publication of
 #                    {slice}/slice-manifest.json, the #107 source document
 #                    v2_release_manifest.py assemble fails closed without.
-#                    Reduction records and the construction contract are
-#                    downloaded from the named construction-v1 run's
-#                    cv1-control plus either its cv1-reduce-* batches or, for
-#                    a finalize-only recovery run that ran no reducers, its
-#                    cv1-resume-reductions set (both retain for 7 days; a
-#                    lapsed run fails loudly here).
+#                    The construction contract is downloaded from the named
+#                    construction-v1 run's cv1-control (30-day retention).
+#                    Reduction records are rebuilt from R2 (item 6: every
+#                    reduce marker carries its record), with the run's
+#                    cv1-reduce-* / cv1-resume-reductions artifacts kept only
+#                    as a fallback for slices built before item 6 -- that
+#                    fallback, and only it, still has a 7-day deadline.
+#                    Either way the set must be exactly the partition count
+#                    the published family manifest attests.
 #                    The slice manifest freezes the slice version's family
 #                    set forever: promote every family that should serve
 #                    from this slice in ONE dispatch.
@@ -510,24 +513,6 @@ jobs:
             }
             gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
               --name cv1-control --dir "cv1/${family}/control"
-            # A run that executed its reducers carries one cv1-reduce-<batch>
-            # artifact per batch. A finalize-only recovery run skips every paid
-            # upstream phase, so it carries no cv1-reduce-*; it re-uploads the
-            # flattened reduction set it authenticated and reused as
-            # cv1-resume-reductions instead. Both hold the same
-            # reductions/<partition>.json layout the flatten below walks, so
-            # prefer the per-batch artifacts and fall back to the resume set.
-            # Preferring rather than merging keeps a run that somehow carries
-            # both from tripping the duplicate-partition check.
-            if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-              --pattern 'cv1-reduce-*' --dir "cv1/${family}/reducers" 2>/dev/null
-            then
-              gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
-                --name cv1-resume-reductions --dir "cv1/${family}/reducers" || {
-                  echo "::error::${family}: run ${run_id} carries neither cv1-reduce-* batches nor cv1-resume-reductions"
-                  exit 1
-                }
-            fi
             local contract="cv1/${family}/control/contract.json"
             local contract_sha
             contract_sha="$(jq -er '.request_sha256' "$contract")"
@@ -556,25 +541,111 @@ jobs:
             }
             jq -er '.producer_commit' "cv1/${family}/control/request.json" \
               > "cv1/${family}/producer-commit"
-            # Flatten every reducer batch's reduction records into one
-            # directory; a duplicate partition file means overlapping batch
-            # artifacts and fails closed.
-            while IFS= read -r record; do
-              local target
-              target="cv1/${family}/reductions/$(basename "$record")"
-              if [ -e "$target" ]; then
-                echo "::error::${family}: duplicate reduction record $(basename "$record")"
-                exit 1
+
+            # --- reduction records: R2 first, GitHub artifacts as fallback ----
+            #
+            # Item 6. The reduction set is the routing authority: it binds every
+            # partition to the serving object promotion copies. It used to reach
+            # promotion only as `cv1-reduce-*` GitHub artifacts, which retain 7
+            # days -- a hard promotion deadline on every planet build, and the
+            # reason a finalize-only recovery run (which runs no reducers, so
+            # carries no `cv1-reduce-*`) needed the separate
+            # `cv1-resume-reductions` special case.
+            #
+            # Every reduce marker now carries its grouping-invariant reduction
+            # record in the run-scoped R2 staging prefix, so the set is rebuilt
+            # from R2 and neither the deadline nor the special case applies.
+            #
+            # The expected partition count comes from the PUBLISHED family
+            # manifest, not from whatever markers happen to exist: the manifest
+            # is written by finalize, its bytes are bound by the slice manifest,
+            # and the slice manifest is bound by the finalize marker. Counting
+            # markers instead would make a partial marker set self-consistent.
+            local family_manifest="cv1/${family}/family-manifest.json"
+            aws s3api get-object \
+              --bucket "$R2_BUCKET" \
+              --key "$(cat "cv1/${family}/slice-root")families/${family}/family-manifest.json" \
+              --endpoint-url "$R2_ENDPOINT" \
+              --region auto \
+              "$family_manifest" > /dev/null
+            jq -e --arg family "$family" --arg request "$sha" '
+              .schema == "construction-v1-family-manifest-v1"
+              and .family == $family
+              and .request_sha256 == $request
+              and .reconciles == true
+              and (.partitions | type == "number" and . > 0)
+            ' "$family_manifest" > /dev/null || {
+              echo "::error::${family}: published family manifest does not attest this request"
+              exit 1
+            }
+            local partitions
+            partitions="$(jq -er '.partitions' "$family_manifest")"
+
+            local source_of_record="r2-construction-namespace"
+            if python -u scripts/construction_v1_hosted.py export-reductions \
+              --contract "$contract" \
+              --family "$family" \
+              --partitions "$partitions" \
+              --output-dir "cv1/${family}/reductions" \
+              --store-root "cv1/${family}/store" \
+              --staging-bucket "$R2_BUCKET" \
+              --staging-endpoint-url "$R2_ENDPOINT"
+            then
+              echo "${family}: ${partitions} reduction records rebuilt from R2"
+            else
+              # Fallback for a slice built by a producer predating item 6: its
+              # markers carry no reduction record, so the artifacts are still
+              # the only copy. Keep the 7-day deadline visible when it applies.
+              echo "::warning::${family}: R2 export failed; falling back to the run's GitHub artifacts (7-day retention applies)"
+              source_of_record="github-artifacts"
+              rm -rf "cv1/${family}/reductions"
+              mkdir -p "cv1/${family}/reductions"
+              # A run that executed its reducers carries one cv1-reduce-<batch>
+              # artifact per batch. A finalize-only recovery run skips every paid
+              # upstream phase, so it carries no cv1-reduce-*; it re-uploads the
+              # flattened reduction set it authenticated and reused as
+              # cv1-resume-reductions instead. Both hold the same
+              # reductions/<partition>.json layout the flatten below walks, so
+              # prefer the per-batch artifacts and fall back to the resume set.
+              # Preferring rather than merging keeps a run that somehow carries
+              # both from tripping the duplicate-partition check.
+              if ! gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+                --pattern 'cv1-reduce-*' --dir "cv1/${family}/reducers" 2>/dev/null
+              then
+                gh run download "$run_id" --repo "$GITHUB_REPOSITORY" \
+                  --name cv1-resume-reductions --dir "cv1/${family}/reducers" || {
+                    echo "::error::${family}: run ${run_id} carries neither cv1-reduce-* batches nor cv1-resume-reductions"
+                    exit 1
+                  }
               fi
-              cp "$record" "$target"
-            done < <(find "cv1/${family}/reducers" -type f -path '*/reductions/*.json' | sort)
+              # Flatten every reducer batch's reduction records into one
+              # directory; a duplicate partition file means overlapping batch
+              # artifacts and fails closed.
+              while IFS= read -r record; do
+                local target
+                target="cv1/${family}/reductions/$(basename "$record")"
+                if [ -e "$target" ]; then
+                  echo "::error::${family}: duplicate reduction record $(basename "$record")"
+                  exit 1
+                fi
+                cp "$record" "$target"
+              done < <(find "cv1/${family}/reducers" -type f -path '*/reductions/*.json' | sort)
+            fi
             local count
             count="$(find "cv1/${family}/reductions" -name '*.json' | wc -l)"
             if [ "$count" -eq 0 ]; then
-              echo "::error::${family}: run ${run_id} carried no reduction records"
+              echo "::error::${family}: no reduction records from run ${run_id}"
               exit 1
             fi
-            echo "${family}: ${count} reduction records from run ${run_id}"
+            # The set must be exactly the published partition count whichever
+            # source supplied it. The fallback path has no per-partition
+            # existence check of its own, so this is where a short artifact set
+            # fails closed.
+            if [ "$count" -ne "$partitions" ]; then
+              echo "::error::${family}: ${count} reduction records from ${source_of_record}, but the published family manifest attests ${partitions} partitions"
+              exit 1
+            fi
+            echo "${family}: ${count} reduction records (${source_of_record})"
             if [ -n "$reverse_run" ]; then
               mkdir -p "cv1/${family}/reverse"
               gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${reverse_run}" \
