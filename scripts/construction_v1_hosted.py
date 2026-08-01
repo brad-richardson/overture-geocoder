@@ -177,6 +177,24 @@ HEAD_MANIFEST_OBJECTS = 1
 # (places_construction_v1.emit_positions / address_construction_v1
 # .emit_address_records, both read by _positions_objects).
 PER_RECORD_OBJECTS_PER_PACK = 2
+# Item 1, zero-copy promotion. Publishing straight into the RELEASE slice
+# namespace costs four fixed operations the construction-namespace shape does
+# not, read off the primitives exactly as the constants above are:
+#
+#   admission     HEAD {version}/slice-manifest.json                     1
+#                 HEAD {version}/families/{family}/family-manifest.json  1
+#   slice claim   create-only put, then read_back_identity               2
+#
+# All four are per-slice and identical on a resume: `put_create_only` charges
+# its attempt whether or not it conflicts, and `read_back_identity` is one
+# operation on both backends (the R2 one falls back to a streaming read when it
+# has no sent MD5, which is deliberately still ONE operation).
+ZERO_COPY_FIXED_OPERATIONS = 4
+# The exact-set listing covers two disjoint prefixes rather than one: the
+# construction prefix (the two manifests and the per-record packs, which stay
+# there) and the release namespace's `objects/`. A prefix costs at least one page
+# even when it holds a single key, so one page is added to the page count.
+ZERO_COPY_LISTING_PAGES = 1
 
 
 def _load(name: str, relative: str):
@@ -193,6 +211,13 @@ PLACES = _load("construction_v1_hosted_places", "scripts/places_construction_v1.
 REMOTE = _load("construction_v1_hosted_remote", "scripts/construction_v1_remote.py")
 CONTROL = _load("construction_v1_hosted_control", "scripts/construction_v1_control.py")
 STAGING = _load("construction_v1_hosted_staging", "scripts/construction_staging_v1.py")
+# Item 1. Zero-copy publication writes into the RELEASE slice namespace, so
+# finalize has to agree with the promotion tool about the slice version format,
+# the slice-claim schema, and the claim's canonical bytes. Load the tool rather
+# than restate its rules: a drift between the two is a slice that publishes and
+# then cannot be promoted. It imports nothing heavy at module scope and does not
+# import this module back.
+PROMOTION = _load("construction_v1_hosted_promotion", "scripts/promote_construction_slice.py")
 
 # Objects per listing page, taken from the publication primitives rather than
 # re-typed, so the projection and the backend can never disagree about what one
@@ -783,6 +808,92 @@ def _publication_remote(args: argparse.Namespace, budget: Any) -> Any:
     return REMOTE.VerifiedStoreRemote(
         STAGING.R2.s3_object_store(bucket, endpoint_url), budget
     )
+
+
+# Item 1. The release slice claim: the create-only document that binds a release
+# slice VERSION to the construction request and the Overture release that
+# produced it. Byte-for-byte the same document `reverse_r2_v1
+# .DirectPublishedArtifactStore._slice_claim` writes and
+# `promote_construction_slice._reverse_publication` validates -- one schema, one
+# canonical encoding, one key -- because forward and reverse claim the same
+# family slice and the second writer must find the first writer's bytes rather
+# than a conflicting document. The schema name comes FROM the promotion tool so
+# the three producers cannot drift apart silently.
+SLICE_CLAIM_SCHEMA = PROMOTION.SLICE_CLAIM_SCHEMA
+
+
+def _slice_claim_document(
+    *, version: str, family: str, request_sha256: str, overture_release: str
+) -> tuple[str, bytes]:
+    return (
+        f"{version}/claims/{family}.json",
+        CONTROL.canonical(
+            {
+                "schema": SLICE_CLAIM_SCHEMA,
+                "version": version,
+                "family": family,
+                "request_sha256": request_sha256,
+                "overture_release": overture_release,
+            }
+        ),
+    )
+
+
+def _admit_release_slice(
+    remote: Any, *, version: str, family: str, request_sha256: str, overture_release: str
+) -> dict[str, Any]:
+    """Claim ``version`` for this family before publishing a byte into it.
+
+    Two things happen here, in this order, and both matter.
+
+    FIRST the release slice is refused if it is already FINALIZED -- if its slice
+    manifest or this family's release family manifest exists. Those are written by
+    promotion, and they freeze what the version serves. Publishing new objects
+    into a version that is already serving would be adding bytes underneath a
+    frozen manifest: inert, because nothing routes to an object the manifest does
+    not name, but it is debris in a live namespace and it means the operator
+    aimed at the wrong version. Fail there, not after 45 GiB of uploads.
+
+    THEN the claim is written create-only. If reverse already claimed this
+    version for this family the bytes are identical and the conflict is benign,
+    which is exactly the property that lets forward and reverse publish into one
+    family slice in either order. Different bytes mean the two producers disagree
+    about the request or the Overture release, and that is fatal.
+
+    The claim is NOT a member of the published exact set. It is shared with
+    reverse, so it cannot belong to either producer's exact set without making
+    the other's set wrong -- the same reason `promote_construction_slice` carries
+    it as its own field rather than an artifact.
+    """
+    for key in (
+        f"{version}/slice-manifest.json",
+        f"{version}/families/{family}/family-manifest.json",
+    ):
+        if remote.head(key) is not None:
+            raise SystemExit(
+                f"refusing to publish into release slice {version}: it is already "
+                f"finalized ({key} exists). Promotion freezes a slice version's "
+                "family set; publish into a new version."
+            )
+    key, payload = _slice_claim_document(
+        version=version,
+        family=family,
+        request_sha256=request_sha256,
+        overture_release=overture_release,
+    )
+    expected = {"sha256": hashlib.sha256(payload).hexdigest(), "bytes": len(payload)}
+    state = "claimed"
+    try:
+        remote.put_create_only(key, payload)
+    except REMOTE.ConflictError:
+        state = "resume"
+    actual = remote.read_back_identity(key, expected)
+    if actual != expected:
+        raise SystemExit(
+            f"release slice {version} is already claimed for {family} by a "
+            "different request or Overture release; refusing to publish into it"
+        )
+    return {"key": key, "state": state, **expected}
 
 
 def _remote_marker_completed(remote_root: str, key: str, contract: dict[str, Any]) -> bool:
@@ -1447,7 +1558,9 @@ def _budget_integer(value: Any, *, what: str) -> int:
     return value
 
 
-def finalize_remote_operations(objects: int, *, retried: bool = True) -> int:
+def finalize_remote_operations(
+    objects: int, *, retried: bool = True, prepositioned: bool = False
+) -> int:
     """Remote operations one finalize charges to publish and verify ``objects``.
 
     ``retried`` defaults to TRUE because that is the case the budget has to cover:
@@ -1459,6 +1572,11 @@ def finalize_remote_operations(objects: int, *, retried: bool = True) -> int:
     The last term is the exact-prefix listing, priced by PAGE. It is one call and
     was priced as one operation, which is wrong for any slice over
     ``FINALIZE_LISTING_PAGE_KEYS`` objects -- i.e. for every planet slice.
+
+    ``prepositioned`` adds the zero-copy publication's fixed cost: the release
+    slice admission HEADs, the slice claim, and the two extra listing pages the
+    three-prefix exact set costs. It is a per-slice constant, so it does not
+    change the per-object arithmetic at all.
     """
     count = _budget_integer(objects, what="published object count")
     return (
@@ -1474,6 +1592,7 @@ def finalize_remote_operations(objects: int, *, retried: bool = True) -> int:
             else FINALIZE_FIXED_OPERATIONS
         )
         + REMOTE.listing_operations(count)
+        + (ZERO_COPY_FIXED_OPERATIONS + ZERO_COPY_LISTING_PAGES if prepositioned else 0)
     )
 
 
@@ -1556,12 +1675,24 @@ def _finalize_publication_projection(
         "fixed_operations": FINALIZE_RETRY_FIXED_OPERATIONS,
         # The exact-prefix listing, priced by page rather than as one request.
         "listing_operations": REMOTE.listing_operations(objects),
+        # Item 1's fixed cost is priced UNCONDITIONALLY, in both figures. This
+        # projection is computed at plan time and the decision to publish into the
+        # release namespace is made at finalize time, so the gate cannot know
+        # which shape will run. Six operations is the whole difference, and
+        # over-projecting is the safe direction for a gate: under-projecting means
+        # discovering the overrun part-way through publishing tens of thousands of
+        # objects at the end of a multi-hour run, which is the exact failure this
+        # gate exists to remove.
+        "zero_copy_fixed_operations": ZERO_COPY_FIXED_OPERATIONS,
+        "zero_copy_listing_pages": ZERO_COPY_LISTING_PAGES,
         "first_attempt_remote_operations": finalize_remote_operations(
-            objects, retried=False
+            objects, retried=False, prepositioned=True
         ),
         # The BUDGETED figure: a resumed finalize is the expensive case and the one
         # the cap has to cover.
-        "projected_remote_operations": finalize_remote_operations(objects),
+        "projected_remote_operations": finalize_remote_operations(
+            objects, prepositioned=True
+        ),
     }
 
 
@@ -2849,6 +2980,36 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         max_read_bytes=int(contract["caps"].get("max_remote_write_bytes", 1_000_000_000_000)),
     )
     remote = _publication_remote(args, budget)
+    # Item 1, zero-copy promotion. Without --release-slice-version the serving
+    # objects are published into the CONSTRUCTION slice namespace and promotion
+    # server-side-copies all 21,279 of them (158.68 GiB, measured on the
+    # 2026-07-31 promotion) into the release namespace, changing the prefix and
+    # nothing else -- both keys are already the object's own sha256. With it they
+    # are published straight into the release namespace under their final names
+    # and promotion binds them without moving a byte, which is exactly what
+    # reverse has done since #205.
+    #
+    # The two construction MANIFESTS stay in the construction namespace either
+    # way. They are what authenticates the slice to promotion (family manifest ->
+    # slice manifest -> finalize marker), they are request-scoped rather than
+    # release-scoped, and the release namespace already has its own manifests
+    # written by promotion.
+    release_version = getattr(args, "release_slice_version", None)
+    slice_claim = None
+    if release_version:
+        release_version = PROMOTION.validate_slice_version(release_version)
+        slice_claim = _admit_release_slice(
+            remote,
+            version=release_version,
+            family=args.family,
+            request_sha256=request_sha256,
+            overture_release=contract["release"],
+        )
+    published_family_prefix = (
+        f"{release_version}/families/{args.family}"
+        if release_version
+        else f"{slice_root}/families/{args.family}"
+    )
     # Every published object is hydrated one at a time PER WORKER and evicted as soon
     # as that worker is done reading it, rather than assembling a list of paths --
     # which hydrated the whole published set onto this runner before the first upload.
@@ -2880,19 +3041,29 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     # compare the bytes on disk to what the PRODUCING phase wrote down, not just to
     # the digest in the filename.
     recorded: dict[str, dict[str, Any]] = {}
+    objects_prefix = f"{published_family_prefix}/objects/"
     for artifact in artifacts:
-        source = f"{slice_root}/families/{args.family}/objects/{Path(artifact['key']).name}"
+        source = f"{objects_prefix}{Path(artifact['key']).name}"
         recorded[source] = artifact
         exact_set.append(member(source, artifact["key"]))
     # Per-family sub-prefix: `positions/` for places, `records/` for addresses --
     # so the published tree names the artifact it holds instead of calling address
     # records "positions". Both go through the same exact-set publisher and the
     # same verify_whole_slice_once below.
+    #
+    # These stay in the CONSTRUCTION namespace even under zero-copy publication,
+    # and that is deliberate rather than an omission. They are build-phase
+    # per-record packs; nothing serves them and promotion has never copied them.
+    # Putting them in the release namespace would drop unpromoted objects into a
+    # serving prefix, where `cmd_verify`'s exact-set listing would correctly call
+    # them unexpected. Only the SERVING set is what item 1 is about.
+    per_record_prefix = (
+        f"{slice_root}/families/{args.family}/{per_record_spec['prefix']}/"
+        if per_record_spec is not None
+        else None
+    )
     for artifact in positions:
-        source = (
-            f"{slice_root}/families/{args.family}/{per_record_spec['prefix']}/"
-            f"{Path(artifact['key']).name}"
-        )
+        source = f"{per_record_prefix}{Path(artifact['key']).name}"
         recorded[source] = artifact
         exact_set.append(member(source, artifact["key"]))
 
@@ -3008,9 +3179,25 @@ def cmd_finalize(args: argparse.Namespace) -> int:
     # built from paths held open across the whole phase) is what lets nothing but
     # the marker outlive the upload loop.
     expected = marker["artifacts"]
+    # One prefix when everything lands in the construction namespace. Two when the
+    # serving objects are prepositioned -- the construction prefix still holds the
+    # manifests and the per-record packs, and `objects/` moved.
+    #
+    # `objects/` rather than the whole release family prefix, because the exact-set
+    # equality must stay exact: `{version}/families/{family}/` is SHARED with
+    # reverse, which writes `reverse/` and `reverse-catalog.rcat` into it, and with
+    # promotion, which writes `routing.json` and `family-manifest.json`. Listing it
+    # whole would report every one of those as an extra. Listing the sub-prefix
+    # forward exclusively owns keeps "no missing, no extra, no duplicate" intact
+    # rather than trading the property away for the copy.
+    verification_prefixes = (
+        [f"{slice_root}/families/{args.family}/", objects_prefix]
+        if release_version
+        else [f"{slice_root}/families/{args.family}/"]
+    )
     verification = REMOTE.verify_whole_slice_once(
         remote,
-        prefix=f"{slice_root}/families/{args.family}/",
+        prefix=verification_prefixes,
         expected=expected,
         # The R2 backend verifies one stored-byte metadata proof per object. The
         # filesystem fallback streams existing local files and consumes no cache
@@ -3040,6 +3227,14 @@ def cmd_finalize(args: argparse.Namespace) -> int:
         # hardcoding a "+1" that would be wrong for addresses.
         "head_manifest_objects": 1 if head_block else 0,
         "serving_object_key": REDUCTION_SERVING_OBJECTS[args.family],
+        # Item 1. Null when the objects went to the construction namespace and
+        # promotion will copy them; the release slice version when they are
+        # already at their final keys and promotion binds them in place. Recorded
+        # so a run's own result states which shape it published, rather than
+        # leaving it to be inferred from the marker's key prefixes.
+        "release_slice_version": release_version,
+        "slice_claim": slice_claim,
+        "published_family_prefix": published_family_prefix,
         **_staging_evidence(store),
     }
     write_json(args.output, result)
@@ -3304,6 +3499,14 @@ def build_parser() -> argparse.ArgumentParser:
                            "--remote-endpoint-url and excludes --remote-root.")
     final.add_argument("--remote-endpoint-url", default=None,
                       help="R2 S3-compatible endpoint URL for --remote-bucket.")
+    final.add_argument("--release-slice-version", default=None,
+                      help="Publish the serving objects and per-record packs "
+                           "straight into this release slice namespace "
+                           "(slice-YYYY-MM-DD.N) instead of the construction one, "
+                           "so promotion binds them in place rather than copying "
+                           "158 GiB between two content-addressed prefixes. The "
+                           "two construction manifests stay where they are. "
+                           "Claims the version create-only for this family first.")
     final.add_argument("--work-root", required=True)
     final.add_argument("--fail-after-upload", type=int, default=None)
     final.add_argument("--output", type=Path, required=True)

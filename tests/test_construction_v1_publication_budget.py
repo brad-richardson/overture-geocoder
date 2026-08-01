@@ -194,8 +194,15 @@ def test_the_projection_counts_every_term_finalize_publishes():
     total = 10 + 4096 + 1 + 6 + 2
     pages = REMOTE.listing_operations(total)
     assert (projection["listing_operations"], pages) == (5, 5)
-    assert projection["projected_remote_operations"] == total * 4 + 3 + pages
-    assert projection["first_attempt_remote_operations"] == total * 3 + 2 + pages
+    # Item 1's fixed cost is priced into BOTH figures unconditionally: the
+    # projection runs at plan time and cannot know whether finalize will publish
+    # into the release namespace, and over-projecting is the safe direction.
+    zero_copy = HOSTED.ZERO_COPY_FIXED_OPERATIONS + HOSTED.ZERO_COPY_LISTING_PAGES
+    assert (zero_copy, projection["zero_copy_fixed_operations"]) == (5, 4)
+    assert projection["projected_remote_operations"] == total * 4 + 3 + pages + zero_copy
+    assert (
+        projection["first_attempt_remote_operations"] == total * 3 + 2 + pages + zero_copy
+    )
     # Addresses have no head phase at all, so no head shards and no head manifest.
     assert HOSTED.HEAD_FAMILIES == ("places",)
     addresses = _projection("addresses", partitions=10, per_record_objects=6)
@@ -424,15 +431,15 @@ def _plan_reduce_addresses(tmp_path: Path, *, cap: int, record_packs: int, tag: 
 
 def test_plan_reduce_refuses_a_plan_whose_publication_exceeds_the_cap(tmp_path, capsys):
     # 20 per-record packs -> 40 published per-record objects. With 1 partition and 2
-    # manifests that is 43 objects = 176 operations on a resumed finalize, over a cap
-    # of 100. Sized so the per-record TERM is what breaches it: without that term the
-    # projection is 3 objects = 16 operations and passes, so dropping the term to 0
-    # flips this test.
+    # manifests that is 43 objects = 176 operations on a resumed finalize plus item
+    # 1's 5 fixed = 181, over a cap of 100. Sized so the per-record TERM is what
+    # breaches it: without that term the projection is 3 objects = 21 operations and
+    # passes, so dropping the term to 0 flips this test.
     with pytest.raises(SystemExit) as excinfo:
         _plan_reduce_addresses(tmp_path, cap=100, record_packs=20, tag="over")
     message = str(excinfo.value)
     assert "exceed the admitted cap max_remote_operations=100" in message
-    assert "176 remote operations" in message
+    assert "181 remote operations" in message
     assert "40 per-record" in message
     # And it refuses for the addresses family, which has no head term to hide behind.
     assert "0 head shards" in message
@@ -448,8 +455,8 @@ def test_plan_reduce_passes_and_reports_the_budget_when_the_publication_fits(tmp
     assert budget["max_remote_operations"] == 1000
     assert budget["per_record_objects"] == 40
     assert budget["serving_objects"] == summary["partitions"]
-    assert budget["projected_remote_operations"] == 176
-    assert budget["first_attempt_remote_operations"] == 132
+    assert budget["projected_remote_operations"] == 181
+    assert budget["first_attempt_remote_operations"] == 137
     assert "map markers" in budget["basis"]
 
 
@@ -591,13 +598,17 @@ def _predict(contract: Path, family: str, inventory: Path, capsys):
 # figures per family because a resumed finalize costs 4N+4 and a first attempt 3N+3;
 # the BUDGETED one is the retry.
 #
+# Both figures carry item 1's 5 fixed operations (release-slice admission, the
+# slice claim, and the extra listing page of the two-prefix exact set), priced
+# unconditionally because plan time cannot know which finalize shape runs.
+#
 # The per-record term is the STRUCTURAL bound -- every map task occupying all 256
 # shuffle buckets -- because the dry run has no markers to measure. (Measured on
 # release 2026-06-17.0, the four planet Places tasks inside source object 0 occupy
 # 107/149/160/109 buckets, so the real Places figures are ~132,900 first attempt /
 # ~177,200 retry.)
-PLANET_PROJECTED_OPERATIONS = {"places": 266_290, "addresses": 263_073}
-PLANET_FIRST_ATTEMPT_OPERATIONS = {"places": 199_734, "addresses": 197_321}
+PLANET_PROJECTED_OPERATIONS = {"places": 266_295, "addresses": 263_078}
+PLANET_FIRST_ATTEMPT_OPERATIONS = {"places": 199_739, "addresses": 197_326}
 OLD_REMOTE_OPERATION_CAP = 100_000
 
 
@@ -659,7 +670,7 @@ def test_the_admitted_cap_clears_the_retry_inclusive_structural_ceiling():
     first_attempt_ceiling = max(
         item["first_attempt_remote_operations"] for item in projections
     )
-    assert (first_attempt_ceiling, ceiling) == (259_658, 346_182)
+    assert (first_attempt_ceiling, ceiling) == (259_663, 346_187)
     assert CONTROL.CAPS["max_remote_operations"] >= ceiling
     # The margin is deliberately modest, because the gate -- not the size of this
     # number -- is what makes an outgrown cap cheap to discover. And it must NOT be

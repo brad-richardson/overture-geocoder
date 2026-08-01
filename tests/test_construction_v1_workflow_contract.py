@@ -405,6 +405,36 @@ def test_every_phase_carries_the_330_minute_job_timeout():
     assert 'HEAD_PHASE_ESTIMATE_MINUTES: "330"' in text()
 
 
+def test_release_slice_version_is_optional_and_validated_before_the_phase_runs():
+    """Item 1: zero-copy publication is opt-in and its format is checked early.
+
+    Empty must keep today's behaviour EXACTLY -- an accidental default would
+    make every dispatch publish into a release namespace. And a malformed
+    version has to fail before finalize does any work: finalize validates it
+    too, but discovering it there means map, reduce and head have already been
+    paid for.
+    """
+    doc = parsed()
+    # YAML 1.1 resolves a bare `on:` key to the boolean True.
+    field = doc[True]["workflow_dispatch"]["inputs"]["release_slice_version"]
+    assert field["required"] is False
+    assert field["default"] == ""
+    body = "\n".join(
+        step.get("run", "") for step in doc["jobs"]["finalize"]["steps"]
+    )
+    assert "--release-slice-version" in body
+    assert 'release_slice_version must match slice-YYYY-MM-DD.N' in body
+    # Guarded, never unconditional: the flag is only appended when the input is
+    # non-empty.
+    assert 'if [ -n "$RELEASE_SLICE_VERSION" ]; then' in body
+    # It is a dispatch input, NOT part of the request digest, so setting it
+    # cannot mint a new staging namespace or invalidate a resume.
+    request = (
+        Path(__file__).parent.parent / "scripts" / "construction_v1_control.py"
+    ).read_text()
+    assert "release_slice_version" not in request
+
+
 def test_r2_writes_are_execute_mode_only_and_create_only():
     value = text()
     doc = parsed()

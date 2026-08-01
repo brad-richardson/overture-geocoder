@@ -948,6 +948,37 @@ def validate_reverse_graph(
     return {"records": records, "cells": cells}
 
 
+def _forward_slice_claim(
+    *, family: str, version: str, request_sha256: str, release: str
+) -> dict[str, Any]:
+    """The slice claim a zero-copy forward finalize must have written.
+
+    DERIVED, not read: the claim is a pure function of (version, family,
+    request, release), so promotion computes the bytes it requires and
+    `_verify_prepositioned` proves the destination holds exactly those. Reading
+    the claim and believing it would make it a label rather than a binding.
+
+    No `content_md5`: promotion did not publish this object and has no recorded
+    store-computed digest for it. `check_identity` then compares bytes and the
+    recorded sha256 only -- see the residual noted on the forward prepositioned
+    path in `_plan_family`.
+    """
+    payload = canonical(
+        {
+            "schema": SLICE_CLAIM_SCHEMA,
+            "version": version,
+            "family": family,
+            "request_sha256": request_sha256,
+            "overture_release": release,
+        }
+    )
+    return {
+        "destination_key": f"{version}/claims/{family}.json",
+        "bytes": len(payload),
+        "sha256": sha256_bytes(payload),
+    }
+
+
 def _plan_family(
     *,
     family: str,
@@ -1037,14 +1068,60 @@ def _plan_family(
     ):
         raise fail(f"{family} manifest object counts do not reconcile")
 
+    # Item 1, zero-copy promotion. The finalize marker's OWN KEYS say where the
+    # serving objects are, and it is the create-only document written last over
+    # the exact published set, so it is the authority -- not the dispatch input,
+    # not a flag, and not an inference from what happens to exist.
+    #
+    #   construction layout  the objects are under the request-scoped
+    #                        construction prefix and promotion CopyObjects each
+    #                        one into the release namespace. 158.68 GiB / 21,279
+    #                        objects on the 2026-07-31 promotion, changing the
+    #                        prefix and nothing else.
+    #   release layout       finalize published them straight into the release
+    #                        namespace under their final content-addressed names
+    #                        (`--release-slice-version`) and promotion binds them
+    #                        in place, exactly as it already does for reverse.
+    #
+    # A slice must be entirely one or the other. A mixture means two finalizes
+    # with different destinations wrote into one marker set, and promoting it
+    # would publish a family manifest naming objects from two different runs.
+    construction_objects_prefix = f"{family_prefix}objects/"
+    release_objects_prefix = f"{version}/families/{family}/objects/"
+    in_construction = any(
+        key.startswith(construction_objects_prefix) for key in marker_artifacts
+    )
+    in_release = any(
+        key.startswith(release_objects_prefix) for key in marker_artifacts
+    )
+    if in_construction and in_release:
+        raise fail(
+            f"{family} finalize marker lists serving objects under BOTH the "
+            "construction and the release namespace; a slice is one layout or "
+            "the other"
+        )
+    if not in_construction and not in_release:
+        raise fail(
+            f"{family} finalize marker lists no serving object under "
+            f"{construction_objects_prefix} or {release_objects_prefix}"
+        )
+    zero_copy = in_release
+    objects_prefix = release_objects_prefix if zero_copy else construction_objects_prefix
+
     reductions = _load_reductions(reductions_dir, family)
     if family == "places":
         head = construction_manifest.get("head")
         if not isinstance(head, dict):
             raise fail("places family manifest carries no head block")
         head_manifest_name = head["manifest"]["object"]
+        # Read from wherever the marker says the objects live. Under the release
+        # layout this means `--source` must be able to READ the release
+        # namespace; in the promotion workflow source and destination are the
+        # same bucket, and the routing manifest's contents are the one thing plan
+        # cannot derive from the family manifest alone (the shard_id -> object
+        # map exists only inside this object).
         head_manifest_bytes = source.read_bytes(
-            f"{family_prefix}objects/{head_manifest_name}"
+            f"{objects_prefix}{head_manifest_name}"
         )
         if sha256_bytes(head_manifest_bytes) != head["manifest"]["sha256"]:
             raise fail("places head routing manifest bytes do not match its record")
@@ -1112,8 +1189,9 @@ def _plan_family(
             raise fail(f"{family} serving object {name} identity disagrees")
 
     objects = []
+    forward_prepositioned = []
     for name in sorted(serving):
-        source_key = f"{family_prefix}objects/{name}"
+        source_key = f"{objects_prefix}{name}"
         published = marker_artifacts.get(source_key)
         if published is None:
             raise fail(f"{family} finalize marker does not list {source_key}")
@@ -1122,10 +1200,48 @@ def _plan_family(
             or published["bytes"] != serving[name]["bytes"]
         ):
             raise fail(f"{family} finalize marker identity differs for {source_key}")
+        destination_key = f"{version}/families/{family}/objects/{name}"
+        if zero_copy:
+            # Nothing to copy: the marker's key IS the destination key. Proved at
+            # execute and verify by `_verify_prepositioned` against the
+            # destination, exactly as reverse's objects are.
+            #
+            # THE RESIDUAL, stated rather than glossed. On the copy path the plan
+            # records the SOURCE object's store-computed content MD5 and the
+            # post-copy check compares the DESTINATION's own ETag against it --
+            # a stored-byte proof that the copy did not corrupt anything. There
+            # is no copy here, so there is nothing for that check to compare and
+            # `content_md5` is absent; `check_identity` then proves length plus
+            # the recorded sha256 metadata, which on R2 is a producer echo.
+            #
+            # What replaces it is upstream and stronger for the property that
+            # actually matters: construction's finalize ran `read_back_identity`
+            # on every one of these objects at publication, which compares R2's
+            # server-computed MD5 of the stored bytes against the MD5 of the
+            # bytes it sent. So the producer->object chain IS a stored-byte
+            # proof; what is no longer independently re-proved at promotion time
+            # is that the object has not been replaced since, by someone able to
+            # write this bucket and forge matching sha256 metadata. The copy path
+            # does not prove that about its source either -- it proves the
+            # destination equals the source. Recording finalize's content MD5 in
+            # the marker would close it; see docs/plans/.
+            if source_key != destination_key:
+                raise fail(
+                    f"{family} prepositioned object {name} is at {source_key}, "
+                    f"not at its release key {destination_key}"
+                )
+            forward_prepositioned.append(
+                {
+                    "destination_key": destination_key,
+                    "sha256": serving[name]["sha256"],
+                    "bytes": serving[name]["bytes"],
+                }
+            )
+            continue
         objects.append(
             {
                 "source_key": source_key,
-                "destination_key": f"{version}/families/{family}/objects/{name}",
+                "destination_key": destination_key,
                 "sha256": serving[name]["sha256"],
                 "bytes": serving[name]["bytes"],
             }
@@ -1162,9 +1278,44 @@ def _plan_family(
         if reverse_catalog is not None
         else None
     )
-    prepositioned = (
+    reverse_prepositioned = (
         reverse_publication["artifacts"] if reverse_publication else []
     )
+    # The slice claim binds this release VERSION to the request and the Overture
+    # release that produced it. It is what restores the authenticated late
+    # binding that `namespaces.slice` cannot carry: the release version is chosen
+    # after the build, so it is a dispatch input, and the claim is the create-only
+    # document that proves the producer chose it deliberately.
+    #
+    # Forward and reverse write BYTE-IDENTICAL claims to the same key, so a
+    # family carrying both must present exactly one claim. Disagreeing claims
+    # would mean the two halves of a family slice came from different requests.
+    slice_claim = reverse_publication["slice_claim"] if reverse_publication else None
+    if zero_copy:
+        forward_claim = _forward_slice_claim(
+            family=family, version=version, request_sha256=request_sha256, release=release
+        )
+        if slice_claim is not None and (
+            slice_claim["destination_key"] != forward_claim["destination_key"]
+            or slice_claim["sha256"] != forward_claim["sha256"]
+            or slice_claim["bytes"] != forward_claim["bytes"]
+        ):
+            raise fail(
+                f"{family} forward and reverse slice claims differ; the two halves "
+                "of this family slice were produced by different requests"
+            )
+        # Keep reverse's claim when there is one: it carries the store-computed
+        # content MD5 its publication recorded, which is a strictly stronger
+        # expectation for `_verify_prepositioned` than the derived bytes alone.
+        slice_claim = slice_claim or forward_claim
+    # Forward and reverse prepositioned objects stay in SEPARATE plan fields, and
+    # that is load-bearing rather than tidy. They are verified identically, but
+    # every other check treats them differently: the forward set is the routing
+    # table's object set (`_derived_members` proves routing and objects are the
+    # same set), the reverse set is deliberately outside it and is proved by
+    # `validate_reverse_graph` instead. Merging them would make every reverse
+    # shard an unrouted forward object.
+    prepositioned = reverse_prepositioned
     routing_bytes = canonical(routing)
     manifest_artifacts = [
         {
@@ -1186,7 +1337,7 @@ def _plan_family(
             "bytes": item["bytes"],
             "sha256": item["sha256"],
         }
-        for item in prepositioned
+        for item in reverse_prepositioned
     )
     family_manifest = GBM.build_family_manifest(
         family,
@@ -1211,11 +1362,11 @@ def _plan_family(
         "markers_root": markers_root,
         "objects": objects,
         "prepositioned": prepositioned,
-        "slice_claim": (
-            reverse_publication["slice_claim"]
-            if reverse_publication
-            else None
-        ),
+        "forward_prepositioned": forward_prepositioned,
+        "slice_claim": slice_claim,
+        # Item 1. Stated in the plan so the operator reads which shape they are
+        # about to execute rather than inferring it from a zero copy count.
+        "forward_layout": "release-prepositioned" if zero_copy else "construction-copy",
         "reverse_totals": (
             {
                 "records": reverse_publication["records"],
@@ -1233,10 +1384,17 @@ def _plan_family(
         "family_manifest_sha256": sha256_bytes(family_manifest_bytes),
         "family_manifest_bytes": len(family_manifest_bytes),
         "totals": {
-            "objects": len(objects) + len(prepositioned),
+            "objects": len(objects) + len(prepositioned) + len(forward_prepositioned),
             "copied_objects": len(objects),
-            "prepositioned_objects": len(prepositioned),
-            "bytes": sum(item["bytes"] for item in objects + prepositioned),
+            "prepositioned_objects": len(prepositioned) + len(forward_prepositioned),
+            # Broken out because it is the number item 1 exists to move: 21,279
+            # forward objects and 158.68 GiB copied on the 2026-07-31 promotion,
+            # zero under the release layout.
+            "forward_prepositioned_objects": len(forward_prepositioned),
+            "bytes": sum(
+                item["bytes"]
+                for item in objects + prepositioned + forward_prepositioned
+            ),
         },
     }
 
@@ -1385,8 +1543,15 @@ def _derived_members(
     # Places head shards are reachable INDIRECTLY: routing.json points at the
     # head routing manifest, and that manifest's `shards[].path` names them --
     # verify re-proves that hop against the destination's own bytes.
+    # The FORWARD serving set, however it got to the destination. Under the
+    # release layout (item 1) nothing is copied, so `objects` is empty and every
+    # routed object is in `forward_prepositioned` instead -- reading only
+    # `objects` would call the entire routing table orphaned. Reverse's
+    # prepositioned artifacts are deliberately NOT here: they are outside the
+    # routing table by design and `validate_reverse_graph` proves them.
     planned = {
-        PurePosixPath(item["destination_key"]).name for item in value["objects"]
+        PurePosixPath(item["destination_key"]).name
+        for item in (*value["objects"], *(value.get("forward_prepositioned") or []))
     }
     routed = _routing_object_names(value["routing"])
     unrouted = planned - routed
@@ -1505,10 +1670,11 @@ def cmd_execute(args: argparse.Namespace) -> int:
         value = plan["families"][family]
         derived = _derived_members(family, value)
         prepositioned = value.get("prepositioned") or []
+        forward_prepositioned = value.get("forward_prepositioned") or []
         slice_claim = value.get("slice_claim")
         if slice_claim is not None:
             _verify_prepositioned(slice_claim, destination)
-        for item in prepositioned:
+        for item in (*prepositioned, *forward_prepositioned):
             _verify_prepositioned(item, destination)
         reverse_totals = value.get("reverse_totals")
         if reverse_totals is not None:
@@ -1549,7 +1715,8 @@ def cmd_execute(args: argparse.Namespace) -> int:
         report[family] = {
             "copied": copied,
             "already_present": skipped,
-            "prepositioned_verified": len(prepositioned),
+            "prepositioned_verified": len(prepositioned) + len(forward_prepositioned),
+            "forward_prepositioned_verified": len(forward_prepositioned),
             "slice_claim": (
                 "verified" if slice_claim is not None else "not-required"
             ),
@@ -1590,7 +1757,10 @@ def cmd_verify(args: argparse.Namespace) -> int:
                     "sha256": item["sha256"],
                     "content_md5": item.get("content_md5"),
                 }
-                for item in value.get("prepositioned") or []
+                for item in (
+                    *(value.get("prepositioned") or []),
+                    *(value.get("forward_prepositioned") or []),
+                )
             }
         )
         # The derived documents' bytes are reproducible from the plan, so their
@@ -1651,11 +1821,13 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 "plan-recorded digest"
             )
         routing = _load_json_object(routing_bytes, f"{family} routing.json")
+        # The forward serving set again -- copied or prepositioned, both are
+        # objects a reader routes to and both are proved against the destination
+        # above. Reading only `objects` would make every routing entry of a
+        # zero-copy slice look dangling.
         object_keys = {
-            PurePosixPath(key).name
-            for key in (
-                item["destination_key"] for item in value["objects"]
-            )
+            PurePosixPath(item["destination_key"]).name
+            for item in (*value["objects"], *(value.get("forward_prepositioned") or []))
         }
         routed = _routing_object_names(routing)
         if not routed <= object_keys:

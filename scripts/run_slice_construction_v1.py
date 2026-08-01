@@ -86,6 +86,15 @@ parser.add_argument("--family", choices=("addresses", "places"), default="places
 parser.add_argument("--no-staging", action="store_true",
                     help="Run the legacy artifact-shaped transport: one local "
                          "store shared by every phase, no staging mirror.")
+# Item 1, zero-copy promotion. With this set, finalize publishes the SERVING
+# objects straight into the release slice namespace under their final
+# content-addressed names, so promotion binds them instead of copying 158 GiB
+# between two prefixes that differ only by prefix. The fast loop is where that
+# path gets exercised, because it is the only one that runs all five phases on
+# real Overture data with no credentials.
+parser.add_argument("--release-slice-version", default=None,
+                    help="Publish serving objects straight into this release "
+                         "slice namespace (slice-YYYY-MM-DD.N).")
 args = parser.parse_args()
 
 WORK = args.work
@@ -416,6 +425,8 @@ hosted("finalize", "--contract", contract, "--store-root", store_for("finalize")
        # workflow, which only threads --head for places.
        *(() if ADDRESSES else ("--head", head)),
        "--remote-root", WORK / "remote",
+       *(("--release-slice-version", args.release_slice_version)
+         if args.release_slice_version else ()),
        "--work-root", WORK / "final-work", "--output", final)
 result = json.loads(final.read_text())
 print(f"  reconciles={result['reconciles']} marker_written_last={result['marker_written_last']}"

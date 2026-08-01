@@ -95,6 +95,30 @@ on:
         required: false
         default: ""
         type: string
+      release_slice_version:
+        # ITEM 1, zero-copy promotion. Empty keeps today's behaviour exactly:
+        # finalize publishes the serving objects into the construction namespace
+        # and `promote-v2-release.yml` server-side-copies all of them into the
+        # release namespace -- 21,279 objects and 158.68 GiB on the 2026-07-31
+        # promotion, changing the prefix and nothing else, because both keys are
+        # already the object's own sha256.
+        #
+        # Set, and finalize publishes them straight into
+        # `<version>/families/<family>/objects/` under their final names and
+        # promotion binds them in place. That is exactly what reverse-v2 has done
+        # since #205, and `promote-slice` needs no flag: it reads the layout off
+        # the finalize marker's own keys.
+        #
+        # It is a DISPATCH input rather than part of the request because the
+        # release slice version is chosen after the build; the create-only slice
+        # claim at `<version>/claims/<family>.json` is what restores the
+        # authenticated binding to this request and Overture release. It is NOT
+        # part of the request digest, so setting it does not mint a new staging
+        # namespace or invalidate a resume.
+        description: Optional release slice version (slice-YYYY-MM-DD.N) to publish serving objects straight into, so promotion copies nothing. Empty publishes into the construction namespace as before.
+        required: false
+        default: ""
+        type: string
 
 permissions:
   contents: read
@@ -1478,6 +1502,7 @@ jobs:
         env:
           FAMILY_KEY: ${{ needs.admit.outputs.family_key }}
           REDUCERS_ALREADY_ACCOUNTED: ${{ needs.admit.outputs.head_only_resume == 'true' || needs.admit.outputs.finalize_only_resume == 'true' }}
+          RELEASE_SLICE_VERSION: ${{ inputs.release_slice_version }}
           # Finalize hydrates the exact published set by key from the run-scoped
           # staging prefix (serving objects, head shards, per-record packs), verifies
           # each against the digest in its key, and publishes it straight to R2.
@@ -1523,11 +1548,23 @@ jobs:
           # each, i.e. 12.4 h for a planet address slice against this job's
           # 360-minute timeout. Its conflict fallback also accepted a pre-existing
           # object on EXISTENCE alone; the Python path compares bytes.
+          # Item 1. Empty is today's shape exactly; set publishes the serving
+          # objects into the release namespace so promotion copies nothing. The
+          # format is re-checked here rather than trusted from the dispatch:
+          # finalize validates it too, but failing before the phase runs is
+          # cheaper than failing after map, reduce and head have been paid for.
+          RELEASE_SLICE_ARGS=()
+          if [ -n "$RELEASE_SLICE_VERSION" ]; then
+            echo "$RELEASE_SLICE_VERSION" | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$' || {
+              echo "::error::release_slice_version must match slice-YYYY-MM-DD.N"; exit 1; }
+            RELEASE_SLICE_ARGS=(--release-slice-version "$RELEASE_SLICE_VERSION")
+            echo "FINALIZE zero-copy: serving objects publish into ${RELEASE_SLICE_VERSION}/families/${FAMILY_KEY}/objects/"
+          fi
           python scripts/construction_v1_hosted.py finalize \
             --contract cv1plan/control/contract.json --store-root store \
             --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
             --family "$FAMILY_KEY" --plan cv1plan/plan/plan.json --reductions-dir red/reductions \
-            "${MARKER_ARGS[@]}" \
+            "${MARKER_ARGS[@]}" "${RELEASE_SLICE_ARGS[@]}" \
             $HEAD_ARG --remote-bucket "$R2_BUCKET" --remote-endpoint-url "$R2_ENDPOINT" \
             --work-root final-work --output final-work/result.json
           echo "FINALIZE publication complete: $(jq -c '{objects,reconciles,marker_key,serving_objects,positions_objects,staged_objects_hydrated}' final-work/result.json)"

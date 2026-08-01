@@ -11,7 +11,58 @@ Every number below is MEASURED from the 2026-07-31 promotion of
 
 ## 1. Promotion should not copy any bytes
 
-### What it does today
+**LANDED 2026-08-01.** Opt-in per dispatch: `construction-v1.yml` takes a
+`release_slice_version` input, finalize publishes the serving objects straight
+into `<version>/families/<family>/objects/`, and `promote-slice` reads the
+layout off the finalize marker's own keys and binds them.
+
+Verified on the real Monaco Places slice (38,182 places, 21 serving objects),
+both layouts planned, executed and verified end to end against a local
+destination:
+
+| | copied | prepositioned | destination |
+|---|---|---|---|
+| construction layout | 21 | 0 | 23 objects, 34,540,148 B |
+| release layout | **0** | 21 | 23 objects, 34,540,148 B |
+
+The published `routing.json` and #107 family manifest are **byte-identical**
+between the two (`family_manifest_sha256 c512192ac10a81f7…`,
+`routing_sha256 0173d65202a21d4c…`). What promotion produces does not change;
+only how the bytes got there.
+
+The residual noted below under "independent byte fidelity" was NOT closed and
+is written into the code at the forward-prepositioned branch of `_plan_family`:
+promotion no longer has a stored-byte digest to compare, because there is no
+copy, so `check_identity` proves length plus the recorded sha256 metadata (an
+echo on R2). The producer→object chain is still a genuine stored-byte proof —
+finalize's `read_back_identity` compares R2's server-computed MD5 of the stored
+bytes against the MD5 of the bytes it sent. **Follow-up:** recording that MD5
+in the finalize marker would let promotion re-prove it independently. It cannot
+be done inside `publish_exact_set` today because the marker is written before
+verification and a resumed finalize has no sent MD5 for objects an earlier run
+uploaded.
+
+Per-record packs (`positions/`, `records/`) deliberately stay in the
+construction namespace: nothing serves them, promotion never copied them, and
+putting them in a release namespace would make `cmd_verify`'s exact-set listing
+correctly call them unexpected.
+
+**PRECONDITION BEFORE USING IT ON A PLANET RUN.** The namespace-hygiene item
+below is *not* closed. What exists: `_admit_release_slice` refuses a version
+that is already finalized (its slice manifest or this family's release family
+manifest exists), the claim is create-only and binds the request and Overture
+release, and every object is content-addressed and create-only — so a failed
+run leaves inert, unroutable bytes rather than anything a reader can reach.
+What does not exist is a way to *remove* them. `r2-cleanup.yml` is prefix-gated
+and its phases target `staging/global-v2/<64-hex>/`; an abandoned
+`slice-YYYY-MM-DD.N/families/<family>/objects/` prefix matches no phase. So a
+planet finalize dispatched with the wrong `release_slice_version` puts ~45 GiB
+(Places) or ~114 GiB (Addresses) into a release namespace that only a
+hand-written operator action can clear. Add a cleanup phase for an *unmarked*
+release namespace before turning this on for a planet build; the Monaco-scale
+proof above does not exercise that risk.
+
+### What it did before this landed
 
 `promote-slice` server-side `CopyObject`s every forward serving object from the
 construction namespace into the release slice namespace:
@@ -158,6 +209,14 @@ the metadata check to a sample or to the non-copied members. Record as
 a deliberate decision, not an optimization reflex.
 
 ## 6. Reduction records should not live only in GitHub artifacts
+
+**LANDED 2026-08-01**, both halves. Every reduce marker now carries its
+grouping-invariant reduction record in the run-scoped R2 staging prefix
+(`5b240bd`), and `promote-slice` rebuilds the set from R2 with the GitHub
+artifacts kept only as a fallback for slices built before that (`be48baa`).
+The 7-day deadline and the finalize-only-recovery special case apply only on
+the fallback path now.
+
 
 Not a speed item, but it bit us today and belongs in the queue.
 

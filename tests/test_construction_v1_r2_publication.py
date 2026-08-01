@@ -1327,6 +1327,14 @@ def test_the_operation_projection_moved_with_the_paginated_listing():
         assert HOSTED.finalize_remote_operations(objects) == (
             objects * 4 + 3 + REMOTE.listing_operations(objects)
         )
+        # Item 1's zero-copy shape is a per-SLICE constant on top, never a
+        # per-object one: the whole difference is the release-slice admission,
+        # the slice claim, and one extra listing page.
+        assert HOSTED.finalize_remote_operations(objects, prepositioned=True) == (
+            HOSTED.finalize_remote_operations(objects)
+            + HOSTED.ZERO_COPY_FIXED_OPERATIONS
+            + HOSTED.ZERO_COPY_LISTING_PAGES
+        )
     assert HOSTED.FINALIZE_LISTING_PAGE_KEYS == REMOTE.LIST_PAGE_KEYS == R2.LIST_PAGE_KEYS
     # The admitted cap still clears the retry-inclusive structural ceiling AFTER the
     # extra listing pages, which is the only thing that made this safe to change.
@@ -1335,7 +1343,12 @@ def test_the_operation_projection_moved_with_the_paginated_listing():
         per_record_objects=HOSTED.PER_RECORD_OBJECTS_PER_PACK * 128 * 256,
         basis="structural ceiling",
     )["projected_remote_operations"]
-    assert ceiling == 346_182
+    # 346,182 for the copy shape plus item 1's five fixed operations, which the
+    # projection prices unconditionally because plan time cannot know which
+    # finalize shape will run.
+    assert ceiling == 346_182 + (
+        HOSTED.ZERO_COPY_FIXED_OPERATIONS + HOSTED.ZERO_COPY_LISTING_PAGES
+    )
     assert control.CAPS["max_remote_operations"] >= ceiling
     # And the CAPS comment states the same arithmetic rather than the old one.
     source = (ROOT / "scripts/construction_v1_control.py").read_text()

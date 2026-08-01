@@ -21,7 +21,7 @@ import os
 import subprocess
 import sys
 import threading
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import pytest
 
@@ -60,12 +60,23 @@ def _identity(obj: dict) -> dict:
 class SyntheticSlice:
     """One family's construction-v1 publication plus its reduction records."""
 
-    def __init__(self, root: Path, family: str):
+    def __init__(self, root: Path, family: str, release_version: str | None = None):
         self.family = family
         self.root = root
         self.slice_root = f"construction-v1/test-{family}/slice/slice-1/"
         self.markers_root = f"construction-v1/test-{family}/markers/"
         self.family_prefix = f"{self.slice_root}families/{family}/"
+        # Item 1. When set, the SERVING objects are published straight into the
+        # release slice namespace under their final content-addressed names and
+        # the finalize marker records those keys, exactly as
+        # `construction_v1_hosted.cmd_finalize --release-slice-version` does. The
+        # manifests and the per-record packs stay in the construction namespace.
+        self.release_version = release_version
+        self.objects_prefix = (
+            f"{release_version}/families/{family}/objects/"
+            if release_version
+            else f"{self.family_prefix}objects/"
+        )
         self.reductions_dir = root / f"reductions-{family}"
         self.reductions_dir.mkdir(parents=True, exist_ok=True)
         self.serving: list[dict] = []
@@ -148,7 +159,20 @@ class SyntheticSlice:
                 json.dumps(record, sort_keys=True)
             )
         for obj in self.serving:
-            self._write(f"{self.family_prefix}objects/{obj['name']}", obj["payload"])
+            self._write(f"{self.objects_prefix}{obj['name']}", obj["payload"])
+        if self.release_version:
+            self._write(
+                f"{self.release_version}/claims/{self.family}.json",
+                promote.canonical(
+                    {
+                        "schema": promote.SLICE_CLAIM_SCHEMA,
+                        "version": self.release_version,
+                        "family": self.family,
+                        "request_sha256": REQUEST_SHA,
+                        "overture_release": RELEASE,
+                    }
+                ),
+            )
         prefix = "positions" if self.family == "places" else "records"
         for obj in self.positions:
             self._write(f"{self.family_prefix}{prefix}/{obj['name']}", obj["payload"])
@@ -203,7 +227,7 @@ class SyntheticSlice:
         for obj in self.serving:
             marker_artifacts.append(
                 {
-                    "key": f"{self.family_prefix}objects/{obj['name']}",
+                    "key": f"{self.objects_prefix}{obj['name']}",
                     "sha256": obj["sha256"],
                     "bytes": obj["bytes"],
                 }
@@ -252,8 +276,8 @@ def _address_partition(country: str, start: int, end: int, suffix: str = "") -> 
     }
 
 
-def build_places(root: Path) -> SyntheticSlice:
-    built = SyntheticSlice(root, "places")
+def build_places(root: Path, release_version: str | None = None) -> SyntheticSlice:
+    built = SyntheticSlice(root, "places", release_version)
     built.add_reduction(
         _places_partition("5292"), b"plrv-5292", "routed_object"
     )
@@ -272,8 +296,8 @@ def build_places(root: Path) -> SyntheticSlice:
     return built
 
 
-def build_addresses(root: Path) -> SyntheticSlice:
-    built = SyntheticSlice(root, "addresses")
+def build_addresses(root: Path, release_version: str | None = None) -> SyntheticSlice:
+    built = SyntheticSlice(root, "addresses", release_version)
     built.add_reduction(
         _address_partition("mc", 0, UINT64_MAX), b"av1-mc", "artifact"
     )
@@ -524,6 +548,196 @@ def test_plan_is_identical_from_the_durable_markers_reduction_subset(both):
     from_markers = root / "plan-marker-subset.json"
     run_plan(root, slices, from_markers)
     assert from_markers.read_bytes() == baseline.read_bytes()
+
+
+# ---------------------------------------------------------------------------
+# Item 1: zero-copy forward promotion.
+#
+# Promotion server-side-copied every forward serving object between two
+# content-addressed prefixes that differ only by prefix -- 21,279 objects and
+# 158.68 GiB on the 2026-07-31 promotion. When construction publishes them into
+# the release namespace directly, promotion binds them in place. The property
+# these tests defend is that the PUBLISHED RESULT is unchanged: same routing,
+# same family manifest, same destination set. Only the copying is gone.
+
+
+@pytest.fixture()
+def zero_copy_places(tmp_path):
+    """A places slice whose serving objects are already at their release keys."""
+    return tmp_path, build_places(tmp_path, release_version=VERSION)
+
+
+def _zero_copy_plan(root, built, output):
+    """Plan with source AND destination the same tree, as the bucket is."""
+    return run_plan(root, [built], output)
+
+
+def test_zero_copy_plan_copies_nothing_and_publishes_identical_documents(tmp_path):
+    # The same slice content built twice: once published into the construction
+    # namespace (promotion copies it), once into the release namespace
+    # (promotion binds it). The routing table and the #107 family manifest must
+    # come out byte-identical, because they are derived from the reductions and
+    # the family manifest -- neither of which knows where the bytes were put.
+    copied_root = tmp_path / "copied"
+    prepositioned_root = tmp_path / "prepositioned"
+    copied = build_places(copied_root)
+    prepositioned = build_places(prepositioned_root, release_version=VERSION)
+
+    copy_plan = run_plan(copied_root, [copied], copied_root / "plan.json")["families"]
+    zero_plan = run_plan(
+        prepositioned_root, [prepositioned], prepositioned_root / "plan.json"
+    )["families"]
+
+    assert copy_plan["places"]["forward_layout"] == "construction-copy"
+    assert zero_plan["places"]["forward_layout"] == "release-prepositioned"
+    # The whole point, stated as an assertion.
+    assert copy_plan["places"]["totals"]["copied_objects"] > 0
+    assert zero_plan["places"]["totals"]["copied_objects"] == 0
+    assert (
+        zero_plan["places"]["totals"]["forward_prepositioned_objects"]
+        == copy_plan["places"]["totals"]["copied_objects"]
+    )
+    assert (
+        zero_plan["places"]["totals"]["bytes"]
+        == copy_plan["places"]["totals"]["bytes"]
+    )
+    # And the published documents do not change at all.
+    for field in ("routing_sha256", "family_manifest_sha256", "routing", "family_manifest"):
+        assert zero_plan["places"][field] == copy_plan["places"][field], field
+
+
+def test_zero_copy_executes_and_verifies_without_copying_a_byte(zero_copy_places):
+    root, built = zero_copy_places
+    # Source and destination are ONE tree, which is what the promotion workflow
+    # actually does (`--source r2:$R2_BUCKET --destination r2:$R2_BUCKET`): the
+    # objects are already at their final keys in the bucket promotion writes to.
+    tree = root / "source"
+    plan_path = root / "plan.json"
+    plan = _zero_copy_plan(root, built, plan_path)
+    assert plan["families"]["places"]["objects"] == []
+
+    assert (
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", f"local:{tree}", "--destination", f"local:{tree}"]
+        )
+        == 0
+    )
+    assert (
+        promote.main(
+            ["verify", "--plan", str(plan_path), "--destination", f"local:{tree}"]
+        )
+        == 0
+    )
+    family_dir = tree / VERSION / "families" / "places"
+    assert (family_dir / "family-manifest.json").is_file()
+    routing = json.loads((family_dir / "routing.json").read_text())
+    # Every routed object resolves in the release namespace, having never moved.
+    for name in promote._routing_object_names(routing):
+        assert (family_dir / "objects" / name).is_file()
+
+
+def test_plan_refuses_a_marker_that_mixes_the_two_layouts(tmp_path):
+    # Two finalizes with different destinations writing into one marker set
+    # would promote a family manifest naming objects from two different runs.
+    built = build_places(tmp_path, release_version=VERSION)
+    marker_path = tmp_path / "source" / built.markers_root / "finalize/places.json"
+    marker = json.loads(marker_path.read_text())
+    # MOVE one key rather than add one: the slice manifest's object_count check
+    # already refuses a marker with an extra entry, and this test is about the
+    # layout, not the count.
+    moved = next(
+        item for item in marker["artifacts"]
+        if item["key"].startswith(built.objects_prefix)
+    )
+    moved["key"] = (
+        f"{built.family_prefix}objects/{PurePosixPath(moved['key']).name}"
+    )
+    marker_path.write_text(json.dumps(marker, sort_keys=True))
+    with pytest.raises(SystemExit, match="BOTH the construction and the release"):
+        run_plan(tmp_path, [built], tmp_path / "plan.json")
+
+
+def test_zero_copy_fails_closed_without_the_slice_claim(zero_copy_places):
+    # The claim is what binds this release VERSION to the request and Overture
+    # release that produced it -- the authenticated late binding that
+    # `namespaces.slice` cannot carry. Publishing into a version nobody claimed
+    # must not promote.
+    root, built = zero_copy_places
+    (root / "source" / VERSION / "claims" / "places.json").unlink()
+    plan_path = root / "plan.json"
+    _zero_copy_plan(root, built, plan_path)
+    with pytest.raises(SystemExit, match="prepositioned destination.*claims/places"):
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", f"local:{root / 'source'}",
+             "--destination", f"local:{root / 'source'}"]
+        )
+
+
+def test_zero_copy_fails_closed_on_a_claim_for_a_different_request(zero_copy_places):
+    # A claim naming a different request means the objects under this version
+    # were produced by some other build. The claim is DERIVED by promotion and
+    # compared, never read and believed.
+    root, built = zero_copy_places
+    claim = root / "source" / VERSION / "claims" / "places.json"
+    claim.write_bytes(
+        promote.canonical(
+            {
+                "schema": promote.SLICE_CLAIM_SCHEMA,
+                "version": VERSION,
+                "family": "places",
+                "request_sha256": "cd" * 32,
+                "overture_release": RELEASE,
+            }
+        )
+    )
+    plan_path = root / "plan.json"
+    _zero_copy_plan(root, built, plan_path)
+    with pytest.raises(SystemExit, match="prepositioned destination.*claims/places"):
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", f"local:{root / 'source'}",
+             "--destination", f"local:{root / 'source'}"]
+        )
+
+
+def test_zero_copy_fails_closed_when_a_prepositioned_object_is_absent(zero_copy_places):
+    # There is no copy to catch a missing object, so `_verify_prepositioned` is
+    # the whole check. It must actually run over the forward set, not only over
+    # reverse's.
+    root, built = zero_copy_places
+    victim = next(
+        (root / "source" / VERSION / "families" / "places" / "objects").glob("*.plrv")
+    )
+    victim.unlink()
+    plan_path = root / "plan.json"
+    _zero_copy_plan(root, built, plan_path)
+    with pytest.raises(SystemExit, match="prepositioned destination"):
+        promote.main(
+            ["execute", "--plan", str(plan_path),
+             "--source", f"local:{root / 'source'}",
+             "--destination", f"local:{root / 'source'}"]
+        )
+
+
+def test_zero_copy_addresses_promote_the_same_way(tmp_path):
+    # The address family has no head phase, so it exercises the branch where
+    # routing is derived entirely from the reduction records.
+    built = build_addresses(tmp_path, release_version=VERSION)
+    plan_path = tmp_path / "plan.json"
+    plan = run_plan(tmp_path, [built], plan_path)["families"]["addresses"]
+    assert plan["forward_layout"] == "release-prepositioned"
+    assert plan["totals"]["copied_objects"] == 0
+    assert plan["totals"]["forward_prepositioned_objects"] == 3
+    tree = tmp_path / "source"
+    assert promote.main(
+        ["execute", "--plan", str(plan_path),
+         "--source", f"local:{tree}", "--destination", f"local:{tree}"]
+    ) == 0
+    assert promote.main(
+        ["verify", "--plan", str(plan_path), "--destination", f"local:{tree}"]
+    ) == 0
 
 
 def test_plan_runs_via_cli_subprocess(both):

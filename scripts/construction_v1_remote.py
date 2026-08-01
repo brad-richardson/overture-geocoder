@@ -824,7 +824,7 @@ def publish_exact_set(
 def verify_whole_slice_once(
     remote: Any,
     *,
-    prefix: str,
+    prefix: str | Sequence[str],
     expected: list[dict[str, object]],
     concurrency: int = PUBLISH_CONCURRENCY,
     progress: Callable[[str, int, int], None] | None = None,
@@ -833,6 +833,17 @@ def verify_whole_slice_once(
 
     The exact-set equality runs FIRST and serially, on the one listing, so a slice
     with a missing, extra or duplicate key is refused before any object is touched.
+
+    ``prefix`` may be a SEQUENCE of prefixes, and the exact-set equality then
+    covers their union. That is not a convenience: zero-copy promotion publishes
+    the serving objects into the release slice namespace and the two construction
+    manifests into the construction namespace, so the published set spans two
+    disjoint prefixes. Listing the common ancestor instead would drag in the
+    reverse family's objects -- reverse writes into the same release family
+    prefix -- and the exact-set check would fail on objects this phase never
+    claimed to own. The prefixes must be pairwise non-nested, because a nested
+    pair would list the same key twice and turn the duplicate check into a
+    false alarm.
 
     HOW an object is read back is the BACKEND's decision, because the cost differs by
     orders of magnitude. `FilesystemRemote` streams and digests it -- local disk, so
@@ -846,7 +857,17 @@ def verify_whole_slice_once(
     position, so `verified` -- and therefore `binding_sha256` -- is in key order
     regardless of completion order.
     """
-    keys = remote.list(prefix)
+    prefixes = [prefix] if isinstance(prefix, str) else sorted(prefix)
+    if not prefixes:
+        raise ValueError("whole-slice verification needs at least one prefix")
+    for outer in prefixes:
+        for inner in prefixes:
+            if outer is not inner and inner.startswith(outer):
+                raise ValueError(
+                    "whole-slice verification prefixes must be pairwise "
+                    f"non-nested; {inner!r} is inside {outer!r}"
+                )
+    keys = sorted(key for one in prefixes for key in remote.list(one))
     expected_by_key = {str(item["key"]): item for item in expected}
     if keys != sorted(expected_by_key):
         raise RuntimeError("final slice has missing, extra, or duplicate keys")

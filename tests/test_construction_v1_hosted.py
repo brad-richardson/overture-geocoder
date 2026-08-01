@@ -96,6 +96,11 @@ def _derive(tmp_path: Path) -> tuple[Path, Path]:
     return contract, runtime
 
 
+def _slice_root(contract: Path) -> str:
+    """The construction slice namespace this contract publishes into."""
+    return json.loads(Path(contract).read_text())["namespaces"]["slice"].rstrip("/")
+
+
 def _admit_completed(store: Path, family: str, phase: str, **kw) -> bool:
     out = store.parent / f"admit-{family}-{phase}-{kw.get('task_id', kw.get('index', ''))}.json"
     argv = ["admit-task", "--store-root", store, "--family", family, "--phase", phase, "--output", out]
@@ -978,6 +983,70 @@ def test_places_finalize_publishes_every_routed_object(tmp_path, binaries):
     assert len({shard["shard_id"] for shard in routing["shards"]}) == len(
         routing["shards"]
     )
+
+    # ITEM 1, zero-copy publication: the SAME slice, published straight into a
+    # release namespace. Promotion then binds these objects instead of copying
+    # 158 GiB between two prefixes that differ only by prefix.
+    zero_copy_remote = tmp_path / "remote-zero-copy"
+    zero_copy_final = tmp_path / "final-zero-copy.json"
+    _run("finalize", "--contract", contract, "--store-root", store, "--family", "places",
+         "--plan", plan, "--reductions-dir", reductions, "--markers-dir", markers_dir,
+         "--head", head, "--remote-root", zero_copy_remote,
+         "--release-slice-version", "slice-2026-08-01.0",
+         "--work-root", tmp_path / "final-work-zero-copy",
+         "--output", zero_copy_final)
+    zero_copy = json.loads(zero_copy_final.read_text())
+    assert zero_copy["release_slice_version"] == "slice-2026-08-01.0"
+    assert zero_copy["slice_claim"]["state"] == "claimed"
+    assert (
+        zero_copy["slice_claim"]["key"] == "slice-2026-08-01.0/claims/places.json"
+    )
+    # The SERVING objects moved to the release namespace, byte for byte the same
+    # set under the same content-addressed names -- that is what makes the copy
+    # unnecessary rather than merely skipped.
+    release_objects = zero_copy_remote / "slice-2026-08-01.0/families/places/objects"
+    assert {path.name for path in release_objects.iterdir()} == {
+        path.name for path in (remote / f"{_slice_root(contract)}/families/places/objects").iterdir()
+    }
+    assert zero_copy["objects"] == result["objects"]
+    assert zero_copy["verification"]["binding_sha256"] != ""
+    # The two construction MANIFESTS and the per-record packs stay put. Manifests
+    # because they authenticate the slice to promotion and are request-scoped;
+    # per-record packs because nothing serves them and promotion never promoted
+    # them, so putting them in a serving namespace would be debris.
+    construction_family = zero_copy_remote / _slice_root(contract) / "families/places"
+    assert (construction_family / "family-manifest.json").is_file()
+    assert (construction_family / "slice-manifest.json").is_file()
+    assert list((construction_family / "positions").glob("*.parquet"))
+    assert not (zero_copy_remote / "slice-2026-08-01.0/families/places/positions").exists()
+    # No serving object was left behind in the construction namespace.
+    assert not (construction_family / "objects").exists()
+
+    # Re-finalizing into the same release version is a benign resume: the claim
+    # is byte-identical, every object is create-only and already present.
+    _run("finalize", "--contract", contract, "--store-root", store, "--family", "places",
+         "--plan", plan, "--reductions-dir", reductions, "--markers-dir", markers_dir,
+         "--head", head, "--remote-root", zero_copy_remote,
+         "--release-slice-version", "slice-2026-08-01.0",
+         "--work-root", tmp_path / "final-work-zero-copy-2",
+         "--output", tmp_path / "final-zero-copy-2.json")
+    assert json.loads(
+        (tmp_path / "final-zero-copy-2.json").read_text()
+    )["slice_claim"]["state"] == "resume"
+
+    # A release slice that is already FINALIZED refuses new objects: its manifest
+    # freezes what the version serves, so publishing under it would be adding
+    # bytes beneath a frozen manifest.
+    (zero_copy_remote / "slice-2026-08-01.0/slice-manifest.json").write_text("{}")
+    with pytest.raises(SystemExit) as excinfo:
+        HOSTED.main(["finalize", "--contract", str(contract), "--store-root", str(store),
+                     "--family", "places", "--plan", str(plan),
+                     "--reductions-dir", str(reductions), "--markers-dir", str(markers_dir),
+                     "--head", str(head), "--remote-root", str(zero_copy_remote),
+                     "--release-slice-version", "slice-2026-08-01.0",
+                     "--work-root", str(tmp_path / "final-work-frozen"),
+                     "--output", str(tmp_path / "final-frozen.json")])
+    assert "already finalized" in str(excinfo.value)
 
     # And wrong bytes under a right routed key abort rather than publish.
     victim = json.loads((reductions / sorted(p.name for p in reductions.glob("*.json"))[0]).read_text())
