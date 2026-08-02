@@ -1,22 +1,23 @@
 # construction-v1: current state
 
-Last updated 2026-08-02 after RC3 and its bounded locality-routing follow-up
-were deployed and accepted against the live gold and external-provider runs.
+Last updated 2026-08-02 after the Big Ben and Machu Picchu entity/gold audit.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
-2026-08-02", "First RC3 live result and locality interaction, 2026-08-02", and
-"RC3 accepted result, 2026-08-02".
+2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
+"RC3 accepted result, 2026-08-02", and "Big Ben and Machu Picchu contract
+audit, 2026-08-02".
 
 **RC2 and RC3 are closed; do not reopen the head intersection or start another
 undirected rebuild.** Worker commits `3d3b33c`, `8f9a90f`, and `e655615` are
 live. Across the same 35-case gold set, name-only head recall@10 moved from 2/10
-before RC2 to 6/10 after RC3, with no final rank@1 regression. Statue of Liberty
-is recovered at rank 4. Empire State Building, Big Ben, and Brandenburg Gate
-remain absent from every relevant capped posting; Machu Picchu is already rank
-1 but 0.291 km outside the gold tolerance. **The next gate is an entity/gold
-audit for Big Ben and Machu Picchu, then a bounded producer-admission design for
-the confirmed Empire State Building and Brandenburg Gate misses, not a
-rebuild.**
+before RC2 to 6/10 after RC3, with no serving rank@1 regression. The subsequent
+contract audit removed a false-positive Big Ben rank and accepted official
+Machu Picchu citadel names, producing an audited name-only score of 7/10.
+Statue of Liberty is recovered at rank 4; Machu Picchu is recovered at rank 10
+under an official alias. **The next gate is a bounded producer-admission design
+for the confirmed Empire State Building, Big Ben, and Brandenburg Gate misses,
+not a rebuild.** Keep `Machu Picchu Cusco` in the separate region-context
+routing backlog.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -44,7 +45,9 @@ at rank 10. RC2 is closed. See "Planet Places rebuild and promotion,
 2026-08-02" and "Head saturated-posting correction, 2026-08-02". RC3 then
 recovered Statue of Liberty without changing rank@1 and moved the name-only
 head stratum to 6/10 at rank 10. Its initially exposed locality interaction is
-fixed and accepted; see "RC3 accepted result, 2026-08-02".
+fixed and accepted; see "RC3 accepted result, 2026-08-02". The later contract
+audit moves the score to 7/10 by accepting an official Machu Picchu citadel
+name; that extra point is a gold correction, not another Worker improvement.
 
 **The next milestone is AGREED (2026-07-31): forward search correctness.**
 Operator approved Stages 0 and 1 of
@@ -1175,6 +1178,55 @@ admission work only for misses that survive that review. Empire State Building
 and Brandenburg Gate are already confirmed producer-admission misses by the
 live capped-posting probe.
 
+### Big Ben and Machu Picchu contract audit, 2026-08-02
+
+The durable audit is
+`benchmarks/2026-08-02-big-ben-machu-picchu-contract-audit.json`. It compares
+live top-ten identities and coordinates with UK Parliament, Historic England,
+Peru Ministry of Culture, and UNESCO sources that were not derived from a
+compared provider.
+
+**Big Ben survives the audit as a producer-admission miss.** UK Parliament
+documents Big Ben as the famous Westminster landmark/bell at Elizabeth Tower,
+and Historic England's statutory Palace of Westminster entry includes the
+tower and its location. The old 2 km case radius was nevertheless too loose:
+`Big Ben London` credited a different same-named London POI 1.337 km away at
+rank 1 while the actual landmark was rank 3 and 0.002 km away. Both Big Ben
+cases now use a case-specific 0.25 km radius. The context-free query still
+returns no London target from Overture, Nominatim, or Photon, while all three
+locality controls retrieve the landmark. The global Overture miss is therefore
+real despite also exposing a weakness shared by the external providers.
+
+**Machu Picchu does not survive as a producer-admission miss.** Peru's Ministry
+of Culture uses `Ciudadela Inka (Llaqta) de Machupicchu`, `ciudadela de Machu
+Picchu`, and `Santuario Histórico de Machu Picchu`; UNESCO uses `Historic
+Sanctuary of Machu Picchu`. Those official aliases are now accepted. The
+Overture exact-name rank-1 point remains correctly rejected at 2.291 km from
+gold, while `Ciudadela De Machu Picchu` is accepted at rank 10 and 0.355 km.
+`Machu Picchu Cusco` still misses because it returns a museum in Cusco city;
+that is a separate region-context routing issue, not evidence for posting
+admission.
+
+The unchanged live service was rerun after the contract correction. Evidence is
+`benchmarks/2026-08-02-forward-gold-after-contract-audit.json` and
+`benchmarks/2026-08-02-forward-gold-external-after-contract-audit.json` (zero
+errors):
+
+| provider | before r@1 | audited r@1 | before r@10 | audited r@10 |
+|---|---|---|---|---|
+| Overture | 0.429 | 0.400 | 0.600 | **0.629** |
+| Nominatim | 0.914 | **0.971** | 0.914 | **0.971** |
+| Photon | 0.771 | **0.800** | 0.943 | 0.943 |
+
+Overture's r@1 change is the intentional removal of the Big Ben false positive,
+not a serving regression; its name-only r@10 improves 0.600 -> 0.700 by
+crediting the already-present citadel. Focused benchmark regressions pin both
+contract decisions.
+
+**The audit gate is closed.** Proceed only with bounded producer admission for
+Empire State Building, Big Ben, and Brandenburg Gate. Do not include Machu
+Picchu in that mechanism.
+
 The bounded `tower` proxy probe in `b8e3151` also needs to be read narrowly. It
 refutes record count, `names.common` cardinality, and `sources` count as direct
 orderings for four famous towers versus the ten measured incumbents. It does
@@ -1348,11 +1400,13 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    all four checks pass on attempt 1.
 2. **Forward Places quality — NOW THE AGREED MILESTONE.** Stage 1, the
    prominence rebuild, RC2, and RC3 improved distinct strata. Name-only head
-   recall@10 is now 6/10, up from 2/10 immediately before RC2, with no final
-   rank@1 regression. Audit the Big Ben and Machu Picchu entity/gold contracts,
-   then design bounded producer admission for the confirmed Empire State
-   Building and Brandenburg Gate posting misses. Do not reopen build ordering,
-   duplicate collapse, or the head cap without contradictory evidence.
+   recall@10 is 6/10 under the accepted RC3 contract and 7/10 under the audited
+   contract; the extra point is the official Machu Picchu alias, not a Worker
+   change. Design bounded producer admission for the confirmed Empire State
+   Building, Big Ben, and Brandenburg Gate posting misses. Keep Machu Picchu
+   Cusco in the separate region-context routing backlog. Do not reopen build
+   ordering, duplicate collapse, or the head cap without contradictory
+   evidence.
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.

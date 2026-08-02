@@ -1,0 +1,126 @@
+{
+  "schema": "forward-gold-contract-audit-v1",
+  "timestamp": "2026-08-02T21:00:46+00:00",
+  "git_sha": "133c30b",
+  "data_version": "2026-08-02.0",
+  "method": [
+    "Inspect the live top ten from Overture, Nominatim, and Photon for each name and name-plus-locality query.",
+    "Validate entity identity and accepted names against government or intergovernmental sources that were not derived from a compared provider.",
+    "Change only the benchmark contract, then rerun the unchanged live service and all three providers."
+  ],
+  "cases": {
+    "big_ben": {
+      "sources": [
+        {
+          "url": "https://www.parliament.uk/about/living-heritage/building/palace/big-ben/",
+          "claim": "UK Parliament treats Big Ben as the globally famous Westminster landmark and documents its relationship to Elizabeth Tower."
+        },
+        {
+          "url": "https://historicengland.org.uk/listing/the-list/list-entry/1226284",
+          "claim": "The official Grade I Palace of Westminster entry includes Elizabeth Tower, home of the famous bell Big Ben, and supplies the statutory location."
+        }
+      ],
+      "contract_before": {
+        "expected_name": "Big Ben",
+        "alt_names": [
+          "Elizabeth Tower"
+        ],
+        "expected_lat": 51.5007,
+        "expected_lon": -0.1246,
+        "tolerance_km": 2.0
+      },
+      "live_evidence": {
+        "name_only": {
+          "overture": "Only Big Ben Memorial Statue in Ontario; the London target is absent.",
+          "nominatim": "Top ten are geographic and other homonyms outside London; the London target is absent.",
+          "photon": "Top ten are geographic and other homonyms outside London; the London target is absent."
+        },
+        "name_locality": {
+          "overture": "A same-named London POI 1.337 km from gold was formerly credited at rank 1; the actual Westminster landmark is rank 3 and 0.002 km from gold.",
+          "nominatim": "The Westminster landmark is rank 1 and 0.002 km from gold.",
+          "photon": "The Westminster landmark is rank 1 and 0.002 km from gold."
+        }
+      },
+      "contract_after": {
+        "tolerance_km": 0.25,
+        "reason": "A tower-specific point contract should not credit a different same-named POI 1.337 km away; 0.25 km remains generous for point placement around the official structure."
+      },
+      "classification": {
+        "entity_contract": "valid after tightening the spatial guard",
+        "name_only_overture": "confirmed producer-admission/global-prominence miss",
+        "name_locality_overture": "retrieved at rank 3"
+      }
+    },
+    "machu_picchu": {
+      "sources": [
+        {
+          "url": "https://www.gob.pe/institucion/cultura/noticias/645136-ministerio-de-cultura-lanza-campana-sobre-la-importancia-de-cuidar-y-preservar-la-llaqta-de-machupicchu",
+          "claim": "Peru's Ministry of Culture calls the archaeological target the Ciudadela Inka (Llaqta) de Machupicchu."
+        },
+        {
+          "url": "https://www.gob.pe/institucion/cultura/noticias/68536-ministerio-de-cultura-declara-patrimonio-cultural-de-la-nacion-4-mil-849-bienes-culturales-muebles-repatriados-de-la-universidad-de-yale",
+          "claim": "Peru's Ministry of Culture uses ciudadela de Machu Picchu and Santuario Historico de Machu Picchu for the archaeological target."
+        },
+        {
+          "url": "https://whc.unesco.org/en/list/274/",
+          "claim": "UNESCO's official property name is Historic Sanctuary of Machu Picchu and its description identifies the archaeological citadel at the property's heart."
+        }
+      ],
+      "contract_before": {
+        "expected_name": "Machu Picchu",
+        "alt_names": [],
+        "expected_lat": -13.1631,
+        "expected_lon": -72.545,
+        "tolerance_km": 2.0
+      },
+      "live_evidence": {
+        "overture_name_only": "The exact-name rank-1 point is 2.291 km away near Machupicchu Pueblo and remains rejected; Ciudadela De Machu Picchu is rank 10 and 0.355 km from gold.",
+        "overture_name_locality": "Machu Picchu Cusco still misses; its top result is a museum in Cusco city, 72.958 km from gold.",
+        "nominatim": "Ciudadela de Machu Picchu is rank 1 and 0.138 km from gold for both query styles.",
+        "photon": "The name-only target is rank 2 and 0.052 km from gold; the official citadel name becomes rank 1 and 0.138 km from gold for the locality query."
+      },
+      "contract_after": {
+        "alt_names": [
+          "Ciudadela de Machu Picchu",
+          "Ciudadela Inka de Machupicchu",
+          "Llaqta de Machupicchu",
+          "Historic Sanctuary of Machu Picchu",
+          "Santuario Histórico de Machu Picchu"
+        ],
+        "reason": "The old contract falsely rejected official Spanish and UNESCO names while correctly rejecting the town-side exact-name point."
+      },
+      "classification": {
+        "entity_contract": "valid after adding official aliases",
+        "name_only_overture": "retrieved at rank 10; not a producer-admission miss",
+        "name_locality_overture": "separate region-context/routing miss, not evidence for producer admission"
+      }
+    }
+  },
+  "remeasurement": {
+    "exact_id_artifact": "benchmarks/2026-08-02-forward-gold-after-contract-audit.json",
+    "external_artifact": "benchmarks/2026-08-02-forward-gold-external-after-contract-audit.json",
+    "providers": {
+      "overture": {
+        "before_recall_at_1": 0.429,
+        "after_recall_at_1": 0.4,
+        "before_recall_at_10": 0.6,
+        "after_recall_at_10": 0.629,
+        "interpretation": "Rank 1 falls only because the Big Ben homonym is no longer a false positive; rank 10 gains the official Machu Picchu citadel."
+      },
+      "nominatim": {
+        "before_recall_at_1": 0.914,
+        "after_recall_at_1": 0.971,
+        "before_recall_at_10": 0.914,
+        "after_recall_at_10": 0.971
+      },
+      "photon": {
+        "before_recall_at_1": 0.771,
+        "after_recall_at_1": 0.8,
+        "before_recall_at_10": 0.943,
+        "after_recall_at_10": 0.943
+      }
+    },
+    "errors_per_provider": 0
+  },
+  "next_gate": "Design bounded producer admission for the confirmed Big Ben, Empire State Building, and Brandenburg Gate name-only misses. Keep Machu Picchu Cusco in the separate region-context routing backlog."
+}
