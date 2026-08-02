@@ -1890,9 +1890,10 @@ def test_rust_encoder_and_verifier_order_keys_match_the_python_key():
 def test_worker_query_time_sorts_match_the_build_time_key():
     """Build order and query order must agree, or the cap and the ranking fight.
 
-    Neither of these is covered by the encoder/verifier assertions -- the worker
-    sorts records it has already decoded, so a divergence here is invisible at
-    build time and shows up only as bad results.
+    This is not covered by the encoder/verifier assertions -- the worker sorts
+    records it has already decoded, so a divergence here is invisible at build
+    time and shows up only as bad results. Both serving lanes must call the same
+    bounded-posting merge so their saturation semantics cannot drift either.
     """
     markers = {
         "identity": ["identifying("],
@@ -1907,12 +1908,13 @@ def test_worker_query_time_sorts_match_the_build_time_key():
         ROOT / "crates/geocoder-worker/src/places_construction_v1.rs"
     ).read_text()
 
-    for anchor in (
-        "fn sort_by_identity_then_producer_order",   # head lane
-        "results.sort_by(|(left, left_mask), (right, right_mask)|",  # routed lane
-    ):
-        block = worker.split(anchor, 1)[1].split("});", 1)[0]
-        assert _signal_order(block, markers) == CANONICAL_RANK_KEY, anchor
+    anchor = "results.sort_by(|(left, left_mask), (right, right_mask)|"
+    block = worker.split(anchor, 1)[1].split("});", 1)[0]
+    assert _signal_order(block, markers) == CANONICAL_RANK_KEY, anchor
+
+    for lane in ("merge_routed_candidates", "merge_head_candidates"):
+        lane_block = worker.split(f"pub(crate) fn {lane}", 1)[1].split("\n}", 1)[0]
+        assert "merge_bounded_candidates(" in lane_block, lane
 
 
 def test_shuffle_bucket_python_mirror_matches_the_sql(construction_module):
