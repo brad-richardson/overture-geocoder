@@ -1,10 +1,11 @@
 # construction-v1: current state
 
-Last updated 2026-08-02 after the saturated-posting Worker correction was
-deployed and measured live, then the remaining head misses were separated by
-live producer-posting evidence. Read, in order: "Planet Places rebuild and
-promotion, 2026-08-02", "Head saturated-posting correction, 2026-08-02", and
-"RC3 and remaining admission split, 2026-08-02".
+Last updated 2026-08-02 after RC3 was deployed, recovered Statue of Liberty,
+and exposed an interaction with locality-suffix routing that is corrected
+locally but not yet redeployed. Read, in order: "Planet Places rebuild and
+promotion, 2026-08-02", "Head saturated-posting correction, 2026-08-02",
+"RC3 and remaining admission split, 2026-08-02", and "First RC3 live result
+and locality interaction, 2026-08-02".
 
 **RC2 is closed; do not reopen the head intersection or start another
 undirected rebuild.** Worker commit `3d3b33c` is live and the same 35-case gold
@@ -12,8 +13,11 @@ set moved name-only head recall@10 from 2/10 to 5/10. Live token and pair probes
 now show that only Statue of Liberty is recoverable by widening the Worker head
 from two to three tokens. Empire State Building, Big Ben, and Brandenburg Gate
 are absent from every relevant capped posting; Machu Picchu is already rank 1
-but 0.291 km outside the gold tolerance. **The next gate is the bounded RC3
-Worker deployment and the same live gold/external measurement, not a rebuild.**
+but 0.291 km outside the gold tolerance. RC3 is live and recovered Statue at
+rank 4, but its first gold run also found a real rank@1 regression: a nonempty
+three-token head suppressed exact locality routing. **The next gate is the
+bounded Worker follow-up and the same live gold/external measurement, not a
+rebuild.**
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -592,12 +596,12 @@ needs stating before anyone implements against the phrase.
 ### Still open, unscheduled
 
 RC2 is closed by deployed Worker commit `3d3b33c` and the live measurement in
-"Head saturated-posting correction, 2026-08-02". The bounded RC3 Worker change
-is implemented locally and awaits deployment plus live measurement. Duplicate
-collapse, producer admission for Empire State Building / Big Ben / Brandenburg
-Gate, and any future `head_result_cap` change remain unscheduled. Machu Picchu
-is not part of that producer-admission work. Do not bundle these mechanisms
-into another ranking or rebuild pass.
+"Head saturated-posting correction, 2026-08-02". RC3 is live in `8f9a90f`, but
+its acceptance gate remains open until the local locality-routing follow-up is
+deployed and measured. Duplicate collapse, producer admission for Empire State
+Building / Big Ben / Brandenburg Gate, and any future `head_result_cap` change
+remain unscheduled. Machu Picchu is not part of that producer-admission work.
+Do not bundle these mechanisms into another ranking or rebuild pass.
 
 ## Current snapshot
 
@@ -1089,10 +1093,43 @@ semantic gold contract for all three providers, while Machu Picchu missed for
 Overture and Nominatim but ranked 2 in Photon. Those cases need entity/gold
 review before they are used to justify an admission design.
 
-**No live RC3 result is claimed yet.** Deploy the three-token Worker, rerun the
-same 35-case gold set and the provider-neutral comparison, and require Statue
-of Liberty to cross the retrieval gate without regression. Empire State
-Building is explicitly not predicted to move.
+This was the pre-deploy prediction. The first live result and its newly exposed
+interaction are recorded immediately below.
+
+### First RC3 live result and locality interaction, 2026-08-02
+
+PR #225 landed as `8f9a90f`; main CI run `30763429295` and automatic deploy run
+`30763644173` passed, including post-deploy smoke. The two falsifiable endpoint
+checks behaved exactly as predicted: Statue of Liberty now returns the New York
+National Monument at rank 4, while Empire State Building remains empty.
+
+The full gold run
+(`benchmarks/2026-08-02-forward-gold-after-rc3.json`) is **not an acceptance
+pass**, despite name-only r@10 improving 0.500 -> 0.600 and overall place r@10
+improving 0.571 -> 0.600. It found a real interaction:
+
+- overall place r@1 regressed 0.429 -> 0.371;
+- `place:name_locality` r@1 regressed 0.400 -> 0.200, though its r@10 stayed
+  0.500;
+- Taj Mahal Agra fell rank 1 -> 5 and Sagrada Familia Barcelona rank 1 -> 2.
+
+The cause is deterministic. Before RC3, three-token queries returned empty from
+the head, which allowed `locality_suffix_candidates` to route the remaining
+name near an exact locality centroid. After RC3, a nonempty three-token global
+head made the old boolean guard suppress that stronger route. Live metadata
+confirmed locality inference was absent for Taj Mahal Agra, Sagrada Familia
+Barcelona, and Eiffel Tower Paris.
+
+The local follow-up preserves the original rule for two-token queries. For a
+nonempty three-token head it permits locality inference only when the head also
+contains an exact primary-name candidate for the prefix: `Taj Mahal` proves the
+parse `Taj Mahal` + `Agra`, while no result exactly named `Statue of` means
+Liberty, NY cannot steal `Statue of Liberty`. Focused tests pin both sides.
+
+**The next gate is deploy and rerun, not more ranking work.** Acceptance
+requires Statue to remain recovered, Empire to remain empty, the prior
+name-locality ranks to return, and no gold stratum to regress. Only then rerun
+the three-provider external comparison and close RC3.
 
 The bounded `tower` proxy probe in `b8e3151` also needs to be read narrowly. It
 refutes record count, `names.common` cardinality, and `sources` count as direct

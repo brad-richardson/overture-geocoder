@@ -1760,25 +1760,26 @@ struct PlacesLocalityInference {
 fn locality_suffix_candidates(
     tokens: &[String],
     explicit_proximity: bool,
-    global_head_nonempty: bool,
+    global_head: &[PlaceProjection],
 ) -> Vec<LocalitySuffixCandidate> {
     // Two tokens are included (RC6): `IKEA Berlin` returned nothing at all,
     // because two tokens got no routing and then died intersecting two ten-deep
     // head lists.
     //
-    // Widening is safe by CONSTRUCTION, not by luck. `global_head_nonempty` is
-    // passed as `!places.is_empty()`, so this fallback runs only when Places
-    // came back EMPTY -- it can convert "no results" into "some results" and can
-    // never displace an answer the head already found. On top of that,
-    // `exact_locality_result` requires a locality-typed division whose whole
-    // name equals the suffix, so a candidate like `tower` from "Eiffel Tower"
-    // simply finds nothing and costs one bounded division lookup. Probed
-    // 2026-07-31: tower/needle/square/park/bridge/palace/museum/garden resolve
-    // to zero exact-name divisions.
-    if explicit_proximity || global_head_nonempty || !(2..=4).contains(&tokens.len()) {
+    // For two-token queries a non-empty head remains authoritative: this
+    // preserves the original "fallback cannot displace a real answer" rule.
+    // RC3 means a three-token name+locality query can now return a non-empty
+    // global head before locality inference. Permit the fallback in that case
+    // only when the head itself contains an exact name for the prefix -- e.g.
+    // `Taj Mahal` in `Taj Mahal Agra`. `Statue of Liberty` has no exact
+    // `Statue of` prefix result, so Liberty, NY cannot steal that landmark.
+    if explicit_proximity
+        || !(2..=4).contains(&tokens.len())
+        || (!global_head.is_empty() && tokens.len() == 2)
+    {
         return Vec::new();
     }
-    (1..=2)
+    let mut candidates = (1..=2)
         .rev()
         .filter(|suffix_length| *suffix_length < tokens.len())
         .map(|suffix_length| {
@@ -1790,7 +1791,16 @@ fn locality_suffix_candidates(
                 locality_tokens,
             }
         })
-        .collect()
+        .collect::<Vec<_>>();
+    if !global_head.is_empty() {
+        candidates.retain(|candidate| {
+            let place_tokens = query_terms(&candidate.place_query);
+            global_head.iter().any(|place| {
+                query_terms(place.name.split(',').next().unwrap_or("")) == place_tokens
+            })
+        });
+    }
+    candidates
 }
 
 fn exact_locality_result<'a>(
@@ -2367,8 +2377,7 @@ pub(crate) async fn handle_forward(
         )
         .await?;
         let tokens = query_terms(query);
-        let suffix_candidates =
-            locality_suffix_candidates(&tokens, proximity.is_some(), !places.is_empty());
+        let suffix_candidates = locality_suffix_candidates(&tokens, proximity.is_some(), &places);
         // Match quality is scored against the query the places lane actually
         // ran. When locality inference fires, that is the query MINUS the
         // locality suffix -- "Eiffel Tower Paris" searches places for "eiffel
@@ -4129,13 +4138,29 @@ mod tests {
         }
     }
 
+    fn head_place(name: &str) -> PlaceProjection {
+        PlaceProjection {
+            id: name.into(),
+            latitude: 0.0,
+            longitude: 0.0,
+            confidence: 1.0,
+            prominence: 0.0,
+            name: name.into(),
+            category: "monument".into(),
+            locality: String::new(),
+            region: String::new(),
+            country: String::new(),
+            distance_km: None,
+        }
+    }
+
     #[test]
-    fn locality_suffix_fallback_is_only_for_empty_context_free_long_heads() {
+    fn locality_suffix_fallback_preserves_two_token_head_answers() {
         let tokens = query_terms("Museum of Modern Art New York");
-        assert!(locality_suffix_candidates(&tokens, false, false).is_empty());
+        assert!(locality_suffix_candidates(&tokens, false, &[]).is_empty());
 
         let tokens = query_terms("Modern Art New York");
-        let candidates = locality_suffix_candidates(&tokens, false, false);
+        let candidates = locality_suffix_candidates(&tokens, false, &[]);
         assert_eq!(
             candidates,
             vec![
@@ -4151,14 +4176,13 @@ mod tests {
                 },
             ]
         );
-        assert!(locality_suffix_candidates(&tokens, true, false).is_empty());
-        assert!(locality_suffix_candidates(&tokens, false, true).is_empty());
+        assert!(locality_suffix_candidates(&tokens, true, &[]).is_empty());
         // Two tokens now DO produce a candidate. `Eiffel Tower` yields the
         // suffix `tower`, which matches no locality-typed division, so the
         // inference finds nothing and the result is unchanged -- while the same
         // widening is what lets `IKEA Berlin` resolve at all (RC6).
         assert_eq!(
-            locality_suffix_candidates(&query_terms("Eiffel Tower"), false, false),
+            locality_suffix_candidates(&query_terms("Eiffel Tower"), false, &[]),
             vec![LocalitySuffixCandidate {
                 place_query: "eiffel".into(),
                 locality_query: "tower".into(),
@@ -4166,7 +4190,7 @@ mod tests {
             }]
         );
         assert_eq!(
-            locality_suffix_candidates(&query_terms("IKEA Berlin"), false, false),
+            locality_suffix_candidates(&query_terms("IKEA Berlin"), false, &[]),
             vec![LocalitySuffixCandidate {
                 place_query: "ikea".into(),
                 locality_query: "berlin".into(),
@@ -4174,12 +4198,35 @@ mod tests {
             }]
         );
         // A single token still cannot be split.
-        assert!(locality_suffix_candidates(&query_terms("Berlin"), false, false).is_empty());
+        assert!(locality_suffix_candidates(&query_terms("Berlin"), false, &[]).is_empty());
         // And the fallback still never runs when the head already answered.
         assert!(
-            locality_suffix_candidates(&query_terms("IKEA Berlin"), false, true).is_empty(),
+            locality_suffix_candidates(&query_terms("IKEA Berlin"), false, &[head_place("IKEA")],)
+                .is_empty(),
             "a non-empty head must suppress the fallback so it can never displace a real answer"
         );
+    }
+
+    #[test]
+    fn three_token_head_keeps_exact_name_locality_routing_without_misreading_liberty() {
+        assert_eq!(
+            locality_suffix_candidates(
+                &query_terms("Taj Mahal Agra"),
+                false,
+                &[head_place("Taj Mahal")],
+            ),
+            vec![LocalitySuffixCandidate {
+                place_query: "taj mahal".into(),
+                locality_query: "agra".into(),
+                locality_tokens: vec!["agra".into()],
+            }]
+        );
+        assert!(locality_suffix_candidates(
+            &query_terms("Statue of Liberty"),
+            false,
+            &[head_place("Statue of Liberty National Monument")],
+        )
+        .is_empty());
     }
 
     #[test]
@@ -4202,10 +4249,9 @@ mod tests {
 
     #[test]
     fn locality_suffix_plan_routes_remaining_name_at_the_centroid() {
-        let candidate =
-            locality_suffix_candidates(&query_terms("Matisse Museum Nice"), false, false)
-                .pop()
-                .unwrap();
+        let candidate = locality_suffix_candidates(&query_terms("Matisse Museum Nice"), false, &[])
+            .pop()
+            .unwrap();
         let division = division_result("nice", "Nice", "locality", 7.262, 43.71);
         let (place_query, inference) = places_locality_inference(&candidate, &division);
         assert_eq!(place_query, "matisse museum");
