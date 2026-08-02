@@ -1,13 +1,16 @@
 # construction-v1: current state
 
-Last updated 2026-08-01 after Stage 1 landed end to end, the rebuild-blocker
-queue was agreed with the operator, and an operator challenge corrected two
-findings the rebuild scope depended on. Read, in order: "Stage 0/1 result",
-"2026-08-01: two Part 6d findings corrected", and "Rebuild queue, 2026-08-01".
+Last updated 2026-08-02 after the planet Places rebuild refuted Wave C's
+head-path prediction and the remaining two-token failure was isolated to the
+Worker's global-head merge. Read, in order: "Planet Places rebuild and
+promotion, 2026-08-02" and "Head saturated-posting correction, 2026-08-02".
 
-**The next decision is rebuild scope, not ranking.** Everything reachable from
-the Worker has landed; the prominence work is implemented and cannot be
-measured until a planet Places rebuild.
+**The next gate is a Worker deployment and live gold measurement, not another
+rebuild.** The global head hard-intersected independently capped postings and
+treated absence from a full ten-row posting as proof that a record did not
+match. The adjacent routed lane already carries the correct saturated-posting
+fallback. The head lane now shares that bounded merge locally; production has
+not moved until the Worker is deployed and the same gold set is re-run.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -28,9 +31,10 @@ promotion, the release publication, and the catalog CAS are all done. See
 measured; `/v2` is live on `2026-08-02.0`. It moved overall place recall
 0.314 -> 0.400 and doubled the routed `name_locality` path, but **Wave C's
 head-path prediction is refuted** (0/10 -> 1/10, not 6/11). Name-only global
-retrieval is now the measured blocker for the milestone below, and it is a
-build/ranking question that a rebuild alone does not answer. See "Planet Places
-rebuild and promotion, 2026-08-02".
+retrieval is now the measured blocker for the milestone below. The next
+correction is Worker-only and requires no data rebuild; its live effect is not
+yet measured. See "Planet Places rebuild and promotion, 2026-08-02" and "Head
+saturated-posting correction, 2026-08-02".
 
 **The next milestone is AGREED (2026-07-31): forward search correctness.**
 Operator approved Stages 0 and 1 of
@@ -581,11 +585,11 @@ needs stating before anyone implements against the phrase.
 
 ### Still open, unscheduled
 
-RC2 (two-token intersection of ten-deep lists), RC3 (three tokens never touch
-the head), duplicate collapse, and `head_result_cap` 10 -> 64. These are why
-`Eiffel Tower`, `Space Needle` and `Statue of Liberty` all still return **0
-features** in production as of 2026-08-01, and a rebuild alone does not fix
-them.
+RC2 now has the local Worker correction described in "Head saturated-posting
+correction, 2026-08-02" and waits on deployment plus live measurement. RC3
+(three tokens never touch the head), duplicate collapse, and any future
+`head_result_cap` change remain unscheduled. Do not use those larger build-side
+items to delay the Worker measurement.
 
 ## Current snapshot
 
@@ -990,6 +994,44 @@ Big Ben all n=0; only Colosseum resolves.
 **Name-only global retrieval is therefore still the open gate**, and it is now
 the measured blocker for the forward-search-correctness milestone.
 
+### Head saturated-posting correction, 2026-08-02
+
+The remaining two-token failure is in the Worker merge, not evidence that the
+planet data needs another ordering pass. Each global-head token posting is
+independently capped at 10. The old `intersect_ranked` path treated absence from
+that lossy list as authoritative, so `q=Eiffel Tower` discarded the Eiffel Tower
+when the selective `eiffel` posting retrieved it but the saturated `tower`
+posting had evicted it. The record's stored primary name proves both tokens.
+
+The routed lane already implements the required distinction: absence from a
+short posting is authoritative, while absence from a full posting may be
+eviction and is recoverable only when stored display fields prove the missing
+token. The local correction makes both lanes call one bounded-posting merge,
+with their existing caps unchanged (routed 256, head 10). It preserves direct
+posting evidence, source-locator identity, field-mask union, deterministic
+producer ordering, and fail-closed cap/cardinality checks.
+
+Local verification on the uncommitted change:
+
+- focused `Eiffel Tower` regression: saturated ten-row absence recovers the
+  target; nine-row unsaturated absence remains an empty result;
+- Worker suite: 197 passed, 4 ignored; `wasm32-unknown-unknown` check green;
+- Python Places contract suite under the frozen Python 3.12.12 environment:
+  58 passed;
+- full Python CI suite under Python 3.11.14: 1,609 passed, 2 skipped;
+- real Monaco construction slice: all five phases green, 38,182 source records,
+  16/16 populated head shards, `reconciles=true`.
+
+**No live quality result is claimed yet.** The next rung is to deploy the Worker
+without rebuilding data, then run the same forward gold set against live build
+`2026-08-02.0`. Only that measurement decides whether RC2 is closed. RC3 --
+queries with more than two tokens never entering the head -- remains separate.
+
+The bounded `tower` proxy probe in `b8e3151` also needs to be read narrowly. It
+refutes record count, `names.common` cardinality, and `sources` count as direct
+orderings for four famous towers versus the ten measured incumbents. It does
+not prove that no entity-fame signal exists anywhere in Overture.
+
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
 The 2026-07-31 section below records that promotion's `/v2/forward` smoke as a
@@ -1156,18 +1198,13 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    broken fixture: the structured address check omitted the required country
    field and had never actually executed. Verified against live production,
    all four checks pass on attempt 1.
-2. **Forward Places quality — NOW THE AGREED MILESTONE**, root-caused in
-   `2026-07-31-search-quality-and-street-layer.md` and queued as Stages 0/1 in
-   "Current milestone" above. The mechanism is confirmed in source: head entries
-   keep only the top 10 per token by `(confidence_rank DESC, feature_id ASC)`
-   where `confidence_rank` is a saturating u8, so an entry is effectively the
-   ten UUID-smallest confidence-1.0 records; two-token queries intersect two
-   such lists and get the empty set; three-token queries never touch the head
-   (`v2.rs:1946-1948`); and the Places projection carries no fame signal at all
-   (`project_places_construction_v1.py:151-180`). `ranking-research.md` P0-P5
-   landed for divisions only — that asymmetry is the bug. Locality-token
-   overconstraint is FIXED (PR #214); address locality aliases bridged
-   (PR #213).
+2. **Forward Places quality — NOW THE AGREED MILESTONE.** Stage 1 and the
+   prominence rebuild improved other strata, but the live 2026-08-02 gold run
+   leaves name-only global retrieval open. The current measured mechanism and
+   local correction are in "Head saturated-posting correction, 2026-08-02".
+   Deploy and measure that Worker-only change before reopening build ordering,
+   duplicate collapse, or the head cap. Three-token queries still never touch
+   the head and remain a separate unscheduled defect.
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.

@@ -16,7 +16,8 @@ exactly like the Eiffel Tower. The build-time key is
 `confidence_rank` is a per-source flat constant. The effective discriminator is
 therefore `feature_id` -- UUID order -- and the cap of 10 picks an arbitrary ten
 monuments from a global pool of thousands. That is why Wave C's reorder at cap
-10 could not move the head path, and why a larger cap cannot fix it either.
+10 could not move the head path, and why a modest cap raise cannot reliably fix
+it.
 
 HYPOTHESIS UNDER TEST. Overture already carries entity-level fame proxies that
 would separate them:
@@ -26,8 +27,9 @@ would separate them:
     H3  source multiplicity  -- LEN(sources), how many upstreams carry it
 
 If any of these cleanly orders the famous entities above the head-list
-incumbents, it is a candidate build-time prominence signal. If none does, the
-signal is not in this data and ranking must come from somewhere else.
+incumbents, it is a candidate build-time prominence signal. If none does, none
+of these three raw proxies is sufficient as the direct build ordering for this
+cohort.
 
 SCOPE, deliberately bounded: one token (`tower`), the four famous entities a
 user would expect, and the exact ten records measured in the live head list.

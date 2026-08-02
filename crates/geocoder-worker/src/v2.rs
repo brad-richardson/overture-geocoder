@@ -19,9 +19,10 @@ use crate::address_construction_v1::{
     MAX_ADDRESS_ROUTING_BYTES,
 };
 use crate::places_construction_v1::{
-    construction_cell, head_shard_id, head_shard_lookup, intersect_ranked, merge_routed_candidates,
-    record_projection, routed_fetch_plan, supports_places_construction_format, HeadRoutingManifest,
-    PlacesRouting, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
+    construction_cell, head_shard_id, head_shard_lookup, merge_head_candidates,
+    merge_routed_candidates, record_projection, routed_fetch_plan,
+    supports_places_construction_format, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
+    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
 };
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
@@ -2036,7 +2037,7 @@ async fn search_places_construction(
         }
         per_token.push(records);
     }
-    let mut records = intersect_ranked(per_token);
+    let mut records = merge_head_candidates(&tokens, per_token).map_err(Error::RustError)?;
     records.truncate(limit);
     Ok(records.iter().map(record_projection).collect())
 }

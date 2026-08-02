@@ -1175,97 +1175,36 @@ pub(crate) fn identifying(field_mask: u8) -> bool {
     field_mask & (FIELD_NAME | FIELD_BRAND) != 0
 }
 
-/// The OR of the field masks of every query token a record matched.
+/// Merge independently bounded postings without making a full producer posting
+/// a false-negative gate.
 ///
-/// Taken across tokens, not per token: for `IKEA Berlin` the record's "ikea"
-/// posting carries the brand bit while its "berlin" posting carries only
-/// context, and the record is still brand-identified.
-fn field_mask_union(per_token: &[Vec<PlacesV1Record>]) -> HashMap<String, u8> {
-    let mut union: HashMap<String, u8> = HashMap::new();
-    for records in per_token {
-        for record in records {
-            *union.entry(record.id.clone()).or_default() |= record.field_mask;
-        }
-    }
-    union
-}
-
-/// Order identifying matches ahead of context-only ones, then by the producer
-/// order (`prominence_rank DESC, confidence_rank DESC, feature_id, locator`)
-/// within each group. This is `CAP_ORDER` in scripts/places_construction_v1.py
-/// and is pinned against it by
-/// `test_worker_query_time_sorts_match_the_build_time_key`.
-fn sort_by_identity_then_producer_order(
-    records: &mut [PlacesV1Record],
-    union: &HashMap<String, u8>,
-) {
-    records.sort_by(|left, right| {
-        let left_identifying = identifying(union.get(&left.id).copied().unwrap_or(left.field_mask));
-        let right_identifying =
-            identifying(union.get(&right.id).copied().unwrap_or(right.field_mask));
-        right_identifying
-            .cmp(&left_identifying)
-            // Prominence outranks confidence for the same reason the build-side
-            // caps order by it first: Overture confidence is an existence
-            // signal that anti-correlates with fame. On a 0002 shard every
-            // prominence is 0, so this degrades to the previous ordering
-            // exactly.
-            .then_with(|| right.prominence_rank.cmp(&left.prominence_rank))
-            .then_with(|| right.confidence_rank.cmp(&left.confidence_rank))
-            .then_with(|| left.id.cmp(&right.id))
-            .then_with(|| left.source_object_index.cmp(&right.source_object_index))
-            .then_with(|| left.source_row_group.cmp(&right.source_row_group))
-            .then_with(|| left.source_row_index.cmp(&right.source_row_index))
-    });
-}
-
-/// AND-intersect per-token record lists by feature id, ordering identifying
-/// matches ahead of context-only ones and then by producer order
-/// (`confidence_rank DESC, feature_id, locator`).
-pub(crate) fn intersect_ranked(mut per_token: Vec<Vec<PlacesV1Record>>) -> Vec<PlacesV1Record> {
-    if per_token.is_empty() {
-        return Vec::new();
-    }
-    let union = field_mask_union(&per_token);
-    let mut results = per_token.remove(0);
-    for other in per_token {
-        let ids: HashSet<String> = other.into_iter().map(|record| record.id).collect();
-        results.retain(|record| ids.contains(&record.id));
-    }
-    sort_by_identity_then_producer_order(&mut results, &union);
-    results
-}
-
-/// Merge the bounded routed postings without making a full producer posting a
-/// false-negative gate.
-///
-/// Each `(cell, token)` posting is independently capped at 256 records. Absence
-/// from a shorter posting is therefore authoritative, while absence from a full
-/// posting may only mean that static confidence evicted the record. Seed from
-/// the bounded union, retain direct posting membership (including common-name
-/// evidence that is not present in the serving projection), and admit a missing
-/// full-posting token only when the record's stored display fields prove it.
+/// Absence from a shorter posting is authoritative, while absence from a full
+/// posting may only mean that the producer ordering evicted the record. Seed
+/// from the bounded union, retain direct posting membership (including
+/// common-name evidence that is not present in the serving projection), and
+/// admit a missing full-posting token only when the record's stored display
+/// fields prove it.
 ///
 /// Identity includes the source locator because construction-v1 deliberately
 /// preserves duplicate UUID rows at different source positions.
-pub(crate) fn merge_routed_candidates(
+fn merge_bounded_candidates(
     tokens: &[String],
     per_token: Vec<Vec<PlacesV1Record>>,
+    posting_cap: usize,
+    token_cap: usize,
+    lane: &str,
 ) -> Result<Vec<PlacesV1Record>> {
     if tokens.len() != per_token.len() {
-        return Err("Places v1 routed token/posting count differs".to_string());
+        return Err(format!("Places v1 {lane} token/posting count differs"));
     }
     if tokens.is_empty() {
         return Ok(Vec::new());
     }
-    if tokens.len() > 4 {
-        return Err("Places v1 routed token cap exceeded".to_string());
+    if tokens.len() > token_cap {
+        return Err(format!("Places v1 {lane} token cap exceeded"));
     }
-    if per_token
-        .iter()
-        .any(|records| records.len() > ROUTED_CANDIDATE_CAP)
-    {
-        return Err("Places v1 routed posting exceeds producer cap".to_string());
+    if per_token.iter().any(|records| records.len() > posting_cap) {
+        return Err(format!("Places v1 {lane} posting exceeds producer cap"));
     }
     if per_token.iter().any(Vec::is_empty) {
         return Ok(Vec::new());
@@ -1280,7 +1219,7 @@ pub(crate) fn merge_routed_candidates(
 
     let saturated: Vec<bool> = per_token
         .iter()
-        .map(|records| records.len() == ROUTED_CANDIDATE_CAP)
+        .map(|records| records.len() == posting_cap)
         .collect();
     let mut candidates: HashMap<(String, u32, u32, u64), Candidate> = HashMap::new();
     for (token_index, records) in per_token.into_iter().enumerate() {
@@ -1346,6 +1285,27 @@ pub(crate) fn merge_routed_candidates(
             .then_with(|| left.source_row_index.cmp(&right.source_row_index))
     });
     Ok(results.into_iter().map(|(record, _)| record).collect())
+}
+
+/// Merge routed `(cell, token)` postings, each capped at 256 records.
+pub(crate) fn merge_routed_candidates(
+    tokens: &[String],
+    per_token: Vec<Vec<PlacesV1Record>>,
+) -> Result<Vec<PlacesV1Record>> {
+    merge_bounded_candidates(tokens, per_token, ROUTED_CANDIDATE_CAP, 4, "routed")
+}
+
+/// Merge global-head token postings, each capped at 10 records.
+///
+/// A full head posting is lossy just like a full routed posting. Treating a
+/// missing member as authoritative made common second tokens such as `tower`
+/// erase records already retrieved by a selective first token such as
+/// `eiffel`, even when the stored primary name proved the complete query.
+pub(crate) fn merge_head_candidates(
+    tokens: &[String],
+    per_token: Vec<Vec<PlacesV1Record>>,
+) -> Result<Vec<PlacesV1Record>> {
+    merge_bounded_candidates(tokens, per_token, HEAD_RESULT_CAP, 2, "head")
 }
 
 /// Project one construction record into the shared serving projection.
@@ -1605,7 +1565,7 @@ pub(crate) fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, va
 mod tests {
     use super::{
         construction_cell, decode_routed_range_payload, head_shard_id, head_shard_lookup,
-        index_hash, intersect_ranked, lookup_head_shard, merge_routed_candidates,
+        index_hash, lookup_head_shard, merge_head_candidates, merge_routed_candidates,
         parse_routed_range_header, parse_routed_range_index, query_key, ranged_index_candidates,
         record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
         validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
@@ -2300,8 +2260,9 @@ mod tests {
         tokens: &[&str],
         limit: usize,
     ) -> Result<Vec<PlacesV1Record>, String> {
+        let tokens: Vec<String> = tokens.iter().map(|token| token.to_string()).collect();
         let mut per_token = Vec::new();
-        for token in tokens {
+        for token in &tokens {
             let shard_id = head_shard_id(token, slice.head.shard_bits);
             let Some(shard) = slice.head.shard(shard_id) else {
                 return Ok(Vec::new());
@@ -2316,7 +2277,7 @@ mod tests {
             }
             per_token.push(records);
         }
-        let mut records = intersect_ranked(per_token);
+        let mut records = merge_head_candidates(&tokens, per_token)?;
         records.truncate(limit);
         Ok(records)
     }
@@ -2398,22 +2359,23 @@ mod tests {
     }
 
     #[test]
-    fn intersect_keeps_first_token_rank_order() {
+    fn head_merge_keeps_producer_rank_order() {
         let first = vec![
             entry_record("cafe", 255, 1),
             entry_record("cafe", 250, 2),
             entry_record("cafe", 240, 3),
         ];
         let second = vec![entry_record("town", 255, 3), entry_record("town", 200, 1)];
-        let merged = intersect_ranked(vec![first, second]);
+        let tokens = vec!["cafe".to_string(), "town".to_string()];
+        let merged = merge_head_candidates(&tokens, vec![first, second]).unwrap();
         assert_eq!(merged.len(), 2);
         assert_eq!(merged[0].id, format_uuid_of(1));
         assert_eq!(merged[1].id, format_uuid_of(3));
-        assert!(intersect_ranked(Vec::new()).is_empty());
+        assert!(merge_head_candidates(&[], Vec::new()).unwrap().is_empty());
     }
 
     #[test]
-    fn intersect_ranks_identifying_matches_above_context_only_ones() {
+    fn head_merge_ranks_identifying_matches_above_context_only_ones() {
         // The live failure: `q=paris` returned Dessirier, Rexel and Midas --
         // maximum-confidence POIs whose only relation to the query is being
         // located in Paris -- ahead of anything actually named Paris. Context
@@ -2421,7 +2383,11 @@ mod tests {
         let context_only = masked_record("paris", 8, 255, 1);
         let named = masked_record("paris", super::FIELD_NAME, 10, 2);
         let branded = masked_record("paris", super::FIELD_BRAND, 5, 3);
-        let ranked = intersect_ranked(vec![vec![context_only, named, branded]]);
+        let ranked = merge_head_candidates(
+            &["paris".to_string()],
+            vec![vec![context_only, named, branded]],
+        )
+        .unwrap();
         assert_eq!(
             ranked
                 .iter()
@@ -2433,7 +2399,7 @@ mod tests {
     }
 
     #[test]
-    fn intersect_unions_masks_across_tokens() {
+    fn head_merge_unions_masks_across_tokens() {
         // `IKEA Berlin`: the record's "ikea" posting carries the brand bit and
         // its "berlin" posting carries only context. The union identifies it,
         // so it must outrank a record that is context-only for BOTH tokens
@@ -2442,10 +2408,15 @@ mod tests {
         let store_context = masked_record("berlin", 8, 10, 1);
         let bystander_a = masked_record("ikea", 8, 255, 2);
         let bystander_b = masked_record("berlin", 8, 255, 2);
-        let ranked = intersect_ranked(vec![
-            vec![store_brand, bystander_a],
-            vec![store_context, bystander_b],
-        ]);
+        let tokens = vec!["ikea".to_string(), "berlin".to_string()];
+        let ranked = merge_head_candidates(
+            &tokens,
+            vec![
+                vec![store_brand, bystander_a],
+                vec![store_context, bystander_b],
+            ],
+        )
+        .unwrap();
         assert_eq!(ranked.len(), 2);
         assert_eq!(
             ranked[0].id,
@@ -2502,6 +2473,39 @@ mod tests {
         )
         .unwrap()
         .is_empty());
+    }
+
+    #[test]
+    fn head_merge_recovers_only_absence_from_a_saturated_posting() {
+        let target = || {
+            let mut record = entry_record("eiffel", 200, 999);
+            record.primary_name = "Eiffel Tower".to_string();
+            record
+        };
+        let saturated: Vec<_> = (1..=10).map(|id| entry_record("tower", 255, id)).collect();
+        let tokens = vec!["eiffel".to_string(), "tower".to_string()];
+
+        let merged = merge_head_candidates(&tokens, vec![vec![target()], saturated]).unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, format_uuid_of(999));
+
+        // Nine rows prove that the producer posting is complete. Display text
+        // must not turn authoritative absence into a false positive.
+        let unsaturated: Vec<_> = (1..=9).map(|id| entry_record("tower", 255, id)).collect();
+        assert!(
+            merge_head_candidates(&tokens, vec![vec![target()], unsaturated])
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[test]
+    fn head_merge_fails_closed_on_contract_mismatch_or_oversized_posting() {
+        let tokens = vec!["eiffel".to_string(), "tower".to_string()];
+        assert!(merge_head_candidates(&tokens, vec![vec![entry_record("eiffel", 1, 1)]]).is_err());
+
+        let oversized: Vec<_> = (1..=11).map(|id| entry_record("tower", 255, id)).collect();
+        assert!(merge_head_candidates(&["tower".to_string()], vec![oversized]).is_err());
     }
 
     #[test]
@@ -2647,7 +2651,7 @@ mod tests {
         .unwrap();
         let found = parsed.lookup("sagrada", None, 16, 8).unwrap();
         assert_eq!(found.len(), 2);
-        let ranked = super::intersect_ranked(vec![found]);
+        let ranked = merge_head_candidates(&["sagrada".to_string()], vec![found]).unwrap();
         assert_eq!(
             ranked[0].id,
             format_uuid_of(1),
