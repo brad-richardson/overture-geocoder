@@ -299,6 +299,53 @@ distinct / 36.2% and NYC 1,031 / 35.9%. The cause is the **US region mix**, not
 the column. The claim in `2026-08-01-confidence-and-duplicates.json` -- exactly
 0.7700 across six NON-US regions -- stands exactly as scoped.
 
+### Track A result, 2026-08-02: `categories.alternate` required, evidence at v3
+
+`3d94b4f`. The prior no longer degrades to primary-only.
+
+**Why promoting the field was honest, and the argument is empirical rather than
+procedural:** the inventory learns nullability from the real release and requires
+it identical across every source object, so a **successful regeneration is itself
+the proof** that release `2026-06-17.0` satisfies the stricter contract. The
+recorded runs already met it; nobody was checking.
+
+The regenerated inventory differs in exactly **19 leaves, all contract-or-hash,
+zero outside them**. Map plan and every total byte-identical: 89 map tasks, 16
+objects, 75,642,289 records, 5,120 row groups.
+
+    inventory_sha256    b1830aee... -> 9ea4eff6...
+    schema_fingerprint  49453ed2... -> 31809dba...
+
+**It is a v3 GENERATION, not an overwrite.** v2 is retained exactly as v1 was
+retained beside v2 -- it remains the true attestation of the runs it describes.
+
+- **Re-measured:** all seven task runs (1, 13, 73, 76, 85, 86, 87). A task run
+  embeds its projection report and that report binds the contract hashes, so
+  they could not be carried. All seven `binding_equal=true`,
+  `deterministic=true`, speedups 4.2-6.8x. **Role selection came out identical
+  to v2** under the new inventory, which is a real check rather than a
+  coincidence: roles are chosen from inventory + census, so a shifted plan would
+  have moved them.
+- **Carried forward unchanged:** the twelve census reports and the functional
+  rehearsal, after verifying that neither records any contract hash.
+  `host-provenance-v3.json` states that split explicitly, and the task runs did
+  execute on `bradflix`, the host v2 already declares for them.
+
+`readiness-v3.json` is `ready=true`, no reasons. **It must be produced under the
+spec's frozen runtime** -- python 3.12.12, duckdb 1.5.1, numpy 2.3.5, pyarrow
+25.0.0, rustc/cargo 1.97.1. The validator compares the live runtime against the
+spec and correctly refuses under 3.11, which is worth knowing before anyone tries
+to regenerate it on a hosted runner pinned to 3.11.14.
+
+**Local-environment note:** `unicodedata2==17.0.0` is required to run the suite
+or any rehearsal step locally. It is x86_64-pinned in the hosted requirements,
+and without it 14 tests fail and 7 error for reasons that have nothing to do with
+the code under test. With it the suite is 1569 passed, 0 failed.
+
+**Remaining before dispatch: nothing in Track A.** Track C (item 2's ~84,000
+sequential HEADs, and the second half of item 1's precondition) is optional
+efficiency, not a blocker.
+
 ### If the head cap is ever raised, it is contract-bound
 
 `head_result_cap` is not a plain default. `acceptance_gates.head.result_cap_per_token`
@@ -343,9 +390,12 @@ attestation of a run that really happened -- the standing rule from `cfb9601`.
 
 ### Sequencing, four tracks
 
-- **Gate 0 -- Wave C.** Blocks everything; nothing in Track A is worth doing if
-  it comes back negative. Now also sizes the 10 -> 64 raise.
-- **Track A -- the single re-attestation pass above.** The long pole.
+- **Gate 0 -- Wave C. PASSED 2026-08-01.** See "Wave C result".
+- **Track A -- DONE 2026-08-02 (`3d94b4f`).** `categories.alternate` is now
+  REQUIRED and the evidence is regenerated as a **v3 generation**, with v2
+  retained rather than overwritten. `readiness-v3` is `ready=true`, control pins
+  the v3 chain, and the evidence SPEC is untouched (still v2) because the head
+  cap stayed at 10. Detail below.
 - **Track B -- build-side quality.** Stage 3 famous-unique is OUT of this
   rebuild: it needs a re-spec onto `prominence_rank` (its design still names
   quantized confidence as the fame proxy) plus encoder/verifier/oracle lockstep.
