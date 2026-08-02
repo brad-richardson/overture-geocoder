@@ -1,16 +1,16 @@
 # construction-v1: current state
 
-Last updated 2026-08-02 after the planet Places rebuild refuted Wave C's
-head-path prediction and the remaining two-token failure was isolated to the
-Worker's global-head merge. Read, in order: "Planet Places rebuild and
+Last updated 2026-08-02 after the saturated-posting Worker correction was
+deployed and measured live. Read, in order: "Planet Places rebuild and
 promotion, 2026-08-02" and "Head saturated-posting correction, 2026-08-02".
 
-**The next gate is a Worker deployment and live gold measurement, not another
-rebuild.** The global head hard-intersected independently capped postings and
-treated absence from a full ten-row posting as proof that a record did not
-match. The adjacent routed lane already carries the correct saturated-posting
-fallback. The head lane now shares that bounded merge locally; production has
-not moved until the Worker is deployed and the same gold set is re-run.
+**RC2 is closed; do not reopen the head intersection or start another
+undirected rebuild.** Worker commit `3d3b33c` is live and the same 35-case gold
+set moved name-only head recall@10 from 2/10 to 5/10. The five remaining
+name-only misses split cleanly into two known three-token RC3 cases and three
+two-token cases whose per-token admission still needs to be inspected. That
+bounded split is the next gate: test the RC3 Worker shape and inspect the three
+two-token producer postings before choosing any build-side change.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -30,11 +30,12 @@ promotion, the release publication, and the catalog CAS are all done. See
 **2026-08-02 UPDATE.** The scoped planet Places rebuild is built, promoted, and
 measured; `/v2` is live on `2026-08-02.0`. It moved overall place recall
 0.314 -> 0.400 and doubled the routed `name_locality` path, but **Wave C's
-head-path prediction is refuted** (0/10 -> 1/10, not 6/11). Name-only global
-retrieval is now the measured blocker for the milestone below. The next
-correction is Worker-only and requires no data rebuild; its live effect is not
-yet measured. See "Planet Places rebuild and promotion, 2026-08-02" and "Head
-saturated-posting correction, 2026-08-02".
+head-path prediction is refuted** (0/10 -> 1/10, not 6/11). The subsequent
+Worker-only saturated-posting correction is also deployed and measured: exact
+self-recall moved 0.400 -> 0.429 at rank 1 and 0.486 -> 0.571 at rank 10,
+while the name-only head stratum moved 1/10 -> 2/10 at rank 1 and 2/10 -> 5/10
+at rank 10. RC2 is closed. See "Planet Places rebuild and promotion,
+2026-08-02" and "Head saturated-posting correction, 2026-08-02".
 
 **The next milestone is AGREED (2026-07-31): forward search correctness.**
 Operator approved Stages 0 and 1 of
@@ -48,7 +49,9 @@ The justification is measured, not aesthetic. Against the build promoted today:
   `types=locality` returns it at 0.8408.
 - `q=paris` returns Dessirier, Rexel, Midas; **Paris is absent from its own
   query**.
-- `q=Eiffel Tower`, `q=Space Needle`, `q=Statue of Liberty` all return zero.
+- Before the saturated-posting correction, `q=Eiffel Tower`, `q=Space Needle`,
+  and `q=Statue of Liberty` all returned zero. Eiffel Tower is now recovered;
+  Statue of Liberty remains behind the separate three-token guard.
 
 ### DONE: Stage 0 -- make improvement measurable
 
@@ -585,11 +588,13 @@ needs stating before anyone implements against the phrase.
 
 ### Still open, unscheduled
 
-RC2 now has the local Worker correction described in "Head saturated-posting
-correction, 2026-08-02" and waits on deployment plus live measurement. RC3
-(three tokens never touch the head), duplicate collapse, and any future
-`head_result_cap` change remain unscheduled. Do not use those larger build-side
-items to delay the Worker measurement.
+RC2 is closed by deployed Worker commit `3d3b33c` and the live measurement in
+"Head saturated-posting correction, 2026-08-02". RC3 (three tokens never touch
+the head), duplicate collapse, and any future `head_result_cap` change remain
+unscheduled. The next bounded investigation is the five remaining name-only
+misses: test the two three-token cases against an RC3 Worker shape and inspect
+producer-posting membership for Big Ben, Machu Picchu, and Brandenburg Gate.
+Do not bundle those two mechanisms into another ranking or rebuild pass.
 
 ## Current snapshot
 
@@ -1011,7 +1016,7 @@ with their existing caps unchanged (routed 256, head 10). It preserves direct
 posting evidence, source-locator identity, field-mask union, deterministic
 producer ordering, and fail-closed cap/cardinality checks.
 
-Local verification on the uncommitted change:
+Pre-merge verification:
 
 - focused `Eiffel Tower` regression: saturated ten-row absence recovers the
   target; nine-row unsaturated absence remains an empty result;
@@ -1022,10 +1027,30 @@ Local verification on the uncommitted change:
 - real Monaco construction slice: all five phases green, 38,182 source records,
   16/16 populated head shards, `reconciles=true`.
 
-**No live quality result is claimed yet.** The next rung is to deploy the Worker
-without rebuilding data, then run the same forward gold set against live build
-`2026-08-02.0`. Only that measurement decides whether RC2 is closed. RC3 --
-queries with more than two tokens never entering the head -- remains separate.
+PR #223 landed as `3d3b33c`; CI run `30761370438` and automatic Worker deploy
+run `30761582221` both passed, including post-deploy smoke. The unchanged gold
+set was then run against live build `2026-08-02.0`; durable evidence is
+`benchmarks/2026-08-02-forward-gold-after-head-saturation.json`.
+
+| group | n | before r@1 | after r@1 | before r@10 | after r@10 | before mrr | after mrr |
+|---|---|---|---|---|---|---|---|
+| self_recall (all place) | 35 | 0.400 | **0.429** | 0.486 | **0.571** | 0.443 | **0.495** |
+| `place:name` (head path) | 10 | 0.100 | **0.200** | 0.200 | **0.500** | 0.150 | **0.333** |
+| `place:name_locality` | 10 | 0.400 | 0.400 | 0.500 | 0.500 | 0.450 | 0.450 |
+| `place:seam` | 10 | 0.900 | 0.900 | 1.000 | 1.000 | 0.950 | 0.950 |
+
+The exact recovered name-only cases are Eiffel Tower (rank 2), Taj Mahal
+(rank 3), and Buckingham Palace (rank 1). No gold stratum regressed, errors
+remained zero, type starvation fell 13 -> 8 across the 35 place cases, and the
+data version remained `2026-08-02.0`; this was a Worker-only change.
+
+**RC2 is closed.** The saturated-posting mechanism was real, the targeted
+Eiffel Tower case now resolves, and three exact IDs crossed the retrieval gate.
+The remaining five name-only misses are not one undifferentiated problem:
+Statue of Liberty and Empire State Building are blocked by RC3's `> 2` token
+guard, while Big Ben, Machu Picchu, and Brandenburg Gate have two tokens and
+need producer-posting admission inspection. Do not infer that raising the cap,
+changing ordering, or rebuilding again fixes both groups.
 
 The bounded `tower` proxy probe in `b8e3151` also needs to be read narrowly. It
 refutes record count, `names.common` cardinality, and `sources` count as direct
@@ -1036,8 +1061,8 @@ not prove that no entity-fame signal exists anywhere in Overture.
 
 The 2026-07-31 section below records that promotion's `/v2/forward` smoke as a
 "false-red". That is wrong and is corrected here: `q=Eiffel Tower` genuinely
-returned zero features, and still does. What was wrong was gating a *promotion*
-on a known-open quality gate, not the observation itself.
+returned zero features until the live RC2 correction above. What was wrong was
+gating a *promotion* on a known-open quality gate, not the observation itself.
 
 Commit `1e2c0ab` replaced that assertion with `q=IKEA` (context-free head) and
 `q=Eiffel Tower Paris` (locality-routed). That is a reasonable promotion gate,
@@ -1198,13 +1223,13 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    broken fixture: the structured address check omitted the required country
    field and had never actually executed. Verified against live production,
    all four checks pass on attempt 1.
-2. **Forward Places quality — NOW THE AGREED MILESTONE.** Stage 1 and the
-   prominence rebuild improved other strata, but the live 2026-08-02 gold run
-   leaves name-only global retrieval open. The current measured mechanism and
-   local correction are in "Head saturated-posting correction, 2026-08-02".
-   Deploy and measure that Worker-only change before reopening build ordering,
-   duplicate collapse, or the head cap. Three-token queries still never touch
-   the head and remain a separate unscheduled defect.
+2. **Forward Places quality — NOW THE AGREED MILESTONE.** Stage 1, the
+   prominence rebuild, and the live RC2 Worker correction improved distinct
+   strata. Name-only head recall@10 is now 5/10, up from 2/10 immediately before
+   RC2. The remaining misses are split: two known three-token RC3 cases, plus
+   three two-token cases requiring producer-posting admission inspection. Run
+   those bounded checks before reopening build ordering, duplicate collapse,
+   or the head cap.
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.
