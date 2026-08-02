@@ -1,22 +1,21 @@
 # construction-v1: current state
 
-Last updated 2026-08-02 after RC3 was deployed, recovered Statue of Liberty,
-and exposed an interaction with locality-suffix routing that is corrected
-locally but not yet redeployed. Read, in order: "Planet Places rebuild and
-promotion, 2026-08-02", "Head saturated-posting correction, 2026-08-02",
-"RC3 and remaining admission split, 2026-08-02", and "First RC3 live result
-and locality interaction, 2026-08-02".
+Last updated 2026-08-02 after RC3 and its bounded locality-routing follow-up
+were deployed and accepted against the live gold and external-provider runs.
+Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
+saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
+2026-08-02", "First RC3 live result and locality interaction, 2026-08-02", and
+"RC3 accepted result, 2026-08-02".
 
-**RC2 is closed; do not reopen the head intersection or start another
-undirected rebuild.** Worker commit `3d3b33c` is live and the same 35-case gold
-set moved name-only head recall@10 from 2/10 to 5/10. Live token and pair probes
-now show that only Statue of Liberty is recoverable by widening the Worker head
-from two to three tokens. Empire State Building, Big Ben, and Brandenburg Gate
-are absent from every relevant capped posting; Machu Picchu is already rank 1
-but 0.291 km outside the gold tolerance. RC3 is live and recovered Statue at
-rank 4, but its first gold run also found a real rank@1 regression: a nonempty
-three-token head suppressed exact locality routing. **The next gate is the
-bounded Worker follow-up and the same live gold/external measurement, not a
+**RC2 and RC3 are closed; do not reopen the head intersection or start another
+undirected rebuild.** Worker commits `3d3b33c`, `8f9a90f`, and `e655615` are
+live. Across the same 35-case gold set, name-only head recall@10 moved from 2/10
+before RC2 to 6/10 after RC3, with no final rank@1 regression. Statue of Liberty
+is recovered at rank 4. Empire State Building, Big Ben, and Brandenburg Gate
+remain absent from every relevant capped posting; Machu Picchu is already rank
+1 but 0.291 km outside the gold tolerance. **The next gate is an entity/gold
+audit for Big Ben and Machu Picchu, then a bounded producer-admission design for
+the confirmed Empire State Building and Brandenburg Gate misses, not a
 rebuild.**
 
 This is the operational snapshot for construction-v1. It intentionally contains
@@ -42,7 +41,10 @@ Worker-only saturated-posting correction is also deployed and measured: exact
 self-recall moved 0.400 -> 0.429 at rank 1 and 0.486 -> 0.571 at rank 10,
 while the name-only head stratum moved 1/10 -> 2/10 at rank 1 and 2/10 -> 5/10
 at rank 10. RC2 is closed. See "Planet Places rebuild and promotion,
-2026-08-02" and "Head saturated-posting correction, 2026-08-02".
+2026-08-02" and "Head saturated-posting correction, 2026-08-02". RC3 then
+recovered Statue of Liberty without changing rank@1 and moved the name-only
+head stratum to 6/10 at rank 10. Its initially exposed locality interaction is
+fixed and accepted; see "RC3 accepted result, 2026-08-02".
 
 **The next milestone is AGREED (2026-07-31): forward search correctness.**
 Operator approved Stages 0 and 1 of
@@ -1126,10 +1128,52 @@ contains an exact primary-name candidate for the prefix: `Taj Mahal` proves the
 parse `Taj Mahal` + `Agra`, while no result exactly named `Statue of` means
 Liberty, NY cannot steal `Statue of Liberty`. Focused tests pin both sides.
 
-**The next gate is deploy and rerun, not more ranking work.** Acceptance
-requires Statue to remain recovered, Empire to remain empty, the prior
-name-locality ranks to return, and no gold stratum to regress. Only then rerun
-the three-provider external comparison and close RC3.
+**The acceptance gate was deploy and rerun, not more ranking work.** It required
+Statue to remain recovered, Empire to remain empty, the prior name-locality
+ranks to return, and no gold stratum to regress, followed by the same
+three-provider external comparison. The result is recorded immediately below.
+
+### RC3 accepted result, 2026-08-02
+
+The bounded locality follow-up landed in PR #226 as `e655615`. Main CI run
+`30764536307` and automatic Worker deploy run `30764760627` both passed,
+including post-deploy verification. The direct live gates all passed: Statue of
+Liberty remains rank 4, Empire State Building remains empty, Taj Mahal Agra and
+Sagrada Familia Barcelona returned to rank 1 with
+`places_locality_inference`, and Eiffel Tower Paris retained the same routed
+path.
+
+The accepted exact-ID run is
+`benchmarks/2026-08-02-forward-gold-after-rc3-locality-fix.json` (46 total
+cases, 35 place self-recall cases, zero errors). Compared with the accepted RC2
+baseline:
+
+| group | n | before r@1 | after r@1 | before r@10 | after r@10 | before mrr | after mrr |
+|---|---|---|---|---|---|---|---|
+| self_recall (all place) | 35 | 0.429 | 0.429 | 0.571 | **0.600** | 0.495 | **0.502** |
+| `place:name` (head path) | 10 | 0.200 | 0.200 | 0.500 | **0.600** | 0.333 | **0.358** |
+| `place:name_locality` | 10 | 0.400 | 0.400 | 0.500 | 0.500 | 0.450 | 0.450 |
+| `place:seam` | 10 | 0.900 | 0.900 | 1.000 | 1.000 | 0.950 | 0.950 |
+
+No gold stratum regressed, type starvation fell 8 -> 7, and the data version
+remained `2026-08-02.0`; both RC3 changes were Worker-only.
+
+The accepted provider-neutral rerun is
+`benchmarks/2026-08-02-forward-gold-external-after-rc3.json` (35 cases per
+provider, zero errors):
+
+| provider | before overall r@10 | after overall r@10 | before name r@10 | after name r@10 |
+|---|---|---|---|---|
+| Overture | 0.571 | **0.600** | 0.500 | **0.600** |
+| Nominatim | 0.914 | 0.914 | 0.800 | 0.800 |
+| Photon | 0.943 | 0.943 | 0.800 | 0.800 |
+
+**RC3 is closed.** The final run accepts the one Worker-recoverable miss without
+the locality regression seen in the first deployment. The next bounded gate is
+case-contract review for Big Ben and Machu Picchu, followed by producer
+admission work only for misses that survive that review. Empire State Building
+and Brandenburg Gate are already confirmed producer-admission misses by the
+live capped-posting probe.
 
 The bounded `tower` proxy probe in `b8e3151` also needs to be read narrowly. It
 refutes record count, `names.common` cardinality, and `sources` count as direct
@@ -1303,12 +1347,12 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    field and had never actually executed. Verified against live production,
    all four checks pass on attempt 1.
 2. **Forward Places quality — NOW THE AGREED MILESTONE.** Stage 1, the
-   prominence rebuild, and the live RC2 Worker correction improved distinct
-   strata. Name-only head recall@10 is now 5/10, up from 2/10 immediately before
-   RC2. The remaining misses are split: two known three-token RC3 cases, plus
-   three two-token cases requiring producer-posting admission inspection. Run
-   those bounded checks before reopening build ordering, duplicate collapse,
-   or the head cap.
+   prominence rebuild, RC2, and RC3 improved distinct strata. Name-only head
+   recall@10 is now 6/10, up from 2/10 immediately before RC2, with no final
+   rank@1 regression. Audit the Big Ben and Machu Picchu entity/gold contracts,
+   then design bounded producer admission for the confirmed Empire State
+   Building and Brandenburg Gate posting misses. Do not reopen build ordering,
+   duplicate collapse, or the head cap without contradictory evidence.
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.
