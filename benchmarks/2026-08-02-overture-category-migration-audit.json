@@ -56,7 +56,7 @@
     "legacy_compatibility": "the v1 inventory fingerprint, physical projection, transform fallback, and frozen June evidence remain unchanged"
   },
   "failure_mode": {
-    "september_or_later_inventory": "fail closed during schema inventory because required categories paths are absent",
+    "september_or_later_inventory": "auto selects the taxonomy contract once categories is absent and still fails closed if any required basic_category or taxonomy path/type/nullability drifts",
     "live_artifacts": "unaffected; published PLHD/PLRV/PCSH artifacts are self-contained",
     "current_june_evidence": "remains valid for its pinned 2026-06-17.0 source and must not be rewritten"
   },
