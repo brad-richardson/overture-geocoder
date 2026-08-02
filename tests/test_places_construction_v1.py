@@ -1917,6 +1917,21 @@ def test_worker_query_time_sorts_match_the_build_time_key():
         assert "merge_bounded_candidates(" in lane_block, lane
 
 
+def test_worker_global_head_uses_one_three_token_cap():
+    worker = (
+        ROOT / "crates/geocoder-worker/src/places_construction_v1.rs"
+    ).read_text()
+    serving = (ROOT / "crates/geocoder-worker/src/v2.rs").read_text()
+
+    assert "pub(crate) const HEAD_QUERY_TOKEN_CAP: usize = 3;" in worker
+    head_merge = worker.split("pub(crate) fn merge_head_candidates", 1)[1].split(
+        "\n}", 1
+    )[0]
+    assert "HEAD_QUERY_TOKEN_CAP" in head_merge
+    assert serving.count("tokens.len() > HEAD_QUERY_TOKEN_CAP") == 2
+    assert "tokens.len() > 2" not in serving
+
+
 def test_shuffle_bucket_python_mirror_matches_the_sql(construction_module):
     # The bucket is computed in SQL during map and in Python everywhere else.
     # If they disagree, a consumer looks in the wrong shard and silently sees no

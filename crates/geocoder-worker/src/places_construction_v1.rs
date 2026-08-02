@@ -93,6 +93,10 @@ const MAX_ARTIFACT_ENTRY_BYTES: usize = 64 * 1024;
 const ROUTED_CANDIDATE_CAP: usize = 256;
 /// Producer cap: at most `head_result_cap` (10) records per head token.
 const HEAD_RESULT_CAP: usize = 10;
+/// Maximum global-head query width. Three admits common landmark names such as
+/// `Statue of Liberty` while keeping the no-proximity lane to three bounded R2
+/// reads. Routed lookup retains its independent four-token cap.
+pub(crate) const HEAD_QUERY_TOKEN_CAP: usize = 3;
 const HEAD_CANDIDATE_CAP: usize = 256;
 const MAX_ROUTING_CELLS: usize = 65_536;
 const MAX_CELL_SUBPARTITIONS: usize = 4_096;
@@ -1305,7 +1309,13 @@ pub(crate) fn merge_head_candidates(
     tokens: &[String],
     per_token: Vec<Vec<PlacesV1Record>>,
 ) -> Result<Vec<PlacesV1Record>> {
-    merge_bounded_candidates(tokens, per_token, HEAD_RESULT_CAP, 2, "head")
+    merge_bounded_candidates(
+        tokens,
+        per_token,
+        HEAD_RESULT_CAP,
+        HEAD_QUERY_TOKEN_CAP,
+        "head",
+    )
 }
 
 /// Project one construction record into the shared serving projection.
@@ -2500,12 +2510,41 @@ mod tests {
     }
 
     #[test]
+    fn head_merge_recovers_a_three_token_landmark_from_one_selective_posting() {
+        let mut target = entry_record("liberty", 200, 999);
+        target.primary_name = "Statue of Liberty National Monument".to_string();
+        let saturated_statue: Vec<_> = (1..=10).map(|id| entry_record("statue", 255, id)).collect();
+        let saturated_of: Vec<_> = (11..=20).map(|id| entry_record("of", 255, id)).collect();
+        let tokens = vec![
+            "statue".to_string(),
+            "of".to_string(),
+            "liberty".to_string(),
+        ];
+
+        let merged =
+            merge_head_candidates(&tokens, vec![saturated_statue, saturated_of, vec![target]])
+                .unwrap();
+        assert_eq!(merged.len(), 1);
+        assert_eq!(merged[0].id, format_uuid_of(999));
+    }
+
+    #[test]
     fn head_merge_fails_closed_on_contract_mismatch_or_oversized_posting() {
         let tokens = vec!["eiffel".to_string(), "tower".to_string()];
         assert!(merge_head_candidates(&tokens, vec![vec![entry_record("eiffel", 1, 1)]]).is_err());
 
         let oversized: Vec<_> = (1..=11).map(|id| entry_record("tower", 255, id)).collect();
         assert!(merge_head_candidates(&["tower".to_string()], vec![oversized]).is_err());
+
+        let too_many_tokens = vec!["one", "two", "three", "four"]
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>();
+        let postings = too_many_tokens
+            .iter()
+            .map(|token| vec![entry_record(token, 1, 1)])
+            .collect();
+        assert!(merge_head_candidates(&too_many_tokens, postings).is_err());
     }
 
     #[test]
