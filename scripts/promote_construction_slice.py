@@ -74,6 +74,8 @@ import shutil
 import struct
 import sys
 import tempfile
+import threading
+from collections.abc import Callable, Iterable
 from pathlib import Path, PurePosixPath
 from typing import Any, BinaryIO
 
@@ -95,6 +97,19 @@ COPY_READ_TIMEOUT_SECONDS = 15 * 60
 # per-object source/destination/post-copy identity proof.  Keep this bounded:
 # the dedicated copy client deliberately does not replay an ambiguous request.
 COPY_WORKERS = 4
+# Item 2. Three loops on the promotion critical path issue roughly 84,000
+# SEQUENTIAL HEAD requests -- plan's source identity (21,279), execute's
+# prepositioned verification (20,777), and verify's per-key destination identity
+# (42,058). The plan loop alone was measured twice on identical input at
+# 17m10s and 36m21s (48.4 and 102.5 ms/HEAD), so one of the three costs 17-36
+# minutes and varies ~2x with nothing but network conditions.
+#
+# Every one of those keys is immutable and independent, so this is embarrassingly
+# parallel. 16 matches what the finalizer already proved on this bucket for its
+# publication and whole-slice verification passes; it is deliberately larger than
+# COPY_WORKERS because a HEAD is not a CopyObject -- it moves no bytes and the
+# ambiguous-replay hazard that keeps the copy pool small does not apply.
+IDENTITY_WORKERS = 16
 PLACES_ROUTING_SCHEMA = "overture-promoted-places-routing-v1"
 ADDRESS_ROUTING_SCHEMA = "overture-promoted-addresses-routing-v1"
 REVERSE_CATALOG_SCHEMA = "overture-reverse-catalog-publication-v1"
@@ -1253,7 +1268,10 @@ def _plan_family(
         # echo of the source's, so this recorded MD5 is what execute and verify
         # compare against the DESTINATION's own ETag to prove byte fidelity.
         # Deterministic: the source objects are immutable, so their ETags are.
-        for item in objects:
+        # Item 2: 21,279 HEADs, measured at 17-36 minutes. The plan stays
+        # byte-identical under concurrency because each task writes only its own
+        # item's `content_md5` and the list order is untouched.
+        def record_source_identity(item: dict[str, Any]) -> None:
             proof = source.identity(item["source_key"])
             if proof is None:
                 raise fail(f"{family} source object is missing: {item['source_key']}")
@@ -1266,6 +1284,8 @@ def _plan_family(
                     "the identity its producing phase recorded"
                 )
             item["content_md5"] = proof["content_md5"]
+
+        _for_each_ordered(objects, record_source_identity, parallel=True)
 
     reverse_publication = (
         _reverse_publication(
@@ -1646,6 +1666,58 @@ def _execute_object(
     return "copied"
 
 
+def _for_each_ordered(
+    items: Iterable[Any],
+    work: Callable[[Any], None],
+    *,
+    parallel: bool,
+) -> None:
+    """Apply `work` to every item, preserving DETERMINISTIC failure order.
+
+    Two properties matter more than the speedup, and both are why this is a
+    helper rather than an inline `ThreadPoolExecutor`:
+
+    1. The exception that propagates belongs to the EARLIEST item in list order,
+       never to whichever thread happened to fail first. Without this the same
+       broken promotion reports a different object every run and an operator
+       ends up debugging thread scheduling instead of the defect.
+    2. It still fails fast. Once any item has failed, later items short-circuit
+       rather than issuing another 40,000 pointless HEADs. Items submitted
+       BEFORE the failure still run to completion, which is what makes property
+       1 sound: the pool submits in index order, so anything with a lower index
+       than the first failure was already in flight and cannot be skipped.
+
+    Parallelism is the caller's call because it only pays for network round
+    trips; against a LocalTree this runs the identical sequential loop it
+    replaced.
+    """
+    items = list(items)
+    if not parallel or len(items) < 2:
+        for item in items:
+            work(item)
+        return
+
+    failures: dict[int, BaseException] = {}
+    stop = threading.Event()
+
+    def run(index: int, item: Any) -> None:
+        if stop.is_set():
+            return
+        try:
+            work(item)
+        except BaseException as error:  # re-raised in index order below
+            failures[index] = error
+            stop.set()
+
+    with concurrent.futures.ThreadPoolExecutor(
+        max_workers=IDENTITY_WORKERS
+    ) as pool:
+        for index, item in enumerate(items):
+            pool.submit(run, index, item)
+    if failures:
+        raise failures[min(failures)]
+
+
 def _verify_prepositioned(
     item: dict[str, Any], destination: LocalTree | R2Tree
 ) -> None:
@@ -1674,8 +1746,13 @@ def cmd_execute(args: argparse.Namespace) -> int:
         slice_claim = value.get("slice_claim")
         if slice_claim is not None:
             _verify_prepositioned(slice_claim, destination)
-        for item in (*prepositioned, *forward_prepositioned):
-            _verify_prepositioned(item, destination)
+        # Item 2: 20,777 HEADs. Each proves one immutable destination key
+        # against its own record, so they are independent.
+        _for_each_ordered(
+            (*prepositioned, *forward_prepositioned),
+            lambda item: _verify_prepositioned(item, destination),
+            parallel=isinstance(destination, R2Tree),
+        )
         reverse_totals = value.get("reverse_totals")
         if reverse_totals is not None:
             validate_reverse_graph(
@@ -1797,9 +1874,14 @@ def cmd_verify(args: argparse.Namespace) -> int:
                 f"{family} destination is not the exact planned set: "
                 f"missing={missing}, unexpected={extra}"
             )
-        for key in listed:
+        # Item 2: 42,058 HEADs, the largest of the three loops and the one that
+        # survives zero-copy promotion -- verify must still prove the
+        # destination. `listed` is sorted, so the reported key is stable.
+        def verify_destination_key(key: str) -> None:
             if not check_identity(destination.identity(key), expected[key]):
                 raise fail(f"{family} destination object {key} identity differs")
+
+        _for_each_ordered(listed, verify_destination_key, parallel=on_r2)
         reverse_totals = value.get("reverse_totals")
         if reverse_totals is not None:
             validate_reverse_graph(

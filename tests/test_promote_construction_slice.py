@@ -21,6 +21,7 @@ import os
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path, PurePosixPath
 
 import pytest
@@ -1794,3 +1795,69 @@ def test_slice_manifest_fails_on_tampered_plan_manifest(both):
     doctored_path.write_text(json.dumps(doctored))
     with pytest.raises(SystemExit, match="identity disagrees"):
         _run_slice_manifest([doctored_path], destination, root / "out.json")
+
+
+# --------------------------------------------------------------------------- #
+# Item 2: the ordered-parallel helper behind the three HEAD loops.
+#
+# The speedup is not the risky part -- these two properties are. Every promotion
+# path that uses it is fail-closed, so a helper that reported the wrong object,
+# or that kept issuing 40,000 HEADs after a failure, would be worse than the
+# sequential loop it replaced.
+# --------------------------------------------------------------------------- #
+def test_ordered_helper_visits_every_item_and_preserves_plan_mutation():
+    items = [{"n": n} for n in range(500)]
+    promote._for_each_ordered(
+        items, lambda item: item.__setitem__("seen", item["n"] * 2), parallel=True
+    )
+    assert [item["seen"] for item in items] == [n * 2 for n in range(500)]
+
+
+def test_ordered_helper_raises_the_EARLIEST_failure_not_the_fastest():
+    """The whole point. Item 400 fails instantly; item 5 fails slowly.
+
+    Under a plain executor the fast failure wins and the reported object depends
+    on thread scheduling, so the same broken promotion names a different key on
+    every run.
+    """
+    def work(item):
+        if item == 5:
+            time.sleep(0.05)
+            raise promote.fail("slow failure at 5")
+        if item == 400:
+            raise promote.fail("fast failure at 400")
+
+    with pytest.raises(SystemExit) as caught:
+        promote._for_each_ordered(range(500), work, parallel=True)
+    assert "slow failure at 5" in str(caught.value)
+
+
+def test_ordered_helper_short_circuits_instead_of_finishing_the_loop():
+    """A failure must not cost another 40,000 pointless round trips."""
+    attempted = []
+    lock = threading.Lock()
+
+    def work(item):
+        with lock:
+            attempted.append(item)
+        if item == 0:
+            raise promote.fail("immediate")
+
+    with pytest.raises(SystemExit):
+        promote._for_each_ordered(range(20_000), work, parallel=True)
+    # Items already in flight still run; the tail must not.
+    assert len(attempted) < 1_000, len(attempted)
+
+
+def test_ordered_helper_is_the_plain_loop_when_not_parallel():
+    seen = []
+    promote._for_each_ordered([3, 1, 2], seen.append, parallel=False)
+    assert seen == [3, 1, 2]
+
+    def boom(item):
+        if item == 1:
+            raise promote.fail("sequential failure")
+
+    with pytest.raises(SystemExit) as caught:
+        promote._for_each_ordered([1, 2], boom, parallel=False)
+    assert "sequential failure" in str(caught.value)
