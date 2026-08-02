@@ -1271,6 +1271,42 @@ This is **P0 for the next source upgrade**, not a reason to interrupt the
 current live-artifact producer-admission investigation. If producer admission
 itself requires a fresh post-August source build, this gate moves ahead of it.
 
+**Compatibility implementation, 2026-08-02:** the code side of this gate is
+now complete. `places_inventory_v1.py` carries a second, taxonomy-native schema
+contract while preserving validation and fingerprints for the frozen legacy
+contract. Auto mode keeps selecting legacy while `categories` exists; an
+explicit taxonomy profile permits a deliberate compatibility build against the
+July dual-field release and becomes the automatic path once `categories` is
+removed. The taxonomy physical projection is generation v2: display remains
+one `taxonomy.primary` value (falling back to `basic_category`), while the
+primary, basic, hierarchy, and alternate terms are separately searchable under
+the existing category field mask. Legacy projection bytes and transform
+semantics remain unchanged.
+
+The bounded July recalibration found all 8,854 sampled legacy
+`landmark_and_historical_building` primaries mapped to `historic_site`; the new
+label therefore inherits the same deliberately weak 0.35 prior. Specific
+museum, monument, castle, library, and train-station labels remained usable,
+and hierarchy ancestors now generalize categories such as specialty museums
+and specific restaurant cuisines. Commodity hierarchy terms remain
+dispositive, so a restaurant cannot gain landmark prominence from an alternate.
+
+The provider-neutral gold set is expanded from 35 to 55 cases with 20 named
+everyday POIs across food/drink, retail, lodging, healthcare, and civic/transit,
+including three explicit brand-branch queries. Evidence:
+`benchmarks/2026-08-02-forward-gold-external-poi-expanded.json`. On the new
+named-POI stratum, rank-10 recall is Overture 0.353 versus Nominatim 0.765 and
+Photon 0.765; on brand branches it is 0.000 / 0.667 / 1.000. This confirms a
+large ordinary-POI retrieval gap independent of the landmark audit. Generic
+origin-dependent intents such as “restaurants near me” remain a separate
+semantic benchmark because exact-place name/coordinate scoring cannot judge
+their relevance honestly.
+
+**Remaining gate:** do not call a post-August source upgrade ready until the
+taxonomy profile has regenerated inventory, construction evidence, readiness,
+and control pins as a new evidence generation. The current live June artifacts
+and their frozen evidence remain unaffected.
+
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
 The 2026-07-31 section below records that promotion's `/v2/forward` smoke as a

@@ -35,6 +35,13 @@ CALIBRATION NOTES, each one measured rather than assumed:
     basilica reaches the cap through `catholic_church` (primary, 0.60), not
     through its `monument` alternate (0.50 after halving).
 
+Rechecked 2026-08-02 against a bounded 1,000,000-row sample from Overture
+places `2026-07-22.0`: all 8,854 sampled legacy
+`landmark_and_historical_building` primaries map to `historic_site` in the new
+taxonomy. That replacement therefore inherits the same deliberately weak
+weight; it is a compatibility mapping, not evidence that the noisy class became
+more prominent.
+
 KNOWN LIMIT, do not mistake this table for a fix to it: a type prior cannot
 separate near-duplicates of the SAME landmark. `Tour Eiffel` is still evicted
 because 15 other `monument` records -- "Eiffel Tower,Paris", "Eiffel tower",
@@ -83,6 +90,8 @@ LANDMARK_PRIOR: dict[str, float] = {
     "library": 0.40,
     # measured-noisy: Overture tags apartment blocks with this
     "landmark_and_historical_building": 0.35,
+    # July taxonomy replacement for the same measured-noisy class
+    "historic_site": 0.35,
 }
 
 # Commodity types. A place whose PRIMARY category is one of these is not
@@ -128,13 +137,23 @@ def type_prior(
     basic: str | None = None,
     taxonomy: str | None = None,
     alternate: object = None,
+    hierarchy: object = None,
 ) -> float:
     """Prominence prior in [0, 1] from a place's category fields.
 
     `primary` being a commodity type is dispositive and returns 0.0 -- see the
     module docstring for why the alternates cannot be allowed to override it.
     """
-    primary_tags = {value for value in (primary, basic, taxonomy) if value}
+    # The new Overture taxonomy puts general-to-specific classifications in
+    # `hierarchy` (for example food_and_drink > restaurant > ...). Treat that
+    # primary path as dispositive just like the old primary/basic columns. An
+    # alternate remains weaker and can never turn a commodity record into a
+    # landmark.
+    primary_tags = {
+        value
+        for value in (primary, basic, taxonomy, *(hierarchy or []))
+        if value
+    }
     if primary_tags & COMMODITY_CATEGORIES:
         return 0.0
 
@@ -154,12 +173,13 @@ def prominence_rank(
     basic: str | None = None,
     taxonomy: str | None = None,
     alternate: object = None,
+    hierarchy: object = None,
 ) -> int:
     """`type_prior` quantized to the u8 the head entry carries.
 
     Saturating and total: every input maps into 0..=255.
     """
-    prior = type_prior(primary, basic, taxonomy, alternate)
+    prior = type_prior(primary, basic, taxonomy, alternate, hierarchy)
     if prior <= 0.0:
         return 0
     if prior >= 1.0:

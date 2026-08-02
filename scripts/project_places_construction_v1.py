@@ -35,7 +35,10 @@ from experiment_hosted_rowgroups import (  # noqa: E402
 
 
 SCHEMA = "overture-places-construction-v1-projection-report-v1"
-PROJECTION_SCHEMA = "overture-places-construction-v1-physical-arrow-v1"
+LEGACY_PROJECTION_SCHEMA = "overture-places-construction-v1-physical-arrow-v1"
+TAXONOMY_PROJECTION_SCHEMA = "overture-places-construction-v1-physical-arrow-v2"
+# Backward-compatible import for callers/tests bound to the frozen projection.
+PROJECTION_SCHEMA = LEGACY_PROJECTION_SCHEMA
 MAXIMUM_BATCH_ROWS = 65_536
 
 
@@ -132,14 +135,7 @@ def _first_address_field(addresses: Any, name: str) -> Any:
 
 
 def _optional_struct_field(array: Any, name: str) -> Any:
-    """`_struct_field`, but returns None when the struct lacks the field.
-
-    `categories.alternate` is deliberately NOT in
-    `places_inventory_v1.REQUIRED_FIELD_TYPES` -- that contract's fingerprint is
-    bound into frozen planet evidence, and requiring a new path would invalidate
-    it (see the note there). So the prominence prior degrades to primary-only
-    rather than failing closed on a source that predates the field.
-    """
+    """`_struct_field`, but returns None when the struct lacks the field."""
     import pyarrow as pa
 
     data_type = array.type
@@ -150,7 +146,12 @@ def _optional_struct_field(array: Any, name: str) -> Any:
     return _struct_field(array, name)
 
 
-def _prominence_rank_array(primary: Any, basic: Any, alternate: Any) -> Any:
+def _prominence_rank_array(
+    primary: Any,
+    basic: Any,
+    alternate: Any,
+    hierarchy: Any = None,
+) -> Any:
     """Per-row POI prominence prior, quantized to the u8 the head entry carries.
 
     Deliberately a Python loop over the three category columns rather than an
@@ -168,6 +169,9 @@ def _prominence_rank_array(primary: Any, basic: Any, alternate: Any) -> Any:
     alternate_values = (
         [None] * rows if alternate is None else alternate.to_pylist()
     )
+    hierarchy_values = (
+        [None] * rows if hierarchy is None else hierarchy.to_pylist()
+    )
     return pa.array(
         [
             type_prior.prominence_rank(
@@ -175,11 +179,74 @@ def _prominence_rank_array(primary: Any, basic: Any, alternate: Any) -> Any:
                 basic_values[index],
                 None,
                 alternate_values[index],
+                hierarchy_values[index],
             )
             for index in range(rows)
         ],
         type=pa.uint8(),
     )
+
+
+def _category_terms_array(
+    primary: Any, basic: Any, hierarchy: Any, alternates: Any
+) -> Any:
+    """Searchable taxonomy terms, separate from the one display category."""
+    import pyarrow as pa
+
+    columns = [
+        primary.to_pylist(),
+        basic.to_pylist(),
+        hierarchy.to_pylist(),
+        alternates.to_pylist(),
+    ]
+    rows = len(columns[0])
+    values = []
+    for index in range(rows):
+        ordered: dict[str, None] = {}
+        for scalar in columns[:2]:
+            value = scalar[index]
+            if value:
+                ordered[str(value)] = None
+        for sequence in columns[2:]:
+            for value in sequence[index] or []:
+                if value:
+                    ordered[str(value)] = None
+        values.append(" ".join(ordered))
+    return pa.array(values, type=pa.string())
+
+
+def _category_projection(batch: Any) -> tuple[Any, Any, Any]:
+    """Return display category, prominence ranks, and optional search terms."""
+    import pyarrow.compute as pc
+
+    basic = _text(batch["basic_category"])
+    if batch.schema.get_field_index("categories") >= 0:
+        categories = batch["categories"]
+        primary_raw = _struct_field(categories, "primary")
+        primary = _text(primary_raw)
+        display = pc.if_else(pc.not_equal(primary, ""), primary, basic)
+        ranks = _prominence_rank_array(
+            primary_raw,
+            batch["basic_category"],
+            _optional_struct_field(categories, "alternate"),
+        )
+        # Preserve the frozen legacy physical schema and transform semantics.
+        return display, ranks, None
+
+    taxonomy = batch["taxonomy"]
+    primary_raw = _struct_field(taxonomy, "primary")
+    hierarchy = _struct_field(taxonomy, "hierarchy")
+    alternates = _struct_field(taxonomy, "alternates")
+    primary = _text(primary_raw)
+    display = pc.if_else(pc.not_equal(primary, ""), primary, basic)
+    ranks = _prominence_rank_array(
+        primary_raw,
+        batch["basic_category"],
+        alternates,
+        hierarchy,
+    )
+    terms = _category_terms_array(primary, basic, hierarchy, alternates)
+    return display, ranks, terms
 
 
 def flatten_batch(
@@ -195,55 +262,52 @@ def flatten_batch(
     common_names = pa.ListArray.from_arrays(
         common.offsets, common.items, mask=common.is_null()
     )
-    category = _text(_struct_field(batch["categories"], "primary"))
-    basic_category = _text(batch["basic_category"])
-    category = pc.if_else(pc.not_equal(category, ""), category, basic_category)
+    category, prominence_rank, category_terms = _category_projection(batch)
     # POI prominence. Overture `confidence` is an EXISTENCE signal and
     # anti-correlates with fame (the Sagrada Familia scores below the Starbucks
     # next door), so the category is the only usable prior. See
     # scripts/places_type_prior_v1.py for the measurement behind the table.
-    prominence_rank = _prominence_rank_array(
-        _struct_field(batch["categories"], "primary"),
-        batch["basic_category"],
-        _optional_struct_field(batch["categories"], "alternate"),
-    )
     rows = batch.num_rows
-    return pa.RecordBatch.from_arrays(
-        [
-            pc.cast(batch["id"], pa.string()),
-            _text(_struct_field(names, "primary")),
-            common_names,
-            _text(_struct_field(batch["brand"], "names", "primary")),
-            category,
-            _first_address_field(batch["addresses"], "locality"),
-            _first_address_field(batch["addresses"], "region"),
-            _first_address_field(batch["addresses"], "country"),
-            pc.cast(batch["confidence"], pa.float64()),
-            prominence_rank,
-            _text(batch["operating_status"]),
-            pc.cast(batch["geometry"], pa.binary()),
-            pa.array(np.full(rows, object_index, dtype=np.int32)),
-            pa.array(np.full(rows, row_group, dtype=np.int32)),
-            pa.array(np.arange(row_offset, row_offset + rows, dtype=np.int32)),
-        ],
-        names=[
-            "id",
-            "primary_name",
-            "common_names",
-            "brand_name",
-            "category",
-            "locality",
-            "region",
-            "country",
-            "confidence",
-            "prominence_rank",
-            "operating_status",
-            "geometry",
-            "source_object_index",
-            "source_row_group",
-            "source_row_index",
-        ],
-    )
+    arrays = [
+        pc.cast(batch["id"], pa.string()),
+        _text(_struct_field(names, "primary")),
+        common_names,
+        _text(_struct_field(batch["brand"], "names", "primary")),
+        category,
+        _first_address_field(batch["addresses"], "locality"),
+        _first_address_field(batch["addresses"], "region"),
+        _first_address_field(batch["addresses"], "country"),
+        pc.cast(batch["confidence"], pa.float64()),
+        prominence_rank,
+        _text(batch["operating_status"]),
+        pc.cast(batch["geometry"], pa.binary()),
+        pa.array(np.full(rows, object_index, dtype=np.int32)),
+        pa.array(np.full(rows, row_group, dtype=np.int32)),
+        pa.array(np.arange(row_offset, row_offset + rows, dtype=np.int32)),
+    ]
+    names = [
+        "id",
+        "primary_name",
+        "common_names",
+        "brand_name",
+        "category",
+        "locality",
+        "region",
+        "country",
+        "confidence",
+        "prominence_rank",
+        "operating_status",
+        "geometry",
+        "source_object_index",
+        "source_row_group",
+        "source_row_index",
+    ]
+    if category_terms is not None:
+        # Keep display stable while making hierarchy/generalization terms
+        # searchable under the existing category field mask.
+        arrays.insert(5, category_terms)
+        names.insert(5, "category_terms")
+    return pa.RecordBatch.from_arrays(arrays, names=names)
 
 
 def projection_identity(
@@ -253,8 +317,13 @@ def projection_identity(
     spec_sha256: str,
 ) -> dict[str, Any]:
     selected_objects = sorted({item["object_index"] for item in task["ranges"]})
+    projection_schema = (
+        TAXONOMY_PROJECTION_SCHEMA
+        if inventory.schema_profile_name(value["schema_contract"]) == "taxonomy"
+        else LEGACY_PROJECTION_SCHEMA
+    )
     return {
-        "schema": PROJECTION_SCHEMA,
+        "schema": projection_schema,
         "release": value["release"],
         "inventory_sha256": value["inventory_sha256"],
         "inventory_file_sha256": inventory_file_sha256,
@@ -400,7 +469,10 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
             parquet = pq.ParquetFile(
                 source["uri"].removeprefix("s3://"), filesystem=filesystem
             )
-            contract = inventory.schema_contract_from_arrow(parquet.schema_arrow)
+            profile = inventory.schema_profile_name(value["schema_contract"])
+            contract = inventory.schema_contract_from_arrow(
+                parquet.schema_arrow, profile
+            )
             if contract["fingerprint_sha256"] != source["schema_fingerprint_sha256"]:
                 raise ValueError("Places source schema changed after inventory")
             for group in range(
@@ -411,7 +483,9 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
                 for batch in parquet.iter_batches(
                     batch_size=MAXIMUM_BATCH_ROWS,
                     row_groups=[group],
-                    columns=sorted(inventory.PROJECTED_COLUMN_ROOTS),
+                    columns=sorted(
+                        inventory.projected_column_roots(value["schema_contract"])
+                    ),
                     use_threads=False,
                 ):
                     flattened = flatten_batch(

@@ -27,7 +27,11 @@ from typing import Any
 BUCKET = "overturemaps-us-west-2"
 REGION = "us-west-2"
 INVENTORY_SCHEMA = "overture-global-v2-places-inventory-v1"
-SCHEMA_CONTRACT_VERSION = "overture-places-required-schema-v1"
+LEGACY_SCHEMA_CONTRACT_VERSION = "overture-places-required-schema-v1"
+TAXONOMY_SCHEMA_CONTRACT_VERSION = "overture-places-required-schema-v2"
+# Backward-compatible import used by existing evidence/tests. The legacy
+# contract is frozen; taxonomy support is a second generation, not a rewrite.
+SCHEMA_CONTRACT_VERSION = LEGACY_SCHEMA_CONTRACT_VERSION
 TASK_PLAN_SCHEMA = "overture-global-v2-places-map-plan-v1"
 RELEASE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+")
 
@@ -35,7 +39,7 @@ RELEASE_RE = re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+")
 # fingerprint below is narrower than the complete Overture schema: unrelated
 # additive properties therefore do not invalidate a build, while any drift in a
 # field whose bytes affect serving does.
-PROJECTED_COLUMN_ROOTS = {
+LEGACY_PROJECTED_COLUMN_ROOTS = {
     "addresses",
     "basic_category",
     "brand",
@@ -46,11 +50,16 @@ PROJECTED_COLUMN_ROOTS = {
     "names",
     "operating_status",
 }
+TAXONOMY_PROJECTED_COLUMN_ROOTS = (
+    LEGACY_PROJECTED_COLUMN_ROOTS - {"categories"}
+) | {"taxonomy"}
+# Backward-compatible name for the frozen v1 inventory.
+PROJECTED_COLUMN_ROOTS = LEGACY_PROJECTED_COLUMN_ROOTS
 
 # Canonical Arrow type spellings accepted by the current producer.  Nullability
 # is intentionally learned from the real release, recorded per path, and then
 # required to be identical for every source object.
-REQUIRED_FIELD_TYPES: dict[str, str] = {
+LEGACY_REQUIRED_FIELD_TYPES: dict[str, str] = {
     "addresses": "list<struct>",
     "addresses[].country": "string",
     "addresses[].locality": "string",
@@ -88,6 +97,35 @@ REQUIRED_FIELD_TYPES: dict[str, str] = {
     "names.common": "map<string,string>",
     "names.primary": "string",
     "operating_status": "string",
+}
+# The September-2026-safe contract. Overture deprecated `categories` in June
+# and announced its removal for September. `taxonomy.alternates` is plural;
+# legacy `categories.alternate` is singular.
+TAXONOMY_REQUIRED_FIELD_TYPES: dict[str, str] = {
+    path: field_type
+    for path, field_type in LEGACY_REQUIRED_FIELD_TYPES.items()
+    if not path.startswith("categories")
+}
+TAXONOMY_REQUIRED_FIELD_TYPES.update(
+    {
+        "taxonomy": "struct",
+        "taxonomy.alternates": "list<string>",
+        "taxonomy.hierarchy": "list<string>",
+        "taxonomy.primary": "string",
+    }
+)
+# Backward-compatible import used by the frozen evidence tests.
+REQUIRED_FIELD_TYPES = LEGACY_REQUIRED_FIELD_TYPES
+
+SCHEMA_PROFILES: dict[str, tuple[dict[str, str], set[str]]] = {
+    LEGACY_SCHEMA_CONTRACT_VERSION: (
+        LEGACY_REQUIRED_FIELD_TYPES,
+        LEGACY_PROJECTED_COLUMN_ROOTS,
+    ),
+    TAXONOMY_SCHEMA_CONTRACT_VERSION: (
+        TAXONOMY_REQUIRED_FIELD_TYPES,
+        TAXONOMY_PROJECTED_COLUMN_ROOTS,
+    ),
 }
 
 
@@ -183,8 +221,25 @@ def list_source_objects(
     return sorted(result, key=lambda item: item["uri"])
 
 
+def _schema_profile_for_paths(paths: set[str]) -> tuple[str, dict[str, str]]:
+    matches = [
+        (version, required)
+        for version, (required, _roots) in SCHEMA_PROFILES.items()
+        if paths == set(required)
+    ]
+    if len(matches) != 1:
+        expected = {
+            version: sorted(set(required) - paths)
+            for version, (required, _roots) in SCHEMA_PROFILES.items()
+        }
+        raise ValueError(
+            f"required Places schema paths match no contract: missing={expected}"
+        )
+    return matches[0]
+
+
 def canonical_schema_contract(fields: Iterable[dict[str, Any]]) -> dict[str, Any]:
-    """Validate and fingerprint required path/type/nullability descriptors."""
+    """Validate and fingerprint one supported path/type/nullability contract."""
 
     supplied: dict[str, dict[str, Any]] = {}
     for raw in fields:
@@ -198,22 +253,17 @@ def canonical_schema_contract(fields: Iterable[dict[str, Any]]) -> dict[str, Any
         if not isinstance(field_type, str) or type(nullable) is not bool:
             raise ValueError("schema field type/nullability is invalid")
         supplied[path] = {"path": path, "type": field_type, "nullable": nullable}
-    if set(supplied) != set(REQUIRED_FIELD_TYPES):
-        missing = sorted(set(REQUIRED_FIELD_TYPES) - set(supplied))
-        extra = sorted(set(supplied) - set(REQUIRED_FIELD_TYPES))
-        raise ValueError(
-            f"required Places schema paths differ: missing={missing}, extra={extra}"
-        )
+    version, required_types = _schema_profile_for_paths(set(supplied))
     wrong = sorted(
         path
-        for path, expected in REQUIRED_FIELD_TYPES.items()
+        for path, expected in required_types.items()
         if supplied[path]["type"] != expected
     )
     if wrong:
         raise ValueError(f"required Places schema types differ: {wrong}")
     normalized = [supplied[path] for path in sorted(supplied)]
     fingerprint_input = {
-        "version": SCHEMA_CONTRACT_VERSION,
+        "version": version,
         "fields": normalized,
     }
     return {
@@ -274,9 +324,18 @@ def _arrow_field_at_path(schema: Any, path: str) -> Any:
     return field
 
 
-def schema_contract_from_arrow(schema: Any) -> dict[str, Any]:
+def schema_contract_from_arrow(schema: Any, profile: str = "auto") -> dict[str, Any]:
+    if profile not in {"auto", "legacy", "taxonomy"}:
+        raise ValueError("Places schema profile must be auto, legacy, or taxonomy")
+    names = set(schema.names)
+    if profile == "legacy" or (profile == "auto" and "categories" in names):
+        required_types = LEGACY_REQUIRED_FIELD_TYPES
+    elif profile == "taxonomy" or (profile == "auto" and "taxonomy" in names):
+        required_types = TAXONOMY_REQUIRED_FIELD_TYPES
+    else:
+        raise ValueError("Places source has neither categories nor taxonomy")
     descriptors = []
-    for path in sorted(REQUIRED_FIELD_TYPES):
+    for path in sorted(required_types):
         if path == "addresses":
             field = schema.field("addresses")
         else:
@@ -291,14 +350,35 @@ def schema_contract_from_arrow(schema: Any) -> dict[str, Any]:
     return canonical_schema_contract(descriptors)
 
 
-def inspect_parquet_object(source: dict[str, Any], filesystem: Any) -> dict[str, Any]:
+def projected_column_roots(contract: dict[str, Any]) -> set[str]:
+    version = contract.get("version")
+    try:
+        _required, roots = SCHEMA_PROFILES[version]
+    except (KeyError, TypeError) as exc:
+        raise ValueError("Places schema contract version is unsupported") from exc
+    return roots
+
+
+def schema_profile_name(contract: dict[str, Any]) -> str:
+    version = contract.get("version")
+    if version == LEGACY_SCHEMA_CONTRACT_VERSION:
+        return "legacy"
+    if version == TAXONOMY_SCHEMA_CONTRACT_VERSION:
+        return "taxonomy"
+    raise ValueError("Places schema contract version is unsupported")
+
+
+def inspect_parquet_object(
+    source: dict[str, Any], filesystem: Any, *, profile: str = "auto"
+) -> dict[str, Any]:
     """Read one Parquet footer and return deterministic inventory metadata."""
 
     import pyarrow.parquet as pq
 
     path = source["uri"].removeprefix("s3://")
     parquet = pq.ParquetFile(path, filesystem=filesystem)
-    contract = schema_contract_from_arrow(parquet.schema_arrow)
+    contract = schema_contract_from_arrow(parquet.schema_arrow, profile)
+    projected_roots = projected_column_roots(contract)
     row_groups: list[dict[str, Any]] = []
     for index in range(parquet.metadata.num_row_groups):
         group = parquet.metadata.row_group(index)
@@ -307,7 +387,7 @@ def inspect_parquet_object(source: dict[str, Any], filesystem: Any) -> dict[str,
         for column_index in range(group.num_columns):
             column = group.column(column_index)
             root = column.path_in_schema.split(".", 1)[0]
-            if root in PROJECTED_COLUMN_ROOTS:
+            if root in projected_roots:
                 selected_compressed += column.total_compressed_size
                 selected_uncompressed += column.total_uncompressed_size
         row_groups.append(
@@ -656,6 +736,15 @@ def main() -> None:
     )
     parser.add_argument("--max-groups", type=int, default=64)
     parser.add_argument("--max-tasks", type=int, default=128)
+    parser.add_argument(
+        "--schema-profile",
+        choices=("auto", "legacy", "taxonomy"),
+        default="auto",
+        help=(
+            "source category contract; auto preserves legacy while categories "
+            "exists and selects taxonomy after its announced removal"
+        ),
+    )
     args = parser.parse_args()
     if not 1 <= args.workers <= 32:
         raise SystemExit("--workers must be between 1 and 32")
@@ -668,7 +757,10 @@ def main() -> None:
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
         inspected = list(
             executor.map(
-                lambda source: inspect_parquet_object(source, filesystem), listed
+                lambda source: inspect_parquet_object(
+                    source, filesystem, profile=args.schema_profile
+                ),
+                listed,
             )
         )
     by_uri = {source["uri"]: details for source, details in zip(listed, inspected)}

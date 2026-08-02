@@ -56,6 +56,11 @@ APARTMENTS = dict(
     taxonomy=None,
     alternate=None,
 )
+TAXONOMY_APARTMENTS = dict(
+    primary="historic_site",
+    basic="historic_site",
+    hierarchy=["cultural_and_historic", "historic_site"],
+)
 SPACE_NEEDLE = dict(
     primary="monument", basic="monument", taxonomy="monument", alternate=None
 )
@@ -83,11 +88,38 @@ def test_noisy_landmark_category_stays_below_real_landmarks():
     assert prior.type_prior(**APARTMENTS) < prior.type_prior(**BASILICA)
 
 
+def test_new_taxonomy_preserves_the_weak_noisy_historic_site_weight():
+    assert prior.type_prior(**TAXONOMY_APARTMENTS) == prior.type_prior(**APARTMENTS)
+    assert prior.type_prior(**TAXONOMY_APARTMENTS) < prior.type_prior(**SPACE_NEEDLE)
+
+
 def test_alternates_are_weaker_than_an_equivalent_primary():
     only_alt = prior.type_prior(primary=None, alternate=["monument"])
     as_primary = prior.type_prior(primary="monument")
     assert only_alt == prior.ALTERNATE_WEIGHT * as_primary
     assert only_alt < as_primary
+
+
+def test_taxonomy_hierarchy_generalizes_specific_categories():
+    assert prior.type_prior(
+        "specialty_museum",
+        basic="museum",
+        hierarchy=["arts_and_entertainment", "museum", "specialty_museum"],
+    ) == prior.LANDMARK_PRIOR["museum"]
+
+
+def test_taxonomy_hierarchy_keeps_specific_restaurants_commodity():
+    assert prior.type_prior(
+        "cantonese_restaurant",
+        basic="restaurant",
+        hierarchy=[
+            "food_and_drink",
+            "restaurant",
+            "asian_restaurant",
+            "cantonese_restaurant",
+        ],
+        alternate=["monument"],
+    ) == 0.0
 
 
 def test_unknown_and_missing_categories_are_zero_not_an_error():
@@ -99,8 +131,16 @@ def test_unknown_and_missing_categories_are_zero_not_an_error():
 
 
 def test_prominence_rank_is_total_and_saturating():
-    for record in (BASILICA, STARBUCKS, VET, HOTEL, HOLIDAY_RENTAL,
-                   APARTMENTS, SPACE_NEEDLE):
+    for record in (
+        BASILICA,
+        STARBUCKS,
+        VET,
+        HOTEL,
+        HOLIDAY_RENTAL,
+        APARTMENTS,
+        TAXONOMY_APARTMENTS,
+        SPACE_NEEDLE,
+    ):
         rank = prior.prominence_rank(**record)
         assert isinstance(rank, int)
         assert 0 <= rank <= prior.PROMINENCE_RANK_MAX

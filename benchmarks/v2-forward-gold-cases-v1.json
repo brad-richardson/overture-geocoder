@@ -7,12 +7,15 @@
       "seam": "query is simultaneously a division name and a POI context token; the division must win rank 1",
       "inverse_seam": "a POI must beat any same-named or homonym division",
       "name": "context-free global landmark retrieval (the known open gap)",
-      "name_locality": "same landmark with a locality token; the control that should already pass"
+      "name_locality": "same landmark with a locality token; the control that should already pass",
+      "named_poi": "an ordinary named restaurant, shop, hotel, hospital, library, or station with a locality token",
+      "brand_branch": "a multi-location brand query that names the intended branch or neighborhood"
     },
     "limitations": [
-      "35 cases is a seam and regression instrument, NOT the balanced multilingual gold set: coverage is Latin-script and Europe/North-America heavy.",
+      "55 cases is a seam and regression instrument, NOT the balanced multilingual gold set: coverage is Latin-script and Europe/North-America heavy.",
       "Coordinates are approximate landmark/city centroids with deliberately loose tolerances (25 km localities, 2 km POIs); this set scores type composition and retrieval, not positional accuracy.",
-      "Overture may legitimately hold a landmark under a local-language primary name; alt_names cover the common cases but a miss should be inspected before it is called a regression."
+      "Overture may legitimately hold a place under a local-language primary name; alt_names cover the common cases but a miss should be inspected before it is called a regression.",
+      "Generic category-intent queries such as 'restaurants near me' need relevance judgments and an explicit search origin, so they belong in a separate semantic benchmark rather than this exact-place gold set."
     ]
   },
   "cases": [
@@ -420,6 +423,411 @@
       "tolerance_km": 2.0,
       "alt_names": [
         "Brandenburger Tor"
+      ]
+    },
+    {
+      "id": "gold:named_poi:pike-place-chowder",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Pike Place Chowder Seattle",
+      "expected_name": "Pike Place Chowder",
+      "expected_feature_type": "poi",
+      "expected_lat": 47.6095,
+      "expected_lon": -122.3412,
+      "tolerance_km": 1.0,
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.pikeplacechowder.com/locations"
+      ]
+    },
+    {
+      "id": "gold:named_poi:noma",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Noma Copenhagen",
+      "expected_name": "Noma",
+      "expected_feature_type": "poi",
+      "expected_lat": 55.6828,
+      "expected_lon": 12.6106,
+      "tolerance_km": 1.0,
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://noma.dk/contact/"
+      ]
+    },
+    {
+      "id": "gold:brand_branch:din-tai-fung-xinyi",
+      "kind": "place",
+      "query_style": "brand_branch",
+      "query": "Din Tai Fung Xinyi",
+      "expected_name": "Din Tai Fung",
+      "expected_feature_type": "poi",
+      "expected_lat": 25.0335,
+      "expected_lon": 121.5301,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Din Tai Fung Xinyi Branch",
+        "鼎泰豐"
+      ],
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "brand_branch"
+      },
+      "sources": [
+        "https://www.dintaifung.com.tw/eng/store.php"
+      ]
+    },
+    {
+      "id": "gold:named_poi:cafe-de-flore",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Cafe de Flore Paris",
+      "expected_name": "Cafe de Flore",
+      "expected_feature_type": "poi",
+      "expected_lat": 48.8541,
+      "expected_lon": 2.3325,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Café de Flore"
+      ],
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://cafedeflore.fr/en/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:harrods",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Harrods London",
+      "expected_name": "Harrods",
+      "expected_feature_type": "poi",
+      "expected_lat": 51.4994,
+      "expected_lon": -0.1631,
+      "tolerance_km": 1.0,
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.harrods.com/en-gb/plan-your-visit"
+      ]
+    },
+    {
+      "id": "gold:named_poi:kadewe",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "KaDeWe Berlin",
+      "expected_name": "KaDeWe",
+      "expected_feature_type": "poi",
+      "expected_lat": 52.5016,
+      "expected_lon": 13.3411,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Kaufhaus des Westens"
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.kadewe.de/en/imprint/"
+      ]
+    },
+    {
+      "id": "gold:brand_branch:ikea-berlin-lichtenberg",
+      "kind": "place",
+      "query_style": "brand_branch",
+      "query": "IKEA Lichtenberg Berlin",
+      "expected_name": "IKEA",
+      "expected_feature_type": "poi",
+      "expected_lat": 52.521,
+      "expected_lon": 13.5194,
+      "tolerance_km": 1.5,
+      "alt_names": [
+        "IKEA Berlin-Lichtenberg"
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      },
+      "sources": [
+        "https://www.ikea.com/de/de/stores/berlin-lichtenberg/"
+      ]
+    },
+    {
+      "id": "gold:brand_branch:apple-marunouchi",
+      "kind": "place",
+      "query_style": "brand_branch",
+      "query": "Apple Marunouchi Tokyo",
+      "expected_name": "Apple Marunouchi",
+      "expected_feature_type": "poi",
+      "expected_lat": 35.681,
+      "expected_lon": 139.7642,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Apple 丸の内"
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      },
+      "sources": [
+        "https://www.apple.com/jp/retail/marunouchi/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:raffles-singapore",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Raffles Hotel Singapore",
+      "expected_name": "Raffles Hotel",
+      "expected_feature_type": "poi",
+      "expected_lat": 1.2949,
+      "expected_lon": 103.8545,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Raffles Singapore"
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.raffles.com/singapore/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:hotel-sacher-vienna",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Hotel Sacher Vienna",
+      "expected_name": "Hotel Sacher",
+      "expected_feature_type": "poi",
+      "expected_lat": 48.2039,
+      "expected_lon": 16.3693,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Hotel Sacher Wien"
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.sacher.com/en/hotels/hotel-sacher-wien/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:plaza-hotel",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Plaza Hotel New York",
+      "expected_name": "The Plaza",
+      "expected_feature_type": "poi",
+      "expected_lat": 40.7645,
+      "expected_lon": -73.9745,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Plaza Hotel"
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.theplazany.com/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:novotel-monte-carlo",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Novotel Monte Carlo",
+      "expected_name": "Novotel Monte Carlo",
+      "expected_feature_type": "poi",
+      "expected_lat": 43.7392,
+      "expected_lon": 7.421,
+      "tolerance_km": 1.0,
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "brand_branch"
+      },
+      "sources": [
+        "https://all.accor.com/hotel/5275/index.en.shtml"
+      ]
+    },
+    {
+      "id": "gold:named_poi:mayo-clinic-rochester",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Mayo Clinic Rochester",
+      "expected_name": "Mayo Clinic",
+      "expected_feature_type": "poi",
+      "expected_lat": 44.0221,
+      "expected_lon": -92.4666,
+      "tolerance_km": 2.0,
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "brand_branch"
+      },
+      "sources": [
+        "https://www.mayoclinic.org/patient-visitor-guide/minnesota"
+      ]
+    },
+    {
+      "id": "gold:named_poi:sickkids-toronto",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "SickKids Toronto",
+      "expected_name": "SickKids",
+      "expected_feature_type": "poi",
+      "expected_lat": 43.6575,
+      "expected_lon": -79.3865,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Hospital for Sick Children"
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.sickkids.ca/en/about/about-sickkids/contact-us/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:royal-childrens-melbourne",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Royal Childrens Hospital Melbourne",
+      "expected_name": "The Royal Children's Hospital",
+      "expected_feature_type": "poi",
+      "expected_lat": -37.7938,
+      "expected_lon": 144.9494,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Royal Childrens Hospital",
+        "Royal Children's Hospital"
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.rch.org.au/info/az_guide/Contact_Us/"
+      ]
+    },
+    {
+      "id": "gold:named_poi:singapore-general-hospital",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Singapore General Hospital",
+      "expected_name": "Singapore General Hospital",
+      "expected_feature_type": "poi",
+      "expected_lat": 1.2799,
+      "expected_lon": 103.8359,
+      "tolerance_km": 1.5,
+      "alt_names": [
+        "SGH"
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.sgh.com.sg/patient-care/visiting-specialist/visit-us"
+      ]
+    },
+    {
+      "id": "gold:named_poi:seattle-central-library",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Seattle Central Library",
+      "expected_name": "Seattle Central Library",
+      "expected_feature_type": "poi",
+      "expected_lat": 47.6067,
+      "expected_lon": -122.3325,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Central Library"
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.spl.org/hours-and-locations/central-library"
+      ]
+    },
+    {
+      "id": "gold:named_poi:gpo-dublin",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "GPO Dublin",
+      "expected_name": "General Post Office",
+      "expected_feature_type": "poi",
+      "expected_lat": 53.3494,
+      "expected_lon": -6.2603,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "GPO",
+        "Dublin General Post Office"
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.anpost.com/GPO"
+      ]
+    },
+    {
+      "id": "gold:named_poi:burton-barr-library",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Burton Barr Library Phoenix",
+      "expected_name": "Burton Barr Central Library",
+      "expected_feature_type": "poi",
+      "expected_lat": 33.4649,
+      "expected_lon": -112.0737,
+      "tolerance_km": 1.0,
+      "alt_names": [
+        "Burton Barr Library"
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.phoenixpubliclibrary.org/locations/burton-barr"
+      ]
+    },
+    {
+      "id": "gold:named_poi:union-station-toronto",
+      "kind": "place",
+      "query_style": "named_poi",
+      "query": "Union Station Toronto",
+      "expected_name": "Union Station",
+      "expected_feature_type": "poi",
+      "expected_lat": 43.6453,
+      "expected_lon": -79.3806,
+      "tolerance_km": 1.0,
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "sources": [
+        "https://www.toronto.ca/explore-enjoy/history-art-culture/union-station/"
       ]
     },
     {

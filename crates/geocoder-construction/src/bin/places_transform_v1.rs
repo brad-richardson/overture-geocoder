@@ -178,11 +178,8 @@ fn required<'a, T: Array + 'static>(batch: &'a RecordBatch, name: &str) -> Resul
 
 /// Like `required`, but returns None when the column is absent.
 ///
-/// `prominence_rank` is projected by the current
-/// `project_places_construction_v1.py` but is deliberately tolerated as absent:
-/// `categories.alternate` is not a required source-contract path (its
-/// fingerprint is bound into frozen planet evidence), so a projection produced
-/// before this change must still transform, with a zero prior throughout.
+/// Optional columns are additive physical-projection generations. Legacy
+/// evidence remains transformable with the exact old schema and semantics.
 fn optional<'a, T: Array + 'static>(batch: &'a RecordBatch, name: &str) -> Option<&'a T> {
     batch.column_by_name(name)?.as_any().downcast_ref::<T>()
 }
@@ -391,6 +388,7 @@ fn transform_batch(
         .context("common_names values must be strings")?;
     let brands = required::<StringArray>(batch, "brand_name")?;
     let categories = required::<StringArray>(batch, "category")?;
+    let category_terms = optional::<StringArray>(batch, "category_terms");
     let localities = required::<StringArray>(batch, "locality")?;
     let regions = required::<StringArray>(batch, "region")?;
     let countries = required::<StringArray>(batch, "country")?;
@@ -481,7 +479,10 @@ fn transform_batch(
             }
         }
         add(text(brands, index), 2);
-        add(text(categories, index), 4);
+        add(
+            category_terms.map_or_else(|| text(categories, index), |terms| text(terms, index)),
+            4,
+        );
         for value in [
             text(localities, index),
             text(regions, index),

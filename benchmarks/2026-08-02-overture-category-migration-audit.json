@@ -38,7 +38,8 @@
       "taxonomy_and_basic_both_absent": 31552,
       "legacy_primary_present_while_taxonomy_absent": 2910,
       "taxonomy_present_while_basic_absent": 39572,
-      "basic_present_while_taxonomy_absent": 2665
+      "basic_present_while_taxonomy_absent": 2665,
+      "legacy_landmark_primary_mapped_to_historic_site": 8854
     },
     "interpretation": [
       "taxonomy is not yet a mechanically equivalent row-for-row replacement in this bounded sample",
@@ -47,12 +48,12 @@
       "the new taxonomy hierarchy carries generalization terms such as restaurant and must be evaluated as searchable category evidence"
     ]
   },
-  "current_repository_dependency": {
-    "inventory": "scripts/places_inventory_v1.py requires categories.primary and categories.alternate and does not project taxonomy",
-    "projection": "scripts/project_places_construction_v1.py displays categories.primary with basic_category only as an empty-value fallback and computes prominence from legacy primary/alternate",
-    "prior": "scripts/places_type_prior_v1.py is calibrated to legacy labels and does not consume taxonomy.hierarchy",
-    "serving": "the construction transform stores and tokenizes one flattened category string",
-    "non_authoritative_extract": "scripts/download_places.sql reads taxonomy.primary and taxonomy.hierarchy, but this is not the strict construction-v1 projector"
+  "repository_migration": {
+    "inventory": "a v2 source-schema contract requires basic_category plus taxonomy.primary/hierarchy/alternates; auto preserves the legacy contract while categories exists, and --schema-profile taxonomy permits a deliberate July compatibility build",
+    "projection": "the v2 physical projection keeps taxonomy.primary as display category with basic_category fallback and emits a separate ordered category_terms field from primary, basic, hierarchy, and alternates",
+    "prior": "taxonomy hierarchy participates in both commodity suppression and prominence; historic_site inherits the measured-noisy legacy landmark weight of 0.35",
+    "serving": "the transform tokenizes category_terms under the existing category field mask while retaining the single display category",
+    "legacy_compatibility": "the v1 inventory fingerprint, physical projection, transform fallback, and frozen June evidence remain unchanged"
   },
   "failure_mode": {
     "september_or_later_inventory": "fail closed during schema inventory because required categories paths are absent",
@@ -60,11 +61,33 @@
     "current_june_evidence": "remains valid for its pinned 2026-06-17.0 source and must not be rewritten"
   },
   "required_migration_before_post_august_source_build": [
-    "introduce a new source-schema contract generation requiring basic_category and taxonomy.primary/hierarchy/alternates while retaining validation for the frozen legacy inventory",
-    "define display-category fallback independently from searchable category terms",
-    "recalibrate prominence against the new labels and hierarchy instead of copying the legacy table",
-    "measure generic and named everyday POIs as well as landmarks before accepting the new admission/ranking behavior",
+    "DONE: introduce a new source-schema contract generation requiring basic_category and taxonomy.primary/hierarchy/alternates while retaining validation for the frozen legacy inventory",
+    "DONE: define display-category fallback independently from searchable category terms",
+    "DONE: recalibrate the known noisy historic-site mapping and generalize existing priors through taxonomy hierarchy",
+    "DONE: measure named everyday POIs across five families; keep generic origin-dependent category intent in a separate future semantic benchmark",
     "regenerate inventory, construction evidence, readiness, and control pins as a new evidence generation"
   ],
-  "decision": "P0 for the next Places source upgrade to the September 2026 release or later; not a blocker for the current live June artifacts or the bounded producer-admission investigation. Do not implement a field-only rename."
+  "expanded_external_benchmark": {
+    "artifact": "benchmarks/2026-08-02-forward-gold-external-poi-expanded.json",
+    "cases": 55,
+    "new_everyday_poi_cases": 20,
+    "families": [
+      "food_drink",
+      "retail",
+      "lodging",
+      "healthcare",
+      "civic_transit"
+    ],
+    "named_poi_recall_at_10": {
+      "overture": 0.353,
+      "nominatim": 0.765,
+      "photon": 0.765
+    },
+    "brand_branch_recall_at_10": {
+      "overture": 0.0,
+      "nominatim": 0.667,
+      "photon": 1.0
+    }
+  },
+  "decision": "Compatibility code is implemented without rewriting legacy evidence. A post-August source build remains gated on regenerating inventory, construction evidence, readiness, and control pins as a new evidence generation. The expanded benchmark independently confirms a large everyday-POI retrieval gap."
 }
