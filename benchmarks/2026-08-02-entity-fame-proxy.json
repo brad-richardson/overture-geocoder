@@ -1,0 +1,263 @@
+{
+  "entities": {
+    "Alloa Tower": {
+      "categories": [
+        "accommodation",
+        "active_life",
+        "atms",
+        "automotive_repair"
+      ],
+      "cohort": "head_list",
+      "example": "Alloa Bridge",
+      "located": true,
+      "name_forms": 131,
+      "records": 140,
+      "sources_max": 2,
+      "sources_median": 2.0,
+      "translations_max": 0,
+      "translations_median": 0.0
+    },
+    "Bancroft Tower": {
+      "categories": [
+        "elementary_school",
+        "hotel",
+        "massage_school",
+        "massage_therapy"
+      ],
+      "cohort": "head_list",
+      "example": "Bancroft School Fieldhouse",
+      "located": true,
+      "name_forms": 6,
+      "records": 7,
+      "sources_max": 7,
+      "sources_median": 4,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Birkenhead Priory": {
+      "categories": [
+        "animal_rescue_service",
+        "antique_store",
+        "aromatherapy",
+        "assisted_living_facility"
+      ],
+      "cohort": "head_list",
+      "example": "5th Birkenhead Scouts",
+      "located": true,
+      "name_forms": 265,
+      "records": 286,
+      "sources_max": 2,
+      "sources_median": 2.0,
+      "translations_max": 0,
+      "translations_median": 0.0
+    },
+    "CN Tower": {
+      "categories": [
+        "condominium",
+        "hotel",
+        "landmark_and_historical_building",
+        "observatory"
+      ],
+      "cohort": "famous",
+      "example": "Lavish Suites- New Two Bedroom - Amazing CN Tower View",
+      "located": true,
+      "name_forms": 13,
+      "records": 15,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Cabot Tower": {
+      "categories": [
+        "assisted_living_facility",
+        "automotive_repair",
+        "bank_credit_union",
+        "banks"
+      ],
+      "cohort": "head_list",
+      "example": "Cabotswood & Quayside Ltd.",
+      "located": true,
+      "name_forms": 45,
+      "records": 47,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Eiffel Tower": {
+      "categories": [
+        "accommodation",
+        "amateur_sports_team",
+        "arts_and_entertainment",
+        "bakery"
+      ],
+      "cohort": "famous",
+      "example": "Eiffel Tower",
+      "located": true,
+      "name_forms": 259,
+      "records": 290,
+      "sources_max": 2,
+      "sources_median": 2.0,
+      "translations_max": 0,
+      "translations_median": 0.0
+    },
+    "Jaywick Martello Tower": {
+      "categories": [
+        "beach",
+        "business_office_supplies_and_stationery",
+        "cafe",
+        "monument"
+      ],
+      "cohort": "head_list",
+      "example": "Jaywick Martello Tower",
+      "located": true,
+      "name_forms": 7,
+      "records": 8,
+      "sources_max": 2,
+      "sources_median": 2.0,
+      "translations_max": 0,
+      "translations_median": 0.0
+    },
+    "Leaning Tower of Pisa": {
+      "categories": [
+        "campground",
+        "central_government_office",
+        "gym",
+        "ice_cream_shop"
+      ],
+      "cohort": "famous",
+      "example": "Camping Village Torre Pendente",
+      "located": true,
+      "name_forms": 5,
+      "records": 5,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Lendal Tower": {
+      "categories": [
+        "bridge",
+        "luggage_storage",
+        "monument",
+        "pub"
+      ],
+      "cohort": "head_list",
+      "example": "Lendal Tower",
+      "located": true,
+      "name_forms": 7,
+      "records": 8,
+      "sources_max": 2,
+      "sources_median": 2.0,
+      "translations_max": 0,
+      "translations_median": 0.0
+    },
+    "The Clock Tower": {
+      "categories": [
+        "landmark_and_historical_building",
+        "topic_concert_venue"
+      ],
+      "cohort": "head_list",
+      "example": "Clock Tower, Palace Of Westminster",
+      "located": true,
+      "name_forms": 5,
+      "records": 5,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "The Round Tower": {
+      "categories": [
+        "monument"
+      ],
+      "cohort": "head_list",
+      "example": "Round Tower",
+      "located": true,
+      "name_forms": 1,
+      "records": 1,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Tokyo Tower": {
+      "categories": [
+        "accommodation",
+        "arts_and_entertainment",
+        "bike_rentals",
+        "cosmetic_and_beauty_supplies"
+      ],
+      "cohort": "famous",
+      "example": "Tokyo Tower",
+      "located": true,
+      "name_forms": 11,
+      "records": 11,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Torre de Belem": {
+      "categories": [
+        "accommodation",
+        "arts_and_entertainment",
+        "asian_restaurant",
+        "bakery"
+      ],
+      "cohort": "head_list",
+      "example": "Ol\u00e1 Bel\u00e9m",
+      "located": true,
+      "name_forms": 114,
+      "records": 121,
+      "sources_max": 2,
+      "sources_median": 2,
+      "translations_max": 0,
+      "translations_median": 0
+    },
+    "Tower Grove House": {
+      "categories": [
+        "assisted_living_facility",
+        "attractions_and_activities",
+        "baptist_church",
+        "cannabis_dispensary"
+      ],
+      "cohort": "head_list",
+      "example": "SSM Health Cardinal Glennon Pediatrics - Danis Pediatrics - Tower Grove",
+      "located": true,
+      "name_forms": 41,
+      "records": 45,
+      "sources_max": 7,
+      "sources_median": 3,
+      "translations_max": 0,
+      "translations_median": 0
+    }
+  },
+  "overture_release": "2026-06-17.0",
+  "schema": "entity-fame-proxy-probe-v1",
+  "token": "tower",
+  "verdict": {
+    "records": {
+      "famous_median": 13.0,
+      "famous_min": 5,
+      "head_list_max": 286,
+      "head_list_median": 26.5,
+      "separates_cleanly": false
+    },
+    "sources_max": {
+      "famous_median": 2.0,
+      "famous_min": 2,
+      "head_list_max": 7,
+      "head_list_median": 2.0,
+      "separates_cleanly": false
+    },
+    "translations_max": {
+      "famous_median": 0.0,
+      "famous_min": 0,
+      "head_list_max": 0,
+      "head_list_median": 0.0,
+      "separates_cleanly": false
+    }
+  }
+}
