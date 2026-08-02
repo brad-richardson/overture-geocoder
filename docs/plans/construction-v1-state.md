@@ -1232,6 +1232,45 @@ refutes record count, `names.common` cardinality, and `sources` count as direct
 orderings for four famous towers versus the ten measured incumbents. It does
 not prove that no entity-fame signal exists anywhere in Overture.
 
+### Upstream Places category migration gate, 2026-08-02
+
+Durable audit:
+`benchmarks/2026-08-02-overture-category-migration-audit.json`.
+
+Overture's July 2026 release notes repeat a concrete deprecation deadline:
+`categories` will be removed in the September 2026 release and replaced by
+`basic_category` plus `taxonomy`. The strict construction-v1 source contract is
+not compatible with that removal. `places_inventory_v1.py` requires
+`categories.primary` and `categories.alternate`, projects no `taxonomy` root,
+and `project_places_construction_v1.py` computes both the displayed category
+and `prominence_rank` from those legacy fields. A September-or-later inventory
+therefore fails closed at schema inspection. Published artifacts are
+self-contained and unaffected, and the frozen June evidence remains true for
+the source it actually measured.
+
+This is not a field-only rename. The July Parquet schema was checked directly:
+the replacement is `taxonomy.primary`, `taxonomy.hierarchy`, and
+`taxonomy.alternates` (**plural**, unlike legacy `categories.alternate`). In a
+bounded one-million-row compatibility probe, 33.8% of old/new primary labels
+differed, 3.4% lacked `taxonomy`, 7.1% lacked a non-empty `basic_category`, and
+73.2% carried legacy alternates while zero sampled rows carried
+`taxonomy.alternates`. The sample is not a geography-balanced quality set, but
+it decisively refutes mechanical substitution. The new `hierarchy` also carries
+general query terms such as `restaurant` that the current single-category
+projection does not preserve.
+
+**Gate:** before constructing Places from the September 2026 release or later,
+add a new source-schema/evidence generation that requires the new taxonomy,
+separates display category from searchable hierarchy terms, and recalibrates
+the prominence table against the renamed/repathed taxonomy. Retain validation
+for the frozen legacy inventory; do not rewrite its evidence or pins. Accept
+the migration only against a provider-neutral, category-stratified benchmark
+covering restaurants and other everyday POIs as well as landmarks.
+
+This is **P0 for the next source upgrade**, not a reason to interrupt the
+current live-artifact producer-admission investigation. If producer admission
+itself requires a fresh post-August source build, this gate moves ahead of it.
+
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
 The 2026-07-31 section below records that promotion's `/v2/forward` smoke as a
