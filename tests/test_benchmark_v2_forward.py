@@ -348,6 +348,73 @@ def test_curated_statue_case_accepts_the_official_nps_unit_name():
     ]
 
 
+def test_curated_big_ben_case_rejects_a_same_named_london_homonym():
+    payload = json.loads(
+        (SCRIPT.parent.parent / "benchmarks/v2-forward-gold-cases-v1.json")
+        .read_text()
+    )
+    case = next(
+        case
+        for case in payload["cases"]
+        if case["id"] == "gold:name_locality:big-ben"
+    )
+    homonym = feature(
+        "50ba72f2-f781-4ab1-93e0-1adc4ac6699b",
+        -0.11420848965644836,
+        51.51083755493164,
+        name="Big Ben",
+    )
+    landmark = feature(
+        "99f74940-898a-49d5-9eca-18a8a2c47918",
+        -0.12457490712404251,
+        51.500701904296875,
+        name="Big Ben",
+    )
+
+    rank, distance, _ = bench.score_case(
+        case, [homonym, landmark], provider="overture", semantic_scoring=True
+    )
+
+    assert rank == 2
+    assert distance is not None and distance < case["tolerance_km"]
+    assert case["tolerance_km"] == 0.25
+
+
+def test_curated_machu_picchu_case_accepts_the_official_citadel_name():
+    payload = json.loads(
+        (SCRIPT.parent.parent / "benchmarks/v2-forward-gold-cases-v1.json")
+        .read_text()
+    )
+    case = next(
+        case
+        for case in payload["cases"]
+        if case["id"] == "gold:name:machu-picchu"
+    )
+    town_side_homonym = feature(
+        "487cc093-6904-4102-b932-d31c32fcd471",
+        -72.52550506591797,
+        -13.15510082244873,
+        name="Machu Picchu",
+    )
+    citadel = feature(
+        "2fe76e46-e532-43ce-bfde-082d27ff1091",
+        -72.54312896728516,
+        -13.165722846984863,
+        name="Ciudadela De Machu Picchu",
+    )
+
+    rank, distance, _ = bench.score_case(
+        case,
+        [town_side_homonym, citadel],
+        provider="overture",
+        semantic_scoring=True,
+    )
+
+    assert rank == 2
+    assert distance is not None and distance < case["tolerance_km"]
+    assert "Ciudadela de Machu Picchu" in case["alt_names"]
+
+
 def test_aggregate_and_summary_math():
     rows = [
         {"kind": "place", "query_style": "name", "strata": {"country": "MC"},

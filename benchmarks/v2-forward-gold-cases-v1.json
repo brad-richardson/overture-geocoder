@@ -225,9 +225,13 @@
       "expected_feature_type": "poi",
       "expected_lat": 51.5007,
       "expected_lon": -0.1246,
-      "tolerance_km": 2.0,
+      "tolerance_km": 0.25,
       "alt_names": [
         "Elizabeth Tower"
+      ],
+      "sources": [
+        "https://www.parliament.uk/about/living-heritage/building/palace/big-ben/",
+        "https://historicengland.org.uk/listing/the-list/list-entry/1226284"
       ]
     },
     {
@@ -239,9 +243,13 @@
       "expected_feature_type": "poi",
       "expected_lat": 51.5007,
       "expected_lon": -0.1246,
-      "tolerance_km": 2.0,
+      "tolerance_km": 0.25,
       "alt_names": [
         "Elizabeth Tower"
+      ],
+      "sources": [
+        "https://www.parliament.uk/about/living-heritage/building/palace/big-ben/",
+        "https://historicengland.org.uk/listing/the-list/list-entry/1226284"
       ]
     },
     {
@@ -275,7 +283,19 @@
       "expected_feature_type": "poi",
       "expected_lat": -13.1631,
       "expected_lon": -72.545,
-      "tolerance_km": 2.0
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Ciudadela de Machu Picchu",
+        "Ciudadela Inka de Machupicchu",
+        "Llaqta de Machupicchu",
+        "Historic Sanctuary of Machu Picchu",
+        "Santuario Histórico de Machu Picchu"
+      ],
+      "sources": [
+        "https://www.gob.pe/institucion/cultura/noticias/645136-ministerio-de-cultura-lanza-campana-sobre-la-importancia-de-cuidar-y-preservar-la-llaqta-de-machupicchu",
+        "https://www.gob.pe/institucion/cultura/noticias/68536-ministerio-de-cultura-declara-patrimonio-cultural-de-la-nacion-4-mil-849-bienes-culturales-muebles-repatriados-de-la-universidad-de-yale",
+        "https://whc.unesco.org/en/list/274/"
+      ]
     },
     {
       "id": "gold:name_locality:machu-picchu",
@@ -286,7 +306,19 @@
       "expected_feature_type": "poi",
       "expected_lat": -13.1631,
       "expected_lon": -72.545,
-      "tolerance_km": 2.0
+      "tolerance_km": 2.0,
+      "alt_names": [
+        "Ciudadela de Machu Picchu",
+        "Ciudadela Inka de Machupicchu",
+        "Llaqta de Machupicchu",
+        "Historic Sanctuary of Machu Picchu",
+        "Santuario Histórico de Machu Picchu"
+      ],
+      "sources": [
+        "https://www.gob.pe/institucion/cultura/noticias/645136-ministerio-de-cultura-lanza-campana-sobre-la-importancia-de-cuidar-y-preservar-la-llaqta-de-machupicchu",
+        "https://www.gob.pe/institucion/cultura/noticias/68536-ministerio-de-cultura-declara-patrimonio-cultural-de-la-nacion-4-mil-849-bienes-culturales-muebles-repatriados-de-la-universidad-de-yale",
+        "https://whc.unesco.org/en/list/274/"
+      ]
     },
     {
       "id": "gold:name:sagrada-familia",
