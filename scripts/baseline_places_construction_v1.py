@@ -297,11 +297,17 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
             has_multilingual = any(
                 value and rust_trim(value) != primary for value in common
             )
+            category_terms = columns.get("category_terms")
+            searchable_category = (
+                text(category_terms, index)
+                if category_terms is not None
+                else text(columns["category"], index)
+            )
             values = [
                 (primary, 1),
                 *((value or "", 1) for value in common),
                 (text(columns["brand_name"], index), 2),
-                (text(columns["category"], index), 4),
+                (searchable_category, 4),
                 (text(columns["locality"], index), 8),
                 (text(columns["region"], index), 8),
                 (text(columns["country"], index), 8),

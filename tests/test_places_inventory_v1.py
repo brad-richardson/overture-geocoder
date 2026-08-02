@@ -12,10 +12,14 @@ if str(SCRIPT_DIR) not in sys.path:
 
 from places_inventory_v1 import (  # noqa: E402
     REQUIRED_FIELD_TYPES,
+    TAXONOMY_REQUIRED_FIELD_TYPES,
+    TAXONOMY_SCHEMA_CONTRACT_VERSION,
     approved_prefix,
     build_inventory,
     canonical_schema_contract,
     list_source_objects,
+    projected_column_roots,
+    schema_profile_name,
     validate_inventory,
 )
 
@@ -35,6 +39,28 @@ def contract(*, nullable_override=None):
             for path, field_type in REQUIRED_FIELD_TYPES.items()
         ]
     )
+
+
+def taxonomy_contract():
+    return canonical_schema_contract(
+        [
+            {"path": path, "type": field_type, "nullable": True}
+            for path, field_type in TAXONOMY_REQUIRED_FIELD_TYPES.items()
+        ]
+    )
+
+
+def test_taxonomy_contract_is_a_new_generation_not_a_legacy_rewrite():
+    legacy = contract()
+    taxonomy = taxonomy_contract()
+    assert legacy["version"] != taxonomy["version"]
+    assert taxonomy["version"] == TAXONOMY_SCHEMA_CONTRACT_VERSION
+    assert schema_profile_name(legacy) == "legacy"
+    assert schema_profile_name(taxonomy) == "taxonomy"
+    assert "categories" in projected_column_roots(legacy)
+    assert "taxonomy" not in projected_column_roots(legacy)
+    assert "taxonomy" in projected_column_roots(taxonomy)
+    assert "categories" not in projected_column_roots(taxonomy)
 
 
 def footer(rows, *, schema=None):

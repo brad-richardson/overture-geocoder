@@ -127,9 +127,12 @@ def test_flatten_batch_is_columnar_and_preserves_nested_values():
 
 
 def test_prominence_degrades_to_primary_only_when_alternate_is_absent():
-    """`categories.alternate` is deliberately not a required contract path --
-    its fingerprint is bound into frozen planet evidence. A source struct
-    without it must still project, using a primary-only prior."""
+    """A pre-v3 standalone projection shape still degrades safely.
+
+    The current strict legacy inventory requires `categories.alternate`, but
+    the lower-level projector remains tolerant for already-materialized and
+    hand-authored legacy inputs.
+    """
     schema = pa.schema(
         [
             ("id", pa.string()),
@@ -198,3 +201,109 @@ def test_prominence_degrades_to_primary_only_when_alternate_is_absent():
     )
     # Projects without raising, and the primary category still separates them.
     assert batch["prominence_rank"].to_pylist() == [255, 0]
+
+
+def test_taxonomy_projection_separates_display_from_search_hierarchy():
+    schema = pa.schema(
+        [
+            ("id", pa.string()),
+            (
+                "names",
+                pa.struct(
+                    [
+                        ("primary", pa.string()),
+                        ("common", pa.map_(pa.string(), pa.string())),
+                    ]
+                ),
+            ),
+            (
+                "brand",
+                pa.struct([("names", pa.struct([("primary", pa.string())]))]),
+            ),
+            (
+                "taxonomy",
+                pa.struct(
+                    [
+                        ("primary", pa.string()),
+                        ("hierarchy", pa.list_(pa.string())),
+                        ("alternates", pa.list_(pa.string())),
+                    ]
+                ),
+            ),
+            ("basic_category", pa.string()),
+            (
+                "addresses",
+                pa.list_(
+                    pa.struct(
+                        [
+                            ("locality", pa.string()),
+                            ("region", pa.string()),
+                            ("country", pa.string()),
+                        ]
+                    )
+                ),
+            ),
+            ("confidence", pa.float64()),
+            ("operating_status", pa.string()),
+            ("geometry", pa.binary()),
+        ]
+    )
+    table = pa.Table.from_pylist(
+        [
+            {
+                "id": "00000000-0000-0000-0000-000000000005",
+                "names": {"primary": "Golden Dragon", "common": []},
+                "brand": None,
+                "taxonomy": {
+                    "primary": "cantonese_restaurant",
+                    "hierarchy": [
+                        "food_and_drink",
+                        "restaurant",
+                        "asian_restaurant",
+                        "cantonese_restaurant",
+                    ],
+                    "alternates": ["takeout_restaurant"],
+                },
+                "basic_category": "restaurant",
+                "addresses": [],
+                "confidence": 1.0,
+                "operating_status": "open",
+                "geometry": b"point5",
+            },
+            {
+                "id": "00000000-0000-0000-0000-000000000006",
+                "names": {"primary": "City Collection", "common": []},
+                "brand": None,
+                "taxonomy": {
+                    "primary": "specialty_museum",
+                    "hierarchy": [
+                        "arts_and_entertainment",
+                        "museum",
+                        "specialty_museum",
+                    ],
+                    "alternates": [],
+                },
+                "basic_category": "museum",
+                "addresses": [],
+                "confidence": 0.5,
+                "operating_status": "open",
+                "geometry": b"point6",
+            },
+        ],
+        schema=schema,
+    )
+    batch = projection.flatten_batch(
+        table.to_batches()[0], object_index=1, row_group=2, row_offset=3
+    )
+    assert batch["category"].to_pylist() == [
+        "cantonese_restaurant",
+        "specialty_museum",
+    ]
+    assert batch["category_terms"].to_pylist() == [
+        (
+            "cantonese_restaurant restaurant food_and_drink "
+            "asian_restaurant takeout_restaurant"
+        ),
+        "specialty_museum museum arts_and_entertainment",
+    ]
+    assert batch["prominence_rank"].to_pylist() == [0, round(0.85 * 255)]

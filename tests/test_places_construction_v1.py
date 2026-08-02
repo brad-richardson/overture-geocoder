@@ -44,40 +44,42 @@ def write_fixture(path: Path, rows: list[dict], *, row_group_size: int = 4) -> N
     def values(name: str, default):
         return [row.get(name, default) for row in rows]
 
-    table = pa.Table.from_arrays(
-        [
-            pa.array(values("id", None), type=pa.string()),
-            pa.array(values("primary_name", ""), type=pa.string()),
-            pa.array(values("common_names", []), type=pa.list_(pa.string())),
-            pa.array(values("brand_name", ""), type=pa.string()),
-            pa.array(values("category", ""), type=pa.string()),
-            pa.array(values("locality", ""), type=pa.string()),
-            pa.array(values("region", ""), type=pa.string()),
-            pa.array(values("country", ""), type=pa.string()),
-            pa.array(values("confidence", 0.5), type=pa.float64()),
-            pa.array(values("operating_status", "open"), type=pa.string()),
-            pa.array([geometry(row) for row in rows], type=pa.binary()),
-            pa.array(values("source_object_index", 0), type=pa.int32()),
-            pa.array(values("source_row_group", 0), type=pa.int32()),
-            pa.array(values("source_row_index", 0), type=pa.int32()),
-        ],
-        names=[
-            "id",
-            "primary_name",
-            "common_names",
-            "brand_name",
-            "category",
-            "locality",
-            "region",
-            "country",
-            "confidence",
-            "operating_status",
-            "geometry",
-            "source_object_index",
-            "source_row_group",
-            "source_row_index",
-        ],
-    )
+    arrays = [
+        pa.array(values("id", None), type=pa.string()),
+        pa.array(values("primary_name", ""), type=pa.string()),
+        pa.array(values("common_names", []), type=pa.list_(pa.string())),
+        pa.array(values("brand_name", ""), type=pa.string()),
+        pa.array(values("category", ""), type=pa.string()),
+        pa.array(values("locality", ""), type=pa.string()),
+        pa.array(values("region", ""), type=pa.string()),
+        pa.array(values("country", ""), type=pa.string()),
+        pa.array(values("confidence", 0.5), type=pa.float64()),
+        pa.array(values("operating_status", "open"), type=pa.string()),
+        pa.array([geometry(row) for row in rows], type=pa.binary()),
+        pa.array(values("source_object_index", 0), type=pa.int32()),
+        pa.array(values("source_row_group", 0), type=pa.int32()),
+        pa.array(values("source_row_index", 0), type=pa.int32()),
+    ]
+    names = [
+        "id",
+        "primary_name",
+        "common_names",
+        "brand_name",
+        "category",
+        "locality",
+        "region",
+        "country",
+        "confidence",
+        "operating_status",
+        "geometry",
+        "source_object_index",
+        "source_row_group",
+        "source_row_index",
+    ]
+    if any("category_terms" in row for row in rows):
+        arrays.insert(5, pa.array(values("category_terms", ""), type=pa.string()))
+        names.insert(5, "category_terms")
+    table = pa.Table.from_arrays(arrays, names=names)
     pq.write_table(table, path, row_group_size=row_group_size)
 
 
@@ -232,6 +234,27 @@ def test_hand_authored_places_transform_contract(tmp_path, transform_binary):
     assert all(
         value == expected["duplicate_feature"]["terms"] for value in copies.values()
     )
+
+
+def test_taxonomy_category_terms_are_searchable_but_display_stays_primary(
+    tmp_path, transform_binary
+):
+    row = {
+        "id": str(uuid.UUID(int=99)),
+        "primary_name": "Golden Dragon",
+        "category": "cantonese_restaurant",
+        "category_terms": (
+            "cantonese_restaurant restaurant food_and_drink asian_restaurant"
+        ),
+        "confidence": 0.8,
+        "source_row_index": 0,
+    }
+    report, table = run_transform(tmp_path, transform_binary, [row])
+    assert report["admitted_features"] == 1
+    terms = dict(zip(table["token"].to_pylist(), table["field_mask"].to_pylist()))
+    assert terms["restaurant"] == 4
+    assert terms["food_and_drink"] == 4
+    assert set(table["category"].to_pylist()) == {"cantonese_restaurant"}
 
 
 def test_places_locator_bounds_and_typed_corruption(tmp_path, transform_binary):

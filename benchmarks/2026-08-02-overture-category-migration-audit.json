@@ -1,0 +1,93 @@
+{
+  "schema": "overture-category-migration-audit-v1",
+  "observed_at": "2026-08-02T00:00:00Z",
+  "source_release": "2026-07-22.0",
+  "source_schema_version": "v1.18.0",
+  "primary_sources": {
+    "release_notes": "https://docs.overturemaps.org/blog/2026/07/22/release-notes/",
+    "taxonomy_guide": "https://docs.overturemaps.org/guides/places/taxonomy/",
+    "taxonomy_schema": "https://docs.overturemaps.org/schema/reference/places/types/taxonomy/",
+    "place_schema": "https://github.com/OvertureMaps/schema/blob/main/schema/places/place.yaml"
+  },
+  "upstream_contract": {
+    "deprecated_property": "categories",
+    "announced_removal_window": "September 2026",
+    "currently_scheduled_release": "2026-09-23.0",
+    "replacement_properties": [
+      "basic_category",
+      "taxonomy"
+    ],
+    "observed_parquet_types": {
+      "basic_category": "string",
+      "taxonomy": "struct<primary:string,hierarchy:list<string>,alternates:list<string>>",
+      "categories": "struct<primary:string,alternate:list<string>>"
+    },
+    "field_name_warning": "The new field is taxonomy.alternates (plural); legacy categories.alternate is singular."
+  },
+  "bounded_data_probe": {
+    "method": "DuckDB read of the first 1000000 rows returned by the public July Places Parquet glob; bounded compatibility probe, not a random or geography-balanced sample",
+    "rows": 1000000,
+    "counts": {
+      "categories_null": 31307,
+      "taxonomy_null": 34217,
+      "basic_category_null_or_empty": 71124,
+      "taxonomy_primary_null_or_empty": 34217,
+      "legacy_and_taxonomy_primary_different": 337568,
+      "legacy_alternate_present": 732034,
+      "taxonomy_alternates_present": 0,
+      "taxonomy_and_basic_both_absent": 31552,
+      "legacy_primary_present_while_taxonomy_absent": 2910,
+      "taxonomy_present_while_basic_absent": 39572,
+      "basic_present_while_taxonomy_absent": 2665,
+      "legacy_landmark_primary_mapped_to_historic_site": 8854
+    },
+    "interpretation": [
+      "taxonomy is not yet a mechanically equivalent row-for-row replacement in this bounded sample",
+      "a third of sampled primary labels changed, so the static prominence tables require recalibration",
+      "legacy alternate categories currently carry signal that taxonomy.alternates did not carry in this sample",
+      "the new taxonomy hierarchy carries generalization terms such as restaurant and must be evaluated as searchable category evidence"
+    ]
+  },
+  "repository_migration": {
+    "inventory": "a v2 source-schema contract requires basic_category plus taxonomy.primary/hierarchy/alternates; auto preserves the legacy contract while categories exists, and --schema-profile taxonomy permits a deliberate July compatibility build",
+    "projection": "the v2 physical projection keeps taxonomy.primary as display category with basic_category fallback and emits a separate ordered category_terms field from primary, basic, hierarchy, and alternates",
+    "prior": "taxonomy hierarchy participates in both commodity suppression and prominence; historic_site inherits the measured-noisy legacy landmark weight of 0.35",
+    "serving": "the transform tokenizes category_terms under the existing category field mask while retaining the single display category",
+    "legacy_compatibility": "the v1 inventory fingerprint, physical projection, transform fallback, and frozen June evidence remain unchanged"
+  },
+  "failure_mode": {
+    "september_or_later_inventory": "auto selects the taxonomy contract once categories is absent and still fails closed if any required basic_category or taxonomy path/type/nullability drifts",
+    "live_artifacts": "unaffected; published PLHD/PLRV/PCSH artifacts are self-contained",
+    "current_june_evidence": "remains valid for its pinned 2026-06-17.0 source and must not be rewritten"
+  },
+  "required_migration_before_post_august_source_build": [
+    "DONE: introduce a new source-schema contract generation requiring basic_category and taxonomy.primary/hierarchy/alternates while retaining validation for the frozen legacy inventory",
+    "DONE: define display-category fallback independently from searchable category terms",
+    "DONE: recalibrate the known noisy historic-site mapping and generalize existing priors through taxonomy hierarchy",
+    "DONE: measure named everyday POIs across five families; keep generic origin-dependent category intent in a separate future semantic benchmark",
+    "regenerate inventory, construction evidence, readiness, and control pins as a new evidence generation"
+  ],
+  "expanded_external_benchmark": {
+    "artifact": "benchmarks/2026-08-02-forward-gold-external-poi-expanded.json",
+    "cases": 55,
+    "new_everyday_poi_cases": 20,
+    "families": [
+      "food_drink",
+      "retail",
+      "lodging",
+      "healthcare",
+      "civic_transit"
+    ],
+    "named_poi_recall_at_10": {
+      "overture": 0.353,
+      "nominatim": 0.765,
+      "photon": 0.765
+    },
+    "brand_branch_recall_at_10": {
+      "overture": 0.0,
+      "nominatim": 0.667,
+      "photon": 1.0
+    }
+  },
+  "decision": "Compatibility code is implemented without rewriting legacy evidence. A post-August source build remains gated on regenerating inventory, construction evidence, readiness, and control pins as a new evidence generation. The expanded benchmark independently confirms a large everyday-POI retrieval gap."
+}

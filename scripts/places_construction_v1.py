@@ -983,7 +983,10 @@ def map_task(
         if (
             not isinstance(projection_identity, dict)
             or projection_identity.get("schema")
-            != "overture-places-construction-v1-physical-arrow-v1"
+            not in {
+                "overture-places-construction-v1-physical-arrow-v1",
+                "overture-places-construction-v1-physical-arrow-v2",
+            }
             or projection_identity.get("expected_input_records")
             != parquet.metadata.num_rows
             or not isinstance(projection_identity.get("inventory_sha256"), str)
