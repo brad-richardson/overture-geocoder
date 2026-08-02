@@ -165,7 +165,11 @@
       "expected_lon": -74.0445,
       "tolerance_km": 2.0,
       "alt_names": [
-        "Liberty Enlightening the World"
+        "Liberty Enlightening the World",
+        "Statue of Liberty National Monument"
+      ],
+      "sources": [
+        "https://www.nps.gov/npnh/learn/news/fact-sheet-stli.htm"
       ]
     },
     {

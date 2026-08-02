@@ -1,16 +1,19 @@
 # construction-v1: current state
 
 Last updated 2026-08-02 after the saturated-posting Worker correction was
-deployed and measured live. Read, in order: "Planet Places rebuild and
-promotion, 2026-08-02" and "Head saturated-posting correction, 2026-08-02".
+deployed and measured live, then the remaining head misses were separated by
+live producer-posting evidence. Read, in order: "Planet Places rebuild and
+promotion, 2026-08-02", "Head saturated-posting correction, 2026-08-02", and
+"RC3 and remaining admission split, 2026-08-02".
 
 **RC2 is closed; do not reopen the head intersection or start another
 undirected rebuild.** Worker commit `3d3b33c` is live and the same 35-case gold
-set moved name-only head recall@10 from 2/10 to 5/10. The five remaining
-name-only misses split cleanly into two known three-token RC3 cases and three
-two-token cases whose per-token admission still needs to be inspected. That
-bounded split is the next gate: test the RC3 Worker shape and inspect the three
-two-token producer postings before choosing any build-side change.
+set moved name-only head recall@10 from 2/10 to 5/10. Live token and pair probes
+now show that only Statue of Liberty is recoverable by widening the Worker head
+from two to three tokens. Empire State Building, Big Ben, and Brandenburg Gate
+are absent from every relevant capped posting; Machu Picchu is already rank 1
+but 0.291 km outside the gold tolerance. **The next gate is the bounded RC3
+Worker deployment and the same live gold/external measurement, not a rebuild.**
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -589,12 +592,12 @@ needs stating before anyone implements against the phrase.
 ### Still open, unscheduled
 
 RC2 is closed by deployed Worker commit `3d3b33c` and the live measurement in
-"Head saturated-posting correction, 2026-08-02". RC3 (three tokens never touch
-the head), duplicate collapse, and any future `head_result_cap` change remain
-unscheduled. The next bounded investigation is the five remaining name-only
-misses: test the two three-token cases against an RC3 Worker shape and inspect
-producer-posting membership for Big Ben, Machu Picchu, and Brandenburg Gate.
-Do not bundle those two mechanisms into another ranking or rebuild pass.
+"Head saturated-posting correction, 2026-08-02". The bounded RC3 Worker change
+is implemented locally and awaits deployment plus live measurement. Duplicate
+collapse, producer admission for Empire State Building / Big Ben / Brandenburg
+Gate, and any future `head_result_cap` change remain unscheduled. Machu Picchu
+is not part of that producer-admission work. Do not bundle these mechanisms
+into another ranking or rebuild pass.
 
 ## Current snapshot
 
@@ -1046,11 +1049,50 @@ data version remained `2026-08-02.0`; this was a Worker-only change.
 
 **RC2 is closed.** The saturated-posting mechanism was real, the targeted
 Eiffel Tower case now resolves, and three exact IDs crossed the retrieval gate.
-The remaining five name-only misses are not one undifferentiated problem:
-Statue of Liberty and Empire State Building are blocked by RC3's `> 2` token
-guard, while Big Ben, Machu Picchu, and Brandenburg Gate have two tokens and
-need producer-posting admission inspection. Do not infer that raising the cap,
-changing ordering, or rebuilding again fixes both groups.
+The remaining misses were then separated by the probe below; the earlier
+two-RC3/three-two-token split was only a query-shape hypothesis.
+
+### RC3 and remaining admission split, 2026-08-02
+
+The live POI-only probe is
+`benchmarks/2026-08-02-head-token-admission-probe.json`. Every constituent
+single-token request used `types=poi&limit=10`; all postings returned ten rows,
+so absence is producer-cap absence rather than a short authoritative posting.
+Two-token projections use the already-live saturated merge to answer whether
+any current posting can seed the target.
+
+| gold miss | live posting evidence | classification |
+|---|---|---|
+| Statue of Liberty | target National Monument is rank 8 for `liberty`, absent from saturated `statue` / `of`; `Statue Liberty` recovers it at rank 3 | RC3 Worker-recoverable |
+| Empire State Building | absent from all three token postings; all three two-token projections empty | producer admission, not RC3 alone |
+| Big Ben | absent from both postings; pair returns only an Ontario memorial | producer admission |
+| Brandenburg Gate | absent from both postings; pair empty | producer admission |
+| Machu Picchu | exact-name candidate is already rank 1, 2.291 km from gold | retrieval succeeds; strict spatial-contract miss |
+
+The Statue candidate is named `Statue Of Liberty National Monument`, the name
+used by the US National Park Service. The curated case now accepts that official
+unit name and records the NPS fact sheet as its source; this is a benchmark
+correction independent of the Worker cap.
+
+The local RC3 change raises one shared global-head token cap from two to three
+for both construction-v1 and legacy readers. The saturated merge already
+handles three postings; the new maximum is three bounded head reads, not an
+unbounded fan-out. Four-token queries remain fail-closed. A focused regression
+models the live Statue shape: the target appears only in the selective
+`liberty` posting and its display name proves the two missing saturated tokens.
+
+An external provider-neutral baseline was also run and saved as
+`benchmarks/2026-08-02-forward-gold-external-before-rc3.json` (35 cases, zero
+errors). Overall r@10 was Overture 0.571, Nominatim 0.914, Photon 0.943; on the
+ten name-only cases it was 0.500 / 0.800 / 0.800. Big Ben missed under the same
+semantic gold contract for all three providers, while Machu Picchu missed for
+Overture and Nominatim but ranked 2 in Photon. Those cases need entity/gold
+review before they are used to justify an admission design.
+
+**No live RC3 result is claimed yet.** Deploy the three-token Worker, rerun the
+same 35-case gold set and the provider-neutral comparison, and require Statue
+of Liberty to cross the retrieval gate without regression. Empire State
+Building is explicitly not predicted to move.
 
 The bounded `tower` proxy probe in `b8e3151` also needs to be read narrowly. It
 refutes record count, `names.common` cardinality, and `sources` count as direct

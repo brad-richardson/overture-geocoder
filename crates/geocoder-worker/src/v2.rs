@@ -21,8 +21,8 @@ use crate::address_construction_v1::{
 use crate::places_construction_v1::{
     construction_cell, head_shard_id, head_shard_lookup, merge_head_candidates,
     merge_routed_candidates, record_projection, routed_fetch_plan,
-    supports_places_construction_format, HeadRoutingManifest, PlacesRouting, MAX_HEAD_SHARD_BYTES,
-    MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
+    supports_places_construction_format, HeadRoutingManifest, PlacesRouting, HEAD_QUERY_TOKEN_CAP,
+    MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
 };
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
@@ -2012,7 +2012,7 @@ async fn search_places_construction(
         }
         return Ok(results);
     }
-    if tokens.len() > 2 {
+    if tokens.len() > HEAD_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
     let head_manifest_key = format!("{object_root}/objects/{}", routing.head.manifest_object);
@@ -2098,7 +2098,7 @@ async fn search_places(
         lookup.results.truncate(limit);
         return Ok(lookup.results);
     }
-    if tokens.len() > 2 {
+    if tokens.len() > HEAD_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
     let clauses = tokens

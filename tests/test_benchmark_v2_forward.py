@@ -320,6 +320,34 @@ def test_score_case_accepts_alt_names_and_accents():
     assert rank == 1
 
 
+def test_curated_statue_case_accepts_the_official_nps_unit_name():
+    payload = json.loads(
+        (SCRIPT.parent.parent / "benchmarks/v2-forward-gold-cases-v1.json")
+        .read_text()
+    )
+    case = next(
+        case
+        for case in payload["cases"]
+        if case["id"] == "gold:name:statue-of-liberty"
+    )
+    observed = feature(
+        "707ad7cf-7faf-495f-8b9e-6e0cd8807c25",
+        -74.04000091552734,
+        40.698612213134766,
+        name="Statue Of Liberty National Monument",
+    )
+
+    rank, distance, _ = bench.score_case(
+        case, [observed], provider="overture", semantic_scoring=True
+    )
+
+    assert rank == 1
+    assert distance is not None and distance < case["tolerance_km"]
+    assert case["sources"] == [
+        "https://www.nps.gov/npnh/learn/news/fact-sheet-stli.htm"
+    ]
+
+
 def test_aggregate_and_summary_math():
     rows = [
         {"kind": "place", "query_style": "name", "strata": {"country": "MC"},

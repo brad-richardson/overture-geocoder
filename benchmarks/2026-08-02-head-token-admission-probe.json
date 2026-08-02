@@ -1,0 +1,105 @@
+{
+  "schema": "head-token-admission-probe-v1",
+  "timestamp": "2026-08-02T19:12:35Z",
+  "endpoint": "https://geocoder.bradr.dev/v2/forward",
+  "worker_git_sha": "3d3b33c",
+  "data_version": "2026-08-02.0",
+  "request_contract": {
+    "types": "poi",
+    "limit": 10,
+    "producer_posting_cap": 10,
+    "method": "Query every constituent token and every diagnostic two-token projection through the POI-only global-head lane. A ten-result single-token response is saturated. A target present in one posting can be recovered from other saturated postings only when its stored display fields prove the missing tokens."
+  },
+  "cases": [
+    {
+      "query": "Statue of Liberty",
+      "expected_lat": 40.6892,
+      "expected_lon": -74.0445,
+      "classification": "rc3_worker_recoverable",
+      "official_accepted_name": "Statue of Liberty National Monument",
+      "official_name_source": "https://www.nps.gov/npnh/learn/news/fact-sheet-stli.htm",
+      "matching_candidate": {
+        "id": "707ad7cf-7faf-495f-8b9e-6e0cd8807c25",
+        "name": "Statue Of Liberty National Monument",
+        "longitude": -74.04000091552734,
+        "latitude": 40.698612213134766
+      },
+      "single_tokens": [
+        {"query": "statue", "result_count": 10, "candidate_rank": null},
+        {"query": "of", "result_count": 10, "candidate_rank": null},
+        {"query": "liberty", "result_count": 10, "candidate_rank": 8}
+      ],
+      "pair_controls": [
+        {"query": "Statue Liberty", "result_count": 4, "candidate_rank": 3}
+      ],
+      "conclusion": "The liberty posting seeds the candidate. The saturated statue and of postings may be proven from its stored display name, so raising the bounded head query width from two to three is sufficient."
+    },
+    {
+      "query": "Empire State Building",
+      "expected_lat": 40.7484,
+      "expected_lon": -73.9857,
+      "classification": "producer_admission_miss",
+      "single_tokens": [
+        {"query": "empire", "result_count": 10, "candidate_rank": null},
+        {"query": "state", "result_count": 10, "candidate_rank": null},
+        {"query": "building", "result_count": 10, "candidate_rank": null}
+      ],
+      "pair_controls": [
+        {"query": "Empire Building", "result_count": 0, "candidate_rank": null},
+        {"query": "Empire State", "result_count": 0, "candidate_rank": null},
+        {"query": "State Building", "result_count": 0, "candidate_rank": null}
+      ],
+      "conclusion": "No constituent posting or two-token projection retrieves the landmark. Removing the three-token guard alone cannot seed it."
+    },
+    {
+      "query": "Big Ben",
+      "expected_lat": 51.5007,
+      "expected_lon": -0.1246,
+      "classification": "producer_admission_miss",
+      "single_tokens": [
+        {"query": "big", "result_count": 10, "candidate_rank": null},
+        {"query": "ben", "result_count": 10, "candidate_rank": null}
+      ],
+      "pair_controls": [
+        {"query": "Big Ben", "result_count": 1, "candidate_rank": null}
+      ],
+      "conclusion": "The only pair result is Big Ben Memorial Statue in Ontario; the London landmark is absent from both capped postings."
+    },
+    {
+      "query": "Brandenburg Gate",
+      "expected_lat": 52.5163,
+      "expected_lon": 13.3777,
+      "classification": "producer_admission_miss",
+      "single_tokens": [
+        {"query": "brandenburg", "result_count": 10, "candidate_rank": null},
+        {"query": "gate", "result_count": 10, "candidate_rank": null}
+      ],
+      "pair_controls": [
+        {"query": "Brandenburg Gate", "result_count": 0, "candidate_rank": null}
+      ],
+      "conclusion": "The landmark is absent from both capped postings; query-time saturated recovery has no candidate to seed."
+    },
+    {
+      "query": "Machu Picchu",
+      "expected_lat": -13.1631,
+      "expected_lon": -72.545,
+      "tolerance_km": 2.0,
+      "classification": "retrieved_spatial_contract_miss",
+      "exact_name_candidate": {
+        "id": "487cc093-6904-4102-b932-d31c32fcd471",
+        "name": "Machu Picchu",
+        "longitude": -72.52550506591797,
+        "latitude": -13.15510082244873,
+        "distance_from_gold_km": 2.291
+      },
+      "single_tokens": [
+        {"query": "machu", "result_count": 10, "candidate_rank": 1},
+        {"query": "picchu", "result_count": 10, "candidate_rank": 2}
+      ],
+      "pair_controls": [
+        {"query": "Machu Picchu", "result_count": 10, "candidate_rank": 1}
+      ],
+      "conclusion": "Retrieval and intersection already succeed. The exact-name top result is 0.291 km outside the deliberately strict gold tolerance, so this is not an admission defect."
+    }
+  ]
+}
