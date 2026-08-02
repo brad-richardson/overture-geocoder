@@ -60,24 +60,27 @@ REQUIRED_FIELD_TYPES: dict[str, str] = {
     "brand.names": "struct",
     "brand.names.primary": "string",
     "categories": "struct",
+    # REQUIRED as of 2026-08-01, for the Places-only planet rebuild.
+    #
+    # It carries the POI prominence signal and the projection reads it (see
+    # `_prominence_rank_array` in project_places_construction_v1.py). It was held
+    # out of this contract deliberately when the prior landed (`cfb9601`),
+    # because the contract is matched by EXACT SET EQUALITY and its fingerprint
+    # is bound into frozen evidence -- so requiring it invalidates that chain,
+    # and the only honest restoration is to re-run the evidence production
+    # rather than rewrite the files. Until then the projection degraded to a
+    # primary-only prior, which is a deliberately weakened signal.
+    #
+    # Promoting it is honest here for a reason that is empirical, not
+    # procedural: the inventory learns nullability from the real release and
+    # requires it IDENTICAL across every source object, so a successful
+    # regeneration is itself the proof that the release satisfies the stricter
+    # contract -- i.e. the recorded runs already met it, we simply were not
+    # checking. `categories` was already in PROJECTED_COLUMN_ROOTS, so no new
+    # column group is read and the map plan and totals are unchanged; only the
+    # declaration and its fingerprint move.
+    "categories.alternate": "list<string>",
     "categories.primary": "string",
-    # DELIBERATELY ABSENT: `categories.alternate`.
-    #
-    # It carries the POI prominence signal and the projection DOES read it (see
-    # `_prominence_rank_array` in project_places_construction_v1.py); `categories`
-    # is already in PROJECTED_COLUMN_ROOTS so the column group costs nothing
-    # extra. It is not listed here because this contract is matched by exact set
-    # equality, and its fingerprint is bound into FROZEN EVIDENCE from real
-    # planet runs -- `benchmarks/places-construction-v1-data/evidence/*.json`
-    # and the pinned `readiness-v2.json` all record
-    # inventory_sha256 b1830aee... / schema_fingerprint 49453ed2....
-    #
-    # Requiring the field would invalidate that whole attestation chain and the
-    # only honest way to restore it is to RE-RUN the readiness/evidence
-    # production, not to rewrite the files. The projection therefore treats
-    # `alternate` as optional and falls back to a primary-only prior when a
-    # source lacks it. Promote it to required in the same change that
-    # regenerates evidence for the next planet build.
     "confidence": "float64",
     "geometry": "binary",
     "id": "string",

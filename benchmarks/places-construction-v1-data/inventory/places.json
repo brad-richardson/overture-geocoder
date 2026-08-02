@@ -1,6 +1,6 @@
 {
   "family": "places",
-  "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+  "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
   "map_plan": {
     "limits": {
       "max_groups": 64,
@@ -3591,7 +3591,7 @@
           "selected_uncompressed_bytes": 1974366
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00000-6c973aba-862d-590f-a178-70bcd31cde1c-c000.zstd.parquet"
     },
     {
@@ -6673,7 +6673,7 @@
           "selected_uncompressed_bytes": 1414625
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00001-ddbf8ca5-c261-5b5f-b256-7c40face457a-c000.zstd.parquet"
     },
     {
@@ -9755,7 +9755,7 @@
           "selected_uncompressed_bytes": 1460881
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00002-85d36905-50d8-5942-afcd-d2023ce6f0f4-c000.zstd.parquet"
     },
     {
@@ -12837,7 +12837,7 @@
           "selected_uncompressed_bytes": 1704383
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00003-75b82572-735d-583c-96ed-02855140d06a-c000.zstd.parquet"
     },
     {
@@ -14383,7 +14383,7 @@
           "selected_uncompressed_bytes": 2668694
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00004-b0dde21c-44b9-5d05-b241-b7564f8a1cfb-c000.zstd.parquet"
     },
     {
@@ -15929,7 +15929,7 @@
           "selected_uncompressed_bytes": 3187187
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00005-d4b9467d-61b3-5509-90bd-2a4bb0f392fb-c000.zstd.parquet"
     },
     {
@@ -19011,7 +19011,7 @@
           "selected_uncompressed_bytes": 1759997
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00006-69fa6c57-1b3b-5f37-98ba-da6c075020be-c000.zstd.parquet"
     },
     {
@@ -20557,7 +20557,7 @@
           "selected_uncompressed_bytes": 1986377
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00007-2aa05b02-fb39-5684-84f8-0809b022962c-c000.zstd.parquet"
     },
     {
@@ -22103,7 +22103,7 @@
           "selected_uncompressed_bytes": 2506897
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00008-9948bcca-a3ba-57bc-b8c5-5be66a334798-c000.zstd.parquet"
     },
     {
@@ -23649,7 +23649,7 @@
           "selected_uncompressed_bytes": 2156741
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00009-2ac6726c-52ad-5fb6-8dd8-f57fb773f9c2-c000.zstd.parquet"
     },
     {
@@ -25195,7 +25195,7 @@
           "selected_uncompressed_bytes": 2729037
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00010-dcfd1843-7c1b-534c-b477-ed80dbbb5ad3-c000.zstd.parquet"
     },
     {
@@ -26741,7 +26741,7 @@
           "selected_uncompressed_bytes": 3177648
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00011-bfc558ea-f8d3-5948-b8fa-451c7311e005-c000.zstd.parquet"
     },
     {
@@ -28287,7 +28287,7 @@
           "selected_uncompressed_bytes": 2858207
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00012-09d51a62-b2e8-5a1a-a8f5-0cedf1b1d6c8-c000.zstd.parquet"
     },
     {
@@ -29833,7 +29833,7 @@
           "selected_uncompressed_bytes": 2488373
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00013-2c19a775-e79a-5ef4-a6f4-3d940428b192-c000.zstd.parquet"
     },
     {
@@ -31379,7 +31379,7 @@
           "selected_uncompressed_bytes": 3898559
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00014-2ab6d75c-0e1b-53e0-b09a-b2a6352dd8c7-c000.zstd.parquet"
     },
     {
@@ -32925,7 +32925,7 @@
           "selected_uncompressed_bytes": 3368690
         }
       ],
-      "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+      "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
       "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00015-0027dc1a-a5a9-54b5-9b90-bb721c5264fd-c000.zstd.parquet"
     }
   ],
@@ -32980,6 +32980,11 @@
       },
       {
         "nullable": true,
+        "path": "categories.alternate",
+        "type": "list<string>"
+      },
+      {
+        "nullable": true,
         "path": "categories.primary",
         "type": "string"
       },
@@ -33019,7 +33024,7 @@
         "type": "string"
       }
     ],
-    "fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+    "fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
     "version": "overture-places-required-schema-v1"
   },
   "source_prefix": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/",

@@ -1,0 +1,23 @@
+{
+  "schema": "overture-places-construction-v1-host-provenance-v1",
+  "hosts": {
+    "bradflix": {
+      "hostname": "bradflix",
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "cores": 20,
+      "os": "Ubuntu 24.04",
+      "arch": "x86_64"
+    },
+    "brads-macbook-air": {
+      "hostname": "Brads-MacBook-Air",
+      "cpu": "Apple M4",
+      "cores": 10,
+      "os": "macOS 26.5.2",
+      "arch": "arm64"
+    }
+  },
+  "task_run_host": "bradflix",
+  "census_host": "brads-macbook-air",
+  "rehearsal_host": "bradflix",
+  "note": "V3 GENERATION, 2026-08-02, for the contract that requires `categories.alternate`. WHAT WAS RE-MEASURED: all seven task runs (tasks 1, 13, 73, 76, 85, 86, 87) were re-executed on 'bradflix' against the regenerated inventory (inventory_sha256 9ea4eff6..., schema_fingerprint 31809dba...), because a task run embeds its projection report and that report binds the contract hashes. Every one reported binding_equal=true and deterministic=true. WHAT WAS CARRIED FORWARD from the v2 generation, unchanged: the twelve census reports and the functional rehearsal. Both are carried rather than re-run because neither records any contract hash -- census measures hardware-independent token-universe metrics, and the rehearsal measures map/plan/reduce/head behaviour -- so the contract change cannot invalidate them, and re-running them would produce different timings without producing a different claim. The v2 generation is retained alongside this one rather than overwritten; it remains the true attestation of the runs it describes. Host characteristics are otherwise as recorded in v2: the laptop exhibits ~2.6x single-threaded Python-baseline timing variance under sustained thermal load, which corrupts the candidate-vs-baseline speedup ratio but never affects binding equality or determinism."
+}

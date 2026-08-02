@@ -36,16 +36,28 @@ FAMILIES = {
         "task_source": "readiness",
         "construction": "address-construction-v1",
     },
+    # V3 EVIDENCE GENERATION, 2026-08-02. The v2 generation is retained on disk
+    # (readiness-v2.json, scale-evidence-v3's predecessor, host-provenance-v2.json)
+    # rather than overwritten: it remains the true attestation of the runs it
+    # describes, and rewriting it to match a contract it never ran under is the
+    # falsification this project refuses. Same reason v1 was kept beside v2.
+    #
+    # What changed: `categories.alternate` is now REQUIRED, so the schema
+    # fingerprint and inventory hash move. Nothing else does -- the regenerated
+    # inventory differs from its predecessor in exactly 19 leaves, ALL of them
+    # contract-or-hash, with the map plan and every total byte-identical (89 map
+    # tasks, 16 objects, 75,642,289 records, 5,120 row groups). `categories` was
+    # already in PROJECTED_COLUMN_ROOTS, so no new column group is read.
     "places": {
         "inventory": "benchmarks/places-construction-v1-data/inventory/places.json",
-        "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
-        "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
-        "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+        "inventory_file_sha256": "643f52eeafced086f333b530334094232219a6fecbcf46ee0565797fa8227570",
+        "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
+        "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
         "spec": "benchmarks/places-construction-v1-evidence-spec-v2.json",
         "spec_sha256": "5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d",
-        "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v2.json",
-        "readiness_file_sha256": "9398d3a2262f83d197df1fc5c439b5438a704365a14dd38c7de37dc324a59010",
-        "scale_evidence_sha256": "71afc784d340b2c031ef70caef852daca12f947b205358388944962efda2e148",
+        "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v3.json",
+        "readiness_file_sha256": "a4efd1e7b4198a077c4678b40cab22d3c3dafe18df2dce5362df1f1714873265",
+        "scale_evidence_sha256": "9b9f31f83d8671fd06be1550ec3603fbe21ea9c4ea6ce2b159cb887ac1462ae4",
         "task_source": "inventory",
         "construction": "places-construction-v1",
     },

@@ -1,0 +1,696 @@
+{
+  "schema": "overture-places-construction-v1-scale-evidence-v1",
+  "evidence_spec_sha256": "5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d",
+  "inventory_file_sha256": "643f52eeafced086f333b530334094232219a6fecbcf46ee0565797fa8227570",
+  "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
+  "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
+  "provenance": {
+    "schema": "overture-places-construction-v1-host-provenance-v1",
+    "hosts": {
+      "bradflix": {
+        "hostname": "bradflix",
+        "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+        "cores": 20,
+        "os": "Ubuntu 24.04",
+        "arch": "x86_64"
+      },
+      "brads-macbook-air": {
+        "hostname": "Brads-MacBook-Air",
+        "cpu": "Apple M4",
+        "cores": 10,
+        "os": "macOS 26.5.2",
+        "arch": "arm64"
+      }
+    },
+    "task_run_host": "bradflix",
+    "census_host": "brads-macbook-air",
+    "rehearsal_host": "bradflix",
+    "note": "V3 GENERATION, 2026-08-02, for the contract that requires `categories.alternate`. WHAT WAS RE-MEASURED: all seven task runs (tasks 1, 13, 73, 76, 85, 86, 87) were re-executed on 'bradflix' against the regenerated inventory (inventory_sha256 9ea4eff6..., schema_fingerprint 31809dba...), because a task run embeds its projection report and that report binds the contract hashes. Every one reported binding_equal=true and deterministic=true. WHAT WAS CARRIED FORWARD from the v2 generation, unchanged: the twelve census reports and the functional rehearsal. Both are carried rather than re-run because neither records any contract hash -- census measures hardware-independent token-universe metrics, and the rehearsal measures map/plan/reduce/head behaviour -- so the contract change cannot invalidate them, and re-running them would produce different timings without producing a different claim. The v2 generation is retained alongside this one rather than overwritten; it remains the true attestation of the runs it describes. Host characteristics are otherwise as recorded in v2: the laptop exhibits ~2.6x single-threaded Python-baseline timing variance under sustained thermal load, which corrupts the candidate-vs-baseline speedup ratio but never affects binding equality or determinism."
+  },
+  "candidate_universe": [
+    15,
+    5,
+    13,
+    1,
+    76,
+    55,
+    85,
+    73,
+    71,
+    86,
+    74,
+    87
+  ],
+  "census": [
+    {
+      "task_index": 15,
+      "metrics": {
+        "cjk_features": 1044,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "c329",
+        "maximum_spatial_cell_term_rows": 782342,
+        "maximum_token": "us",
+        "maximum_token_rows": 348537,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 1044,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.386068017960184
+      }
+    },
+    {
+      "task_index": 5,
+      "metrics": {
+        "cjk_features": 143,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "ae2c",
+        "maximum_spatial_cell_term_rows": 1349737,
+        "maximum_token": "us",
+        "maximum_token_rows": 445671,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 143,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.505132363667568
+      }
+    },
+    {
+      "task_index": 13,
+      "metrics": {
+        "cjk_features": 481,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b529",
+        "maximum_spatial_cell_term_rows": 850901,
+        "maximum_token": "us",
+        "maximum_token_rows": 596673,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 481,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.556551439805054
+      }
+    },
+    {
+      "task_index": 1,
+      "metrics": {
+        "cjk_features": 417,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "9b39",
+        "maximum_spatial_cell_term_rows": 930600,
+        "maximum_token": "mx",
+        "maximum_token_rows": 929154,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 417,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.818283555636577
+      }
+    },
+    {
+      "task_index": 76,
+      "metrics": {
+        "cjk_features": 5217,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "96cc",
+        "maximum_spatial_cell_term_rows": 689895,
+        "maximum_token": "vn",
+        "maximum_token_rows": 354477,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 5217,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 7.547855030774422
+      }
+    },
+    {
+      "task_index": 55,
+      "metrics": {
+        "cjk_features": 406,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "bd83",
+        "maximum_spatial_cell_term_rows": 417194,
+        "maximum_token": "fr",
+        "maximum_token_rows": 302349,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 406,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.528319449482086
+      }
+    },
+    {
+      "task_index": 85,
+      "metrics": {
+        "cjk_features": 457771,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "a3d6",
+        "maximum_spatial_cell_term_rows": 3109163,
+        "maximum_token": "kr",
+        "maximum_token_rows": 513157,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 457771,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 8.14948976988877
+      }
+    },
+    {
+      "task_index": 73,
+      "metrics": {
+        "cjk_features": 13782,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "93c7",
+        "maximum_spatial_cell_term_rows": 1035436,
+        "maximum_token": "th",
+        "maximum_token_rows": 524905,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 13782,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.532878141774946
+      }
+    },
+    {
+      "task_index": 71,
+      "metrics": {
+        "cjk_features": 2517,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "93c7",
+        "maximum_spatial_cell_term_rows": 1768566,
+        "maximum_token": "in",
+        "maximum_token_rows": 499764,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 2517,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.331134680896658
+      }
+    },
+    {
+      "task_index": 86,
+      "metrics": {
+        "cjk_features": 982315,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b1e0",
+        "maximum_spatial_cell_term_rows": 5759513,
+        "maximum_token": "jp",
+        "maximum_token_rows": 984845,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 982315,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 13.85040611954925
+      }
+    },
+    {
+      "task_index": 74,
+      "metrics": {
+        "cjk_features": 2053,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "8fcb",
+        "maximum_spatial_cell_term_rows": 2814029,
+        "maximum_token": "id",
+        "maximum_token_rows": 335689,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 2053,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 6.9944263238486934
+      }
+    },
+    {
+      "task_index": 87,
+      "metrics": {
+        "cjk_features": 976641,
+        "duplicate_uuid_rows": 0,
+        "maximum_spatial_cell": "b2e3",
+        "maximum_spatial_cell_term_rows": 8554422,
+        "maximum_token": "jp",
+        "maximum_token_rows": 980122,
+        "maximum_uuid_multiplicity": 1,
+        "multilingual_cjk_features": 976641,
+        "multilingual_features": 0,
+        "term_rows_per_admitted_feature": 13.954833121289445
+      }
+    }
+  ],
+  "roles": {
+    "representative": 76,
+    "near_cap": 73,
+    "densest_spatial": 87,
+    "token_fanout": 86,
+    "multilingual_cjk": 85,
+    "duplicate_heavy": 1,
+    "head_heavy": 13
+  },
+  "task_runs": {
+    "1": {
+      "baseline": {
+        "elapsed_seconds": 78.626901147014,
+        "emitted_term_rows": 6732305,
+        "semantic_sum_a": "4aa39c109ba8e4c3ea1bed2058bc2279cf0f49c1bf5f2a3280b5b1162a0deb0f",
+        "semantic_sum_b": "9ae9dc73faff06bd8cca41d62aaa16b2ff3aed23a8201287093dc2f9e5104dae"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 6732305,
+            "semantic_sum_a": "4aa39c109ba8e4c3ea1bed2058bc2279cf0f49c1bf5f2a3280b5b1162a0deb0f",
+            "semantic_sum_b": "9ae9dc73faff06bd8cca41d62aaa16b2ff3aed23a8201287093dc2f9e5104dae"
+          },
+          "output_sha256": "9edd32d8ddb30b977141d4e70a42289e8348e8f568a4bd6eba6e874abf44502e",
+          "resources": {
+            "peak_rss_bytes": 292818944,
+            "peak_scratch_bytes": 1732122565,
+            "wall_seconds": 11.516797118005343
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 6732305,
+            "semantic_sum_a": "4aa39c109ba8e4c3ea1bed2058bc2279cf0f49c1bf5f2a3280b5b1162a0deb0f",
+            "semantic_sum_b": "9ae9dc73faff06bd8cca41d62aaa16b2ff3aed23a8201287093dc2f9e5104dae"
+          },
+          "output_sha256": "9edd32d8ddb30b977141d4e70a42289e8348e8f568a4bd6eba6e874abf44502e",
+          "resources": {
+            "peak_rss_bytes": 294285312,
+            "peak_scratch_bytes": 1732122565,
+            "wall_seconds": 11.552424344001338
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "b538a8d7260461e1a8c2070f0e2e5aba241cf919d63fe8c71b4f80d6f4c42094"
+        },
+        "output": {
+          "bytes": 61035749
+        },
+        "resources": {
+          "remote_read_bytes": 75817550
+        }
+      },
+      "host": "bradflix"
+    },
+    "13": {
+      "baseline": {
+        "elapsed_seconds": 49.25140823202673,
+        "emitted_term_rows": 4508828,
+        "semantic_sum_a": "c2b794f918d431b657f47f688052fd50237e92b2eb45cd36ed4f13e3c9e56ca4",
+        "semantic_sum_b": "ef766d031990fb9c1462d5a31fb89bc3b86acf086e7724e3afb3b8656c8d8941"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 4508828,
+            "semantic_sum_a": "c2b794f918d431b657f47f688052fd50237e92b2eb45cd36ed4f13e3c9e56ca4",
+            "semantic_sum_b": "ef766d031990fb9c1462d5a31fb89bc3b86acf086e7724e3afb3b8656c8d8941"
+          },
+          "output_sha256": "b5cb825cc5009de0521194b0503e716342b9721154e1b0e6a301bbcb944fe953",
+          "resources": {
+            "peak_rss_bytes": 243744768,
+            "peak_scratch_bytes": 1156477021,
+            "wall_seconds": 7.976776028983295
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 4508828,
+            "semantic_sum_a": "c2b794f918d431b657f47f688052fd50237e92b2eb45cd36ed4f13e3c9e56ca4",
+            "semantic_sum_b": "ef766d031990fb9c1462d5a31fb89bc3b86acf086e7724e3afb3b8656c8d8941"
+          },
+          "output_sha256": "b5cb825cc5009de0521194b0503e716342b9721154e1b0e6a301bbcb944fe953",
+          "resources": {
+            "peak_rss_bytes": 241938432,
+            "peak_scratch_bytes": 1156475622,
+            "wall_seconds": 7.989828802994452
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "84734a814cd6c830f67694549eb047dd3137cbbe2d83d22d4f6a3464a6d53e60"
+        },
+        "output": {
+          "bytes": 35598173
+        },
+        "resources": {
+          "remote_read_bytes": 47984245
+        }
+      },
+      "host": "bradflix"
+    },
+    "73": {
+      "baseline": {
+        "elapsed_seconds": 78.53412990598008,
+        "emitted_term_rows": 6510993,
+        "semantic_sum_a": "affaae8a949d7d0b4ef2c514a09d8f012f31bc3c2c6f01de50a052061f3e008c",
+        "semantic_sum_b": "57510b5c302b7083602975b52b165bdf1745ad40b8364bcb4439d10458b9feaf"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 6510993,
+            "semantic_sum_a": "affaae8a949d7d0b4ef2c514a09d8f012f31bc3c2c6f01de50a052061f3e008c",
+            "semantic_sum_b": "57510b5c302b7083602975b52b165bdf1745ad40b8364bcb4439d10458b9feaf"
+          },
+          "output_sha256": "05461a1850d098d547920385ae6c8a4c0281653c463e9f78ea7cfee638b525e0",
+          "resources": {
+            "peak_rss_bytes": 305856512,
+            "peak_scratch_bytes": 1887130317,
+            "wall_seconds": 13.310616953007411
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 6510993,
+            "semantic_sum_a": "affaae8a949d7d0b4ef2c514a09d8f012f31bc3c2c6f01de50a052061f3e008c",
+            "semantic_sum_b": "57510b5c302b7083602975b52b165bdf1745ad40b8364bcb4439d10458b9feaf"
+          },
+          "output_sha256": "05461a1850d098d547920385ae6c8a4c0281653c463e9f78ea7cfee638b525e0",
+          "resources": {
+            "peak_rss_bytes": 309235712,
+            "peak_scratch_bytes": 1887130317,
+            "wall_seconds": 13.312312813010067
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "7fbaecad78bf6c1543f193e2bf8daf5648245121a38ea1242360f70c194958fe"
+        },
+        "output": {
+          "bytes": 65808213
+        },
+        "resources": {
+          "remote_read_bytes": 80851227
+        }
+      },
+      "host": "bradflix"
+    },
+    "76": {
+      "baseline": {
+        "elapsed_seconds": 81.70809768198524,
+        "emitted_term_rows": 7514886,
+        "semantic_sum_a": "b8bce280e1c94f00c9b46218eeded8b1fdcfe09028f68dddf53db14e9a724714",
+        "semantic_sum_b": "e3b48b3476a4800094c34d116c2c2cc1ae956d49d08b25fb4c4725c360e788bc"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 7514886,
+            "semantic_sum_a": "b8bce280e1c94f00c9b46218eeded8b1fdcfe09028f68dddf53db14e9a724714",
+            "semantic_sum_b": "e3b48b3476a4800094c34d116c2c2cc1ae956d49d08b25fb4c4725c360e788bc"
+          },
+          "output_sha256": "90f12b5957de05f319f125d6e6b7de251763e0fe69fd90928374c95a7e82dbd1",
+          "resources": {
+            "peak_rss_bytes": 298172416,
+            "peak_scratch_bytes": 1939626522,
+            "wall_seconds": 12.491873334045522
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 7514886,
+            "semantic_sum_a": "b8bce280e1c94f00c9b46218eeded8b1fdcfe09028f68dddf53db14e9a724714",
+            "semantic_sum_b": "e3b48b3476a4800094c34d116c2c2cc1ae956d49d08b25fb4c4725c360e788bc"
+          },
+          "output_sha256": "90f12b5957de05f319f125d6e6b7de251763e0fe69fd90928374c95a7e82dbd1",
+          "resources": {
+            "peak_rss_bytes": 295165952,
+            "peak_scratch_bytes": 1939629927,
+            "wall_seconds": 12.518910104001407
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "824b669f2a88cc1d1a24caf30074932e07ba8f3d995d51cfed8477eff1a1824c"
+        },
+        "output": {
+          "bytes": 62988581
+        },
+        "resources": {
+          "remote_read_bytes": 76862435
+        }
+      },
+      "host": "bradflix"
+    },
+    "85": {
+      "baseline": {
+        "elapsed_seconds": 77.22938020899892,
+        "emitted_term_rows": 8146613,
+        "semantic_sum_a": "dafb563d6dfab62b6ee100dacf7f66e749af3ec96421e28df7f2924d7a5dd3c9",
+        "semantic_sum_b": "f0ce32a5fe0ba6079116d4e525a76fc7179409ecca8870eae502c6ab3e3107d1"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 8146613,
+            "semantic_sum_a": "dafb563d6dfab62b6ee100dacf7f66e749af3ec96421e28df7f2924d7a5dd3c9",
+            "semantic_sum_b": "f0ce32a5fe0ba6079116d4e525a76fc7179409ecca8870eae502c6ab3e3107d1"
+          },
+          "output_sha256": "ba03806cdadfcb992bde446d2380729ac086af51baef6d8b8e366a309d89037a",
+          "resources": {
+            "peak_rss_bytes": 310956032,
+            "peak_scratch_bytes": 2107370997,
+            "wall_seconds": 14.861150345997885
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 8146613,
+            "semantic_sum_a": "dafb563d6dfab62b6ee100dacf7f66e749af3ec96421e28df7f2924d7a5dd3c9",
+            "semantic_sum_b": "f0ce32a5fe0ba6079116d4e525a76fc7179409ecca8870eae502c6ab3e3107d1"
+          },
+          "output_sha256": "ba03806cdadfcb992bde446d2380729ac086af51baef6d8b8e366a309d89037a",
+          "resources": {
+            "peak_rss_bytes": 305721344,
+            "peak_scratch_bytes": 2107362922,
+            "wall_seconds": 14.812003919971175
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "f095beb140f83c18bc3131e00dda8bd130b20b3d11702e69a7680675af05c9a1"
+        },
+        "output": {
+          "bytes": 63818643
+        },
+        "resources": {
+          "remote_read_bytes": 81918916
+        }
+      },
+      "host": "bradflix"
+    },
+    "86": {
+      "baseline": {
+        "elapsed_seconds": 91.46171592298197,
+        "emitted_term_rows": 13822456,
+        "semantic_sum_a": "a5178afc1911a07a81c8753b5a2021ab29b3311df1a56a3e907d438f415e55ed",
+        "semantic_sum_b": "cc5e84019de0f8f86012ef72feb199c01ba3e8f509ab11d11da195904edf64d9"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 13822456,
+            "semantic_sum_a": "a5178afc1911a07a81c8753b5a2021ab29b3311df1a56a3e907d438f415e55ed",
+            "semantic_sum_b": "cc5e84019de0f8f86012ef72feb199c01ba3e8f509ab11d11da195904edf64d9"
+          },
+          "output_sha256": "58e6c1f162f64aca286980829937e4141bc8b7b4cf998ca50850df8d295f7e5d",
+          "resources": {
+            "peak_rss_bytes": 317050880,
+            "peak_scratch_bytes": 3542927586,
+            "wall_seconds": 21.39467272895854
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 13822456,
+            "semantic_sum_a": "a5178afc1911a07a81c8753b5a2021ab29b3311df1a56a3e907d438f415e55ed",
+            "semantic_sum_b": "cc5e84019de0f8f86012ef72feb199c01ba3e8f509ab11d11da195904edf64d9"
+          },
+          "output_sha256": "58e6c1f162f64aca286980829937e4141bc8b7b4cf998ca50850df8d295f7e5d",
+          "resources": {
+            "peak_rss_bytes": 314568704,
+            "peak_scratch_bytes": 3542925079,
+            "wall_seconds": 21.291703135997523
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "fcbcc35cc5fb6d4fb3c3fd6c070f284bc8edbfe2d7579341c8294b38cc48ee20"
+        },
+        "output": {
+          "bytes": 63769426
+        },
+        "resources": {
+          "remote_read_bytes": 83993244
+        }
+      },
+      "host": "bradflix"
+    },
+    "87": {
+      "baseline": {
+        "elapsed_seconds": 89.44624591397587,
+        "emitted_term_rows": 13677732,
+        "semantic_sum_a": "5833751749357b3905427442392e99eeebb549c0547bd4b5259471306d92620a",
+        "semantic_sum_b": "1384599326517dda5962b657ed95509b1b2ec9701c35ea0764a1a46676d7f194"
+      },
+      "candidates": [
+        {
+          "binding": {
+            "emitted_term_rows": 13677732,
+            "semantic_sum_a": "5833751749357b3905427442392e99eeebb549c0547bd4b5259471306d92620a",
+            "semantic_sum_b": "1384599326517dda5962b657ed95509b1b2ec9701c35ea0764a1a46676d7f194"
+          },
+          "output_sha256": "7fe1dfb2f7a51a542705e3ba78488476ba7fb10aac252ab8002f4b5f321a704a",
+          "resources": {
+            "peak_rss_bytes": 306470912,
+            "peak_scratch_bytes": 3509650607,
+            "wall_seconds": 21.08398734696675
+          }
+        },
+        {
+          "binding": {
+            "emitted_term_rows": 13677732,
+            "semantic_sum_a": "5833751749357b3905427442392e99eeebb549c0547bd4b5259471306d92620a",
+            "semantic_sum_b": "1384599326517dda5962b657ed95509b1b2ec9701c35ea0764a1a46676d7f194"
+          },
+          "output_sha256": "7fe1dfb2f7a51a542705e3ba78488476ba7fb10aac252ab8002f4b5f321a704a",
+          "resources": {
+            "peak_rss_bytes": 317108224,
+            "peak_scratch_bytes": 3509651399,
+            "wall_seconds": 21.01725312101189
+          }
+        }
+      ],
+      "projection": {
+        "identity": {
+          "task_digest": "dd6f2442e95fcf4619f786d77936ad433866b6d8aa24ed6e773199e23bfd8751"
+        },
+        "output": {
+          "bytes": 62640365
+        },
+        "resources": {
+          "remote_read_bytes": 82287111
+        }
+      },
+      "host": "bradflix"
+    }
+  },
+  "rehearsal": {
+    "adaptive_subdivision": true,
+    "exact_reconciliation": true,
+    "head_populated_shards": 64,
+    "head_result_cap": 10,
+    "head_shard_bits": 6,
+    "head_shard_count": 64,
+    "head_sharded": true,
+    "head_verified": true,
+    "host": "bradflix",
+    "interruption_phases": [
+      "local_write",
+      "immutable_publish",
+      "before_marker"
+    ],
+    "logical_tasks": 7,
+    "maximum_selective_amplification": 1.132744,
+    "maximum_worker_index_probes": 1,
+    "multi_task_fan_in": true,
+    "observed": {
+      "adaptive_max_depth": 2,
+      "adaptive_plan_seconds": 89.704,
+      "head_excluded_over_row_cap_task_ids": [
+        "role-01",
+        "role-13",
+        "role-73",
+        "role-87"
+      ],
+      "head_input_candidate_rows": 4745166,
+      "head_merged_task_ids": [
+        "role-76",
+        "role-85",
+        "role-86"
+      ],
+      "head_serving_encode_note": "",
+      "head_total_index_entries": 2283623,
+      "head_total_records": 4349810,
+      "mapped_tasks": [
+        76,
+        73,
+        87,
+        86,
+        85,
+        1,
+        13
+      ],
+      "reduced_partitions": [
+        "p-b0de",
+        "p-9b39",
+        "p-9d36"
+      ],
+      "resume_seconds": 0.272,
+      "scale_note": "Full seven-role fan-in over the real 2026-06-17.0 census tasks, including the dense CJK role tasks 86 (token_fanout) and 87 (densest_spatial). Post-#143 map scratch hygiene keeps their per-stage scratch under the 8 GiB cap, so no substitution is needed. The global head is hash-sharded and every shard is reconciled against an independent reduce-side binding; the actual Worker head-shard decoder resolves real tokens from the built shard bytes (worker_local_decoder_evidence).",
+      "subdivided_cells": [
+        "93c7",
+        "a3d6",
+        "afdc",
+        "b1df",
+        "b1e0",
+        "b1e1",
+        "b2e1",
+        "b2e3",
+        "b5da"
+      ],
+      "subdivided_partition_count": 159,
+      "subdivided_partition_reduction": {
+        "binding_matches_plan": true,
+        "partition_id": "p-93c7-h0",
+        "read_amplification": 23.89688,
+        "records": 46315
+      },
+      "worker_head_probes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ],
+      "worker_local_decoder": {
+        "class": "worker_local_decoder_evidence",
+        "decoder": "geocoder-worker::places_construction_v1::lookup_head_shard",
+        "manifest_key": "serve/places-v1/head-manifest/sha256/11b90f0f22f55723c3b5f92db43ad1bb666cb5bee6d04ea887b4086579d3d61a.json",
+        "misroute_rejections": 8,
+        "sample_tokens": [
+          "\u5805\u305f",
+          "\u30a6\u30a7\u30eb\u30c6\u30db\u30f3\u30c6",
+          "\u1107\u116e\u11a8\u1106\u1175",
+          "\u8328\u6728\u897f\u99c5\u524d\u5e97",
+          "\u1106\u1166\u110c\u1169\u11bc\u1103\u1173\u1107\u1175\u1100\u1165\u11ab",
+          "\u5c71\u6771\u6599\u7406",
+          "\u5b87\u57ce\u6574\u5099\u8eca\u5834",
+          "\u304d\u3082\u3064\u304d\u60c5\u5831\u5316\u63a8\u9032\u30bb\u30f3\u30bf\u30fc"
+        ],
+        "shard_bits": 6,
+        "tokens_resolved": 8
+      },
+      "worker_routed_probes": [
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1,
+        1
+      ]
+    },
+    "overlap_reconciliation": true,
+    "packs": 127,
+    "parquet_row_groups": 492,
+    "partitions": 1205,
+    "resume_before_projection": true,
+    "routed_verified": true,
+    "worker_head_query": true,
+    "worker_local_decoder_evidence": true,
+    "worker_routed_query": true,
+    "census_complete": true,
+    "construction_phase_pending": false
+  }
+}
