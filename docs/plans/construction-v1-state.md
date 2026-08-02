@@ -24,6 +24,14 @@ it no longer returns `capability_unavailable`. Both reverse builds, the slice
 promotion, the release publication, and the catalog CAS are all done. See
 "Promotion result, 2026-07-31".
 
+**2026-08-02 UPDATE.** The scoped planet Places rebuild is built, promoted, and
+measured; `/v2` is live on `2026-08-02.0`. It moved overall place recall
+0.314 -> 0.400 and doubled the routed `name_locality` path, but **Wave C's
+head-path prediction is refuted** (0/10 -> 1/10, not 6/11). Name-only global
+retrieval is now the measured blocker for the milestone below, and it is a
+build/ranking question that a rebuild alone does not answer. See "Planet Places
+rebuild and promotion, 2026-08-02".
+
 **The next milestone is AGREED (2026-07-31): forward search correctness.**
 Operator approved Stages 0 and 1 of
 `docs/plans/2026-07-31-search-quality-and-street-layer.md` (merged #220). The
@@ -879,6 +887,122 @@ Europe finalizers also proved bounded streaming and exact-set reconciliation at
 measurement for Places. Address measured it successfully in run `30215529919`:
 292.66 GiB of reducer hydration plus marker-last publication and whole-slice
 verification of 10,931 objects.
+
+## Planet Places rebuild and promotion, 2026-08-02
+
+The rebuild scoped on 2026-08-01 (Places only, DuckDB held, reorder at cap 10,
+`categories.alternate` at v3) was built, promoted, and measured. `/v2` is live
+on build `2026-08-02.0`.
+
+| stage | run | result |
+|---|---|---|
+| construction | `30728476415` | 10h06m wall; 219 jobs; `reconciles=true` |
+| Places reverse | `30748269856` | 65m30s wall / 225 runner-min; 18 jobs |
+| `promote-slice` | `30752624029` | 123 min; 21,279 objects copied |
+| `publish-release` | `30757323897` | `v2/releases/2026-08-02.0/release.json` sha256 `9a7cbece...1c784` |
+| `promote-catalog` | `30757383528` | CAS `1365b737...` -> `0457d57f...`; smoke green attempt 1/10 |
+
+Construction phase wall clock: map 2h43m (89 jobs, concurrency 4), plan 1h40m,
+reduce 2h26m (128 batches), **head 2h35m32s**, finalize 40m33s. Map+reduce cost
+1,203 runner-minutes across 217 jobs. Output was byte-shape-identical to the
+prior build: 40,931 objects, 20,698 serving + 20,231 positions, 4,096/4,096
+populated shards -- only ordering changed.
+
+### The head cap still lacks its second input
+
+**Head ran 155.5 min against a 330-minute budget (47%).** That half of the
+head-cap question is now answered with real planet data.
+
+**The DuckDB temp peak is still not measured.** The head step emits only the
+*configured* spill cap (9,126,805,504 B, i.e. `DUCKDB_TEMP_SHARE` overridden
+4->2 against the 17 GiB scratch cap) and `staged_peak_resident_bytes`
+(1,505,847,088). Nothing samples the temp directory high-water mark. The run
+tripped neither the 8.5 GiB spill cap nor the 17 GiB whole-stage watchdog, which
+bounds the peak from above but does not measure it. Raising the head cap still
+requires instrumenting the head step and observing another planet run.
+
+### Reverse re-attestation is forced by the chain, not by the data
+
+`publish-release` requires `.request_sha256 == <forward request>` on every
+family's reverse catalog (`promote-v2-release.yml:677`), so the existing Places
+reverse -- bound to `88b7f171...` -- could not attach to a forward built at
+`f3c7eef3...`. Reverse had to be rebuilt purely to re-attest.
+
+**The rebuilt reverse produced 75,631,061 records over 16,511 cells: delta zero
+on both against the prior build.** The operator's judgement that Places reverse
+did not need rebuilding was correct about the data; only the attestation chain
+disagreed. A re-attestation path that rebinds a reverse catalog to a new forward
+request without rewriting 75.6M records would convert 225 runner-minutes plus a
+full second copy in R2 into a metadata operation. Recorded, not scheduled.
+
+Also measured: `max_parallel=4` cut reverse wall clock from 2h15m to 65m30s.
+The prior 2 was a dispatch default, not a limit, exactly as the workflow comment
+claimed.
+
+### Addresses reduction records are a durability gap
+
+The Addresses construction run `30215529919` predates item 6, so its reduce
+markers carry no full reduction records and the R2 export fails:
+
+    addresses reduce marker 0000 carries no full reduction record. It was
+    written by a producer predating item 6; promote from that run's GitHub
+    artifacts instead.
+
+Promotion therefore fell back to that run's GitHub artifacts, whose retention
+expired **2026-08-02T22:30Z** -- inside the same day. Had promotion slipped, the
+Addresses family could not have been promoted into a new slice at all.
+
+Backed up before expiry, verified by round trip (`sha256 915b1117...14e4f4`,
+581/581 records restored):
+
+    backups/construction-v1/88b7f171.../addresses-30215529919/artifacts.tar.gz
+    backups/construction-v1/88b7f171.../addresses-30215529919/backup-manifest.json
+    /home/brad/dev/cv1-artifacts-backup/addresses-30215529919/   (local mirror)
+
+`backups` is in `PROTECTED_PREFIXES`, so `r2-cleanup.yml` cannot reach it. The
+durable fix -- exporting those 581 records into the R2 construction namespace so
+the item 6 path works -- is recorded, not scheduled. Note the same class of
+problem applies to `cv1-control` on **every** construction run: 30-day
+retention, so today's Places run lapses 2026-09-01.
+
+### Wave C's falsifiable prediction is REFUTED
+
+Wave C predicted head-path gold cases **0/11 -> 6/11** after the reorder at cap
+10. Measured live against `2026-08-02.0`
+(`benchmarks/2026-08-02-forward-gold-after-planet-rebuild.json`, 35 cases, vs
+the 2026-08-01 baseline on the prior build):
+
+| group | n | old r@1 | new r@1 | old mrr | new mrr |
+|---|---|---|---|---|---|
+| self_recall (all place) | 35 | 0.314 | **0.400** | 0.343 | 0.443 |
+| `place:name` (head path) | 10 | 0.000 | **0.100** | 0.000 | 0.150 |
+| `place:name_locality` | 10 | 0.200 | **0.400** | 0.250 | 0.450 |
+| `place:seam` | 10 | 0.900 | 0.900 | 0.950 | 0.950 |
+| `place:inverse_seam` | 5 | 0.000 | 0.000 | 0.000 | 0.000 |
+
+**Head path went 0/10 -> 1/10 at r@1 (2/10 at r@5), not 6/11.** The rebuild is
+not a null result -- overall place recall rose 27% relative and the routed
+`name_locality` path doubled -- but the mechanism Wave C claimed for the head
+path did not materialise. Bare name-only landmark queries still return zero on
+the live build: Eiffel Tower, Statue of Liberty, Tokyo Tower, Musee du Louvre,
+Big Ben all n=0; only Colosseum resolves.
+
+**Name-only global retrieval is therefore still the open gate**, and it is now
+the measured blocker for the forward-search-correctness milestone.
+
+### Correction: the 2026-07-31 smoke red was TRUE, not false
+
+The 2026-07-31 section below records that promotion's `/v2/forward` smoke as a
+"false-red". That is wrong and is corrected here: `q=Eiffel Tower` genuinely
+returned zero features, and still does. What was wrong was gating a *promotion*
+on a known-open quality gate, not the observation itself.
+
+Commit `1e2c0ab` replaced that assertion with `q=IKEA` (context-free head) and
+`q=Eiffel Tower Paris` (locality-routed). That is a reasonable promotion gate,
+but **both new assertions also pass on the build being replaced** -- verified
+directly against `2026-07-31.0` before the edge cache flipped. The smoke can no
+longer detect a head-path regression, by construction. Promotion smoke and
+quality measurement are now disjoint: only the gold set speaks to the latter.
 
 ## Promotion result, 2026-07-31
 
