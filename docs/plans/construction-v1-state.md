@@ -2,8 +2,8 @@
 
 Last updated 2026-08-03 after the bounded entity-phrase admission implementation,
 the independent correctness audit, fresh v4 formal evidence, sidecar Phase 0's
-cross-release identity measurement, and completion of the 200-case
-everyday-POI tripwire.
+cross-release identity measurement, completion of the 200-case everyday-POI
+tripwire, and its current-OSM presence control.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -1679,6 +1679,26 @@ Treat this live-build result as the pre-preview baseline and rerun the identical
 case file against the completed v4 preview before choosing a targeted admission
 change or a larger decision set. The sidecar Phase 0 audit remains separate and
 incomplete.
+
+The fourth benchmark column is an **OSM presence control**, not another ranked
+provider. Evidence is
+`benchmarks/2026-08-03-everyday-poi-overpass-presence-v1.json` (sha256
+`c66d0446022a9ecc4a64af41c9c20b608a211dc16627771c59d9f043b3b8483e`). Ten
+sequential Overpass queries inspected named nodes, ways, and relations within
+500 m of every independent authority coordinate. Exact normalized accepted
+names are present for 46/200 cases; 12 more are fuzzy review candidates, 134
+have only a named same-family feature without an accepted-name match, and eight
+have no named same-family candidate. Do not promote the latter 146 cases into
+OSM existence claims.
+
+The control isolates 24 Nominatim misses and 24 Photon misses where the exact
+accepted name is demonstrably present in current OSM. All 22 Nominatim hits and
+22/23 Photon hits align with exact OSM presence. Overture hits 37 cases without
+an exact OSM name match and misses 18 with one. This separates upstream
+representation from ranked-search behavior while preserving the government
+source as gold. Keep Overpass beside the ranked-provider report, but label it
+as a presence control because it does not execute the benchmark query or
+produce a comparable top-ten ranking.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
