@@ -1,6 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-08-02 after the Big Ben and Machu Picchu entity/gold audit.
+Last updated 2026-08-02 after the taxonomy slice and September cross-theme
+schema audit.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -1302,10 +1303,67 @@ origin-dependent intents such as “restaurants near me” remain a separate
 semantic benchmark because exact-place name/coordinate scoring cannot judge
 their relevance honestly.
 
-**Remaining gate:** do not call a post-August source upgrade ready until the
-taxonomy profile has regenerated inventory, construction evidence, readiness,
-and control pins as a new evidence generation. The current live June artifacts
+**Real taxonomy fast loop, 2026-08-02:** the explicit taxonomy profile now runs
+through the same real Monaco inventory and all five construction phases used by
+the slice smoke. Against the exact same July object, row groups 66-67, and
+38,182 input rows, both legacy and taxonomy runs reconciled 21 serving objects.
+Taxonomy emitted 338,950 input term rows versus 261,144 (+29.79%) and
+86,589,934 total staged/serving bytes versus 76,537,910 (+13.13%); head records
+moved only 69,069 -> 70,124 (+1.53%). Durable evidence is
+`benchmarks/2026-08-02-taxonomy-slice-comparison-v1.json`. The pull-request
+slice smoke now forces `--schema-profile taxonomy` and asserts the selected
+profile, so July's still-present legacy field can no longer make the migration
+path look green accidentally.
+
+The required scale jump then repeated the exact legacy/taxonomy comparison in
+New York, Tokyo, Lagos, Sao Paulo, and Sydney. All twelve runs reconciled. Across
+six continents and 225,521 identical admitted rows, taxonomy added 23.69% input
+term rows, 9.85% total bytes, and 1.32% head records. Total-byte growth ranged
+from 4.82% in Tokyo to 18.61% in Sao Paulo, decisively showing that Monaco's
+13.13% is neither noise nor a safe linear planet projection. Durable evidence:
+`benchmarks/2026-08-02-taxonomy-multiregion-comparison-v1.json`.
+
+**Remaining taxonomy gate:** the code and real-slice compatibility rungs are
+closed. Do not call a post-August source upgrade ready until a formal new
+evidence generation regenerates the global inventory, readiness, scale
+projection, and control pins. The six-region aggregate materially narrows the
+risk, but it is not a formal planet projection. The current live June artifacts
 and their frozen evidence remain unaffected.
+
+### Upstream shared-source migration audit, 2026-08-02
+
+Durable audit:
+`benchmarks/2026-08-02-overture-september-cross-theme-audit.json`.
+
+The Places `categories` removal is the only September breaking change currently
+confirmed in Overture's published release notes. There is also a second,
+cross-theme change announced in merged schema PR #535: the rough September plan
+makes `sources[].provider`, `resource`, and source `version` required while
+making `dataset` optional and deprecated; `dataset` removal is planned for
+March 2027 or later. Treat that distinction honestly: the shared-source step is
+in a merged plan, but as of this audit it is not in the July release notes and
+has no separate merged breaking-change PR. The upstream `vnext` branch is
+identical to `main`, and repository searches found no third September change.
+
+The source migration applies schema-wide to all 15 released feature types in
+addresses, base, buildings, divisions, places, and transportation. It is not
+yet represented physically in July data: a bounded first-object/first-row-group
+read of every type found the same old seven fields (`property`, `dataset`,
+`license`, `record_id`, `update_time`, `confidence`, `between`), with zero types
+carrying `provider`, `resource`, or source `version`. All 15 samples populated
+`dataset`. Therefore August is a required re-audit point, not an assumed bridge.
+
+**Construction impact:** no active construction-v1 source contract or mapper
+selects `sources`, and the division build does not use source identity, so this
+does not block the Places/Addresses build or invalidate published artifacts.
+The SQL exports that preserve the whole struct remain compatible through the
+September optionality step. Four provenance-oriented research tools still use
+`dataset` as identity: `experiment_current_release_addresses.py`,
+`benchmark_address_street.py`, `benchmark_places_sampling.py`, and
+`benchmark_transport_components.py`. Before their first post-August rerun they
+must prefer the complete `(provider, resource, version)` tuple and retain
+`dataset` only as a legacy fallback. Do not add provenance columns to the hot
+construction projection merely to solve that research-tool migration.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 

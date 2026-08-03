@@ -151,7 +151,9 @@ jobs:
           # shellcheck disable=SC2086
           python scripts/build_slice_inventory_v1.py \
             --release "$SLICE_RELEASE" --bbox $SLICE_BBOX \
+            --schema-profile taxonomy \
             --output slice/inventory.json | tee slice/inventory-report.json
+          jq -e '.schema_profile == "taxonomy"' slice/inventory-report.json
           TASK="$(jq -r '.task_index' slice/inventory-report.json)"
           if [ "$TASK" != "$SLICE_TASK_INDEX" ]; then
             echo "The bbox now lands on map task $TASK, not the pinned $SLICE_TASK_INDEX." >&2

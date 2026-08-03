@@ -96,6 +96,12 @@ def test_pins_the_release_bbox_and_task_index_with_a_drift_check():
     assert "update SLICE_TASK_INDEX" in value
 
 
+def test_places_slice_forces_the_post_august_taxonomy_contract():
+    value = text()
+    assert "--schema-profile taxonomy" in value
+    assert "'.schema_profile == \"taxonomy\"'" in value
+
+
 def test_asserts_real_counts_not_just_the_reconciles_literal():
     value = text()
     # `reconciles` is now reported by `places_construction_v1

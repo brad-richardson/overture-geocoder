@@ -1,0 +1,112 @@
+{
+  "schema": "overture-places-taxonomy-multiregion-comparison-v1",
+  "measured_at": "2026-08-02",
+  "release": "2026-07-22.0",
+  "scope": "Six real tasks on six continents, each run through projection, map, plan, reduce, head, and finalize under identical legacy and taxonomy inputs.",
+  "regions": [
+    {
+      "name": "monaco",
+      "bbox": [7.36, 43.71, 7.47, 43.78],
+      "object": "s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/part-00009-13a3baae-7971-5b5b-a1b8-7a733bb51d44-c000.zstd.parquet",
+      "row_groups": [66, 67],
+      "records": 38182,
+      "taxonomy_term_rows": 338950,
+      "legacy_term_rows": 261144,
+      "taxonomy_total_bytes": 86589934,
+      "legacy_total_bytes": 76537910,
+      "taxonomy_head_records": 70124,
+      "legacy_head_records": 69069,
+      "growth_percent": {"term_rows": 29.794, "total_bytes": 13.133, "head_records": 1.527}
+    },
+    {
+      "name": "new_york",
+      "bbox": [-74.1, 40.68, -73.85, 40.88],
+      "object": "s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/part-00006-890bb2bd-3d61-530b-8b0a-7d181b27b03f-c000.zstd.parquet",
+      "row_groups": [48, 51],
+      "records": 37478,
+      "taxonomy_term_rows": 358614,
+      "legacy_term_rows": 285924,
+      "taxonomy_total_bytes": 71666067,
+      "legacy_total_bytes": 65266214,
+      "taxonomy_head_records": 64384,
+      "legacy_head_records": 63492,
+      "growth_percent": {"term_rows": 25.423, "total_bytes": 9.806, "head_records": 1.405}
+    },
+    {
+      "name": "tokyo",
+      "bbox": [139.6, 35.55, 139.9, 35.8],
+      "object": "s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/part-00015-f754b4ac-fcf9-5991-bcbd-90e439ba21a0-c000.zstd.parquet",
+      "row_groups": [178, 179],
+      "records": 32178,
+      "taxonomy_term_rows": 577542,
+      "legacy_term_rows": 503577,
+      "taxonomy_total_bytes": 133973797,
+      "legacy_total_bytes": 127812764,
+      "taxonomy_head_records": 122070,
+      "legacy_head_records": 121143,
+      "growth_percent": {"term_rows": 14.688, "total_bytes": 4.82, "head_records": 0.765}
+    },
+    {
+      "name": "lagos",
+      "bbox": [3.2, 6.35, 3.6, 6.7],
+      "object": "s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/part-00005-269c56b0-24ae-50e1-bb87-e806fb769341-c000.zstd.parquet",
+      "row_groups": [232, 233],
+      "records": 35856,
+      "taxonomy_term_rows": 314650,
+      "legacy_term_rows": 252469,
+      "taxonomy_total_bytes": 62738046,
+      "legacy_total_bytes": 58354786,
+      "taxonomy_head_records": 56646,
+      "legacy_head_records": 55726,
+      "growth_percent": {"term_rows": 24.629, "total_bytes": 7.511, "head_records": 1.651}
+    },
+    {
+      "name": "sao_paulo",
+      "bbox": [-46.8, -23.7, -46.4, -23.4],
+      "object": "s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/part-00004-585db6a6-c061-5c96-81fe-7368b8446633-c000.zstd.parquet",
+      "row_groups": [154, 155],
+      "records": 36759,
+      "taxonomy_term_rows": 357362,
+      "legacy_term_rows": 283680,
+      "taxonomy_total_bytes": 83721524,
+      "legacy_total_bytes": 70583570,
+      "taxonomy_head_records": 57004,
+      "legacy_head_records": 56076,
+      "growth_percent": {"term_rows": 25.974, "total_bytes": 18.613, "head_records": 1.655}
+    },
+    {
+      "name": "sydney",
+      "bbox": [150.95, -34.05, 151.3, -33.7],
+      "object": "s3://overturemaps-us-west-2/release/2026-07-22.0/theme=places/type=place/part-00013-2323cf21-80ea-5672-b47b-087e95afa6fb-c000.zstd.parquet",
+      "row_groups": [164, 165],
+      "records": 45068,
+      "taxonomy_term_rows": 421368,
+      "legacy_term_rows": 328047,
+      "taxonomy_total_bytes": 83730193,
+      "legacy_total_bytes": 77015496,
+      "taxonomy_head_records": 67792,
+      "legacy_head_records": 66812,
+      "growth_percent": {"term_rows": 28.447, "total_bytes": 8.719, "head_records": 1.467}
+    }
+  ],
+  "aggregate": {
+    "records": {"taxonomy": 225521, "legacy": 225521, "growth_percent": 0.0},
+    "term_rows": {"taxonomy": 2368486, "legacy": 1914841, "growth_percent": 23.691, "slice_growth_percent_range": [14.688, 29.794]},
+    "retained_term_rows": {"taxonomy": 1153169, "legacy": 1012554, "growth_percent": 13.887, "slice_growth_percent_range": [6.077, 28.655]},
+    "map_bytes": {"taxonomy": 166850839, "legacy": 154494123, "growth_percent": 7.998, "slice_growth_percent_range": [4.509, 13.283]},
+    "reduce_bytes": {"taxonomy": 111421582, "legacy": 99594926, "growth_percent": 11.875, "slice_growth_percent_range": [6.595, 19.465]},
+    "serve_bytes": {"taxonomy": 244105287, "legacy": 221440826, "growth_percent": 10.235, "slice_growth_percent_range": [4.323, 21.929]},
+    "total_bytes": {"taxonomy": 522419561, "legacy": 475570740, "growth_percent": 9.851, "slice_growth_percent_range": [4.82, 18.613], "slice_growth_percent_median": 9.262},
+    "head_records": {"taxonomy": 438020, "legacy": 432318, "growth_percent": 1.319, "slice_growth_percent_range": [0.765, 1.655]}
+  },
+  "verification": {
+    "taxonomy_runs_reconciled": 6,
+    "legacy_runs_reconciled": 6,
+    "failed_runs": 0
+  },
+  "interpretation": [
+    "The taxonomy expansion is present in every sampled geography, but its byte impact is not spatially uniform.",
+    "The six-task aggregate is a better planning signal than Monaco alone, but it remains bounded evidence rather than a formal planet projection.",
+    "Head growth stays narrow even where intermediate and serving bytes grow substantially."
+  ]
+}

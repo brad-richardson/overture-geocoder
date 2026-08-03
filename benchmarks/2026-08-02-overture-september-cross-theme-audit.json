@@ -1,0 +1,133 @@
+{
+  "schema": "overture-september-cross-theme-audit-v1",
+  "audited_at": "2026-08-02",
+  "scope": {
+    "release": "2026-07-22.0",
+    "themes": [
+      "addresses",
+      "base",
+      "buildings",
+      "divisions",
+      "places",
+      "transportation"
+    ],
+    "feature_types": 15
+  },
+  "findings": {
+    "release_note_confirmed_september_breaks": [
+      {
+        "theme": "places",
+        "change": "remove categories in favor of basic_category and taxonomy",
+        "status": "confirmed in the May, June, and July 2026 release notes"
+      }
+    ],
+    "merged_schema_plan_september_breaks": [
+      {
+        "scope": "shared SourceItem used by all 15 feature types",
+        "change": "make provider, resource, and version required; make dataset optional and deprecated",
+        "status": "announced as a rough September timeline in merged schema PR 535, but not yet listed in the July release notes or implemented by a separate merged breaking-change PR",
+        "later_change": "remove dataset in March 2027 or later"
+      }
+    ],
+    "other_september_breaks_found": [],
+    "upstream_state": {
+      "september_release": "2026-09-23.0",
+      "september_is_reserved_for_quarterly_major_changes": true,
+      "categories_removal_pr": {
+        "number": 434,
+        "state": "open",
+        "merged": false,
+        "head_sha": "2b82e47fef385d2e0939188283b22fc755e8bbfc"
+      },
+      "source_transition_pr": {
+        "number": 535,
+        "state": "closed",
+        "merged": true,
+        "merged_at": "2026-06-26T15:01:48Z",
+        "head_sha": "82c5288a1ac9116bb3d9ef29319d231b8d7ba804"
+      },
+      "abandoned_earlier_source_pr": {
+        "number": 532,
+        "state": "closed",
+        "merged": false,
+        "draft": true
+      },
+      "vnext_vs_main": "identical at 92f966fb5113e46cfabb60d0f694ff1e667cd24f"
+    }
+  },
+  "july_source_schema_measurement": {
+    "method": "For every feature type, inspect the first public Parquet object and read at most the first 20000 feature rows from row group zero, selecting only sources.",
+    "common_physical_fields": [
+      "property",
+      "dataset",
+      "license",
+      "record_id",
+      "update_time",
+      "confidence",
+      "between"
+    ],
+    "all_physical_fields_nullable": true,
+    "provider_resource_version_present_in_types": 0,
+    "dataset_present_in_types": 15,
+    "types": [
+      {"theme": "addresses", "type": "address", "object": "part-00000-73262e31-91e5-5e79-8f0e-486ecf492448-c000.zstd.parquet", "sample_feature_rows": 20000, "sample_source_records": 20000, "dataset_populated_records": 20000},
+      {"theme": "divisions", "type": "division", "object": "part-00000-3d9695ce-2282-56c2-9d25-622b1ec4727f-c000.zstd.parquet", "sample_feature_rows": 17832, "sample_source_records": 20575, "dataset_populated_records": 20575},
+      {"theme": "divisions", "type": "division_area", "object": "part-00000-3d6dbc8d-b72d-58d4-9cad-a7be4d4777de-c000.zstd.parquet", "sample_feature_rows": 2049, "sample_source_records": 3764, "dataset_populated_records": 3764},
+      {"theme": "divisions", "type": "division_boundary", "object": "part-00000-a50724e6-f9a9-5900-9fbc-70469fb9b268-c000.zstd.parquet", "sample_feature_rows": 1294, "sample_source_records": 2588, "dataset_populated_records": 2588},
+      {"theme": "places", "type": "place", "object": "part-00000-721bdadd-4327-5b81-bc83-aa244c71ceaa-c000.zstd.parquet", "sample_feature_rows": 16591, "sample_source_records": 33185, "dataset_populated_records": 33185},
+      {"theme": "transportation", "type": "connector", "object": "part-00000-44c16799-27c9-53b1-89ae-9c3a9ab01753-c000.zstd.parquet", "sample_feature_rows": 20000, "sample_source_records": 20000, "dataset_populated_records": 20000},
+      {"theme": "transportation", "type": "segment", "object": "part-00000-ecf02450-3f89-52d5-8ce4-b6fe28eb54bc-c000.zstd.parquet", "sample_feature_rows": 20000, "sample_source_records": 21262, "dataset_populated_records": 21262},
+      {"theme": "base", "type": "bathymetry", "object": "part-00000-cf17cfee-00e5-5871-9cab-7f48d910d28f-c000.zstd.parquet", "sample_feature_rows": 14857, "sample_source_records": 14857, "dataset_populated_records": 14857},
+      {"theme": "base", "type": "infrastructure", "object": "part-00000-80bd9a35-dbfb-5887-b8c9-98a4c201d082-c000.zstd.parquet", "sample_feature_rows": 20000, "sample_source_records": 20000, "dataset_populated_records": 20000},
+      {"theme": "base", "type": "land", "object": "part-00000-0a6002ad-70f8-569c-beab-e26c0d13500b-c000.zstd.parquet", "sample_feature_rows": 9510, "sample_source_records": 9510, "dataset_populated_records": 9510},
+      {"theme": "base", "type": "land_cover", "object": "part-00000-e427d4d7-ccce-54da-b2eb-d7622e7bcc2d-c000.zstd.parquet", "sample_feature_rows": 7585, "sample_source_records": 7585, "dataset_populated_records": 7585},
+      {"theme": "base", "type": "land_use", "object": "part-00000-77ee3eeb-102c-5b2e-ba40-e9fcc7244467-c000.zstd.parquet", "sample_feature_rows": 14492, "sample_source_records": 14492, "dataset_populated_records": 14492},
+      {"theme": "base", "type": "water", "object": "part-00000-578d6d54-898d-5022-9de6-dbc6b56c8402-c000.zstd.parquet", "sample_feature_rows": 7059, "sample_source_records": 7059, "dataset_populated_records": 7059},
+      {"theme": "buildings", "type": "building", "object": "part-00000-9ec87dd0-a7e0-5767-b796-1c3c023ddb23-c000.zstd.parquet", "sample_feature_rows": 20000, "sample_source_records": 20000, "dataset_populated_records": 20000},
+      {"theme": "buildings", "type": "building_part", "object": "part-00000-fce47f81-77d9-536d-952c-f94d08da76c2-c000.zstd.parquet", "sample_feature_rows": 20000, "sample_source_records": 20000, "dataset_populated_records": 20000}
+    ],
+    "interpretation": "The July release is not a physical bridge for the shared source migration. August must be re-audited before assuming the September-required fields are populated."
+  },
+  "repository_impact": {
+    "construction_v1": {
+      "status": "not blocked",
+      "reason": "The strict Places and Addresses inventories and projectors do not select sources, and the division build selects no source provenance fields.",
+      "published_artifacts": "unaffected because they are self-contained"
+    },
+    "opaque_preservation": {
+      "status": "compatible through September",
+      "paths": [
+        "scripts/download_addresses.sql",
+        "scripts/download_places.sql",
+        "scripts/extract_country_router.sql"
+      ],
+      "reason": "These paths preserve or JSON-encode the full source struct without requiring dataset as identity."
+    },
+    "dataset_identity_consumers": {
+      "status": "migration required before their first post-August rerun",
+      "paths": [
+        "scripts/experiment_current_release_addresses.py",
+        "scripts/benchmark_address_street.py",
+        "scripts/benchmark_places_sampling.py",
+        "scripts/benchmark_transport_components.py"
+      ],
+      "required_behavior": "Prefer the provider/resource/version tuple when all three are populated; retain dataset only as a legacy fallback through its announced removal window."
+    }
+  },
+  "decision": {
+    "current_action": "Keep the construction-v1 projection source-agnostic, force the taxonomy contract in the real slice smoke, and record the shared-source migration as a post-August research-tool gate.",
+    "august_gate": "Inspect all 15 feature types in 2026-08-19.0 for physical provider/resource/version fields and population before accepting September compatibility.",
+    "september_gate": "Do not run dataset-stratified research on 2026-09-23.0 until source identity is provider/resource/version-first."
+  },
+  "sources": [
+    "https://docs.overturemaps.org/release-calendar/",
+    "https://docs.overturemaps.org/blog/2026/07/22/release-notes/",
+    "https://docs.overturemaps.org/blog/2026/06/17/release-notes/",
+    "https://docs.overturemaps.org/blog/2026/05/20/release-notes/",
+    "https://github.com/OvertureMaps/schema/pull/434",
+    "https://github.com/OvertureMaps/schema/pull/535",
+    "https://github.com/OvertureMaps/schema/pull/532",
+    "https://github.com/OvertureMaps/schema/issues/530",
+    "https://stac.overturemaps.org/2026-07-22.0/catalog.json"
+  ]
+}
