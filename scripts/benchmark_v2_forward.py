@@ -647,6 +647,23 @@ def case_capability(provider, case, semantic_scoring=None):
     """``(state, reason)`` before spending a public-provider request."""
     if semantic_scoring is None:
         semantic_scoring = provider != "overture"
+    comparison_providers = case.get("comparison_providers")
+    if comparison_providers is not None:
+        if (
+            not isinstance(comparison_providers, list)
+            or not comparison_providers
+            or len(set(comparison_providers)) != len(comparison_providers)
+            or not all(value in PROVIDERS for value in comparison_providers)
+        ):
+            return (
+                "unscorable",
+                "comparison_providers is not a valid provider list",
+            )
+        if provider not in comparison_providers:
+            return (
+                "unscorable",
+                "gold provenance excludes this provider from comparison",
+            )
     if (semantic_scoring and case["kind"] != "address"
             and not case.get("expected_name")):
         return (

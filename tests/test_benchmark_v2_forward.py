@@ -237,6 +237,26 @@ def test_address_cases_are_deterministic_and_keep_locator_identity():
     assert len({case["id"] for case in first}) == 2
 
 
+def test_case_capability_honors_provenance_provider_eligibility():
+    value = {
+        "kind": "place",
+        "expected_name": "商店",
+        "comparison_providers": ["overture"],
+    }
+    assert bench.case_capability("overture", value, True) == ("supported", None)
+    capability, reason = bench.case_capability("nominatim", value, True)
+    assert capability == "unscorable"
+    assert "provenance excludes" in reason
+    invalid = {**value, "comparison_providers": ["unknown"]}
+    capability, reason = bench.case_capability("overture", invalid, True)
+    assert capability == "unscorable"
+    assert "not a valid provider list" in reason
+    duplicate = {**value, "comparison_providers": ["overture", "overture"]}
+    assert bench.case_capability("overture", duplicate, True)[0] == "unscorable"
+    empty = {**value, "comparison_providers": []}
+    assert bench.case_capability("overture", empty, True)[0] == "unscorable"
+
+
 def test_case_file_is_identical_for_a_fixed_seed_and_timestamp():
     records = [place_record(bytes([index] * 16), f"Cafe {index}")
                for index in range(6)]

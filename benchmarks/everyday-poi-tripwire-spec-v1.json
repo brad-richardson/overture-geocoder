@@ -1,0 +1,52 @@
+{
+  "schema": "everyday-poi-tripwire-spec-v1",
+  "purpose": "A frozen fast-loop benchmark for ordinary named POIs in the commercial-feed regime, independent of every compared provider.",
+  "case_schema": "benchmark-v2-forward-cases-v1",
+  "gates": {
+    "minimum_cases": 200,
+    "minimum_outside_europe_north_america": 160,
+    "minimum_non_latin_script": 80,
+    "minimum_macroregions": 4,
+    "minimum_countries": 8,
+    "maximum_cases_per_country": 40,
+    "minimum_poi_families": 5,
+    "minimum_cases_per_poi_family": 20,
+    "minimum_government_or_open_primary_cases": 160
+  },
+  "allowed": {
+    "poi_families": [
+      "civic_transit",
+      "food_drink",
+      "healthcare",
+      "lodging",
+      "retail",
+      "services"
+    ],
+    "scripts": [
+      "latin",
+      "non_latin",
+      "mixed"
+    ],
+    "densities": [
+      "dense_urban"
+    ],
+    "source_kinds": [
+      "government",
+      "open_primary",
+      "wikidata"
+    ],
+    "comparison_providers": [
+      "overture",
+      "nominatim",
+      "photon"
+    ]
+  },
+  "rules": [
+    "Every case names one real, ordinary POI and carries no expected_gers_id.",
+    "Gold coordinates and accepted names come from the cited source, never from Overture, Nominatim, or Photon.",
+    "A case whose source is OSM-derived is eligible only for Overture and must exclude Nominatim and Photon.",
+    "Non-OSM cases are eligible for all three providers.",
+    "Generic intents such as restaurants near me are excluded; this file scores exact named-place retrieval.",
+    "Changing a numeric gate requires a new spec generation rather than silently weakening this one."
+  ]
+}

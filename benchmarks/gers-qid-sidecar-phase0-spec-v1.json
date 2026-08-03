@@ -1,0 +1,49 @@
+{
+  "schema": "gers-qid-sidecar-phase0-spec-v1",
+  "purpose": "Decision contract for a durable external fame sidecar; this generation authorizes measurement only and cannot alter construction output.",
+  "identity_model": {
+    "durable_mapping_key": "gers_id",
+    "external_entity_key": "wikidata_qid",
+    "release_handling": "Keep accepted GERS-to-QID mappings durable. For each Overture release, derive an attested membership/delta containing present, added, removed, and reassigned GERS IDs; do not rematch every surviving ID by default.",
+    "reason": "GERS IDs are intended to be stable, while measured bridge continuity determines the size of the exception path. QIDs key the independently refreshed Wikidata fame table."
+  },
+  "required_mapping_fields": [
+    "gers_id",
+    "wikidata_qid",
+    "decision",
+    "match_method",
+    "match_evidence",
+    "first_overture_release",
+    "last_validated_overture_release",
+    "matcher_version",
+    "review_status"
+  ],
+  "allowed_decisions": [
+    "accepted",
+    "rejected",
+    "needs_review"
+  ],
+  "allowed_match_methods": [
+    "direct_source_wikidata_id",
+    "reviewed_name_distance",
+    "reviewed_name_address",
+    "reviewed_manual"
+  ],
+  "phase0_gates": {
+    "minimum_hand_checked_candidates": 200,
+    "maximum_false_accepts": 0,
+    "automatic_acceptance_requires_direct_external_id": true,
+    "fuzzy_candidates_require_review": true,
+    "coordinates_may_only_gate_match_distance": true,
+    "unreviewed_matches_may_not_change_prominence": true,
+    "construction_contract_movement": false
+  },
+  "required_evidence": [
+    "Cross-release bridge continuity report for every Places bridge dataset shared by the two measured releases.",
+    "A deterministic candidate set with matcher version and source hashes.",
+    "At least 200 independently hand-checked candidate decisions, including every proposed automatic-accept rule.",
+    "False-accept examples and rejection reasons retained rather than deleted.",
+    "Measured broadcast bytes and resident join memory for the accepted mapping."
+  ],
+  "phase1_stop_line": "A later v5 evidence generation may be proposed only after Phase 0 passes. This file does not authorize a projection join, prominence change, planet build, or promotion."
+}
