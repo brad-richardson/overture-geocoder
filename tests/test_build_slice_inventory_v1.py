@@ -244,7 +244,13 @@ def test_places_slice_builds_a_canonical_inventory_the_projector_accepts(monkeyp
         ],
         "schema_contract": contract,
     }
-    monkeypatch.setattr(places, "inspect_parquet_object", lambda s, fs: details)
+    profiles = []
+
+    def inspect(_source, _filesystem, *, profile="auto"):
+        profiles.append(profile)
+        return details
+
+    monkeypatch.setattr(places, "inspect_parquet_object", inspect)
     monkeypatch.setattr(builder, "INV", places)
 
     inventory, tasks, digest = builder.places_slice(
@@ -256,6 +262,54 @@ def test_places_slice_builds_a_canonical_inventory_the_projector_accepts(monkeyp
     identity = places.validate_inventory(inventory)
     assert identity["inventory_sha256"] == digest
     assert builder.task_covering(tasks, 5) == 2
+    assert profiles == ["auto"]
+
+
+def test_places_slice_can_force_the_taxonomy_contract(monkeypatch):
+    places = _load("places_inventory_v1_taxonomy_slice", "scripts/places_inventory_v1.py")
+    uri = f"{places.approved_prefix(RELEASE)}part-00000-slice.zstd.parquet"
+    source = {"uri": uri, "etag": "etag", "bytes": 4096}
+    contract = places.canonical_schema_contract(
+        [
+            {"path": path, "type": kind, "nullable": True}
+            for path, kind in sorted(places.TAXONOMY_REQUIRED_FIELD_TYPES.items())
+        ]
+    )
+    details = {
+        "records": 4,
+        "row_group_count": 2,
+        "row_groups": [
+            {
+                "index": index,
+                "rows": 2,
+                "selected_compressed_bytes": 200,
+                "selected_uncompressed_bytes": 400,
+            }
+            for index in range(2)
+        ],
+        "schema_contract": contract,
+    }
+    profiles = []
+
+    def inspect(_source, _filesystem, *, profile="auto"):
+        profiles.append(profile)
+        return details
+
+    monkeypatch.setattr(places, "inspect_parquet_object", inspect)
+    monkeypatch.setattr(builder, "INV", places)
+
+    inventory, tasks, digest = builder.places_slice(
+        source,
+        None,
+        release=RELEASE,
+        groups_per_task=1,
+        schema_profile="taxonomy",
+    )
+
+    assert profiles == ["taxonomy"]
+    assert places.schema_profile_name(inventory["schema_contract"]) == "taxonomy"
+    assert len(tasks) == 2
+    assert places.validate_inventory(inventory)["inventory_sha256"] == digest
 
 
 def test_main_writes_the_inventory_and_reports_one_records_key(monkeypatch, tmp_path):

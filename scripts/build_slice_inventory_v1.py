@@ -121,9 +121,16 @@ def covering_row_group(
 
 
 def places_slice(
-    source: dict[str, Any], filesystem, *, release: str, groups_per_task: int
+    source: dict[str, Any],
+    filesystem,
+    *,
+    release: str,
+    groups_per_task: int,
+    schema_profile: str = "auto",
 ) -> tuple[dict[str, Any], list[dict[str, Any]], str]:
-    details = INV.inspect_parquet_object(source, filesystem)
+    details = INV.inspect_parquet_object(
+        source, filesystem, profile=schema_profile
+    )
     largest = max(group["rows"] for group in details["row_groups"])
     inventory = INV.build_inventory(
         release, [source], lambda _s: details,
@@ -189,6 +196,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument(
+        "--schema-profile",
+        choices=("auto", "legacy", "taxonomy"),
+        default="auto",
+        help=(
+            "Places category contract. Use taxonomy to exercise the migration "
+            "against a dual-field release; addresses accept only auto."
+        ),
+    )
+    parser.add_argument(
         "--groups-per-task", type=int, default=None,
         help="Row groups per map task. Default: the finest value the 128-task cap "
              "admits for the object actually selected (2 for a 256-row-group "
@@ -200,6 +216,8 @@ def main(argv: list[str] | None = None) -> int:
 
     filesystem = pafs.S3FileSystem(anonymous=True, region=INV.REGION)
     if args.family == "addresses":
+        if args.schema_profile != "auto":
+            raise SystemExit("--schema-profile applies only to the places family")
         listed = sorted(AINV.list_objects(args.release), key=lambda i: i["uri"])
         build = addresses_slice
     else:
@@ -213,9 +231,14 @@ def main(argv: list[str] | None = None) -> int:
         if found is None:
             continue
         groups_per_task = args.groups_per_task or finest_groups_per_task(row_groups)
+        build_kwargs = {
+            "release": args.release,
+            "groups_per_task": groups_per_task,
+        }
+        if args.family == "places":
+            build_kwargs["schema_profile"] = args.schema_profile
         inventory, tasks, inventory_sha256 = build(
-            source, filesystem, release=args.release,
-            groups_per_task=groups_per_task,
+            source, filesystem, **build_kwargs
         )
         task_index = task_covering(tasks, found)
         task = tasks[task_index]
@@ -230,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
             )
         args.output.parent.mkdir(parents=True, exist_ok=True)
         args.output.write_text(json.dumps(inventory, indent=2, sort_keys=True) + "\n")
-        print(json.dumps({
+        summary = {
             "family": args.family,
             "object_index": object_index,
             "row_group": found,
@@ -240,7 +263,12 @@ def main(argv: list[str] | None = None) -> int:
             "task_records": task_records,
             "tasks": len(tasks),
             "inventory_sha256": inventory_sha256,
-        }, sort_keys=True))
+        }
+        if args.family == "places":
+            summary["schema_profile"] = INV.schema_profile_name(
+                inventory["schema_contract"]
+            )
+        print(json.dumps(summary, sort_keys=True))
         return 0
 
     raise SystemExit(f"no row group overlaps bbox {args.bbox}")
