@@ -3,9 +3,10 @@
 Date: 2026-08-03
 
 Status: the cross-release identity measurement and the benchmark contracts are
-complete. The first 50 of 200 everyday-POI cases are frozen from Singapore and
-Taiwan, before any provider request. GERS-to-QID candidate generation, the
-200-decision match audit, and the remaining 150 benchmark cases are not yet
+complete. The first 90 of 200 everyday-POI cases are frozen from Singapore,
+Taiwan, Hong Kong, and South Korea, before any provider request. GERS-to-QID
+candidate generation, the 200-decision match audit, and the remaining 110
+benchmark cases are not yet
 built. Nothing in this work changes a construction request, projection, serving
 artifact, catalog, or Worker.
 
@@ -123,6 +124,24 @@ stations. Selection made zero compared-provider requests and retained the exact
 dataset and licence bytes under `benchmarks/everyday-poi-source-data-v1/`, with
 their hashes in `benchmarks/everyday-poi-source-snapshots-v1.json`.
 
+Collection batch 2 adds 20 Hong Kong Hospital Authority facilities and 20
+active Seoul hospitals. The Hong Kong CSDI GeoJSON contains 44 bilingual WGS84
+points with stable `OBJECTID` values; selection uses the Traditional Chinese
+name and retains the official English name as an accepted alias. Seoul's
+official 1,000-row preview contains the complete 929-row licensing dataset:
+555 rows report both active trade status and `영업중`, eight of those lack
+coordinates, and excluding both sides of ten duplicate-name pairs leaves 527
+eligible records. Its data-only JavaScript response is parsed without `eval`.
+The official EPSG:5174 coordinates are converted with pinned pyproj 3.7.2 /
+PROJ 9.5.1 using the named EPSG operation at 1 m stated accuracy; original
+coordinates and the complete transformation contract are retained in every
+Seoul case. Batch 2 also made zero compared-provider requests.
+
+The frozen set is now 90 cases across four countries and three POI families,
+including 70 non-Latin cases. Readiness remains correctly red: 110 cases, two
+macroregions, four countries, two POI families, ten non-Latin cases, and 70
+government/open-primary cases remain to reach the v1 gates.
+
 The sources are official spatial restaurant, transit, medical-facility,
 business, and health-network datasets. Selection is deterministic from frozen
 source bytes and stable source record IDs before any compared-provider request.
@@ -179,10 +198,13 @@ python scripts/validate_everyday_poi_tripwire.py \
 During collection, `--allow-incomplete` may write a readiness report, but it
 does not weaken or mark any frozen gate as passed.
 
-Reproduce collection batch 1 from the frozen local source bytes:
+Reproduce the current collection from the frozen local source bytes. Seoul's
+coordinate transformation is intentionally version-pinned:
 
 ```bash
-python3 scripts/collect_everyday_poi_batch1.py \
+python3 -m venv /tmp/everyday-poi-pyproj-venv
+/tmp/everyday-poi-pyproj-venv/bin/pip install pyproj==3.7.2
+/tmp/everyday-poi-pyproj-venv/bin/python scripts/collect_everyday_poi.py \
   --output benchmarks/everyday-poi-tripwire-cases-v1.json \
   --report benchmarks/everyday-poi-selection-report-v1.json
 ```

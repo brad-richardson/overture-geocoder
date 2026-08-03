@@ -1,7 +1,7 @@
 {
   "schema": "everyday-poi-source-plan-v1",
   "tripwire_spec": "benchmarks/everyday-poi-tripwire-spec-v1.json",
-  "status": "collection in progress; 50 cases frozen from Singapore and Taiwan",
+  "status": "collection in progress; 90 cases frozen from Singapore, Taiwan, Hong Kong, and South Korea",
   "target_totals": {
     "cases": 200,
     "government_or_open_primary": 200,
@@ -140,7 +140,7 @@
         "EPSG:5174 easting",
         "EPSG:5174 northing"
       ],
-      "qualification": "The official catalog is updated daily and explicitly documents EPSG:5174 coordinates; conversion to WGS84 must be reproducible and retained with each case."
+      "qualification": "The official catalog is updated daily and explicitly documents EPSG:5174 coordinates. Its unauthenticated 1,000-row sheet preview contains the complete 929-row dataset, stable MGTNO licensing identifiers, and explicit trade/detailed status fields; conversion to WGS84 is pinned to pyproj 3.7.2 / PROJ 9.5.1 and retained with each case."
     },
     {
       "id": "hk-ha-health-care-facilities",
@@ -157,7 +157,7 @@
       "source_license": "DATA.GOV.HK Terms and Conditions",
       "format": "Common Spatial Data Infrastructure API",
       "identity_fields": [
-        "source feature identifier"
+        "OBJECTID"
       ],
       "name_fields": [
         "Traditional Chinese facility name",
@@ -166,7 +166,7 @@
       "coordinate_fields": [
         "point geometry"
       ],
-      "qualification": "The official quarterly spatial directory is bilingual. Prefer the Traditional Chinese name as the query surface and retain English only as an accepted alias."
+      "qualification": "The official quarterly CSDI GeoJSON carries stable OBJECTID values, bilingual names, WGS84 points, and LASTUPDATE timestamps. Prefer the Traditional Chinese name as the query surface and retain English only as an accepted alias."
     },
     {
       "id": "co-bogota-public-health-network",
