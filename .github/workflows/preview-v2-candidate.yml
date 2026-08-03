@@ -84,7 +84,9 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y llvm clang
-          cargo install worker-build
+          # worker-build 0.8 requires worker >=0.8; this Worker intentionally
+          # remains on worker 0.7, so keep the compatible build toolchain.
+          cargo install worker-build --version '^0.7' --locked
           npm install --global wrangler
 
       - name: Fetch and bind the live release plus candidate Places slice
