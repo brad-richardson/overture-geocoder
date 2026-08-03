@@ -1,8 +1,9 @@
 # construction-v1: current state
 
 Last updated 2026-08-03 after the bounded entity-phrase admission implementation,
-the independent correctness audit, fresh v4 formal evidence, and sidecar Phase
-0's cross-release identity measurement.
+the independent correctness audit, fresh v4 formal evidence, sidecar Phase 0's
+cross-release identity measurement, and completion of the 200-case
+everyday-POI tripwire.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -1637,25 +1638,30 @@ non-Latin cases and five families: civic/transit, food/drink, healthcare,
 lodging, and retail. Selection is deterministic from source records before any
 provider request. The validator enforces independent provenance and excludes
 Nominatim/Photon for any gold later found to be OSM-derived. Collection batches
-1-3 froze 135 cases with zero provider requests: 20 Singapore rail stations, 30
-Tainan food/drink records, 20 Hong Kong Hospital Authority facilities, 20
-active Seoul hospitals, 20 Bogotá public healthcare facilities, and 25
-Melbourne physical-retail establishments. The current Taiwan feed has no
+1-4 froze all 200 cases with zero provider requests: 20 Singapore rail stations,
+30 Tainan food/drink records, 20 Hong Kong Hospital Authority facilities, 20
+active Seoul hospitals, 20 Bogotá public healthcare facilities, 25 Melbourne
+physical-retail establishments, 30 Shinjuku clinics, and 35 Ciudad de México
+lodging/retail establishments. The current Taiwan feed has no
 Taipei records, so the source filter moved to five Tainan core districts rather
 than silently filling the quota from another provider. Hong Kong contributes
 official bilingual WGS84 points with stable `OBJECTID`s. Seoul's full 929-row
 licensing preview is parsed as data rather than evaluated, filtered on explicit
 active/open status, and transformed from EPSG:5174 with pinned pyproj 3.7.2 /
 PROJ 9.5.1 while retaining the original coordinates and operation contract.
-The readiness report remains correctly red on six incomplete coverage gates:
-135/200 cases,
-70/80 non-Latin cases, six/eight countries, and four/five families; all four
-macroregions are now represented. Bogotá uses stable district-health `ID`
-values from a frozen 117-feature layer (116 valid points, 114 inside the dense
-bounds). Melbourne filters its frozen 19,672-record 2024 snapshot to ANZSIC
-physical-retail divisions 39-42, excludes duplicate official names, and records
-one reviewed storage-only rejection before admission. Do not commit past sidecar
-Phase 0 until the full tripwire is frozen and measured.
+The readiness report is now green with no blockers: 200/200 cases, 100/80
+non-Latin cases, eight/eight countries, five/five families, and all four
+macroregions. Bogotá uses stable district-health `ID` values from a frozen
+117-feature layer (116 valid points, 114 inside the dense bounds). Melbourne
+filters its frozen 19,672-record 2024 snapshot to ANZSIC physical-retail
+divisions 39-42, excludes duplicate official names, and records one reviewed
+storage-only rejection before admission. Japan deliberately pivots away from
+the planned 2020 MLIT source because that catalog explicitly includes suspended
+facilities; the current Shinjuku standard dataset provides 695 unique IDs and
+valid points. Mexico uses the corrected DENUE 05/2026 bulk file with 462,732
+unique `id` and `CLEE` values, fixed-establishment and SCIAN family filters,
+and retained methodology/correction evidence. Provider measurement is the next
+benchmark step; the sidecar Phase 0 audit remains separate and incomplete.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 

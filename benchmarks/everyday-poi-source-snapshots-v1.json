@@ -121,6 +121,61 @@
       "source_license": "Creative Commons Attribution 4.0",
       "source_name": "Business establishments with address and industry classification (2024)",
       "source_url": "https://data.melbourne.vic.gov.au/explore/dataset/business-establishments-with-address-and-industry-classification/"
+    },
+    {
+      "accessed_at": "2026-08-03T18:41:00Z",
+      "download_locator": "https://www.city.shinjuku.lg.jp/content/000399984.csv",
+      "id": "jp-shinjuku-medical-facilities",
+      "license_snapshot_bytes": 48970,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/cc-by-4.0.html",
+      "license_snapshot_sha256": "6d55b998ed5c54f43426d059a8c549ed58a3321e5463e6a6af1c6b56ab78c333",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.en",
+      "metadata_snapshots": [
+        {
+          "bytes": 3023,
+          "path": "benchmarks/everyday-poi-source-data-v1/jp-shinjuku-package.json",
+          "sha256": "4a18d5c5d4f7fe15b59ab68ee28a4887feda821a1bf34ead066406eca7ba111d",
+          "url": "https://catalog.data.metro.tokyo.lg.jp/api/3/action/package_show?id=t131041d0000000121"
+        }
+      ],
+      "snapshot_bytes": 355584,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/jp-shinjuku-medical.csv",
+      "snapshot_sha256": "bff79ab6082ab489bc65865934a5de0a4ca5896253e77b10f8c4f779f1e39f70",
+      "source_license": "Creative Commons Attribution 4.0",
+      "source_name": "新宿区の医療機関一覧",
+      "source_url": "https://catalog.data.metro.tokyo.lg.jp/dataset/t131041d0000000121",
+      "text_encoding": "UTF-16"
+    },
+    {
+      "accessed_at": "2026-08-03T18:43:00Z",
+      "archive_member": "conjunto_de_datos/denue_inegi_09_.csv",
+      "download_locator": "https://www.inegi.org.mx/contenidos/masiva/denue/denue_09_csv.zip",
+      "id": "mx-inegi-denue",
+      "license_snapshot_bytes": 10442,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/mx-inegi-terms.html",
+      "license_snapshot_sha256": "97e97599169f75f455877e85edffcf941d512f56c5c00197ebfec783d802c67a",
+      "license_url": "https://www.inegi.org.mx/inegi/terminos.html",
+      "metadata_snapshots": [
+        {
+          "bytes": 5369245,
+          "path": "benchmarks/everyday-poi-source-data-v1/mx-denue-methodology.pdf",
+          "sha256": "36a0e236d8eea4f1a0bfd19914223c4c823fc6217c0f814d0e30da5e97b752a4",
+          "url": "https://www.inegi.org.mx/contenidos/temas/directorio/doc/metodologia.pdf"
+        },
+        {
+          "bytes": 193164,
+          "path": "benchmarks/everyday-poi-source-data-v1/mx-denue-correction.pdf",
+          "sha256": "2537e1dac93cf24b34d8df77ec746f6011d804b6fb70a66c7721c66bbe92d448",
+          "url": "https://www.inegi.org.mx/app/mapa/denue/nota.pdf"
+        }
+      ],
+      "snapshot_bytes": 45439249,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/mx-denue-09-2026.zip",
+      "snapshot_sha256": "ae608f30118f6313e9d537ea22918b2c9e9a3d3f19c2ddf5907f55dbb1642b19",
+      "source_license": "INEGI Terms of Free Use",
+      "source_name": "Directorio Estadístico Nacional de Unidades Económicas (DENUE) 05/2026",
+      "source_url": "https://www.inegi.org.mx/temas/directorio/",
+      "text_encoding": "Windows-1252"
     }
   ]
 }

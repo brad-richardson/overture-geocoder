@@ -2,11 +2,10 @@
 
 Date: 2026-08-03
 
-Status: the cross-release identity measurement and the benchmark contracts are
-complete. The first 135 of 200 everyday-POI cases are frozen from Singapore,
-Taiwan, Hong Kong, South Korea, Colombia, and Australia, before any provider
-request. GERS-to-QID candidate generation, the 200-decision match audit, and
-the remaining 65 benchmark cases are not yet
+Status: the cross-release identity measurement, benchmark contracts, and all
+200 everyday-POI cases are complete. The cases are frozen from eight government
+sources before any provider request, and the readiness report is green.
+GERS-to-QID candidate generation and the 200-decision match audit are not yet
 built. Nothing in this work changes a construction request, projection, serving
 artifact, catalog, or Worker.
 
@@ -148,11 +147,23 @@ storage-only record before filling the 25-case quota. Exact dataset, catalog,
 ArcGIS-layer, and CC BY 4.0 evidence bytes are retained. Batch 3 also made zero
 compared-provider requests.
 
-The frozen set is now 135 cases across six countries, four macroregions, and
-four POI families, including 70 non-Latin cases. Readiness remains correctly
-red on six incomplete gates: 65 cases, two countries, one POI family, ten
-non-Latin cases, and 25 government/open-primary cases remain to reach the v1
-minimums. Macroregion coverage is complete.
+Collection batch 4 completes the set with 30 Shinjuku healthcare facilities and
+35 Ciudad de México establishments: 20 lodging and 15 retail. The planned 2020
+MLIT medical source was rejected because its own catalog says it includes
+suspended facilities. The replacement Shinjuku municipal-standard dataset was
+updated 2025-12-12 and has 695 unique stable `ID` values and valid points. It
+provides 673 unique named Japanese-script candidates; one temporary vaccination
+site is retained as a reviewed rejection. The corrected DENUE 05/2026 snapshot
+has 462,732 unique `id` and `CLEE` values. The collector retains the exact bulk
+ZIP, free-use terms, methodology, and May 2026 correction notice; requires
+fixed establishments and official SCIAN 721 lodging or 46 retail activities;
+and excludes generic, duplicate, or out-of-bounds records. Batch 4 also made
+zero compared-provider requests.
+
+The frozen set is now complete: 200 cases, eight countries, four macroregions,
+five POI families, 100 non-Latin cases, and 200 government-source cases. Every
+frozen minimum passes and `everyday-poi-tripwire-readiness-v1.json` is
+`ready=true` with no blockers.
 
 The sources are official spatial restaurant, transit, medical-facility,
 business, and health-network datasets. Selection is deterministic from frozen
