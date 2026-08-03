@@ -199,6 +199,7 @@ def test_preview_workflow_is_run_scoped_and_cleans_only_its_prefix():
     assert "--expect-absent" in workflow
     assert "wrangler.global-v2-preview.toml" in workflow
     assert "validate_v2_preview_results.py" in workflow
+    assert "cargo install worker-build --version '^0.7' --locked" in workflow
     assert "s3://geocoder-shards/ --recursive" not in workflow
 
 
