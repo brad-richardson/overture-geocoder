@@ -26,6 +26,8 @@ use uuid::Uuid;
 
 const MAX_RECORD_BYTES: usize = 1_048_576;
 const TOKENIZER_VERSION: &str = "nfkd-lower-stripmark-cjk-bigram-v4";
+const ENTITY_PHRASE_MIN_WORDS: usize = 2;
+const ENTITY_PHRASE_MAX_WORDS: usize = 3;
 
 /// The tokenizer contract pins one Unicode version across both implementations.
 /// NFKD and combining-mark classification come from `unicode-normalization`
@@ -281,6 +283,23 @@ fn tokens(value: &str) -> Vec<String> {
     result
 }
 
+/// One head-only exact-primary-name key for a category-prominent entity.
+///
+/// Exact phrase equality is the identity evidence; `prominence_rank > 0` is
+/// only the bounded admission budget.  The `eN:` namespace cannot collide with
+/// ordinary tokenizer output because `:` is a word separator.  CJK runs are a
+/// single normalized word here and remain on the existing token/bigram path.
+fn entity_phrase_key(primary_name: &str, prominence_rank: u8) -> Option<String> {
+    if prominence_rank == 0 {
+        return None;
+    }
+    let words = normalized_words(primary_name);
+    if !(ENTITY_PHRASE_MIN_WORDS..=ENTITY_PHRASE_MAX_WORDS).contains(&words.len()) {
+        return None;
+    }
+    Some(format!("e{}:{}", words.len(), words.join(" ")))
+}
+
 fn point(value: &[u8]) -> Option<(f64, f64)> {
     if value.len() != 21 || !matches!(value[0], 0 | 1) {
         return None;
@@ -499,6 +518,9 @@ fn transform_batch(
         let prominence = prominences
             .filter(|array| !array.is_null(index))
             .map_or(0, |array| array.value(index));
+        if let Some(phrase) = entity_phrase_key(primary_name, prominence) {
+            *terms.entry(phrase).or_default() |= 1;
+        }
         let template = TermRow {
             execution_group,
             partition_cell,

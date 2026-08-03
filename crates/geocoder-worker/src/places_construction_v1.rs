@@ -93,6 +93,7 @@ const MAX_ARTIFACT_ENTRY_BYTES: usize = 64 * 1024;
 const ROUTED_CANDIDATE_CAP: usize = 256;
 /// Producer cap: at most `head_result_cap` (10) records per head token.
 const HEAD_RESULT_CAP: usize = 10;
+pub(crate) const ENTITY_PHRASE_ADMISSION: &str = "prominence-primary-name-v1";
 /// Maximum global-head query width. Three admits common landmark names such as
 /// `Statue of Liberty` while keeping the no-proximity lane to three bounded R2
 /// reads. Routed lookup retains its independent four-token cap.
@@ -998,6 +999,8 @@ struct RawHeadShard {
 #[derive(Debug, Deserialize)]
 struct RawHeadManifest {
     schema: String,
+    #[serde(default)]
+    entity_phrase_admission: Option<String>,
     shard_bits: u32,
     shard_count: u32,
     populated_shards: usize,
@@ -1017,6 +1020,7 @@ pub(crate) struct HeadShardIdentity {
 pub(crate) struct HeadRoutingManifest {
     pub shard_bits: u32,
     pub shard_count: u32,
+    entity_phrase_admission: bool,
     shards: HashMap<u32, HeadShardIdentity>,
 }
 
@@ -1034,6 +1038,14 @@ impl HeadRoutingManifest {
         {
             return Err("unsupported Places head routing manifest contract".into());
         }
+        if raw
+            .entity_phrase_admission
+            .as_deref()
+            .is_some_and(|value| value != ENTITY_PHRASE_ADMISSION)
+        {
+            return Err("unsupported Places head entity-phrase admission".into());
+        }
+        let entity_phrase_admission = raw.entity_phrase_admission.is_some();
         let mut shards = HashMap::with_capacity(raw.shards.len());
         for shard in raw.shards {
             if shard.shard_id >= raw.shard_count
@@ -1057,6 +1069,7 @@ impl HeadRoutingManifest {
         Ok(Self {
             shard_bits: raw.shard_bits,
             shard_count: raw.shard_count,
+            entity_phrase_admission,
             shards,
         })
     }
@@ -1067,6 +1080,10 @@ impl HeadRoutingManifest {
 
     pub(crate) fn shards(&self) -> impl Iterator<Item = &HeadShardIdentity> {
         self.shards.values()
+    }
+
+    pub(crate) fn admits_entity_phrases(&self) -> bool {
+        self.entity_phrase_admission
     }
 
     /// Geometry agreement with the routing.json head block, checked at both
@@ -1316,6 +1333,26 @@ pub(crate) fn merge_head_candidates(
         HEAD_QUERY_TOKEN_CAP,
         "head",
     )
+}
+
+/// Synthetic exact-primary-name key shared with `places-transform-v1`.
+/// `query_terms` already supplies the frozen normalized word sequence.
+pub(crate) fn entity_phrase_key(tokens: &[String]) -> Option<String> {
+    if !(2..=3).contains(&tokens.len()) {
+        return None;
+    }
+    Some(format!("e{}:{}", tokens.len(), tokens.join(" ")))
+}
+
+/// Fail closed if a malformed phrase posting does not prove its own key.
+pub(crate) fn validate_entity_phrase_records(
+    tokens: &[String],
+    records: Vec<PlacesV1Record>,
+) -> Vec<PlacesV1Record> {
+    records
+        .into_iter()
+        .filter(|record| crate::places_pages::query_terms(&record.primary_name) == tokens)
+        .collect()
 }
 
 /// Project one construction record into the shared serving projection.
@@ -1574,13 +1611,14 @@ pub(crate) fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, va
 #[cfg(test)]
 mod tests {
     use super::{
-        construction_cell, decode_routed_range_payload, head_shard_id, head_shard_lookup,
-        index_hash, lookup_head_shard, merge_head_candidates, merge_routed_candidates,
-        parse_routed_range_header, parse_routed_range_index, query_key, ranged_index_candidates,
-        record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
-        validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
-        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, PlacesV1Version,
-        MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+        construction_cell, decode_routed_range_payload, entity_phrase_key, head_shard_id,
+        head_shard_lookup, index_hash, lookup_head_shard, merge_head_candidates,
+        merge_routed_candidates, parse_routed_range_header, parse_routed_range_index, query_key,
+        ranged_index_candidates, record_projection, routed_fetch_plan, routed_lookup,
+        routed_token_hash, validate_entity_phrase_records, validate_routed_range_payload_extent,
+        HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex,
+        PlacesV1Record, PlacesV1Version, ENTITY_PHRASE_ADMISSION, MAX_ARTIFACT_ENTRY_BYTES,
+        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -2801,6 +2839,13 @@ mod tests {
             HeadRoutingManifest::parse(&value.to_string())
         };
         assert!(manifest(&|_| {}).is_ok());
+        let admitted =
+            manifest(&|value| value["entity_phrase_admission"] = json!(ENTITY_PHRASE_ADMISSION))
+                .unwrap();
+        assert!(admitted.admits_entity_phrases());
+        assert!(
+            manifest(&|value| { value["entity_phrase_admission"] = json!("unknown") }).is_err()
+        );
         assert!(manifest(&|value| value["schema"] = json!("other")).is_err());
         assert!(manifest(&|value| value["shard_count"] = json!(8)).is_err());
         assert!(manifest(&|value| value["populated_shards"] = json!(2)).is_err());
@@ -2823,6 +2868,37 @@ mod tests {
         let mut expected = vec![ids[0], ids[ids.len() / 2], ids[ids.len() - 1]];
         expected.dedup();
         assert_eq!(sample, expected);
+    }
+
+    #[test]
+    fn entity_phrase_key_and_record_validation_are_exact_and_bounded() {
+        let words = vec!["big".to_string(), "ben".to_string()];
+        assert_eq!(entity_phrase_key(&words).as_deref(), Some("e2:big ben"));
+        assert_eq!(
+            entity_phrase_key(&[
+                "empire".to_string(),
+                "state".to_string(),
+                "building".to_string(),
+            ])
+            .as_deref(),
+            Some("e3:empire state building")
+        );
+        assert!(entity_phrase_key(&["ben".to_string()]).is_none());
+        assert!(entity_phrase_key(&[
+            "one".to_string(),
+            "two".to_string(),
+            "three".to_string(),
+            "four".to_string(),
+        ])
+        .is_none());
+
+        let mut exact = entry_record("e2:big ben", 255, 1);
+        exact.primary_name = "Big Ben".to_string();
+        let mut wrong = entry_record("e2:big ben", 255, 2);
+        wrong.primary_name = "Big Ben Memorial".to_string();
+        let records = validate_entity_phrase_records(&words, vec![wrong, exact]);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].primary_name, "Big Ben");
     }
 
     /// Local evidence over a real promoted slice (for example the Monaco

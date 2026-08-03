@@ -286,6 +286,8 @@ fn verify_artifact(data: &[u8], mode: &str) -> Result<Verified> {
 #[derive(Deserialize)]
 struct Manifest {
     schema: String,
+    #[serde(default)]
+    entity_phrase_admission: Option<String>,
     shard_count: u64,
     shard_bits: u32,
     total_records: u64,
@@ -337,6 +339,13 @@ fn verify_sharded_head(manifest_path: &Path) -> Result<()> {
     .context("parse head manifest")?;
     if manifest.schema != "overture-places-global-head-sharded-v2" {
         bail!("unexpected head manifest schema")
+    }
+    if manifest
+        .entity_phrase_admission
+        .as_deref()
+        .is_some_and(|value| value != "prominence-primary-name-v1")
+    {
+        bail!("unsupported head entity-phrase admission")
     }
     // Shard count is a per-build value, but must be a power of two so the top
     // `shard_bits` of the index hash address it exactly.

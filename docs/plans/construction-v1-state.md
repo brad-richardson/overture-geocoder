@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-08-02 after the taxonomy slice and September cross-theme
-schema audit.
+Last updated 2026-08-03 after the bounded entity-phrase admission implementation
+and expanded POI stage audit.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -15,10 +15,15 @@ before RC2 to 6/10 after RC3, with no serving rank@1 regression. The subsequent
 contract audit removed a false-positive Big Ben rank and accepted official
 Machu Picchu citadel names, producing an audited name-only score of 7/10.
 Statue of Liberty is recovered at rank 4; Machu Picchu is recovered at rank 10
-under an official alias. **The next gate is a bounded producer-admission design
-for the confirmed Empire State Building, Big Ben, and Brandenburg Gate misses,
-not a rebuild.** Keep `Machu Picchu Cusco` in the separate region-context
-routing backlog.
+under an official alias. The bounded producer-admission design is now
+implemented and real-slice validated for **Empire State Building and Big Ben**.
+A direct source-stage audit corrected Brandenburg Gate: the nearby June records
+expose German/Spanish names, not the English query surface, and even the German
+routed control misses the canonical record. It is an alias/tokenization plus
+routed-cap problem, not the same global-head eviction. **The next gate is formal
+evidence regeneration and a planet-rebuild decision for the two phrase-admission
+targets, not another ranking pass.** Keep Brandenburg Gate and `Machu Picchu
+Cusco` in their separate follow-up backlogs.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -1365,6 +1370,77 @@ must prefer the complete `(provider, resource, version)` tuple and retain
 `dataset` only as a legacy fallback. Do not add provenance columns to the hot
 construction projection merely to solve that research-tool migration.
 
+### Bounded entity-phrase admission and expanded POI stage audit, 2026-08-03
+
+Durable evidence:
+
+- `benchmarks/2026-08-03-poi-admission-audit-v1.json`;
+- `benchmarks/2026-08-03-entity-phrase-scale-v1.json`;
+- `benchmarks/2026-08-03-entity-phrase-monaco-slice-v1.json`; and
+- `benchmarks/2026-08-03-forward-gold-external-poi-expanded-audited.json`.
+
+The 23-case stage audit combines an exact-release, gold-radius source read with
+the live context-free query and explicit-proximity controls. It changes the
+three-landmark conclusion:
+
+- **Big Ben and Empire State Building are true global-head admission misses.**
+  The June source carries exact primary-name records at the gold points;
+  explicit-proximity forward search retrieves them at ranks 3 and 1; and the
+  new phrase contract has one and two eligible source records respectively.
+- **Brandenburg Gate is not the same failure.** The four nearby accepted source
+  matches are named `Brandenburger Tor` or `Puerta de Brandeburgo`; no projected
+  primary/brand field carries `Brandenburg Gate`. The English explicit-proximity
+  control returns same-named records 25.8 km away, while `Brandenburger Tor`
+  still does not admit the canonical record to the routed top ten. A phrase key
+  cannot manufacture the missing English alias. Track this as source alias /
+  tokenization plus routed-cap work, not as evidence for the global phrase lane.
+
+The implementation emits at most one synthetic `e2:` or `e3:` key for a
+two- or three-word **primary name** whose existing `prominence_rank` is nonzero.
+Exact phrase equality is the identity evidence; the category prior is only the
+hard admission budget. The keys participate in the existing per-task/global
+top-10 and additive-digest proofs, are excluded from routed serving artifacts,
+and are advertised by the head manifest as
+`prominence-primary-name-v1`. The Worker probes the phrase shard first only when
+that capability is present, validates every returned record against its stored
+primary name, and otherwise uses the existing bounded token merge. Old releases
+therefore pay no extra read and keep their exact behavior.
+
+The scale result is bounded enough to continue and broad admission is not.
+Across seven metros on six continents, 1,020,847 admitted rows produce 30,231
+retained prominence-gated phrase rows (**2.961%** of source rows). Emitting the
+same lane for every named POI would produce 526,689 (**51.593%**) and is rejected.
+A directional ratio-to-planet projection is 2.24M rows / 373 MB, about 7.3% of
+the current 5.14 GB head; it is not a formal planet projection.
+
+The real Monaco taxonomy fast loop ran all five phases on the same 38,182 rows
+as the 2026-08-02 comparison and reconciled. It added exactly 927 term rows and
+927 head rows; total local store bytes grew 0.615%. All 927 phrase rows reached
+the head, no `e2:`/`e3:` key entered a routed artifact, the manifest advertised
+the capability, and the finalizer wrote its marker last.
+
+The expanded ordinary-POI audit also prevents mis-scoping the next fix. Of 20
+restaurant/retail/lodging/healthcare/civic cases, seven already retrieve. Of
+the remaining thirteen, eleven retrieve the correct target through either the
+original query with explicit proximity or an accepted-name proximity control;
+only Raffles Singapore and Mayo Clinic fail every such routed control. Most of
+the ordinary-POI gap is therefore locality placement, branch/alias expression,
+or query tokenization -- not evidence for a planet-wide all-POI head lane.
+
+One gold defect was corrected before accepting those counts: the live top-1
+`Hotel Sacher Vienna` result is the intended property 0.032 km from gold, but
+the case accepted only `Hotel Sacher` / `Hotel Sacher Wien`. The English city
+form is now accepted and regression-tested. On the unchanged live service, the
+audited named-POI r@10 moves 0.353 -> **0.412** and overall r@10 0.509 ->
+**0.527**. This is a contract correction, not a serving improvement.
+
+**Not deployed.** The code and real-slice rung are complete. Before a planet
+build, regenerate the formal global inventory/readiness/scale evidence and
+control pins for the changed producer, then make an explicit rebuild decision.
+If that build moves to a post-August Overture release, the taxonomy source gate
+above runs first. Do not widen phrase admission to commodity POIs; take the
+eleven ordinary routing/alias cases through a separate Worker fast loop.
+
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
 The 2026-07-31 section below records that promotion's `/v2/forward` smoke as a
@@ -1535,11 +1611,13 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    prominence rebuild, RC2, and RC3 improved distinct strata. Name-only head
    recall@10 is 6/10 under the accepted RC3 contract and 7/10 under the audited
    contract; the extra point is the official Machu Picchu alias, not a Worker
-   change. Design bounded producer admission for the confirmed Empire State
-   Building, Big Ben, and Brandenburg Gate posting misses. Keep Machu Picchu
-   Cusco in the separate region-context routing backlog. Do not reopen build
-   ordering, duplicate collapse, or the head cap without contradictory
-   evidence.
+   change. Bounded exact-primary-name admission is implemented and slice-proven
+   for the confirmed Empire State Building and Big Ben global-head misses; its
+   next gate is formal evidence regeneration and a planet-rebuild decision.
+   Brandenburg Gate is corrected to the source-alias/tokenization plus
+   routed-cap backlog, and Machu Picchu Cusco remains in region-context routing.
+   Do not reopen build ordering, duplicate collapse, or the head cap without
+   contradictory evidence.
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.

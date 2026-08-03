@@ -50,14 +50,16 @@ search is intentionally not advertised yet. An explicit `types=address` with
 different family.
 
 The first Places reader has bounded, explicit recall limits. A query without
-`proximity` first consults only the packed global head, which supports one or
-two exact normalized tokens. When a three- or four-token global-head query is
-empty solely because of that token limit, the reader may interpret the final
-one or two exact tokens as a locality-like division and route the remaining
-name once at that division's centroid. This fallback does not run for explicit
-proximity or a non-empty global-head result. The inference is recorded in
-`metadata.places_locality_inference`; distance from its routing centroid is not
-exposed as user-proximity distance.
+`proximity` first consults only the packed global head, which supports one to
+three exact normalized tokens. A head manifest may additionally advertise a
+category-bounded exact-primary-name phrase lane for two- and three-token
+queries; older manifests skip that probe. When a three- or four-token
+global-head query is empty solely because of that token limit, the reader may
+interpret the final one or two exact tokens as a locality-like division and
+route the remaining name once at that division's centroid. This fallback does
+not run for explicit proximity or a non-empty global-head result. The inference
+is recorded in `metadata.places_locality_inference`; distance from its routing
+centroid is not exposed as user-proximity distance.
 
 A located query routes to exactly one stable world-quadkey shard and supports
 up to four tokens, with optional last-token prefix matching. Reported distance
