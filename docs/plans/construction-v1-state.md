@@ -23,8 +23,9 @@ expose German/Spanish names, not the English query surface, and even the German
 routed control misses the canonical record. It is an alias/tokenization plus
 routed-cap problem, not the same global-head eviction. Fresh v4 formal evidence
 is now green, including the planet-wide phrase-posting falsification probe. **The
-non-promoting Places-only planet build under v4 is now in progress; preview
-measurement remains the next gate before any catalog promotion.** Keep Brandenburg
+non-promoting Places-only planet build under v4 has completed every reducer but
+exposed a measured global-head spill-cap blocker; its scoped head-only recovery
+is the active gate. Preview measurement remains next before catalog promotion.** Keep Brandenburg
 Gate and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
 phrase admission again in this generation: the repeated functional rehearsal
 has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
@@ -1505,18 +1506,39 @@ Durable evidence:
 
 The control plane and slice workflow now bind v4 and its exact hashes. This
 closes the review's v2/v3 inconsistency. The **Places-only, non-promoting planet
-build** is dispatched as run `30799029151` from exact producer
+build** is run `30799029151` from exact producer
 `ad3ff5de72d20f7c8c52707ac08d624eed037cc7`. Admission, binaries, all 89 maps,
-and planning passed. At the 2026-08-03T14:33Z observation, 60 of 128 reducer
-batches had passed, four were active, 64 were queued, and none had failed. At
-14:46Z, 71 had passed and batch 30 had acquired an infrastructure-like failure:
-GitHub closed the job after 46 minutes while its reducer step still reported
-`in_progress`, no post step ran, and the job-log blob was absent. Other reducer
-batches continued normally. Wait for matrix completion, inspect the finalized
-log, then rerun failed jobs in the same run; do not discard the run-scoped
-staging progress by starting a new request. Preview measurement follows a green
-completion; catalog promotion still requires measured quality and integrity
-gates.
+planning, and 127 of 128 first-attempt reducers passed. GitHub closed batch 30
+after 46 minutes while its reducer step still reported `in_progress`; no post
+step ran and the finalized job still had no log blob, confirming runner loss
+rather than a reducer error.
+
+A failed-jobs rerun preserved the request-scoped R2 namespace and produced a
+successful batch 30. GitHub's matrix rerun semantics also repeated the other
+127 reducers, so the completed run now has exactly 128 unique durable reducer
+artifacts and attempt 2 has at least one successful job for every expected
+batch. Its attempt-scoped history additionally exposes four stale queued
+batch-30 records even though the run is completed; recovery therefore
+authenticates the 128 unique successful expected jobs from the final attempt,
+not raw job-row count or `run_attempt == 1`.
+
+The rerun reached the global head and established the next measured blocker. At
+79% through the first bounded tree-merge query DuckDB failed to offload another
+256 KiB because the configured half-share spill limit was full: 8.4 GiB used
+against 8.5 GiB / 9,126,805,504 bytes. This is not an RSS, reducer, R2, candidate
+admission, or runner-ENOSPC failure. No head result, final object, or completion
+marker was published.
+
+The scoped recovery is a fresh `head_only_resume` from run `30799029151`. It
+keeps the request-pinned producer and all immutable staged rows, keys, ordering,
+and binaries. The workflow raises only this head's DuckDB spill allowance to
+three quarters of the admitted scratch cap: 13,690,208,256 of
+18,253,611,008 bytes. The independent whole-stage 17 GiB scratch watchdog and
+the runner's 25,000,000-KiB free-disk floor are unchanged. The workflow proves
+both the producer's quarter-share default and the effective three-quarter value
+before starting the expensive statement. Once that recovery is green, preview
+measurement follows; catalog promotion still requires measured quality and
+integrity gates.
 
 **The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
 deploy run `30796985582` published Worker version

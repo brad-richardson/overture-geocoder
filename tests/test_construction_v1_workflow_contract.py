@@ -528,13 +528,18 @@ def test_head_only_resume_is_narrow_authenticated_and_complete():
         '.name == "Construction v1 planet build"',
         '.event == "workflow_dispatch"',
         '.head_branch == "main"',
-        '.run_attempt == 1',
+        '.run_attempt >= 1',
         '.conclusion == "failure"',
         "cmp --silent current-request.canonical.json prior-request.canonical.json",
         'CANONICAL_SHA="$(sha256sum current-request.canonical.json',
         "cmp --silent control/contract.json prior-plan/control/contract.json",
         "cv1-reduce-*",
         'startswith("places reduce batch ")',
+        'RUN_ATTEMPT="$(jq -er',
+        'attempts/${RUN_ATTEMPT}/jobs?per_page=50',
+        'for ATTEMPT in 1 2 3',
+        'reducer job history was unavailable after bounded retries',
+        'seen[$1]=1',
         'grep -Fqx "places reduce batch ${BATCH}',
         "ledger-fragment-${BATCH}.json",
         ".reduce_execution.partition_count",
@@ -667,7 +672,7 @@ def test_marker_written_last_and_fresh_dispatch_resume_are_pinned():
     value = text()
     assert "marker_written_last=true" in value
     assert "NON-PROMOTING" in value
-    assert "never Re-run failed jobs" in value
+    assert "prior rerun attempts are authenticated" in value
     assert "construction-v1-run-ledger-v1" in value
 
 
@@ -715,9 +720,11 @@ def test_the_intermediate_store_travels_through_r2_staging_not_artifacts():
     # authenticated source tree. Total stage scratch remains unchanged.
     assert "shared = H.PLACES.A" in value
     assert "assert shared.DUCKDB_TEMP_SHARE == 4" in value
-    assert "shared.DUCKDB_TEMP_SHARE = 2" in value
+    assert 'shared.duckdb_temp_limit = lambda cap: f"{cap * 3 // 4}B"' in value
     assert 'import address_construction_v1 as A' not in value
     assert 'actual = shared.duckdb_temp_limit(limits.max_scratch_bytes)' in value
+    assert 'original == f"{limits.max_scratch_bytes // 4}B"' in value
+    assert 'expected = f"{limits.max_scratch_bytes * 3 // 4}B"' in value
     assert "assert actual == expected" in value
     assert "unchanged 17 GiB whole-stage scratch watchdog" in value
 
