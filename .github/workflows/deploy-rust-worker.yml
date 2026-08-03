@@ -58,9 +58,23 @@ jobs:
         run: |
           set -uo pipefail
 
-          # One pass of the four smoke checks against the live worker. Returns
-          # 0 only when every check passes. Kept to four requests per attempt
-          # to stay well under the worker's 60 req/min per-IP rate limit.
+          # Repeatedly hit the route-independent root before checking data
+          # behavior. A single request can miss a bad runtime isolate or a
+          # partially unhealthy rollout; fifteen clean starts makes that
+          # failure mode visible while keeping three attempts under 60 req/min.
+          run_startup_checks() {
+            local probe
+            for probe in $(seq 1 15); do
+              curl -fsS --max-time 15 "$BASE_URL/" >/dev/null || {
+                echo "  FAIL / startup probe $probe/15: request error"
+                return 1
+              }
+            done
+            echo "  OK   / (15 consecutive startup probes)"
+          }
+
+          # One pass of the four functional checks against the live worker.
+          # Returns 0 only when every check passes.
           run_checks() {
             local health health_version search reverse data_version gers_id id_json
 
@@ -155,7 +169,7 @@ jobs:
           # Retry a few times so brief deploy propagation doesn't fail the run.
           for attempt in 1 2 3; do
             echo "Post-deploy checks, attempt $attempt/3:"
-            if run_checks; then
+            if run_startup_checks && run_checks; then
               echo "All post-deploy checks passed."
               exit 0
             fi

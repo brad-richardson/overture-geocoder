@@ -58,7 +58,7 @@ import sys
 import time
 import unicodedata
 from datetime import datetime, timezone
-from math import atan2, cos, radians, sin, sqrt
+from math import atan2, comb, cos, radians, sin, sqrt
 from pathlib import Path
 
 import requests
@@ -1186,6 +1186,74 @@ def compare_summaries(baseline, current, threshold):
     return regressions
 
 
+def _mcnemar_exact_p(flips_to_hit, flips_to_miss):
+    discordant = flips_to_hit + flips_to_miss
+    if discordant == 0:
+        return 1.0
+    tail = min(flips_to_hit, flips_to_miss)
+    probability = sum(
+        comb(discordant, value) for value in range(tail + 1)
+    ) / 2**discordant
+    return min(1.0, 2 * probability)
+
+
+def paired_discordance(baseline_rows, current_rows, provider):
+    """Paired hit/miss flips for matched supported cases.
+
+    Recall deltas alone hide whether a gain is six improvements or twelve
+    improvements offset by six regressions. McNemar's exact test operates on
+    those discordant pairs, so persist the counts beside each reportable group.
+    """
+
+    def selected(rows):
+        return {
+            row["case_id"]: row
+            for row in rows
+            if row.get("provider", provider) == provider
+            and row.get("capability", "supported") == "supported"
+        }
+
+    baseline = selected(baseline_rows)
+    current = selected(current_rows)
+    pairs = [
+        (baseline[case_id], current[case_id])
+        for case_id in sorted(set(baseline) & set(current))
+    ]
+    groups = {"overall": pairs}
+    for before, after in pairs:
+        dimensions = {
+            f"by_kind:{after['kind']}",
+            f"by_query_style:{after['kind']}:{after['query_style']}",
+        }
+        if after.get("strata"):
+            dimensions.add(f"by_stratum:{after['kind']}:{stratum_key(after['strata'])}")
+        for name in dimensions:
+            groups.setdefault(name, []).append((before, after))
+
+    report = {}
+    for name, group in sorted(groups.items()):
+        metrics = {}
+        for metric in ("found_at_1", "found_at_10"):
+            flips_to_hit = sum(
+                not bool(before.get(metric)) and bool(after.get(metric))
+                for before, after in group
+            )
+            flips_to_miss = sum(
+                bool(before.get(metric)) and not bool(after.get(metric))
+                for before, after in group
+            )
+            metrics[metric] = {
+                "flips_to_hit": flips_to_hit,
+                "flips_to_miss": flips_to_miss,
+                "discordant_pairs": flips_to_hit + flips_to_miss,
+                "mcnemar_exact_two_sided_p": round(
+                    _mcnemar_exact_p(flips_to_hit, flips_to_miss), 6
+                ),
+            }
+        report[name] = {"paired_cases": len(group), **metrics}
+    return {"provider": provider, "groups": report}
+
+
 def print_comparison(baseline_payload, current_summary, threshold):
     meta = baseline_payload.get("meta", {})
     baseline = baseline_payload["summary"]
@@ -1459,7 +1527,13 @@ def run_run(args):
     }
     if args.compare:
         with open(args.compare) as handle:
-            print_comparison(json.load(handle), summary, args.regression_threshold)
+            baseline_payload = json.load(handle)
+        print_comparison(baseline_payload, summary, args.regression_threshold)
+        payload["paired_comparison"] = paired_discordance(
+            baseline_payload.get("results", []),
+            all_results,
+            primary_provider,
+        )
     if args.output:
         with open(args.output, "w") as handle:
             json.dump(payload, handle, indent=1, ensure_ascii=False)

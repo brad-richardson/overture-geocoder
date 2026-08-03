@@ -55,7 +55,7 @@ on:
       - "crates/geocoder-construction/**"
       - "crates/Cargo.toml"
       - "crates/Cargo.lock"
-      - "benchmarks/places-construction-v1-evidence-spec-v2.json"
+      - "benchmarks/places-construction-v1-evidence-spec-v4.json"
       - ".github/requirements-hosted-rowgroup.txt"
       - ".github/workflows/slice-smoke.yml"
       # The hosted workflow is the SOURCE the import check derives its module
@@ -67,7 +67,7 @@ on:
       - "crates/geocoder-construction/**"
       - "crates/Cargo.toml"
       - "crates/Cargo.lock"
-      - "benchmarks/places-construction-v1-evidence-spec-v2.json"
+      - "benchmarks/places-construction-v1-evidence-spec-v4.json"
       - ".github/requirements-hosted-rowgroup.txt"
       - ".github/workflows/slice-smoke.yml"
       # The hosted workflow is the SOURCE the import check derives its module

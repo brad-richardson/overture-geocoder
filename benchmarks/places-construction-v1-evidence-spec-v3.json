@@ -1,0 +1,182 @@
+{
+  "schema": "overture-places-construction-v1-evidence-spec-v3",
+  "frozen_at": "2026-08-03",
+  "supersedes": "overture-places-construction-v1-evidence-spec-v2",
+  "release": "2026-06-17.0",
+  "relaxation_policy": "none; any gate or selection change requires a new schema/version and invalidates evidence under this spec. This v3 adds the prominence-gated exact-primary-name phrase contract and its head-only serving proof without relaxing any resource cap.",
+  "changes_from_v2": [
+    "Category-prominent two- and three-word primary names emit at most one synthetic e2:/e3: key per admitted record.",
+    "The independent Python semantic baseline must reproduce phrase admission and match the Rust transform's exact dual-lane binding.",
+    "The functional rehearsal must prove nonzero phrase entries in the sharded head, the prominence-primary-name-v1 manifest capability, zero phrase entries in routed artifacts, and an actual Worker head-shard decoder lookup of a phrase key.",
+    "The dense role crossed the old quarter-scratch DuckDB map spill allowance; map packing may use half of the unchanged scratch budget while the whole-stage watchdog and 25% headroom gate remain unchanged."
+  ],
+  "runtime": {
+    "python": "3.12.12",
+    "duckdb": "1.5.1",
+    "numpy": "2.3.5",
+    "pyarrow": "25.0.0",
+    "unicodedata2": "17.0.0",
+    "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+    "cargo": "1.97.1 (c980f4866 2026-06-30)"
+  },
+  "tokenizer": {
+    "version": "nfkd-lower-stripmark-cjk-bigram-v4",
+    "authority": "Rust places_transform_v1 is authoritative for admission, normalization, tokenization, routing, ranking, phrase admission, and proof payloads",
+    "unicode_version": "17.0.0",
+    "normalization": "trim White_Space only; lowercase = Unicode simple+special per-char mapping plus explicit final-sigma fold; word chars = Rust is_alphanumeric union underscore",
+    "baseline_parity": "the Python semantic baseline emulates the pinned Rust semantics and entity-phrase admission so both dual-lane digest sums match the Rust candidate exactly per contract version"
+  },
+  "inventory": {
+    "path": "benchmarks/places-construction-v1-data/inventory/places.json",
+    "required_schema": "overture-global-v2-places-inventory-v1",
+    "required_release": "2026-06-17.0",
+    "required_family": "places",
+    "required_theme": "places",
+    "required_type": "place",
+    "required_source_prefix": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/",
+    "required_schema_contract": "overture-places-required-schema-v1",
+    "required_object_identity_fields": ["uri", "etag", "bytes", "records", "row_group_count", "schema_fingerprint_sha256"],
+    "required_row_group_identity_fields": ["index", "rows", "selected_compressed_bytes", "selected_uncompressed_bytes"],
+    "required_task_identity_fields": ["index", "task_digest", "source_digest", "expected_input_records", "selected_uncompressed_bytes", "row_groups", "ranges"],
+    "task_plan_limits": {
+      "target_rows": 1000000,
+      "max_selected_uncompressed_bytes": 1000000000,
+      "max_groups": 64,
+      "max_tasks": 128
+    },
+    "self_bound_digest_required": true,
+    "deterministic_rebuild_required": true
+  },
+  "candidate_universe": {
+    "maximum_tasks": 12,
+    "selection": "ordered union of task indexes nearest row-count quantiles [0,0.10,0.25,0.50,0.75,0.90,1.0], then descending selected_uncompressed_bytes and ascending task_index until 12 unique tasks",
+    "census_scope": "only selected tasks; one bounded projection per unique task; no construction timing may be observed before role selection is frozen",
+    "roles_in_selection_order": {
+      "representative": "minimum absolute distance to median candidate input rows, then ascending task_index",
+      "near_cap": "descending selected_uncompressed_bytes, then ascending task_index, excluding prior roles",
+      "densest_spatial": "descending maximum emitted term rows in one base spatial cell, then ascending task_index, excluding prior roles",
+      "token_fanout": "descending emitted term rows per admitted feature, then ascending task_index, excluding prior roles",
+      "multilingual_cjk": "descending admitted features with common names or at least one CJK token, then ascending task_index, excluding prior roles",
+      "duplicate_heavy": "descending maximum UUID multiplicity then duplicate UUID rows, then ascending task_index, excluding prior roles",
+      "head_heavy": "descending maximum rows for one token then ascending task_index, excluding prior roles"
+    },
+    "required_distinct_roles": 7,
+    "role_exclusion_required": true
+  },
+  "acceptance_gates": {
+    "baseline_and_candidate": {
+      "baseline": "frozen columnar Python semantic baseline (Rust-emulating, tokenizer v4 plus entity phrases) in a fresh process group",
+      "candidate": "Rust transform plus on-disk DuckDB construction in a fresh process group",
+      "candidate_runs_per_required_input": 2,
+      "baseline_runs_per_required_input": 1,
+      "candidate_vs_baseline_speedup_min": 2.0,
+      "deterministic_candidate_output_sha256_required": true,
+      "exact_semantic_binding_equality_required": true
+    },
+    "input": {
+      "rows_hard_cap": 1000000,
+      "row_groups_hard_cap": 64,
+      "selected_compressed_bytes_hard_cap": 536870912,
+      "selected_uncompressed_bytes_hard_cap": 1000000000,
+      "remote_read_bytes_per_task_hard_cap": 805306368,
+      "remote_read_bytes_census_total_hard_cap": 8589934592,
+      "remote_read_bytes_evidence_total_hard_cap": 8589934592,
+      "projected_parquet_bytes_per_task_hard_cap": 536870912
+    },
+    "resources": {
+      "process_group_rss_hard_cap_bytes": 4294967296,
+      "scratch_hard_cap_bytes": 8589934592,
+      "map_output_hard_cap_bytes": 2147483648,
+      "reduce_output_hard_cap_bytes": 2147483648,
+      "head_output_hard_cap_bytes": 1073741824,
+      "projection_wall_hard_cap_seconds": 600,
+      "baseline_wall_hard_cap_seconds": 900,
+      "candidate_wall_hard_cap_seconds": 600,
+      "plan_reduce_head_wall_hard_cap_seconds": 900,
+      "resource_headroom_min_fraction": 0.25,
+      "maximum_ipc_batch_rows": 65536,
+      "duckdb_memory_limit": "3GB",
+      "duckdb_threads": 2,
+      "map_duckdb_memory_limit": "2GB",
+      "map_duckdb_temp_share": 2,
+      "fresh_process_group_required": true,
+      "external_on_disk_state_required": true
+    },
+    "map_reduce": {
+      "minimum_logical_tasks": 7,
+      "minimum_packs": 7,
+      "minimum_parquet_row_groups": 14,
+      "minimum_genesis_partitions": 8,
+      "maximum_map_pack_rows": 500000,
+      "parquet_row_group_rows": 131072,
+      "maximum_fan_in_map_tasks": 16,
+      "maximum_fan_in_packs": 64,
+      "partition_term_rows_hard_cap": 1000000,
+      "partition_estimated_uncompressed_bytes_hard_cap": 268435456,
+      "partition_distinct_tokens_hard_cap": 250000,
+      "adaptive_subdivision_max_depth": 8,
+      "selective_read_amplification_max": 4.0,
+      "exact_selected_discarded_reconciliation_required": true,
+      "exact_global_binding_reconciliation_required": true,
+      "predecessor_forbidden": true
+    },
+    "serving": {
+      "index_required": true,
+      "linear_artifact_scan_forbidden": true,
+      "maximum_index_probe_entries": 32,
+      "maximum_candidates_per_query": 256,
+      "maximum_results_per_query": 10,
+      "required_routed_queries_per_partition": 3,
+      "worker_byte_and_candidate_caps_required": true,
+      "independent_verifier_required": true
+    },
+    "head": {
+      "result_cap_per_token": 10,
+      "candidate_cap_per_task_token": 10,
+      "maximum_merge_fan_in": 16,
+      "maximum_head_candidate_rows": 5000000,
+      "same_rust_tokenizer_ranker_required": true,
+      "deterministic_ties_required": true,
+      "entity_phrase": {
+        "admission": "prominence-primary-name-v1",
+        "field": "primary_name",
+        "minimum_normalized_words": 2,
+        "maximum_normalized_words": 3,
+        "maximum_keys_per_record": 1,
+        "key_prefixes": ["e2:", "e3:"],
+        "prominence_rank_must_be_positive": true,
+        "head_only": true,
+        "stored_primary_name_validation_required": true
+      },
+      "sharded": {
+        "manifest_schema": "overture-places-global-head-sharded-v2",
+        "shard_id_is_top_index_hash_bits": true,
+        "shard_count_is_power_of_two": true,
+        "maximum_shard_bits": 24,
+        "per_shard_index_entries_hard_cap": 250000,
+        "independent_reduce_side_binding_required": true,
+        "independent_binding_field": "merged_head_binding",
+        "independent_binding_producer": "python-control-plane-head-entry-re-encoder",
+        "sharded_verify_required": true
+      }
+    },
+    "coverage": {
+      "required_role_set_complete": true,
+      "multilingual_cjk_positive_required": true,
+      "duplicate_positive_required": false,
+      "duplicate_gate": "synthetic-fixture (tests/fixtures/places_duplicate_uuid.json via tests/test_places_duplicate_uuid_gate.py); planet duplicate coverage is recorded informationally because real 2026-06-17.0 data carries zero duplicate UUIDs",
+      "overlap_reconciliation_positive_required": true,
+      "adaptive_subdivision_positive_required": true,
+      "multi_task_fan_in_positive_required": true,
+      "routed_and_head_artifacts_required": true,
+      "sharded_head_required": true,
+      "dormant_worker_routed_and_head_queries_required": true,
+      "worker_local_decoder_evidence_required": true,
+      "worker_entity_phrase_decoder_required": true,
+      "worker_head_query_evidence_class": "worker_local_decoder_evidence: the actual geocoder-worker head-shard decoder (lookup_head_shard, including the mis-route fail-closed check) resolves real ordinary and entity-phrase tokens from locally-built PLHD shard bytes; entity phrase samples additionally round-trip phrase-key derivation and stored-record validation. This is decoder evidence, not full HTTP query-orchestration evidence; no deployed Worker or R2 fetch is required or implied",
+      "interruption_phases": ["local_write", "immutable_publish", "before_marker"],
+      "resume_before_projection_required": true
+    }
+  },
+  "readiness_policy": "fail closed on missing, extra, malformed, mismatched, over-cap, non-deterministic, runtime-incompatible, or phrase-contract-incomplete evidence"
+}

@@ -167,6 +167,22 @@ ENTITY_PHRASE_PREFIXES = ("e2:", "e3:")
 ROUTED_REAL_TOKEN_PREDICATE = " AND ".join(
     f"NOT starts_with(token, '{prefix}')" for prefix in ENTITY_PHRASE_PREFIXES
 )
+# The first phrase-admission evidence rehearsal measured the dense role task crossing the
+# shared quarter-scratch DuckDB spill allowance by less than 0.1% after entity
+# phrases were added. Letting DuckDB use the general 3GB memory cap then drove
+# real map RSS above the frozen 25% headroom boundary. Map packing therefore
+# uses a 2GB memory pool and may spill into half the unchanged scratch budget;
+# the whole-stage watchdog remains authoritative over both resources.
+MAP_DUCKDB_MEMORY_LIMIT = "2GB"
+MAP_DUCKDB_TEMP_SHARE = 2
+
+
+def map_duckdb_temp_limit(max_scratch_bytes: int) -> str:
+    if max_scratch_bytes <= 0:
+        raise ValueError("Places map DuckDB temp cap needs a positive scratch budget")
+    return f"{max(1, int(max_scratch_bytes) // MAP_DUCKDB_TEMP_SHARE)}B"
+
+
 # The combiner deletes rows outside the top-N of each (partition_cell, token)
 # group. That is exact ONLY while a group is never split across two reduce
 # partitions -- otherwise a row outside the global top-N could be inside a
@@ -1065,12 +1081,12 @@ def map_task(
         spill = workspace / "spill"
         spill.mkdir()
         connection = duckdb.connect(str(database))
-        connection.execute(f"SET memory_limit='{limits.duckdb_memory_limit}'")
+        connection.execute(f"SET memory_limit='{MAP_DUCKDB_MEMORY_LIMIT}'")
         connection.execute(f"SET threads={limits.duckdb_threads}")
         connection.execute(f"SET temp_directory='{spill}'")
         connection.execute(
             f"SET max_temp_directory_size='"
-            f"{A.duckdb_temp_limit(limits.max_scratch_bytes)}'"
+            f"{map_duckdb_temp_limit(limits.max_scratch_bytes)}'"
         )
         ingestion = ingest(connection, transformed, "terms")
         # Staged deletion (2/4): the term IPC stream is dead once DuckDB has

@@ -36,28 +36,22 @@ FAMILIES = {
         "task_source": "readiness",
         "construction": "address-construction-v1",
     },
-    # V3 EVIDENCE GENERATION, 2026-08-02. The v2 generation is retained on disk
-    # (readiness-v2.json, scale-evidence-v3's predecessor, host-provenance-v2.json)
-    # rather than overwritten: it remains the true attestation of the runs it
-    # describes, and rewriting it to match a contract it never ran under is the
-    # falsification this project refuses. Same reason v1 was kept beside v2.
-    #
-    # What changed: `categories.alternate` is now REQUIRED, so the schema
-    # fingerprint and inventory hash move. Nothing else does -- the regenerated
-    # inventory differs from its predecessor in exactly 19 leaves, ALL of them
-    # contract-or-hash, with the map plan and every total byte-identical (89 map
-    # tasks, 16 objects, 75,642,289 records, 5,120 row groups). `categories` was
-    # already in PROJECTED_COLUMN_ROOTS, so no new column group is read.
+    # V4 EVIDENCE GENERATION, 2026-08-03. Prior generations remain on disk as
+    # true attestations of their own runs. V4 is fully fresh after the
+    # planet-category audit added bounded hospital/opera prominence and made
+    # observed ATM/bank/laundry spellings dispositive commodity classes. All
+    # twelve projections/censuses, seven task runs, and the functional rehearsal
+    # were regenerated; readiness is fail-closed and green.
     "places": {
         "inventory": "benchmarks/places-construction-v1-data/inventory/places.json",
         "inventory_file_sha256": "643f52eeafced086f333b530334094232219a6fecbcf46ee0565797fa8227570",
         "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
         "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
-        "spec": "benchmarks/places-construction-v1-evidence-spec-v2.json",
-        "spec_sha256": "5b779b9fadc7987bbf794d90c45e62da2866a43ef14ba4b90b904aea0ad0414d",
-        "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v3.json",
-        "readiness_file_sha256": "a4efd1e7b4198a077c4678b40cab22d3c3dafe18df2dce5362df1f1714873265",
-        "scale_evidence_sha256": "9b9f31f83d8671fd06be1550ec3603fbe21ea9c4ea6ce2b159cb887ac1462ae4",
+        "spec": "benchmarks/places-construction-v1-evidence-spec-v4.json",
+        "spec_sha256": "77bce6209c9c98ee4243167982fe11b13f7702c042e48bfad90daa6b3b26bfed",
+        "readiness": "benchmarks/places-construction-v1-data/evidence/readiness-v4.json",
+        "readiness_file_sha256": "312020845eb32dffdc49f6db269e4a45d887c20442734bdf763bfb9453bbeaec",
+        "scale_evidence_sha256": "a6d3de90cda567d405c56231070324babc4b9e53715e14cdc136d99d215f2527",
         "task_source": "inventory",
         "construction": "places-construction-v1",
     },
@@ -68,6 +62,7 @@ VERSIONS = {
     "duckdb": "1.5.1",
     "numpy": "2.3.5",
     "pyarrow": "25.0.0",
+    "unicodedata2": "17.0.0",
     "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
     "cargo": "1.97.1 (c980f4866 2026-06-30)",
     "arrow_ipc": "construction-v1-arrow-ipc-v1",

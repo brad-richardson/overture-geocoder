@@ -1351,7 +1351,11 @@ pub(crate) fn validate_entity_phrase_records(
 ) -> Vec<PlacesV1Record> {
     records
         .into_iter()
-        .filter(|record| crate::places_pages::query_terms(&record.primary_name) == tokens)
+        .filter(|record| {
+            record.prominence_rank > 0
+                && record.field_mask == FIELD_NAME
+                && crate::places_pages::query_terms(&record.primary_name) == tokens
+        })
         .collect()
 }
 
@@ -1948,7 +1952,9 @@ mod tests {
     #[test]
     #[ignore = "requires locally-built head shards; driven by the rehearsal"]
     fn local_decoder_resolves_real_head_shards() {
-        use super::{head_shard_id, lookup_head_shard};
+        use super::{
+            entity_phrase_key, head_shard_id, lookup_head_shard, validate_entity_phrase_records,
+        };
         let shard_bits: u32 = std::env::var("PLACES_HEAD_SHARD_BITS")
             .expect("PLACES_HEAD_SHARD_BITS is required")
             .parse()
@@ -1959,6 +1965,7 @@ mod tests {
         assert!(!rows.is_empty(), "no head-shard samples supplied");
         let mut resolved = 0usize;
         let mut misroute_rejected = 0usize;
+        let mut entity_phrase_records_validated = 0usize;
         for row in &rows {
             let mut parts = row.split('\t');
             let token = parts.next().expect("token");
@@ -1989,6 +1996,16 @@ mod tests {
             .expect("real head shard must decode and resolve the token");
             assert!(!hits.is_empty(), "token {token} resolved zero head records");
             assert_eq!(&hits[0].token, token, "decoded head record token differs");
+            if token.starts_with("e2:") || token.starts_with("e3:") {
+                let words: Vec<String> = token[3..].split(' ').map(ToString::to_string).collect();
+                assert_eq!(entity_phrase_key(&words).as_deref(), Some(token));
+                let valid = validate_entity_phrase_records(&words, hits);
+                assert!(
+                    !valid.is_empty(),
+                    "entity phrase {token} has no contract-valid records"
+                );
+                entity_phrase_records_validated += valid.len();
+            }
             resolved += 1;
             // Mis-route fail-closed: the same bytes served under any other shard
             // id must be rejected rather than silently answered.
@@ -2014,7 +2031,7 @@ mod tests {
         }
         if let Ok(out) = std::env::var("PLACES_HEAD_EVIDENCE_OUT") {
             let json = format!(
-                "{{\"class\":\"worker_local_decoder_evidence\",\"decoder\":\"geocoder-worker::places_construction_v1::lookup_head_shard\",\"shard_bits\":{shard_bits},\"tokens_resolved\":{resolved},\"misroute_rejections\":{misroute_rejected}}}"
+                "{{\"class\":\"worker_local_decoder_evidence\",\"decoder\":\"geocoder-worker::places_construction_v1::lookup_head_shard\",\"shard_bits\":{shard_bits},\"tokens_resolved\":{resolved},\"misroute_rejections\":{misroute_rejected},\"entity_phrase_records_validated\":{entity_phrase_records_validated}}}"
             );
             std::fs::write(out, json).expect("write head decoder evidence");
         }
@@ -2894,9 +2911,19 @@ mod tests {
 
         let mut exact = entry_record("e2:big ben", 255, 1);
         exact.primary_name = "Big Ben".to_string();
+        exact.prominence_rank = 1;
         let mut wrong = entry_record("e2:big ben", 255, 2);
         wrong.primary_name = "Big Ben Memorial".to_string();
-        let records = validate_entity_phrase_records(&words, vec![wrong, exact]);
+        wrong.prominence_rank = 1;
+        let mut zero_prominence = entry_record("e2:big ben", 255, 3);
+        zero_prominence.primary_name = "Big Ben".to_string();
+        zero_prominence.prominence_rank = 0;
+        let mut wrong_mask = entry_record("e2:big ben", 255, 4);
+        wrong_mask.primary_name = "Big Ben".to_string();
+        wrong_mask.prominence_rank = 1;
+        wrong_mask.field_mask = super::FIELD_BRAND;
+        let records =
+            validate_entity_phrase_records(&words, vec![wrong, zero_prominence, wrong_mask, exact]);
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].primary_name, "Big Ben");
     }

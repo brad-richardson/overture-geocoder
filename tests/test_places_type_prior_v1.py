@@ -130,6 +130,24 @@ def test_unknown_and_missing_categories_are_zero_not_an_error():
     assert prior.type_prior("shoe_store", alternate=[]) == 0.0
 
 
+def test_audited_healthcare_and_cultural_categories_are_bounded_prominence():
+    assert prior.type_prior("opera_and_ballet") == 0.45
+    assert prior.type_prior("hospital") == 0.40
+
+
+def test_audited_commodity_spellings_block_alternate_inflation():
+    for category in (
+        "atms",
+        "banks",
+        "bank_credit_union",
+        "bank_or_credit_union",
+        "laundromat",
+        "laundry_service",
+        "laundry_services",
+    ):
+        assert prior.type_prior(category, alternate=["monument"]) == 0.0
+
+
 def test_prominence_rank_is_total_and_saturating():
     for record in (
         BASILICA,

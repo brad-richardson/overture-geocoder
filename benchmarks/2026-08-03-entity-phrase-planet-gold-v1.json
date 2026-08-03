@@ -1,0 +1,142 @@
+{
+  "all_canonical_targets_survive": true,
+  "head_result_cap": 10,
+  "limitations": [
+    "This falsifies target posting survival; it does not measure encoded bytes or a deployed Worker query.",
+    "The two canonical IDs are frozen from the independently audited 2026-06-17.0 source matches."
+  ],
+  "measurement": {
+    "matching_source_rows": 124,
+    "wall_seconds": 455.0740990700433
+  },
+  "parameters": {
+    "duckdb_memory_limit": "2GB",
+    "duckdb_threads": 2
+  },
+  "producer_contract": {
+    "admission": "prominence_rank > 0",
+    "cap_order": "identifying, prominence DESC, confidence DESC, feature_id, source locator",
+    "field_mask": "primary_name",
+    "normalization": "nfkd-lower-stripmark-words",
+    "word_count": [
+      2,
+      3
+    ]
+  },
+  "schema": "overture-places-entity-phrase-planet-gold-v1",
+  "source_release": "2026-06-17.0",
+  "targets": {
+    "big_ben": {
+      "canonical_id": "99f74940-898a-49d5-9eca-18a8a2c47918",
+      "canonical_rank_under_head_cap_order": 3,
+      "canonical_survives_head_cap": true,
+      "matching_source_rows": 117,
+      "phrase": "big ben",
+      "producer_admitted_rows": 117,
+      "prominence_gated_posting_records": 4,
+      "retained_records": [
+        {
+          "basic_category": "travel_service",
+          "category": "travel_services",
+          "confidence_rank": 214,
+          "id": "50ba72f2-f781-4ab1-93e0-1adc4ac6699b",
+          "primary_name": "Big Ben",
+          "prominence_rank": 128,
+          "source_file_row_number": 3704721,
+          "source_object": "part-00007-2aa05b02-fb39-5684-84f8-0809b022962c-c000.zstd.parquet"
+        },
+        {
+          "basic_category": "public_fountain",
+          "category": "fountain",
+          "confidence_rank": 174,
+          "id": "3a0ff840-a3a5-4171-9f73-24fab2ece25b",
+          "primary_name": "Big Ben",
+          "prominence_rank": 128,
+          "source_file_row_number": 3663867,
+          "source_object": "part-00007-2aa05b02-fb39-5684-84f8-0809b022962c-c000.zstd.parquet"
+        },
+        {
+          "basic_category": "historic_site",
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 239,
+          "id": "99f74940-898a-49d5-9eca-18a8a2c47918",
+          "primary_name": "Big Ben",
+          "prominence_rank": 89,
+          "source_file_row_number": 3664139,
+          "source_object": "part-00007-2aa05b02-fb39-5684-84f8-0809b022962c-c000.zstd.parquet"
+        },
+        {
+          "basic_category": null,
+          "category": "attractions_and_activities",
+          "confidence_rank": 95,
+          "id": "d4d3a382-81c3-42ea-b53f-97d372242dfb",
+          "primary_name": "Big Ben",
+          "prominence_rank": 57,
+          "source_file_row_number": 3949764,
+          "source_object": "part-00007-2aa05b02-fb39-5684-84f8-0809b022962c-c000.zstd.parquet"
+        }
+      ]
+    },
+    "empire_state_building": {
+      "canonical_id": "91b41dc1-59cb-4822-af8b-bb45d3b96f42",
+      "canonical_rank_under_head_cap_order": 2,
+      "canonical_survives_head_cap": true,
+      "matching_source_rows": 7,
+      "phrase": "empire state building",
+      "producer_admitted_rows": 7,
+      "prominence_gated_posting_records": 5,
+      "retained_records": [
+        {
+          "basic_category": "historic_site",
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 248,
+          "id": "58cebdfc-eba5-4c46-a86d-57bc05aca28b",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128,
+          "source_file_row_number": 979667,
+          "source_object": "part-00006-69fa6c57-1b3b-5f37-98ba-da6c075020be-c000.zstd.parquet"
+        },
+        {
+          "basic_category": "historic_site",
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 243,
+          "id": "91b41dc1-59cb-4822-af8b-bb45d3b96f42",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128,
+          "source_file_row_number": 756582,
+          "source_object": "part-00006-69fa6c57-1b3b-5f37-98ba-da6c075020be-c000.zstd.parquet"
+        },
+        {
+          "basic_category": "historic_site",
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 206,
+          "id": "f041dba7-18f9-49b8-8f22-5b8b8d9b4902",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 89,
+          "source_file_row_number": 960047,
+          "source_object": "part-00006-69fa6c57-1b3b-5f37-98ba-da6c075020be-c000.zstd.parquet"
+        },
+        {
+          "basic_category": "historic_site",
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 180,
+          "id": "f3ef1a38-544d-4157-9f33-3c7d542f18b9",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 89,
+          "source_file_row_number": 956572,
+          "source_object": "part-00006-69fa6c57-1b3b-5f37-98ba-da6c075020be-c000.zstd.parquet"
+        },
+        {
+          "basic_category": "historic_site",
+          "category": "landmark_and_historical_building",
+          "confidence_rank": 171,
+          "id": "f78e6e6d-7085-4f6c-9093-f2f8088e9c01",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 89,
+          "source_file_row_number": 684013,
+          "source_object": "part-00006-69fa6c57-1b3b-5f37-98ba-da6c075020be-c000.zstd.parquet"
+        }
+      ]
+    }
+  }
+}

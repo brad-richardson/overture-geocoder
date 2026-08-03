@@ -410,8 +410,9 @@ def test_curated_machu_picchu_case_accepts_the_official_citadel_name():
         semantic_scoring=True,
     )
 
-    assert rank == 2
-    assert distance is not None and distance < case["tolerance_km"]
+    assert rank == 1
+    assert distance is not None and 2.0 < distance < case["tolerance_km"]
+    assert case["tolerance_basis"] == "extent"
     assert "Ciudadela de Machu Picchu" in case["alt_names"]
 
 
@@ -439,6 +440,56 @@ def test_curated_hotel_sacher_case_accepts_the_english_city_name():
     assert rank == 1
     assert distance == 0.0
     assert "Hotel Sacher Vienna" in case["alt_names"]
+
+
+def test_curated_poi_contract_corrections_are_explicit():
+    payload = json.loads(
+        (SCRIPT.parent.parent / "benchmarks/v2-forward-gold-cases-v1.json")
+        .read_text()
+    )
+    assert payload["meta"]["tolerance_basis_default"] == "point"
+    cases = {case["id"]: case for case in payload["cases"]}
+
+    assert {"Coliseo Romano", "Anfiteatro Flavio"} <= set(
+        cases["gold:name_locality:colosseum"]["alt_names"]
+    )
+    assert "Statue of Liberty National Monument" in cases[
+        "gold:name_locality:statue-of-liberty"
+    ]["alt_names"]
+    assert {
+        "The Plaza - A Fairmont Managed Hotel",
+        "The Plaza, Fifth Avenue at Central Park South",
+    } <= set(cases["gold:named_poi:plaza-hotel"]["alt_names"])
+    assert "萊佛士酒店" in cases["gold:named_poi:raffles-singapore"]["alt_names"]
+    assert cases["gold:name:machu-picchu"]["tolerance_km"] == 3.0
+    assert cases["gold:name:machu-picchu"]["tolerance_basis"] == "extent"
+
+
+def test_paired_discordance_reports_direction_and_exact_mcnemar_p():
+    baseline = []
+    current = []
+    for index in range(7):
+        shared = {
+            "provider": "overture",
+            "capability": "supported",
+            "case_id": f"case-{index}",
+            "kind": "place",
+            "query_style": "named_poi",
+        }
+        baseline.append({**shared, "found_at_1": False, "found_at_10": index == 6})
+        current.append({**shared, "found_at_1": index < 6, "found_at_10": False})
+
+    report = bench.paired_discordance(baseline, current, "overture")
+    overall = report["groups"]["overall"]
+
+    assert overall["found_at_1"] == {
+        "flips_to_hit": 6,
+        "flips_to_miss": 0,
+        "discordant_pairs": 6,
+        "mcnemar_exact_two_sided_p": 0.03125,
+    }
+    assert overall["found_at_10"]["flips_to_hit"] == 0
+    assert overall["found_at_10"]["flips_to_miss"] == 1
 
 
 def test_aggregate_and_summary_math():

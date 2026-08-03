@@ -1,0 +1,16 @@
+{
+  "schema": "overture-places-construction-v1-host-provenance-v1",
+  "hosts": {
+    "bradflix": {
+      "hostname": "bradflix",
+      "cpu": "Intel(R) Core(TM) Ultra 7 265K",
+      "cores": 20,
+      "os": "Ubuntu 24.04.4 LTS",
+      "arch": "x86_64"
+    }
+  },
+  "task_run_host": "bradflix",
+  "census_host": "bradflix",
+  "rehearsal_host": "bradflix",
+  "note": "V4 GENERATION, 2026-08-03. All twelve projections, all twelve censuses, all seven baseline/candidate task runs, and the seven-role functional rehearsal were freshly executed on bradflix under evidence spec v4 after the audited hospital/opera prominence additions and observed ATM/bank/laundry commodity spelling corrections. The first fresh v4 rehearsal was rejected because task 85 recorded only 14.5% RSS reserve despite deterministic output. A second rehearsal reran all seven maps fresh and reused only the same-generation interruption-phase checkpoint; it produced identical logical outputs and task 85 recorded 54.2% RSS reserve. The second rehearsal is the admitted evidence. No v2/v3 census, task-run, or rehearsal measurement is carried forward. The separate planet category vocabulary audit used isolated DuckDB 1.5.5 to avoid a 1.5.1 HTTP-reader failure and is not part of this frozen 1.5.1 construction evidence runtime."
+}

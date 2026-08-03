@@ -158,12 +158,21 @@ def test_ipc_batch_constants_are_derived_and_within_cap(construction_module):
     assert signature.parameters["batch_rows"].default == module.HYDRATE_BATCH_ROWS
     # The single cap constant must equal the frozen evidence-spec value.
     spec = json.loads(
-        (ROOT / "benchmarks/places-construction-v1-evidence-spec.json").read_text()
+        (ROOT / "benchmarks/places-construction-v1-evidence-spec-v4.json").read_text()
     )
     assert (
         module.MAX_IPC_BATCH_ROWS
         == spec["acceptance_gates"]["resources"]["maximum_ipc_batch_rows"]
     )
+    assert module.MAP_DUCKDB_TEMP_SHARE == 2
+    assert module.MAP_DUCKDB_TEMP_SHARE == spec["acceptance_gates"]["resources"][
+        "map_duckdb_temp_share"
+    ]
+    assert module.MAP_DUCKDB_MEMORY_LIMIT == "2GB"
+    assert module.MAP_DUCKDB_MEMORY_LIMIT == spec["acceptance_gates"]["resources"][
+        "map_duckdb_memory_limit"
+    ]
+    assert module.map_duckdb_temp_limit(8 * 1024**3) == f"{4 * 1024**3}B"
 
 
 def run_transform(
@@ -265,7 +274,7 @@ def test_taxonomy_category_terms_are_searchable_but_display_stays_primary(
 
 
 def test_prominent_short_primary_names_emit_one_head_only_phrase_key(
-    tmp_path, transform_binary
+    tmp_path, transform_binary, baseline_module
 ):
     rows = [
         {
@@ -294,7 +303,14 @@ def test_prominent_short_primary_names_emit_one_head_only_phrase_key(
         },
     ]
 
-    _, table = run_transform(tmp_path, transform_binary, rows)
+    rust, table = run_transform(tmp_path, transform_binary, rows)
+    baseline = baseline_module.run(tmp_path / "places.parquet", tmp_path / "limits.json")
+    for field in (
+        "emitted_term_rows",
+        "semantic_sum_a",
+        "semantic_sum_b",
+    ):
+        assert baseline[field] == rust[field]
     by_id = collections.defaultdict(dict)
     for feature_id, token, mask in zip(
         table["feature_id"].to_pylist(),
@@ -1636,6 +1652,11 @@ def test_sharded_head_manifest_tamper_fails_closed(
 def test_baseline_tokenizer_pins_the_contract_unicode_version(baseline_module):
     assert baseline_module.TOKENIZER_UNICODE_VERSION == "17.0.0"
     assert baseline_module.unicodedata.unidata_version == "17.0.0"
+    spec = json.loads(
+        (ROOT / "benchmarks/places-construction-v1-evidence-spec-v4.json").read_text()
+    )
+    assert spec["tokenizer"]["unicode_version"] == "17.0.0"
+    assert spec["runtime"]["unicodedata2"] == "17.0.0"
 
 
 @pytest.mark.parametrize(

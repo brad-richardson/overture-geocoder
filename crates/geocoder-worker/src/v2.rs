@@ -1691,6 +1691,82 @@ fn division_feature(result: &geocoder_core::GeocoderResult) -> (f64, Value) {
 /// and is supposed to separate Paris, France from Paris, Texas.
 const POI_PRIOR_CAP: f64 = 0.08;
 
+fn primary_category_prior(category: &str) -> Option<f64> {
+    Some(match category {
+        "monument" => 1.0,
+        "tourist_attraction" => 0.95,
+        "airport" | "airport_terminal" => 0.90,
+        "museum" | "history_museum" | "art_museum" | "castle" | "palace" => 0.85,
+        "cathedral" => 0.80,
+        "catholic_church" | "zoo" | "aquarium" => 0.60,
+        "train_station"
+        | "christian_place_of_worship"
+        | "synagogue"
+        | "mosque"
+        | "temple"
+        | "university" => 0.55,
+        "subway_station" | "seaplane_bases" | "place_of_worship" | "art_gallery" => 0.50,
+        "stadium_arena" | "opera_and_ballet" | "park" | "theatre" | "public_plaza" => 0.45,
+        "library" | "hospital" => 0.40,
+        "landmark_and_historical_building" | "historic_site" => 0.35,
+        _ => return None,
+    })
+}
+
+/// Correct a serialized prior using the primary category the Worker can
+/// actually observe. Alternate categories are deliberately absent from the
+/// serving projection; clamping prevents one of them from inflating an
+/// unrelated primary such as `fountain` or `travel_services`.
+fn effective_place_prominence(place: &PlaceProjection) -> f64 {
+    let prominence = f64::from(place.prominence).clamp(0.0, 1.0);
+    let category = place.category.trim();
+    if category.is_empty() {
+        return prominence;
+    }
+    if matches!(
+        category,
+        "landmark_and_historical_building" | "historic_site"
+    ) {
+        return prominence.max(0.85);
+    }
+    match primary_category_prior(category) {
+        Some(maximum) => prominence.min(maximum),
+        None => prominence.min(POI_PRIOR_CAP),
+    }
+}
+
+fn poi_match_quality(primary_name: &str, query: &NormalizedQuery) -> f64 {
+    let quality = geocoder_core::query::match_quality(primary_name, query);
+    let query_tokens = query_terms(query.as_str());
+    let name_tokens = query_terms(primary_name);
+
+    // The shared ladder intentionally comma-truncates display names. Preserve
+    // exact full-name equality at 1.0 while putting comma-qualified names on a
+    // distinct rung so UUID order cannot decide the result.
+    if quality == 1.0 && name_tokens != query_tokens {
+        return 0.97;
+    }
+
+    // A character LCP rewards a longer name merely for sharing the start of a
+    // multi-token query. Replace only that partial rung with bounded token
+    // coverage and name coverage; exact and prefix rungs remain untouched.
+    if query_tokens.len() > 1 && quality > 0.0 && quality < 0.8 {
+        let name_set: HashSet<&str> = name_tokens.iter().map(String::as_str).collect();
+        let present = query_tokens
+            .iter()
+            .filter(|token| name_set.contains(token.as_str()))
+            .collect::<Vec<_>>();
+        let name_chars: usize = name_tokens.iter().map(|token| token.chars().count()).sum();
+        if name_chars == 0 {
+            return 0.0;
+        }
+        let matched_chars: usize = present.iter().map(|token| token.chars().count()).sum();
+        return 0.7 * present.len() as f64 / query_tokens.len() as f64 * matched_chars as f64
+            / name_chars as f64;
+    }
+    quality
+}
+
 /// Score a POI on the SAME composition divisions already use:
 /// `(match_quality + 0.5 * static_prior) / 2`, clamped.
 ///
@@ -1698,10 +1774,10 @@ const POI_PRIOR_CAP: f64 = 0.08;
 /// nothing to match against, so the previous confidence score stands.
 fn place_score(place: &PlaceProjection, query: Option<&NormalizedQuery>) -> f64 {
     let confidence = f64::from(place.confidence).clamp(0.0, 1.0);
-    let prominence = f64::from(place.prominence).clamp(0.0, 1.0);
+    let prominence = effective_place_prominence(place);
     match query {
         Some(query) => {
-            let quality = geocoder_core::query::match_quality(&place.name, query);
+            let quality = poi_match_quality(&place.name, query);
             // A real prominence prior gets the SAME 0.5 static band divisions
             // get, because it is the same kind of signal -- a calibrated
             // category prior. POI_PRIOR_CAP exists only to defend against
@@ -1775,7 +1851,7 @@ fn locality_suffix_candidates(
     // `Taj Mahal` in `Taj Mahal Agra`. `Statue of Liberty` has no exact
     // `Statue of` prefix result, so Liberty, NY cannot steal that landmark.
     if explicit_proximity
-        || !(2..=4).contains(&tokens.len())
+        || !(2..=6).contains(&tokens.len())
         || (!global_head.is_empty() && tokens.len() == 2)
     {
         return Vec::new();
@@ -1955,7 +2031,6 @@ async fn search_places_construction(
     entrypoint: &ArtifactIdentity,
     query: &str,
     proximity: Option<(f64, f64)>,
-    limit: usize,
 ) -> Result<Vec<PlaceProjection>> {
     const SUFFIX: &str = "/routing.json";
     let object_root = entrypoint
@@ -2010,8 +2085,7 @@ async fn search_places_construction(
                 })
             })
             .collect::<Result<Vec<_>>>()?;
-        let mut records = merge_routed_candidates(&tokens, per_token).map_err(Error::RustError)?;
-        records.truncate(limit);
+        let records = merge_routed_candidates(&tokens, per_token).map_err(Error::RustError)?;
         let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
         for place in &mut results {
             place.distance_km = Some(haversine_km(
@@ -2040,9 +2114,8 @@ async fn search_places_construction(
                     .await?;
                 let records = head_shard_lookup(&bytes, shard_id, head.shard_bits, &phrase_key)
                     .map_err(Error::RustError)?;
-                let mut records = validate_entity_phrase_records(&tokens, records);
+                let records = validate_entity_phrase_records(&tokens, records);
                 if !records.is_empty() {
-                    records.truncate(limit);
                     return Ok(records.iter().map(record_projection).collect());
                 }
             }
@@ -2066,8 +2139,7 @@ async fn search_places_construction(
         }
         per_token.push(records);
     }
-    let mut records = merge_head_candidates(&tokens, per_token).map_err(Error::RustError)?;
-    records.truncate(limit);
+    let records = merge_head_candidates(&tokens, per_token).map_err(Error::RustError)?;
     Ok(records.iter().map(record_projection).collect())
 }
 
@@ -2084,7 +2156,7 @@ async fn search_places(
         .get("forward")
         .ok_or_else(|| Error::RustError("v2 Places family omits its forward entrypoint".into()))?;
     if supports_places_construction_format(&family.versions.format) {
-        return search_places_construction(loader, entrypoint, query, proximity, limit).await;
+        return search_places_construction(loader, entrypoint, query, proximity).await;
     }
     const SUFFIX: &str = "/catalog.pcat";
     let object_root = entrypoint
@@ -2658,7 +2730,9 @@ pub(crate) async fn handle_id(
 
 #[cfg(test)]
 mod seam_tests {
-    use super::{place_score, NormalizedQuery, POI_PRIOR_CAP};
+    use super::{
+        effective_place_prominence, place_score, poi_match_quality, NormalizedQuery, POI_PRIOR_CAP,
+    };
     use crate::places_pages::PlaceProjection;
 
     fn place(name: &str, confidence: f32) -> PlaceProjection {
@@ -2746,6 +2820,44 @@ mod seam_tests {
         assert!(
             strong_match_zero_confidence > weak_match_high_confidence,
             "an exact match at confidence 0 must beat a prefix match at confidence 1"
+        );
+    }
+
+    #[test]
+    fn full_name_exactness_breaks_comma_truncation_ties() {
+        let query = NormalizedQuery::new("Taj Mahal");
+        assert_eq!(poi_match_quality("Taj Mahal", &query), 1.0);
+        assert_eq!(poi_match_quality("Taj Mahal, Agra, India", &query), 0.97);
+    }
+
+    #[test]
+    fn multi_token_partial_quality_rewards_compact_token_coverage() {
+        let query = NormalizedQuery::new("SickKids Toronto");
+        let exact_entity = poi_match_quality("SickKids", &query);
+        let foundation = poi_match_quality("SickKids Foundation", &query);
+
+        assert!(exact_entity > foundation);
+        assert!(exact_entity < 0.8);
+    }
+
+    #[test]
+    fn primary_category_corrects_alternate_inflation() {
+        let mut false_big_ben = place("Big Ben", 0.84);
+        false_big_ben.category = "fountain".into();
+        false_big_ben.prominence = 0.502;
+        let mut real_big_ben = place("Big Ben", 0.94);
+        real_big_ben.category = "landmark_and_historical_building".into();
+        real_big_ben.prominence = 0.349;
+        let mut terminal = place("Terminal 1", 0.9);
+        terminal.category = "airport_terminal".into();
+        terminal.prominence = 0.902;
+
+        assert!((effective_place_prominence(&false_big_ben) - 0.08).abs() < 1e-9);
+        assert!((effective_place_prominence(&real_big_ben) - 0.85).abs() < 1e-9);
+        assert!((effective_place_prominence(&terminal) - 0.90).abs() < 1e-9);
+        let query = NormalizedQuery::new("Big Ben");
+        assert!(
+            place_score(&real_big_ben, Some(&query)) > place_score(&false_big_ben, Some(&query))
         );
     }
 }
@@ -4174,9 +4286,30 @@ mod tests {
     }
 
     #[test]
-    fn locality_suffix_fallback_preserves_two_token_head_answers() {
+    fn locality_suffix_fallback_accepts_bounded_long_name_locality_queries() {
         let tokens = query_terms("Museum of Modern Art New York");
-        assert!(locality_suffix_candidates(&tokens, false, &[]).is_empty());
+        assert_eq!(tokens.len(), 6);
+        assert_eq!(
+            locality_suffix_candidates(&tokens, false, &[]),
+            vec![
+                LocalitySuffixCandidate {
+                    place_query: "museum of modern art".into(),
+                    locality_query: "new york".into(),
+                    locality_tokens: vec!["new".into(), "york".into()],
+                },
+                LocalitySuffixCandidate {
+                    place_query: "museum of modern art new".into(),
+                    locality_query: "york".into(),
+                    locality_tokens: vec!["york".into()],
+                },
+            ]
+        );
+        assert!(locality_suffix_candidates(
+            &query_terms("The Museum of Modern Art New York"),
+            false,
+            &[],
+        )
+        .is_empty());
 
         let tokens = query_terms("Modern Art New York");
         let candidates = locality_suffix_candidates(&tokens, false, &[]);

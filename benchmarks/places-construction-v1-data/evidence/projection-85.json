@@ -1,16 +1,16 @@
 {
   "identity": {
-    "evidence_spec_sha256": "0baee5f19bc3419995f504aec9bc6baf31d85b31d130a25fbf8114bbcd429dab",
+    "evidence_spec_sha256": "77bce6209c9c98ee4243167982fe11b13f7702c042e48bfad90daa6b3b26bfed",
     "expected_input_records": 999805,
-    "inventory_file_sha256": "0a5eaa1ce23a7c71ec4d6303059c0e5e829ba7402d3bac33802bbac16150c2eb",
-    "inventory_sha256": "b1830aee50ea61395cda14f6b04888d846dcba12f24967c7ab52c64fe5944eff",
+    "inventory_file_sha256": "643f52eeafced086f333b530334094232219a6fecbcf46ee0565797fa8227570",
+    "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
     "objects": [
       {
         "bytes": 643810507,
         "etag": "a561221b648ed9c93332377640fd4e80-10",
         "records": 4725559,
         "row_group_count": 256,
-        "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+        "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
         "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00015-0027dc1a-a5a9-54b5-9b90-bb721c5264fd-c000.zstd.parquet"
       }
     ],
@@ -30,7 +30,7 @@
     "release": "2026-06-17.0",
     "row_groups": 54,
     "schema": "overture-places-construction-v1-physical-arrow-v1",
-    "schema_fingerprint_sha256": "49453ed2b28a7940fe6664b13ec89631fbee2d98efdad0ff8ab1a26972212a5a",
+    "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
     "selected_compressed_bytes": 76181303,
     "selected_uncompressed_bytes": 145229366,
     "task_digest": "f095beb140f83c18bc3131e00dda8bd130b20b3d11702e69a7680675af05c9a1",
@@ -44,20 +44,27 @@
     "selected_uncompressed_bytes": 145229366
   },
   "output": {
-    "bytes": 63818643,
-    "path": "benchmarks/places-construction-v1-data/projected/task-85.parquet",
+    "bytes": 63987628,
+    "path": "/tmp/places-phrase-evidence-v5/projections/task-85.parquet",
     "records": 999805,
     "row_groups": 54,
-    "sha256": "fb3745caaf56c35e2b21b73ea89b94acf0198b416cc2d30b4dc95856cb09cad4"
+    "sha256": "5e97a05da3b62e4fd4e9798a1209421ff2db94542bccda061c8bbf16d9718eb3"
   },
   "resources": {
     "batches": 54,
-    "elapsed_seconds": 27.445283583016135,
+    "elapsed_seconds": 28.800722645013593,
     "maximum_batch_rows": 27103,
-    "peak_rss_bytes": 189267968,
+    "peak_rss_bytes": 245305344,
     "python_feature_rows_materialized": false,
-    "remote_read_bytes": 81918916,
+    "remote_read_bytes": 85634925,
     "selected_compressed_bytes_planned": 76181303
   },
-  "schema": "overture-places-construction-v1-projection-report-v1"
+  "schema": "overture-places-construction-v1-projection-report-v1",
+  "verification": {
+    "objects_identity_verified": [
+      15
+    ],
+    "output_record_count_match": true,
+    "pre_post_source_identity_match": true
+  }
 }
