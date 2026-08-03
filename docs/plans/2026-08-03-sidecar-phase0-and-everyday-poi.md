@@ -178,6 +178,27 @@ coverage gates. `scripts/benchmark_v2_forward.py` now honors each case's
 `comparison_providers`; excluded providers are marked unscorable before a
 network request and cannot enter paired comparisons.
 
+The first full provider-neutral run is frozen in
+`benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json`. It measured the
+live Overture `2026-08-02.0` build and the public Nominatim and Photon endpoints
+with all 200 cases and the same semantic scoring contract. All 600 eligible
+requests returned HTTP 200 with zero harness errors:
+
+| provider | recall@1 | recall@10 | p50 | p95 |
+| --- | ---: | ---: | ---: | ---: |
+| Overture | 31.0% | 32.5% | 292.0 ms | 926.5 ms |
+| Nominatim | 10.5% | 11.0% | 345.8 ms | 731.2 ms |
+| Photon | 10.0% | 11.5% | 161.0 ms | 454.7 ms |
+
+Overture recall@10 was 73.3% for food/drink and 40.0% for healthcare, but 25.0%
+for civic/transit, 5.0% for retail, and 0% for lodging. Its macroregion split was
+58.0% East Asia, 25.0% Southeast Asia, 8.0% Oceania, and 0% Latin America. The
+paired outcomes were 54 Overture-only hits, 11 hits shared by all providers, 13
+external-only hits, and 122 shared misses. Overture returned no POI anywhere in
+the top ten for 114 cases. That makes admission/routing coverage the leading
+diagnostic, while the identical post-v4-preview rerun remains the next measured
+gate.
+
 The 200-case set is the development tripwire. It does not replace the audit's
 recommended 1,200-case decision set with at least 150 cases per reportable
 stratum. Build the larger set only after the tripwire exposes which strata are

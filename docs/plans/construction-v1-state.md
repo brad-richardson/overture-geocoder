@@ -1660,8 +1660,25 @@ the planned 2020 MLIT source because that catalog explicitly includes suspended
 facilities; the current Shinjuku standard dataset provides 695 unique IDs and
 valid points. Mexico uses the corrected DENUE 05/2026 bulk file with 462,732
 unique `id` and `CLEE` values, fixed-establishment and SCIAN family filters,
-and retained methodology/correction evidence. Provider measurement is the next
-benchmark step; the sidecar Phase 0 audit remains separate and incomplete.
+and retained methodology/correction evidence.
+
+The first provider-neutral measurement is retained as
+`benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json` (sha256
+`8f9b9fd4a0e0ec575f32bfedd69dbf8ea80bb4bb6e21f8feb6179e0b5730c255`). It ran
+all 200 cases against live Overture build `2026-08-02.0`, Nominatim, and Photon:
+600 supported requests, 600 HTTP 200 responses, and zero harness errors.
+Overture measured 31.0% recall@1 and 32.5% recall@10, ahead of Nominatim at
+10.5%/11.0% and Photon at 10.0%/11.5%. Overture's recall@10 by family was 25.0%
+civic/transit, 73.3% food/drink, 40.0% healthcare, 0% lodging, and 5.0% retail.
+By macroregion it was 58.0% East Asia, 0% Latin America, 8.0% Oceania, and 25.0%
+Southeast Asia. Of the 200 paired cases, all providers missed 122, Overture alone
+hit 54, all three hit 11, and an external provider hit while Overture missed 13.
+The Overture result was POI-type-starved on 114 cases, so the leading signal is
+missing admission/routing coverage rather than a small within-top-10 rank issue.
+Treat this live-build result as the pre-preview baseline and rerun the identical
+case file against the completed v4 preview before choosing a targeted admission
+change or a larger decision set. The sidecar Phase 0 audit remains separate and
+incomplete.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
