@@ -84,10 +84,15 @@ LANDMARK_PRIOR: dict[str, float] = {
     "university": 0.55,
     "art_gallery": 0.50,
     "stadium_arena": 0.45,
+    "opera_and_ballet": 0.45,
     "park": 0.45,
     "theatre": 0.45,
     "public_plaza": 0.45,
     "library": 0.40,
+    # Named hospitals are a high-value everyday-POI retrieval class. The
+    # planet contract audit measured 513,082 legacy primary rows; keep the
+    # prior below transport/leisure landmarks because this is broad admission.
+    "hospital": 0.40,
     # measured-noisy: Overture tags apartment blocks with this
     "landmark_and_historical_building": 0.35,
     # July taxonomy replacement for the same measured-noisy class
@@ -100,7 +105,11 @@ COMMODITY_CATEGORIES: frozenset[str] = frozenset(
     {
         "accommodation",
         "atm",
+        "atms",
         "bank",
+        "banks",
+        "bank_credit_union",
+        "bank_or_credit_union",
         "bar",
         "cafe",
         "coffee_shop",
@@ -115,6 +124,9 @@ COMMODITY_CATEGORIES: frozenset[str] = frozenset(
         "hotel",
         "insurance_agency",
         "laundry",
+        "laundromat",
+        "laundry_service",
+        "laundry_services",
         "motel",
         "pharmacy",
         "real_estate_agent",

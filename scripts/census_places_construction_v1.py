@@ -114,6 +114,17 @@ def run(args: argparse.Namespace) -> dict:
         report = {
             "schema": "overture-places-construction-v1-census-v1",
             "identity": identity,
+            "parameters": {
+                "duckdb_memory_limit": args.memory_limit,
+                "duckdb_threads": args.threads,
+                "max_rss_bytes": args.max_rss_bytes,
+                "max_scratch_bytes": args.max_scratch_bytes,
+                "wall_seconds": args.wall_seconds,
+            },
+            "transform_binary": {
+                "path": str(args.binary),
+                "sha256": P.A.sha256_file(args.binary),
+            },
             "input": {
                 "bytes": args.input.stat().st_size,
                 "sha256": P.A.sha256_file(args.input),

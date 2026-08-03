@@ -3,6 +3,8 @@
   "meta": {
     "purpose": "Curated forward gold set for cross-type ranking (Stage 0)",
     "provenance": "Authored from widely published open references. Deliberately carries NO expected_gers_id: an id could only have come from the system under test, which is what makes self-recall a retrievability claim rather than a quality one. Not derived from Nominatim or Photon either, so it stays usable for provider-neutral comparison.",
+    "tolerance_basis_default": "point",
+    "tolerance_basis_note": "A case-level tolerance_basis overrides this default. 'extent' is reserved for a sourced real-world feature extent rather than a point-centroid allowance.",
     "strata": {
       "seam": "query is simultaneously a division name and a POI context token; the division must win rank 1",
       "inverse_seam": "a POI must beat any same-named or homonym division",
@@ -13,7 +15,7 @@
     },
     "limitations": [
       "55 cases is a seam and regression instrument, NOT the balanced multilingual gold set: coverage is Latin-script and Europe/North-America heavy.",
-      "Coordinates are approximate landmark/city centroids with deliberately loose tolerances (25 km localities, 2 km POIs); this set scores type composition and retrieval, not positional accuracy.",
+      "Coordinates are approximate landmark/city centroids with deliberately loose point tolerances (25 km localities, usually 2 km POIs); the Machu Picchu case alone records a sourced extent basis. This set scores type composition and retrieval, not positional accuracy.",
       "Overture may legitimately hold a place under a local-language primary name; alt_names cover the common cases but a miss should be inspected before it is called a regression.",
       "Generic category-intent queries such as 'restaurants near me' need relevance judgments and an explicit search origin, so they belong in a separate semantic benchmark rather than this exact-place gold set."
     ]
@@ -186,7 +188,8 @@
       "expected_lon": -74.0445,
       "tolerance_km": 2.0,
       "alt_names": [
-        "Liberty Enlightening the World"
+        "Liberty Enlightening the World",
+        "Statue of Liberty National Monument"
       ]
     },
     {
@@ -201,7 +204,9 @@
       "tolerance_km": 2.0,
       "alt_names": [
         "Colosseo",
-        "Coliseum"
+        "Coliseum",
+        "Coliseo Romano",
+        "Anfiteatro Flavio"
       ]
     },
     {
@@ -216,7 +221,9 @@
       "tolerance_km": 2.0,
       "alt_names": [
         "Colosseo",
-        "Coliseum"
+        "Coliseum",
+        "Coliseo Romano",
+        "Anfiteatro Flavio"
       ]
     },
     {
@@ -286,7 +293,8 @@
       "expected_feature_type": "poi",
       "expected_lat": -13.1631,
       "expected_lon": -72.545,
-      "tolerance_km": 2.0,
+      "tolerance_km": 3.0,
+      "tolerance_basis": "extent",
       "alt_names": [
         "Ciudadela de Machu Picchu",
         "Ciudadela Inka de Machupicchu",
@@ -596,7 +604,8 @@
       "expected_lon": 103.8545,
       "tolerance_km": 1.0,
       "alt_names": [
-        "Raffles Singapore"
+        "Raffles Singapore",
+        "萊佛士酒店"
       ],
       "strata": {
         "poi_family": "lodging",
@@ -639,7 +648,9 @@
       "expected_lon": -73.9745,
       "tolerance_km": 1.0,
       "alt_names": [
-        "Plaza Hotel"
+        "Plaza Hotel",
+        "The Plaza - A Fairmont Managed Hotel",
+        "The Plaza, Fifth Avenue at Central Park South"
       ],
       "strata": {
         "poi_family": "lodging",

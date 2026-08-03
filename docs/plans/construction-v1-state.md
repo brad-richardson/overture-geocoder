@@ -1,7 +1,7 @@
 # construction-v1: current state
 
-Last updated 2026-08-03 after the bounded entity-phrase admission implementation
-and expanded POI stage audit.
+Last updated 2026-08-03 after the bounded entity-phrase admission implementation,
+the independent correctness audit, and fresh v4 formal evidence.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -20,10 +20,13 @@ implemented and real-slice validated for **Empire State Building and Big Ben**.
 A direct source-stage audit corrected Brandenburg Gate: the nearby June records
 expose German/Spanish names, not the English query surface, and even the German
 routed control misses the canonical record. It is an alias/tokenization plus
-routed-cap problem, not the same global-head eviction. **The next gate is formal
-evidence regeneration and a planet-rebuild decision for the two phrase-admission
-targets, not another ranking pass.** Keep Brandenburg Gate and `Machu Picchu
-Cusco` in their separate follow-up backlogs.
+routed-cap problem, not the same global-head eviction. Fresh v4 formal evidence
+is now green, including the planet-wide phrase-posting falsification probe. **The
+next construction gate is a non-promoting Places-only planet build under v4,
+followed by preview measurement before any catalog promotion.** Keep Brandenburg
+Gate and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
+phrase admission again in this generation: the repeated functional rehearsal
+has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
 
 This is the operational snapshot for construction-v1. It intentionally contains
 only the current milestone, measured blockers, next actions, and frozen
@@ -132,12 +135,13 @@ non-zero exact-id self-recall this gold set has produced. Fix 1 is correct and
 live but moved nothing, for the reason Part 6b records: query-time reranking
 cannot recover what the build-time cap already discarded.
 
-**So the Worker-side milestone is met, and everything left is build-side.** The
-`PLHD0002 -> PLHD0003` prominence bump is implemented, validated end to end on
-the Monaco slice, and **unmeasurable until a planet rebuild** -- every published
-shard is 0002, so prominence is 0 everywhere in production and the gold set
-physically cannot move. That makes the next decision a rebuild-scope decision,
-not a ranking decision.
+**Historical gate, now closed.** At this point the Worker-side milestone was met
+and the `PLHD0002 -> PLHD0003` prominence bump had only been validated on the
+Monaco slice, so it was unmeasurable until a planet rebuild. The 2026-08-02
+rebuild subsequently shipped PLHD0003 and made `prominence_rank` live. The
+2026-08-03 independent audit recovered the live quantized priors from response
+scores and proved the signal is not zero; its remaining defect is
+alternate-category inflation, now clamped at query time by primary category.
 
 ### 2026-08-01: two Part 6d findings corrected by operator challenge
 
@@ -252,7 +256,7 @@ concurrency group, and feeds `construction_v1_control.py admit-dispatch` for
 byte-verification. It is not a gate and must not be removed without redesigning
 that contract.
 
-## Next planet rebuild: SCOPE AGREED 2026-08-01, targeting early week of 2026-08-03
+## 2026-08-02 planet rebuild: scope agreed 2026-08-01
 
 Operator decisions, taken 2026-08-01:
 
@@ -263,9 +267,11 @@ Operator decisions, taken 2026-08-01:
 | Places reverse | **not rebuilt** | `POSITIONS_COLUMNS` carries no `prominence_rank` and the reverse encoder's `OrderKey` is purely spatial, so the existing 7.82 GiB catalog is referenced in place. Saves 2h15m |
 | `head_result_cap` | **STAYS AT 10** (revised after Wave C, same day) | Wave C measured the reorder as delivering the whole step change at cap 10, and 64 as the riskiest part of the run. See "Wave C result" |
 
-**The rebuild exists to make prominence measurable.** Every published shard is
-0002, so `prominence_rank` is 0 in production and the gold set physically cannot
-move. Nothing else justifies the spend.
+**This was the rebuild's decision-time justification.** The then-published
+PLHD0002 shards did not carry prominence, so the proposed ordering could not be
+measured live. The rebuild completed and shipped PLHD0003 on 2026-08-02;
+prominence is now live and was directly confirmed by the 2026-08-03 audit. This
+historical rationale must not be reused to justify another rebuild.
 
 ### Wave C result, 2026-08-01: GATE PASSED, and it resized the run
 
@@ -424,11 +430,12 @@ attestation of a run that really happened -- the standing rule from `cfb9601`.
 ### Sequencing, four tracks
 
 - **Gate 0 -- Wave C. PASSED 2026-08-01.** See "Wave C result".
-- **Track A -- DONE 2026-08-02 (`3d94b4f`).** `categories.alternate` is now
-  REQUIRED and the evidence is regenerated as a **v3 generation**, with v2
-  retained rather than overwritten. `readiness-v3` is `ready=true`, control pins
-  the v3 chain, and the evidence SPEC is untouched (still v2) because the head
-  cap stayed at 10. Detail below.
+- **Track A -- DONE 2026-08-02 (`3d94b4f`).** `categories.alternate` became
+  REQUIRED and the evidence was regenerated as a **v3 generation**, with v2
+  retained rather than overwritten. At that point `readiness-v3` was
+  `ready=true` and the control pinned the v3 chain. The current control now pins
+  the later, fully fresh v4 generation recorded in the 2026-08-03 audit-closure
+  section. Detail below.
 - **Track B -- build-side quality.** Stage 3 famous-unique is OUT of this
   rebuild: it needs a re-spec onto `prominence_rank` (its design still names
   quantized confidence as the fame proxy) plus encoder/verifier/oracle lockstep.
@@ -1434,12 +1441,93 @@ form is now accepted and regression-tested. On the unchanged live service, the
 audited named-POI r@10 moves 0.353 -> **0.412** and overall r@10 0.509 ->
 **0.527**. This is a contract correction, not a serving improvement.
 
-**Not deployed.** The code and real-slice rung are complete. Before a planet
-build, regenerate the formal global inventory/readiness/scale evidence and
-control pins for the changed producer, then make an explicit rebuild decision.
-If that build moves to a post-August Overture release, the taxonomy source gate
-above runs first. Do not widen phrase admission to commodity POIs; take the
-eleven ordinary routing/alias cases through a separate Worker fast loop.
+**The changed producer is not deployed.** Its code, real-slice rung, formal v4
+inventory/readiness/scale evidence, control pins, and explicit rebuild decision
+are now complete. The next step is the non-promoting Places-only planet build
+described below. If that build moves to a post-August Overture release, the
+taxonomy source gate above runs first. Do not widen phrase admission to
+commodity POIs; keep the remaining ordinary routing/alias cases on their
+separate Worker and external-data tracks.
+
+### Independent audit closure and v4 decision, 2026-08-03
+
+Canonical external review:
+`docs/plans/2026-08-03-claude-audit-feedback.md`. It is preserved as the
+auditor's final report; the decisions below incorporate it without rewriting
+that evidence.
+
+**Production availability is closed.** The intermittent root `1101` came from
+Worker version `786a3aad-4ea5-4f7f-878d-b9dbff8f129d` (git `05ac13b`); a
+Cloudflare tail captured the runtime cancelling the request as hung. Redeploying
+the identical commit produced version `b923d11d-d504-48ba-9aab-75897eaf2f3d`.
+The root then passed 50/50 requests, Sydney/Seattle/Singapore/Paris passed 40/40,
+and the tail stayed clean. Durable evidence is
+`benchmarks/2026-08-03-worker-startup-incident.json`. Deployment now requires
+15 repeated root probes, contract-tested by
+`tests/test_deploy_workflow_contract.py`; a one-shot root smoke is not an
+adequate startup gate.
+
+**The bounded Worker correctness pass is implemented.** Candidate scoring now
+happens before the final result cap. Place reranking applies the audited A2+B+C
+contract: partial multi-token name match quality, exact/qualified full-name
+quality, and bounded category priors. Locality suffix candidates cover two
+through six tokens. The entity-phrase fast path remains fail-closed: positive
+prominence, name field mask, and exact normalized primary-name equality are all
+required; an empty or invalid phrase result falls through to the ordinary path.
+It does not merge an additional ordinary result set into every successful phrase
+query, avoiding two or three unnecessary R2 reads.
+
+The gold contract now records point-vs-extent tolerance explicitly, accepts the
+official Machu Picchu extent case without loosening Big Ben, and reports paired
+McNemar evidence. The planet phrase probe is decisive before construction:
+`benchmarks/2026-08-03-entity-phrase-planet-gold-v1.json` finds 117 exact
+normalized Big Ben records with four prominence-gated records (canonical rank
+3), and seven Empire State Building records with five gated records (canonical
+rank 2). Both canonical records survive cap 10.
+
+**The v4 construction evidence gate is green.** Contract
+`benchmarks/places-construction-v1-evidence-spec-v4.json` has sha256
+`77bce6209c9c98ee4243167982fe11b13f7702c042e48bfad90daa6b3b26bfed`.
+All 12 projections and censuses and all seven role task runs were regenerated
+from public source data. The repeated functional rehearsal produced 4,419,976
+head records, 2,349,588 head index entries, and 70,166 phrase rows; all outputs
+reconciled, the Worker decoder succeeded, and zero phrase keys entered routed
+artifacts. Head bytes are 773,590,640 against an 805,306,368-byte 25%-headroom
+threshold. The first rehearsal's task-85 RSS result failed the reserve rule and
+is recorded but not admitted; the fresh repeat passed every resource gate.
+Durable evidence:
+
+- `benchmarks/places-construction-v1-data/evidence/host-provenance-v4.json`;
+- `benchmarks/places-construction-v1-data/evidence/rehearsal-v4.json`;
+- `benchmarks/places-construction-v1-data/evidence/scale-evidence-v4.json`; and
+- `benchmarks/places-construction-v1-data/evidence/readiness-v4.json` (`ready=true`).
+
+The control plane and slice workflow now bind v4 and its exact hashes. This
+closes the review's v2/v3 inconsistency. The next construction action is a
+**Places-only, non-promoting planet build**, then preview measurement; catalog
+promotion still requires measured quality and integrity gates.
+
+**The category audit changes both spellings and scope, but stays bounded.** The
+planet scan found 2,261 distinct category strings across 228,421,560 values.
+Observed commodity spellings include `atms`, `banks`, `bank_credit_union`,
+`bank_or_credit_union`, `laundromat`, `laundry_service`, and
+`laundry_services`; the old aliases remain harmless compatibility entries.
+`atm` is real in `categories.basic`, so the earlier claim that ATM demotion
+never fired is refuted. `stadium` is absent and `stadium_arena` is real.
+`opera_and_ballet` and `hospital` now receive bounded landmark priors. Evidence:
+`benchmarks/2026-08-03-places-category-contract-audit-v1.json`. No broader POI
+admission is authorized by this result.
+
+**Aliases are a separate future track.** Planet measurement finds
+`names.common` empty and `names.rules` populated away from the landmark classes;
+none of the seven landmark gold entities has a useful rules alias. Exact
+URL/social clustering is either unsafe or negligible and is deferred. The
+durable sidecar direction is fame first: a stable QID-keyed table plus a
+release-scoped GERS-to-QID match table, with audited match precision as the Phase
+0 go/no-go. Since this work has consumed evidence generation v4, a sidecar that
+changes projection identity must start at **v5**, not reuse the audit's
+provisional v4 label. Everyday-POI benchmark expansion precedes any commitment
+beyond sidecar Phase 0.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
@@ -1612,12 +1700,13 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    recall@10 is 6/10 under the accepted RC3 contract and 7/10 under the audited
    contract; the extra point is the official Machu Picchu alias, not a Worker
    change. Bounded exact-primary-name admission is implemented and slice-proven
-   for the confirmed Empire State Building and Big Ben global-head misses; its
-   next gate is formal evidence regeneration and a planet-rebuild decision.
-   Brandenburg Gate is corrected to the source-alias/tokenization plus
-   routed-cap backlog, and Machu Picchu Cusco remains in region-context routing.
-   Do not reopen build ordering, duplicate collapse, or the head cap without
-   contradictory evidence.
+   for the confirmed Empire State Building and Big Ben global-head misses. Its
+   planet phrase-posting probe and fresh v4 formal evidence are green. The next
+   gate is a non-promoting Places-only planet build, then preview measurement
+   before any catalog promotion. Brandenburg Gate is corrected to the
+   source-alias/tokenization plus routed-cap backlog, and Machu Picchu Cusco
+   remains in region-context routing. Do not reopen build ordering, duplicate
+   collapse, phrase scope, or the head cap without contradictory evidence.
 3. **Structured Address serving latency.** The 211-case run measured p50
    1,595.4 ms and the 2026-07-30 pilot 1,303.8 ms, against 24-140 ms for the
    public comparators. Next serving-latency measurement.

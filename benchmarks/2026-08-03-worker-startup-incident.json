@@ -1,0 +1,36 @@
+{
+  "schema": "overture-geocoder-worker-startup-incident-v1",
+  "observed_at": "2026-08-03",
+  "production_url": "https://geocoder.bradr.dev/",
+  "git_sha": "05ac13b",
+  "before": {
+    "cloudflare_version_id": "786a3aad-4ea5-4f7f-878d-b9dbff8f129d",
+    "deployment_created_at": "2026-08-03T02:20:04.691Z",
+    "root_probe_requests": 20,
+    "root_probe_http_500": 6,
+    "tail_outcome": "exception",
+    "tail_exception": "The Workers runtime canceled this request because it detected that your Worker's code had hung and would never generate a response."
+  },
+  "replacement": {
+    "github_actions_run_id": 30782233179,
+    "cloudflare_version_id": "b923d11d-d504-48ba-9aab-75897eaf2f3d",
+    "deployment_created_at": "2026-08-03T03:43:02.089Z",
+    "root_probe_requests": 50,
+    "root_probe_http_200": 50,
+    "root_probe_failures": 0,
+    "routed_cell_follow_up": {
+      "probes_per_cell": 10,
+      "cells": [
+        "sydney",
+        "seattle",
+        "singapore"
+      ],
+      "paris_control_probes": 10,
+      "http_200": 40,
+      "failures": 0
+    },
+    "tail_outcomes_for_replacement_probes": "ok"
+  },
+  "conclusion": "Redeploying the identical git commit replaced the failing Worker version and cleared 50 consecutive route-independent probes. The evidence localizes the incident to the deployed artifact or isolate rollout, not a deterministic root request path; it does not distinguish between those Cloudflare-side mechanisms.",
+  "follow_up": "Require repeated route-independent startup probes in the post-deploy gate so a mixed or intermittently bad rollout cannot pass on four lucky functional requests."
+}

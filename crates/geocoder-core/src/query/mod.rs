@@ -165,6 +165,13 @@ impl NormalizedQuery {
     pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
+
+    /// The normalized, comma-truncated query used by the match ladder.
+    /// Callers may derive lane-local diagnostics from it without repeating the
+    /// normalization contract.
+    pub fn as_str(&self) -> &str {
+        &self.text
+    }
 }
 
 /// Match quality against alternate/translated names (the `search_name`

@@ -1,0 +1,248 @@
+{
+  "adaptive_subdivision": true,
+  "entity_phrase_admission": "prominence-primary-name-v1",
+  "entity_phrase_head_by_prefix": {
+    "e2:": {
+      "index_entries": 35998,
+      "records": 37334
+    },
+    "e3:": {
+      "index_entries": 29967,
+      "records": 32832
+    }
+  },
+  "entity_phrase_head_index_entries": 65965,
+  "entity_phrase_head_records": 70166,
+  "exact_reconciliation": true,
+  "head_output_bytes": 773590640,
+  "head_populated_shards": 64,
+  "head_result_cap": 10,
+  "head_shard_bits": 6,
+  "head_shard_count": 64,
+  "head_sharded": true,
+  "head_verified": true,
+  "interruption_phases": [
+    "local_write",
+    "immutable_publish",
+    "before_marker"
+  ],
+  "logical_tasks": 7,
+  "map_stage_resources": [
+    {
+      "construction": {
+        "observations": 9405,
+        "peak_rss_bytes": 1468506112,
+        "peak_scratch_and_output_bytes": 1939699836,
+        "peak_sweep_seconds": 0.004981831007171422,
+        "wall_seconds": 107.67429106595227
+      },
+      "task_index": 76,
+      "transform": {
+        "peak_rss_bytes": 32608256,
+        "peak_scratch_bytes": 1948242587,
+        "peak_sweep_seconds": 0.00014950602781027555,
+        "wall_seconds": 10.994893140043132
+      }
+    },
+    {
+      "construction": {
+        "observations": 4704,
+        "peak_rss_bytes": 2958028800,
+        "peak_scratch_and_output_bytes": 1789410082,
+        "peak_sweep_seconds": 0.0017323520150966942,
+        "wall_seconds": 49.689700777991675
+      },
+      "task_index": 73,
+      "transform": {
+        "peak_rss_bytes": 28639232,
+        "peak_scratch_bytes": 1894042192,
+        "peak_sweep_seconds": 0.0002758230548352003,
+        "wall_seconds": 11.931818220007699
+      }
+    },
+    {
+      "construction": {
+        "observations": 3949,
+        "peak_rss_bytes": 2753384448,
+        "peak_scratch_and_output_bytes": 3080804157,
+        "peak_sweep_seconds": 0.0021414340008050203,
+        "wall_seconds": 41.40188267600024
+      },
+      "task_index": 87,
+      "transform": {
+        "peak_rss_bytes": 47529984,
+        "peak_scratch_bytes": 3508888888,
+        "peak_sweep_seconds": 0.0002551390207372606,
+        "wall_seconds": 18.621066292980686
+      }
+    },
+    {
+      "construction": {
+        "observations": 8533,
+        "peak_rss_bytes": 2156273664,
+        "peak_scratch_and_output_bytes": 3476424403,
+        "peak_sweep_seconds": 0.0038646620232611895,
+        "wall_seconds": 95.17117438995047
+      },
+      "task_index": 86,
+      "transform": {
+        "peak_rss_bytes": 46473216,
+        "peak_scratch_bytes": 3543452704,
+        "peak_sweep_seconds": 0.00015357101801782846,
+        "wall_seconds": 18.758323370013386
+      }
+    },
+    {
+      "construction": {
+        "observations": 15723,
+        "peak_rss_bytes": 1968312320,
+        "peak_scratch_and_output_bytes": 2422939747,
+        "peak_sweep_seconds": 0.006464294972829521,
+        "wall_seconds": 182.27529231499648
+      },
+      "task_index": 85,
+      "transform": {
+        "peak_rss_bytes": 37040128,
+        "peak_scratch_bytes": 2110974576,
+        "peak_sweep_seconds": 0.0002601200249046087,
+        "wall_seconds": 13.961194647999946
+      }
+    },
+    {
+      "construction": {
+        "observations": 5783,
+        "peak_rss_bytes": 2925170688,
+        "peak_scratch_and_output_bytes": 1651992030,
+        "peak_sweep_seconds": 0.00396131700836122,
+        "wall_seconds": 63.05228527903091
+      },
+      "task_index": 1,
+      "transform": {
+        "peak_rss_bytes": 30781440,
+        "peak_scratch_bytes": 1736054472,
+        "peak_sweep_seconds": 0.0002081620041280985,
+        "wall_seconds": 10.13027114898432
+      }
+    },
+    {
+      "construction": {
+        "observations": 2899,
+        "peak_rss_bytes": 2824531968,
+        "peak_scratch_and_output_bytes": 1111677675,
+        "peak_sweep_seconds": 0.004012167977634817,
+        "wall_seconds": 31.27418458700413
+      },
+      "task_index": 13,
+      "transform": {
+        "peak_rss_bytes": 28037120,
+        "peak_scratch_bytes": 1160315120,
+        "peak_sweep_seconds": 0.00027298799250274897,
+        "wall_seconds": 6.9558520980062895
+      }
+    }
+  ],
+  "maximum_selective_amplification": 1.000035,
+  "maximum_worker_index_probes": 1,
+  "multi_task_fan_in": true,
+  "observed": {
+    "adaptive_max_depth": 1,
+    "adaptive_plan_seconds": 45.407,
+    "head_excluded_over_row_cap_task_ids": [
+      "role-01",
+      "role-13",
+      "role-73",
+      "role-87"
+    ],
+    "head_input_candidate_rows": 4815347,
+    "head_merged_task_ids": [
+      "role-76",
+      "role-85",
+      "role-86"
+    ],
+    "head_serving_encode_note": "",
+    "head_total_index_entries": 2349588,
+    "head_total_records": 4419976,
+    "mapped_tasks": [
+      76,
+      73,
+      87,
+      86,
+      85,
+      1,
+      13
+    ],
+    "reduced_partitions": [
+      "p-b1e1",
+      "p-afdc",
+      "p-b2e1"
+    ],
+    "resume_seconds": 0.196,
+    "scale_note": "Full seven-role fan-in over the real 2026-06-17.0 census tasks, including the dense CJK role tasks 86 (token_fanout) and 87 (densest_spatial). Post-#143 map scratch hygiene keeps their per-stage scratch under the 8 GiB cap, so no substitution is needed. The global head is hash-sharded and every shard is reconciled against an independent reduce-side binding; the actual Worker head-shard decoder resolves real tokens from the built shard bytes (worker_local_decoder_evidence).",
+    "subdivided_cells": [
+      "a3d6",
+      "b1e0",
+      "b2e3"
+    ],
+    "subdivided_partition_count": 48,
+    "subdivided_partition_reduction": {
+      "binding_matches_plan": true,
+      "partition_id": "p-a3d6-h0",
+      "read_amplification": 15.900105,
+      "records": 101226
+    },
+    "worker_head_probes": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "worker_local_decoder": {
+      "class": "worker_local_decoder_evidence",
+      "decoder": "geocoder-worker::places_construction_v1::lookup_head_shard",
+      "entity_phrase_decoder_validated": true,
+      "entity_phrase_records_validated": 2,
+      "entity_phrase_token_resolved": true,
+      "manifest_key": "serve/places-v1/head-manifest/sha256/b688d36953c83a81ffe205bccf01d59c84b67f6fc3619b7c8d97ded6853187ca.json",
+      "misroute_rejections": 8,
+      "sample_tokens": [
+        "\u5805\u305f",
+        "\u30a6\u30a7\u30eb\u30c6\u30db\u30f3\u30c6",
+        "\u1107\u116e\u11a8\u1106\u1175",
+        "\u8328\u6728\u897f\u99c5\u524d\u5e97",
+        "\u1106\u1166\u110c\u1169\u11bc\u1103\u1173\u1107\u1175\u1100\u1165\u11ab",
+        "\u5c71\u6771\u6599\u7406",
+        "e3:sports complex sandakan",
+        "e2:pulung bulo"
+      ],
+      "shard_bits": 6,
+      "tokens_resolved": 8
+    },
+    "worker_routed_probes": [
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1,
+      1
+    ]
+  },
+  "overlap_reconciliation": true,
+  "packs": 759,
+  "parquet_row_groups": 912,
+  "partitions": 1100,
+  "resume_before_projection": true,
+  "routed_entity_phrase_index_entries": 0,
+  "routed_entity_phrases_absent": true,
+  "routed_verified": true,
+  "worker_entity_phrase_decoder": true,
+  "worker_head_query": true,
+  "worker_local_decoder_evidence": true,
+  "worker_routed_query": true
+}

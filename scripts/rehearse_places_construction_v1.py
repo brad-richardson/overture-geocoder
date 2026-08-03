@@ -48,7 +48,7 @@ DATA = ROOT / "benchmarks/places-construction-v1-data"
 # `acceptance_gates.map_reduce` block declares the three partition hard caps
 # below, and its relaxation policy is "none": a rehearsal that planned above
 # them would not be evidence under this spec at all.
-EVIDENCE_SPEC = ROOT / "benchmarks/places-construction-v1-evidence-spec-v2.json"
+EVIDENCE_SPEC = ROOT / "benchmarks/places-construction-v1-evidence-spec-v4.json"
 PROJECTED = DATA / "projected"
 EVIDENCE = DATA / "evidence"
 INVENTORY = DATA / "inventory/places.json"
@@ -286,12 +286,33 @@ def measured_candidate(index: int, seq: int, scratch_root: Path, caps: dict) -> 
 
 
 def run_task_run(args: argparse.Namespace) -> None:
+    import pyarrow.parquet as pq
+
     index = args.task
     scratch_root = Path(args.scratch_root)
     scratch_root.mkdir(parents=True, exist_ok=True)
     projection = json.loads((EVIDENCE / f"projection-{index:02d}.json").read_text())
-    inventory = json.loads(INVENTORY.read_text())
-    task = inventory["map_plan"]["tasks"][index]
+    input_path = projected_path(index)
+    parquet = pq.ParquetFile(input_path)
+    raw_identity = (parquet.schema_arrow.metadata or {}).get(
+        b"overture.places_projection_identity"
+    )
+    if raw_identity is None:
+        raise ValueError(f"projected task {index} lacks its identity metadata")
+    actual_identity = json.loads(raw_identity)
+    actual_output = {
+        "bytes": input_path.stat().st_size,
+        "sha256": A.sha256_file(input_path),
+        "records": parquet.metadata.num_rows,
+        "row_groups": parquet.metadata.num_row_groups,
+    }
+    if projection.get("identity") != actual_identity:
+        raise ValueError(f"task {index} projection report identity differs from Parquet")
+    reported_output = projection.get("output", {})
+    if any(
+        reported_output.get(key) != value for key, value in actual_output.items()
+    ):
+        raise ValueError(f"task {index} projection report output differs from Parquet")
 
     caps = {
         "memory_limit": args.memory_limit,
@@ -308,7 +329,7 @@ def run_task_run(args: argparse.Namespace) -> None:
             sys.executable,
             str(ROOT / "scripts/baseline_places_construction_v1.py"),
             "--input",
-            str(projected_path(index)),
+            str(input_path),
             "--source-limits",
             str(SOURCE_LIMITS),
             "--output",
@@ -328,13 +349,7 @@ def run_task_run(args: argparse.Namespace) -> None:
     ]
 
     task_run = {
-        "projection": {
-            "identity": {"task_digest": task["task_digest"]},
-            "resources": {
-                "remote_read_bytes": projection["resources"]["remote_read_bytes"]
-            },
-            "output": {"bytes": projection["output"]["bytes"]},
-        },
+        "projection": {**projection, "verified_input": actual_output},
         "baseline": {
             "emitted_term_rows": baseline["emitted_term_rows"],
             "semantic_sum_a": baseline["semantic_sum_a"],
@@ -382,8 +397,9 @@ def index_hash(key: bytes) -> int:
 
 
 def parse_serving_index(data: bytes, mode: str) -> list[dict]:
-    magic = b"PLRV0002" if mode == "routed" else b"PLHD0002"
-    if len(data) < 36 or data[:8] != magic:
+    prefix = b"PLRV" if mode == "routed" else b"PLHD"
+    accepted_magic = {prefix + b"0002", prefix + b"0003"}
+    if len(data) < 36 or data[:8] not in accepted_magic:
         raise ValueError("invalid Places v1 artifact magic")
     index_offset = struct.unpack_from("<Q", data, 16)[0]
     index_count = struct.unpack_from("<I", data, 24)[0]
@@ -490,19 +506,42 @@ def exercise_worker_head_decoder(
 ) -> dict[str, Any]:
     manifest = json.loads(store.path(head["manifest_object"]["key"]).read_text())
     shard_bits = manifest["shard_bits"]
+    shard_paths = {
+        item["shard_id"]: str(store.path(item["key"]))
+        for item in head["shard_objects"]
+    }
     # Draw real sample tokens straight from the built shard bytes, one per shard.
     samples: list[tuple[str, int, str]] = []
+    phrase_sample: tuple[str, int, str] | None = None
     for shard in manifest["shards"]:
-        path = shard["path"]
+        path = shard_paths.get(shard["shard_id"])
+        if path is None:
+            raise ValueError("head manifest shard lacks a local object-store key")
         entries = parse_serving_index(Path(path).read_bytes(), "head")
         if not entries:
             continue
-        token = entries[0]["key"].decode("utf-8")
-        samples.append((token, shard["shard_id"], path))
-        if len(samples) >= sample:
-            break
+        if len(samples) < sample:
+            token = entries[0]["key"].decode("utf-8")
+            samples.append((token, shard["shard_id"], path))
+        if phrase_sample is None:
+            phrase_entry = next(
+                (
+                    entry
+                    for entry in entries
+                    if entry["key"].startswith((b"e2:", b"e3:"))
+                ),
+                None,
+            )
+            if phrase_entry is not None:
+                phrase_sample = (
+                    phrase_entry["key"].decode("utf-8"),
+                    shard["shard_id"],
+                    path,
+                )
     if not samples:
         raise RuntimeError("sharded head produced no decodable head tokens")
+    if phrase_sample is not None and phrase_sample not in samples:
+        samples[-1] = phrase_sample
     evidence_out = scratch_root / "worker-head-decoder-evidence.json"
     env = dict(**__import__("os").environ)
     env["PLACES_HEAD_SHARD_BITS"] = str(shard_bits)
@@ -531,6 +570,13 @@ def exercise_worker_head_decoder(
     )
     result = json.loads(evidence_out.read_text())
     result["sample_tokens"] = [token for token, _, _ in samples]
+    result["entity_phrase_token_resolved"] = (
+        phrase_sample is not None and phrase_sample in samples
+    )
+    result["entity_phrase_decoder_validated"] = (
+        result["entity_phrase_token_resolved"]
+        and result.get("entity_phrase_records_validated", 0) > 0
+    )
     result["manifest_key"] = head["manifest_object"]["key"]
     return result
 
@@ -567,14 +613,14 @@ def run_rehearse(args: argparse.Namespace) -> None:
         # The partition caps DECLARED BY THE FROZEN EVIDENCE SPEC, read from it
         # rather than restated here. They are deliberately NOT the raised hosted
         # production caps (2,000,000 / 512 MiB / 400,000, now the `P.Limits`
-        # defaults): this rehearsal is the evidence for spec v2, whose relaxation
+        # defaults): this rehearsal is evidence for the current frozen spec, whose relaxation
         # policy is "none", and its coverage gate requires genuine adaptive
-        # subdivision. Raising these needs a places evidence spec v3 plus a
-        # re-run, not an edit here -- see
+        # subdivision. Raising these needs a new Places evidence generation plus
+        # a re-run, not an edit here -- see
         # docs/plans/2026-07-24-construction-v1-follow-ups.md.
         **spec_partition_caps(),
         # The head caps the same spec declares, read for the same reason. The hosted
-        # build runs a merge fan-in of 8; spec v2 froze 16, and its relaxation policy
+        # build runs a merge fan-in of 8; the spec freezes 16, and its relaxation policy
         # is "none". See spec_head_caps for the coverage gap that leaves.
         **spec_head_caps(),
         adaptive_subdivision_depth=8,
@@ -592,7 +638,19 @@ def run_rehearse(args: argparse.Namespace) -> None:
     P.hydrate = lambda input_path, output, batch_rows=hydrate_batch: original_hydrate(
         input_path, output, batch_rows=batch_rows
     )
-    interruption_phases: list[str] = []
+    interruption_checkpoint = scratch_root / "interruption-phases.json"
+    expected_interruptions = [
+        ("local_write", "local_write"),
+        ("after_objects", "immutable_publish"),
+        ("before_marker", "before_marker"),
+    ]
+    if interruption_checkpoint.exists():
+        interruption_phases = json.loads(interruption_checkpoint.read_text())
+        expected_phases = [phase for _, phase in expected_interruptions]
+        if interruption_phases != expected_phases[: len(interruption_phases)]:
+            raise ValueError("interruption checkpoint is incomplete or invalid")
+    else:
+        interruption_phases = []
 
     # ---- map each role task; exercise interruption/resume on the first task ----
     markers: list[dict] = []
@@ -609,14 +667,10 @@ def run_rehearse(args: argparse.Namespace) -> None:
             proof_binary=binaries["proof"],
             limits=limits,
         )
-        if position == 0:
+        if position == 0 and len(interruption_phases) < len(expected_interruptions):
             # Interruption phases: kill after local write / before marker; resume
             # must not duplicate logical rows. failpoint names map to spec phases.
-            for failpoint, phase in (
-                ("local_write", "local_write"),
-                ("after_objects", "immutable_publish"),
-                ("before_marker", "before_marker"),
-            ):
+            for failpoint, phase in expected_interruptions[len(interruption_phases) :]:
                 try:
                     P.map_task(**arguments, failpoint=failpoint)
                     raise RuntimeError(f"expected injected interruption {failpoint}")
@@ -628,6 +682,9 @@ def run_rehearse(args: argparse.Namespace) -> None:
                         f"marker published despite interruption {failpoint}"
                     )
                 interruption_phases.append(phase)
+                interruption_checkpoint.write_text(
+                    json.dumps(interruption_phases, sort_keys=True) + "\n"
+                )
         marker = P.map_task(**arguments)
         markers.append(marker)
         print(
@@ -666,6 +723,14 @@ def run_rehearse(args: argparse.Namespace) -> None:
     total_row_groups = sum(
         len(pack["directory"]["row_groups"]) for m in markers for pack in m["packs"]
     )
+    map_stage_resources = [
+        {
+            "task_index": int(marker["task_id"].removeprefix("role-")),
+            "transform": marker["transform_evidence"],
+            "construction": marker["construction_evidence"],
+        }
+        for marker in markers
+    ]
 
     # ---- adaptive genesis plan: frozen caps force b2e3 (8.55M) to subdivide ----
     plan_started = time.monotonic()
@@ -716,6 +781,7 @@ def run_rehearse(args: argparse.Namespace) -> None:
     overlap_reconciliation = False
     max_amplification = 0.0
     routed_verified = True
+    routed_entity_phrase_index_entries = 0
     for partition in reduce_targets:
         reduction = reduce_one(partition)
         reductions.append(reduction)
@@ -745,6 +811,10 @@ def run_rehearse(args: argparse.Namespace) -> None:
         # the dormant Worker can query the routed artifact under caps.
         routed_bytes = store.path(reduction["routed_object"]["key"]).read_bytes()
         entries = parse_serving_index(routed_bytes, "routed")
+        routed_entity_phrase_index_entries += sum(
+            b"\0e2:" in entry["key"] or b"\0e3:" in entry["key"]
+            for entry in entries
+        )
         cell = partition["partition_cell"]
         # sample up to 3 routed tokens for this cell from the leaf.
         leaf = pq.ParquetFile(store.path(reduction["leaf_object"]["key"]))
@@ -794,6 +864,14 @@ def run_rehearse(args: argparse.Namespace) -> None:
     head_note = ""
     head: dict[str, Any] = {}
     worker_local_decoder: dict[str, Any] = {}
+    entity_phrase_admission: str | None = None
+    entity_phrase_head_index_entries = 0
+    entity_phrase_head_records = 0
+    entity_phrase_head_by_prefix = {
+        prefix: {"index_entries": 0, "records": 0}
+        for prefix in P.ENTITY_PHRASE_PREFIXES
+    }
+    head_output_bytes = 0
     try:
         head = P.build_sharded_global_head_from_markers(
             markers=head_markers,
@@ -808,6 +886,41 @@ def run_rehearse(args: argparse.Namespace) -> None:
         # which reconciles every shard's bytes against the independent binding.
         head_result_cap = head["result_cap"]
         head_verified = True
+        head_manifest = json.loads(
+            store.path(head["manifest_object"]["key"]).read_text()
+        )
+        entity_phrase_admission = head_manifest.get("entity_phrase_admission")
+        head_output_bytes = head["manifest_object"]["bytes"] + sum(
+            item["bytes"] for item in head["shard_objects"]
+        )
+        shard_paths = {
+            item["shard_id"]: store.path(item["key"])
+            for item in head["shard_objects"]
+        }
+        for shard in head_manifest["shards"]:
+            path = shard_paths.get(shard["shard_id"])
+            if path is None:
+                raise ValueError("head manifest shard lacks a local object-store key")
+            entries = parse_serving_index(path.read_bytes(), "head")
+            phrase_entries = [
+                entry
+                for entry in entries
+                if entry["key"].startswith((b"e2:", b"e3:"))
+            ]
+            entity_phrase_head_index_entries += len(phrase_entries)
+            entity_phrase_head_records += sum(
+                entry["records"] for entry in phrase_entries
+            )
+            for prefix in P.ENTITY_PHRASE_PREFIXES:
+                selected = [
+                    entry
+                    for entry in phrase_entries
+                    if entry["key"].startswith(prefix.encode())
+                ]
+                entity_phrase_head_by_prefix[prefix]["index_entries"] += len(selected)
+                entity_phrase_head_by_prefix[prefix]["records"] += sum(
+                    entry["records"] for entry in selected
+                )
         worker_local_decoder = exercise_worker_head_decoder(head, store, scratch_root)
         for _ in range(worker_local_decoder["tokens_resolved"]):
             worker_head_probes.append(1)
@@ -832,6 +945,9 @@ def run_rehearse(args: argparse.Namespace) -> None:
         "worker_routed_query": len(worker_routed_probes) > 0 and routed_verified,
         "worker_head_query": len(worker_head_probes) > 0 and head_verified,
         "worker_local_decoder_evidence": bool(worker_local_decoder),
+        "worker_entity_phrase_decoder": worker_local_decoder.get(
+            "entity_phrase_decoder_validated", False
+        ),
         "resume_before_projection": resume_before_projection,
         "interruption_phases": interruption_phases,
         "head_result_cap": head_result_cap,
@@ -840,6 +956,14 @@ def run_rehearse(args: argparse.Namespace) -> None:
         "head_shard_count": head.get("shard_count"),
         "head_populated_shards": head.get("populated_shards"),
         "maximum_worker_index_probes": max_worker_probes,
+        "entity_phrase_admission": entity_phrase_admission,
+        "entity_phrase_head_index_entries": entity_phrase_head_index_entries,
+        "entity_phrase_head_records": entity_phrase_head_records,
+        "entity_phrase_head_by_prefix": entity_phrase_head_by_prefix,
+        "head_output_bytes": head_output_bytes,
+        "routed_entity_phrase_index_entries": routed_entity_phrase_index_entries,
+        "routed_entity_phrases_absent": routed_entity_phrase_index_entries == 0,
+        "map_stage_resources": map_stage_resources,
         "observed": {
             "mapped_tasks": tasks,
             "scale_note": (
@@ -883,9 +1007,9 @@ worker_head_probes: list[int] = []
 # Assemble: merge task_runs + rehearsal into the frozen scale-evidence file
 # ---------------------------------------------------------------------------
 def run_assemble(args: argparse.Namespace) -> None:
-    """Compose the full scale-evidence-v2 bundle from fresh census/task-run/rehearsal.
+    """Compose a scale-evidence bundle from fresh census/task-run/rehearsal.
 
-    Everything is derived from the re-run artifacts and bound to the v2 evidence
+    Everything is derived from the re-run artifacts and bound to the supplied evidence
     spec; nothing is carried over from the v1 evidence. Candidate universe and
     role selection use the readiness validator's own functions so the assembled
     evidence and the validator agree by construction.
@@ -899,7 +1023,18 @@ def run_assemble(args: argparse.Namespace) -> None:
     for path in sorted(Path(args.census_dir).glob("census-*.json")):
         index = int(path.stem.split("-")[-1])
         report = json.loads(path.read_text())
-        census[index] = {"task_index": index, "metrics": report["metrics"]}
+        if report.get("schema") != "overture-places-construction-v1-census-v1":
+            raise ValueError(f"census report {path} has an unexpected schema")
+        if report.get("identity", {}).get("task_index") != index:
+            raise ValueError(f"census report {path} task identity differs")
+        # Keep the complete fresh report plus its file digest. Role metrics alone
+        # cannot prove which projection/spec or transform produced them, and
+        # would let a pre-change census silently select the formal role set.
+        census[index] = {
+            "task_index": index,
+            "report_sha256": A.sha256_file(path),
+            **report,
+        }
 
     universe = validator.candidate_universe(
         inventory, json.loads(spec_path.read_text())["candidate_universe"]["maximum_tasks"]

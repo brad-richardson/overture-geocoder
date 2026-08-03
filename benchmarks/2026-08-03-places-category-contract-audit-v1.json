@@ -1,0 +1,9431 @@
+{
+  "contract_snapshot": "before-2026-08-03-category-corrections",
+  "configured_contracts": {
+    "commodity": {
+      "accommodation": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 1534695,
+          "primary": 368463
+        },
+        "records": 1903158
+      },
+      "atm": {
+        "closest_observed": [],
+        "fields": {
+          "basic": 420184
+        },
+        "records": 420184
+      },
+      "bank": {
+        "closest_observed": [
+          "banks"
+        ],
+        "fields": {},
+        "records": 0
+      },
+      "bar": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 1159850,
+          "basic": 1055001,
+          "primary": 682117
+        },
+        "records": 2896968
+      },
+      "cafe": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 1007071,
+          "basic": 786613,
+          "primary": 736432
+        },
+        "records": 2530116
+      },
+      "coffee_shop": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 620922,
+          "basic": 671874,
+          "primary": 653551
+        },
+        "records": 1946347
+      },
+      "convenience_store": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 339784,
+          "basic": 548474,
+          "primary": 547903
+        },
+        "records": 1436161
+      },
+      "dentist": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 239544,
+          "primary": 540934
+        },
+        "records": 780478
+      },
+      "fast_food_restaurant": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 847449,
+          "basic": 451873,
+          "primary": 447718
+        },
+        "records": 1747040
+      },
+      "gas_station": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 99583,
+          "basic": 750203,
+          "primary": 742161
+        },
+        "records": 1591947
+      },
+      "grocery_store": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 836003,
+          "primary": 538664
+        },
+        "records": 1374667
+      },
+      "gym": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 340596,
+          "basic": 569419,
+          "primary": 569306
+        },
+        "records": 1479321
+      },
+      "hair_salon": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 357622,
+          "primary": 607833
+        },
+        "records": 965455
+      },
+      "holiday_rental_home": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 163368,
+          "primary": 203408
+        },
+        "records": 366776
+      },
+      "hotel": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 724620,
+          "basic": 1291109,
+          "primary": 1258122
+        },
+        "records": 3273851
+      },
+      "insurance_agency": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 44749,
+          "primary": 329158
+        },
+        "records": 373907
+      },
+      "laundry": {
+        "closest_observed": [],
+        "fields": {},
+        "records": 0
+      },
+      "motel": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 389283,
+          "primary": 32430
+        },
+        "records": 421713
+      },
+      "pharmacy": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 162991,
+          "primary": 556510
+        },
+        "records": 719501
+      },
+      "real_estate_agent": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 409258,
+          "primary": 642895
+        },
+        "records": 1052153
+      },
+      "restaurant": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 3350015,
+          "basic": 5579412,
+          "primary": 1798160
+        },
+        "records": 10727587
+      },
+      "service_apartments": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 36879,
+          "primary": 15937
+        },
+        "records": 52816
+      },
+      "veterinarian": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 49968,
+          "primary": 202050
+        },
+        "records": 252018
+      }
+    },
+    "landmark_prior": {
+      "airport": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 30366,
+          "basic": 67228,
+          "primary": 57576
+        },
+        "records": 155170
+      },
+      "aquarium": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 8014,
+          "basic": 7407,
+          "primary": 7404
+        },
+        "records": 22825
+      },
+      "art_gallery": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 71605,
+          "basic": 151544,
+          "primary": 151491
+        },
+        "records": 374640
+      },
+      "art_museum": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 38894,
+          "primary": 16507
+        },
+        "records": 55401
+      },
+      "castle": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 9548,
+          "basic": 15957,
+          "primary": 15947
+        },
+        "records": 41452
+      },
+      "cathedral": {
+        "closest_observed": [
+          "church_cathedral"
+        ],
+        "fields": {},
+        "records": 0
+      },
+      "catholic_church": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 61460,
+          "primary": 141276
+        },
+        "records": 202736
+      },
+      "christian_place_of_worship": {
+        "closest_observed": [],
+        "fields": {
+          "basic": 1261956
+        },
+        "records": 1261956
+      },
+      "historic_site": {
+        "closest_observed": [],
+        "fields": {
+          "basic": 1007364
+        },
+        "records": 1007364
+      },
+      "history_museum": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 52607,
+          "primary": 40348
+        },
+        "records": 92955
+      },
+      "landmark_and_historical_building": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 734642,
+          "primary": 1000086
+        },
+        "records": 1734728
+      },
+      "library": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 35669,
+          "basic": 152590,
+          "primary": 152526
+        },
+        "records": 340785
+      },
+      "monument": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 199954,
+          "basic": 49999,
+          "primary": 49990
+        },
+        "records": 299943
+      },
+      "mosque": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 18171,
+          "primary": 127117
+        },
+        "records": 145288
+      },
+      "museum": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 92198,
+          "basic": 158704,
+          "primary": 88624
+        },
+        "records": 339526
+      },
+      "palace": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 9702,
+          "primary": 4917
+        },
+        "records": 14619
+      },
+      "park": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 327811,
+          "basic": 522608,
+          "primary": 506190
+        },
+        "records": 1356609
+      },
+      "place_of_worship": {
+        "closest_observed": [],
+        "fields": {
+          "basic": 5881
+        },
+        "records": 5881
+      },
+      "public_plaza": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 57817,
+          "basic": 67834,
+          "primary": 65580
+        },
+        "records": 191231
+      },
+      "seaplane_bases": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 616,
+          "primary": 284
+        },
+        "records": 900
+      },
+      "stadium_arena": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 142480,
+          "basic": 128329,
+          "primary": 97194
+        },
+        "records": 368003
+      },
+      "subway_station": {
+        "closest_observed": [
+          "gas_station",
+          "bus_station"
+        ],
+        "fields": {},
+        "records": 0
+      },
+      "synagogue": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 4735,
+          "primary": 8655
+        },
+        "records": 13390
+      },
+      "temple": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 147,
+          "primary": 1152
+        },
+        "records": 1299
+      },
+      "theatre": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 72626,
+          "primary": 59260
+        },
+        "records": 131886
+      },
+      "tourist_attraction": {
+        "closest_observed": [
+          "rural_attraction",
+          "amusement_attraction"
+        ],
+        "fields": {},
+        "records": 0
+      },
+      "train_station": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 31601,
+          "basic": 119489,
+          "primary": 119407
+        },
+        "records": 270497
+      },
+      "university": {
+        "closest_observed": [],
+        "fields": {},
+        "records": 0
+      },
+      "zoo": {
+        "closest_observed": [],
+        "fields": {
+          "alternate": 10010,
+          "basic": 13537,
+          "primary": 10693
+        },
+        "records": 34240
+      }
+    }
+  },
+  "focus": {
+    "atm": {
+      "fields": {
+        "basic": 420184
+      },
+      "records": 420184
+    },
+    "atms": {
+      "fields": {
+        "alternate": 75740,
+        "primary": 420174
+      },
+      "records": 495914
+    },
+    "hospital": {
+      "fields": {
+        "alternate": 441970,
+        "basic": 514571,
+        "primary": 513082
+      },
+      "records": 1469623
+    },
+    "opera_and_ballet": {
+      "fields": {
+        "alternate": 1380,
+        "primary": 1130
+      },
+      "records": 2510
+    },
+    "stadium": {
+      "fields": {},
+      "records": 0
+    },
+    "stadium_arena": {
+      "fields": {
+        "alternate": 142480,
+        "basic": 128329,
+        "primary": 97194
+      },
+      "records": 368003
+    }
+  },
+  "measurement": {
+    "distinct_categories": 2261,
+    "field_value_records": 228421560,
+    "wall_seconds": 1270.3609667529818
+  },
+  "observed_categories": {
+    "3d_printing_service": {
+      "alternate": 813,
+      "primary": 938
+    },
+    "abortion_clinic": {
+      "alternate": 473,
+      "primary": 435
+    },
+    "abrasives_supplier": {
+      "alternate": 132,
+      "primary": 116
+    },
+    "abuse_and_addiction_treatment": {
+      "alternate": 13077,
+      "primary": 20745
+    },
+    "academic_bookstore": {
+      "alternate": 2581,
+      "primary": 1913
+    },
+    "academy": {
+      "basic": 71
+    },
+    "acai_bowls": {
+      "alternate": 2,
+      "primary": 450
+    },
+    "accommodation": {
+      "alternate": 1534695,
+      "primary": 368463
+    },
+    "accountant": {
+      "alternate": 106250,
+      "primary": 152011
+    },
+    "acne_treatment": {
+      "alternate": 106,
+      "primary": 37
+    },
+    "acoustical_consultant": {
+      "alternate": 267,
+      "primary": 229
+    },
+    "active_life": {
+      "alternate": 730896,
+      "primary": 171155
+    },
+    "acupuncture": {
+      "alternate": 19080,
+      "primary": 41880
+    },
+    "addiction_rehabilitation_center": {
+      "alternate": 169,
+      "primary": 2204
+    },
+    "adoption_services": {
+      "alternate": 2249,
+      "primary": 1119
+    },
+    "adult_education": {
+      "alternate": 2084,
+      "primary": 9311
+    },
+    "adult_entertainment": {
+      "alternate": 19716,
+      "primary": 11754
+    },
+    "adult_entertainment_venue": {
+      "basic": 13204
+    },
+    "adult_store": {
+      "alternate": 948,
+      "primary": 1775
+    },
+    "adventure_sports_center": {
+      "alternate": 1282,
+      "primary": 943
+    },
+    "advertising_agency": {
+      "alternate": 169762,
+      "primary": 246717
+    },
+    "aerial_fitness_center": {
+      "primary": 27
+    },
+    "aerial_tours": {
+      "alternate": 50,
+      "primary": 84
+    },
+    "aesthetician": {
+      "alternate": 2067,
+      "primary": 232
+    },
+    "afghan_restaurant": {
+      "alternate": 2350,
+      "primary": 2073
+    },
+    "african_restaurant": {
+      "alternate": 7184,
+      "primary": 7670
+    },
+    "after_school_program": {
+      "alternate": 740,
+      "primary": 1100
+    },
+    "aggregate_supplier": {
+      "alternate": 559,
+      "primary": 188
+    },
+    "agricultural_cooperatives": {
+      "alternate": 39931,
+      "primary": 26129
+    },
+    "agricultural_engineering_service": {
+      "alternate": 7308,
+      "primary": 24
+    },
+    "agricultural_production": {
+      "alternate": 4091,
+      "primary": 246
+    },
+    "agricultural_seed_store": {
+      "alternate": 193,
+      "primary": 677
+    },
+    "agricultural_service": {
+      "alternate": 113513,
+      "basic": 89260,
+      "primary": 88144
+    },
+    "agriculture": {
+      "alternate": 131402,
+      "primary": 61864
+    },
+    "agriculture_association": {
+      "alternate": 1205,
+      "primary": 782
+    },
+    "agriturismo": {
+      "alternate": 72,
+      "primary": 948
+    },
+    "air_duct_cleaning_service": {
+      "alternate": 1449,
+      "primary": 1356
+    },
+    "air_transport_facility_or_service": {
+      "basic": 17369
+    },
+    "aircraft_dealer": {
+      "alternate": 1099,
+      "primary": 847
+    },
+    "aircraft_manufacturer": {
+      "alternate": 784,
+      "primary": 771
+    },
+    "aircraft_parts_and_supplies": {
+      "alternate": 120,
+      "primary": 124
+    },
+    "aircraft_repair": {
+      "alternate": 1582,
+      "primary": 1743
+    },
+    "airline": {
+      "alternate": 6844,
+      "primary": 6572
+    },
+    "airline_ticket_agency": {
+      "alternate": 287,
+      "primary": 111
+    },
+    "airlines": {
+      "alternate": 10948,
+      "primary": 4909
+    },
+    "airport": {
+      "alternate": 30366,
+      "basic": 67228,
+      "primary": 57576
+    },
+    "airport_lounge": {
+      "alternate": 3945,
+      "primary": 4044
+    },
+    "airport_shuttles": {
+      "alternate": 10506,
+      "primary": 4974
+    },
+    "airport_terminal": {
+      "alternate": 13057,
+      "primary": 7217
+    },
+    "airsoft_fields": {
+      "alternate": 40,
+      "primary": 58
+    },
+    "alcohol_and_drug_treatment_center": {
+      "alternate": 249,
+      "primary": 488
+    },
+    "alcohol_and_drug_treatment_centers": {
+      "alternate": 11045,
+      "primary": 3796
+    },
+    "alcoholic_beverage_venue": {
+      "basic": 17484
+    },
+    "allergist": {
+      "alternate": 3200,
+      "primary": 6439
+    },
+    "altering_and_remodeling_contractor": {
+      "alternate": 2089,
+      "primary": 5158
+    },
+    "alternative_medicine": {
+      "alternate": 5173,
+      "primary": 19973
+    },
+    "aluminum_supplier": {
+      "alternate": 619,
+      "primary": 437
+    },
+    "amateur_sports_league": {
+      "alternate": 13971,
+      "primary": 4430
+    },
+    "amateur_sports_team": {
+      "alternate": 58796,
+      "primary": 25583
+    },
+    "ambulance_and_ems_services": {
+      "alternate": 42030,
+      "primary": 22445
+    },
+    "american_football_field": {
+      "alternate": 8,
+      "primary": 193
+    },
+    "american_restaurant": {
+      "alternate": 221663,
+      "primary": 81776
+    },
+    "amusement_attraction": {
+      "basic": 6694
+    },
+    "amusement_park": {
+      "alternate": 70157,
+      "basic": 44697,
+      "primary": 44681
+    },
+    "anesthesiologist": {
+      "alternate": 929,
+      "primary": 4463
+    },
+    "anglican_church": {
+      "alternate": 8499,
+      "primary": 24650
+    },
+    "animal_and_pet_store": {
+      "basic": 189361
+    },
+    "animal_assisted_therapy": {
+      "alternate": 973,
+      "primary": 4
+    },
+    "animal_attraction": {
+      "basic": 10553
+    },
+    "animal_hospital": {
+      "alternate": 2945,
+      "primary": 1889
+    },
+    "animal_or_pet_service": {
+      "basic": 537269
+    },
+    "animal_physical_therapy": {
+      "primary": 16
+    },
+    "animal_rescue_service": {
+      "alternate": 6078,
+      "primary": 4799
+    },
+    "animal_shelter": {
+      "alternate": 23888,
+      "primary": 26724
+    },
+    "animation_studio": {
+      "alternate": 764,
+      "primary": 2154
+    },
+    "antenna_service": {
+      "alternate": 305,
+      "primary": 136
+    },
+    "antique_store": {
+      "alternate": 31218,
+      "primary": 71188
+    },
+    "apartment": {
+      "basic": 40668
+    },
+    "apartment_agent": {
+      "alternate": 355,
+      "primary": 1498
+    },
+    "apartments": {
+      "alternate": 11382,
+      "primary": 40668
+    },
+    "apiaries_and_beekeepers": {
+      "alternate": 19,
+      "primary": 34
+    },
+    "appellate_practice_lawyers": {
+      "alternate": 251,
+      "primary": 3224
+    },
+    "appliance_manufacturer": {
+      "alternate": 7099,
+      "primary": 20509
+    },
+    "appliance_repair_service": {
+      "alternate": 49857,
+      "primary": 44807
+    },
+    "appliance_store": {
+      "alternate": 32752,
+      "primary": 69487
+    },
+    "appraisal_services": {
+      "alternate": 17254,
+      "primary": 25843
+    },
+    "aquarium": {
+      "alternate": 8014,
+      "basic": 7407,
+      "primary": 7404
+    },
+    "aquarium_services": {
+      "alternate": 3188,
+      "primary": 105
+    },
+    "aquatic_pet_store": {
+      "alternate": 30088,
+      "primary": 12170
+    },
+    "arabian_restaurant": {
+      "alternate": 8753,
+      "primary": 3163
+    },
+    "arcade": {
+      "alternate": 25495,
+      "basic": 30297,
+      "primary": 30224
+    },
+    "archaeological_services": {
+      "alternate": 1373,
+      "primary": 1429
+    },
+    "archery_range": {
+      "alternate": 2625,
+      "primary": 3487
+    },
+    "archery_shop": {
+      "alternate": 948,
+      "primary": 1490
+    },
+    "architect": {
+      "alternate": 9360,
+      "primary": 13772
+    },
+    "architectural_designer": {
+      "alternate": 76595,
+      "primary": 99922
+    },
+    "architectural_tours": {
+      "alternate": 644,
+      "primary": 120
+    },
+    "architecture": {
+      "alternate": 10202,
+      "primary": 309
+    },
+    "architecture_schools": {
+      "alternate": 12,
+      "primary": 75
+    },
+    "argentine_restaurant": {
+      "alternate": 5579,
+      "primary": 4826
+    },
+    "armed_forces_branch": {
+      "alternate": 25034,
+      "primary": 35193
+    },
+    "armenian_restaurant": {
+      "alternate": 421,
+      "primary": 454
+    },
+    "army_and_navy_store": {
+      "alternate": 75,
+      "primary": 20
+    },
+    "aromatherapy": {
+      "alternate": 7924,
+      "primary": 4899
+    },
+    "art_gallery": {
+      "alternate": 71605,
+      "basic": 151544,
+      "primary": 151491
+    },
+    "art_museum": {
+      "alternate": 38894,
+      "primary": 16507
+    },
+    "art_restoration": {
+      "alternate": 3960,
+      "primary": 3080
+    },
+    "art_restoration_service": {
+      "alternate": 587,
+      "primary": 532
+    },
+    "art_school": {
+      "alternate": 44805,
+      "primary": 34227
+    },
+    "art_space_rental": {
+      "alternate": 24,
+      "primary": 1
+    },
+    "art_supply_store": {
+      "alternate": 1303,
+      "primary": 1666
+    },
+    "art_tours": {
+      "alternate": 7,
+      "primary": 25
+    },
+    "artificial_turf": {
+      "alternate": 108,
+      "primary": 227
+    },
+    "arts_and_crafts": {
+      "alternate": 133572,
+      "primary": 145224
+    },
+    "arts_and_crafts_space": {
+      "basic": 2418
+    },
+    "arts_and_entertainment": {
+      "alternate": 624246,
+      "primary": 187954
+    },
+    "arts_crafts_and_hobby_store": {
+      "basic": 268351
+    },
+    "asian_art_museum": {
+      "alternate": 661,
+      "primary": 103
+    },
+    "asian_fusion_restaurant": {
+      "alternate": 8649,
+      "primary": 14175
+    },
+    "asian_grocery_store": {
+      "alternate": 9,
+      "primary": 964
+    },
+    "asian_restaurant": {
+      "alternate": 473034,
+      "primary": 78518
+    },
+    "assisted_living_facility": {
+      "alternate": 9005,
+      "primary": 40047
+    },
+    "astrologer": {
+      "alternate": 2853,
+      "primary": 8406
+    },
+    "astrological_advising": {
+      "basic": 8406
+    },
+    "atelier": {
+      "alternate": 3,
+      "primary": 51
+    },
+    "atm": {
+      "basic": 420184
+    },
+    "atms": {
+      "alternate": 75740,
+      "primary": 420174
+    },
+    "attorney_or_law_firm": {
+      "basic": 398600
+    },
+    "attraction_farm": {
+      "alternate": 51,
+      "primary": 177
+    },
+    "attractions_and_activities": {
+      "alternate": 382554,
+      "primary": 110387
+    },
+    "atv_recreation_park": {
+      "alternate": 4799,
+      "primary": 1033
+    },
+    "atv_rentals_and_tours": {
+      "alternate": 6439,
+      "primary": 1874
+    },
+    "auction_house": {
+      "alternate": 4185,
+      "primary": 18463
+    },
+    "audio_visual_equipment_store": {
+      "alternate": 61474,
+      "primary": 17230
+    },
+    "audio_visual_production_and_design": {
+      "alternate": 173,
+      "primary": 271
+    },
+    "audiologist": {
+      "alternate": 14117,
+      "primary": 17483
+    },
+    "audiovisual_equipment_rental": {
+      "alternate": 160,
+      "primary": 6226
+    },
+    "auditorium": {
+      "alternate": 11260,
+      "primary": 20566
+    },
+    "australian_restaurant": {
+      "alternate": 4240,
+      "primary": 2250
+    },
+    "austrian_restaurant": {
+      "alternate": 5533,
+      "primary": 5106
+    },
+    "auto_body_shop": {
+      "alternate": 125627,
+      "primary": 94092
+    },
+    "auto_company": {
+      "alternate": 191705,
+      "primary": 51606
+    },
+    "auto_customization": {
+      "alternate": 55800,
+      "primary": 30870
+    },
+    "auto_dealer": {
+      "basic": 567027
+    },
+    "auto_detailing": {
+      "alternate": 126002,
+      "primary": 127308
+    },
+    "auto_electrical_repair": {
+      "alternate": 8185,
+      "primary": 9025
+    },
+    "auto_glass_service": {
+      "alternate": 19131,
+      "primary": 32476
+    },
+    "auto_insurance": {
+      "alternate": 202,
+      "primary": 46936
+    },
+    "auto_loan_provider": {
+      "alternate": 144,
+      "primary": 7897
+    },
+    "auto_manufacturers_and_distributors": {
+      "alternate": 46639,
+      "primary": 12862
+    },
+    "auto_parts_and_supply_store": {
+      "alternate": 24032,
+      "primary": 45601
+    },
+    "auto_restoration_services": {
+      "alternate": 31877,
+      "primary": 17091
+    },
+    "auto_security": {
+      "alternate": 399,
+      "primary": 1527
+    },
+    "auto_upholstery": {
+      "alternate": 2021,
+      "primary": 4253
+    },
+    "automation_services": {
+      "alternate": 22755,
+      "primary": 20832
+    },
+    "automobile_leasing": {
+      "alternate": 43916,
+      "primary": 5151
+    },
+    "automobile_registration_service": {
+      "alternate": 3195,
+      "primary": 4308
+    },
+    "automotive": {
+      "alternate": 1044592,
+      "primary": 173847
+    },
+    "automotive_consultant": {
+      "alternate": 14812,
+      "primary": 9506
+    },
+    "automotive_dealer": {
+      "alternate": 519198,
+      "primary": 131896
+    },
+    "automotive_parts_and_accessories": {
+      "alternate": 255063,
+      "primary": 283047
+    },
+    "automotive_repair": {
+      "alternate": 438177,
+      "primary": 837902
+    },
+    "automotive_service": {
+      "basic": 1563339
+    },
+    "automotive_services_and_repair": {
+      "alternate": 296805,
+      "primary": 94803
+    },
+    "automotive_storage_facility": {
+      "alternate": 9636,
+      "primary": 2288
+    },
+    "automotive_wheel_polishing_service": {
+      "alternate": 2869,
+      "primary": 558
+    },
+    "aviation_museum": {
+      "alternate": 517,
+      "primary": 587
+    },
+    "avionics_shop": {
+      "alternate": 1096,
+      "primary": 515
+    },
+    "awning_supplier": {
+      "alternate": 1562,
+      "primary": 1051
+    },
+    "axe_throwing": {
+      "alternate": 143,
+      "primary": 24
+    },
+    "ayurveda": {
+      "alternate": 184,
+      "primary": 268
+    },
+    "azerbaijani_restaurant": {
+      "alternate": 227,
+      "primary": 57
+    },
+    "b2b_agriculture_and_food": {
+      "alternate": 28407,
+      "primary": 92
+    },
+    "b2b_apparel": {
+      "alternate": 19932,
+      "primary": 7265
+    },
+    "b2b_autos_and_vehicles": {
+      "alternate": 2775,
+      "primary": 200
+    },
+    "b2b_cleaning_and_waste_management": {
+      "alternate": 5142,
+      "primary": 7383
+    },
+    "b2b_dairies": {
+      "alternate": 300,
+      "primary": 83
+    },
+    "b2b_electronic_equipment": {
+      "alternate": 32249,
+      "primary": 17790
+    },
+    "b2b_energy_and_mining": {
+      "alternate": 42169,
+      "primary": 784
+    },
+    "b2b_energy_and_utility_service": {
+      "basic": 59817
+    },
+    "b2b_equipment_maintenance_and_repair": {
+      "alternate": 90,
+      "primary": 677
+    },
+    "b2b_farming": {
+      "alternate": 16488,
+      "primary": 12
+    },
+    "b2b_farms": {
+      "alternate": 110,
+      "primary": 89
+    },
+    "b2b_food_products": {
+      "alternate": 978,
+      "primary": 1432
+    },
+    "b2b_forklift_dealers": {
+      "alternate": 222,
+      "primary": 490
+    },
+    "b2b_furniture_and_housewares": {
+      "alternate": 21453,
+      "primary": 569
+    },
+    "b2b_hardware": {
+      "alternate": 203,
+      "primary": 164
+    },
+    "b2b_industrial_and_machine_service": {
+      "basic": 177750
+    },
+    "b2b_jewelers": {
+      "alternate": 25509,
+      "primary": 16817
+    },
+    "b2b_machinery_and_tools": {
+      "alternate": 56765,
+      "primary": 1626
+    },
+    "b2b_medical_support_services": {
+      "alternate": 50088,
+      "primary": 242
+    },
+    "b2b_office_and_professional_service": {
+      "basic": 203877
+    },
+    "b2b_oil_and_gas_extraction_and_services": {
+      "alternate": 175,
+      "primary": 1479
+    },
+    "b2b_rubber_and_plastics": {
+      "alternate": 1301,
+      "primary": 1916
+    },
+    "b2b_science_and_technology": {
+      "alternate": 51390,
+      "primary": 13815
+    },
+    "b2b_science_and_technology_service": {
+      "basic": 14555
+    },
+    "b2b_scientific_equipment": {
+      "alternate": 728,
+      "primary": 551
+    },
+    "b2b_service": {
+      "basic": 290730
+    },
+    "b2b_sporting_and_recreation_goods": {
+      "alternate": 797,
+      "primary": 402
+    },
+    "b2b_storage_and_warehouses": {
+      "alternate": 12529,
+      "primary": 113
+    },
+    "b2b_textiles": {
+      "alternate": 47833,
+      "primary": 32593
+    },
+    "b2b_tires": {
+      "alternate": 8,
+      "primary": 91
+    },
+    "b2b_tractor_dealers": {
+      "alternate": 1156,
+      "primary": 1847
+    },
+    "b2b_transportation_and_storage_service": {
+      "basic": 220812
+    },
+    "b2b_truck_equipment_parts_and_accessories": {
+      "alternate": 211,
+      "primary": 1384
+    },
+    "baby_gear_and_furniture": {
+      "alternate": 2843,
+      "primary": 6203
+    },
+    "back_shop": {
+      "alternate": 14,
+      "primary": 50
+    },
+    "backflow_services": {
+      "alternate": 7,
+      "primary": 101
+    },
+    "background_check_services": {
+      "alternate": 4,
+      "primary": 38
+    },
+    "backpacking_area": {
+      "alternate": 100,
+      "primary": 4
+    },
+    "badminton_court": {
+      "alternate": 1558,
+      "primary": 4447
+    },
+    "bagel_restaurant": {
+      "alternate": 102,
+      "primary": 1013
+    },
+    "bagel_shop": {
+      "alternate": 11448,
+      "primary": 10643
+    },
+    "bags_luggage_company": {
+      "alternate": 4741,
+      "primary": 2526
+    },
+    "baguettes": {
+      "alternate": 10
+    },
+    "bail_bonds_service": {
+      "alternate": 2192,
+      "primary": 6590
+    },
+    "bakery": {
+      "alternate": 225186,
+      "primary": 539683
+    },
+    "balloon_ports": {
+      "alternate": 508,
+      "primary": 101
+    },
+    "balloon_services": {
+      "alternate": 84,
+      "primary": 497
+    },
+    "bangladeshi_restaurant": {
+      "alternate": 2153,
+      "primary": 1930
+    },
+    "bank_credit_union": {
+      "alternate": 145169,
+      "primary": 388410
+    },
+    "bank_equipment_service": {
+      "alternate": 2133,
+      "primary": 633
+    },
+    "bank_or_credit_union": {
+      "basic": 778247
+    },
+    "bankruptcy_law": {
+      "alternate": 3619,
+      "primary": 8767
+    },
+    "banks": {
+      "alternate": 163741,
+      "primary": 314891
+    },
+    "baptist_church": {
+      "alternate": 24659,
+      "primary": 98730
+    },
+    "bar": {
+      "alternate": 1159850,
+      "basic": 1055001,
+      "primary": 682117
+    },
+    "bar_and_grill_restaurant": {
+      "alternate": 200033,
+      "primary": 88428
+    },
+    "bar_crawl": {
+      "alternate": 6,
+      "primary": 4
+    },
+    "barbecue_restaurant": {
+      "alternate": 112285,
+      "primary": 119234
+    },
+    "barber": {
+      "alternate": 305448,
+      "primary": 377572
+    },
+    "barre_classes": {
+      "alternate": 3,
+      "primary": 401
+    },
+    "bartender": {
+      "alternate": 20257,
+      "primary": 3043
+    },
+    "bartending_school": {
+      "alternate": 581,
+      "primary": 939
+    },
+    "baseball_field": {
+      "alternate": 8370,
+      "primary": 17198
+    },
+    "baseball_stadium": {
+      "alternate": 2916,
+      "primary": 1837
+    },
+    "basketball_court": {
+      "alternate": 4246,
+      "primary": 8563
+    },
+    "basketball_stadium": {
+      "alternate": 1651,
+      "primary": 947
+    },
+    "basque_restaurant": {
+      "alternate": 1220,
+      "primary": 1096
+    },
+    "bathroom_fixture_stores": {
+      "alternate": 80,
+      "primary": 364
+    },
+    "bathroom_remodeling": {
+      "alternate": 3139,
+      "primary": 7032
+    },
+    "bathtub_and_sink_repairs": {
+      "alternate": 1575,
+      "primary": 369
+    },
+    "battery_inverter_supplier": {
+      "alternate": 39,
+      "primary": 1
+    },
+    "battery_store": {
+      "alternate": 1035,
+      "primary": 3674
+    },
+    "batting_cage": {
+      "alternate": 1425,
+      "primary": 2585
+    },
+    "bazaars": {
+      "alternate": 1,
+      "primary": 11
+    },
+    "beach": {
+      "alternate": 85215,
+      "basic": 180987,
+      "primary": 180780
+    },
+    "beach_bar": {
+      "alternate": 19,
+      "primary": 851
+    },
+    "beach_combing_area": {
+      "alternate": 1
+    },
+    "beach_equipment_rentals": {
+      "alternate": 5724,
+      "primary": 1051
+    },
+    "beach_resort": {
+      "alternate": 7675,
+      "primary": 6884
+    },
+    "beach_volleyball_club": {
+      "alternate": 2
+    },
+    "beach_volleyball_court": {
+      "alternate": 9,
+      "primary": 29
+    },
+    "bearing_supplier": {
+      "alternate": 257,
+      "primary": 388
+    },
+    "beauty_and_spa": {
+      "alternate": 1546447,
+      "primary": 409560
+    },
+    "beauty_product_supplier": {
+      "alternate": 36049,
+      "primary": 27890
+    },
+    "beauty_salon": {
+      "alternate": 1200813,
+      "primary": 1305241
+    },
+    "bed_and_breakfast": {
+      "alternate": 120627,
+      "basic": 168168,
+      "primary": 168136
+    },
+    "bedding_and_bath_stores": {
+      "alternate": 1691,
+      "primary": 2253
+    },
+    "beer_bar": {
+      "alternate": 107539,
+      "primary": 26740
+    },
+    "beer_garden": {
+      "alternate": 72295,
+      "primary": 17169
+    },
+    "beer_tours": {
+      "alternate": 1,
+      "primary": 33
+    },
+    "beer_wine_and_spirits": {
+      "alternate": 12836,
+      "primary": 15715
+    },
+    "behavior_analyst": {
+      "alternate": 130,
+      "primary": 181
+    },
+    "behavioral_or_mental_health_clinic": {
+      "basic": 324512
+    },
+    "belarusian_restaurant": {
+      "alternate": 230,
+      "primary": 45
+    },
+    "belgian_restaurant": {
+      "alternate": 5079,
+      "primary": 4473
+    },
+    "belizean_restaurant": {
+      "alternate": 34,
+      "primary": 12
+    },
+    "betting_center": {
+      "alternate": 8708,
+      "primary": 17600
+    },
+    "beverage_store": {
+      "alternate": 6665,
+      "primary": 24124
+    },
+    "beverage_supplier": {
+      "alternate": 1454,
+      "primary": 8641
+    },
+    "bicycle_path": {
+      "alternate": 11,
+      "primary": 11
+    },
+    "bicycle_sharing_location": {
+      "alternate": 2,
+      "primary": 8
+    },
+    "bicycle_shop": {
+      "alternate": 35111,
+      "primary": 93013
+    },
+    "bike_parking": {
+      "alternate": 3,
+      "primary": 19
+    },
+    "bike_rentals": {
+      "alternate": 18121,
+      "primary": 13851
+    },
+    "bike_repair_maintenance": {
+      "alternate": 26559,
+      "primary": 13547
+    },
+    "bike_sharing": {
+      "primary": 4
+    },
+    "bike_tours": {
+      "alternate": 29,
+      "primary": 92
+    },
+    "billing_services": {
+      "alternate": 270,
+      "primary": 802
+    },
+    "bingo_hall": {
+      "alternate": 1408,
+      "primary": 3039
+    },
+    "biotechnology_company": {
+      "alternate": 8519,
+      "primary": 8722
+    },
+    "bird_shop": {
+      "alternate": 2854,
+      "primary": 242
+    },
+    "bistro": {
+      "alternate": 1349,
+      "primary": 6788
+    },
+    "blacksmiths": {
+      "alternate": 183,
+      "primary": 326
+    },
+    "blood_and_plasma_donation_center": {
+      "alternate": 2657,
+      "primary": 8617
+    },
+    "blow_dry_blow_out_service": {
+      "alternate": 32,
+      "primary": 270
+    },
+    "blueprinters": {
+      "alternate": 34,
+      "primary": 104
+    },
+    "board_of_education_offices": {
+      "alternate": 428,
+      "primary": 327
+    },
+    "boat_builder": {
+      "alternate": 84,
+      "primary": 227
+    },
+    "boat_charter": {
+      "alternate": 82,
+      "primary": 991
+    },
+    "boat_dealer": {
+      "alternate": 8107,
+      "primary": 14971
+    },
+    "boat_parts_and_accessories": {
+      "alternate": 12126,
+      "primary": 6198
+    },
+    "boat_parts_and_supply_store": {
+      "alternate": 1132,
+      "primary": 1064
+    },
+    "boat_rental_and_training": {
+      "alternate": 12978,
+      "primary": 16231
+    },
+    "boat_service_and_repair": {
+      "alternate": 22209,
+      "primary": 12651
+    },
+    "boat_storage_facility": {
+      "alternate": 119,
+      "primary": 581
+    },
+    "boat_tours": {
+      "alternate": 12600,
+      "primary": 10868
+    },
+    "boating_places": {
+      "alternate": 46,
+      "primary": 3
+    },
+    "bobsledding_field": {
+      "primary": 1
+    },
+    "bocce_ball_court": {
+      "alternate": 3,
+      "primary": 3
+    },
+    "body_contouring": {
+      "alternate": 169,
+      "primary": 35
+    },
+    "bolivian_restaurant": {
+      "alternate": 296,
+      "primary": 124
+    },
+    "book_magazine_distribution": {
+      "alternate": 10153,
+      "primary": 2718
+    },
+    "bookbinding": {
+      "alternate": 506,
+      "primary": 432
+    },
+    "bookkeeper": {
+      "alternate": 21190,
+      "primary": 2272
+    },
+    "bookmakers": {
+      "alternate": 13,
+      "primary": 1286
+    },
+    "books_mags_music_and_video": {
+      "alternate": 36503,
+      "primary": 7113
+    },
+    "books_music_and_video_store": {
+      "basic": 260712
+    },
+    "bookstore": {
+      "alternate": 45213,
+      "primary": 146814
+    },
+    "boot_camp": {
+      "alternate": 20152,
+      "primary": 9630
+    },
+    "botanical_garden": {
+      "alternate": 18180,
+      "primary": 10807
+    },
+    "bottled_water_company": {
+      "alternate": 9550,
+      "primary": 17829
+    },
+    "boudoir_photography": {
+      "alternate": 1,
+      "primary": 96
+    },
+    "bounce_house_rental": {
+      "alternate": 8,
+      "primary": 466
+    },
+    "boutique": {
+      "alternate": 131081,
+      "primary": 116836
+    },
+    "bowling_alley": {
+      "alternate": 5103,
+      "primary": 19290
+    },
+    "box_lunch_supplier": {
+      "alternate": 197,
+      "primary": 83
+    },
+    "boxing_class": {
+      "alternate": 8886,
+      "primary": 13617
+    },
+    "boxing_club": {
+      "alternate": 438,
+      "primary": 431
+    },
+    "boxing_gym": {
+      "alternate": 474,
+      "primary": 825
+    },
+    "brake_service_and_repair": {
+      "alternate": 30497,
+      "primary": 13012
+    },
+    "brasserie": {
+      "alternate": 114,
+      "primary": 1619
+    },
+    "brazilian_jiu_jitsu_club": {
+      "primary": 191
+    },
+    "brazilian_restaurant": {
+      "alternate": 47911,
+      "primary": 43935
+    },
+    "breakfast_and_brunch_restaurant": {
+      "alternate": 120301,
+      "primary": 77588
+    },
+    "brewery": {
+      "alternate": 23696,
+      "basic": 52197,
+      "primary": 52170
+    },
+    "brewing_supply_store": {
+      "alternate": 78,
+      "primary": 412
+    },
+    "bridal_shop": {
+      "alternate": 42445,
+      "primary": 57035
+    },
+    "bridge": {
+      "alternate": 8280,
+      "basic": 43707,
+      "primary": 43674
+    },
+    "british_restaurant": {
+      "alternate": 24398,
+      "primary": 5128
+    },
+    "broadcasting_media_production": {
+      "alternate": 55695,
+      "primary": 51600
+    },
+    "brokers": {
+      "alternate": 34383,
+      "primary": 7781
+    },
+    "bubble_soccer_field": {
+      "alternate": 8,
+      "primary": 1
+    },
+    "bubble_tea": {
+      "alternate": 22412,
+      "primary": 40219
+    },
+    "buddhist_place_of_worship": {
+      "basic": 112230
+    },
+    "buddhist_temple": {
+      "alternate": 38133,
+      "primary": 112218
+    },
+    "buffet_restaurant": {
+      "alternate": 36892,
+      "primary": 34413
+    },
+    "builders": {
+      "alternate": 15234,
+      "primary": 16293
+    },
+    "building": {
+      "basic": 5
+    },
+    "building_contractor": {
+      "alternate": 21273,
+      "primary": 24223
+    },
+    "building_or_construction_service": {
+      "basic": 487635
+    },
+    "building_supply_store": {
+      "alternate": 204191,
+      "primary": 360367
+    },
+    "built_feature": {
+      "basic": 484
+    },
+    "bulgarian_restaurant": {
+      "alternate": 1651,
+      "primary": 683
+    },
+    "bulk_billing": {
+      "alternate": 2,
+      "primary": 65
+    },
+    "bungee_jumping_center": {
+      "alternate": 1,
+      "primary": 1
+    },
+    "burger_restaurant": {
+      "alternate": 132132,
+      "primary": 163972
+    },
+    "burmese_restaurant": {
+      "alternate": 864,
+      "primary": 639
+    },
+    "bus_rentals": {
+      "alternate": 5726,
+      "primary": 1515
+    },
+    "bus_service": {
+      "alternate": 1919,
+      "primary": 26249
+    },
+    "bus_station": {
+      "alternate": 13585,
+      "primary": 69619
+    },
+    "bus_ticket_agency": {
+      "alternate": 128,
+      "primary": 58
+    },
+    "bus_tours": {
+      "alternate": 3987,
+      "primary": 3313
+    },
+    "business": {
+      "alternate": 151576,
+      "primary": 108134
+    },
+    "business_advertising": {
+      "alternate": 213676,
+      "primary": 47712
+    },
+    "business_banking_service": {
+      "alternate": 71717,
+      "primary": 396
+    },
+    "business_brokers": {
+      "alternate": 258,
+      "primary": 2668
+    },
+    "business_consulting": {
+      "alternate": 37349,
+      "primary": 36212
+    },
+    "business_equipment_and_supply": {
+      "alternate": 168901,
+      "primary": 5817
+    },
+    "business_financing": {
+      "alternate": 287,
+      "primary": 316
+    },
+    "business_law": {
+      "alternate": 481,
+      "primary": 3776
+    },
+    "business_management_services": {
+      "alternate": 53513,
+      "primary": 87836
+    },
+    "business_manufacturing_and_supply": {
+      "alternate": 171367,
+      "primary": 267402
+    },
+    "business_office_supplies_and_stationery": {
+      "alternate": 10110,
+      "primary": 13998
+    },
+    "business_records_storage_and_management": {
+      "alternate": 1345,
+      "primary": 1324
+    },
+    "business_schools": {
+      "alternate": 1311,
+      "primary": 1079
+    },
+    "business_signage": {
+      "alternate": 349,
+      "primary": 1586
+    },
+    "business_storage_and_transportation": {
+      "alternate": 54337,
+      "primary": 1230
+    },
+    "business_to_business": {
+      "alternate": 760913,
+      "primary": 36354
+    },
+    "business_to_business_services": {
+      "alternate": 222144,
+      "primary": 14705
+    },
+    "butcher_shop": {
+      "alternate": 42100,
+      "primary": 144997
+    },
+    "cabaret": {
+      "alternate": 13,
+      "primary": 23
+    },
+    "cabin": {
+      "alternate": 61958,
+      "primary": 39720
+    },
+    "cabinet_sales_service": {
+      "alternate": 11456,
+      "primary": 8782
+    },
+    "cable_car_service": {
+      "alternate": 40,
+      "primary": 1000
+    },
+    "cafe": {
+      "alternate": 1007071,
+      "basic": 786613,
+      "primary": 736432
+    },
+    "cafeteria": {
+      "primary": 3766
+    },
+    "cajun_and_creole_restaurant": {
+      "alternate": 7570
+    },
+    "calligraphy": {
+      "alternate": 29,
+      "primary": 27
+    },
+    "cambodian_restaurant": {
+      "alternate": 1155,
+      "primary": 796
+    },
+    "campground": {
+      "alternate": 47034,
+      "basic": 114207,
+      "primary": 114157
+    },
+    "campus_building": {
+      "alternate": 171327,
+      "basic": 87116,
+      "primary": 86239
+    },
+    "canadian_restaurant": {
+      "alternate": 5840,
+      "primary": 963
+    },
+    "canal": {
+      "alternate": 998,
+      "basic": 2555,
+      "primary": 2555
+    },
+    "cancer_treatment_center": {
+      "alternate": 1488,
+      "primary": 1746
+    },
+    "candle_store": {
+      "alternate": 141,
+      "primary": 2496
+    },
+    "candy_store": {
+      "alternate": 93271,
+      "primary": 63705
+    },
+    "cannabis_clinic": {
+      "alternate": 2931,
+      "primary": 10446
+    },
+    "cannabis_collective": {
+      "alternate": 1476,
+      "primary": 2
+    },
+    "cannabis_dispensary": {
+      "alternate": 363,
+      "primary": 10431
+    },
+    "cannabis_tour": {
+      "primary": 5
+    },
+    "canoe_and_kayak_hire_service": {
+      "alternate": 5678,
+      "primary": 7784
+    },
+    "canteen": {
+      "alternate": 5,
+      "primary": 8
+    },
+    "canyon": {
+      "alternate": 43,
+      "basic": 17,
+      "primary": 17
+    },
+    "car_auction": {
+      "alternate": 189,
+      "primary": 371
+    },
+    "car_broker": {
+      "alternate": 671,
+      "primary": 2824
+    },
+    "car_buyer": {
+      "alternate": 32062,
+      "primary": 720
+    },
+    "car_dealer": {
+      "alternate": 192033,
+      "primary": 466520
+    },
+    "car_inspection": {
+      "alternate": 32921,
+      "primary": 4170
+    },
+    "car_rental_agency": {
+      "alternate": 26295,
+      "primary": 117340
+    },
+    "car_sharing": {
+      "alternate": 643,
+      "primary": 3313
+    },
+    "car_stereo_installation": {
+      "alternate": 752,
+      "primary": 367
+    },
+    "car_stereo_store": {
+      "alternate": 10314,
+      "primary": 12721
+    },
+    "car_wash": {
+      "alternate": 50054,
+      "primary": 128121
+    },
+    "car_window_tinting": {
+      "alternate": 6075,
+      "primary": 17661
+    },
+    "cardio_classes": {
+      "alternate": 17,
+      "primary": 78
+    },
+    "cardiologist": {
+      "alternate": 6539,
+      "primary": 29192
+    },
+    "cardiovascular_and_thoracic_surgeon": {
+      "alternate": 9,
+      "primary": 749
+    },
+    "cards_and_stationery_store": {
+      "alternate": 6549,
+      "primary": 4313
+    },
+    "career_counseling": {
+      "alternate": 10395,
+      "primary": 7201
+    },
+    "caribbean_restaurant": {
+      "alternate": 10163,
+      "primary": 8362
+    },
+    "caricature": {
+      "alternate": 15,
+      "primary": 19
+    },
+    "carousel": {
+      "alternate": 733
+    },
+    "carpenter": {
+      "alternate": 56491,
+      "primary": 88891
+    },
+    "carpet_cleaning": {
+      "alternate": 20935,
+      "primary": 19899
+    },
+    "carpet_dyeing": {
+      "alternate": 16
+    },
+    "carpet_installation": {
+      "alternate": 450,
+      "primary": 971
+    },
+    "carpet_store": {
+      "alternate": 32262,
+      "primary": 66628
+    },
+    "cartooning_museum": {
+      "alternate": 733,
+      "primary": 72
+    },
+    "casino": {
+      "alternate": 15047,
+      "basic": 34034,
+      "primary": 34007
+    },
+    "casting_molding_and_machining": {
+      "alternate": 237,
+      "primary": 147
+    },
+    "castle": {
+      "alternate": 9548,
+      "basic": 15957,
+      "primary": 15947
+    },
+    "casual_eatery": {
+      "basic": 1457749
+    },
+    "catalan_restaurant": {
+      "alternate": 2605,
+      "primary": 1354
+    },
+    "caterer": {
+      "alternate": 63916,
+      "primary": 91294
+    },
+    "catholic_church": {
+      "alternate": 61460,
+      "primary": 141276
+    },
+    "cave": {
+      "alternate": 8177,
+      "primary": 4506
+    },
+    "ceiling_and_roofing_repair_and_service": {
+      "alternate": 37904,
+      "primary": 196
+    },
+    "ceiling_service": {
+      "alternate": 6179,
+      "primary": 1223
+    },
+    "cement_supplier": {
+      "alternate": 1360,
+      "primary": 1220
+    },
+    "cemeteries": {
+      "alternate": 1774,
+      "primary": 4733
+    },
+    "cemetery": {
+      "basic": 4733
+    },
+    "central_government_office": {
+      "alternate": 225251,
+      "primary": 171236
+    },
+    "ceremonial_clothing": {
+      "alternate": 1,
+      "primary": 149
+    },
+    "certification_agency": {
+      "alternate": 255,
+      "primary": 160
+    },
+    "challenge_courses_center": {
+      "alternate": 53,
+      "primary": 42
+    },
+    "chamber_of_handicraft": {
+      "alternate": 35,
+      "primary": 16
+    },
+    "chambers_of_commerce": {
+      "alternate": 605,
+      "primary": 354
+    },
+    "champagne_bar": {
+      "alternate": 377,
+      "primary": 267
+    },
+    "charity_organization": {
+      "alternate": 107110,
+      "primary": 64786
+    },
+    "charter_school": {
+      "alternate": 159,
+      "primary": 156
+    },
+    "check_cashing_payday_loans": {
+      "alternate": 1000,
+      "primary": 11995
+    },
+    "cheerleading": {
+      "alternate": 14,
+      "primary": 22
+    },
+    "cheese_shop": {
+      "alternate": 8705,
+      "primary": 14336
+    },
+    "cheese_tasting_classes": {
+      "alternate": 16,
+      "primary": 8
+    },
+    "cheesesteak_restaurant": {
+      "alternate": 92,
+      "primary": 1038
+    },
+    "chemical_plant": {
+      "alternate": 41890,
+      "primary": 48327
+    },
+    "chicken_restaurant": {
+      "alternate": 105254,
+      "primary": 100586
+    },
+    "chicken_wings_restaurant": {
+      "alternate": 3552,
+      "primary": 5204
+    },
+    "child_care_and_day_care": {
+      "alternate": 11098,
+      "primary": 32144
+    },
+    "child_protection_service": {
+      "alternate": 2646,
+      "primary": 1397
+    },
+    "child_psychiatrist": {
+      "alternate": 12,
+      "primary": 816
+    },
+    "childbirth_education": {
+      "alternate": 5,
+      "primary": 119
+    },
+    "childproofing": {
+      "alternate": 74,
+      "primary": 23
+    },
+    "children_hall": {
+      "alternate": 34,
+      "primary": 16
+    },
+    "childrens_clothing_store": {
+      "alternate": 72114,
+      "primary": 126612
+    },
+    "childrens_hospital": {
+      "alternate": 797,
+      "primary": 1288
+    },
+    "childrens_museum": {
+      "alternate": 2327,
+      "primary": 1403
+    },
+    "chilean_restaurant": {
+      "alternate": 649,
+      "primary": 280
+    },
+    "chimney_cake_shop": {
+      "alternate": 2615,
+      "primary": 2
+    },
+    "chimney_service": {
+      "alternate": 3346,
+      "primary": 230
+    },
+    "chimney_sweep": {
+      "alternate": 1258,
+      "primary": 8135
+    },
+    "chinese_martial_arts_club": {
+      "alternate": 1,
+      "primary": 174
+    },
+    "chinese_restaurant": {
+      "alternate": 105166,
+      "primary": 191349
+    },
+    "chiropractor": {
+      "alternate": 34027,
+      "primary": 107784
+    },
+    "chocolatier": {
+      "alternate": 15596,
+      "primary": 31899
+    },
+    "choir": {
+      "alternate": 1296,
+      "primary": 3649
+    },
+    "christian_place_of_worship": {
+      "basic": 1261956
+    },
+    "christmas_trees": {
+      "alternate": 35,
+      "primary": 3142
+    },
+    "church_cathedral": {
+      "alternate": 554573,
+      "primary": 907127
+    },
+    "cidery": {
+      "alternate": 45,
+      "primary": 213
+    },
+    "cigar_bar": {
+      "alternate": 226,
+      "primary": 585
+    },
+    "cinema": {
+      "alternate": 32496,
+      "primary": 66656
+    },
+    "circus": {
+      "alternate": 2458,
+      "primary": 3954
+    },
+    "circus_school": {
+      "alternate": 19,
+      "primary": 66
+    },
+    "civic_center": {
+      "alternate": 1506,
+      "basic": 533,
+      "primary": 533
+    },
+    "civic_organization": {
+      "basic": 152537
+    },
+    "civil_engineers": {
+      "alternate": 234,
+      "primary": 3870
+    },
+    "civil_examinations_academy": {
+      "alternate": 20,
+      "primary": 71
+    },
+    "civil_rights_lawyers": {
+      "alternate": 179,
+      "primary": 254
+    },
+    "civilization_museum": {
+      "alternate": 12271,
+      "primary": 517
+    },
+    "class_venue": {
+      "basic": 28
+    },
+    "cleaning_products_supplier": {
+      "alternate": 1304,
+      "primary": 1895
+    },
+    "cleaning_services": {
+      "alternate": 25218,
+      "primary": 22729
+    },
+    "climbing_class": {
+      "alternate": 5,
+      "primary": 4
+    },
+    "climbing_service": {
+      "alternate": 200,
+      "primary": 120
+    },
+    "clinical_laboratories": {
+      "alternate": 12451,
+      "primary": 14755
+    },
+    "clock_repair_service": {
+      "alternate": 443,
+      "primary": 184
+    },
+    "closet_remodeling": {
+      "alternate": 187,
+      "primary": 42
+    },
+    "clothing_company": {
+      "alternate": 40617,
+      "primary": 17171
+    },
+    "clothing_rental": {
+      "alternate": 35,
+      "primary": 5662
+    },
+    "clothing_store": {
+      "alternate": 743397,
+      "primary": 959812
+    },
+    "clown": {
+      "alternate": 21,
+      "primary": 41
+    },
+    "club_crawl": {
+      "alternate": 2,
+      "primary": 3
+    },
+    "coach_bus": {
+      "alternate": 533,
+      "primary": 361
+    },
+    "coal_and_coke": {
+      "alternate": 180,
+      "primary": 630
+    },
+    "cocktail_bar": {
+      "alternate": 76331,
+      "primary": 48927
+    },
+    "coffee_and_tea_supplies": {
+      "alternate": 530,
+      "primary": 916
+    },
+    "coffee_roastery": {
+      "alternate": 33819,
+      "primary": 1736
+    },
+    "coffee_shop": {
+      "alternate": 620922,
+      "basic": 671874,
+      "primary": 653551
+    },
+    "coin_dealers": {
+      "alternate": 515,
+      "primary": 204
+    },
+    "collection_agencies": {
+      "alternate": 2774,
+      "primary": 4012
+    },
+    "college_counseling": {
+      "alternate": 10,
+      "primary": 114
+    },
+    "college_university": {
+      "alternate": 223530,
+      "basic": 399136,
+      "primary": 395848
+    },
+    "colombian_restaurant": {
+      "alternate": 2593,
+      "primary": 3003
+    },
+    "colonics": {
+      "alternate": 90,
+      "primary": 42
+    },
+    "comedy_club": {
+      "alternate": 23361,
+      "basic": 7966,
+      "primary": 7958
+    },
+    "comfort_food_restaurant": {
+      "alternate": 25330,
+      "primary": 8720
+    },
+    "comic_books_store": {
+      "alternate": 35780,
+      "primary": 9968
+    },
+    "commercial_industrial": {
+      "alternate": 330814,
+      "primary": 85151
+    },
+    "commercial_printer": {
+      "alternate": 10171,
+      "primary": 1447
+    },
+    "commercial_real_estate": {
+      "alternate": 53114,
+      "primary": 37395
+    },
+    "commercial_refrigeration": {
+      "alternate": 22715,
+      "primary": 7983
+    },
+    "commercial_vehicle_dealer": {
+      "alternate": 48451,
+      "primary": 5181
+    },
+    "commissioned_artist": {
+      "alternate": 708,
+      "primary": 618
+    },
+    "community_center": {
+      "alternate": 163305,
+      "basic": 106090,
+      "primary": 106037
+    },
+    "community_gardens": {
+      "alternate": 26,
+      "primary": 131
+    },
+    "community_health_center": {
+      "alternate": 464,
+      "primary": 627
+    },
+    "community_museum": {
+      "alternate": 21687,
+      "primary": 2448
+    },
+    "community_services_non_profits": {
+      "alternate": 741532,
+      "primary": 698777
+    },
+    "complementary_and_alternative_medicine": {
+      "basic": 329753
+    },
+    "computer_coaching": {
+      "alternate": 18667,
+      "primary": 28406
+    },
+    "computer_hardware_company": {
+      "alternate": 124282,
+      "primary": 31488
+    },
+    "computer_museum": {
+      "alternate": 1457,
+      "primary": 484
+    },
+    "computer_store": {
+      "alternate": 87584,
+      "primary": 101457
+    },
+    "computer_wholesaler": {
+      "alternate": 459,
+      "primary": 9498
+    },
+    "concept_shop": {
+      "alternate": 12,
+      "primary": 4
+    },
+    "concierge_medicine": {
+      "alternate": 59,
+      "primary": 38
+    },
+    "condominium": {
+      "alternate": 15376,
+      "basic": 22325,
+      "primary": 22325
+    },
+    "construction_management": {
+      "alternate": 1876,
+      "primary": 1090
+    },
+    "construction_services": {
+      "alternate": 298151,
+      "primary": 325620
+    },
+    "consultant_and_general_service": {
+      "alternate": 99907,
+      "primary": 2725
+    },
+    "contemporary_art_museum": {
+      "alternate": 8122,
+      "primary": 1098
+    },
+    "contract_law": {
+      "alternate": 2145,
+      "primary": 363
+    },
+    "contractor": {
+      "alternate": 446397,
+      "primary": 347802
+    },
+    "convenience_store": {
+      "alternate": 339784,
+      "basic": 548474,
+      "primary": 547903
+    },
+    "convents_and_monasteries": {
+      "alternate": 8317,
+      "primary": 10231
+    },
+    "cooking_classes": {
+      "alternate": 91,
+      "primary": 572
+    },
+    "cooking_school": {
+      "alternate": 4672,
+      "primary": 9815
+    },
+    "copywriting_service": {
+      "alternate": 2359,
+      "primary": 623
+    },
+    "corporate_entertainment_services": {
+      "alternate": 789,
+      "primary": 5151
+    },
+    "corporate_gift_supplier": {
+      "alternate": 178,
+      "primary": 97
+    },
+    "corporate_office": {
+      "alternate": 55923,
+      "primary": 135375
+    },
+    "corporate_or_business_office": {
+      "basic": 742043
+    },
+    "cosmetic_and_beauty_supplies": {
+      "alternate": 199408,
+      "primary": 215641
+    },
+    "cosmetic_dentist": {
+      "alternate": 61230,
+      "primary": 32016
+    },
+    "cosmetic_products_manufacturer": {
+      "alternate": 4684,
+      "primary": 219
+    },
+    "cosmetic_surgeon": {
+      "alternate": 684,
+      "primary": 2654
+    },
+    "cosmetology_school": {
+      "alternate": 6824,
+      "primary": 12130
+    },
+    "costa_rican_restaurant": {
+      "alternate": 216,
+      "primary": 77
+    },
+    "costume_museum": {
+      "alternate": 793,
+      "primary": 134
+    },
+    "costume_store": {
+      "alternate": 13413,
+      "primary": 18883
+    },
+    "cottage": {
+      "alternate": 99407,
+      "primary": 39831
+    },
+    "cotton_mill": {
+      "alternate": 500,
+      "primary": 203
+    },
+    "counseling_and_mental_health": {
+      "alternate": 207155,
+      "primary": 150344
+    },
+    "countertop_installation": {
+      "alternate": 29016,
+      "primary": 27536
+    },
+    "country_club": {
+      "alternate": 527,
+      "basic": 474,
+      "primary": 474
+    },
+    "country_dance_hall": {
+      "alternate": 104,
+      "primary": 188
+    },
+    "country_house": {
+      "alternate": 258,
+      "primary": 49
+    },
+    "courier_and_delivery_services": {
+      "alternate": 9604,
+      "primary": 62729
+    },
+    "court_reporter": {
+      "alternate": 545,
+      "primary": 533
+    },
+    "courthouse": {
+      "alternate": 9776,
+      "basic": 39008,
+      "primary": 38989
+    },
+    "coworking_space": {
+      "alternate": 1890,
+      "primary": 14887
+    },
+    "cpr_classes": {
+      "alternate": 21,
+      "primary": 726
+    },
+    "craft_shop": {
+      "alternate": 1066,
+      "primary": 4655
+    },
+    "crane_services": {
+      "alternate": 1650,
+      "primary": 1856
+    },
+    "crater": {
+      "alternate": 2
+    },
+    "credit_and_debt_counseling": {
+      "alternate": 10675,
+      "primary": 7933
+    },
+    "credit_union": {
+      "alternate": 28079,
+      "primary": 74928
+    },
+    "cremation_services": {
+      "alternate": 780,
+      "primary": 6726
+    },
+    "cricket_ground": {
+      "alternate": 4203,
+      "primary": 4981
+    },
+    "criminal_defense_law": {
+      "alternate": 25996,
+      "primary": 10421
+    },
+    "crisis_intervention_services": {
+      "alternate": 1817,
+      "primary": 875
+    },
+    "crops_production": {
+      "alternate": 2384,
+      "primary": 663
+    },
+    "cryotherapy": {
+      "alternate": 271,
+      "primary": 155
+    },
+    "csa_farm": {
+      "alternate": 86,
+      "primary": 27
+    },
+    "cuban_restaurant": {
+      "alternate": 1577,
+      "primary": 3284
+    },
+    "cultural_center": {
+      "alternate": 39808,
+      "basic": 52797,
+      "primary": 52764
+    },
+    "cupcake_shop": {
+      "alternate": 51132,
+      "primary": 29014
+    },
+    "currency_exchange": {
+      "alternate": 16697,
+      "primary": 20216
+    },
+    "curry_sausage_restaurant": {
+      "alternate": 252,
+      "primary": 2
+    },
+    "custom_cakes_shop": {
+      "alternate": 2925,
+      "primary": 287
+    },
+    "custom_clothing": {
+      "alternate": 13809,
+      "primary": 1126
+    },
+    "custom_t_shirt_store": {
+      "primary": 1328
+    },
+    "customized_merchandise": {
+      "alternate": 4269,
+      "primary": 3338
+    },
+    "customs_broker": {
+      "alternate": 394,
+      "primary": 447
+    },
+    "cycling_classes": {
+      "alternate": 2366,
+      "primary": 2665
+    },
+    "czech_restaurant": {
+      "alternate": 992,
+      "primary": 1670
+    },
+    "dairy_farm": {
+      "alternate": 12197,
+      "primary": 11291
+    },
+    "dairy_stores": {
+      "alternate": 325,
+      "primary": 1927
+    },
+    "dam": {
+      "alternate": 12,
+      "basic": 2,
+      "primary": 2
+    },
+    "damage_restoration": {
+      "alternate": 24154,
+      "primary": 13538
+    },
+    "dance_club": {
+      "alternate": 95413,
+      "basic": 94613,
+      "primary": 93376
+    },
+    "dance_school": {
+      "alternate": 24252,
+      "primary": 128511
+    },
+    "dance_wear": {
+      "alternate": 53,
+      "primary": 2079
+    },
+    "danish_restaurant": {
+      "alternate": 68,
+      "primary": 6
+    },
+    "data_recovery": {
+      "alternate": 489,
+      "primary": 3635
+    },
+    "day_care_preschool": {
+      "alternate": 209325,
+      "primary": 94926
+    },
+    "day_spa": {
+      "alternate": 40942,
+      "primary": 27911
+    },
+    "debt_relief_services": {
+      "alternate": 314,
+      "primary": 865
+    },
+    "deck_and_railing_sales_service": {
+      "alternate": 481,
+      "primary": 1883
+    },
+    "decorative_arts_museum": {
+      "alternate": 739,
+      "primary": 178
+    },
+    "delicatessen": {
+      "alternate": 215087,
+      "primary": 64556
+    },
+    "demolition_service": {
+      "alternate": 2357,
+      "primary": 2436
+    },
+    "denim_wear_store": {
+      "alternate": 27,
+      "primary": 258
+    },
+    "dental_clinic": {
+      "basic": 751895
+    },
+    "dental_hygienist": {
+      "alternate": 137,
+      "primary": 89
+    },
+    "dental_laboratories": {
+      "alternate": 926,
+      "primary": 1241
+    },
+    "dental_supply_store": {
+      "alternate": 486,
+      "primary": 1531
+    },
+    "dentist": {
+      "alternate": 239544,
+      "primary": 540934
+    },
+    "dentistry_schools": {
+      "primary": 175
+    },
+    "department_of_motor_vehicles": {
+      "alternate": 15201,
+      "primary": 8821
+    },
+    "department_of_social_service": {
+      "alternate": 4830,
+      "primary": 45
+    },
+    "department_store": {
+      "alternate": 95154,
+      "basic": 106860,
+      "primary": 106781
+    },
+    "dermatologist": {
+      "alternate": 14135,
+      "primary": 42010
+    },
+    "desert": {
+      "alternate": 2177,
+      "primary": 44
+    },
+    "design_museum": {
+      "alternate": 958,
+      "primary": 314
+    },
+    "design_service": {
+      "basic": 299765
+    },
+    "designer_clothing": {
+      "alternate": 11053,
+      "primary": 7990
+    },
+    "desserts": {
+      "alternate": 253176,
+      "primary": 126560
+    },
+    "diagnostic_imaging": {
+      "alternate": 541,
+      "primary": 24310
+    },
+    "diagnostic_services": {
+      "alternate": 39847,
+      "primary": 32090
+    },
+    "diagnostics_imaging_or_lab_service": {
+      "basic": 158498
+    },
+    "dialysis_clinic": {
+      "alternate": 2064,
+      "primary": 13027
+    },
+    "diamond_dealer": {
+      "alternate": 218,
+      "primary": 564
+    },
+    "dietitian": {
+      "alternate": 202,
+      "primary": 707
+    },
+    "digitizing_services": {
+      "alternate": 724,
+      "primary": 626
+    },
+    "dim_sum_restaurant": {
+      "alternate": 10929,
+      "primary": 5290
+    },
+    "diner": {
+      "alternate": 751918,
+      "primary": 94699
+    },
+    "dinner_theater": {
+      "alternate": 143,
+      "primary": 34
+    },
+    "direct_mail_advertising": {
+      "alternate": 148,
+      "primary": 214
+    },
+    "disability_law": {
+      "alternate": 295,
+      "primary": 2486
+    },
+    "disability_services_and_support_organization": {
+      "alternate": 20799,
+      "primary": 21202
+    },
+    "disc_golf_course": {
+      "alternate": 785,
+      "primary": 3305
+    },
+    "discount_store": {
+      "alternate": 64504,
+      "basic": 138653,
+      "primary": 138646
+    },
+    "display_home_center": {
+      "alternate": 269,
+      "primary": 466
+    },
+    "distillery": {
+      "alternate": 4012,
+      "basic": 10388,
+      "primary": 10388
+    },
+    "distribution_services": {
+      "alternate": 2504,
+      "primary": 10550
+    },
+    "dive_bar": {
+      "alternate": 6954,
+      "primary": 4073
+    },
+    "dive_shop": {
+      "alternate": 14,
+      "primary": 1144
+    },
+    "diving_center": {
+      "alternate": 4208,
+      "primary": 1216
+    },
+    "divorce_and_family_law": {
+      "alternate": 25498,
+      "primary": 24383
+    },
+    "diy_auto_shop": {
+      "primary": 17
+    },
+    "diy_foods_restaurant": {
+      "alternate": 33,
+      "primary": 60
+    },
+    "dj_service": {
+      "alternate": 13721,
+      "primary": 5630
+    },
+    "do_it_yourself_store": {
+      "alternate": 582,
+      "primary": 4109
+    },
+    "doctor": {
+      "alternate": 758897,
+      "primary": 368844
+    },
+    "dog_meat_restaurant": {
+      "alternate": 3
+    },
+    "dog_park": {
+      "alternate": 5870,
+      "basic": 13901,
+      "primary": 13888
+    },
+    "dog_trainer": {
+      "alternate": 9249,
+      "primary": 24971
+    },
+    "dog_walkers": {
+      "alternate": 6819,
+      "primary": 6551
+    },
+    "domestic_airports": {
+      "alternate": 1,
+      "primary": 4
+    },
+    "domestic_business_and_trade_organizations": {
+      "alternate": 3790,
+      "primary": 1264
+    },
+    "dominican_restaurant": {
+      "alternate": 574,
+      "primary": 1008
+    },
+    "donation_center": {
+      "alternate": 1229,
+      "primary": 420
+    },
+    "doner_kebab": {
+      "alternate": 19630,
+      "primary": 22545
+    },
+    "donuts": {
+      "alternate": 17142,
+      "primary": 32849
+    },
+    "door_sales_service": {
+      "alternate": 5540,
+      "primary": 3933
+    },
+    "doula": {
+      "alternate": 50,
+      "primary": 55
+    },
+    "drama_school": {
+      "alternate": 22,
+      "primary": 469
+    },
+    "drinking_water_dispenser": {
+      "alternate": 122,
+      "primary": 90
+    },
+    "drive_in_theater": {
+      "alternate": 19539,
+      "primary": 3496
+    },
+    "drive_thru_bar": {
+      "primary": 92
+    },
+    "driving_range": {
+      "alternate": 5292,
+      "primary": 6517
+    },
+    "driving_school": {
+      "alternate": 8563,
+      "primary": 107525
+    },
+    "drone_store": {
+      "alternate": 2168,
+      "primary": 170
+    },
+    "drugstore": {
+      "alternate": 64583,
+      "primary": 34964
+    },
+    "dry_cleaning": {
+      "alternate": 49834,
+      "primary": 53301
+    },
+    "drywall_services": {
+      "alternate": 2617,
+      "primary": 4294
+    },
+    "dui_law": {
+      "alternate": 1452,
+      "primary": 690
+    },
+    "dui_school": {
+      "alternate": 1,
+      "primary": 36
+    },
+    "dumpling_restaurant": {
+      "alternate": 53,
+      "primary": 1499
+    },
+    "dumpster_rentals": {
+      "alternate": 333,
+      "primary": 2161
+    },
+    "duplication_services": {
+      "alternate": 2380,
+      "primary": 125
+    },
+    "duty_free_shop": {
+      "alternate": 456,
+      "primary": 1239
+    },
+    "e_cigarette_store": {
+      "alternate": 16430,
+      "primary": 32712
+    },
+    "e_commerce_service": {
+      "alternate": 14789,
+      "primary": 8250
+    },
+    "ear_nose_and_throat": {
+      "alternate": 6462,
+      "primary": 20483
+    },
+    "eastern_european_restaurant": {
+      "alternate": 6592,
+      "primary": 4284
+    },
+    "eat_and_drink": {
+      "alternate": 411343,
+      "primary": 94339
+    },
+    "eatertainment": {
+      "alternate": 246,
+      "primary": 197
+    },
+    "eating_disorder_treatment_centers": {
+      "primary": 7
+    },
+    "ecuadorian_restaurant": {
+      "alternate": 751,
+      "primary": 959
+    },
+    "editorial_services": {
+      "alternate": 840,
+      "primary": 111
+    },
+    "education": {
+      "alternate": 1033800,
+      "primary": 443514
+    },
+    "educational_camp": {
+      "alternate": 10789,
+      "primary": 6092
+    },
+    "educational_facility": {
+      "basic": 6095
+    },
+    "educational_research_institute": {
+      "alternate": 27493,
+      "primary": 17538
+    },
+    "educational_service": {
+      "basic": 84444
+    },
+    "educational_services": {
+      "alternate": 76784,
+      "primary": 69068
+    },
+    "educational_supply_store": {
+      "alternate": 11058,
+      "primary": 7605
+    },
+    "egyptian_restaurant": {
+      "alternate": 872,
+      "primary": 1026
+    },
+    "elder_care_planning": {
+      "alternate": 241,
+      "primary": 33
+    },
+    "electric_utility_provider": {
+      "alternate": 12004,
+      "basic": 19574,
+      "primary": 14799
+    },
+    "electrical_consultant": {
+      "alternate": 849,
+      "primary": 2
+    },
+    "electrical_supply_store": {
+      "alternate": 11854,
+      "primary": 11737
+    },
+    "electrical_wholesaler": {
+      "alternate": 2707,
+      "primary": 5243
+    },
+    "electrician": {
+      "alternate": 61362,
+      "primary": 126552
+    },
+    "electricity_supplier": {
+      "alternate": 1577,
+      "primary": 4771
+    },
+    "electronic_parts_supplier": {
+      "alternate": 12570,
+      "primary": 4998
+    },
+    "electronics": {
+      "alternate": 242523,
+      "primary": 275885
+    },
+    "electronics_repair_shop": {
+      "alternate": 7185,
+      "primary": 2348
+    },
+    "electronics_store": {
+      "basic": 804380
+    },
+    "elementary_school": {
+      "alternate": 359956,
+      "basic": 466892,
+      "primary": 466799
+    },
+    "elevator_service": {
+      "alternate": 3749,
+      "primary": 8473
+    },
+    "embassy": {
+      "alternate": 4300,
+      "basic": 19399,
+      "primary": 19398
+    },
+    "embroidery_and_crochet": {
+      "alternate": 1527,
+      "primary": 2456
+    },
+    "emergency_department": {
+      "basic": 12914
+    },
+    "emergency_medicine": {
+      "alternate": 267,
+      "primary": 4604
+    },
+    "emergency_or_urgent_care_facility": {
+      "basic": 28468
+    },
+    "emergency_pet_hospital": {
+      "alternate": 1633,
+      "primary": 823
+    },
+    "emergency_roadside_service": {
+      "alternate": 16441,
+      "primary": 2031
+    },
+    "emergency_room": {
+      "alternate": 23108,
+      "primary": 12908
+    },
+    "emergency_service": {
+      "alternate": 4125,
+      "primary": 1418
+    },
+    "emissions_inspection": {
+      "alternate": 6897,
+      "primary": 8130
+    },
+    "empanadas": {
+      "alternate": 15,
+      "primary": 328
+    },
+    "employment_agencies": {
+      "alternate": 49586,
+      "primary": 110568
+    },
+    "employment_law": {
+      "alternate": 14934,
+      "primary": 8717
+    },
+    "ems_training": {
+      "alternate": 21,
+      "primary": 4
+    },
+    "endocrinologist": {
+      "alternate": 3059,
+      "primary": 6923
+    },
+    "endodontist": {
+      "alternate": 6273,
+      "primary": 6843
+    },
+    "endoscopist": {
+      "alternate": 12,
+      "primary": 33
+    },
+    "energy_company": {
+      "alternate": 69553,
+      "primary": 30321
+    },
+    "energy_equipment_and_solution": {
+      "alternate": 16280,
+      "primary": 33839
+    },
+    "energy_management_and_conservation_consultants": {
+      "alternate": 92,
+      "primary": 739
+    },
+    "engine_repair_service": {
+      "alternate": 42173,
+      "primary": 6158
+    },
+    "engineering_schools": {
+      "alternate": 498,
+      "primary": 545
+    },
+    "engineering_services": {
+      "alternate": 173222,
+      "primary": 139774
+    },
+    "engraving": {
+      "alternate": 690,
+      "primary": 489
+    },
+    "entertainment_law": {
+      "alternate": 455,
+      "primary": 284
+    },
+    "environmental_abatement_services": {
+      "alternate": 525,
+      "primary": 267
+    },
+    "environmental_and_ecological_services_for_businesses": {
+      "alternate": 25761,
+      "primary": 10984
+    },
+    "environmental_conservation_and_ecological_organizations": {
+      "alternate": 28324,
+      "primary": 8162
+    },
+    "environmental_conservation_organization": {
+      "alternate": 26472,
+      "primary": 20847
+    },
+    "environmental_medicine": {
+      "alternate": 33,
+      "primary": 6
+    },
+    "environmental_or_ecological_service": {
+      "basic": 59680
+    },
+    "environmental_renewable_natural_resource": {
+      "alternate": 49,
+      "primary": 135
+    },
+    "environmental_testing": {
+      "alternate": 3635,
+      "primary": 3072
+    },
+    "episcopal_church": {
+      "alternate": 810,
+      "primary": 2823
+    },
+    "equestrian_facility": {
+      "alternate": 19525,
+      "primary": 31674
+    },
+    "erotic_massage": {
+      "alternate": 547,
+      "primary": 230
+    },
+    "escape_rooms": {
+      "alternate": 2396,
+      "primary": 10104
+    },
+    "escrow_services": {
+      "alternate": 3598,
+      "primary": 3912
+    },
+    "esports_league": {
+      "alternate": 2873,
+      "primary": 631
+    },
+    "esports_team": {
+      "alternate": 1052,
+      "primary": 489
+    },
+    "estate_liquidation": {
+      "alternate": 507,
+      "primary": 314
+    },
+    "estate_planning_law": {
+      "alternate": 3586,
+      "primary": 3615
+    },
+    "esthetician": {
+      "alternate": 100,
+      "primary": 62
+    },
+    "ethical_grocery": {
+      "alternate": 487,
+      "primary": 2645
+    },
+    "ethiopian_restaurant": {
+      "alternate": 1625,
+      "primary": 1710
+    },
+    "european_restaurant": {
+      "alternate": 153162,
+      "primary": 13862
+    },
+    "ev_charging_station": {
+      "alternate": 1093,
+      "basic": 52280,
+      "primary": 52280
+    },
+    "evangelical_church": {
+      "alternate": 61689,
+      "primary": 44359
+    },
+    "event_or_party_service": {
+      "basic": 987299
+    },
+    "event_photography": {
+      "alternate": 174327,
+      "primary": 91401
+    },
+    "event_planning": {
+      "alternate": 435986,
+      "primary": 773983
+    },
+    "event_technology_service": {
+      "alternate": 434,
+      "primary": 12713
+    },
+    "event_venue": {
+      "basic": 48566
+    },
+    "excavation_service": {
+      "alternate": 16378,
+      "primary": 17161
+    },
+    "executive_search_consultants": {
+      "alternate": 33,
+      "primary": 747
+    },
+    "exhaust_and_muffler_repair": {
+      "alternate": 28755,
+      "primary": 39
+    },
+    "exhibition_and_trade_center": {
+      "alternate": 273,
+      "primary": 237
+    },
+    "exporters": {
+      "alternate": 1001,
+      "primary": 976
+    },
+    "exterior_design": {
+      "alternate": 566,
+      "primary": 110
+    },
+    "eye_care_clinic": {
+      "alternate": 24714,
+      "primary": 33733
+    },
+    "eyebrow_service": {
+      "alternate": 2375,
+      "primary": 521
+    },
+    "eyelash_service": {
+      "alternate": 2784,
+      "primary": 1392
+    },
+    "eyewear_and_optician": {
+      "alternate": 73559,
+      "primary": 191929
+    },
+    "fabric_store": {
+      "alternate": 34502,
+      "primary": 56201
+    },
+    "fabric_wholesaler": {
+      "alternate": 670,
+      "primary": 340
+    },
+    "face_painting": {
+      "alternate": 21,
+      "primary": 48
+    },
+    "fair": {
+      "alternate": 9437,
+      "primary": 13220
+    },
+    "fairgrounds": {
+      "basic": 13224
+    },
+    "falafel_restaurant": {
+      "alternate": 17,
+      "primary": 1134
+    },
+    "family_counselor": {
+      "alternate": 9918,
+      "primary": 4318
+    },
+    "family_practice": {
+      "alternate": 108462,
+      "primary": 59184
+    },
+    "family_service": {
+      "basic": 259370
+    },
+    "family_service_center": {
+      "alternate": 3933,
+      "primary": 504
+    },
+    "farm": {
+      "alternate": 159009,
+      "basic": 277303,
+      "primary": 253050
+    },
+    "farm_equipment_and_supply": {
+      "alternate": 2604,
+      "primary": 7338
+    },
+    "farm_equipment_repair_service": {
+      "alternate": 1168,
+      "primary": 291
+    },
+    "farm_insurance": {
+      "alternate": 6,
+      "primary": 37
+    },
+    "farmers_market": {
+      "alternate": 44420,
+      "basic": 60913,
+      "primary": 60852
+    },
+    "farming_equipment_store": {
+      "alternate": 7075,
+      "primary": 1250
+    },
+    "farming_services": {
+      "alternate": 1761,
+      "primary": 6461
+    },
+    "farrier_services": {
+      "alternate": 11,
+      "primary": 29
+    },
+    "fashion": {
+      "alternate": 372870,
+      "primary": 96379
+    },
+    "fashion_accessories_store": {
+      "alternate": 320212,
+      "primary": 101407
+    },
+    "fashion_and_apparel_store": {
+      "basic": 2750934
+    },
+    "fast_food_restaurant": {
+      "alternate": 847449,
+      "basic": 451873,
+      "primary": 447718
+    },
+    "fastener_supplier": {
+      "alternate": 788,
+      "primary": 824
+    },
+    "federal_government_offices": {
+      "alternate": 928,
+      "primary": 564
+    },
+    "fence_and_gate_sales_service": {
+      "alternate": 10926,
+      "primary": 18433
+    },
+    "fencing_club": {
+      "alternate": 1080,
+      "primary": 1998
+    },
+    "feng_shui": {
+      "alternate": 60,
+      "primary": 53
+    },
+    "ferry_boat_company": {
+      "alternate": 6803,
+      "primary": 8231
+    },
+    "ferry_service": {
+      "alternate": 302,
+      "basic": 746,
+      "primary": 746
+    },
+    "fertility": {
+      "alternate": 10189,
+      "primary": 6252
+    },
+    "fertilizer_store": {
+      "alternate": 17,
+      "primary": 590
+    },
+    "festival": {
+      "alternate": 9720,
+      "primary": 382
+    },
+    "festival_venue": {
+      "basic": 1244
+    },
+    "fidelity_and_surety_bonds": {
+      "alternate": 8,
+      "primary": 36
+    },
+    "filipino_restaurant": {
+      "alternate": 21544,
+      "primary": 10764
+    },
+    "film_festivals_and_organizations": {
+      "alternate": 64,
+      "primary": 93
+    },
+    "financial_advising": {
+      "alternate": 70701,
+      "primary": 87447
+    },
+    "financial_service": {
+      "alternate": 507350,
+      "basic": 1460695,
+      "primary": 327207
+    },
+    "fingerprinting_service": {
+      "alternate": 90,
+      "primary": 454
+    },
+    "fire_and_water_damage_restoration": {
+      "alternate": 600,
+      "primary": 8528
+    },
+    "fire_department": {
+      "alternate": 19434,
+      "primary": 87362
+    },
+    "fire_protection_service": {
+      "alternate": 55043,
+      "primary": 27167
+    },
+    "fire_station": {
+      "basic": 87376
+    },
+    "firearm_training": {
+      "alternate": 37,
+      "primary": 446
+    },
+    "fireplace_service": {
+      "alternate": 4897,
+      "primary": 8369
+    },
+    "firewood": {
+      "alternate": 652,
+      "primary": 499
+    },
+    "firework_retailer": {
+      "alternate": 1513,
+      "primary": 11957
+    },
+    "first_aid_class": {
+      "alternate": 3356,
+      "primary": 3483
+    },
+    "fischbrotchen_restaurant": {
+      "alternate": 59
+    },
+    "fish_and_chips_restaurant": {
+      "alternate": 10182,
+      "primary": 18234
+    },
+    "fish_farm": {
+      "alternate": 5273,
+      "primary": 6420
+    },
+    "fish_farms_and_hatcheries": {
+      "alternate": 117,
+      "primary": 173
+    },
+    "fish_restaurant": {
+      "alternate": 623,
+      "primary": 125
+    },
+    "fishing_charter": {
+      "alternate": 4081,
+      "primary": 10197
+    },
+    "fishing_club": {
+      "alternate": 14919,
+      "primary": 12209
+    },
+    "fishmonger": {
+      "alternate": 18266,
+      "primary": 29728
+    },
+    "fitness_equipment_wholesaler": {
+      "alternate": 59,
+      "primary": 343
+    },
+    "fitness_exercise_equipment": {
+      "alternate": 3872,
+      "primary": 1006
+    },
+    "fitness_studio": {
+      "basic": 143443
+    },
+    "fitness_trainer": {
+      "alternate": 88644,
+      "primary": 44562
+    },
+    "flatbread": {
+      "alternate": 6596
+    },
+    "flatbread_restaurant": {
+      "alternate": 34,
+      "primary": 25
+    },
+    "flea_market": {
+      "alternate": 13281,
+      "primary": 26961
+    },
+    "flight_school": {
+      "alternate": 3041,
+      "primary": 9644
+    },
+    "float_spa": {
+      "alternate": 66,
+      "primary": 38
+    },
+    "flooring_contractors": {
+      "alternate": 8015,
+      "primary": 20274
+    },
+    "flooring_store": {
+      "alternate": 16171,
+      "primary": 12545
+    },
+    "floral_designer": {
+      "alternate": 1649,
+      "primary": 120
+    },
+    "florist": {
+      "alternate": 185,
+      "primary": 24948
+    },
+    "flour_mill": {
+      "alternate": 251,
+      "primary": 99
+    },
+    "flower_markets": {
+      "alternate": 392,
+      "primary": 44
+    },
+    "flowers_and_gifts_shop": {
+      "alternate": 185431,
+      "primary": 432730
+    },
+    "flowers_and_gifts_store": {
+      "basic": 520175
+    },
+    "flyboarding_center": {
+      "alternate": 385,
+      "primary": 87
+    },
+    "flyboarding_rental": {
+      "alternate": 3,
+      "primary": 4
+    },
+    "fmcg_wholesaler": {
+      "alternate": 95,
+      "primary": 160
+    },
+    "fondue_restaurant": {
+      "alternate": 6413,
+      "primary": 2553
+    },
+    "food": {
+      "alternate": 181537,
+      "primary": 45599
+    },
+    "food_and_beverage_consultant": {
+      "alternate": 9363,
+      "primary": 609
+    },
+    "food_and_beverage_exporter": {
+      "primary": 965
+    },
+    "food_and_beverage_store": {
+      "basic": 1772244
+    },
+    "food_bank": {
+      "basic": 6843
+    },
+    "food_banks": {
+      "alternate": 1691,
+      "primary": 6841
+    },
+    "food_beverage_service_distribution": {
+      "alternate": 74781,
+      "primary": 58445
+    },
+    "food_consultant": {
+      "alternate": 6877,
+      "primary": 2749
+    },
+    "food_court": {
+      "alternate": 120,
+      "basic": 3036,
+      "primary": 3036
+    },
+    "food_delivery_service": {
+      "alternate": 108627,
+      "primary": 50673
+    },
+    "food_safety_training": {
+      "alternate": 579,
+      "primary": 748
+    },
+    "food_service": {
+      "basic": 53742
+    },
+    "food_stand": {
+      "alternate": 108588,
+      "primary": 49194
+    },
+    "food_tours": {
+      "alternate": 1746,
+      "primary": 1022
+    },
+    "food_truck": {
+      "alternate": 36058,
+      "primary": 31850
+    },
+    "food_truck_stand": {
+      "basic": 32248
+    },
+    "foot_care": {
+      "alternate": 2632,
+      "primary": 497
+    },
+    "football_club": {
+      "alternate": 41,
+      "primary": 221
+    },
+    "football_stadium": {
+      "alternate": 33978,
+      "primary": 9756
+    },
+    "footwear_wholesaler": {
+      "alternate": 1167,
+      "primary": 78
+    },
+    "forest": {
+      "alternate": 6293,
+      "basic": 7678,
+      "primary": 7676
+    },
+    "forestry_consultants": {
+      "alternate": 224,
+      "primary": 28
+    },
+    "forestry_service": {
+      "alternate": 1704,
+      "primary": 15930
+    },
+    "forklift_dealer": {
+      "alternate": 694,
+      "primary": 1230
+    },
+    "formal_wear_store": {
+      "alternate": 169,
+      "primary": 1460
+    },
+    "fort": {
+      "alternate": 2551,
+      "basic": 2107,
+      "primary": 2107
+    },
+    "fortune_telling_service": {
+      "alternate": 33,
+      "primary": 68
+    },
+    "foster_care_services": {
+      "alternate": 16,
+      "primary": 1662
+    },
+    "foundation_repair": {
+      "alternate": 331,
+      "primary": 675
+    },
+    "fountain": {
+      "alternate": 247587,
+      "primary": 11991
+    },
+    "framing_store": {
+      "alternate": 165,
+      "primary": 6329
+    },
+    "fraternal_organization": {
+      "alternate": 42,
+      "primary": 113
+    },
+    "free_diving_center": {
+      "alternate": 14,
+      "primary": 31
+    },
+    "freight_and_cargo_service": {
+      "alternate": 113489,
+      "primary": 180796
+    },
+    "freight_forwarding_agency": {
+      "alternate": 1012,
+      "primary": 3787
+    },
+    "french_restaurant": {
+      "alternate": 44257,
+      "primary": 69956
+    },
+    "friterie": {
+      "alternate": 677,
+      "primary": 568
+    },
+    "frozen_foods": {
+      "alternate": 615,
+      "primary": 2027
+    },
+    "frozen_yoghurt_shop": {
+      "alternate": 6525,
+      "primary": 10218
+    },
+    "fruits_and_vegetables": {
+      "alternate": 70148,
+      "primary": 69885
+    },
+    "fuel_dock": {
+      "alternate": 16,
+      "primary": 17
+    },
+    "funeral_services_and_cemeteries": {
+      "alternate": 52473,
+      "primary": 118027
+    },
+    "fur_clothing": {
+      "alternate": 20,
+      "primary": 625
+    },
+    "furniture_accessory_store": {
+      "alternate": 4296,
+      "primary": 2264
+    },
+    "furniture_assembly": {
+      "alternate": 32678,
+      "primary": 30676
+    },
+    "furniture_manufacturers": {
+      "alternate": 6452,
+      "primary": 13551
+    },
+    "furniture_rental_service": {
+      "alternate": 1668,
+      "primary": 693
+    },
+    "furniture_repair": {
+      "alternate": 1860,
+      "primary": 757
+    },
+    "furniture_reupholstery": {
+      "alternate": 4034,
+      "primary": 350
+    },
+    "furniture_store": {
+      "alternate": 186860,
+      "primary": 484785
+    },
+    "furniture_wholesalers": {
+      "alternate": 2470,
+      "primary": 1106
+    },
+    "futsal_field": {
+      "alternate": 8,
+      "primary": 13
+    },
+    "game_publisher": {
+      "alternate": 1160,
+      "primary": 5440
+    },
+    "game_truck_rental": {
+      "alternate": 10,
+      "primary": 12
+    },
+    "gaming_venue": {
+      "basic": 46808
+    },
+    "garage_door_service": {
+      "alternate": 8472,
+      "primary": 21089
+    },
+    "garbage_collection_service": {
+      "alternate": 36871,
+      "primary": 49360
+    },
+    "garden": {
+      "basic": 10941
+    },
+    "gardener": {
+      "alternate": 57018,
+      "primary": 43384
+    },
+    "gas_station": {
+      "alternate": 99583,
+      "basic": 750203,
+      "primary": 742161
+    },
+    "gastroenterologist": {
+      "alternate": 3543,
+      "primary": 15011
+    },
+    "gastropub": {
+      "alternate": 60355,
+      "primary": 27175
+    },
+    "gay_and_lesbian_services_organization": {
+      "primary": 46
+    },
+    "gay_bar": {
+      "alternate": 2855,
+      "primary": 4115
+    },
+    "gelato": {
+      "alternate": 20219,
+      "primary": 12573
+    },
+    "gemstone_and_mineral": {
+      "alternate": 159,
+      "primary": 267
+    },
+    "genealogists": {
+      "alternate": 776,
+      "primary": 748
+    },
+    "general_dentistry": {
+      "alternate": 196098,
+      "primary": 111209
+    },
+    "general_festivals": {
+      "alternate": 250,
+      "primary": 692
+    },
+    "general_litigation": {
+      "alternate": 3313,
+      "primary": 1401
+    },
+    "generator_installation_repair": {
+      "alternate": 510,
+      "primary": 72
+    },
+    "geneticist": {
+      "alternate": 10,
+      "primary": 99
+    },
+    "gents_tailor": {
+      "alternate": 118,
+      "primary": 4559
+    },
+    "geologic_formation": {
+      "alternate": 64,
+      "primary": 2
+    },
+    "geological_services": {
+      "alternate": 3077,
+      "primary": 3796
+    },
+    "georgian_restaurant": {
+      "alternate": 1852,
+      "primary": 1396
+    },
+    "geriatric_medicine": {
+      "alternate": 375,
+      "primary": 838
+    },
+    "geriatric_psychiatry": {
+      "primary": 59
+    },
+    "german_restaurant": {
+      "alternate": 30249,
+      "primary": 29602
+    },
+    "gerontologist": {
+      "alternate": 1115,
+      "primary": 732
+    },
+    "gift_shop": {
+      "alternate": 42016,
+      "primary": 62326
+    },
+    "glass_and_mirror_sales_service": {
+      "alternate": 35018,
+      "primary": 39056
+    },
+    "glass_blowing": {
+      "alternate": 3463,
+      "primary": 2100
+    },
+    "glass_manufacturer": {
+      "alternate": 5616,
+      "primary": 6386
+    },
+    "gliderports": {
+      "alternate": 1,
+      "primary": 12
+    },
+    "gluten_free_restaurant": {
+      "alternate": 2599,
+      "primary": 1269
+    },
+    "go_kart_club": {
+      "alternate": 1745,
+      "primary": 4004
+    },
+    "go_kart_track": {
+      "alternate": 218,
+      "primary": 555
+    },
+    "gold_buyer": {
+      "alternate": 176,
+      "primary": 2266
+    },
+    "goldsmith": {
+      "alternate": 565,
+      "primary": 120
+    },
+    "golf_cart_dealer": {
+      "alternate": 984,
+      "primary": 3747
+    },
+    "golf_cart_rental": {
+      "alternate": 12,
+      "primary": 82
+    },
+    "golf_club": {
+      "alternate": 1229,
+      "primary": 2484
+    },
+    "golf_course": {
+      "alternate": 12863,
+      "basic": 43257,
+      "primary": 43257
+    },
+    "golf_equipment": {
+      "alternate": 17,
+      "primary": 3058
+    },
+    "golf_instructor": {
+      "alternate": 2221,
+      "primary": 3827
+    },
+    "government_department": {
+      "basic": 13776
+    },
+    "government_office": {
+      "basic": 612623
+    },
+    "government_services": {
+      "alternate": 8278,
+      "primary": 14491
+    },
+    "grain_elevators": {
+      "alternate": 14,
+      "primary": 1191
+    },
+    "grain_production": {
+      "alternate": 265,
+      "primary": 1145
+    },
+    "granite_supplier": {
+      "alternate": 8939,
+      "primary": 14468
+    },
+    "graphic_designer": {
+      "alternate": 98838,
+      "primary": 70106
+    },
+    "gravel_professionals": {
+      "alternate": 15,
+      "primary": 57
+    },
+    "greek_restaurant": {
+      "alternate": 17697,
+      "primary": 30248
+    },
+    "greengrocer": {
+      "alternate": 20,
+      "primary": 260
+    },
+    "greenhouses": {
+      "alternate": 1,
+      "primary": 270
+    },
+    "grilling_equipment": {
+      "alternate": 174,
+      "primary": 557
+    },
+    "grocery_store": {
+      "alternate": 836003,
+      "primary": 538664
+    },
+    "ground_transport_facility_or_service": {
+      "basic": 174509
+    },
+    "grout_service": {
+      "alternate": 116,
+      "primary": 305
+    },
+    "guamanian_restaurant": {
+      "primary": 1
+    },
+    "guatemalan_restaurant": {
+      "alternate": 583,
+      "primary": 436
+    },
+    "guest_house": {
+      "alternate": 2829,
+      "primary": 5424
+    },
+    "guitar_store": {
+      "alternate": 159,
+      "primary": 767
+    },
+    "gun_and_ammo": {
+      "alternate": 6106,
+      "primary": 15816
+    },
+    "gunsmith": {
+      "alternate": 83,
+      "primary": 2790
+    },
+    "gutter_service": {
+      "alternate": 8707,
+      "primary": 7248
+    },
+    "gym": {
+      "alternate": 340596,
+      "basic": 569419,
+      "primary": 569306
+    },
+    "gymnastics_center": {
+      "alternate": 10809,
+      "primary": 17664
+    },
+    "gymnastics_club": {
+      "alternate": 67,
+      "primary": 30
+    },
+    "hair_extensions": {
+      "alternate": 19435,
+      "primary": 6571
+    },
+    "hair_loss_center": {
+      "alternate": 457,
+      "primary": 865
+    },
+    "hair_removal": {
+      "alternate": 67182,
+      "primary": 13215
+    },
+    "hair_replacement": {
+      "alternate": 6919,
+      "primary": 6635
+    },
+    "hair_salon": {
+      "alternate": 357622,
+      "primary": 607833
+    },
+    "hair_stylist": {
+      "alternate": 3143,
+      "primary": 11599
+    },
+    "hair_supply_stores": {
+      "alternate": 54072,
+      "primary": 47857
+    },
+    "haitian_restaurant": {
+      "alternate": 343,
+      "primary": 477
+    },
+    "halal_restaurant": {
+      "alternate": 24508,
+      "primary": 7668
+    },
+    "halfway_house": {
+      "alternate": 4055,
+      "primary": 1802
+    },
+    "halotherapy": {
+      "alternate": 46,
+      "primary": 18
+    },
+    "handbag_stores": {
+      "alternate": 1154,
+      "primary": 1549
+    },
+    "handicraft_shop": {
+      "alternate": 1510,
+      "primary": 1194
+    },
+    "handyman": {
+      "alternate": 8681,
+      "primary": 12908
+    },
+    "hang_gliding_center": {
+      "alternate": 357,
+      "primary": 327
+    },
+    "hardware_home_and_garden_store": {
+      "basic": 1940381
+    },
+    "hardware_store": {
+      "alternate": 183479,
+      "primary": 280157
+    },
+    "hat_shop": {
+      "alternate": 3127,
+      "primary": 6854
+    },
+    "haunted_house": {
+      "alternate": 1094,
+      "primary": 2738
+    },
+    "haute_cuisine_restaurant": {
+      "alternate": 9,
+      "primary": 3
+    },
+    "hawaiian_restaurant": {
+      "alternate": 2610,
+      "primary": 2705
+    },
+    "hazardous_waste_disposal": {
+      "alternate": 2853,
+      "primary": 173
+    },
+    "health_and_medical": {
+      "alternate": 2050626,
+      "primary": 306475
+    },
+    "health_and_wellness_club": {
+      "alternate": 2560,
+      "primary": 15803
+    },
+    "health_coach": {
+      "alternate": 2003,
+      "primary": 1303
+    },
+    "health_consultant": {
+      "alternate": 2304,
+      "primary": 3761
+    },
+    "health_department": {
+      "alternate": 18089,
+      "primary": 4904
+    },
+    "health_food_restaurant": {
+      "alternate": 33438,
+      "primary": 9987
+    },
+    "health_food_store": {
+      "alternate": 175477,
+      "primary": 77747
+    },
+    "health_insurance_office": {
+      "alternate": 6325,
+      "primary": 11125
+    },
+    "health_market": {
+      "alternate": 4954,
+      "primary": 1920
+    },
+    "health_retreats": {
+      "alternate": 925,
+      "primary": 116
+    },
+    "health_spa": {
+      "alternate": 41633,
+      "primary": 16708
+    },
+    "hearing_aid_provider": {
+      "alternate": 10280,
+      "primary": 326
+    },
+    "hearing_aids": {
+      "alternate": 389,
+      "primary": 29060
+    },
+    "heliports": {
+      "alternate": 1092,
+      "primary": 1940
+    },
+    "hematology": {
+      "alternate": 76,
+      "primary": 3836
+    },
+    "henna_artist": {
+      "alternate": 34,
+      "primary": 61
+    },
+    "hepatologist": {
+      "alternate": 111,
+      "primary": 64
+    },
+    "herb_and_spice_shop": {
+      "alternate": 406,
+      "primary": 1046
+    },
+    "herbal_shop": {
+      "alternate": 229,
+      "primary": 1284
+    },
+    "high_gliding_center": {
+      "alternate": 21,
+      "primary": 9
+    },
+    "high_school": {
+      "alternate": 168031,
+      "basic": 187932,
+      "primary": 187869
+    },
+    "hiking_trail": {
+      "alternate": 21987,
+      "primary": 40968
+    },
+    "himalayan_nepalese_restaurant": {
+      "alternate": 2847,
+      "primary": 2850
+    },
+    "hindu_place_of_worship": {
+      "basic": 128324
+    },
+    "hindu_temple": {
+      "alternate": 19369,
+      "primary": 128307
+    },
+    "historic_site": {
+      "basic": 1007364
+    },
+    "historical_tours": {
+      "alternate": 2740,
+      "primary": 1190
+    },
+    "history_museum": {
+      "alternate": 52607,
+      "primary": 40348
+    },
+    "hobby_shop": {
+      "alternate": 55022,
+      "primary": 30043
+    },
+    "hockey_arena": {
+      "alternate": 2289,
+      "primary": 1822
+    },
+    "hockey_equipment": {
+      "alternate": 2,
+      "primary": 294
+    },
+    "hockey_field": {
+      "alternate": 8632,
+      "primary": 1396
+    },
+    "holding_companies": {
+      "alternate": 10430,
+      "primary": 1110
+    },
+    "holiday_decor": {
+      "alternate": 108,
+      "primary": 249
+    },
+    "holiday_decorating": {
+      "alternate": 753,
+      "primary": 38
+    },
+    "holiday_market": {
+      "alternate": 51,
+      "primary": 25
+    },
+    "holiday_park": {
+      "alternate": 509,
+      "primary": 103
+    },
+    "holiday_rental_home": {
+      "alternate": 163368,
+      "primary": 203408
+    },
+    "holistic_animal_care": {
+      "alternate": 68,
+      "primary": 97
+    },
+    "home_and_garden": {
+      "alternate": 203752,
+      "primary": 31002
+    },
+    "home_and_rental_insurance": {
+      "alternate": 14900,
+      "primary": 721
+    },
+    "home_automation": {
+      "alternate": 1132,
+      "primary": 1160
+    },
+    "home_cleaning": {
+      "alternate": 91917,
+      "primary": 127047
+    },
+    "home_decor": {
+      "alternate": 2796,
+      "primary": 15206
+    },
+    "home_developer": {
+      "alternate": 89685,
+      "primary": 123319
+    },
+    "home_energy_auditor": {
+      "alternate": 167,
+      "primary": 132
+    },
+    "home_goods_store": {
+      "alternate": 182690,
+      "primary": 129827
+    },
+    "home_health_care": {
+      "alternate": 24183,
+      "primary": 69599
+    },
+    "home_improvement_store": {
+      "alternate": 417420,
+      "primary": 126461
+    },
+    "home_inspector": {
+      "alternate": 5246,
+      "primary": 12272
+    },
+    "home_network_installation": {
+      "alternate": 187,
+      "primary": 125
+    },
+    "home_organization": {
+      "alternate": 3224,
+      "primary": 1976
+    },
+    "home_security": {
+      "alternate": 36418,
+      "primary": 31269
+    },
+    "home_service": {
+      "alternate": 222979,
+      "basic": 2421816,
+      "primary": 162633
+    },
+    "home_staging": {
+      "alternate": 7013,
+      "primary": 3787
+    },
+    "home_theater_systems_stores": {
+      "alternate": 5949,
+      "primary": 1814
+    },
+    "home_window_tinting": {
+      "alternate": 2078,
+      "primary": 676
+    },
+    "homeless_shelter": {
+      "alternate": 6622,
+      "primary": 6336
+    },
+    "homeopathic_medicine": {
+      "alternate": 131,
+      "primary": 1202
+    },
+    "homeowner_association": {
+      "alternate": 120,
+      "primary": 325
+    },
+    "honduran_restaurant": {
+      "alternate": 502,
+      "primary": 772
+    },
+    "honey_farm_shop": {
+      "alternate": 208,
+      "primary": 463
+    },
+    "hong_kong_style_cafe": {
+      "alternate": 1711,
+      "primary": 1299
+    },
+    "hookah_bar": {
+      "alternate": 12118,
+      "primary": 17329
+    },
+    "horse_boarding": {
+      "alternate": 13210,
+      "primary": 16425
+    },
+    "horse_equipment_shop": {
+      "alternate": 3228,
+      "primary": 563
+    },
+    "horse_racing_track": {
+      "alternate": 38,
+      "primary": 468
+    },
+    "horse_riding": {
+      "alternate": 21872,
+      "primary": 11260
+    },
+    "horse_trainer": {
+      "alternate": 8102,
+      "primary": 5932
+    },
+    "horseback_riding_service": {
+      "alternate": 24109,
+      "primary": 8908
+    },
+    "hospice": {
+      "alternate": 11514,
+      "primary": 9337
+    },
+    "hospital": {
+      "alternate": 441970,
+      "basic": 514571,
+      "primary": 513082
+    },
+    "hospital_equipment_and_supplies": {
+      "alternate": 5394,
+      "primary": 1732
+    },
+    "hospitalist": {
+      "alternate": 234,
+      "primary": 1268
+    },
+    "hostel": {
+      "alternate": 53469,
+      "primary": 61672
+    },
+    "hot_air_balloons_tour": {
+      "alternate": 486,
+      "primary": 1144
+    },
+    "hot_dog_restaurant": {
+      "alternate": 12791,
+      "primary": 13575
+    },
+    "hot_springs": {
+      "alternate": 46,
+      "basic": 5851,
+      "primary": 30
+    },
+    "hot_tubs_and_pools": {
+      "alternate": 61,
+      "primary": 4567
+    },
+    "hotel": {
+      "alternate": 724620,
+      "basic": 1291109,
+      "primary": 1258122
+    },
+    "hotel_bar": {
+      "alternate": 7036,
+      "primary": 4631
+    },
+    "hotel_supply_service": {
+      "alternate": 10948,
+      "primary": 2513
+    },
+    "house_sitting": {
+      "alternate": 1400,
+      "primary": 501
+    },
+    "houseboat": {
+      "alternate": 27,
+      "primary": 18
+    },
+    "housing_authorities": {
+      "alternate": 13612,
+      "primary": 7848
+    },
+    "housing_cooperative": {
+      "alternate": 640,
+      "primary": 1106
+    },
+    "housing_or_property_service": {
+      "basic": 15843
+    },
+    "human_resource_services": {
+      "alternate": 1363,
+      "primary": 5155
+    },
+    "hungarian_restaurant": {
+      "alternate": 1620,
+      "primary": 1262
+    },
+    "hunting_and_fishing_supplies": {
+      "alternate": 14937,
+      "primary": 30181
+    },
+    "hvac_services": {
+      "alternate": 104972,
+      "primary": 141531
+    },
+    "hvac_supplier": {
+      "alternate": 16378,
+      "primary": 10579
+    },
+    "hybrid_car_repair": {
+      "alternate": 28761,
+      "primary": 135
+    },
+    "hydraulic_equipment_supplier": {
+      "alternate": 13765,
+      "primary": 3906
+    },
+    "hydraulic_repair_service": {
+      "alternate": 644,
+      "primary": 562
+    },
+    "hydro_jetting": {
+      "alternate": 161,
+      "primary": 54
+    },
+    "hydroponic_gardening": {
+      "alternate": 729,
+      "primary": 299
+    },
+    "hydrotherapy": {
+      "alternate": 307,
+      "primary": 24
+    },
+    "hypnosis_hypnotherapy": {
+      "alternate": 986,
+      "primary": 2333
+    },
+    "iberian_restaurant": {
+      "alternate": 2369,
+      "primary": 50
+    },
+    "ice_cream_and_frozen_yoghurt": {
+      "alternate": 2534,
+      "primary": 6508
+    },
+    "ice_cream_shop": {
+      "alternate": 77560,
+      "primary": 177859
+    },
+    "ice_skating_rink": {
+      "alternate": 3670,
+      "primary": 5891
+    },
+    "ice_supplier": {
+      "alternate": 261,
+      "primary": 1017
+    },
+    "image_consultant": {
+      "alternate": 5283,
+      "primary": 3075
+    },
+    "immigration_and_naturalization": {
+      "alternate": 327,
+      "primary": 284
+    },
+    "immigration_assistance_services": {
+      "alternate": 452,
+      "primary": 121
+    },
+    "immigration_law": {
+      "alternate": 7592,
+      "primary": 13446
+    },
+    "immunodermatologist": {
+      "alternate": 106,
+      "primary": 80
+    },
+    "imported_food": {
+      "alternate": 81,
+      "primary": 991
+    },
+    "importer_and_exporter": {
+      "alternate": 2937,
+      "primary": 4113
+    },
+    "importers": {
+      "alternate": 34,
+      "primary": 740
+    },
+    "indian_grocery_store": {
+      "alternate": 290,
+      "primary": 6053
+    },
+    "indian_restaurant": {
+      "alternate": 52376,
+      "primary": 110057
+    },
+    "indian_sweets_shop": {
+      "alternate": 205,
+      "primary": 134
+    },
+    "indo_chinese_restaurant": {
+      "alternate": 2009,
+      "primary": 609
+    },
+    "indonesian_restaurant": {
+      "alternate": 41811,
+      "primary": 55557
+    },
+    "indoor_golf_center": {
+      "alternate": 34,
+      "primary": 149
+    },
+    "indoor_landscaping": {
+      "alternate": 133,
+      "primary": 125
+    },
+    "indoor_playcenter": {
+      "alternate": 452,
+      "primary": 1615
+    },
+    "industrial_cleaning_services": {
+      "alternate": 189,
+      "primary": 309
+    },
+    "industrial_company": {
+      "alternate": 208061,
+      "primary": 77377
+    },
+    "industrial_equipment": {
+      "alternate": 208291,
+      "primary": 225670
+    },
+    "industrial_facility_or_service": {
+      "basic": 9389
+    },
+    "industrial_spares_and_products_wholesaler": {
+      "alternate": 3046,
+      "primary": 347
+    },
+    "infectious_disease_specialist": {
+      "alternate": 395,
+      "primary": 2807
+    },
+    "information_technology_company": {
+      "alternate": 170714,
+      "primary": 118655
+    },
+    "inn": {
+      "alternate": 103191,
+      "basic": 27798,
+      "primary": 27795
+    },
+    "inspection_services": {
+      "alternate": 354,
+      "primary": 2405
+    },
+    "installment_loans": {
+      "alternate": 70876,
+      "primary": 37590
+    },
+    "instrumentation_engineers": {
+      "alternate": 30,
+      "primary": 81
+    },
+    "insulation_installation": {
+      "alternate": 2234,
+      "primary": 2785
+    },
+    "insurance_agency": {
+      "alternate": 44749,
+      "primary": 329158
+    },
+    "interior_design": {
+      "alternate": 102973,
+      "primary": 125143
+    },
+    "interlock_system": {
+      "alternate": 2511,
+      "primary": 18
+    },
+    "internal_medicine": {
+      "alternate": 28126,
+      "primary": 37761
+    },
+    "international_business_and_trade_services": {
+      "alternate": 12386,
+      "primary": 8797
+    },
+    "international_grocery_store": {
+      "alternate": 528,
+      "primary": 2587
+    },
+    "international_restaurant": {
+      "alternate": 2201,
+      "primary": 867
+    },
+    "internet_cafe": {
+      "alternate": 27895,
+      "primary": 23906
+    },
+    "internet_marketing_service": {
+      "alternate": 39484,
+      "primary": 37700
+    },
+    "internet_service_provider": {
+      "alternate": 75061,
+      "primary": 41587
+    },
+    "inventory_control_service": {
+      "alternate": 2111,
+      "primary": 904
+    },
+    "investing": {
+      "alternate": 90250,
+      "primary": 25431
+    },
+    "ip_and_internet_law": {
+      "alternate": 3407,
+      "primary": 2185
+    },
+    "irish_pub": {
+      "alternate": 4276,
+      "primary": 7629
+    },
+    "irish_restaurant": {
+      "alternate": 1784,
+      "primary": 434
+    },
+    "iron_and_steel_industry": {
+      "alternate": 33406,
+      "primary": 28362
+    },
+    "iron_and_steel_store": {
+      "alternate": 2230,
+      "primary": 159
+    },
+    "iron_work": {
+      "primary": 1678
+    },
+    "ironworkers": {
+      "alternate": 344,
+      "primary": 35
+    },
+    "irrigation": {
+      "alternate": 955,
+      "primary": 2253
+    },
+    "irrigation_companies": {
+      "primary": 164
+    },
+    "island": {
+      "alternate": 28553,
+      "basic": 2745,
+      "primary": 2745
+    },
+    "israeli_restaurant": {
+      "alternate": 441,
+      "primary": 338
+    },
+    "it_consultant": {
+      "alternate": 3673,
+      "primary": 2229
+    },
+    "it_service_and_computer_repair": {
+      "alternate": 190245,
+      "primary": 174988
+    },
+    "it_support_and_service": {
+      "alternate": 6673,
+      "primary": 5101
+    },
+    "italian_restaurant": {
+      "alternate": 197197,
+      "primary": 231147
+    },
+    "iv_hydration": {
+      "alternate": 151,
+      "primary": 64
+    },
+    "jail_and_prison": {
+      "alternate": 7295,
+      "primary": 9226
+    },
+    "jail_or_prison": {
+      "basic": 9257
+    },
+    "jamaican_restaurant": {
+      "alternate": 2361,
+      "primary": 2468
+    },
+    "janitorial_services": {
+      "alternate": 30763,
+      "primary": 24574
+    },
+    "japanese_confectionery_shop": {
+      "alternate": 706,
+      "primary": 393
+    },
+    "japanese_grocery_store": {
+      "alternate": 11,
+      "primary": 53
+    },
+    "japanese_restaurant": {
+      "alternate": 176898,
+      "primary": 365652
+    },
+    "jazz_and_blues": {
+      "alternate": 3628,
+      "primary": 3476
+    },
+    "jehovahs_witness_kingdom_hall": {
+      "alternate": 1023,
+      "primary": 3429
+    },
+    "jet_skis_rental": {
+      "alternate": 1909,
+      "primary": 1740
+    },
+    "jewelry_and_watches_manufacturer": {
+      "alternate": 76790,
+      "primary": 21804
+    },
+    "jewelry_manufacturer": {
+      "alternate": 7184,
+      "primary": 78
+    },
+    "jewelry_repair_service": {
+      "alternate": 1447,
+      "primary": 62
+    },
+    "jewelry_store": {
+      "alternate": 85939,
+      "primary": 292519
+    },
+    "jewish_place_of_worship": {
+      "basic": 8656
+    },
+    "jewish_restaurant": {
+      "alternate": 3,
+      "primary": 74
+    },
+    "junk_removal_and_hauling": {
+      "alternate": 9620,
+      "primary": 3349
+    },
+    "junkyard": {
+      "alternate": 4842,
+      "primary": 7048
+    },
+    "juvenile_detention_center": {
+      "alternate": 2,
+      "primary": 28
+    },
+    "karaoke": {
+      "alternate": 15846,
+      "primary": 30961
+    },
+    "karaoke_rental": {
+      "alternate": 1,
+      "primary": 36
+    },
+    "karate_club": {
+      "alternate": 15,
+      "primary": 767
+    },
+    "key_and_locksmith": {
+      "alternate": 14289,
+      "primary": 81366
+    },
+    "kickboxing_club": {
+      "alternate": 76,
+      "primary": 1022
+    },
+    "kids_hair_salon": {
+      "alternate": 2865,
+      "primary": 2799
+    },
+    "kids_recreation_and_party": {
+      "alternate": 23129,
+      "primary": 15097
+    },
+    "kiosk": {
+      "alternate": 32340,
+      "basic": 1973,
+      "primary": 1973
+    },
+    "kitchen_and_bath": {
+      "alternate": 11968,
+      "primary": 9922
+    },
+    "kitchen_incubator": {
+      "alternate": 5,
+      "primary": 6
+    },
+    "kitchen_remodeling": {
+      "alternate": 3277,
+      "primary": 5978
+    },
+    "kitchen_supply_store": {
+      "alternate": 68,
+      "primary": 13896
+    },
+    "kiteboarding": {
+      "alternate": 939,
+      "primary": 1003
+    },
+    "kiteboarding_instruction": {
+      "alternate": 18,
+      "primary": 4
+    },
+    "knife_sharpening": {
+      "alternate": 1492,
+      "primary": 335
+    },
+    "knitting_supply": {
+      "alternate": 7447,
+      "primary": 1004
+    },
+    "kofta_restaurant": {
+      "alternate": 1,
+      "primary": 32
+    },
+    "kombucha": {
+      "alternate": 13,
+      "primary": 41
+    },
+    "korean_grocery_store": {
+      "alternate": 2508,
+      "primary": 14708
+    },
+    "korean_restaurant": {
+      "alternate": 35782,
+      "primary": 88808
+    },
+    "kosher_grocery_store": {
+      "alternate": 2,
+      "primary": 61
+    },
+    "kosher_restaurant": {
+      "alternate": 1778,
+      "primary": 1329
+    },
+    "kurdish_restaurant": {
+      "alternate": 187,
+      "primary": 97
+    },
+    "labor_union": {
+      "alternate": 11338,
+      "basic": 27570,
+      "primary": 27565
+    },
+    "laboratory": {
+      "alternate": 4118,
+      "primary": 9096
+    },
+    "laboratory_equipment_supplier": {
+      "alternate": 718,
+      "primary": 908
+    },
+    "laboratory_testing": {
+      "alternate": 73710,
+      "primary": 86392
+    },
+    "lactation_services": {
+      "alternate": 1132,
+      "primary": 29
+    },
+    "lake": {
+      "alternate": 63189,
+      "basic": 214320,
+      "primary": 214273
+    },
+    "land_feature": {
+      "basic": 4565
+    },
+    "land_surveying": {
+      "alternate": 7820,
+      "primary": 25646
+    },
+    "landmark_and_historical_building": {
+      "alternate": 734642,
+      "primary": 1000086
+    },
+    "landscape_architect": {
+      "alternate": 3192,
+      "primary": 9651
+    },
+    "landscaping": {
+      "alternate": 92465,
+      "primary": 90831
+    },
+    "language_school": {
+      "alternate": 26739,
+      "primary": 92269
+    },
+    "laotian_restaurant": {
+      "alternate": 5,
+      "primary": 23
+    },
+    "laser_cutting_service_provider": {
+      "alternate": 213,
+      "primary": 218
+    },
+    "laser_eye_surgery_lasik": {
+      "alternate": 5486,
+      "primary": 1809
+    },
+    "laser_hair_removal": {
+      "alternate": 19607,
+      "primary": 20358
+    },
+    "laser_tag": {
+      "alternate": 2107,
+      "primary": 2581
+    },
+    "latin_american_restaurant": {
+      "alternate": 166519,
+      "primary": 19306
+    },
+    "laundromat": {
+      "alternate": 31864,
+      "primary": 104694
+    },
+    "laundry_service": {
+      "basic": 177187
+    },
+    "laundry_services": {
+      "alternate": 12750,
+      "primary": 19018
+    },
+    "law_enforcement": {
+      "alternate": 46741,
+      "primary": 18633
+    },
+    "law_schools": {
+      "alternate": 43,
+      "primary": 654
+    },
+    "lawn_bowling_club": {
+      "alternate": 25,
+      "primary": 15
+    },
+    "lawn_mower_repair_service": {
+      "alternate": 336,
+      "primary": 156
+    },
+    "lawn_mower_store": {
+      "alternate": 687,
+      "primary": 2617
+    },
+    "lawn_service": {
+      "alternate": 900,
+      "primary": 5666
+    },
+    "lawyer": {
+      "alternate": 110598,
+      "primary": 274866
+    },
+    "leather_goods": {
+      "alternate": 2213,
+      "primary": 5105
+    },
+    "leather_products_manufacturer": {
+      "alternate": 634,
+      "primary": 93
+    },
+    "lebanese_restaurant": {
+      "alternate": 6924,
+      "primary": 7127
+    },
+    "legal_service": {
+      "basic": 180655
+    },
+    "legal_services": {
+      "alternate": 280831,
+      "primary": 126039
+    },
+    "library": {
+      "alternate": 35669,
+      "basic": 152590,
+      "primary": 152526
+    },
+    "lice_treatment": {
+      "alternate": 77,
+      "primary": 166
+    },
+    "life_coach": {
+      "alternate": 37145,
+      "primary": 28857
+    },
+    "life_insurance": {
+      "alternate": 1987,
+      "primary": 11823
+    },
+    "light_rail_and_subway_stations": {
+      "alternate": 43,
+      "primary": 2725
+    },
+    "lighthouse": {
+      "alternate": 1494,
+      "basic": 3944,
+      "primary": 3941
+    },
+    "lighting_fixture_manufacturers": {
+      "alternate": 1209,
+      "primary": 271
+    },
+    "lighting_fixtures_and_equipment": {
+      "alternate": 8992,
+      "primary": 470
+    },
+    "lighting_store": {
+      "alternate": 16436,
+      "primary": 40277
+    },
+    "lime_professionals": {
+      "alternate": 17,
+      "primary": 51
+    },
+    "limo_services": {
+      "alternate": 13065,
+      "primary": 11449
+    },
+    "linen": {
+      "alternate": 16179,
+      "primary": 32648
+    },
+    "lingerie_store": {
+      "alternate": 15002,
+      "primary": 50907
+    },
+    "lingerie_wholesaler": {
+      "alternate": 608,
+      "primary": 7
+    },
+    "liquor_store": {
+      "alternate": 74479,
+      "primary": 157384
+    },
+    "live_and_raw_food_restaurant": {
+      "alternate": 3954,
+      "primary": 771
+    },
+    "livestock_breeder": {
+      "alternate": 73438,
+      "primary": 20419
+    },
+    "livestock_dealers": {
+      "alternate": 835,
+      "primary": 81
+    },
+    "livestock_feed_and_supply_store": {
+      "alternate": 4301,
+      "primary": 554
+    },
+    "local_and_state_government_offices": {
+      "alternate": 14058,
+      "primary": 6838
+    },
+    "lodge": {
+      "alternate": 288901,
+      "primary": 72299
+    },
+    "lodging": {
+      "basic": 599485
+    },
+    "logging_contractor": {
+      "alternate": 5252,
+      "primary": 2246
+    },
+    "logging_equipment_and_supplies": {
+      "alternate": 145,
+      "primary": 413
+    },
+    "logging_services": {
+      "alternate": 12733,
+      "primary": 11818
+    },
+    "lookout": {
+      "alternate": 87,
+      "primary": 26
+    },
+    "lottery_ticket": {
+      "alternate": 10781,
+      "primary": 16054
+    },
+    "lounge": {
+      "alternate": 134781,
+      "basic": 60852,
+      "primary": 56705
+    },
+    "low_income_housing": {
+      "alternate": 159,
+      "primary": 135
+    },
+    "luggage_storage": {
+      "alternate": 1850,
+      "primary": 4312
+    },
+    "luggage_store": {
+      "alternate": 21124,
+      "primary": 25875
+    },
+    "lumber_store": {
+      "alternate": 25845,
+      "primary": 26008
+    },
+    "macarons": {
+      "alternate": 183,
+      "primary": 73
+    },
+    "machine_and_tool_rentals": {
+      "alternate": 13921,
+      "primary": 9449
+    },
+    "machine_shop": {
+      "alternate": 35898,
+      "primary": 56114
+    },
+    "magician": {
+      "alternate": 581,
+      "primary": 834
+    },
+    "mailbox_center": {
+      "alternate": 92792,
+      "primary": 483
+    },
+    "major_airports": {
+      "alternate": 1,
+      "primary": 1
+    },
+    "makerspace": {
+      "alternate": 10,
+      "basic": 29,
+      "primary": 29
+    },
+    "makeup_artist": {
+      "alternate": 45215,
+      "primary": 33820
+    },
+    "malaysian_restaurant": {
+      "alternate": 14030,
+      "primary": 12595
+    },
+    "manufacturer": {
+      "basic": 780319
+    },
+    "manufacturers_agents_and_representatives": {
+      "alternate": 26,
+      "primary": 285
+    },
+    "manufacturing_and_industrial_consultant": {
+      "alternate": 87,
+      "primary": 238
+    },
+    "marble_and_granite_professionals": {
+      "alternate": 141,
+      "primary": 1011
+    },
+    "marching_band": {
+      "alternate": 6,
+      "primary": 1
+    },
+    "marina": {
+      "alternate": 13510,
+      "basic": 19235,
+      "primary": 19228
+    },
+    "market": {
+      "basic": 10871
+    },
+    "market_stall": {
+      "alternate": 3,
+      "primary": 2
+    },
+    "marketing_agency": {
+      "alternate": 127984,
+      "primary": 125018
+    },
+    "marketing_consultant": {
+      "alternate": 23652,
+      "primary": 25500
+    },
+    "marriage_or_relationship_counselor": {
+      "alternate": 5260,
+      "primary": 4596
+    },
+    "martial_arts_club": {
+      "alternate": 27154,
+      "primary": 130344
+    },
+    "masonry_concrete": {
+      "alternate": 31802,
+      "primary": 25957
+    },
+    "masonry_contractors": {
+      "alternate": 361,
+      "primary": 4867
+    },
+    "mass_media": {
+      "alternate": 58230,
+      "primary": 13722
+    },
+    "massage": {
+      "alternate": 88494,
+      "primary": 67624
+    },
+    "massage_school": {
+      "alternate": 1902,
+      "primary": 2144
+    },
+    "massage_therapy": {
+      "alternate": 61696,
+      "primary": 103767
+    },
+    "matchmaker": {
+      "alternate": 108,
+      "primary": 265
+    },
+    "maternity_centers": {
+      "alternate": 12023,
+      "primary": 6834
+    },
+    "maternity_wear": {
+      "alternate": 3734,
+      "primary": 2438
+    },
+    "mattress_manufacturing": {
+      "alternate": 4425,
+      "primary": 2672
+    },
+    "mattress_store": {
+      "alternate": 21662,
+      "primary": 43411
+    },
+    "meat_restaurant": {
+      "alternate": 152,
+      "primary": 101
+    },
+    "meat_shop": {
+      "alternate": 2862,
+      "primary": 1026
+    },
+    "meat_wholesaler": {
+      "alternate": 43581,
+      "primary": 12861
+    },
+    "mechanical_engineers": {
+      "alternate": 735,
+      "primary": 1857
+    },
+    "media_agency": {
+      "alternate": 18804,
+      "primary": 25528
+    },
+    "media_critic": {
+      "alternate": 46,
+      "primary": 37
+    },
+    "media_news_company": {
+      "alternate": 29218,
+      "primary": 22078
+    },
+    "media_news_website": {
+      "alternate": 8100,
+      "primary": 6432
+    },
+    "media_restoration_service": {
+      "alternate": 1453,
+      "primary": 543
+    },
+    "media_service": {
+      "basic": 362170
+    },
+    "mediator": {
+      "alternate": 507,
+      "primary": 775
+    },
+    "medical_cannabis_referral": {
+      "alternate": 144,
+      "primary": 12
+    },
+    "medical_center": {
+      "alternate": 248967,
+      "primary": 236359
+    },
+    "medical_law": {
+      "alternate": 1290,
+      "primary": 1601
+    },
+    "medical_research_and_development": {
+      "alternate": 25697,
+      "primary": 21994
+    },
+    "medical_school": {
+      "alternate": 12289,
+      "primary": 10624
+    },
+    "medical_sciences_schools": {
+      "alternate": 698,
+      "primary": 389
+    },
+    "medical_service": {
+      "basic": 166759
+    },
+    "medical_service_organizations": {
+      "alternate": 283171,
+      "primary": 54972
+    },
+    "medical_spa": {
+      "alternate": 24552,
+      "primary": 45995
+    },
+    "medical_supply": {
+      "alternate": 65039,
+      "primary": 50381
+    },
+    "medical_transportation": {
+      "alternate": 6396,
+      "primary": 2553
+    },
+    "meditation_center": {
+      "alternate": 17123,
+      "primary": 9520
+    },
+    "mediterranean_restaurant": {
+      "alternate": 84337,
+      "primary": 30332
+    },
+    "memorial_park": {
+      "alternate": 11,
+      "primary": 382
+    },
+    "memorial_site": {
+      "basic": 382
+    },
+    "memory_care": {
+      "alternate": 601,
+      "primary": 23
+    },
+    "mens_clothing_store": {
+      "alternate": 125609,
+      "primary": 91302
+    },
+    "merchandising_service": {
+      "alternate": 16618,
+      "primary": 6626
+    },
+    "metal_detector_services": {
+      "alternate": 3033,
+      "primary": 9
+    },
+    "metal_fabricator": {
+      "alternate": 42604,
+      "primary": 83817
+    },
+    "metal_materials_and_experts": {
+      "alternate": 9091,
+      "primary": 759
+    },
+    "metal_plating_service": {
+      "alternate": 4440,
+      "primary": 2519
+    },
+    "metal_supplier": {
+      "alternate": 37102,
+      "primary": 52177
+    },
+    "metals": {
+      "alternate": 32579,
+      "primary": 7643
+    },
+    "metro_station": {
+      "alternate": 157,
+      "primary": 5256
+    },
+    "mexican_grocery_store": {
+      "alternate": 8,
+      "primary": 485
+    },
+    "mexican_restaurant": {
+      "alternate": 110639,
+      "primary": 215839
+    },
+    "middle_eastern_restaurant": {
+      "alternate": 51416,
+      "primary": 17882
+    },
+    "middle_school": {
+      "alternate": 111053,
+      "basic": 73380,
+      "primary": 73363
+    },
+    "midwife": {
+      "alternate": 859,
+      "primary": 950
+    },
+    "military_museum": {
+      "alternate": 19,
+      "primary": 35
+    },
+    "military_site": {
+      "basic": 35239
+    },
+    "military_surplus_store": {
+      "alternate": 180,
+      "primary": 509
+    },
+    "milk_bar": {
+      "alternate": 20,
+      "primary": 4821
+    },
+    "milkshake_bar": {
+      "alternate": 4818
+    },
+    "mills": {
+      "alternate": 12949,
+      "primary": 238
+    },
+    "miniature_golf_course": {
+      "alternate": 2029,
+      "primary": 5377
+    },
+    "mining": {
+      "alternate": 9779,
+      "primary": 9323
+    },
+    "mission": {
+      "alternate": 5091,
+      "primary": 1733
+    },
+    "misting_system_services": {
+      "alternate": 13,
+      "primary": 5
+    },
+    "mobile_clinic": {
+      "alternate": 3,
+      "primary": 432
+    },
+    "mobile_dent_repair": {
+      "alternate": 118,
+      "primary": 24
+    },
+    "mobile_home_dealer": {
+      "alternate": 8693,
+      "primary": 7333
+    },
+    "mobile_home_park": {
+      "alternate": 6385,
+      "primary": 12683
+    },
+    "mobile_home_repair": {
+      "alternate": 128,
+      "primary": 87
+    },
+    "mobile_phone_accessories": {
+      "alternate": 20755,
+      "primary": 8699
+    },
+    "mobile_phone_repair": {
+      "alternate": 19822,
+      "primary": 10870
+    },
+    "mobile_phone_store": {
+      "alternate": 113573,
+      "primary": 353457
+    },
+    "mobility_equipment_services": {
+      "alternate": 1766,
+      "primary": 3905
+    },
+    "modern_art_museum": {
+      "alternate": 9257,
+      "primary": 1015
+    },
+    "mohel": {
+      "primary": 5
+    },
+    "molecular_gastronomy_restaurant": {
+      "alternate": 506,
+      "primary": 379
+    },
+    "money_transfer_services": {
+      "alternate": 2599,
+      "primary": 117749
+    },
+    "mongolian_restaurant": {
+      "alternate": 955,
+      "primary": 816
+    },
+    "montessori_school": {
+      "alternate": 104,
+      "primary": 582
+    },
+    "monument": {
+      "alternate": 199954,
+      "basic": 49999,
+      "primary": 49990
+    },
+    "mooring_service": {
+      "alternate": 13
+    },
+    "moroccan_restaurant": {
+      "alternate": 1757,
+      "primary": 3044
+    },
+    "mortgage_broker": {
+      "alternate": 38067,
+      "primary": 58997
+    },
+    "mortgage_lender": {
+      "alternate": 266,
+      "primary": 26662
+    },
+    "mortuary_services": {
+      "alternate": 60,
+      "primary": 265
+    },
+    "mosque": {
+      "alternate": 18171,
+      "primary": 127117
+    },
+    "motel": {
+      "alternate": 389283,
+      "primary": 32430
+    },
+    "motor_freight_trucking": {
+      "alternate": 2221,
+      "primary": 1811
+    },
+    "motorcycle_dealer": {
+      "alternate": 63160,
+      "primary": 119027
+    },
+    "motorcycle_gear": {
+      "alternate": 3050,
+      "primary": 221
+    },
+    "motorcycle_manufacturer": {
+      "alternate": 14732,
+      "primary": 1983
+    },
+    "motorcycle_parking": {
+      "alternate": 3,
+      "primary": 2
+    },
+    "motorcycle_rentals": {
+      "alternate": 2841,
+      "primary": 2300
+    },
+    "motorcycle_repair": {
+      "alternate": 48599,
+      "primary": 94309
+    },
+    "motorsport_vehicle_dealer": {
+      "alternate": 38645,
+      "primary": 6477
+    },
+    "motorsport_vehicle_repair": {
+      "alternate": 86,
+      "primary": 30
+    },
+    "motorsports_store": {
+      "alternate": 26280,
+      "primary": 10819
+    },
+    "mountain": {
+      "alternate": 168611,
+      "basic": 125499,
+      "primary": 125458
+    },
+    "mountain_bike_parks": {
+      "alternate": 139,
+      "primary": 79
+    },
+    "mountain_bike_trails": {
+      "alternate": 4502,
+      "primary": 4114
+    },
+    "mountain_huts": {
+      "alternate": 36,
+      "primary": 228
+    },
+    "movers": {
+      "alternate": 19254,
+      "primary": 15117
+    },
+    "movie_critic": {
+      "alternate": 6,
+      "primary": 6
+    },
+    "movie_television_studio": {
+      "alternate": 19809,
+      "primary": 14469
+    },
+    "movie_theater": {
+      "basic": 70221
+    },
+    "muay_thai_club": {
+      "alternate": 50,
+      "primary": 107
+    },
+    "mulled_wine": {
+      "alternate": 482
+    },
+    "museum": {
+      "alternate": 92198,
+      "basic": 158704,
+      "primary": 88624
+    },
+    "music_and_dvd_store": {
+      "alternate": 20960,
+      "primary": 30147
+    },
+    "music_critic": {
+      "alternate": 8,
+      "primary": 5
+    },
+    "music_festivals_and_organizations": {
+      "alternate": 56,
+      "primary": 77
+    },
+    "music_production": {
+      "alternate": 20226,
+      "primary": 52670
+    },
+    "music_production_services": {
+      "alternate": 727,
+      "primary": 468
+    },
+    "music_school": {
+      "alternate": 21339,
+      "primary": 70807
+    },
+    "music_venue": {
+      "alternate": 101861,
+      "basic": 228460,
+      "primary": 56682
+    },
+    "musical_band_orchestras_and_symphonies": {
+      "alternate": 122,
+      "primary": 57
+    },
+    "musical_instrument_and_pro_audio_store": {
+      "basic": 43622
+    },
+    "musical_instrument_services": {
+      "alternate": 5881,
+      "primary": 379
+    },
+    "musical_instrument_store": {
+      "alternate": 14413,
+      "primary": 42413
+    },
+    "musician": {
+      "alternate": 210,
+      "primary": 1581
+    },
+    "muslim_place_of_worship": {
+      "basic": 127159
+    },
+    "mystic": {
+      "primary": 3
+    },
+    "nail_salon": {
+      "alternate": 67507,
+      "primary": 229006
+    },
+    "nanny_services": {
+      "alternate": 4251,
+      "primary": 892
+    },
+    "national_museum": {
+      "alternate": 680,
+      "primary": 5
+    },
+    "national_park": {
+      "alternate": 41887,
+      "basic": 27193,
+      "primary": 27187
+    },
+    "national_security_services": {
+      "alternate": 6921,
+      "primary": 7
+    },
+    "natural_gas_supplier": {
+      "alternate": 4806,
+      "primary": 8238
+    },
+    "natural_gas_utility_provider": {
+      "basic": 8238
+    },
+    "natural_hot_springs": {
+      "alternate": 8877,
+      "primary": 5818
+    },
+    "nature_reserve": {
+      "alternate": 26998,
+      "basic": 23473,
+      "primary": 23470
+    },
+    "naturopathic_holistic": {
+      "alternate": 222455,
+      "primary": 146044
+    },
+    "nephrologist": {
+      "alternate": 3066,
+      "primary": 4461
+    },
+    "neurologist": {
+      "alternate": 4982,
+      "primary": 16443
+    },
+    "neuropathologist": {
+      "alternate": 1181,
+      "primary": 2386
+    },
+    "neurotologist": {
+      "alternate": 54,
+      "primary": 7
+    },
+    "newspaper_advertising": {
+      "alternate": 649,
+      "primary": 671
+    },
+    "newspaper_and_magazines_store": {
+      "alternate": 3665,
+      "primary": 20944
+    },
+    "nicaraguan_restaurant": {
+      "alternate": 322,
+      "primary": 279
+    },
+    "nigerian_restaurant": {
+      "alternate": 545,
+      "primary": 266
+    },
+    "night_market": {
+      "alternate": 3771,
+      "primary": 4560
+    },
+    "nightlife_venue": {
+      "basic": 7
+    },
+    "non_alcoholic_beverage_venue": {
+      "basic": 132821
+    },
+    "non_governmental_association": {
+      "alternate": 100329,
+      "primary": 56306
+    },
+    "noodles_restaurant": {
+      "alternate": 39857,
+      "primary": 43720
+    },
+    "norwegian_restaurant": {
+      "alternate": 6,
+      "primary": 1
+    },
+    "notary_public": {
+      "alternate": 14848,
+      "primary": 33004
+    },
+    "nudist_clubs": {
+      "alternate": 14,
+      "primary": 13
+    },
+    "nurse_practitioner": {
+      "alternate": 30824,
+      "primary": 22805
+    },
+    "nursery_and_gardening": {
+      "alternate": 93574,
+      "primary": 113326
+    },
+    "nursing_school": {
+      "alternate": 2604,
+      "primary": 7065
+    },
+    "nutritionist": {
+      "alternate": 30430,
+      "primary": 60380
+    },
+    "observatory": {
+      "alternate": 2654,
+      "primary": 3098
+    },
+    "obstetrician_and_gynecologist": {
+      "alternate": 15581,
+      "primary": 61031
+    },
+    "occupational_medicine": {
+      "alternate": 1884,
+      "primary": 1558
+    },
+    "occupational_safety": {
+      "alternate": 12083,
+      "primary": 14421
+    },
+    "occupational_therapy": {
+      "alternate": 56646,
+      "primary": 12550
+    },
+    "office_cleaning": {
+      "alternate": 556,
+      "primary": 5648
+    },
+    "office_equipment": {
+      "alternate": 28020,
+      "primary": 50496
+    },
+    "office_of_vital_records": {
+      "alternate": 11,
+      "primary": 11
+    },
+    "office_supply_store": {
+      "basic": 63997
+    },
+    "officiating_services": {
+      "alternate": 13,
+      "primary": 283
+    },
+    "oil_and_gas": {
+      "alternate": 14166,
+      "primary": 7479
+    },
+    "oil_and_gas_exploration_and_development": {
+      "alternate": 22,
+      "primary": 157
+    },
+    "oil_and_gas_field_equipment_and_services": {
+      "alternate": 158,
+      "primary": 2052
+    },
+    "oil_change_station": {
+      "alternate": 28867,
+      "primary": 17638
+    },
+    "oil_refiners": {
+      "alternate": 404,
+      "primary": 1548
+    },
+    "olive_oil": {
+      "alternate": 244,
+      "primary": 198
+    },
+    "oncologist": {
+      "alternate": 6003,
+      "primary": 14670
+    },
+    "online_shop": {
+      "alternate": 20674,
+      "primary": 79189
+    },
+    "onsen": {
+      "alternate": 7409,
+      "primary": 5499
+    },
+    "opera_and_ballet": {
+      "alternate": 1380,
+      "primary": 1130
+    },
+    "ophthalmologist": {
+      "alternate": 646,
+      "primary": 11905
+    },
+    "optical_wholesaler": {
+      "alternate": 3087,
+      "primary": 768
+    },
+    "optometrist": {
+      "alternate": 85475,
+      "primary": 79196
+    },
+    "oral_surgeon": {
+      "alternate": 23284,
+      "primary": 11736
+    },
+    "orchard": {
+      "alternate": 34,
+      "primary": 91
+    },
+    "orchards_production": {
+      "alternate": 2,
+      "primary": 6
+    },
+    "organ_and_tissue_donor_service": {
+      "alternate": 31,
+      "primary": 10
+    },
+    "organic_grocery_store": {
+      "alternate": 28062,
+      "primary": 21628
+    },
+    "organization": {
+      "alternate": 34553,
+      "primary": 31405
+    },
+    "oriental_restaurant": {
+      "alternate": 14,
+      "primary": 3
+    },
+    "orthodontist": {
+      "alternate": 40734,
+      "primary": 35985
+    },
+    "orthopedic_shoe_store": {
+      "alternate": 20,
+      "primary": 1283
+    },
+    "orthopedist": {
+      "alternate": 17796,
+      "primary": 48863
+    },
+    "orthotics": {
+      "alternate": 2076,
+      "primary": 1301
+    },
+    "osteopath": {
+      "alternate": 392,
+      "primary": 2446
+    },
+    "osteopathic_physician": {
+      "alternate": 8457,
+      "primary": 20336
+    },
+    "otologist": {
+      "alternate": 874,
+      "primary": 311
+    },
+    "outdoor_advertising": {
+      "alternate": 126,
+      "primary": 194
+    },
+    "outdoor_furniture_store": {
+      "alternate": 305,
+      "primary": 2287
+    },
+    "outdoor_gear": {
+      "alternate": 58665,
+      "primary": 32245
+    },
+    "outdoor_movies": {
+      "alternate": 4,
+      "primary": 41
+    },
+    "outlet_store": {
+      "alternate": 21986,
+      "primary": 16016
+    },
+    "outpatient_care_facility": {
+      "basic": 236370
+    },
+    "oxygen_bar": {
+      "alternate": 16,
+      "primary": 5
+    },
+    "package_locker": {
+      "alternate": 2944,
+      "primary": 112044
+    },
+    "packaging_contractors_and_service": {
+      "alternate": 725,
+      "primary": 464
+    },
+    "packing_services": {
+      "alternate": 3950,
+      "primary": 2582
+    },
+    "packing_supply": {
+      "alternate": 10792,
+      "primary": 13387
+    },
+    "paddle_tennis_club": {
+      "alternate": 39,
+      "primary": 23
+    },
+    "paddleboard_rental": {
+      "alternate": 152,
+      "primary": 279
+    },
+    "paddleboarding_center": {
+      "alternate": 1749,
+      "primary": 846
+    },
+    "paddleboarding_lessons": {
+      "primary": 1
+    },
+    "pain_management": {
+      "alternate": 1090,
+      "primary": 4077
+    },
+    "paint_and_sip": {
+      "alternate": 314,
+      "primary": 129
+    },
+    "paint_store": {
+      "alternate": 914,
+      "primary": 22090
+    },
+    "paint_your_own_pottery": {
+      "primary": 172
+    },
+    "paintball": {
+      "alternate": 1804,
+      "primary": 7266
+    },
+    "painting": {
+      "alternate": 31131,
+      "primary": 60276
+    },
+    "pakistani_restaurant": {
+      "alternate": 5155,
+      "primary": 3325
+    },
+    "palace": {
+      "alternate": 9702,
+      "primary": 4917
+    },
+    "pan_asian_restaurant": {
+      "alternate": 10865,
+      "primary": 3763
+    },
+    "panamanian_restaurant": {
+      "alternate": 907,
+      "primary": 254
+    },
+    "pancake_house": {
+      "alternate": 8393,
+      "primary": 14883
+    },
+    "paper_mill": {
+      "alternate": 851,
+      "primary": 986
+    },
+    "paraguayan_restaurant": {
+      "alternate": 40,
+      "primary": 59
+    },
+    "paralegal_services": {
+      "alternate": 126,
+      "primary": 592
+    },
+    "parasailing_ride_service": {
+      "alternate": 21,
+      "primary": 17
+    },
+    "parenting_classes": {
+      "alternate": 25,
+      "primary": 68
+    },
+    "park": {
+      "alternate": 327811,
+      "basic": 522608,
+      "primary": 506190
+    },
+    "park_and_ride": {
+      "basic": 137
+    },
+    "park_and_rides": {
+      "alternate": 118,
+      "primary": 137
+    },
+    "parking": {
+      "alternate": 34683,
+      "basic": 133618,
+      "primary": 133537
+    },
+    "party_and_event_planning": {
+      "alternate": 28989,
+      "primary": 17152
+    },
+    "party_bike_rental": {
+      "alternate": 1,
+      "primary": 8
+    },
+    "party_bus_rental": {
+      "alternate": 11,
+      "primary": 343
+    },
+    "party_character": {
+      "alternate": 34,
+      "primary": 22
+    },
+    "party_equipment_rental": {
+      "alternate": 8077,
+      "primary": 3733
+    },
+    "party_supply": {
+      "alternate": 32761,
+      "primary": 48699
+    },
+    "passport_and_visa_services": {
+      "alternate": 12852,
+      "primary": 19082
+    },
+    "pasta_shop": {
+      "alternate": 67,
+      "primary": 559
+    },
+    "patent_law": {
+      "alternate": 228,
+      "primary": 1028
+    },
+    "paternity_tests_and_services": {
+      "alternate": 109,
+      "primary": 83
+    },
+    "pathologist": {
+      "alternate": 483,
+      "primary": 4987
+    },
+    "patio_covers": {
+      "alternate": 10822,
+      "primary": 5179
+    },
+    "patisserie_cake_shop": {
+      "alternate": 6819,
+      "primary": 4276
+    },
+    "paving_contractor": {
+      "alternate": 6946,
+      "primary": 9904
+    },
+    "pawn_shop": {
+      "alternate": 6031,
+      "primary": 31765
+    },
+    "payroll_services": {
+      "alternate": 2107,
+      "primary": 748
+    },
+    "pediatric_anesthesiology": {
+      "primary": 146
+    },
+    "pediatric_cardiology": {
+      "primary": 1733
+    },
+    "pediatric_clinic": {
+      "basic": 55060
+    },
+    "pediatric_dentist": {
+      "alternate": 28476,
+      "primary": 17824
+    },
+    "pediatric_endocrinology": {
+      "alternate": 8,
+      "primary": 409
+    },
+    "pediatric_gastroenterology": {
+      "alternate": 8,
+      "primary": 417
+    },
+    "pediatric_infectious_disease": {
+      "alternate": 525,
+      "primary": 24
+    },
+    "pediatric_nephrology": {
+      "alternate": 6,
+      "primary": 140
+    },
+    "pediatric_neurology": {
+      "alternate": 3,
+      "primary": 365
+    },
+    "pediatric_oncology": {
+      "primary": 332
+    },
+    "pediatric_orthopedic_surgery": {
+      "alternate": 110,
+      "primary": 472
+    },
+    "pediatric_pulmonology": {
+      "alternate": 22,
+      "primary": 697
+    },
+    "pediatric_radiology": {
+      "alternate": 523,
+      "primary": 91
+    },
+    "pediatric_surgery": {
+      "alternate": 4,
+      "primary": 321
+    },
+    "pediatrician": {
+      "alternate": 23668,
+      "primary": 50704
+    },
+    "pedicab_service": {
+      "alternate": 5,
+      "primary": 4
+    },
+    "pen_store": {
+      "alternate": 1588,
+      "primary": 101
+    },
+    "pension": {
+      "alternate": 719,
+      "primary": 295
+    },
+    "pentecostal_church": {
+      "alternate": 27963,
+      "primary": 39492
+    },
+    "performing_arts": {
+      "alternate": 49868,
+      "primary": 13994
+    },
+    "performing_arts_venue": {
+      "basic": 17374
+    },
+    "perfume_store": {
+      "alternate": 1079,
+      "primary": 9292
+    },
+    "periodontist": {
+      "alternate": 5762,
+      "primary": 4254
+    },
+    "permanent_makeup": {
+      "alternate": 1254,
+      "primary": 799
+    },
+    "persian_iranian_restaurant": {
+      "alternate": 1354,
+      "primary": 2776
+    },
+    "personal_assistant": {
+      "alternate": 2139,
+      "primary": 970
+    },
+    "personal_care_and_beauty_store": {
+      "basic": 278104
+    },
+    "personal_care_service": {
+      "alternate": 37586,
+      "primary": 5967
+    },
+    "personal_chef": {
+      "alternate": 3209,
+      "primary": 1201
+    },
+    "personal_injury_law": {
+      "alternate": 14795,
+      "primary": 23778
+    },
+    "personal_or_beauty_service": {
+      "basic": 3394105
+    },
+    "personal_shopper": {
+      "alternate": 90,
+      "primary": 63
+    },
+    "peruvian_restaurant": {
+      "alternate": 10907,
+      "primary": 9689
+    },
+    "pest_control_service": {
+      "alternate": 7329,
+      "primary": 44631
+    },
+    "pet_adoption": {
+      "alternate": 5280,
+      "primary": 1313
+    },
+    "pet_boarding": {
+      "alternate": 9776,
+      "primary": 19686
+    },
+    "pet_breeder": {
+      "alternate": 14552,
+      "primary": 26301
+    },
+    "pet_cemetery_and_crematorium_services": {
+      "alternate": 174,
+      "primary": 292
+    },
+    "pet_groomer": {
+      "alternate": 34925,
+      "primary": 97446
+    },
+    "pet_hospice": {
+      "alternate": 105,
+      "primary": 1509
+    },
+    "pet_insurance": {
+      "alternate": 31,
+      "primary": 16
+    },
+    "pet_photography": {
+      "alternate": 63,
+      "primary": 47
+    },
+    "pet_services": {
+      "alternate": 318435,
+      "primary": 82650
+    },
+    "pet_sitting": {
+      "alternate": 21217,
+      "primary": 12592
+    },
+    "pet_store": {
+      "alternate": 75552,
+      "primary": 173698
+    },
+    "pet_training": {
+      "alternate": 3817,
+      "primary": 1126
+    },
+    "pet_transportation": {
+      "alternate": 40,
+      "primary": 36
+    },
+    "pet_waste_removal": {
+      "alternate": 13,
+      "primary": 27
+    },
+    "pets": {
+      "alternate": 54305,
+      "primary": 3646
+    },
+    "petting_zoo": {
+      "alternate": 6199,
+      "primary": 2841
+    },
+    "pharmaceutical_companies": {
+      "alternate": 23197,
+      "primary": 20792
+    },
+    "pharmaceutical_products_wholesaler": {
+      "alternate": 1042,
+      "primary": 7792
+    },
+    "pharmacy": {
+      "alternate": 162991,
+      "primary": 556510
+    },
+    "pharmacy_and_drug_store": {
+      "basic": 591782
+    },
+    "pharmacy_schools": {
+      "alternate": 9,
+      "primary": 43
+    },
+    "phlebologist": {
+      "alternate": 20,
+      "primary": 44
+    },
+    "photo_booth_rental": {
+      "alternate": 392,
+      "primary": 4811
+    },
+    "photographer": {
+      "alternate": 536,
+      "primary": 16328
+    },
+    "photography_classes": {
+      "alternate": 15,
+      "primary": 74
+    },
+    "photography_museum": {
+      "alternate": 440,
+      "primary": 177
+    },
+    "photography_store_and_services": {
+      "alternate": 22827,
+      "primary": 29186
+    },
+    "physical_medicine_and_rehabilitation": {
+      "basic": 253073
+    },
+    "physical_therapy": {
+      "alternate": 86948,
+      "primary": 208523
+    },
+    "physician_assistant": {
+      "alternate": 1588,
+      "primary": 4350
+    },
+    "piadina_restaurant": {
+      "alternate": 6,
+      "primary": 132
+    },
+    "piano_bar": {
+      "alternate": 231,
+      "primary": 182
+    },
+    "piano_services": {
+      "alternate": 84,
+      "primary": 1069
+    },
+    "piano_store": {
+      "alternate": 684,
+      "primary": 437
+    },
+    "pick_your_own_farm": {
+      "alternate": 13,
+      "primary": 71
+    },
+    "pie_shop": {
+      "alternate": 2634,
+      "primary": 1145
+    },
+    "pier": {
+      "alternate": 3671,
+      "basic": 4841,
+      "primary": 4835
+    },
+    "piercing": {
+      "alternate": 2211,
+      "primary": 2313
+    },
+    "pig_farm": {
+      "alternate": 1,
+      "primary": 90
+    },
+    "pigs_trotters_restaurant": {
+      "alternate": 15
+    },
+    "pilates_studio": {
+      "alternate": 16604,
+      "primary": 50619
+    },
+    "pipe_supplier": {
+      "alternate": 7561,
+      "primary": 736
+    },
+    "pipeline_transportation": {
+      "alternate": 1061,
+      "primary": 655
+    },
+    "pizza_delivery_service": {
+      "alternate": 200,
+      "primary": 9372
+    },
+    "pizza_restaurant": {
+      "alternate": 146943,
+      "primary": 444973
+    },
+    "place_of_learning": {
+      "basic": 820645
+    },
+    "place_of_worship": {
+      "basic": 5881
+    },
+    "placenta_encapsulation_service": {
+      "alternate": 10,
+      "primary": 1
+    },
+    "planetarium": {
+      "alternate": 1444,
+      "basic": 1621,
+      "primary": 1621
+    },
+    "plasterer": {
+      "alternate": 1164,
+      "primary": 597
+    },
+    "plastic_company": {
+      "alternate": 6198,
+      "primary": 2594
+    },
+    "plastic_fabrication_company": {
+      "alternate": 14283,
+      "primary": 18316
+    },
+    "plastic_injection_molding_workshop": {
+      "alternate": 335,
+      "primary": 258
+    },
+    "plastic_manufacturer": {
+      "alternate": 13506,
+      "primary": 15692
+    },
+    "plastic_surgeon": {
+      "alternate": 12690,
+      "primary": 33358
+    },
+    "playground": {
+      "alternate": 30579,
+      "basic": 41289,
+      "primary": 41256
+    },
+    "playground_equipment_supplier": {
+      "primary": 6
+    },
+    "plaza": {
+      "alternate": 1108,
+      "primary": 2087
+    },
+    "plumbing": {
+      "alternate": 72220,
+      "primary": 103201
+    },
+    "plus_size_clothing": {
+      "alternate": 1018,
+      "primary": 320
+    },
+    "podiatrist": {
+      "alternate": 6244,
+      "primary": 41689
+    },
+    "podiatry": {
+      "alternate": 861,
+      "primary": 72
+    },
+    "poke_restaurant": {
+      "alternate": 1077
+    },
+    "police_department": {
+      "alternate": 49829,
+      "primary": 84872
+    },
+    "police_station": {
+      "basic": 103530
+    },
+    "polish_restaurant": {
+      "alternate": 2764,
+      "primary": 2955
+    },
+    "political_organization": {
+      "alternate": 28814,
+      "basic": 42939,
+      "primary": 27935
+    },
+    "political_party_office": {
+      "alternate": 4016,
+      "primary": 15000
+    },
+    "polynesian_restaurant": {
+      "alternate": 903,
+      "primary": 163
+    },
+    "pool_and_billiards": {
+      "alternate": 173,
+      "primary": 421
+    },
+    "pool_and_hot_tub_services": {
+      "alternate": 3691,
+      "primary": 3800
+    },
+    "pool_billiards": {
+      "alternate": 10985,
+      "primary": 17210
+    },
+    "pool_cleaning": {
+      "alternate": 46503,
+      "primary": 27850
+    },
+    "pool_hall": {
+      "alternate": 295,
+      "primary": 1316
+    },
+    "pop_up_restaurant": {
+      "alternate": 7,
+      "primary": 4
+    },
+    "pop_up_shop": {
+      "alternate": 11206,
+      "primary": 7333
+    },
+    "popcorn_shop": {
+      "alternate": 251,
+      "primary": 124
+    },
+    "portuguese_restaurant": {
+      "alternate": 9359,
+      "primary": 10519
+    },
+    "post_office": {
+      "alternate": 73677,
+      "primary": 285147
+    },
+    "potato_restaurant": {
+      "alternate": 59,
+      "primary": 9
+    },
+    "poultry_farm": {
+      "alternate": 5366,
+      "primary": 5618
+    },
+    "poultry_farming": {
+      "alternate": 267,
+      "primary": 114
+    },
+    "poutinerie_restaurant": {
+      "alternate": 32,
+      "primary": 50
+    },
+    "powder_coating_service": {
+      "alternate": 5508,
+      "primary": 6083
+    },
+    "power_plants_and_power_plant_service": {
+      "alternate": 235,
+      "primary": 977
+    },
+    "prenatal_perinatal_care": {
+      "alternate": 11209,
+      "primary": 10215
+    },
+    "preschool": {
+      "alternate": 146990,
+      "basic": 291682,
+      "primary": 291655
+    },
+    "pressure_washing": {
+      "alternate": 9227,
+      "primary": 2880
+    },
+    "pretzels": {
+      "alternate": 6618,
+      "primary": 1175
+    },
+    "preventive_medicine": {
+      "alternate": 55,
+      "primary": 92
+    },
+    "primary_care_or_general_clinic": {
+      "basic": 67996
+    },
+    "print_media": {
+      "alternate": 82883,
+      "primary": 20590
+    },
+    "print_media_service": {
+      "basic": 39394
+    },
+    "printing_equipment_and_supply": {
+      "alternate": 6516,
+      "primary": 26385
+    },
+    "printing_service": {
+      "basic": 331869
+    },
+    "printing_services": {
+      "alternate": 244581,
+      "primary": 286261
+    },
+    "private_association": {
+      "alternate": 17310,
+      "primary": 12705
+    },
+    "private_equity_firm": {
+      "alternate": 193,
+      "primary": 311
+    },
+    "private_establishments_and_corporates": {
+      "alternate": 79723,
+      "primary": 79
+    },
+    "private_investigation": {
+      "alternate": 13737,
+      "primary": 7579
+    },
+    "private_jet_charters": {
+      "alternate": 103,
+      "primary": 159
+    },
+    "private_lodging": {
+      "basic": 208847
+    },
+    "private_school": {
+      "alternate": 89372,
+      "primary": 75466
+    },
+    "private_tutor": {
+      "alternate": 297,
+      "primary": 1322
+    },
+    "process_servers": {
+      "alternate": 3324,
+      "primary": 4932
+    },
+    "proctologist": {
+      "alternate": 701,
+      "primary": 1892
+    },
+    "produce_wholesaler": {
+      "alternate": 721,
+      "primary": 1489
+    },
+    "product_design": {
+      "alternate": 112,
+      "primary": 54
+    },
+    "professional_service": {
+      "basic": 1981435
+    },
+    "professional_services": {
+      "alternate": 1747207,
+      "primary": 1290102
+    },
+    "professional_sports_league": {
+      "alternate": 2508,
+      "primary": 1378
+    },
+    "professional_sports_team": {
+      "alternate": 8462,
+      "primary": 5842
+    },
+    "promotional_products_and_services": {
+      "alternate": 886,
+      "primary": 2221
+    },
+    "propane_supplier": {
+      "alternate": 1863,
+      "primary": 47953
+    },
+    "property_management": {
+      "alternate": 102025,
+      "primary": 126331
+    },
+    "props": {
+      "alternate": 15,
+      "primary": 56
+    },
+    "prosthetics": {
+      "alternate": 5866,
+      "primary": 7345
+    },
+    "prosthodontist": {
+      "alternate": 5506,
+      "primary": 2698
+    },
+    "psychiatrist": {
+      "alternate": 5024,
+      "primary": 16103
+    },
+    "psychic": {
+      "alternate": 8412,
+      "primary": 14927
+    },
+    "psychic_advising": {
+      "basic": 16047
+    },
+    "psychic_medium": {
+      "alternate": 240,
+      "primary": 1119
+    },
+    "psychoanalyst": {
+      "alternate": 9,
+      "primary": 30
+    },
+    "psychologist": {
+      "alternate": 44687,
+      "primary": 96927
+    },
+    "psychomotor_therapist": {
+      "alternate": 13,
+      "primary": 3
+    },
+    "psychotherapist": {
+      "alternate": 88483,
+      "primary": 45757
+    },
+    "pub": {
+      "alternate": 382761,
+      "primary": 166228
+    },
+    "public_adjuster": {
+      "alternate": 85,
+      "primary": 276
+    },
+    "public_and_government_association": {
+      "alternate": 416715,
+      "primary": 320776
+    },
+    "public_bath_houses": {
+      "alternate": 226,
+      "primary": 922
+    },
+    "public_facility": {
+      "basic": 2
+    },
+    "public_fountain": {
+      "basic": 12081
+    },
+    "public_health_clinic": {
+      "alternate": 21159,
+      "primary": 7713
+    },
+    "public_market": {
+      "alternate": 1156,
+      "primary": 4302
+    },
+    "public_phones": {
+      "alternate": 4,
+      "primary": 2
+    },
+    "public_plaza": {
+      "alternate": 57817,
+      "basic": 67834,
+      "primary": 65580
+    },
+    "public_relations": {
+      "alternate": 118030,
+      "primary": 11169
+    },
+    "public_restroom": {
+      "basic": 2320
+    },
+    "public_restrooms": {
+      "alternate": 213,
+      "primary": 246
+    },
+    "public_school": {
+      "alternate": 206500,
+      "primary": 49272
+    },
+    "public_service_and_government": {
+      "alternate": 457582,
+      "primary": 224297
+    },
+    "public_toilet": {
+      "alternate": 2695,
+      "primary": 2069
+    },
+    "public_transit_facility_or_service": {
+      "basic": 106755
+    },
+    "public_transportation": {
+      "alternate": 3991,
+      "primary": 1252
+    },
+    "public_utility": {
+      "basic": 74136
+    },
+    "public_utility_company": {
+      "alternate": 35900,
+      "primary": 16454
+    },
+    "publicity_service": {
+      "alternate": 1960,
+      "primary": 736
+    },
+    "puerto_rican_restaurant": {
+      "alternate": 609,
+      "primary": 1125
+    },
+    "pulmonologist": {
+      "alternate": 3263,
+      "primary": 5554
+    },
+    "pumpkin_patch": {
+      "alternate": 15,
+      "primary": 100
+    },
+    "qi_gong_studio": {
+      "alternate": 21,
+      "primary": 29
+    },
+    "quarries": {
+      "alternate": 22,
+      "primary": 805
+    },
+    "quay": {
+      "alternate": 1309,
+      "primary": 458
+    },
+    "race_track": {
+      "alternate": 10279,
+      "primary": 20201
+    },
+    "racing_experience": {
+      "alternate": 22,
+      "primary": 28
+    },
+    "racquetball_court": {
+      "alternate": 766,
+      "primary": 241
+    },
+    "radio_and_television_commercials": {
+      "alternate": 3059,
+      "primary": 1324
+    },
+    "radio_station": {
+      "alternate": 19695,
+      "basic": 24106,
+      "primary": 24100
+    },
+    "radiologist": {
+      "alternate": 7507,
+      "primary": 10577
+    },
+    "rafting_kayaking_area": {
+      "alternate": 518,
+      "primary": 734
+    },
+    "rail_facility_or_service": {
+      "basic": 1687
+    },
+    "railroad_freight": {
+      "alternate": 10058,
+      "primary": 5144
+    },
+    "railway_service": {
+      "alternate": 502,
+      "primary": 189
+    },
+    "railway_ticket_agent": {
+      "alternate": 24,
+      "primary": 15
+    },
+    "ranch": {
+      "alternate": 51,
+      "primary": 618
+    },
+    "real_estate": {
+      "alternate": 848441,
+      "primary": 700666
+    },
+    "real_estate_agent": {
+      "alternate": 409258,
+      "primary": 642895
+    },
+    "real_estate_investment": {
+      "alternate": 27894,
+      "primary": 11040
+    },
+    "real_estate_law": {
+      "alternate": 9905,
+      "primary": 3475
+    },
+    "real_estate_photography": {
+      "alternate": 3605,
+      "primary": 190
+    },
+    "real_estate_service": {
+      "alternate": 392981,
+      "basic": 1743025,
+      "primary": 49007
+    },
+    "record_label": {
+      "alternate": 9227,
+      "primary": 6500
+    },
+    "recording_and_rehearsal_studio": {
+      "alternate": 931,
+      "primary": 3213
+    },
+    "recreation_vehicle_repair": {
+      "alternate": 5892,
+      "primary": 4542
+    },
+    "recreational_equipment_rental": {
+      "basic": 43477
+    },
+    "recreational_trail_or_path": {
+      "basic": 45142
+    },
+    "recreational_vehicle_dealer": {
+      "alternate": 9696,
+      "primary": 15392
+    },
+    "recreational_vehicle_parts_and_accessories": {
+      "alternate": 1493,
+      "primary": 56
+    },
+    "recycling_center": {
+      "alternate": 15736,
+      "primary": 30396
+    },
+    "refinishing_services": {
+      "alternate": 1472,
+      "primary": 566
+    },
+    "reflexology": {
+      "alternate": 8587,
+      "primary": 7182
+    },
+    "registry_office": {
+      "alternate": 164,
+      "primary": 163
+    },
+    "rehabilitation_center": {
+      "alternate": 5209,
+      "primary": 4766
+    },
+    "reiki": {
+      "alternate": 863,
+      "primary": 436
+    },
+    "religious_destination": {
+      "alternate": 453,
+      "primary": 9002
+    },
+    "religious_items": {
+      "alternate": 462,
+      "primary": 543
+    },
+    "religious_landmark": {
+      "basic": 12
+    },
+    "religious_organization": {
+      "alternate": 870401,
+      "basic": 384870,
+      "primary": 365573
+    },
+    "religious_school": {
+      "alternate": 31570,
+      "primary": 26424
+    },
+    "rental_kiosks": {
+      "alternate": 15374,
+      "primary": 155236
+    },
+    "rental_service": {
+      "alternate": 80308,
+      "basic": 374823,
+      "primary": 53101
+    },
+    "rental_services": {
+      "alternate": 9724,
+      "primary": 21383
+    },
+    "reproductive_perinatal_and_womens_care": {
+      "basic": 89372
+    },
+    "reptile_shop": {
+      "alternate": 7914,
+      "primary": 2082
+    },
+    "research_institute": {
+      "alternate": 525,
+      "basic": 40870,
+      "primary": 1334
+    },
+    "resort": {
+      "alternate": 52834,
+      "basic": 154158,
+      "primary": 130445
+    },
+    "rest_areas": {
+      "alternate": 67,
+      "primary": 539
+    },
+    "rest_stop": {
+      "alternate": 372,
+      "basic": 708,
+      "primary": 169
+    },
+    "restaurant": {
+      "alternate": 3350015,
+      "basic": 5579412,
+      "primary": 1798160
+    },
+    "restaurant_equipment_and_supply": {
+      "alternate": 9910,
+      "primary": 12622
+    },
+    "restaurant_management": {
+      "alternate": 10,
+      "primary": 14
+    },
+    "restaurant_wholesale": {
+      "alternate": 15164,
+      "primary": 2646
+    },
+    "retail": {
+      "alternate": 1575938,
+      "primary": 240676
+    },
+    "retaining_wall_supplier": {
+      "alternate": 22,
+      "primary": 49
+    },
+    "retina_specialist": {
+      "primary": 163
+    },
+    "retirement_home": {
+      "alternate": 61890,
+      "primary": 150430
+    },
+    "rheumatologist": {
+      "alternate": 1553,
+      "primary": 4192
+    },
+    "rice_mill": {
+      "alternate": 208,
+      "primary": 82
+    },
+    "rice_shop": {
+      "alternate": 165,
+      "primary": 40
+    },
+    "ride_sharing": {
+      "alternate": 1390,
+      "primary": 520
+    },
+    "river": {
+      "alternate": 78272,
+      "basic": 131425,
+      "primary": 131397
+    },
+    "road_contractor": {
+      "alternate": 2409,
+      "primary": 1133
+    },
+    "road_structures_and_services": {
+      "alternate": 3590,
+      "primary": 112
+    },
+    "roadside_assistance": {
+      "alternate": 29015,
+      "primary": 1652
+    },
+    "rock_climbing_gym": {
+      "alternate": 248,
+      "primary": 665
+    },
+    "rock_climbing_instructor": {
+      "alternate": 31,
+      "primary": 10
+    },
+    "rock_climbing_spot": {
+      "alternate": 3509,
+      "primary": 7335
+    },
+    "rodeo": {
+      "alternate": 2082,
+      "basic": 2100,
+      "primary": 2100
+    },
+    "roller_skating_rink": {
+      "alternate": 1009,
+      "primary": 2237
+    },
+    "romanian_restaurant": {
+      "alternate": 1025,
+      "primary": 648
+    },
+    "roofing": {
+      "alternate": 18115,
+      "primary": 93859
+    },
+    "rotisserie_chicken_restaurant": {
+      "alternate": 445,
+      "primary": 5
+    },
+    "rowing_club": {
+      "alternate": 8,
+      "primary": 12
+    },
+    "rug_store": {
+      "alternate": 567,
+      "primary": 2044
+    },
+    "rugby_pitch": {
+      "alternate": 2146,
+      "primary": 1406
+    },
+    "rugby_stadium": {
+      "alternate": 1251,
+      "primary": 527
+    },
+    "ruin": {
+      "alternate": 19,
+      "primary": 39
+    },
+    "rural_attraction": {
+      "basic": 465
+    },
+    "russian_grocery_store": {
+      "primary": 16
+    },
+    "russian_restaurant": {
+      "alternate": 1814,
+      "primary": 1458
+    },
+    "rv_and_boat_storage_facility": {
+      "alternate": 1463,
+      "primary": 1
+    },
+    "rv_park": {
+      "alternate": 40472,
+      "basic": 24387,
+      "primary": 24381
+    },
+    "rv_rentals": {
+      "alternate": 3629,
+      "primary": 3846
+    },
+    "rv_storage_facility": {
+      "alternate": 15,
+      "primary": 814
+    },
+    "ryokan": {
+      "alternate": 10938,
+      "primary": 3
+    },
+    "safe_store": {
+      "alternate": 79,
+      "primary": 476
+    },
+    "safety_equipment": {
+      "alternate": 18662,
+      "primary": 8889
+    },
+    "sailing_area": {
+      "alternate": 154,
+      "primary": 178
+    },
+    "sailing_club": {
+      "alternate": 189,
+      "primary": 246
+    },
+    "sake_bar": {
+      "alternate": 15421,
+      "primary": 16467
+    },
+    "salad_bar": {
+      "alternate": 23929,
+      "primary": 13004
+    },
+    "salsa_club": {
+      "alternate": 1872,
+      "primary": 1169
+    },
+    "salvadoran_restaurant": {
+      "alternate": 804,
+      "primary": 2497
+    },
+    "sand_and_gravel_supplier": {
+      "alternate": 792,
+      "primary": 701
+    },
+    "sand_dune": {
+      "alternate": 187,
+      "primary": 11
+    },
+    "sandblasting_service": {
+      "alternate": 2631,
+      "primary": 3133
+    },
+    "sandwich_shop": {
+      "alternate": 84208,
+      "primary": 100421
+    },
+    "saree_shop": {
+      "alternate": 88,
+      "primary": 51
+    },
+    "sauna": {
+      "alternate": 334,
+      "primary": 867
+    },
+    "saw_mill": {
+      "alternate": 817,
+      "primary": 1231
+    },
+    "scale_supplier": {
+      "alternate": 230,
+      "primary": 232
+    },
+    "scandinavian_restaurant": {
+      "alternate": 5345,
+      "primary": 3799
+    },
+    "scavenger_hunts_provider": {
+      "alternate": 11,
+      "primary": 2
+    },
+    "scenic_viewpoint": {
+      "basic": 3
+    },
+    "schnitzel_restaurant": {
+      "alternate": 11,
+      "primary": 20
+    },
+    "school": {
+      "alternate": 1026095,
+      "primary": 659243
+    },
+    "school_district_office": {
+      "basic": 189
+    },
+    "school_district_offices": {
+      "alternate": 288,
+      "primary": 189
+    },
+    "school_sports_league": {
+      "alternate": 2311,
+      "primary": 399
+    },
+    "school_sports_team": {
+      "alternate": 3413,
+      "primary": 1288
+    },
+    "science_attraction": {
+      "basic": 3137
+    },
+    "science_museum": {
+      "alternate": 4096,
+      "primary": 3551
+    },
+    "science_schools": {
+      "alternate": 57,
+      "primary": 56
+    },
+    "scientific_laboratories": {
+      "alternate": 5989,
+      "primary": 184
+    },
+    "scooter_dealers": {
+      "alternate": 1687,
+      "primary": 278
+    },
+    "scooter_rental": {
+      "alternate": 111,
+      "primary": 154
+    },
+    "scooter_tours": {
+      "alternate": 8,
+      "primary": 5
+    },
+    "scottish_restaurant": {
+      "alternate": 691,
+      "primary": 243
+    },
+    "scout_hall": {
+      "alternate": 30,
+      "primary": 287
+    },
+    "scrap_metals": {
+      "alternate": 2401,
+      "primary": 3927
+    },
+    "screen_printing_t_shirt_printing": {
+      "alternate": 87139,
+      "primary": 43089
+    },
+    "scuba_diving_center": {
+      "alternate": 5951,
+      "primary": 12049
+    },
+    "scuba_diving_instruction": {
+      "alternate": 5029,
+      "primary": 1376
+    },
+    "sculpture_statue": {
+      "alternate": 5012,
+      "basic": 3676,
+      "primary": 3676
+    },
+    "seafood_market": {
+      "alternate": 1022,
+      "primary": 3030
+    },
+    "seafood_restaurant": {
+      "alternate": 121912,
+      "primary": 155064
+    },
+    "seafood_wholesaler": {
+      "alternate": 214,
+      "primary": 1474
+    },
+    "seaplane_bases": {
+      "alternate": 616,
+      "primary": 284
+    },
+    "second_hand_store": {
+      "basic": 237875
+    },
+    "secretarial_services": {
+      "alternate": 3726,
+      "primary": 1492
+    },
+    "security_service": {
+      "basic": 8631
+    },
+    "security_services": {
+      "alternate": 10632,
+      "primary": 8177
+    },
+    "security_systems": {
+      "alternate": 7006,
+      "primary": 7759
+    },
+    "self_catering_accommodation": {
+      "alternate": 1857,
+      "primary": 774
+    },
+    "self_defense_classes": {
+      "alternate": 381,
+      "primary": 222
+    },
+    "self_storage_facility": {
+      "alternate": 15393,
+      "primary": 71593
+    },
+    "senegalese_restaurant": {
+      "alternate": 253,
+      "primary": 94
+    },
+    "senior_citizen_services": {
+      "alternate": 55384,
+      "primary": 15659
+    },
+    "senior_living_facility": {
+      "basic": 190529
+    },
+    "septic_services": {
+      "alternate": 9663,
+      "primary": 7530
+    },
+    "serbo_croatian_restaurant": {
+      "alternate": 38,
+      "primary": 10
+    },
+    "service_apartments": {
+      "alternate": 36879,
+      "primary": 15937
+    },
+    "session_photography": {
+      "alternate": 73,
+      "primary": 6176
+    },
+    "sewing_and_alterations": {
+      "alternate": 35745,
+      "primary": 48807
+    },
+    "sex_therapist": {
+      "alternate": 1987,
+      "primary": 1866
+    },
+    "shades_and_blinds": {
+      "alternate": 4815,
+      "primary": 2738
+    },
+    "shared_office_space": {
+      "alternate": 1890,
+      "primary": 356
+    },
+    "shaved_ice_shop": {
+      "alternate": 4484,
+      "primary": 4908
+    },
+    "shaved_snow_shop": {
+      "alternate": 8,
+      "primary": 1
+    },
+    "sheet_metal": {
+      "alternate": 439,
+      "primary": 337
+    },
+    "shinto_shrines": {
+      "alternate": 4,
+      "primary": 12
+    },
+    "shipping_center": {
+      "alternate": 75677,
+      "primary": 108785
+    },
+    "shipping_collection_services": {
+      "alternate": 2321,
+      "primary": 1769
+    },
+    "shipping_or_delivery_service": {
+      "basic": 463109
+    },
+    "shoe_factory": {
+      "alternate": 204,
+      "primary": 44
+    },
+    "shoe_repair": {
+      "alternate": 7648,
+      "primary": 15728
+    },
+    "shoe_shining_service": {
+      "alternate": 594,
+      "primary": 14
+    },
+    "shoe_store": {
+      "alternate": 104610,
+      "primary": 266607
+    },
+    "shooting_range": {
+      "alternate": 8297,
+      "primary": 17987
+    },
+    "shopping": {
+      "alternate": 2013278,
+      "primary": 819957
+    },
+    "shopping_center": {
+      "alternate": 102587,
+      "primary": 200980
+    },
+    "shopping_mall": {
+      "basic": 201320
+    },
+    "shopping_passage": {
+      "alternate": 149,
+      "primary": 4
+    },
+    "shopping_service": {
+      "basic": 63
+    },
+    "shredding_services": {
+      "alternate": 7067,
+      "primary": 2595
+    },
+    "shutters": {
+      "alternate": 1459,
+      "primary": 234
+    },
+    "siding": {
+      "alternate": 2228,
+      "primary": 1056
+    },
+    "sightseeing_tour_agency": {
+      "alternate": 20031,
+      "primary": 12195
+    },
+    "sign_making": {
+      "alternate": 79270,
+      "primary": 37388
+    },
+    "sikh_temple": {
+      "alternate": 1838,
+      "primary": 4729
+    },
+    "silent_disco": {
+      "alternate": 4,
+      "primary": 3
+    },
+    "singaporean_restaurant": {
+      "alternate": 1376,
+      "primary": 758
+    },
+    "skate_park": {
+      "alternate": 18734,
+      "basic": 18957,
+      "primary": 18952
+    },
+    "skate_shop": {
+      "alternate": 2332,
+      "primary": 5153
+    },
+    "skating_rink": {
+      "alternate": 161,
+      "basic": 9448,
+      "primary": 1317
+    },
+    "ski_and_snowboard_school": {
+      "alternate": 2578,
+      "primary": 2753
+    },
+    "ski_and_snowboard_shop": {
+      "alternate": 2838,
+      "primary": 5624
+    },
+    "ski_area": {
+      "alternate": 284,
+      "primary": 25
+    },
+    "ski_resort": {
+      "alternate": 7449,
+      "primary": 16815
+    },
+    "skilled_nursing": {
+      "alternate": 17243,
+      "primary": 4815
+    },
+    "skin_care": {
+      "alternate": 117670,
+      "primary": 68839
+    },
+    "sky_diving": {
+      "alternate": 957,
+      "primary": 1798
+    },
+    "skylight_installation": {
+      "alternate": 81,
+      "primary": 186
+    },
+    "skyline": {
+      "alternate": 9,
+      "primary": 3
+    },
+    "skyscraper": {
+      "alternate": 4,
+      "primary": 5
+    },
+    "sledding_rental": {
+      "alternate": 25,
+      "primary": 76
+    },
+    "sleep_specialist": {
+      "alternate": 1415,
+      "primary": 1313
+    },
+    "sleepwear": {
+      "alternate": 8,
+      "primary": 3
+    },
+    "slovakian_restaurant": {
+      "alternate": 267,
+      "primary": 94
+    },
+    "smokehouse": {
+      "alternate": 33,
+      "primary": 152
+    },
+    "smoothie_juice_bar": {
+      "alternate": 153689,
+      "basic": 62403,
+      "primary": 61224
+    },
+    "snorkeling": {
+      "alternate": 1757,
+      "primary": 269
+    },
+    "snorkeling_equipment_rental": {
+      "alternate": 2791,
+      "primary": 4
+    },
+    "snow_removal_service": {
+      "alternate": 2094,
+      "primary": 344
+    },
+    "snowboarding_center": {
+      "alternate": 152,
+      "primary": 3
+    },
+    "snuggle_service": {
+      "primary": 2
+    },
+    "soccer_club": {
+      "alternate": 221,
+      "primary": 1032
+    },
+    "soccer_field": {
+      "alternate": 23973,
+      "primary": 46212
+    },
+    "soccer_stadium": {
+      "alternate": 18235,
+      "primary": 8305
+    },
+    "social_and_human_services": {
+      "alternate": 522,
+      "primary": 14414
+    },
+    "social_club": {
+      "alternate": 1100,
+      "basic": 11739,
+      "primary": 10697
+    },
+    "social_media_agency": {
+      "alternate": 24550,
+      "primary": 10463
+    },
+    "social_media_company": {
+      "alternate": 623,
+      "primary": 1643
+    },
+    "social_or_community_service": {
+      "basic": 934816
+    },
+    "social_security_law": {
+      "alternate": 618,
+      "primary": 752
+    },
+    "social_security_services": {
+      "alternate": 316,
+      "primary": 771
+    },
+    "social_service_organizations": {
+      "alternate": 257765,
+      "primary": 165652
+    },
+    "social_welfare_center": {
+      "alternate": 1133,
+      "primary": 640
+    },
+    "software_development": {
+      "alternate": 73392,
+      "primary": 151148
+    },
+    "solar_installation": {
+      "alternate": 31609,
+      "primary": 21851
+    },
+    "solar_panel_cleaning": {
+      "alternate": 55,
+      "primary": 18
+    },
+    "sommelier_service": {
+      "primary": 2
+    },
+    "soul_food": {
+      "alternate": 3627,
+      "primary": 2485
+    },
+    "soup_restaurant": {
+      "alternate": 18155,
+      "primary": 13672
+    },
+    "south_african_restaurant": {
+      "alternate": 978,
+      "primary": 212
+    },
+    "southern_restaurant": {
+      "alternate": 18501,
+      "primary": 6198
+    },
+    "souvenir_shop": {
+      "alternate": 34905,
+      "primary": 14105
+    },
+    "spanish_restaurant": {
+      "alternate": 49800,
+      "primary": 31668
+    },
+    "spas": {
+      "alternate": 481157,
+      "primary": 231359
+    },
+    "speakeasy": {
+      "alternate": 2553,
+      "primary": 2487
+    },
+    "specialized_health_care": {
+      "basic": 412889
+    },
+    "specialized_medical_facility": {
+      "basic": 46509
+    },
+    "specialty_foods": {
+      "alternate": 8159,
+      "primary": 1477
+    },
+    "specialty_grocery_store": {
+      "alternate": 68325,
+      "primary": 27471
+    },
+    "specialty_hospital": {
+      "basic": 1288
+    },
+    "specialty_school": {
+      "alternate": 200037,
+      "basic": 483003,
+      "primary": 48829
+    },
+    "specialty_store": {
+      "basic": 378905
+    },
+    "speech_therapist": {
+      "alternate": 39430,
+      "primary": 16374
+    },
+    "speech_training": {
+      "alternate": 5,
+      "primary": 52
+    },
+    "sperm_clinic": {
+      "alternate": 18,
+      "primary": 14
+    },
+    "spices_wholesaler": {
+      "alternate": 2,
+      "primary": 42
+    },
+    "spine_surgeon": {
+      "alternate": 224,
+      "primary": 44
+    },
+    "spiritual_advising": {
+      "basic": 165
+    },
+    "spiritual_shop": {
+      "alternate": 211,
+      "primary": 358
+    },
+    "sport_court": {
+      "basic": 49580
+    },
+    "sport_equipment_rentals": {
+      "alternate": 7579,
+      "primary": 348
+    },
+    "sport_field": {
+      "basic": 69820
+    },
+    "sport_league": {
+      "basic": 6838
+    },
+    "sport_or_fitness_facility": {
+      "basic": 591951
+    },
+    "sport_or_recreation_club": {
+      "basic": 377847
+    },
+    "sport_team": {
+      "basic": 33207
+    },
+    "sporting_goods": {
+      "alternate": 151576,
+      "primary": 136336
+    },
+    "sporting_goods_store": {
+      "basic": 360804
+    },
+    "sports_and_fitness_instruction": {
+      "alternate": 246036,
+      "primary": 20580
+    },
+    "sports_and_recreation_venue": {
+      "alternate": 608322,
+      "primary": 151590
+    },
+    "sports_bar": {
+      "alternate": 14703,
+      "primary": 26133
+    },
+    "sports_club_and_league": {
+      "alternate": 380236,
+      "primary": 221760
+    },
+    "sports_medicine": {
+      "alternate": 2527,
+      "primary": 5322
+    },
+    "sports_museum": {
+      "alternate": 485,
+      "primary": 426
+    },
+    "sports_psychologist": {
+      "alternate": 632,
+      "primary": 264
+    },
+    "sports_school": {
+      "alternate": 495,
+      "primary": 730
+    },
+    "sports_wear": {
+      "alternate": 54745,
+      "primary": 33031
+    },
+    "spray_tanning": {
+      "alternate": 250,
+      "primary": 830
+    },
+    "spring_supplier": {
+      "alternate": 491,
+      "primary": 104
+    },
+    "squash_court": {
+      "alternate": 1344,
+      "primary": 1204
+    },
+    "sri_lankan_restaurant": {
+      "alternate": 810,
+      "primary": 1151
+    },
+    "stadium_arena": {
+      "alternate": 142480,
+      "basic": 128329,
+      "primary": 97194
+    },
+    "stargazing_area": {
+      "alternate": 10
+    },
+    "state_museum": {
+      "alternate": 441,
+      "primary": 326
+    },
+    "state_park": {
+      "alternate": 49,
+      "primary": 1496
+    },
+    "steakhouse": {
+      "alternate": 79850,
+      "primary": 68468
+    },
+    "steel_fabricators": {
+      "alternate": 8940,
+      "primary": 2237
+    },
+    "stock_and_bond_brokers": {
+      "alternate": 225,
+      "primary": 10458
+    },
+    "stocking": {
+      "alternate": 75,
+      "primary": 30
+    },
+    "stone_and_masonry": {
+      "alternate": 7471,
+      "primary": 1250
+    },
+    "stone_supplier": {
+      "alternate": 3083,
+      "primary": 1099
+    },
+    "storage_facility": {
+      "alternate": 70747,
+      "basic": 273902,
+      "primary": 86549
+    },
+    "storefront_clinic": {
+      "alternate": 3
+    },
+    "street_art": {
+      "alternate": 16,
+      "basic": 125,
+      "primary": 125
+    },
+    "street_vendor": {
+      "alternate": 23,
+      "primary": 28
+    },
+    "stress_management_services": {
+      "alternate": 5163,
+      "primary": 31
+    },
+    "strip_club": {
+      "alternate": 21,
+      "primary": 1202
+    },
+    "striptease_dancer": {
+      "alternate": 2,
+      "primary": 7
+    },
+    "structural_engineer": {
+      "alternate": 13141,
+      "primary": 5289
+    },
+    "structure_and_geography": {
+      "alternate": 166828,
+      "primary": 175776
+    },
+    "stucco_services": {
+      "alternate": 515,
+      "primary": 495
+    },
+    "student_union": {
+      "alternate": 823,
+      "primary": 634
+    },
+    "studio_taping": {
+      "alternate": 158,
+      "primary": 94
+    },
+    "sugar_shack": {
+      "alternate": 2,
+      "primary": 6
+    },
+    "sugaring": {
+      "alternate": 3933,
+      "primary": 1298
+    },
+    "suicide_prevention_services": {
+      "primary": 2
+    },
+    "sunglasses_store": {
+      "alternate": 4679,
+      "primary": 8446
+    },
+    "supermarket": {
+      "alternate": 319866,
+      "primary": 455609
+    },
+    "supernatural_reading": {
+      "alternate": 2148,
+      "primary": 94
+    },
+    "superstore": {
+      "alternate": 102976,
+      "basic": 14476,
+      "primary": 14459
+    },
+    "supper_club": {
+      "alternate": 6,
+      "primary": 1
+    },
+    "supplier_or_distributor": {
+      "basic": 339773
+    },
+    "surf_lifesaving_club": {
+      "alternate": 4,
+      "primary": 5
+    },
+    "surf_shop": {
+      "alternate": 2722,
+      "primary": 7508
+    },
+    "surfboard_rental": {
+      "alternate": 269,
+      "primary": 75
+    },
+    "surfing": {
+      "alternate": 15182,
+      "primary": 5096
+    },
+    "surfing_school": {
+      "alternate": 37,
+      "primary": 213
+    },
+    "surgeon": {
+      "alternate": 45054,
+      "primary": 31127
+    },
+    "surgery": {
+      "basic": 89165
+    },
+    "surgical_appliances_and_supplies": {
+      "alternate": 36119,
+      "primary": 24677
+    },
+    "surgical_center": {
+      "alternate": 17316,
+      "primary": 8701
+    },
+    "sushi_restaurant": {
+      "alternate": 63209,
+      "primary": 111111
+    },
+    "swimming_instructor": {
+      "alternate": 3757,
+      "primary": 11862
+    },
+    "swimming_pool": {
+      "alternate": 30530,
+      "basic": 81317,
+      "primary": 69420
+    },
+    "swimwear_store": {
+      "alternate": 5732,
+      "primary": 8172
+    },
+    "swiss_restaurant": {
+      "alternate": 2574,
+      "primary": 2393
+    },
+    "synagogue": {
+      "alternate": 4735,
+      "primary": 8655
+    },
+    "syrian_restaurant": {
+      "alternate": 928,
+      "primary": 1208
+    },
+    "t_shirt_store": {
+      "alternate": 7307,
+      "primary": 6456
+    },
+    "tabac": {
+      "alternate": 77,
+      "primary": 179
+    },
+    "table_tennis_club": {
+      "alternate": 17,
+      "primary": 448
+    },
+    "tabletop_games": {
+      "alternate": 115,
+      "primary": 233
+    },
+    "tableware_supplier": {
+      "alternate": 448,
+      "primary": 292
+    },
+    "taco_restaurant": {
+      "alternate": 52214,
+      "primary": 42254
+    },
+    "taekwondo_club": {
+      "alternate": 62,
+      "primary": 478
+    },
+    "tai_chi_studio": {
+      "alternate": 1845,
+      "primary": 1038
+    },
+    "taiwanese_restaurant": {
+      "alternate": 15353,
+      "primary": 8983
+    },
+    "talent_agency": {
+      "alternate": 373,
+      "primary": 1427
+    },
+    "tanning_bed": {
+      "alternate": 541,
+      "primary": 108
+    },
+    "tanning_salon": {
+      "alternate": 92956,
+      "primary": 34363
+    },
+    "tapas_bar": {
+      "alternate": 43730,
+      "primary": 44102
+    },
+    "tasting_classes": {
+      "alternate": 56,
+      "primary": 7
+    },
+    "tatar_restaurant": {
+      "alternate": 780,
+      "primary": 85
+    },
+    "tattoo": {
+      "alternate": 1918,
+      "primary": 1642
+    },
+    "tattoo_and_piercing": {
+      "alternate": 31552,
+      "primary": 182956
+    },
+    "tattoo_removal": {
+      "alternate": 244,
+      "primary": 493
+    },
+    "tax_law": {
+      "alternate": 4135,
+      "primary": 2697
+    },
+    "tax_office": {
+      "alternate": 10370,
+      "primary": 96
+    },
+    "tax_services": {
+      "alternate": 6443,
+      "primary": 48570
+    },
+    "taxi_or_ride_share_service": {
+      "basic": 65633
+    },
+    "taxi_rank": {
+      "alternate": 119,
+      "primary": 56
+    },
+    "taxi_service": {
+      "alternate": 24457,
+      "primary": 50009
+    },
+    "taxidermist": {
+      "alternate": 834,
+      "primary": 5535
+    },
+    "tea_room": {
+      "alternate": 139934,
+      "primary": 62737
+    },
+    "tea_wholesaler": {
+      "alternate": 9,
+      "primary": 35
+    },
+    "team_building_activity": {
+      "alternate": 76,
+      "primary": 201
+    },
+    "technical_service": {
+      "basic": 527341
+    },
+    "teeth_whitening": {
+      "alternate": 9467,
+      "primary": 2270
+    },
+    "telecommunications": {
+      "alternate": 2952,
+      "primary": 39448
+    },
+    "telecommunications_company": {
+      "alternate": 112749,
+      "primary": 83082
+    },
+    "telecommunications_service": {
+      "basic": 39448
+    },
+    "telemarketing_services": {
+      "alternate": 3198,
+      "primary": 2541
+    },
+    "telephone_services": {
+      "alternate": 6366,
+      "primary": 731
+    },
+    "television_service_providers": {
+      "alternate": 34061,
+      "primary": 11730
+    },
+    "television_station": {
+      "alternate": 355,
+      "basic": 1593,
+      "primary": 1593
+    },
+    "temp_agency": {
+      "alternate": 961,
+      "primary": 5444
+    },
+    "temple": {
+      "alternate": 147,
+      "primary": 1152
+    },
+    "tenant_and_eviction_law": {
+      "alternate": 85,
+      "primary": 82
+    },
+    "tennis_court": {
+      "alternate": 10827,
+      "primary": 32667
+    },
+    "tennis_stadium": {
+      "alternate": 2023,
+      "primary": 847
+    },
+    "tent_house_supplier": {
+      "alternate": 32,
+      "primary": 11
+    },
+    "test_preparation": {
+      "alternate": 26576,
+      "primary": 12728
+    },
+    "texmex_restaurant": {
+      "alternate": 43934,
+      "primary": 9651
+    },
+    "textile_mill": {
+      "alternate": 6073,
+      "primary": 2730
+    },
+    "textile_museum": {
+      "alternate": 658,
+      "primary": 332
+    },
+    "thai_restaurant": {
+      "alternate": 123140,
+      "primary": 101653
+    },
+    "theaters_and_performance_venues": {
+      "alternate": 5490,
+      "primary": 2226
+    },
+    "theatre": {
+      "alternate": 72626,
+      "primary": 59260
+    },
+    "theatre_venue": {
+      "basic": 75035
+    },
+    "theatrical_productions": {
+      "alternate": 18316,
+      "primary": 15531
+    },
+    "theme_restaurant": {
+      "alternate": 64471,
+      "primary": 21999
+    },
+    "thread_supplier": {
+      "alternate": 39,
+      "primary": 4
+    },
+    "threading_service": {
+      "alternate": 4925,
+      "primary": 2964
+    },
+    "threads_and_yarns_wholesaler": {
+      "alternate": 285,
+      "primary": 300
+    },
+    "thrift_store": {
+      "alternate": 57048,
+      "primary": 79478
+    },
+    "ticket_office_or_booth": {
+      "basic": 623
+    },
+    "ticket_sales": {
+      "alternate": 262,
+      "primary": 623
+    },
+    "tiki_bar": {
+      "alternate": 1066,
+      "primary": 1094
+    },
+    "tile_store": {
+      "alternate": 3473,
+      "primary": 6791
+    },
+    "tiling": {
+      "alternate": 12963,
+      "primary": 7098
+    },
+    "tire_dealer_and_repair": {
+      "alternate": 75359,
+      "primary": 131529
+    },
+    "tire_repair_shop": {
+      "alternate": 2136,
+      "primary": 4017
+    },
+    "tire_shop": {
+      "alternate": 12890,
+      "primary": 30568
+    },
+    "tobacco_company": {
+      "alternate": 3992,
+      "primary": 625
+    },
+    "tobacco_shop": {
+      "alternate": 39076,
+      "primary": 69583
+    },
+    "toll_station": {
+      "basic": 50
+    },
+    "toll_stations": {
+      "alternate": 22,
+      "primary": 50
+    },
+    "tools_wholesaler": {
+      "alternate": 2575,
+      "primary": 583
+    },
+    "topic_concert_venue": {
+      "alternate": 701062,
+      "primary": 133511
+    },
+    "topic_publisher": {
+      "alternate": 27824,
+      "primary": 39390
+    },
+    "tours": {
+      "alternate": 241271,
+      "primary": 123267
+    },
+    "tower": {
+      "alternate": 26,
+      "primary": 19
+    },
+    "tower_communication_service": {
+      "alternate": 71,
+      "primary": 22
+    },
+    "towing_service": {
+      "alternate": 18667,
+      "primary": 35178
+    },
+    "town_car_service": {
+      "alternate": 334,
+      "primary": 276
+    },
+    "town_hall": {
+      "alternate": 66948,
+      "primary": 96076
+    },
+    "toxicologist": {
+      "alternate": 35,
+      "primary": 11
+    },
+    "toy_store": {
+      "alternate": 43403,
+      "primary": 72299
+    },
+    "toys_and_games_store": {
+      "basic": 72548
+    },
+    "track_stadium": {
+      "alternate": 4995,
+      "primary": 2077
+    },
+    "trade_fair": {
+      "alternate": 117,
+      "primary": 224
+    },
+    "traditional_chinese_medicine": {
+      "alternate": 686,
+      "primary": 22
+    },
+    "traditional_clothing": {
+      "alternate": 3045,
+      "primary": 1958
+    },
+    "traffic_school": {
+      "alternate": 16285,
+      "primary": 1671
+    },
+    "traffic_ticketing_law": {
+      "alternate": 55,
+      "primary": 35
+    },
+    "trail": {
+      "alternate": 178,
+      "primary": 29
+    },
+    "trailer_dealer": {
+      "alternate": 6345,
+      "primary": 9374
+    },
+    "trailer_rentals": {
+      "alternate": 5361,
+      "primary": 6175
+    },
+    "trailer_repair": {
+      "alternate": 670,
+      "primary": 185
+    },
+    "train_station": {
+      "alternate": 31601,
+      "basic": 119489,
+      "primary": 119407
+    },
+    "trains": {
+      "alternate": 5185,
+      "primary": 1481
+    },
+    "trampoline_park": {
+      "alternate": 403,
+      "primary": 78
+    },
+    "transcription_services": {
+      "alternate": 83,
+      "primary": 229
+    },
+    "translating_and_interpreting_services": {
+      "alternate": 4222,
+      "primary": 11482
+    },
+    "translation_services": {
+      "alternate": 1885,
+      "primary": 3846
+    },
+    "transmission_repair": {
+      "alternate": 3489,
+      "primary": 3076
+    },
+    "transport_interchange": {
+      "alternate": 53,
+      "primary": 51
+    },
+    "transportation": {
+      "alternate": 304001,
+      "primary": 206086
+    },
+    "travel": {
+      "alternate": 600571,
+      "primary": 108180
+    },
+    "travel_agents": {
+      "alternate": 6468,
+      "primary": 48695
+    },
+    "travel_company": {
+      "alternate": 167804,
+      "primary": 27742
+    },
+    "travel_service": {
+      "basic": 632131
+    },
+    "travel_services": {
+      "alternate": 144397,
+      "primary": 291653
+    },
+    "tree_services": {
+      "alternate": 11773,
+      "primary": 27573
+    },
+    "trinidadian_restaurant": {
+      "alternate": 244,
+      "primary": 51
+    },
+    "trivia_host": {
+      "alternate": 1,
+      "primary": 3
+    },
+    "trophy_shop": {
+      "alternate": 5611,
+      "primary": 8376
+    },
+    "tropical_medicine": {
+      "alternate": 1
+    },
+    "truck_dealer": {
+      "alternate": 14732,
+      "primary": 17277
+    },
+    "truck_dealer_for_businesses": {
+      "alternate": 1758,
+      "primary": 12210
+    },
+    "truck_gas_station": {
+      "alternate": 552,
+      "primary": 7206
+    },
+    "truck_rentals": {
+      "alternate": 15934,
+      "primary": 49750
+    },
+    "truck_repair": {
+      "alternate": 22436,
+      "primary": 20055
+    },
+    "truck_repair_and_services_for_businesses": {
+      "alternate": 8917,
+      "primary": 143
+    },
+    "truck_stop": {
+      "primary": 449
+    },
+    "trucks_and_industrial_vehicles": {
+      "alternate": 17780,
+      "primary": 451
+    },
+    "trusts": {
+      "alternate": 63126,
+      "primary": 74219
+    },
+    "tubing_provider": {
+      "alternate": 71,
+      "primary": 19
+    },
+    "tui_na": {
+      "alternate": 47,
+      "primary": 53
+    },
+    "turkish_baths": {
+      "alternate": 8
+    },
+    "turkish_restaurant": {
+      "alternate": 36064,
+      "primary": 36700
+    },
+    "turnery": {
+      "alternate": 128,
+      "primary": 63
+    },
+    "tutoring_center": {
+      "alternate": 56495,
+      "primary": 83454
+    },
+    "tutoring_service": {
+      "basic": 84777
+    },
+    "tv_mounting": {
+      "alternate": 2850,
+      "primary": 2146
+    },
+    "typing_services": {
+      "alternate": 153,
+      "primary": 114
+    },
+    "ukrainian_restaurant": {
+      "alternate": 773,
+      "primary": 1018
+    },
+    "ultrasound_imaging_center": {
+      "alternate": 340,
+      "primary": 52
+    },
+    "undersea_hyperbaric_medicine": {
+      "alternate": 28,
+      "primary": 108
+    },
+    "unemployment_office": {
+      "alternate": 1815,
+      "primary": 127
+    },
+    "uniform_store": {
+      "alternate": 9463,
+      "primary": 21232
+    },
+    "university_housing": {
+      "alternate": 1229,
+      "primary": 1223
+    },
+    "urban_farm": {
+      "alternate": 43486,
+      "primary": 6481
+    },
+    "urgent_care_center": {
+      "basic": 5098
+    },
+    "urgent_care_clinic": {
+      "alternate": 4112,
+      "primary": 5098
+    },
+    "urologist": {
+      "alternate": 3049,
+      "primary": 15559
+    },
+    "uruguayan_restaurant": {
+      "alternate": 154,
+      "primary": 176
+    },
+    "used_bookstore": {
+      "alternate": 634,
+      "primary": 1042
+    },
+    "used_car_dealer": {
+      "alternate": 113052,
+      "primary": 92507
+    },
+    "used_vintage_and_consignment": {
+      "alternate": 35398,
+      "primary": 21339
+    },
+    "utility_energy_infrastructure": {
+      "basic": 72
+    },
+    "utility_service": {
+      "alternate": 41254,
+      "primary": 775
+    },
+    "uzbek_restaurant": {
+      "alternate": 390,
+      "primary": 204
+    },
+    "vacation_rental_agents": {
+      "alternate": 4407,
+      "primary": 3092
+    },
+    "valet_service": {
+      "alternate": 100,
+      "primary": 469
+    },
+    "vascular_medicine": {
+      "alternate": 3101,
+      "primary": 301
+    },
+    "vegan_restaurant": {
+      "alternate": 1339,
+      "primary": 4973
+    },
+    "vegetarian_restaurant": {
+      "alternate": 29855,
+      "primary": 25602
+    },
+    "vehicle_dealer": {
+      "basic": 338424
+    },
+    "vehicle_parts_store": {
+      "basic": 347068
+    },
+    "vehicle_service": {
+      "basic": 298032
+    },
+    "vehicle_shipping": {
+      "alternate": 4639,
+      "primary": 3692
+    },
+    "vehicle_wrap": {
+      "alternate": 420,
+      "primary": 499
+    },
+    "vending_machine_supplier": {
+      "alternate": 5002,
+      "primary": 5979
+    },
+    "venezuelan_restaurant": {
+      "alternate": 576,
+      "primary": 1654
+    },
+    "venue_and_event_space": {
+      "alternate": 2979,
+      "primary": 27498
+    },
+    "vermouth_bar": {
+      "primary": 2
+    },
+    "veterans_organization": {
+      "alternate": 29,
+      "primary": 927
+    },
+    "veterinarian": {
+      "alternate": 49968,
+      "primary": 202050
+    },
+    "veterinary_schools": {
+      "alternate": 1,
+      "primary": 2
+    },
+    "video_and_video_game_rentals": {
+      "alternate": 5652,
+      "primary": 11087
+    },
+    "video_film_production": {
+      "alternate": 5753,
+      "primary": 4049
+    },
+    "video_game_critic": {
+      "alternate": 10,
+      "primary": 13
+    },
+    "video_game_store": {
+      "alternate": 6155,
+      "primary": 29199
+    },
+    "videographer": {
+      "alternate": 13183,
+      "primary": 3420
+    },
+    "vietnamese_restaurant": {
+      "alternate": 46708,
+      "primary": 37262
+    },
+    "vinyl_record_store": {
+      "alternate": 318,
+      "primary": 2380
+    },
+    "virtual_reality_center": {
+      "alternate": 132,
+      "primary": 37
+    },
+    "visa_agent": {
+      "alternate": 18,
+      "primary": 169
+    },
+    "vision_or_eye_care_clinic": {
+      "basic": 126809
+    },
+    "visitor_center": {
+      "alternate": 1060,
+      "primary": 2188
+    },
+    "vitamins_and_supplements": {
+      "alternate": 63702,
+      "primary": 44758
+    },
+    "vocal_coach": {
+      "alternate": 19,
+      "primary": 173
+    },
+    "vocational_and_technical_school": {
+      "alternate": 43211,
+      "primary": 39809
+    },
+    "volleyball_club": {
+      "alternate": 40,
+      "primary": 37
+    },
+    "volleyball_court": {
+      "alternate": 1860,
+      "primary": 2407
+    },
+    "volunteer_association": {
+      "alternate": 86,
+      "primary": 505
+    },
+    "waffle_restaurant": {
+      "alternate": 105,
+      "primary": 289
+    },
+    "waldorf_school": {
+      "alternate": 18,
+      "primary": 10
+    },
+    "walk_in_clinic": {
+      "alternate": 119,
+      "basic": 11236,
+      "primary": 11236
+    },
+    "walking_tours": {
+      "alternate": 77,
+      "primary": 96
+    },
+    "wallpaper_installers": {
+      "alternate": 207,
+      "primary": 37
+    },
+    "wallpaper_store": {
+      "alternate": 1222,
+      "primary": 397
+    },
+    "warehouse_club_store": {
+      "basic": 123060
+    },
+    "warehouse_rental_services_and_yards": {
+      "alternate": 87,
+      "primary": 73
+    },
+    "warehouses": {
+      "alternate": 3572,
+      "primary": 12939
+    },
+    "washer_and_dryer_repair_service": {
+      "alternate": 381,
+      "primary": 108
+    },
+    "watch_repair_service": {
+      "alternate": 1415,
+      "primary": 141
+    },
+    "watch_store": {
+      "alternate": 3147,
+      "primary": 5107
+    },
+    "water_delivery": {
+      "alternate": 1538,
+      "primary": 66
+    },
+    "water_heater_installation_repair": {
+      "alternate": 14273,
+      "primary": 1615
+    },
+    "water_park": {
+      "alternate": 20810,
+      "primary": 14446
+    },
+    "water_purification_services": {
+      "alternate": 2008,
+      "primary": 1285
+    },
+    "water_softening_equipment_supplier": {
+      "alternate": 1046,
+      "primary": 617
+    },
+    "water_store": {
+      "alternate": 631,
+      "primary": 55
+    },
+    "water_supplier": {
+      "alternate": 8514,
+      "primary": 16182
+    },
+    "water_taxi": {
+      "alternate": 280,
+      "primary": 2
+    },
+    "water_taxi_service": {
+      "basic": 2
+    },
+    "water_treatment_equipment_and_services": {
+      "alternate": 15734,
+      "primary": 28743
+    },
+    "water_utility_provider": {
+      "basic": 16184
+    },
+    "waterfall": {
+      "alternate": 8871,
+      "basic": 8190,
+      "primary": 8185
+    },
+    "waterproofing": {
+      "alternate": 1798,
+      "primary": 1369
+    },
+    "waxing": {
+      "alternate": 13805,
+      "primary": 13325
+    },
+    "weather_forecast_services": {
+      "alternate": 14,
+      "primary": 23
+    },
+    "weather_station": {
+      "alternate": 244,
+      "primary": 275
+    },
+    "weaving_mill": {
+      "alternate": 531,
+      "primary": 26
+    },
+    "web_designer": {
+      "alternate": 71079,
+      "primary": 78514
+    },
+    "web_hosting_service": {
+      "alternate": 695,
+      "primary": 1343
+    },
+    "wedding_chapel": {
+      "alternate": 233,
+      "primary": 1449
+    },
+    "wedding_planning": {
+      "alternate": 95672,
+      "primary": 40631
+    },
+    "weight_loss_center": {
+      "alternate": 14918,
+      "primary": 20079
+    },
+    "welders": {
+      "alternate": 1290,
+      "primary": 1450
+    },
+    "welding_supply_store": {
+      "alternate": 25,
+      "primary": 5359
+    },
+    "well_drilling": {
+      "alternate": 3850,
+      "primary": 8141
+    },
+    "wellness_program": {
+      "alternate": 9759,
+      "primary": 1952
+    },
+    "wellness_service": {
+      "basic": 614574
+    },
+    "whale_watching_tours": {
+      "alternate": 33,
+      "primary": 62
+    },
+    "wheel_and_rim_repair": {
+      "alternate": 11485,
+      "primary": 3203
+    },
+    "whiskey_bar": {
+      "alternate": 2629,
+      "primary": 2025
+    },
+    "wholesale_florist": {
+      "alternate": 1073,
+      "primary": 460
+    },
+    "wholesale_grocer": {
+      "alternate": 26131,
+      "primary": 8279
+    },
+    "wholesale_store": {
+      "alternate": 150110,
+      "primary": 123013
+    },
+    "wholesaler": {
+      "alternate": 45938,
+      "basic": 79204,
+      "primary": 18094
+    },
+    "wig_store": {
+      "alternate": 4959,
+      "primary": 5293
+    },
+    "wild_game_meats_restaurant": {
+      "alternate": 1,
+      "primary": 2
+    },
+    "wildlife_control": {
+      "alternate": 1006,
+      "primary": 273
+    },
+    "wildlife_hunting_range": {
+      "alternate": 213,
+      "primary": 288
+    },
+    "wildlife_sanctuary": {
+      "alternate": 28092,
+      "primary": 10550
+    },
+    "wills_trusts_and_probate": {
+      "alternate": 8866,
+      "primary": 6163
+    },
+    "wind_energy": {
+      "alternate": 31,
+      "primary": 72
+    },
+    "window_supplier": {
+      "alternate": 2861,
+      "primary": 6545
+    },
+    "window_treatment_store": {
+      "alternate": 1235,
+      "primary": 6017
+    },
+    "window_washing": {
+      "alternate": 3717,
+      "primary": 2182
+    },
+    "windows_installation": {
+      "alternate": 39299,
+      "primary": 33277
+    },
+    "windshield_installation_and_repair": {
+      "alternate": 3221,
+      "primary": 2672
+    },
+    "windsurfing_center": {
+      "alternate": 18
+    },
+    "wine_bar": {
+      "alternate": 46381,
+      "primary": 38368
+    },
+    "wine_tasting_classes": {
+      "alternate": 4,
+      "primary": 13
+    },
+    "wine_tasting_room": {
+      "alternate": 523,
+      "primary": 327
+    },
+    "wine_tours": {
+      "alternate": 70,
+      "primary": 175
+    },
+    "wine_wholesaler": {
+      "alternate": 175,
+      "primary": 6816
+    },
+    "winery": {
+      "alternate": 20988,
+      "basic": 82959,
+      "primary": 82615
+    },
+    "wok_restaurant": {
+      "alternate": 19,
+      "primary": 16
+    },
+    "womens_clothing_store": {
+      "alternate": 465816,
+      "primary": 292532
+    },
+    "womens_health_clinic": {
+      "alternate": 27767,
+      "primary": 10256
+    },
+    "wood_and_pulp": {
+      "alternate": 12447,
+      "primary": 7412
+    },
+    "woodworking_supply_store": {
+      "alternate": 2190,
+      "primary": 4542
+    },
+    "workers_compensation_law": {
+      "alternate": 1113,
+      "primary": 177
+    },
+    "wrap_restaurant": {
+      "alternate": 6864,
+      "primary": 3
+    },
+    "writing_service": {
+      "alternate": 3260,
+      "primary": 2827
+    },
+    "yoga_instructor": {
+      "alternate": 263,
+      "primary": 150
+    },
+    "yoga_studio": {
+      "alternate": 27781,
+      "primary": 81535
+    },
+    "youth_organization": {
+      "basic": 55622
+    },
+    "youth_organizations": {
+      "alternate": 45971,
+      "primary": 55609
+    },
+    "ziplining_center": {
+      "alternate": 125,
+      "primary": 33
+    },
+    "zoo": {
+      "alternate": 10010,
+      "basic": 13537,
+      "primary": 10693
+    },
+    "zorbing_center": {
+      "alternate": 1
+    }
+  },
+  "parameters": {
+    "duckdb_memory_limit": "8GB",
+    "duckdb_threads": 2,
+    "duckdb_version": "1.5.5",
+    "preserve_insertion_order": false,
+    "scan_strategy": "field-separated-v1"
+  },
+  "schema": "overture-places-category-contract-audit-v1",
+  "source_release": "2026-06-17.0"
+}

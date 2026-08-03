@@ -8,6 +8,7 @@ import hashlib
 import importlib.util
 import json
 import platform
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,8 +27,26 @@ ROLES = (
 )
 
 
+def memory_limit_bytes(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(r"([1-9][0-9]*)(MB|GB)", value)
+    if match is None:
+        return None
+    multiplier = 1024**2 if match.group(2) == "MB" else 1024**3
+    return int(match.group(1)) * multiplier
+
+
 def sha256_file(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def is_sha256(value: Any) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
 
 
 def load_inventory_module():
@@ -53,19 +72,20 @@ def actual_runtime() -> dict[str, str]:
     import duckdb
     import numpy
     import pyarrow
+    import unicodedata2
 
     return {
         "python": platform.python_version(),
         "duckdb": duckdb.__version__,
         "numpy": numpy.__version__,
         "pyarrow": pyarrow.__version__,
+        "unicodedata2": unicodedata2.unidata_version,
         "rustc": subprocess.check_output(["rustc", "--version"], text=True)
         .strip()
         .removeprefix("rustc "),
         "cargo": subprocess.check_output(["cargo", "--version"], text=True)
         .strip()
         .removeprefix("cargo "),
-        "python_executable": ".venv/bin/python",
     }
 
 
@@ -172,7 +192,7 @@ def validate(
     spec_sha256 = sha256_file(spec_path)
     inventory_file_sha256 = sha256_file(inventory_path)
     require(
-        spec.get("schema") == "overture-places-construction-v1-evidence-spec-v2",
+        spec.get("schema") == "overture-places-construction-v1-evidence-spec-v4",
         "evidence spec schema differs",
     )
     try:
@@ -184,6 +204,10 @@ def validate(
     )
     current_runtime = runtime or actual_runtime()
     require(current_runtime == spec.get("runtime"), "runtime differs from frozen spec")
+    require(
+        spec.get("tokenizer", {}).get("unicode_version") == "17.0.0",
+        "tokenizer Unicode version differs from the frozen contract",
+    )
     require(
         evidence.get("schema") == "overture-places-construction-v1-scale-evidence-v1",
         "scale evidence schema differs",
@@ -213,11 +237,128 @@ def validate(
     )
     raw_census = evidence.get("census")
     census: dict[int, dict[str, Any]] = {}
+    census_items = 0
     if isinstance(raw_census, list):
         for item in raw_census:
+            census_items += 1
             if isinstance(item, dict) and type(item.get("task_index")) is int:
                 census[item["task_index"]] = item
     require(sorted(census) == sorted(universe), "census task set is missing or extra")
+    require(census_items == len(census), "census contains malformed or duplicate tasks")
+    transform_binary_sha256: str | None = None
+    for task_index in universe:
+        item = census.get(task_index, {})
+        task = inventory["map_plan"]["tasks"][task_index]
+        identity = item.get("identity", {})
+        require(
+            item.get("schema") == "overture-places-construction-v1-census-v1",
+            f"census task {task_index} schema differs",
+        )
+        require(
+            identity.get("evidence_spec_sha256") == spec_sha256,
+            f"census task {task_index} evidence spec binding differs",
+        )
+        require(
+            identity.get("inventory_file_sha256") == inventory_file_sha256
+            and identity.get("inventory_sha256") == inventory.get("inventory_sha256"),
+            f"census task {task_index} inventory binding differs",
+        )
+        require(
+            identity.get("task_index") == task_index
+            and identity.get("task_digest") == task["task_digest"]
+            and identity.get("task_source_digest") == task["source_digest"]
+            and identity.get("expected_input_records")
+            == task["expected_input_records"],
+            f"census task {task_index} task identity differs",
+        )
+        embedded_report = {
+            key: value
+            for key, value in item.items()
+            if key not in ("task_index", "report_sha256")
+        }
+        embedded_sha256 = hashlib.sha256(
+            (json.dumps(embedded_report, indent=2, sort_keys=True) + "\n").encode()
+        ).hexdigest()
+        require(
+            item.get("report_sha256") == embedded_sha256,
+            f"census task {task_index} report digest differs",
+        )
+        input_evidence = item.get("input", {})
+        require(
+            input_evidence.get("rows") == task["expected_input_records"]
+            and is_sha256(input_evidence.get("sha256")),
+            f"census task {task_index} projected input binding differs",
+        )
+        transform_binary = item.get("transform_binary", {})
+        binary_sha256 = transform_binary.get("sha256")
+        require(
+            is_sha256(binary_sha256),
+            f"census task {task_index} transform binary binding differs",
+        )
+        if transform_binary_sha256 is None:
+            transform_binary_sha256 = binary_sha256
+        require(
+            binary_sha256 == transform_binary_sha256,
+            f"census task {task_index} transform binary differs across tasks",
+        )
+        transform = item.get("transform", {})
+        require(
+            transform.get("schema") == "overture-places-rust-transform-report-v1"
+            and transform.get("tokenizer_version") == spec["tokenizer"]["version"]
+            and is_sha256(transform.get("semantic_sum_a"))
+            and is_sha256(transform.get("semantic_sum_b")),
+            f"census task {task_index} transform binding differs",
+        )
+        metrics = item.get("metrics", {})
+        admitted = transform.get("admitted_features")
+        emitted = transform.get("emitted_term_rows")
+        require(
+            type(admitted) is int
+            and admitted > 0
+            and type(emitted) is int
+            and emitted > 0
+            and metrics.get("term_rows_per_admitted_feature")
+            == emitted / admitted
+            and metrics.get("multilingual_cjk_features")
+            == transform.get("multilingual_features", -1)
+            + transform.get("cjk_features", -1),
+            f"census task {task_index} metrics do not bind to its transform",
+        )
+        parameters = item.get("parameters", {})
+        census_memory_bytes = memory_limit_bytes(
+            parameters.get("duckdb_memory_limit")
+        )
+        memory_cap_bytes = memory_limit_bytes(
+            spec["acceptance_gates"]["resources"]["duckdb_memory_limit"]
+        )
+        require(
+            census_memory_bytes is not None
+            and memory_cap_bytes is not None
+            and census_memory_bytes <= memory_cap_bytes
+            and parameters.get("duckdb_threads")
+            == spec["acceptance_gates"]["resources"]["duckdb_threads"],
+            f"census task {task_index} DuckDB parameters exceed the frozen caps",
+        )
+        census_resources = item.get("census_evidence", {})
+        census_headroom = 1 - spec["acceptance_gates"]["resources"][
+            "resource_headroom_min_fraction"
+        ]
+        require(
+            type(census_resources.get("peak_rss_bytes")) is int
+            and census_resources["peak_rss_bytes"]
+            <= spec["acceptance_gates"]["resources"][
+                "process_group_rss_hard_cap_bytes"
+            ]
+            * census_headroom,
+            f"census task {task_index} RSS lacks headroom",
+        )
+        require(
+            type(census_resources.get("peak_scratch_and_output_bytes")) is int
+            and census_resources["peak_scratch_and_output_bytes"]
+            <= spec["acceptance_gates"]["resources"]["scratch_hard_cap_bytes"]
+            * census_headroom,
+            f"census task {task_index} scratch lacks headroom",
+        )
     expected_roles = (
         select_roles(inventory, census) if len(census) == len(universe) else {}
     )
@@ -271,6 +412,40 @@ def validate(
         <= construction.MAX_IPC_BATCH_ROWS,
         "hydrate batch is not derived within the IPC cap",
     )
+    require(
+        construction.MAP_DUCKDB_MEMORY_LIMIT
+        == spec["acceptance_gates"]["resources"].get("map_duckdb_memory_limit"),
+        "Places map DuckDB memory limit differs from the frozen evidence spec",
+    )
+    require(
+        construction.MAP_DUCKDB_TEMP_SHARE
+        == spec["acceptance_gates"]["resources"].get("map_duckdb_temp_share"),
+        "Places map DuckDB temp share differs from the frozen evidence spec",
+    )
+
+    entity_phrase = spec.get("acceptance_gates", {}).get("head", {}).get(
+        "entity_phrase"
+    )
+    require(
+        entity_phrase
+        == {
+            "admission": "prominence-primary-name-v1",
+            "field": "primary_name",
+            "minimum_normalized_words": 2,
+            "maximum_normalized_words": 3,
+            "maximum_keys_per_record": 1,
+            "key_prefixes": ["e2:", "e3:"],
+            "prominence_rank_must_be_positive": True,
+            "head_only": True,
+            "stored_primary_name_validation_required": True,
+        },
+        "entity-phrase contract differs",
+    )
+    require(
+        list(construction.ENTITY_PHRASE_PREFIXES)
+        == (entity_phrase or {}).get("key_prefixes"),
+        "construction entity-phrase prefixes differ from the frozen evidence spec",
+    )
 
     gates = spec["acceptance_gates"]
     task_runs = (
@@ -286,9 +461,33 @@ def validate(
         run = task_runs.get(str(task_index), {})
         projection = run.get("projection", {})
         task = inventory["map_plan"]["tasks"][task_index]
+        projection_identity = projection.get("identity", {})
         require(
-            projection.get("identity", {}).get("task_digest") == task["task_digest"],
+            projection.get("schema")
+            == "overture-places-construction-v1-projection-report-v1"
+            and projection_identity.get("evidence_spec_sha256") == spec_sha256
+            and projection_identity.get("inventory_file_sha256")
+            == inventory_file_sha256
+            and projection_identity.get("inventory_sha256")
+            == inventory.get("inventory_sha256")
+            and projection_identity.get("task_index") == task_index
+            and projection_identity.get("task_digest") == task["task_digest"]
+            and projection_identity.get("task_source_digest")
+            == task["source_digest"]
+            and projection_identity.get("expected_input_records")
+            == task["expected_input_records"],
             f"task {task_index} projection identity differs",
+        )
+        projected_output = projection.get("output", {})
+        verified_input = projection.get("verified_input", {})
+        require(
+            all(
+                projected_output.get(key) == verified_input.get(key)
+                for key in ("bytes", "sha256", "records", "row_groups")
+            )
+            and is_sha256(verified_input.get("sha256"))
+            and verified_input.get("records") == task["expected_input_records"],
+            f"task {task_index} projected Parquet binding differs",
         )
         resources = projection.get("resources", {})
         input_gate = gates["input"]
@@ -299,7 +498,7 @@ def validate(
             f"task {task_index} remote read evidence differs/over cap",
         )
         require(
-            projection.get("output", {}).get(
+            projected_output.get(
                 "bytes", input_gate["projected_parquet_bytes_per_task_hard_cap"] + 1
             )
             <= input_gate["projected_parquet_bytes_per_task_hard_cap"],
@@ -370,9 +569,15 @@ def validate(
     rehearsal = evidence.get("rehearsal", {})
     map_reduce = gates["map_reduce"]
     coverage = gates["coverage"]
+    role_tasks = list(roles.values()) if isinstance(roles, dict) else []
     require(
-        rehearsal.get("logical_tasks", 0) >= map_reduce["minimum_logical_tasks"],
-        "logical task coverage is low",
+        rehearsal.get("logical_tasks") == len(role_tasks)
+        and rehearsal.get("logical_tasks", 0) >= map_reduce["minimum_logical_tasks"],
+        "logical task coverage differs",
+    )
+    require(
+        rehearsal.get("observed", {}).get("mapped_tasks") == role_tasks,
+        "rehearsal mapped task set/order differs from selected roles",
     )
     require(
         rehearsal.get("packs", 0) >= map_reduce["minimum_packs"], "pack coverage is low"
@@ -407,6 +612,10 @@ def validate(
         # Worker or R2 fetch is required or implied. Require the class flag so the
         # evidence provenance is explicit and honest.
         ("worker_local_decoder_evidence", "Worker local-decoder evidence is absent"),
+        (
+            "worker_entity_phrase_decoder",
+            "Worker entity-phrase decoder/validation evidence is absent",
+        ),
         ("resume_before_projection", "resume-before-projection evidence is absent"),
     ):
         require(rehearsal.get(field) is True, reason)
@@ -439,10 +648,79 @@ def validate(
         "head result cap differs",
     )
     require(
+        rehearsal.get("entity_phrase_admission")
+        == (entity_phrase or {}).get("admission"),
+        "head entity-phrase admission capability differs",
+    )
+    require(
+        type(rehearsal.get("entity_phrase_head_index_entries")) is int
+        and rehearsal["entity_phrase_head_index_entries"] > 0,
+        "head entity-phrase index coverage is absent",
+    )
+    require(
+        type(rehearsal.get("entity_phrase_head_records")) is int
+        and rehearsal["entity_phrase_head_records"] > 0,
+        "head entity-phrase record coverage is absent",
+    )
+    phrase_by_prefix = rehearsal.get("entity_phrase_head_by_prefix", {})
+    for prefix in (entity_phrase or {}).get("key_prefixes", []):
+        prefix_evidence = phrase_by_prefix.get(prefix, {})
+        require(
+            type(prefix_evidence.get("index_entries")) is int
+            and prefix_evidence["index_entries"] > 0
+            and type(prefix_evidence.get("records")) is int
+            and prefix_evidence["records"] > 0,
+            f"head entity-phrase coverage is absent for {prefix}",
+        )
+    require(
+        rehearsal.get("routed_entity_phrase_index_entries") == 0
+        and rehearsal.get("routed_entity_phrases_absent") is True,
+        "entity-phrase keys entered routed serving artifacts",
+    )
+    require(
         rehearsal.get("maximum_worker_index_probes", 10**9)
         <= gates["serving"]["maximum_index_probe_entries"],
         "Worker index probe cap differs",
     )
+    map_resources = rehearsal.get("map_stage_resources")
+    require(
+        isinstance(map_resources, list)
+        and [item.get("task_index") for item in map_resources] == role_tasks,
+        "map-stage resource task set/order differs from selected roles",
+    )
+    resource_gate = gates["resources"]
+    headroom = 1 - resource_gate["resource_headroom_min_fraction"]
+    require(
+        type(rehearsal.get("head_output_bytes")) is int
+        and rehearsal["head_output_bytes"]
+        <= resource_gate["head_output_hard_cap_bytes"] * headroom,
+        "head output lacks frozen resource headroom",
+    )
+    for item in map_resources if isinstance(map_resources, list) else []:
+        task_index = item.get("task_index")
+        for stage, scratch_field in (
+            ("transform", "peak_scratch_bytes"),
+            ("construction", "peak_scratch_and_output_bytes"),
+        ):
+            measured = item.get(stage, {})
+            require(
+                type(measured.get("peak_rss_bytes")) is int
+                and measured["peak_rss_bytes"]
+                <= resource_gate["process_group_rss_hard_cap_bytes"] * headroom,
+                f"map task {task_index} {stage} RSS lacks headroom",
+            )
+            require(
+                type(measured.get(scratch_field)) is int
+                and measured[scratch_field]
+                <= resource_gate["scratch_hard_cap_bytes"] * headroom,
+                f"map task {task_index} {stage} scratch lacks headroom",
+            )
+            require(
+                isinstance(measured.get("wall_seconds"), (int, float))
+                and measured["wall_seconds"]
+                <= resource_gate["candidate_wall_hard_cap_seconds"] * headroom,
+                f"map task {task_index} {stage} wall time lacks headroom",
+            )
 
     report = {
         "schema": "overture-places-construction-v1-readiness-v1",

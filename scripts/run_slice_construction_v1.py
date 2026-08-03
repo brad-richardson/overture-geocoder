@@ -224,7 +224,7 @@ if ADDRESSES:
 else:
     run(VENV, "scripts/project_places_construction_v1.py",
         "--inventory", args.inventory,
-        "--evidence-spec", ROOT / "benchmarks/places-construction-v1-evidence-spec-v2.json",
+        "--evidence-spec", ROOT / "benchmarks/places-construction-v1-evidence-spec-v4.json",
         "--task-index", TASK_INDEX, "--output", projected, "--report", report,
         "--max-rows", 4_000_000, "--max-groups", 72,
         "--max-selected-compressed-bytes", 536_870_912,

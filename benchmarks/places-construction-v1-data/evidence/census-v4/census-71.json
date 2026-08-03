@@ -1,0 +1,115 @@
+{
+  "census_evidence": {
+    "duckdb_census_seconds": 8.007996939006262,
+    "observations": 773,
+    "peak_rss_bytes": 2351947776,
+    "peak_scratch_and_output_bytes": 2521552035,
+    "peak_sweep_seconds": 0.0010396709549240768,
+    "wall_seconds": 7.982462861051317
+  },
+  "hydration": {
+    "batches": 488,
+    "full_table_read_all": false,
+    "input_records": 998644,
+    "input_row_groups": 53,
+    "maximum_batch_rows": 2048
+  },
+  "identity": {
+    "evidence_spec_sha256": "77bce6209c9c98ee4243167982fe11b13f7702c042e48bfad90daa6b3b26bfed",
+    "expected_input_records": 998644,
+    "inventory_file_sha256": "643f52eeafced086f333b530334094232219a6fecbcf46ee0565797fa8227570",
+    "inventory_sha256": "9ea4eff665766c3c1146ee7baed413fcf76f097e1724d795c77baabe7dff1795",
+    "objects": [
+      {
+        "bytes": 637843665,
+        "etag": "e75631062f0a770593cc49ccab7d038d-10",
+        "records": 4738453,
+        "row_group_count": 256,
+        "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
+        "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00012-09d51a62-b2e8-5a1a-a8f5-0cedf1b1d6c8-c000.zstd.parquet"
+      }
+    ],
+    "ranges": [
+      {
+        "etag": "e75631062f0a770593cc49ccab7d038d-10",
+        "first_row_group": 60,
+        "last_row_group": 112,
+        "object_index": 12,
+        "row_groups": 53,
+        "rows": 998644,
+        "selected_compressed_bytes": 76851554,
+        "selected_uncompressed_bytes": 162031968,
+        "uri": "s3://overturemaps-us-west-2/release/2026-06-17.0/theme=places/type=place/part-00012-09d51a62-b2e8-5a1a-a8f5-0cedf1b1d6c8-c000.zstd.parquet"
+      }
+    ],
+    "release": "2026-06-17.0",
+    "row_groups": 53,
+    "schema": "overture-places-construction-v1-physical-arrow-v1",
+    "schema_fingerprint_sha256": "31809dbadf976783e7863d2694d2cfe870f53665ef81d007076144c55bf64e67",
+    "selected_compressed_bytes": 76851554,
+    "selected_uncompressed_bytes": 162031968,
+    "task_digest": "fa8dac86d28e9b35cae3b506c2009bed8b1a48a1b4a32a4fd6548d15f3c5e36c",
+    "task_index": 71,
+    "task_source_digest": "747c7091707676ff453556e3f00dfc61ab22fb9f97fd7056283c6a1b26af7af7"
+  },
+  "input": {
+    "bytes": 64557082,
+    "rows": 998644,
+    "sha256": "8310e29bdd2e28615c160aec5442c903037102f0614ce93c4d17e94ac4908ef0"
+  },
+  "metrics": {
+    "cjk_features": 2517,
+    "duplicate_uuid_rows": 0,
+    "maximum_spatial_cell": "93c7",
+    "maximum_spatial_cell_term_rows": 1780790,
+    "maximum_token": "in",
+    "maximum_token_rows": 499764,
+    "maximum_uuid_multiplicity": 1,
+    "multilingual_cjk_features": 2517,
+    "multilingual_features": 0,
+    "term_rows_per_admitted_feature": 6.374892103476521
+  },
+  "parameters": {
+    "duckdb_memory_limit": "512MB",
+    "duckdb_threads": 2,
+    "max_rss_bytes": 4294967296,
+    "max_scratch_bytes": 8589934592,
+    "wall_seconds": 600.0
+  },
+  "schema": "overture-places-construction-v1-census-v1",
+  "transform": {
+    "admitted_features": 998642,
+    "cjk_features": 2517,
+    "digest_version": "sha256-add-mod-2^256-two-domain-v1",
+    "elapsed_seconds": 12.05872418,
+    "emitted_term_rows": 6366235,
+    "input_features": 998644,
+    "multilingual_features": 0,
+    "rejected_features": 2,
+    "rejections_by_precedence": {
+      "invalid_confidence": 0,
+      "invalid_geometry": 0,
+      "invalid_record": 0,
+      "invalid_source_locator": 0,
+      "invalid_uuid": 0,
+      "missing_primary_name": 0,
+      "permanently_closed": 2,
+      "record_too_large": 0
+    },
+    "schema": "overture-places-rust-transform-report-v1",
+    "semantic_sum_a": "b20587abf29ec8a4bd48d9d31d0a96974d6891979f5012f4a01704c73ffd8d1f",
+    "semantic_sum_b": "6187dcddb59b563eb90300cdee4cc234af55c8a7ebd86a6a98587673ddd24285",
+    "tokenizer_version": "nfkd-lower-stripmark-cjk-bigram-v4",
+    "transform_version": "places-rust-arrow-transform-v1"
+  },
+  "transform_binary": {
+    "path": "crates/target/release/places-transform-v1",
+    "sha256": "e77c3150493c1b6d10d80b6f86d636911ab9014a43c3906704d2b9e20d29ab0f"
+  },
+  "transform_evidence": {
+    "peak_rss_bytes": 24276992,
+    "peak_scratch_bytes": 1833134640,
+    "peak_sweep_seconds": 0.00026224099565297365,
+    "wall_seconds": 12.064400836999994
+  }
+}

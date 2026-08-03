@@ -120,7 +120,7 @@ def is_cjk(character: str) -> bool:
     )
 
 
-def tokens(value: str) -> set[str]:
+def normalized_words(value: str) -> list[str]:
     # Mirror Rust `normalized_words`: trim White_Space, NFKD-decompose, then
     # lowercase per-char (after NFKD, so styled capitals fold), fold final
     # sigma, and drop combining marks.
@@ -142,6 +142,11 @@ def tokens(value: str) -> set[str]:
             current = []
     if current:
         words.append("".join(current))
+    return words
+
+
+def tokens(value: str) -> set[str]:
+    words = normalized_words(value)
     result = set(words)
     for word in words:
         characters = list(word)
@@ -292,6 +297,15 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
             ):
                 rejected["invalid_source_locator"] += 1
                 continue
+            # Mirrors the Rust transform's optional read: the projection carries
+            # `prominence_rank` when it was produced by a projector that knows
+            # about it, and zero otherwise.
+            prominence_column = columns.get("prominence_rank")
+            prominence = 0
+            if prominence_column is not None:
+                value = prominence_column[index].as_py()
+                if isinstance(value, int) and 0 <= value <= 255:
+                    prominence = value
             fields: dict[str, int] = {}
             common = columns["common_names"][index].as_py() or []
             has_multilingual = any(
@@ -315,21 +329,16 @@ def run(input_path: Path, source_limits_path: Path) -> dict[str, Any]:
             for value, mask in values:
                 for token in tokens(value):
                     fields[token] = fields.get(token, 0) | mask
+            phrase_words = normalized_words(primary)
+            if prominence > 0 and 2 <= len(phrase_words) <= 3:
+                phrase = f"e{len(phrase_words)}:{' '.join(phrase_words)}"
+                fields[phrase] = fields.get(phrase, 0) | 1
             if not fields:
                 rejected["invalid_record"] += 1
                 continue
             longitude, latitude = coordinates
             partition_key, execution_group, partition_cell = route(longitude, latitude)
             rank = math.floor(confidence * 255 + 0.5)
-            # Mirrors the Rust transform's optional read: the projection carries
-            # `prominence_rank` when it was produced by a projector that knows
-            # about it, and zero otherwise.
-            prominence_column = columns.get("prominence_rank")
-            prominence = 0
-            if prominence_column is not None:
-                value = prominence_column[index].as_py()
-                if isinstance(value, int) and 0 <= value <= 255:
-                    prominence = value
             display = [
                 primary,
                 text(columns["brand_name"], index),
