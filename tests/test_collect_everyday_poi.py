@@ -1,4 +1,4 @@
-"""Contract tests for deterministic Singapore/Taiwan POI collection."""
+"""Contract tests for deterministic everyday-POI source collection."""
 
 import hashlib
 import importlib.util
@@ -8,14 +8,14 @@ import zipfile
 
 
 ROOT = Path(__file__).parent.parent
-SCRIPT = ROOT / "scripts" / "collect_everyday_poi_batch1.py"
-spec = importlib.util.spec_from_file_location("collect_everyday_poi_batch1", SCRIPT)
+SCRIPT = ROOT / "scripts" / "collect_everyday_poi.py"
+spec = importlib.util.spec_from_file_location("collect_everyday_poi", SCRIPT)
 collector = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(collector)
 
 
 def source(source_id):
-    return {
+    value = {
         "accessed_at": "2026-08-03T00:00:00Z",
         "id": source_id,
         "snapshot_sha256": "a" * 64,
@@ -23,6 +23,17 @@ def source(source_id):
         "source_name": "Official source",
         "source_url": "https://example.gov/source",
     }
+    if source_id == "kr-seoul-hospital-licenses":
+        value["coordinate_transformation"] = {
+            "accuracy_metres": 1.0,
+            "always_xy": True,
+            "operation": "pinned test operation",
+            "proj_version": "9.5.1",
+            "pyproj_version": "3.7.2",
+            "source_crs": "EPSG:5174",
+            "target_crs": "EPSG:4326",
+        }
+    return value
 
 
 def sg_feature(object_id, station, exit_code, lon=103.8, lat=1.3):
@@ -104,6 +115,76 @@ def test_taiwan_filters_to_active_core_points_and_retains_duplicate_exclusions(
     ]
 
 
+def test_javascript_data_parser_accepts_only_the_seoul_data_subset():
+    value = collector.JavaScriptDataParser(
+        '{result:"ok",page:{totalCount:1,listCount:1},'
+        'list:[{MGTNO:"one",BPLCNM:"name,field: still string",X:"1",Y:"2"},]}'
+    ).parse()
+    assert value["list"][0]["BPLCNM"] == "name,field: still string"
+    for unsafe in ('{value:alert(1)}', '{value:`template`}', '{value:undefined}'):
+        try:
+            collector.JavaScriptDataParser(unsafe).parse()
+        except ValueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe JavaScript was accepted: {unsafe}")
+
+
+def test_hong_kong_selects_bilingual_points_and_retains_english_alias(tmp_path):
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            {
+                "type": "Feature",
+                "geometry": {"type": "Point", "coordinates": [114.1, 22.3]},
+                "properties": {
+                    "OBJECTID": 7,
+                    "NAME_TC": "測試醫院",
+                    "NAME_EN": "Test Hospital",
+                },
+            }
+        ],
+    }
+    path = tmp_path / "hk.geojson"
+    path.write_text(json.dumps(payload))
+    cases, report = collector.collect_hong_kong(
+        path, source("hk-ha-health-care-facilities"), quota=1
+    )
+    assert cases[0]["expected_name"] == "測試醫院"
+    assert cases[0]["alt_names"] == ["Test Hospital"]
+    assert report["eligible_after_duplicate_filter"] == 1
+
+
+def test_seoul_filters_active_rows_and_retains_transform_provenance(
+    tmp_path, monkeypatch
+):
+    path = tmp_path / "seoul.js"
+    path.write_text(
+        '{result:"ok",page:{totalCount:2,listCount:2},list:['
+        '{TRDSTATEGBN:"01",DTLSTATENM:"영업중",BPLCNM:"테스트병원",'
+        'MGTNO:"active",X:"200000",Y:"450000"},'
+        '{TRDSTATEGBN:"03",DTLSTATENM:"폐업",BPLCNM:"닫힌병원",'
+        'MGTNO:"closed",X:"200000",Y:"450000"},]}'
+    )
+
+    class Transformer:
+        def transform(self, x, y):
+            assert (x, y) == (200000.0, 450000.0)
+            return 127.0, 37.5
+
+    monkeypatch.setattr(collector, "seoul_transformer", lambda _: Transformer())
+    cases, report = collector.collect_seoul(
+        path, source("kr-seoul-hospital-licenses"), quota=1
+    )
+    assert cases[0]["expected_name"] == "테스트병원"
+    assert cases[0]["provenance"]["source_coordinate"] == {
+        "x": "200000",
+        "y": "450000",
+        "crs": "EPSG:5174",
+    }
+    assert report["filter_counts"] == {"not_active_trade_state": 1}
+
+
 def test_committed_batch_is_frozen_partial_evidence():
     payload_bytes = (ROOT / "benchmarks/everyday-poi-tripwire-cases-v1.json").read_bytes()
     payload = json.loads(payload_bytes)
@@ -112,11 +193,13 @@ def test_committed_batch_is_frozen_partial_evidence():
     )
     cases = payload["cases"]
     assert payload["schema"] == "benchmark-v2-forward-cases-v1"
-    assert len(cases) == 50
-    assert len({item["id"] for item in cases}) == 50
-    assert {item["strata"]["country"] for item in cases} == {"SG", "TW"}
+    assert len(cases) == 90
+    assert len({item["id"] for item in cases}) == 90
+    assert {item["strata"]["country"] for item in cases} == {"HK", "KR", "SG", "TW"}
     assert sum(item["strata"]["country"] == "SG" for item in cases) == 20
     assert sum(item["strata"]["country"] == "TW" for item in cases) == 30
+    assert sum(item["strata"]["country"] == "HK" for item in cases) == 20
+    assert sum(item["strata"]["country"] == "KR" for item in cases) == 20
     assert all(item["selection_review"]["decision"] == "accepted" for item in cases)
     assert all("expected_gers_id" not in item for item in cases)
     assert report["provider_requests_made_during_selection"] == 0
@@ -131,6 +214,8 @@ def test_snapshot_manifest_has_exact_hashes_and_licence_evidence():
     assert {item["id"] for item in manifest["sources"]} == {
         "sg-lta-mrt-exits",
         "tw-tourism-restaurants",
+        "hk-ha-health-care-facilities",
+        "kr-seoul-hospital-licenses",
     }
     for item in manifest["sources"]:
         assert len(item["snapshot_sha256"]) == 64
@@ -145,3 +230,15 @@ def test_snapshot_manifest_has_exact_hashes_and_licence_evidence():
         assert licence.stat().st_size == item["license_snapshot_bytes"]
         assert collector.sha256_file(snapshot) == item["snapshot_sha256"]
         assert collector.sha256_file(licence) == item["license_snapshot_sha256"]
+
+
+def test_committed_seoul_preview_is_complete_and_status_explicit():
+    rows = collector.parse_seoul_preview(
+        ROOT / "benchmarks/everyday-poi-source-data-v1/kr-seoul-hospitals.js"
+    )
+    assert len(rows) == 929
+    assert sum(
+        row["TRDSTATEGBN"] == "01" and row["DTLSTATENM"] == "영업중"
+        for row in rows
+    ) == 555
+    assert len({row["MGTNO"] for row in rows}) == 929

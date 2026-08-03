@@ -1,0 +1,1282 @@
+{
+	"type" : "FeatureCollection",
+	"name" : "HOSPITAL",
+	"features" : [
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2067402204, 22.3176399839 ]
+			},
+			"properties" : {
+				"OBJECTID" : 1,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Kai Tak Hospital",
+				"ADDRESS_EN" : "2-3 Shing Cheong Road, Kowloon Bay, Kowloon",
+				"NAME_TC" : "啟德醫院",
+				"ADDRESS_TC" : "九龍九龍灣承昌道2至3號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : null,
+				"NSEARCH01_TC" : null,
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282642&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282642&Lang=CHIB5",
+				"NSEARCH03_EN" : null,
+				"NSEARCH03_TC" : null,
+				"NORTHING" : 819849.4,
+				"EASTING" : 839345.1,
+				"LATITUDE" : 22.317639999999997,
+				"LONGITUDE" : 114.20674,
+				"LASTUPDATE" : "20260612105610"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1759100327, 22.2509659615 ]
+			},
+			"properties" : {
+				"OBJECTID" : 2,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Wong Chuk Hang Hospital",
+				"ADDRESS_EN" : "2 Wong Chuk Hang Path, Wong Chuk Hang, HK",
+				"NAME_TC" : "黃竹坑醫院",
+				"ADDRESS_TC" : "香港黃竹坑黃竹坑徑2號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2873 7222",
+				"NSEARCH01_TC" : "2873 7222",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282511&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282511&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 812466,
+				"EASTING" : 836168.6,
+				"LATITUDE" : 22.250966,
+				"LONGITUDE" : 114.17591,
+				"LASTUPDATE" : "20260414185213"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1902604429, 22.2747250674 ]
+			},
+			"properties" : {
+				"OBJECTID" : 3,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tung Wah Eastern Hospital",
+				"ADDRESS_EN" : "19 Eastern Hospital Road, Causeway Bay, HK",
+				"NAME_TC" : "東華東院",
+				"ADDRESS_TC" : "香港銅鑼灣東院道19號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2162 6888",
+				"NSEARCH01_TC" : "2162 6888",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282510&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282510&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 815097,
+				"EASTING" : 837647.6,
+				"LATITUDE" : 22.274725,
+				"LONGITUDE" : 114.19026,
+				"LASTUPDATE" : "20260414185213"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1239896646, 22.2697953268 ]
+			},
+			"properties" : {
+				"OBJECTID" : 4,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "MacLehose Medical Rehabilitation Centre",
+				"ADDRESS_EN" : "7 Sha Wan Drive, Pokfulam, HK",
+				"NAME_TC" : "麥理浩復康院",
+				"ADDRESS_TC" : "香港薄扶林沙灣徑7號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2817 0018",
+				"NSEARCH01_TC" : "2817 0018",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282513&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282513&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 814552,
+				"EASTING" : 830817.4,
+				"LATITUDE" : 22.269795,
+				"LONGITUDE" : 114.12398999999999,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1973004737, 22.2120243326 ]
+			},
+			"properties" : {
+				"OBJECTID" : 5,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Cheshire Home, Chung Hom Kok",
+				"ADDRESS_EN" : "128 Chung Hom Kok Road, HK",
+				"NAME_TC" : "舂磡角慈氏護養院",
+				"ADDRESS_TC" : "香港舂磡角道128號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2899 1300",
+				"NSEARCH01_TC" : "2899 1300",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282505&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282505&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 808154,
+				"EASTING" : 838374.1,
+				"LATITUDE" : 22.212024,
+				"LONGITUDE" : 114.1973,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.0315096161, 22.2080585904 ]
+			},
+			"properties" : {
+				"OBJECTID" : 6,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "St. John Hospital",
+				"ADDRESS_EN" : "Cheung Chau Hospital Road, Tung Wan, Cheung Chau",
+				"NAME_TC" : "長洲醫院",
+				"ADDRESS_TC" : "長洲東灣長洲醫院路",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2986 2100",
+				"NSEARCH01_TC" : "2986 2100",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282508&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282508&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 807721.9,
+				"EASTING" : 821279.3,
+				"LATITUDE" : 22.208059,
+				"LONGITUDE" : 114.03151,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1242402955, 22.2715744453 ]
+			},
+			"properties" : {
+				"OBJECTID" : 7,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "The Duchess of Kent Children's Hospital at Sandy Bay",
+				"ADDRESS_EN" : "12 Sandy Bay Road, Pokfulam, HK",
+				"NAME_TC" : "大口環根德公爵夫人兒童醫院",
+				"ADDRESS_TC" : "香港薄扶林大口環道12號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2817 7111",
+				"NSEARCH01_TC" : "2817 7111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282515&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282515&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 814749,
+				"EASTING" : 830843.3,
+				"LATITUDE" : 22.271573999999998,
+				"LONGITUDE" : 114.12424,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1445698568, 22.2861461746 ]
+			},
+			"properties" : {
+				"OBJECTID" : 8,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tsan Yuk Hospital",
+				"ADDRESS_EN" : "30 Hospital Road, Sai Ying Pun, HK",
+				"NAME_TC" : "贊育醫院",
+				"ADDRESS_TC" : "香港西營盤醫院道30號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2589 2100",
+				"NSEARCH01_TC" : "2589 2100",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282516&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282516&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 816362,
+				"EASTING" : 832938.9,
+				"LATITUDE" : 22.286146,
+				"LONGITUDE" : 114.14457,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1311703189, 22.270399848 ]
+			},
+			"properties" : {
+				"OBJECTID" : 9,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Queen Mary Hospital",
+				"ADDRESS_EN" : "102 Pokfulam Road, HK",
+				"NAME_TC" : "瑪麗醫院",
+				"ADDRESS_TC" : "香港薄扶林道102號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2255 3838",
+				"NSEARCH01_TC" : "2255 3838",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282514&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282514&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 814618.7000000001,
+				"EASTING" : 831557.5,
+				"LATITUDE" : 22.270400000000002,
+				"LONGITUDE" : 114.13117,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1752898509, 22.27590863 ]
+			},
+			"properties" : {
+				"OBJECTID" : 10,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Ruttonjee Hospital",
+				"ADDRESS_EN" : "266 Queen's Road East, Wan Chai, HK",
+				"NAME_TC" : "律敦治醫院",
+				"ADDRESS_TC" : "香港灣仔皇后大道東266號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2291 2000",
+				"NSEARCH01_TC" : "2291 2000",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282507&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282507&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 815228,
+				"EASTING" : 836104.7000000001,
+				"LATITUDE" : 22.275909,
+				"LONGITUDE" : 114.17529,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1466098242, 22.2849554269 ]
+			},
+			"properties" : {
+				"OBJECTID" : 11,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tung Wah Hospital",
+				"ADDRESS_EN" : "12 Po Yan Street, Sheung Wan, HK",
+				"NAME_TC" : "東華醫院",
+				"ADDRESS_TC" : "香港上環普仁街12號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2589 8111",
+				"NSEARCH01_TC" : "2589 8111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282518&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282518&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 816230.1,
+				"EASTING" : 833149.1,
+				"LATITUDE" : 22.284955,
+				"LONGITUDE" : 114.14661,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2364302288, 22.2691798038 ]
+			},
+			"properties" : {
+				"OBJECTID" : 12,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Pamela Youde Nethersole Eastern Hospital",
+				"ADDRESS_EN" : "3 Lok Man Road, Chai Wan, HK",
+				"NAME_TC" : "東區尤德夫人那打素醫院",
+				"ADDRESS_TC" : "香港柴灣樂民道3號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2595 6111",
+				"NSEARCH01_TC" : "2595 6111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282506&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282506&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 814484.1,
+				"EASTING" : 842406.2000000001,
+				"LATITUDE" : 22.26918,
+				"LONGITUDE" : 114.23643,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1777398457, 22.2753126123 ]
+			},
+			"properties" : {
+				"OBJECTID" : 13,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tang Shiu Kin Hospital",
+				"ADDRESS_EN" : "282 Queen's Road East, Wan Chai, HK",
+				"NAME_TC" : "鄧肇堅醫院",
+				"ADDRESS_TC" : "香港灣仔皇后大道東282號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2291 2000",
+				"NSEARCH01_TC" : "2291 2000",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282509&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282509&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 815162,
+				"EASTING" : 836357.2000000001,
+				"LATITUDE" : 22.275313,
+				"LONGITUDE" : 114.17774,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1248302791, 22.2714075683 ]
+			},
+			"properties" : {
+				"OBJECTID" : 14,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tung Wah Group of Hospitals Fung Yiu King Hospital",
+				"ADDRESS_EN" : "9 Sandy Bay Road, Pokfulam, HK",
+				"NAME_TC" : "東華三院馮堯敬醫院",
+				"ADDRESS_TC" : "香港薄扶林大口環道9號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2855 6111",
+				"NSEARCH01_TC" : "2855 6111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282517&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=282517&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 814730.5,
+				"EASTING" : 830904.1,
+				"LATITUDE" : 22.271407999999997,
+				"LONGITUDE" : 114.12483,
+				"LASTUPDATE" : "20260414185212"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1731597245, 22.2511555668 ]
+			},
+			"properties" : {
+				"OBJECTID" : 15,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Grantham Hospital",
+				"ADDRESS_EN" : "125 Wong Chuk Hang Road, Aberdeen, HK",
+				"NAME_TC" : "葛量洪醫院",
+				"ADDRESS_TC" : "香港仔黃竹坑道125號",
+				"SEARCH01_EN" : "HONG KONG ISLAND CLUSTER",
+				"SEARCH01_TC" : "香港島醫院聯網",
+				"NSEARCH01_EN" : "2518 2111",
+				"NSEARCH01_TC" : "2518 2111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100139&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100139&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 812487,
+				"EASTING" : 835885.1,
+				"LATITUDE" : 22.251155999999998,
+				"LONGITUDE" : 114.17316,
+				"LASTUPDATE" : "20260402093032"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.134699607, 22.3400565924 ]
+			},
+			"properties" : {
+				"OBJECTID" : 16,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Princess Margaret Hospital",
+				"ADDRESS_EN" : "2-10 Princess Margaret Hospital Road, Kwai Chung, New Territories",
+				"NAME_TC" : "瑪嘉烈醫院",
+				"ADDRESS_TC" : "新界葵涌瑪嘉烈醫院路2-10號",
+				"SEARCH01_EN" : "KOWLOON WEST CLUSTER",
+				"SEARCH01_TC" : "九龍西醫院聯網",
+				"NSEARCH01_EN" : "2990 1111",
+				"NSEARCH01_TC" : "2990 1111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100160&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100160&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 822332,
+				"EASTING" : 831923.4,
+				"LATITUDE" : 22.340056999999998,
+				"LONGITUDE" : 114.13470000000001,
+				"LASTUPDATE" : "20260220113408"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 113.9762101999, 22.407079588 ]
+			},
+			"properties" : {
+				"OBJECTID" : 17,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tuen Mun Hospital",
+				"ADDRESS_EN" : "23 Tsing Chung Koon Road, Tuen Mun, NT",
+				"NAME_TC" : "屯門醫院",
+				"ADDRESS_TC" : "新界屯門青松觀路23號",
+				"SEARCH01_EN" : "NEW TERRITORIES WEST CLUSTER",
+				"SEARCH01_TC" : "新界西醫院聯網",
+				"NSEARCH01_EN" : "2468 5111",
+				"NSEARCH01_TC" : "2468 5111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100173&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100173&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 829767,
+				"EASTING" : 815606.6,
+				"LATITUDE" : 22.40708,
+				"LONGITUDE" : 113.97621,
+				"LASTUPDATE" : "20250718153207"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1721001654, 22.3142896124 ]
+			},
+			"properties" : {
+				"OBJECTID" : 18,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Kwong Wah Hospital",
+				"ADDRESS_EN" : "25 Waterloo Road, KLN",
+				"NAME_TC" : "廣華醫院",
+				"ADDRESS_TC" : "九龍窩打老道25號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "2332 2311",
+				"NSEARCH01_TC" : "2332 2311",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100153&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100153&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 819478.1,
+				"EASTING" : 835776.1,
+				"LATITUDE" : 22.31429,
+				"LONGITUDE" : 114.1721,
+				"LASTUPDATE" : "20240717103640"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.133360078, 22.3428918369 ]
+			},
+			"properties" : {
+				"OBJECTID" : 19,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Kwai Chung Hospital",
+				"ADDRESS_EN" : "3-15 Kwai Chung Hospital Road, NT",
+				"NAME_TC" : "葵涌醫院",
+				"ADDRESS_TC" : "新界葵涌醫院路3-15號",
+				"SEARCH01_EN" : "KOWLOON WEST CLUSTER",
+				"SEARCH01_TC" : "九龍西醫院聯網",
+				"NSEARCH01_EN" : "2959 8111",
+				"NSEARCH01_TC" : "2959 8111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100162&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100162&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 822646,
+				"EASTING" : 831785.5,
+				"LATITUDE" : 22.342892,
+				"LONGITUDE" : 114.13336,
+				"LASTUPDATE" : "20240621114104"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.256269866, 22.3137726389 ]
+			},
+			"properties" : {
+				"OBJECTID" : 20,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Haven of Hope Hospital",
+				"ADDRESS_EN" : "8 Haven of Hope Road, Tseung Kwan O",
+				"NAME_TC" : "靈實醫院",
+				"ADDRESS_TC" : "將軍澳靈實路8號",
+				"SEARCH01_EN" : "KOWLOON EAST CLUSTER",
+				"SEARCH01_TC" : "九龍東醫院聯網",
+				"NSEARCH01_EN" : "2703 8888<br/>2409 5868",
+				"NSEARCH01_TC" : "2703 8888<br/>2409 5868",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100157&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100157&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 819423,
+				"EASTING" : 844448.4,
+				"LATITUDE" : 22.313772999999998,
+				"LONGITUDE" : 114.25627,
+				"LASTUPDATE" : "20230424135913"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2278996854, 22.3222908734 ]
+			},
+			"properties" : {
+				"OBJECTID" : 21,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "United Christian Hospital",
+				"ADDRESS_EN" : "130 Hip Wo Street, Kwun Tong, KLN",
+				"NAME_TC" : "基督教聯合醫院",
+				"ADDRESS_TC" : "九龍觀塘協和街130號",
+				"SEARCH01_EN" : "KOWLOON EAST CLUSTER",
+				"SEARCH01_TC" : "九龍東醫院聯網",
+				"NSEARCH01_EN" : "2379 9611",
+				"NSEARCH01_TC" : "2379 9611",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100156&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100156&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 820365,
+				"EASTING" : 841525,
+				"LATITUDE" : 22.322291,
+				"LONGITUDE" : 114.2279,
+				"LASTUPDATE" : "20220520142657"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1195595487, 22.3695484392 ]
+			},
+			"properties" : {
+				"OBJECTID" : 22,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Yan Chai Hospital",
+				"ADDRESS_EN" : "7-11 Yan Chai Street, Tsuen Wan, NT",
+				"NAME_TC" : "仁濟醫院",
+				"ADDRESS_TC" : "新界荃灣仁濟街7-11號",
+				"SEARCH01_EN" : "KOWLOON WEST CLUSTER",
+				"SEARCH01_TC" : "九龍西醫院聯網",
+				"NSEARCH01_EN" : "2417 8383",
+				"NSEARCH01_TC" : "2417 8383",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100165&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100165&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 825598.3,
+				"EASTING" : 830365,
+				"LATITUDE" : 22.369547999999998,
+				"LONGITUDE" : 114.11956,
+				"LASTUPDATE" : "20220520142657"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1963201931, 22.3468076352 ]
+			},
+			"properties" : {
+				"OBJECTID" : 23,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
+				"ADDRESS_EN" : "124 Shatin Pass Road, Wong Tai Sin, KLN",
+				"NAME_TC" : "東華三院黃大仙醫院",
+				"ADDRESS_TC" : "九龍黃大仙沙田坳道124號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "2320 0377",
+				"NSEARCH01_TC" : "2320 0377",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100154&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100154&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 823079.1,
+				"EASTING" : 838271.1,
+				"LATITUDE" : 22.346808,
+				"LONGITUDE" : 114.19632,
+				"LASTUPDATE" : "20220520142656"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2702098559, 22.3179644358 ]
+			},
+			"properties" : {
+				"OBJECTID" : 24,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tseung Kwan O Hospital",
+				"ADDRESS_EN" : "No. 2 Po Ning Lane, Hang Hau, Tseung Kwan O",
+				"NAME_TC" : "將軍澳醫院",
+				"ADDRESS_TC" : "將軍澳坑口寶寧里2號",
+				"SEARCH01_EN" : "KOWLOON EAST CLUSTER",
+				"SEARCH01_TC" : "九龍東醫院聯網",
+				"NSEARCH01_EN" : "2208 0111",
+				"NSEARCH01_TC" : "2208 0111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=101326&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=101326&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 819888,
+				"EASTING" : 845884.4,
+				"LATITUDE" : 22.317964,
+				"LONGITUDE" : 114.27020999999999,
+				"LASTUPDATE" : "20220520142656"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1746397585, 22.4614302235 ]
+			},
+			"properties" : {
+				"OBJECTID" : 25,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tai Po Hospital",
+				"ADDRESS_EN" : "9 Chuen On Road, Tai Po, NT",
+				"NAME_TC" : "大埔醫院",
+				"ADDRESS_TC" : "新界大埔全安路9號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "2607 6111",
+				"NSEARCH01_TC" : "2607 6111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100172&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100172&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 835771.8,
+				"EASTING" : 836038,
+				"LATITUDE" : 22.46143,
+				"LONGITUDE" : 114.17464,
+				"LASTUPDATE" : "20220520142655"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 113.9958499057, 22.4587035818 ]
+			},
+			"properties" : {
+				"OBJECTID" : 26,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Tin Shui Wai Hospital",
+				"ADDRESS_EN" : "11 Tin Tan Street, Tin Shui Wai, NT",
+				"NAME_TC" : "天水圍醫院",
+				"ADDRESS_TC" : "新界天水圍天壇街11號",
+				"SEARCH01_EN" : "NEW TERRITORIES WEST CLUSTER",
+				"SEARCH01_TC" : "新界西醫院聯網",
+				"NSEARCH01_EN" : "3513 5000",
+				"NSEARCH01_TC" : "3513 5000",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=235909&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=235909&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 835481.1,
+				"EASTING" : 817635.7000000001,
+				"LATITUDE" : 22.458703999999997,
+				"LONGITUDE" : 113.99585,
+				"LASTUPDATE" : "20220520142655"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1751895262, 22.3088595714 ]
+			},
+			"properties" : {
+				"OBJECTID" : 27,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Queen Elizabeth Hospital",
+				"ADDRESS_EN" : "30 Gascoigne Road, KLN",
+				"NAME_TC" : "伊利沙伯醫院",
+				"ADDRESS_TC" : "九龍加士居道30號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "3506 8888",
+				"NSEARCH01_TC" : "3506 8888",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100149&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100149&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 818876.8,
+				"EASTING" : 836094.4,
+				"LATITUDE" : 22.30886,
+				"LONGITUDE" : 114.17519,
+				"LASTUPDATE" : "20220520142654"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2126299028, 22.3981154454 ]
+			},
+			"properties" : {
+				"OBJECTID" : 28,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Shatin Hospital",
+				"ADDRESS_EN" : "33 A Kung Kok Street, Ma On Shan, Shatin, NT",
+				"NAME_TC" : "沙田醫院",
+				"ADDRESS_TC" : "新界沙田馬鞍山亞公角街33號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "3919 7500",
+				"NSEARCH01_TC" : "3919 7500",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100168&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100168&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 828761,
+				"EASTING" : 839949.8,
+				"LATITUDE" : 22.398115,
+				"LONGITUDE" : 114.21263,
+				"LASTUPDATE" : "20220520142654"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 113.9748695355, 22.4100498411 ]
+			},
+			"properties" : {
+				"OBJECTID" : 29,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Siu Lam Hospital",
+				"ADDRESS_EN" : "15 Tsing Chung Koon Road, Tuen Mun, N.T.",
+				"NAME_TC" : "小欖醫院",
+				"ADDRESS_TC" : "新界屯門青松觀路15號",
+				"SEARCH01_EN" : "NEW TERRITORIES WEST CLUSTER",
+				"SEARCH01_TC" : "新界西醫院聯網",
+				"NSEARCH01_EN" : "2456 7111",
+				"NSEARCH01_TC" : "2456 7111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100177&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100177&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 830096.1,
+				"EASTING" : 815469,
+				"LATITUDE" : 22.41005,
+				"LONGITUDE" : 113.97487,
+				"LASTUPDATE" : "20220520142654"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2012896093, 22.3799391281 ]
+			},
+			"properties" : {
+				"OBJECTID" : 30,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Prince of Wales Hospital",
+				"ADDRESS_EN" : "30-32 Ngan Shing Street, Shatin, NT",
+				"NAME_TC" : "威爾斯親王醫院",
+				"ADDRESS_TC" : "新界沙田銀城街30-32號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "3505 2211",
+				"NSEARCH01_TC" : "3505 2211",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100166&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100166&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 826748,
+				"EASTING" : 838782.4,
+				"LATITUDE" : 22.379939,
+				"LONGITUDE" : 114.20129,
+				"LASTUPDATE" : "20220520142653"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 113.9391399685, 22.2825708428 ]
+			},
+			"properties" : {
+				"OBJECTID" : 31,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "North Lantau Hospital",
+				"ADDRESS_EN" : "8 Chung Yan Road, Tung Chung, Lantau Island",
+				"NAME_TC" : "北大嶼山醫院",
+				"ADDRESS_TC" : "大嶼山東涌松仁路8號",
+				"SEARCH01_EN" : "KOWLOON WEST CLUSTER",
+				"SEARCH01_TC" : "九龍西醫院聯網",
+				"NSEARCH01_EN" : "3467 7000",
+				"NSEARCH01_TC" : "3467 7000",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=216546&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=216546&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 815985,
+				"EASTING" : 811767.9,
+				"LATITUDE" : 22.282570999999997,
+				"LONGITUDE" : 113.93914,
+				"LASTUPDATE" : "20220520142653"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1965704843, 22.3455875756 ]
+			},
+			"properties" : {
+				"OBJECTID" : 32,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Our Lady of Maryknoll Hospital",
+				"ADDRESS_EN" : "118 Shatin Pass Road, Wong Tai Sin, KLN",
+				"NAME_TC" : "聖母醫院",
+				"ADDRESS_TC" : "九龍黃大仙沙田坳道118號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "2320 2121",
+				"NSEARCH01_TC" : "2320 2121",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100155&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100155&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 822944,
+				"EASTING" : 838296.9,
+				"LATITUDE" : 22.345588,
+				"LONGITUDE" : 114.19657,
+				"LASTUPDATE" : "20220520142653"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.0415904767, 22.4452298543 ]
+			},
+			"properties" : {
+				"OBJECTID" : 33,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Pok Oi Hospital",
+				"ADDRESS_EN" : "Au Tau, Yuen Long, NT",
+				"NAME_TC" : "博愛醫院",
+				"ADDRESS_TC" : "新界元朗坳頭",
+				"SEARCH01_EN" : "NEW TERRITORIES WEST CLUSTER",
+				"SEARCH01_TC" : "新界西醫院聯網",
+				"NSEARCH01_EN" : "2486 8000",
+				"NSEARCH01_TC" : "2486 8000",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100174&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100174&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 833984.1,
+				"EASTING" : 822342.3,
+				"LATITUDE" : 22.44523,
+				"LONGITUDE" : 114.04159,
+				"LASTUPDATE" : "20220520142653"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1245598324, 22.4968318269 ]
+			},
+			"properties" : {
+				"OBJECTID" : 34,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "North District Hospital",
+				"ADDRESS_EN" : "9 Po Kin Road, Sheung Shui, NT",
+				"NAME_TC" : "北區醫院",
+				"ADDRESS_TC" : "新界上水保健路9號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "2683 8888",
+				"NSEARCH01_TC" : "2683 8888",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100178&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100178&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 839693,
+				"EASTING" : 830884.9,
+				"LATITUDE" : 22.496831999999998,
+				"LONGITUDE" : 114.12456,
+				"LASTUPDATE" : "20220520142652"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.179569791, 22.3237076656 ]
+			},
+			"properties" : {
+				"OBJECTID" : 35,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Kowloon Hospital",
+				"ADDRESS_EN" : "147A Argyle Street, KLN",
+				"NAME_TC" : "九龍醫院",
+				"ADDRESS_TC" : "九龍亞皆老街147A",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "3129 7111",
+				"NSEARCH01_TC" : "3129 7111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100151&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100151&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 820521,
+				"EASTING" : 836545.7000000001,
+				"LATITUDE" : 22.323708,
+				"LONGITUDE" : 114.17957,
+				"LASTUPDATE" : "20220520142652"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1887403175, 22.3356799982 ]
+			},
+			"properties" : {
+				"OBJECTID" : 36,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Hong Kong Buddhist Hospital",
+				"ADDRESS_EN" : "10 Heng Lam Street, Lok Fu, KLN",
+				"NAME_TC" : "香港佛教醫院",
+				"ADDRESS_TC" : "九龍樂富杏林街10號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "2339 6111",
+				"NSEARCH01_TC" : "2339 6111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100152&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100152&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 821846.8,
+				"EASTING" : 837490.4,
+				"LATITUDE" : 22.33568,
+				"LONGITUDE" : 114.18874,
+				"LASTUPDATE" : "20220520142651"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1744295729, 22.3107939175 ]
+			},
+			"properties" : {
+				"OBJECTID" : 37,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Hong Kong Red Cross Blood Transfusion Service",
+				"ADDRESS_EN" : "15 King's Park Rise, KLN",
+				"NAME_TC" : "香港紅十字會輸血服務中心",
+				"ADDRESS_TC" : "九龍京士柏道15號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "2710 1234",
+				"NSEARCH01_TC" : "2710 1234",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100179&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100179&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 819091,
+				"EASTING" : 836016.1,
+				"LATITUDE" : 22.310793999999998,
+				"LONGITUDE" : 114.17443,
+				"LASTUPDATE" : "20220520142651"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2088595476, 22.3157566998 ]
+			},
+			"properties" : {
+				"OBJECTID" : 38,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Hong Kong Children's Hospital",
+				"ADDRESS_EN" : "1 Shing Cheong Road, Kowloon Bay, KLN",
+				"NAME_TC" : "香港兒童醫院",
+				"ADDRESS_TC" : "九龍灣承昌道一號",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "3513 3888",
+				"NSEARCH01_TC" : "3513 3888",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=244164&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=244164&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 819640.9,
+				"EASTING" : 839563.5,
+				"LATITUDE" : 22.315756999999998,
+				"LONGITUDE" : 114.20886,
+				"LASTUPDATE" : "20220520142651"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1846200292, 22.3249266311 ]
+			},
+			"properties" : {
+				"OBJECTID" : 39,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Hong Kong Eye Hospital",
+				"ADDRESS_EN" : "147K Argyle Street, KLN",
+				"NAME_TC" : "香港眼科醫院",
+				"ADDRESS_TC" : "九龍亞皆老街147K",
+				"SEARCH01_EN" : "KOWLOON CENTRAL CLUSTER",
+				"SEARCH01_TC" : "九龍中醫院聯網",
+				"NSEARCH01_EN" : "2762 3007",
+				"NSEARCH01_TC" : "2762 3007",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100159&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100159&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 820656,
+				"EASTING" : 837066,
+				"LATITUDE" : 22.324927,
+				"LONGITUDE" : 114.18462,
+				"LASTUPDATE" : "20220520142651"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 113.9737400614, 22.4100114009 ]
+			},
+			"properties" : {
+				"OBJECTID" : 40,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Castle Peak Hospital",
+				"ADDRESS_EN" : "15 Tsing Chung Koon Road, Tuen Mun, NT",
+				"NAME_TC" : "青山醫院",
+				"ADDRESS_TC" : "新界屯門青松觀路15號",
+				"SEARCH01_EN" : "NEW TERRITORIES WEST CLUSTER",
+				"SEARCH01_TC" : "新界西醫院聯網",
+				"NSEARCH01_EN" : "2456 7111",
+				"NSEARCH01_TC" : "2456 7111",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100176&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100176&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 830092,
+				"EASTING" : 815352.7000000001,
+				"LATITUDE" : 22.410010999999997,
+				"LONGITUDE" : 113.97373999999999,
+				"LASTUPDATE" : "20220520142650"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2165303124, 22.3991801345 ]
+			},
+			"properties" : {
+				"OBJECTID" : 41,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Cheshire Home, Shatin",
+				"ADDRESS_EN" : "30 A Kung Kok Shan Road, Shatin, NT",
+				"NAME_TC" : "沙田慈氏護養院",
+				"ADDRESS_TC" : "新界沙田亞公角山路30號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "2636 7288",
+				"NSEARCH01_TC" : "2636 7288",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100169&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100169&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 828879,
+				"EASTING" : 840351.4,
+				"LATITUDE" : 22.399179999999998,
+				"LONGITUDE" : 114.21653,
+				"LASTUPDATE" : "20220520142650"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.2150996262, 22.398512222 ]
+			},
+			"properties" : {
+				"OBJECTID" : 42,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Bradbury Hospice",
+				"ADDRESS_EN" : "17 A Kung Kok Shan Road, Shatin, NT",
+				"NAME_TC" : "白普理寧養中心",
+				"ADDRESS_TC" : "新界沙田亞公角山路17號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "2636 0163",
+				"NSEARCH01_TC" : "2636 0163",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100170&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100170&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 828805,
+				"EASTING" : 840204.1,
+				"LATITUDE" : 22.398512,
+				"LONGITUDE" : 114.2151,
+				"LASTUPDATE" : "20220520142650"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1523096953, 22.3406291405 ]
+			},
+			"properties" : {
+				"OBJECTID" : 43,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Caritas Medical Centre",
+				"ADDRESS_EN" : "111 Wing Hong Street, Sham Shui Po, KLN",
+				"NAME_TC" : "明愛醫院",
+				"ADDRESS_TC" : "九龍深水埗永康街111號",
+				"SEARCH01_EN" : "KOWLOON WEST CLUSTER",
+				"SEARCH01_TC" : "九龍西醫院聯網",
+				"NSEARCH01_EN" : "3408 5678",
+				"NSEARCH01_TC" : "3408 5678",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100163&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100163&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 822395,
+				"EASTING" : 833737.5,
+				"LATITUDE" : 22.340629,
+				"LONGITUDE" : 114.15231,
+				"LASTUPDATE" : "20220520142650"
+			}
+		},
+		{
+			"type" : "Feature",
+			"geometry" : {
+				"type" : "Point",
+				"coordinates" : [ 114.1747903941, 22.4586958089 ]
+			},
+			"properties" : {
+				"OBJECTID" : 44,
+				"DATASET_EN" : "Hospital Authority Hospital/Institution List",
+				"DATASET_TC" : "醫院管理局轄下醫院/機構目錄",
+				"NAME_EN" : "Alice Ho Miu Ling Nethersole Hospital",
+				"ADDRESS_EN" : "11 Chuen On Road, Tai Po, NT",
+				"NAME_TC" : "雅麗氏何妙齡那打素醫院",
+				"ADDRESS_TC" : "新界大埔全安路11號",
+				"SEARCH01_EN" : "NEW TERRITORIES EAST CLUSTER",
+				"SEARCH01_TC" : "新界東醫院聯網",
+				"NSEARCH01_EN" : "2689 2000",
+				"NSEARCH01_TC" : "2689 2000",
+				"NSEARCH02_EN" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100171&Lang=ENG",
+				"NSEARCH02_TC" : "https://www.ha.org.hk/visitor/ha_visitor_index.asp?Content_ID=100171&Lang=CHIB5",
+				"NSEARCH03_EN" : "N.A.",
+				"NSEARCH03_TC" : "N.A.",
+				"NORTHING" : 835469,
+				"EASTING" : 836053.5,
+				"LATITUDE" : 22.458696,
+				"LONGITUDE" : 114.17479,
+				"LASTUPDATE" : "20220520142649"
+			}
+		}
+	]
+}

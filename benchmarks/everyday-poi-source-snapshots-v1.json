@@ -30,6 +30,45 @@
       "source_license": "Open Government Data License, version 1.0",
       "source_name": "Tourism Information Database - Restaurants",
       "source_url": "https://data.gov.tw/dataset/7779"
+    },
+    {
+      "accessed_at": "2026-08-03T15:21:43Z",
+      "download_locator": "https://portal.csdi.gov.hk/csdi-webpage/file-api?dataset_id=fhb_rcd_1637028364270_14638&format=geojson&layer_name=HOSPITAL",
+      "id": "hk-ha-health-care-facilities",
+      "license_snapshot_bytes": 39948,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/hk-license.html",
+      "license_snapshot_sha256": "c901a8f56c42a4cbcb2502c10d3623309529500e38f5d6c247aab68c6149dde0",
+      "license_url": "https://data.gov.hk/en/terms-and-conditions",
+      "snapshot_bytes": 48531,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/hk-hospitals.geojson",
+      "snapshot_sha256": "8a766762a9eb1e49b800a7ff41ed0855ab753ea85a25eab8869bccff7df1da0a",
+      "source_license": "DATA.GOV.HK Terms of Use version 1.2",
+      "source_name": "Hospital Authority Hospital/Institution List",
+      "source_url": "https://data.gov.hk/tc-data/dataset/hospital-hadata-health-care-facilities/resource/db3a9da3-9ecd-40ec-b91d-0f1c2dd2a08c"
+    },
+    {
+      "accessed_at": "2026-08-03T15:23:41Z",
+      "coordinate_transformation": {
+        "accuracy_metres": 1.0,
+        "always_xy": true,
+        "operation": "axis order change (2D) + Inverse of Korea Modified Central Belt + Korean 1985 to WGS 84 (1) + axis order change (2D)",
+        "proj_version": "9.5.1",
+        "pyproj_version": "3.7.2",
+        "source_crs": "EPSG:5174",
+        "target_crs": "EPSG:4326"
+      },
+      "download_locator": "https://data.seoul.go.kr/dataList/dataView.do?onepagerow=1000&srvType=S&infId=OA-16479&serviceKind=0&pageNo=1&ssUserId=SAMPLE_VIEW&strWhere=&strOrderby=&filterCol=&txtFilter=&browser1=chrome&version=1",
+      "id": "kr-seoul-hospital-licenses",
+      "license_snapshot_bytes": 7729,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/kr-license.html",
+      "license_snapshot_sha256": "6b40c3874cf8866f61d8d1bab95e5d4bbedae4dd11347288883a1e83cfd425a6",
+      "license_url": "https://www.kogl.or.kr/info/licenseType1.do",
+      "snapshot_bytes": 562956,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/kr-seoul-hospitals.js",
+      "snapshot_sha256": "0f7b8178b66c6a2b4e7171c90fbbc293f4ca9413cf1f4869f744339b16044699",
+      "source_license": "Korea Open Government Licence Type 1",
+      "source_name": "Seoul Hospital Licensing Information",
+      "source_url": "https://data.seoul.go.kr/dataList/OA-16479/S/1/datasetView.do?tab=A"
     }
   ]
 }

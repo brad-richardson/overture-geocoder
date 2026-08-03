@@ -1614,13 +1614,20 @@ sources and four macroregions, all outside Europe/North America, with 100
 non-Latin cases and five families: civic/transit, food/drink, healthcare,
 lodging, and retail. Selection is deterministic from source records before any
 provider request. The validator enforces independent provenance and excludes
-Nominatim/Photon for any gold later found to be OSM-derived. Collection batch 1
-froze 50 cases with zero provider requests: 20 Singapore rail stations and 30
-Tainan food/drink records. The current Taiwan feed has no Taipei records, so the
+Nominatim/Photon for any gold later found to be OSM-derived. Collection batches
+1-2 froze 90 cases with zero provider requests: 20 Singapore rail stations, 30
+Tainan food/drink records, 20 Hong Kong Hospital Authority facilities, and 20
+active Seoul hospitals. The current Taiwan feed has no Taipei records, so the
 source filter moved to five Tainan core districts rather than silently filling
-the quota from another provider. The readiness report remains correctly red on
-the seven incomplete coverage gates. Do not commit past sidecar Phase 0 until
-the full tripwire is frozen and measured.
+the quota from another provider. Hong Kong contributes official bilingual
+WGS84 points with stable `OBJECTID`s. Seoul's full 929-row licensing preview is
+parsed as data rather than evaluated, filtered on explicit active/open status,
+and transformed from EPSG:5174 with pinned pyproj 3.7.2 / PROJ 9.5.1 while
+retaining the original coordinates and operation contract. The readiness
+report remains correctly red on the seven incomplete coverage gates: 90/200
+cases, 70/80 non-Latin cases, two/four macroregions, four/eight countries, and
+three/five families. Do not commit past sidecar Phase 0 until the full tripwire
+is frozen and measured.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
