@@ -1582,7 +1582,10 @@ evidence:
 - `benchmarks/gers-qid-sidecar-phase0-spec-v1.json`;
 - `benchmarks/2026-08-03-gers-place-stability-v1.json`;
 - `benchmarks/everyday-poi-tripwire-spec-v1.json`; and
-- `benchmarks/everyday-poi-source-plan-v1.json`.
+- `benchmarks/everyday-poi-source-plan-v1.json`;
+- `benchmarks/everyday-poi-source-snapshots-v1.json`;
+- `benchmarks/everyday-poi-tripwire-cases-v1.json`; and
+- `benchmarks/everyday-poi-tripwire-readiness-v1.json`.
 
 The audit report's “release-scoped GERS-to-QID match table” is corrected.
 Overture intends GERS IDs to be stable, so accepted GERS-to-QID associations are
@@ -1611,9 +1614,13 @@ sources and four macroregions, all outside Europe/North America, with 100
 non-Latin cases and five families: civic/transit, food/drink, healthcare,
 lodging, and retail. Selection is deterministic from source records before any
 provider request. The validator enforces independent provenance and excludes
-Nominatim/Photon for any gold later found to be OSM-derived. Case collection is
-not yet complete. Do not commit past sidecar Phase 0 until this tripwire is
-frozen and measured.
+Nominatim/Photon for any gold later found to be OSM-derived. Collection batch 1
+froze 50 cases with zero provider requests: 20 Singapore rail stations and 30
+Tainan food/drink records. The current Taiwan feed has no Taipei records, so the
+source filter moved to five Tainan core districts rather than silently filling
+the quota from another provider. The readiness report remains correctly red on
+the seven incomplete coverage gates. Do not commit past sidecar Phase 0 until
+the full tripwire is frozen and measured.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
