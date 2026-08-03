@@ -617,7 +617,8 @@
       "expected_lon": 16.3693,
       "tolerance_km": 1.0,
       "alt_names": [
-        "Hotel Sacher Wien"
+        "Hotel Sacher Wien",
+        "Hotel Sacher Vienna"
       ],
       "strata": {
         "poi_family": "lodging",

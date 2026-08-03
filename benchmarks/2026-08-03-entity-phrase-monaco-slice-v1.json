@@ -1,0 +1,44 @@
+{
+  "schema": "overture-places-entity-phrase-monaco-slice-v1",
+  "date": "2026-08-03",
+  "source_release": "2026-07-22.0",
+  "schema_profile": "taxonomy",
+  "bbox": [7.36, 43.71, 7.47, 43.78],
+  "task_index": 33,
+  "input_records": 38182,
+  "admitted_records": 38172,
+  "entity_phrase_admission": "prominence-primary-name-v1",
+  "result": {
+    "reconciles": true,
+    "partitions": 4,
+    "serving_objects": 21,
+    "head_populated_shards": 16,
+    "term_rows": 339877,
+    "head_records": 71051,
+    "head_index_entries": 28381,
+    "entity_phrase_head_records": 927,
+    "total_store_bytes": 87122050,
+    "manifest_advertises_capability": true,
+    "routed_artifacts_contain_entity_phrase_prefix": false
+  },
+  "comparison": {
+    "baseline": "benchmarks/2026-08-02-taxonomy-slice-comparison-v1.json taxonomy run",
+    "same_source_rows": true,
+    "baseline_term_rows": 338950,
+    "baseline_head_records": 70124,
+    "baseline_total_store_bytes": 86589934,
+    "term_rows_delta": 927,
+    "term_rows_growth_pct": 0.274,
+    "head_records_delta": 927,
+    "head_records_growth_pct": 1.322,
+    "total_store_bytes_delta": 532116,
+    "total_store_bytes_growth_pct": 0.615
+  },
+  "verification": [
+    "All five construction-v1 phases completed against real Overture data.",
+    "The sharded verifier accepted all 16 head shards and the independent additive binding.",
+    "The finalizer reconciled the exact publication set and wrote its marker last.",
+    "All 927 synthetic phrase rows reached the head; no e2:/e3: key was present in a routed artifact."
+  ],
+  "limitation": "One real-data slice is the fast loop, not a planet projection; seven-metro sizing is recorded separately."
+}

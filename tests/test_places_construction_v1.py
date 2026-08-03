@@ -76,6 +76,13 @@ def write_fixture(path: Path, rows: list[dict], *, row_group_size: int = 4) -> N
         "source_row_group",
         "source_row_index",
     ]
+    if any("prominence_rank" in row for row in rows):
+        prominence_index = names.index("confidence") + 1
+        arrays.insert(
+            prominence_index,
+            pa.array(values("prominence_rank", 0), type=pa.uint8()),
+        )
+        names.insert(prominence_index, "prominence_rank")
     if any("category_terms" in row for row in rows):
         arrays.insert(5, pa.array(values("category_terms", ""), type=pa.string()))
         names.insert(5, "category_terms")
@@ -255,6 +262,58 @@ def test_taxonomy_category_terms_are_searchable_but_display_stays_primary(
     assert terms["restaurant"] == 4
     assert terms["food_and_drink"] == 4
     assert set(table["category"].to_pylist()) == {"cantonese_restaurant"}
+
+
+def test_prominent_short_primary_names_emit_one_head_only_phrase_key(
+    tmp_path, transform_binary
+):
+    rows = [
+        {
+            "id": str(uuid.UUID(int=101)),
+            "primary_name": "Big Ben",
+            "prominence_rank": 89,
+            "source_row_index": 0,
+        },
+        {
+            "id": str(uuid.UUID(int=102)),
+            "primary_name": "Noma Copenhagen",
+            "prominence_rank": 0,
+            "source_row_index": 1,
+        },
+        {
+            "id": str(uuid.UUID(int=103)),
+            "primary_name": "One Two Three Four",
+            "prominence_rank": 255,
+            "source_row_index": 2,
+        },
+        {
+            "id": str(uuid.UUID(int=104)),
+            "primary_name": "Empire State Building",
+            "prominence_rank": 128,
+            "source_row_index": 3,
+        },
+    ]
+
+    _, table = run_transform(tmp_path, transform_binary, rows)
+    by_id = collections.defaultdict(dict)
+    for feature_id, token, mask in zip(
+        table["feature_id"].to_pylist(),
+        table["token"].to_pylist(),
+        table["field_mask"].to_pylist(),
+        strict=True,
+    ):
+        by_id[uuid.UUID(bytes=feature_id).int][token] = mask
+
+    assert by_id[101]["e2:big ben"] == 1
+    assert not any(token.startswith("e2:") for token in by_id[102])
+    assert not any(token.startswith("e") and ":" in token for token in by_id[103])
+    assert by_id[104]["e3:empire state building"] == 1
+
+
+def test_entity_phrase_keys_are_excluded_from_routed_serving(construction_module):
+    predicate = construction_module.ROUTED_REAL_TOKEN_PREDICATE
+    assert construction_module.ENTITY_PHRASE_PREFIXES == ("e2:", "e3:")
+    assert "e2:" in predicate and "e3:" in predicate
 
 
 def test_places_locator_bounds_and_typed_corruption(tmp_path, transform_binary):
@@ -1548,6 +1607,10 @@ def test_sharded_head_manifest_tamper_fails_closed(
 
     assert verify(manifest) == 0
     assert manifest["schema"] == "overture-places-global-head-sharded-v2"
+    assert manifest["entity_phrase_admission"] == "prominence-primary-name-v1"
+    unknown_admission = json.loads(json.dumps(manifest))
+    unknown_admission["entity_phrase_admission"] = "unknown"
+    assert verify(unknown_admission) != 0
     assert manifest["merged_head_binding"]["records"] == manifest["total_records"]
     inflated = json.loads(json.dumps(manifest))
     inflated["total_records"] += 1

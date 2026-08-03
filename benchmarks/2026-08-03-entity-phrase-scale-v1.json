@@ -1,0 +1,134 @@
+{
+  "estimation_basis": {
+    "bytes_per_record": 166.712,
+    "planet_admitted_place_rows": 75631061,
+    "planet_head_bytes": 5141583720,
+    "planet_head_records": 30841082
+  },
+  "head_result_cap": 10,
+  "limitations": [
+    "Seven metro bboxes are not a planet projection.",
+    "SQL normalization is sufficient for Latin-script sizing but is not the frozen Rust tokenizer oracle.",
+    "The bytes estimate charges the current head average and is directional, not an encoded artifact measurement."
+  ],
+  "phrase_contract": {
+    "admission": "existing prominence_rank > 0",
+    "field": "primary_name",
+    "key_limit_per_record": 1,
+    "normalization": "bounded SQL approximation of nfkd-lower-stripmark-cjk-bigram-v4",
+    "token_count": [
+      2,
+      3
+    ]
+  },
+  "regions": {
+    "berlin_de": {
+      "admitted_rows": 94498,
+      "all_phrase_input_records": 54574,
+      "all_phrase_keys": 48669,
+      "all_phrase_retained_records": 53085,
+      "all_retained_pct_of_admitted": 56.176,
+      "largest_all_phrase_posting": 435,
+      "largest_prominent_phrase_posting": 7,
+      "prominent_phrase_input_records": 3266,
+      "prominent_phrase_keys": 3134,
+      "prominent_phrase_retained_records": 3266,
+      "prominent_retained_pct_of_admitted": 3.456
+    },
+    "lagos_ng": {
+      "admitted_rows": 35194,
+      "all_phrase_input_records": 20728,
+      "all_phrase_keys": 20296,
+      "all_phrase_retained_records": 20704,
+      "all_retained_pct_of_admitted": 58.828,
+      "largest_all_phrase_posting": 20,
+      "largest_prominent_phrase_posting": 20,
+      "prominent_phrase_input_records": 1052,
+      "prominent_phrase_keys": 980,
+      "prominent_phrase_retained_records": 1038,
+      "prominent_retained_pct_of_admitted": 2.949
+    },
+    "mumbai_in": {
+      "admitted_rows": 122106,
+      "all_phrase_input_records": 73914,
+      "all_phrase_keys": 64021,
+      "all_phrase_retained_records": 70528,
+      "all_retained_pct_of_admitted": 57.76,
+      "largest_all_phrase_posting": 274,
+      "largest_prominent_phrase_posting": 8,
+      "prominent_phrase_input_records": 5753,
+      "prominent_phrase_keys": 5538,
+      "prominent_phrase_retained_records": 5753,
+      "prominent_retained_pct_of_admitted": 4.711
+    },
+    "paris_fr": {
+      "admitted_rows": 165575,
+      "all_phrase_input_records": 95809,
+      "all_phrase_keys": 83368,
+      "all_phrase_retained_records": 92309,
+      "all_retained_pct_of_admitted": 55.751,
+      "largest_all_phrase_posting": 372,
+      "largest_prominent_phrase_posting": 14,
+      "prominent_phrase_input_records": 5930,
+      "prominent_phrase_keys": 5667,
+      "prominent_phrase_retained_records": 5926,
+      "prominent_retained_pct_of_admitted": 3.579
+    },
+    "sao_paulo_br": {
+      "admitted_rows": 283467,
+      "all_phrase_input_records": 167522,
+      "all_phrase_keys": 150496,
+      "all_phrase_retained_records": 162457,
+      "all_retained_pct_of_admitted": 57.311,
+      "largest_all_phrase_posting": 257,
+      "largest_prominent_phrase_posting": 17,
+      "prominent_phrase_input_records": 8485,
+      "prominent_phrase_keys": 7959,
+      "prominent_phrase_retained_records": 8474,
+      "prominent_retained_pct_of_admitted": 2.989
+    },
+    "seattle_us": {
+      "admitted_rows": 49526,
+      "all_phrase_input_records": 29842,
+      "all_phrase_keys": 25608,
+      "all_phrase_retained_records": 29257,
+      "all_retained_pct_of_admitted": 59.074,
+      "largest_all_phrase_posting": 98,
+      "largest_prominent_phrase_posting": 8,
+      "prominent_phrase_input_records": 2394,
+      "prominent_phrase_keys": 2274,
+      "prominent_phrase_retained_records": 2394,
+      "prominent_retained_pct_of_admitted": 4.834
+    },
+    "tokyo_jp": {
+      "admitted_rows": 270481,
+      "all_phrase_input_records": 99799,
+      "all_phrase_keys": 94335,
+      "all_phrase_retained_records": 98349,
+      "all_retained_pct_of_admitted": 36.361,
+      "largest_all_phrase_posting": 704,
+      "largest_prominent_phrase_posting": 4,
+      "prominent_phrase_input_records": 3380,
+      "prominent_phrase_keys": 3328,
+      "prominent_phrase_retained_records": 3380,
+      "prominent_retained_pct_of_admitted": 1.25
+    }
+  },
+  "schema": "overture-places-entity-phrase-scale-v1",
+  "source_release": "2026-06-17.0",
+  "totals": {
+    "admitted_rows": 1020847,
+    "all_estimated_bytes": 87805466,
+    "all_phrase_input_records": 542188,
+    "all_phrase_keys": 486793,
+    "all_phrase_retained_records": 526689,
+    "all_retained_pct_of_admitted": 51.593,
+    "directional_planet_prominent_bytes": 373387082,
+    "directional_planet_prominent_records": 2239711,
+    "prominent_estimated_bytes": 5039876,
+    "prominent_phrase_input_records": 30260,
+    "prominent_phrase_keys": 28880,
+    "prominent_phrase_retained_records": 30231,
+    "prominent_retained_pct_of_admitted": 2.961
+  }
+}

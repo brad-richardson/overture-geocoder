@@ -415,6 +415,32 @@ def test_curated_machu_picchu_case_accepts_the_official_citadel_name():
     assert "Ciudadela de Machu Picchu" in case["alt_names"]
 
 
+def test_curated_hotel_sacher_case_accepts_the_english_city_name():
+    payload = json.loads(
+        (SCRIPT.parent.parent / "benchmarks/v2-forward-gold-cases-v1.json")
+        .read_text()
+    )
+    case = next(
+        case
+        for case in payload["cases"]
+        if case["id"] == "gold:named_poi:hotel-sacher-vienna"
+    )
+    target = feature(
+        "hotel-sacher-vienna",
+        16.3693,
+        48.2039,
+        name="Hotel Sacher Vienna",
+    )
+
+    rank, distance, _ = bench.score_case(
+        case, [target], provider="overture", semantic_scoring=True
+    )
+
+    assert rank == 1
+    assert distance == 0.0
+    assert "Hotel Sacher Vienna" in case["alt_names"]
+
+
 def test_aggregate_and_summary_math():
     rows = [
         {"kind": "place", "query_style": "name", "strata": {"country": "MC"},

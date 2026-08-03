@@ -160,6 +160,13 @@ HEAD_ORDER = f"token, {CAP_ORDER}"
 # expression.
 SERVING_ORDER = CAP_ORDER
 SERVING_PARTITION = "PARTITION BY partition_cell, token"
+# Synthetic exact-primary-name keys are global-head-only. They share the term
+# stream so all existing top-N/digest proofs apply, then are deliberately
+# excluded from routed artifacts that no located query will request.
+ENTITY_PHRASE_PREFIXES = ("e2:", "e3:")
+ROUTED_REAL_TOKEN_PREDICATE = " AND ".join(
+    f"NOT starts_with(token, '{prefix}')" for prefix in ENTITY_PHRASE_PREFIXES
+)
 # The combiner deletes rows outside the top-N of each (partition_cell, token)
 # group. That is exact ONLY while a group is never split across two reduce
 # partitions -- otherwise a row outside the global top-N could be inside a
@@ -2000,7 +2007,8 @@ def _emit_partition(
         # exactly one place where the partition's row set is decided.
         serving_rows = A.write_arrow_query(
             connection,
-            f"SELECT * FROM read_parquet('{leaf}') QUALIFY row_number() OVER "
+            f"SELECT * FROM read_parquet('{leaf}') "
+            f"WHERE {ROUTED_REAL_TOKEN_PREDICATE} QUALIFY row_number() OVER "
             f"({SERVING_PARTITION} ORDER BY {SERVING_ORDER})"
             f"<={limits.maximum_serving_candidates} ORDER BY {TOTAL_ORDER}",
             arrow,
@@ -3133,6 +3141,7 @@ def build_sharded_global_head_from_markers(
         # misroute rejection -- survivable at 16 shards, unusable at 4096.
         manifest = {
             "schema": "overture-places-global-head-sharded-v2",
+            "entity_phrase_admission": "prominence-primary-name-v1",
             "shard_count": shard_count,
             "shard_bits": shard_bits,
             "populated_shards": len(shard_entries),

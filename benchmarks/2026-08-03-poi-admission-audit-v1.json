@@ -1,0 +1,3874 @@
+{
+  "case_count": 23,
+  "cases": [
+    {
+      "case_id": "gold:name:big-ben",
+      "classification": "global_head_or_locality_routing",
+      "entity_phrase_candidate_ids": [
+        "99f74940-898a-49d5-9eca-18a8a2c47918"
+      ],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.002,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -0.1246,
+                51.5007
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Big Ben",
+            "rank": 3,
+            "result_count": 10,
+            "top1_distance_km": 1.337,
+            "top_names": [
+              "Big Ben",
+              "Big Ben",
+              "Big Ben"
+            ]
+          },
+          {
+            "matched_distance_km": 0.018,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -0.1246,
+                51.5007
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Elizabeth Tower",
+            "rank": 1,
+            "result_count": 3,
+            "top1_distance_km": 0.018,
+            "top_names": [
+              "Elizabeth Tower, Palace of Westminster",
+              "Elizabeth Tower (Big Ben)",
+              "The Elizabeth Tower"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.002,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -0.1246,
+              51.5007
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 10,
+          "top1_distance_km": 1.337,
+          "top_names": [
+            "Big Ben",
+            "Big Ben",
+            "Big Ben"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 5430.893,
+          "top_names": [
+            "Big Ben Memorial Statue"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.002,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -0.1246,
+              51.5007
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 10,
+          "top1_distance_km": 1.337,
+          "top_names": [
+            "Big Ben",
+            "Big Ben",
+            "Big Ben"
+          ]
+        }
+      },
+      "query": "Big Ben",
+      "query_style": "name",
+      "source_bbox_rows": 52530,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "central_government_office",
+            "tours"
+          ],
+          "basic_category": "historic_site",
+          "brand_name": "Big Ben Tower, London",
+          "category": "landmark_and_historical_building",
+          "confidence": 0.9356468319892883,
+          "distance_km": 0.002,
+          "id": "99f74940-898a-49d5-9eca-18a8a2c47918",
+          "latitude": 51.500694274902344,
+          "longitude": -0.1245749220252037,
+          "operating_status": null,
+          "primary_name": "Big Ben",
+          "prominence_rank": 89
+        },
+        {
+          "alternate_categories": [
+            "landmark_and_historical_building",
+            "tours"
+          ],
+          "basic_category": "public_fountain",
+          "brand_name": null,
+          "category": "fountain",
+          "confidence": 0.8119909763336182,
+          "distance_km": 0.018,
+          "id": "ea5deb7a-3ef4-4c4d-8ed5-b73da2f78d5a",
+          "latitude": 51.500831604003906,
+          "longitude": -0.12444444745779037,
+          "operating_status": null,
+          "primary_name": "Elizabeth Tower, Palace of Westminster",
+          "prominence_rank": 45
+        },
+        {
+          "alternate_categories": [
+            "accommodation"
+          ],
+          "basic_category": "historic_site",
+          "brand_name": null,
+          "category": "landmark_and_historical_building",
+          "confidence": 0.8719004988670349,
+          "distance_km": 0.126,
+          "id": "1fc2110b-ce75-4983-a440-2e2788d115bb",
+          "latitude": 51.50071716308594,
+          "longitude": -0.1264192759990692,
+          "operating_status": null,
+          "primary_name": "Big Ben, Parliament Square",
+          "prominence_rank": 89
+        }
+      ],
+      "strata": {}
+    },
+    {
+      "case_id": "gold:name:empire-state-building",
+      "classification": "global_head_or_locality_routing",
+      "entity_phrase_candidate_ids": [
+        "91b41dc1-59cb-4822-af8b-bb45d3b96f42",
+        "f041dba7-18f9-49b8-8f22-5b8b8d9b4902"
+      ],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.645,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -73.9857,
+                40.7484
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Empire State Building",
+            "rank": 1,
+            "result_count": 10,
+            "top1_distance_km": 0.645,
+            "top_names": [
+              "Empire State Building, Manatthan",
+              "Empire State Building",
+              "Empire State Building"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.645,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -73.9857,
+              40.7484
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.645,
+          "top_names": [
+            "Empire State Building, Manatthan",
+            "Empire State Building",
+            "Empire State Building"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.645,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -73.9857,
+              40.7484
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.645,
+          "top_names": [
+            "Empire State Building, Manatthan",
+            "Empire State Building",
+            "Empire State Building"
+          ]
+        }
+      },
+      "query": "Empire State Building",
+      "query_style": "name",
+      "source_bbox_rows": 137903,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "monument",
+            "observatory"
+          ],
+          "basic_category": "historic_site",
+          "brand_name": "Empire State Building",
+          "category": "landmark_and_historical_building",
+          "confidence": 0.9514120817184448,
+          "distance_km": 0.003,
+          "id": "91b41dc1-59cb-4822-af8b-bb45d3b96f42",
+          "latitude": 40.748416900634766,
+          "longitude": -73.98567962646484,
+          "operating_status": "open",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 128
+        },
+        {
+          "alternate_categories": [
+            "transportation",
+            "travel"
+          ],
+          "basic_category": "taxi_or_ride_share_service",
+          "brand_name": "Empire State Building",
+          "category": "limo_services",
+          "confidence": 0.744810163974762,
+          "distance_km": 0.037,
+          "id": "b80661e1-b0c5-4b88-9317-b9d7c0b869c3",
+          "latitude": 40.748294830322266,
+          "longitude": -73.98612213134766,
+          "operating_status": "open",
+          "primary_name": "New York Limousine Service",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "coffee_shop",
+            "art_museum"
+          ],
+          "basic_category": "museum",
+          "brand_name": null,
+          "category": "museum",
+          "confidence": 0.747342050075531,
+          "distance_km": 0.644,
+          "id": "b6a64328-6c33-4341-b95e-6fb10c8cc3bc",
+          "latitude": 40.74836730957031,
+          "longitude": -73.9780502319336,
+          "operating_status": null,
+          "primary_name": "Empire State Building, Manatthan",
+          "prominence_rank": 217
+        },
+        {
+          "alternate_categories": null,
+          "basic_category": null,
+          "brand_name": "Empire State Building",
+          "category": null,
+          "confidence": 0.7107001543045044,
+          "distance_km": 0.824,
+          "id": "183248b6-b2f7-4fc2-8ff8-12df51e9cb5c",
+          "latitude": 40.74146270751953,
+          "longitude": -73.98912811279297,
+          "operating_status": null,
+          "primary_name": "Empire State Building",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "arts_and_entertainment",
+            "travel_services"
+          ],
+          "basic_category": "historic_site",
+          "brand_name": "Empire State Building",
+          "category": "landmark_and_historical_building",
+          "confidence": 0.7892091274261475,
+          "distance_km": 1.513,
+          "id": "c704e6e1-c664-4364-a040-f5ce99aa241c",
+          "latitude": 40.756656646728516,
+          "longitude": -73.97142791748047,
+          "operating_status": "open",
+          "primary_name": "Empire State Building, New York",
+          "prominence_rank": 89
+        },
+        {
+          "alternate_categories": [
+            "arts_and_entertainment",
+            "active_life"
+          ],
+          "basic_category": "historic_site",
+          "brand_name": "Empire State Building",
+          "category": "landmark_and_historical_building",
+          "confidence": 0.8084574341773987,
+          "distance_km": 1.862,
+          "id": "f041dba7-18f9-49b8-8f22-5b8b8d9b4902",
+          "latitude": 40.764739990234375,
+          "longitude": -73.98085021972656,
+          "operating_status": "open",
+          "primary_name": "Empire State Building",
+          "prominence_rank": 89
+        }
+      ],
+      "strata": {}
+    },
+    {
+      "case_id": "gold:name:brandenburg-gate",
+      "classification": "routed_forward_admission_or_tokenization",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                13.3777,
+                52.5163
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Brandenburg Gate",
+            "rank": null,
+            "result_count": 6,
+            "top1_distance_km": 25.83,
+            "top_names": [
+              "Brandenburg Gate",
+              "Brandenburg Gate Berlin",
+              "Apartments at Brandenburg Gate"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                13.3777,
+                52.5163
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Brandenburger Tor",
+            "rank": null,
+            "result_count": 10,
+            "top1_distance_km": 0.26,
+            "top_names": [
+              "Brandenburger Tor (m\u00e9tro de Berlin)",
+              "Porta di Bradenburgo",
+              "Puerta de Brandeburgo"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              13.3777,
+              52.5163
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 6,
+          "top1_distance_km": 25.83,
+          "top_names": [
+            "Brandenburg Gate",
+            "Brandenburg Gate Berlin",
+            "Apartments at Brandenburg Gate"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              13.3777,
+              52.5163
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 6,
+          "top1_distance_km": 25.83,
+          "top_names": [
+            "Brandenburg Gate",
+            "Brandenburg Gate Berlin",
+            "Apartments at Brandenburg Gate"
+          ]
+        }
+      },
+      "query": "Brandenburg Gate",
+      "query_style": "name",
+      "source_bbox_rows": 56395,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "monument"
+          ],
+          "basic_category": "historic_site",
+          "brand_name": "Brandenburger Tor",
+          "category": "landmark_and_historical_building",
+          "confidence": 0.9964627861976624,
+          "distance_km": 0.005,
+          "id": "a071ff52-5af8-4317-84f1-29dc88f877d2",
+          "latitude": 52.51628494262695,
+          "longitude": 13.377766609191895,
+          "operating_status": null,
+          "primary_name": "Brandenburger Tor",
+          "prominence_rank": 128
+        },
+        {
+          "alternate_categories": [
+            "landmark_and_historical_building",
+            "tours"
+          ],
+          "basic_category": "monument",
+          "brand_name": "Brandenburger Tor",
+          "category": "monument",
+          "confidence": 0.7528827786445618,
+          "distance_km": 0.007,
+          "id": "891c6e0b-c826-4ee4-b251-3ee2390e8166",
+          "latitude": 52.51624298095703,
+          "longitude": 13.377666473388672,
+          "operating_status": null,
+          "primary_name": "Puerta de Brandeburgo",
+          "prominence_rank": 255
+        },
+        {
+          "alternate_categories": [
+            "travel_services",
+            "travel"
+          ],
+          "basic_category": "private_lodging",
+          "brand_name": "Brandenburger Tor",
+          "category": "holiday_rental_home",
+          "confidence": 0.28655144572257996,
+          "distance_km": 0.482,
+          "id": "562a38fa-63f6-4c4a-ac13-28adcef21fa7",
+          "latitude": 52.512062072753906,
+          "longitude": 13.37921142578125,
+          "operating_status": null,
+          "primary_name": "Serviceb\u00fcro Apartments am Brandenburger Tor",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": null,
+          "basic_category": "train_station",
+          "brand_name": "Brandenburger Tor",
+          "category": "train_station",
+          "confidence": 0.8339790105819702,
+          "distance_km": 1.386,
+          "id": "249c0aa0-f9d3-4e44-8c76-37fad39cd1ac",
+          "latitude": 52.52507019042969,
+          "longitude": 13.392258644104004,
+          "operating_status": null,
+          "primary_name": "Oranienburger Str.",
+          "prominence_rank": 140
+        }
+      ],
+      "strata": {}
+    },
+    {
+      "case_id": "gold:named_poi:pike-place-chowder",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.576,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -122.3412,
+                47.6095
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Pike Place Chowder",
+            "rank": 1,
+            "result_count": 2,
+            "top1_distance_km": 0.576,
+            "top_names": [
+              "Pike Place Chowder",
+              "Pike Place Chowder"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.576,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -122.3412,
+              47.6095
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 2,
+          "top1_distance_km": 0.576,
+          "top_names": [
+            "Pike Place Chowder",
+            "Pike Place Chowder"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.576,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "f195dba2-33a7-4585-ba9e-79fd7417b950",
+              "division_type": "locality",
+              "query": "seattle",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 2,
+          "top1_distance_km": 0.576,
+          "top_names": [
+            "Pike Place Chowder",
+            "Pike Place Chowder"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.576,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -122.3412,
+              47.6095
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 2,
+          "top1_distance_km": 0.576,
+          "top_names": [
+            "Pike Place Chowder",
+            "Pike Place Chowder"
+          ]
+        }
+      },
+      "query": "Pike Place Chowder Seattle",
+      "query_style": "named_poi",
+      "source_bbox_rows": 15294,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "soup_restaurant",
+            "american_restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": "Pike Place Chowder",
+          "category": "seafood_restaurant",
+          "confidence": 0.986574113368988,
+          "distance_km": 0.011,
+          "id": "cf4881c7-6ad8-49a5-a83c-e9b5b87ece31",
+          "latitude": 47.60941696166992,
+          "longitude": -122.34127807617188,
+          "operating_status": "open",
+          "primary_name": "Pike Place Chowder",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "soup_restaurant",
+            "restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": null,
+          "category": "seafood_restaurant",
+          "confidence": 0.9937361478805542,
+          "distance_km": 0.575,
+          "id": "5466e2fa-9b56-43df-9bd2-c585755f9049",
+          "latitude": 47.612823486328125,
+          "longitude": -122.33531951904297,
+          "operating_status": "open",
+          "primary_name": "Pike Place Chowder",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:noma",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.009,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                12.6106,
+                55.6828
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Noma",
+            "rank": 1,
+            "result_count": 3,
+            "top1_distance_km": 0.009,
+            "top_names": [
+              "Noma",
+              "Noma",
+              "Noma Restaurant , Copenhagen"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.009,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              12.6106,
+              55.6828
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 3,
+          "top1_distance_km": 0.009,
+          "top_names": [
+            "Noma",
+            "Noma",
+            "Noma Restaurant , Copenhagen"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              12.6106,
+              55.6828
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 5.237,
+          "top_names": [
+            "Noma Restaurant , Copenhagen"
+          ]
+        }
+      },
+      "query": "Noma Copenhagen",
+      "query_style": "named_poi",
+      "source_bbox_rows": 7063,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "scandinavian_restaurant",
+            "european_restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": null,
+          "category": "restaurant",
+          "confidence": 0.9900725370645523,
+          "distance_km": 0.009,
+          "id": "8a39e121-0c83-4a70-82f4-4cf5558b8a7d",
+          "latitude": 55.682838439941406,
+          "longitude": 12.610465049743652,
+          "operating_status": null,
+          "primary_name": "Noma",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.005,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                121.5301,
+                25.0335
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Din Tai Fung",
+            "rank": 3,
+            "result_count": 9,
+            "top1_distance_km": 62.59,
+            "top_names": [
+              "Din Tai Fung",
+              "Din Tai Fung",
+              "Din Tai Fung"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                121.5301,
+                25.0335
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Din Tai Fung Xinyi Branch",
+            "rank": null,
+            "result_count": 0,
+            "top1_distance_km": null,
+            "top_names": []
+          },
+          {
+            "matched_distance_km": 0.005,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                121.5301,
+                25.0335
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "\u9f0e\u6cf0\u8c50",
+            "rank": 2,
+            "result_count": 10,
+            "top1_distance_km": 2.277,
+            "top_names": [
+              "\u9f0e\u6cf0\u8c50",
+              "\u9f0e\u6cf0\u8c50",
+              "\u9f0e\u6cf0\u8c50"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.005,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              121.5301,
+              25.0335
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 9,
+          "top1_distance_km": 62.59,
+          "top_names": [
+            "Din Tai Fung",
+            "Din Tai Fung",
+            "Din Tai Fung"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              121.5301,
+              25.0335
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 3.827,
+          "top_names": [
+            "\u9f0e\u6cf0\u8c50 Din Tai Fung"
+          ]
+        }
+      },
+      "query": "Din Tai Fung Xinyi",
+      "query_style": "brand_branch",
+      "source_bbox_rows": 32459,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": null,
+          "category": "chinese_restaurant",
+          "confidence": 0.9231929183006287,
+          "distance_km": 0.005,
+          "id": "5605a6da-7f62-48e6-ae4c-3450bf4581f6",
+          "latitude": 25.033540725708008,
+          "longitude": 121.53012084960938,
+          "operating_status": null,
+          "primary_name": "Din Tai Fung",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "restaurant",
+            "asian_restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": null,
+          "category": "chinese_restaurant",
+          "confidence": 0.9969138145446778,
+          "distance_km": 0.005,
+          "id": "7d77d2a9-638f-49c6-be4b-77ef93919534",
+          "latitude": 25.03345489501953,
+          "longitude": 121.53010559082031,
+          "operating_status": null,
+          "primary_name": "\u9f0e\u6cf0\u8c50",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "brand_branch"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:cafe-de-flore",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.006,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                2.3325,
+                48.8541
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Cafe de Flore",
+            "rank": 1,
+            "result_count": 1,
+            "top1_distance_km": 0.006,
+            "top_names": [
+              "Caf\u00e9 de Flore"
+            ]
+          },
+          {
+            "matched_distance_km": 0.006,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                2.3325,
+                48.8541
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Caf\u00e9 de Flore",
+            "rank": 1,
+            "result_count": 1,
+            "top1_distance_km": 0.006,
+            "top_names": [
+              "Caf\u00e9 de Flore"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.006,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              2.3325,
+              48.8541
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.006,
+          "top_names": [
+            "Caf\u00e9 de Flore"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.006,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "8ac4f7a7-3596-4267-89a6-9ae3d1c6a634",
+              "division_type": "locality",
+              "query": "paris",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.006,
+          "top_names": [
+            "Caf\u00e9 de Flore"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.006,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              2.3325,
+              48.8541
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.006,
+          "top_names": [
+            "Caf\u00e9 de Flore"
+          ]
+        }
+      },
+      "query": "Cafe de Flore Paris",
+      "query_style": "named_poi",
+      "source_bbox_rows": 40164,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "french_restaurant",
+            "european_restaurant"
+          ],
+          "basic_category": "cafe",
+          "brand_name": "Caf\u00e9 de Flore",
+          "category": "cafe",
+          "confidence": 0.997887487411499,
+          "distance_km": 0.006,
+          "id": "17ddb220-ee08-4f7f-9d8d-8fd7c7c5953b",
+          "latitude": 48.85408401489258,
+          "longitude": 2.332585096359253,
+          "operating_status": null,
+          "primary_name": "Caf\u00e9 de Flore",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:harrods",
+      "classification": "global_head_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.01,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -0.1631,
+                51.4994
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Harrods",
+            "rank": 2,
+            "result_count": 10,
+            "top1_distance_km": 4.791,
+            "top_names": [
+              "Harrods Furniture Depository",
+              "Harrods",
+              "Harrods Estates"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.01,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -0.1631,
+              51.4994
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 2,
+          "result_count": 10,
+          "top1_distance_km": 4.791,
+          "top_names": [
+            "Harrods Furniture Depository",
+            "Harrods",
+            "Harrods Estates"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 4.791,
+          "top_names": [
+            "Harrods Furniture Depository"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.01,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -0.1631,
+              51.4994
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 10,
+          "top1_distance_km": 4.791,
+          "top_names": [
+            "Harrods Furniture Depository",
+            "Harrods Estates",
+            "Harrods"
+          ]
+        }
+      },
+      "query": "Harrods London",
+      "query_style": "named_poi",
+      "source_bbox_rows": 33068,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "shopping",
+            "shopping_center"
+          ],
+          "basic_category": "department_store",
+          "brand_name": "Harrods",
+          "category": "department_store",
+          "confidence": 0.9997246323883533,
+          "distance_km": 0.01,
+          "id": "fe52c66c-9aed-4158-b4c0-f161758cd156",
+          "latitude": 51.4994010925293,
+          "longitude": -0.1632380336523056,
+          "operating_status": null,
+          "primary_name": "Harrods",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "barbecue_restaurant",
+            "restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": "Harrods",
+          "category": "bar_and_grill_restaurant",
+          "confidence": 0.9823091626167297,
+          "distance_km": 0.028,
+          "id": "94585f32-d6db-4461-96ab-0270ae5a6502",
+          "latitude": 51.499176025390625,
+          "longitude": -0.16327032446861267,
+          "operating_status": null,
+          "primary_name": "Rotisserie Harrods",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "coffee_shop",
+            "desserts"
+          ],
+          "basic_category": "cafe",
+          "brand_name": "Harrods",
+          "category": "cafe",
+          "confidence": 0.7177503705024719,
+          "distance_km": 0.047,
+          "id": "e3b66d61-9838-4143-b89b-47610bd98167",
+          "latitude": 51.49930953979492,
+          "longitude": -0.16377010941505432,
+          "operating_status": null,
+          "primary_name": "Chocolate Bar at Harrods",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "travel",
+            "professional_services"
+          ],
+          "basic_category": "shopping_mall",
+          "brand_name": "Harrods",
+          "category": "shopping_center",
+          "confidence": 0.8664727807044983,
+          "distance_km": 0.061,
+          "id": "771d502e-a2d1-4b83-8e50-e60f79c7ee9d",
+          "latitude": 51.49993896484375,
+          "longitude": -0.1629319190979004,
+          "operating_status": null,
+          "primary_name": "London Westminster&harrods Shopping Mall",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "coffee_shop",
+            "sandwich_shop"
+          ],
+          "basic_category": "cafe",
+          "brand_name": "Harrods",
+          "category": "cafe",
+          "confidence": 0.9993957076966763,
+          "distance_km": 0.064,
+          "id": "98f13cc7-fc91-4cac-99d2-4fb7210770a5",
+          "latitude": 51.49882888793945,
+          "longitude": -0.1630229353904724,
+          "operating_status": null,
+          "primary_name": "The Coffee Bar",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "restaurant",
+            "bar"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": "Harrods",
+          "category": "british_restaurant",
+          "confidence": 0.9766157865524292,
+          "distance_km": 0.064,
+          "id": "e9c77c5e-0655-4339-b6aa-7156478d8d32",
+          "latitude": 51.49888229370117,
+          "longitude": -0.1634899526834488,
+          "operating_status": null,
+          "primary_name": "Georgian Restaurant",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "coffee_shop",
+            "cafe"
+          ],
+          "basic_category": "casual_eatery",
+          "brand_name": "Harrods",
+          "category": "bakery",
+          "confidence": 0.9950887989401818,
+          "distance_km": 0.068,
+          "id": "222e6c68-5f1a-462b-b17d-bb72dc6ae682",
+          "latitude": 51.499000549316406,
+          "longitude": -0.1623537242412567,
+          "operating_status": null,
+          "primary_name": "Roast and Bake",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "seafood_restaurant",
+            "bar"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": "Harrods",
+          "category": "restaurant",
+          "confidence": 0.9692324501276016,
+          "distance_km": 0.071,
+          "id": "48c5203a-d40c-4c56-b139-a991810a5274",
+          "latitude": 51.49876022338867,
+          "longitude": -0.16319642961025238,
+          "operating_status": null,
+          "primary_name": "Perrier - Jouet Champagne Terrace",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "shopping",
+            "shopping_center"
+          ],
+          "basic_category": "department_store",
+          "brand_name": "Harrods",
+          "category": "department_store",
+          "confidence": 0.9289839267730713,
+          "distance_km": 0.103,
+          "id": "45911754-65c1-402a-a382-d4204cc3e204",
+          "latitude": 51.498695373535156,
+          "longitude": -0.16212527453899384,
+          "operating_status": null,
+          "primary_name": "Harrods Lobby",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "coffee_shop",
+            "arts_and_entertainment"
+          ],
+          "basic_category": "non_alcoholic_beverage_venue",
+          "brand_name": "Harrods",
+          "category": "tea_room",
+          "confidence": 0.774879515171051,
+          "distance_km": 0.104,
+          "id": "fa7edc3f-80dd-492a-929f-802c655c5ded",
+          "latitude": 51.49852752685547,
+          "longitude": -0.16257412731647491,
+          "operating_status": null,
+          "primary_name": "Laduree Paris Tea Lounge , Harrods.",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "restaurant",
+            "fast_food_restaurant"
+          ],
+          "basic_category": "restaurant",
+          "brand_name": "Harrods",
+          "category": "burger_restaurant",
+          "confidence": 0.5957402586936951,
+          "distance_km": 0.108,
+          "id": "f2a8f965-9edd-4fc8-924a-7bb32f77a9ea",
+          "latitude": 51.49867248535156,
+          "longitude": -0.16207699477672577,
+          "operating_status": null,
+          "primary_name": "The Burger Bar",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "bar",
+            "restaurant"
+          ],
+          "basic_category": "bar",
+          "brand_name": "Harrods",
+          "category": "champagne_bar",
+          "confidence": 0.9504852294921875,
+          "distance_km": 0.109,
+          "id": "e4c417df-d07e-4f59-892e-82078e28fa36",
+          "latitude": 51.498600006103516,
+          "longitude": -0.16218362748622894,
+          "operating_status": null,
+          "primary_name": "Mo\u00ebt & Chandon Bar at Harrods",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "coffee_shop",
+            "restaurant"
+          ],
+          "basic_category": "non_alcoholic_beverage_venue",
+          "brand_name": "Harrods",
+          "category": "tea_room",
+          "confidence": 0.7002941370010376,
+          "distance_km": 0.119,
+          "id": "9eb1170b-a098-4b0c-82fb-7b682b7bcdea",
+          "latitude": 51.49843978881836,
+          "longitude": -0.1623300015926361,
+          "operating_status": null,
+          "primary_name": "The Tearoom At Harrods",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "shopping",
+            "department_store"
+          ],
+          "basic_category": "shopping_mall",
+          "brand_name": "Harrods",
+          "category": "shopping_center",
+          "confidence": 0.7424666881561279,
+          "distance_km": 0.537,
+          "id": "4b769668-e710-41f0-9566-8ca86481bfbf",
+          "latitude": 51.50216293334961,
+          "longitude": -0.1567319631576538,
+          "operating_status": null,
+          "primary_name": "Harrods",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:kadewe",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.019,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                13.3411,
+                52.5016
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "KaDeWe",
+            "rank": 1,
+            "result_count": 10,
+            "top1_distance_km": 0.019,
+            "top_names": [
+              "KaDeWe",
+              "CONTIPARK Tiefgarage Am KaDeWe",
+              "L\u00e4derach | Deutschland | Berlin | KaDeWe"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                13.3411,
+                52.5016
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Kaufhaus des Westens",
+            "rank": null,
+            "result_count": 0,
+            "top1_distance_km": null,
+            "top_names": []
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.019,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              13.3411,
+              52.5016
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.019,
+          "top_names": [
+            "KaDeWe",
+            "CONTIPARK Tiefgarage Am KaDeWe",
+            "L\u00e4derach | Deutschland | Berlin | KaDeWe"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.019,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 10,
+          "top1_distance_km": 0.118,
+          "top_names": [
+            "CONTIPARK Tiefgarage Am KaDeWe",
+            "L\u00e4derach | Deutschland | Berlin | KaDeWe",
+            "KaDeWe"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.019,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              13.3411,
+              52.5016
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 10,
+          "top1_distance_km": 0.118,
+          "top_names": [
+            "CONTIPARK Tiefgarage Am KaDeWe",
+            "L\u00e4derach | Deutschland | Berlin | KaDeWe",
+            "KaDeWe"
+          ]
+        }
+      },
+      "query": "KaDeWe Berlin",
+      "query_style": "named_poi",
+      "source_bbox_rows": 15883,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "shopping",
+            "retail"
+          ],
+          "basic_category": "department_store",
+          "brand_name": null,
+          "category": "department_store",
+          "confidence": 0.9988915046155453,
+          "distance_km": 0.018,
+          "id": "f5906d0f-91e2-4101-80ad-3ac775091884",
+          "latitude": 52.50176239013672,
+          "longitude": 13.34111499786377,
+          "operating_status": null,
+          "primary_name": "KaDeWe",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:brand_branch:ikea-berlin-lichtenberg",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 1.493,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                13.5194,
+                52.521
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "IKEA",
+            "rank": 2,
+            "result_count": 10,
+            "top1_distance_km": 20.638,
+            "top_names": [
+              "IKEA",
+              "IKEA",
+              "IKEA"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                13.5194,
+                52.521
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "IKEA Berlin-Lichtenberg",
+            "rank": null,
+            "result_count": 1,
+            "top1_distance_km": 1.529,
+            "top_names": [
+              "Freetrailer PKW Anh\u00e4ngervermietung - IKEA Berlin-Lichtenberg"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 1.493,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              13.5194,
+              52.521
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 2,
+          "result_count": 10,
+          "top1_distance_km": 20.638,
+          "top_names": [
+            "IKEA",
+            "IKEA",
+            "IKEA"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "9187e609-5a2f-4535-85ec-e2b88399eea3",
+              "division_type": "locality",
+              "query": "berlin",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 1.529,
+          "top_names": [
+            "Freetrailer PKW Anh\u00e4ngervermietung - IKEA Berlin-Lichtenberg"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              13.5194,
+              52.521
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 1.529,
+          "top_names": [
+            "Freetrailer PKW Anh\u00e4ngervermietung - IKEA Berlin-Lichtenberg"
+          ]
+        }
+      },
+      "query": "IKEA Lichtenberg Berlin",
+      "query_style": "brand_branch",
+      "source_bbox_rows": 5848,
+      "source_matches": [
+        {
+          "alternate_categories": null,
+          "basic_category": "sport_or_fitness_facility",
+          "brand_name": "IKEA",
+          "category": "indoor_playcenter",
+          "confidence": 0.8,
+          "distance_km": 1.479,
+          "id": "994e4b6f-bff9-4a89-996c-1426cc2d2f4e",
+          "latitude": 52.53395080566406,
+          "longitude": 13.514389991760254,
+          "operating_status": null,
+          "primary_name": "Sm\u00e5land",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "mattress_store"
+          ],
+          "basic_category": "hardware_home_and_garden_store",
+          "brand_name": "IKEA",
+          "category": "furniture_store",
+          "confidence": 0.9999507279634475,
+          "distance_km": 1.492,
+          "id": "5d475f5f-3e46-4aea-aa20-e3025807b25a",
+          "latitude": 52.53401184082031,
+          "longitude": 13.514031410217285,
+          "operating_status": null,
+          "primary_name": "IKEA",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      }
+    },
+    {
+      "case_id": "gold:brand_branch:apple-marunouchi",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                139.7642,
+                35.681
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Apple Marunouchi",
+            "rank": null,
+            "result_count": 0,
+            "top1_distance_km": null,
+            "top_names": []
+          },
+          {
+            "matched_distance_km": 0.094,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                139.7642,
+                35.681
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Apple \u4e38\u306e\u5185",
+            "rank": 1,
+            "result_count": 1,
+            "top1_distance_km": 0.094,
+            "top_names": [
+              "Apple \u4e38\u306e\u5185"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              139.7642,
+              35.681
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              139.7642,
+              35.681
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        }
+      },
+      "query": "Apple Marunouchi Tokyo",
+      "query_style": "brand_branch",
+      "source_bbox_rows": 53283,
+      "source_matches": [
+        {
+          "alternate_categories": null,
+          "basic_category": "electronics_store",
+          "brand_name": null,
+          "category": "electronics",
+          "confidence": 0.77,
+          "distance_km": 0.094,
+          "id": "e783445a-f8e3-4ecf-b089-a3eb039048fb",
+          "latitude": 35.680198669433594,
+          "longitude": 139.7638702392578,
+          "operating_status": null,
+          "primary_name": "Apple \u4e38\u306e\u5185",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:raffles-singapore",
+      "classification": "routed_forward_admission_or_tokenization",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                103.8545,
+                1.2949
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Raffles Hotel",
+            "rank": null,
+            "result_count": 9,
+            "top1_distance_km": 0.139,
+            "top_names": [
+              "Raffles Hotel Long Bar",
+              "Raffles Sentosa Singapore",
+              "Ascott Raffles Place Singapore"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                103.8545,
+                1.2949
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Raffles Singapore",
+            "rank": null,
+            "result_count": 10,
+            "top1_distance_km": 0.897,
+            "top_names": [
+              "Sir Stamford Raffles Statue (Raffles' Landing Site)",
+              "Raffles Archives and Museum",
+              "Raffles Museum of Biodiversity Research"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              103.8545,
+              1.2949
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 9,
+          "top1_distance_km": 0.139,
+          "top_names": [
+            "Raffles Hotel Long Bar",
+            "Raffles Sentosa Singapore",
+            "Ascott Raffles Place Singapore"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "a107473a-bab0-49c4-aaef-126868351e12",
+              "division_type": "locality",
+              "query": "singapore",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 9,
+          "top1_distance_km": 0.139,
+          "top_names": [
+            "Raffles Hotel Long Bar",
+            "Raffles Sentosa Singapore",
+            "Ascott Raffles Place Singapore"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              103.8545,
+              1.2949
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 9,
+          "top1_distance_km": 0.139,
+          "top_names": [
+            "Raffles Hotel Long Bar",
+            "Ascott Raffles Place Singapore",
+            "Leica Store Raffles Hotel Arcade"
+          ]
+        }
+      },
+      "query": "Raffles Hotel Singapore",
+      "query_style": "named_poi",
+      "source_bbox_rows": 33683,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "hotel"
+          ],
+          "basic_category": "resort",
+          "brand_name": null,
+          "category": "resort",
+          "confidence": 0.9987796793341637,
+          "distance_km": 0.004,
+          "id": "d9279e04-88c9-4c2b-aa8e-b1712af6ce19",
+          "latitude": 1.294888973236084,
+          "longitude": 103.8544692993164,
+          "operating_status": null,
+          "primary_name": "Raffles Singapore",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:hotel-sacher-vienna",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.032,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                16.3693,
+                48.2039
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Hotel Sacher",
+            "rank": 2,
+            "result_count": 4,
+            "top1_distance_km": 1.196,
+            "top_names": [
+              "Hotel Sacher",
+              "Hotel Sacher Vienna",
+              "Hotel Sacher Baden"
+            ]
+          },
+          {
+            "matched_distance_km": 0.032,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                16.3693,
+                48.2039
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Hotel Sacher Wien",
+            "rank": 1,
+            "result_count": 3,
+            "top1_distance_km": 0.032,
+            "top_names": [
+              "Hotel Sacher Vienna",
+              "Hotel Sacher",
+              "Sacher Hotels"
+            ]
+          },
+          {
+            "matched_distance_km": 0.032,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                16.3693,
+                48.2039
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Hotel Sacher Vienna",
+            "rank": 1,
+            "result_count": 2,
+            "top1_distance_km": 0.032,
+            "top_names": [
+              "Hotel Sacher Vienna",
+              "Hotel Sacher"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.032,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              16.3693,
+              48.2039
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 2,
+          "result_count": 4,
+          "top1_distance_km": 1.196,
+          "top_names": [
+            "Hotel Sacher",
+            "Hotel Sacher Vienna",
+            "Hotel Sacher Baden"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.032,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.032,
+          "top_names": [
+            "Hotel Sacher Vienna"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.032,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              16.3693,
+              48.2039
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 2,
+          "top1_distance_km": 0.032,
+          "top_names": [
+            "Hotel Sacher Vienna",
+            "Hotel Sacher"
+          ]
+        }
+      },
+      "query": "Hotel Sacher Vienna",
+      "query_style": "named_poi",
+      "source_bbox_rows": 24736,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "accommodation",
+            "cafe"
+          ],
+          "basic_category": "hotel",
+          "brand_name": null,
+          "category": "hotel",
+          "confidence": 0.9986311323940754,
+          "distance_km": 0.032,
+          "id": "823c67c2-222e-4629-abf9-e23ce74c676f",
+          "latitude": 48.203895568847656,
+          "longitude": 16.369733810424805,
+          "operating_status": null,
+          "primary_name": "Hotel Sacher Vienna",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:plaza-hotel",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.094,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -73.9745,
+                40.7645
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "The Plaza",
+            "rank": 1,
+            "result_count": 10,
+            "top1_distance_km": 0.094,
+            "top_names": [
+              "The Plaza, Fifth Avenue at Central Park South",
+              "The Plaza, Metuchen",
+              "The Plaza at Livingston Campus at Rutgers"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -73.9745,
+                40.7645
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Plaza Hotel",
+            "rank": null,
+            "result_count": 8,
+            "top1_distance_km": 1.266,
+            "top_names": [
+              "Hotel Riu Plaza New York Times Square",
+              "Crowne Plaza HY36",
+              "Pointe Plaza Hotel"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.094,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -73.9745,
+              40.7645
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.094,
+          "top_names": [
+            "The Plaza, Fifth Avenue at Central Park South",
+            "The Plaza, Metuchen",
+            "The Plaza at Livingston Campus at Rutgers"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "a4c73b33-ce85-45ac-99e5-44abe35b6732",
+              "division_type": "locality",
+              "query": "new york",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 8,
+          "top1_distance_km": 1.266,
+          "top_names": [
+            "Hotel Riu Plaza New York Times Square",
+            "Crowne Plaza HY36",
+            "Pointe Plaza Hotel"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -73.9745,
+              40.7645
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 5,
+          "top1_distance_km": 1.266,
+          "top_names": [
+            "Hotel Riu Plaza New York Times Square",
+            "Crowne Plaza HY36",
+            "Pointe Plaza Hotel"
+          ]
+        }
+      },
+      "query": "Plaza Hotel New York",
+      "query_style": "named_poi",
+      "source_bbox_rows": 68702,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "arts_and_entertainment",
+            "topic_concert_venue"
+          ],
+          "basic_category": "museum",
+          "brand_name": null,
+          "category": "museum",
+          "confidence": 0.9722161889076233,
+          "distance_km": 0.093,
+          "id": "95a3bb15-2963-4688-a270-b80ddf933f61",
+          "latitude": 40.76398849487305,
+          "longitude": -73.97362518310547,
+          "operating_status": "open",
+          "primary_name": "The Plaza, Fifth Avenue at Central Park South",
+          "prominence_rank": 217
+        }
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:novotel-monte-carlo",
+      "classification": "global_head_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.061,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                7.421,
+                43.7392
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Novotel Monte Carlo",
+            "rank": 1,
+            "result_count": 1,
+            "top1_distance_km": 0.061,
+            "top_names": [
+              "Novotel Monte Carlo"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.061,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              7.421,
+              43.7392
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.061,
+          "top_names": [
+            "Novotel Monte Carlo"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.061,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              7.421,
+              43.7392
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.061,
+          "top_names": [
+            "Novotel Monte Carlo"
+          ]
+        }
+      },
+      "query": "Novotel Monte Carlo",
+      "query_style": "named_poi",
+      "source_bbox_rows": 3438,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "accommodation",
+            "motel"
+          ],
+          "basic_category": "hotel",
+          "brand_name": "Novotel",
+          "category": "hotel",
+          "confidence": 0.9998995550274848,
+          "distance_km": 0.061,
+          "id": "3aa4b82a-919b-4969-940e-c41bffbb0775",
+          "latitude": 43.73903274536133,
+          "longitude": 7.42172384262085,
+          "operating_status": null,
+          "primary_name": "Novotel Monte Carlo",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "brand_branch"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:mayo-clinic-rochester",
+      "classification": "routed_forward_admission_or_tokenization",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -92.4666,
+                44.0221
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Mayo Clinic",
+            "rank": null,
+            "result_count": 10,
+            "top1_distance_km": 0.204,
+            "top_names": [
+              "Mayo Clinic Libraries",
+              "Museum Mayo Clinic Heritage Hall",
+              "Mitchell Student Center - Mayo Clinic"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -92.4666,
+              44.0221
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 10,
+          "top1_distance_km": 0.204,
+          "top_names": [
+            "Mayo Clinic Libraries",
+            "Museum Mayo Clinic Heritage Hall",
+            "Mitchell Student Center - Mayo Clinic"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "59c3b445-868d-4e91-bf81-2e8133a4b1eb",
+              "division_type": "locality",
+              "query": "rochester",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -92.4666,
+              44.0221
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 10,
+          "top1_distance_km": 0.204,
+          "top_names": [
+            "Mayo Clinic Libraries",
+            "Museum Mayo Clinic Heritage Hall",
+            "Mitchell Student Center - Mayo Clinic"
+          ]
+        }
+      },
+      "query": "Mayo Clinic Rochester",
+      "query_style": "named_poi",
+      "source_bbox_rows": 4369,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "doctor",
+            "medical_center"
+          ],
+          "basic_category": "specialized_health_care",
+          "brand_name": "Mayo Clinic",
+          "category": "podiatrist",
+          "confidence": 0.9943634271621704,
+          "distance_km": 0.007,
+          "id": "3dc0b028-f72b-4805-aa45-51b620fd76c5",
+          "latitude": 44.02213668823242,
+          "longitude": -92.4666748046875,
+          "operating_status": null,
+          "primary_name": "Martin Ellman, MD",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "college_university"
+          ],
+          "basic_category": "specialty_school",
+          "brand_name": "Mayo Clinic",
+          "category": "medical_school",
+          "confidence": 0.9997143756747245,
+          "distance_km": 0.046,
+          "id": "f3962cf8-5620-462e-be5f-648900e8dacf",
+          "latitude": 44.0224494934082,
+          "longitude": -92.46691131591797,
+          "operating_status": null,
+          "primary_name": "Mayo Clinic College of Medicine and Science",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "doctor",
+            "health_and_medical"
+          ],
+          "basic_category": "specialized_health_care",
+          "brand_name": "Mayo Clinic",
+          "category": "dermatologist",
+          "confidence": 0.9913148283958435,
+          "distance_km": 0.055,
+          "id": "7a29113c-4a09-4cec-91df-b3796a23f53f",
+          "latitude": 44.022483825683594,
+          "longitude": -92.46702575683594,
+          "operating_status": "open",
+          "primary_name": "Mark Denis Davis, MD",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "medical_center"
+          ],
+          "basic_category": "specialized_health_care",
+          "brand_name": "Mayo Clinic",
+          "category": "cardiologist",
+          "confidence": 0.9199122190475464,
+          "distance_km": 0.056,
+          "id": "8b4e53df-e77e-40c1-bb16-85a895277184",
+          "latitude": 44.02259063720703,
+          "longitude": -92.46678161621094,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic Hypertrophic Cardiomyopathy Specialty Group",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "proctologist",
+            "surgical_center"
+          ],
+          "basic_category": "surgery",
+          "brand_name": "Mayo Clinic",
+          "category": "surgeon",
+          "confidence": 0.9211245179176331,
+          "distance_km": 0.057,
+          "id": "323afd9e-1b3d-4a6d-8662-d68b469c1dba",
+          "latitude": 44.0225944519043,
+          "longitude": -92.46678161621094,
+          "operating_status": null,
+          "primary_name": "Mayo Clinic Colon and Rectal Surgery",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": null,
+          "basic_category": "fashion_and_apparel_store",
+          "brand_name": "Mayo Clinic",
+          "category": "eyewear_and_optician",
+          "confidence": 0.9931195795536041,
+          "distance_km": 0.064,
+          "id": "e82647c1-5c5e-4ffd-a126-c038f34c3a9d",
+          "latitude": 44.022666931152344,
+          "longitude": -92.46675109863281,
+          "operating_status": null,
+          "primary_name": "Mayo Clinic Optical Store - Rochester Downtown",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "hospital",
+            "medical_service_organizations"
+          ],
+          "basic_category": "outpatient_care_facility",
+          "brand_name": "Mayo Clinic",
+          "category": "medical_center",
+          "confidence": 0.9813855886459351,
+          "distance_km": 0.073,
+          "id": "711284b1-5414-4aaf-922a-37f40d1f61e4",
+          "latitude": 44.02273178100586,
+          "longitude": -92.46685791015625,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "medical_center"
+          ],
+          "basic_category": "hospital",
+          "brand_name": "Mayo Clinic",
+          "category": "hospital",
+          "confidence": 0.9813855886459351,
+          "distance_km": 0.206,
+          "id": "bf952a07-0ee1-4533-abea-0f4492bcf147",
+          "latitude": 44.023948669433594,
+          "longitude": -92.46663665771484,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic Hospital Methodist Campus",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "physical_therapy",
+            "occupational_therapy"
+          ],
+          "basic_category": "outpatient_care_facility",
+          "brand_name": "Mayo Clinic",
+          "category": "medical_center",
+          "confidence": 0.9199122190475464,
+          "distance_km": 0.303,
+          "id": "8f6b62ab-7de7-4b37-a2b5-39b28099ca9a",
+          "latitude": 44.0229606628418,
+          "longitude": -92.47019958496094,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic Orthopedics and Sports Medicine",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "health_spa",
+            "day_spa"
+          ],
+          "basic_category": "wellness_service",
+          "brand_name": "Mayo Clinic",
+          "category": "spas",
+          "confidence": 0.9481361508369446,
+          "distance_km": 0.339,
+          "id": "75e07e72-0af6-47ed-8a06-ec875d213856",
+          "latitude": 44.02288055419922,
+          "longitude": -92.470703125,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic Healthy Living Program",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "health_and_medical",
+            "pediatrician"
+          ],
+          "basic_category": "hospital",
+          "brand_name": "Mayo Clinic",
+          "category": "hospital",
+          "confidence": 0.9997569114863872,
+          "distance_km": 1.246,
+          "id": "982e4ffd-04f6-48d6-9538-f45a6377eb12",
+          "latitude": 44.02117919921875,
+          "longitude": -92.48212432861328,
+          "operating_status": null,
+          "primary_name": "Mayo Eugenio Litta Children's Hospital",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "medical_center"
+          ],
+          "basic_category": "hospital",
+          "brand_name": "Mayo Clinic",
+          "category": "hospital",
+          "confidence": 0.9813855886459351,
+          "distance_km": 1.303,
+          "id": "78a187d3-c555-4542-b40b-b6aee4864426",
+          "latitude": 44.020713806152344,
+          "longitude": -92.48278045654297,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic Hospital, Saint Marys Campus",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "surgical_appliances_and_supplies"
+          ],
+          "basic_category": "specialty_store",
+          "brand_name": "Mayo Clinic",
+          "category": "medical_supply",
+          "confidence": 0.9679990410804749,
+          "distance_km": 1.998,
+          "id": "c0b7204e-6b0a-4249-8c32-95d3f44d1382",
+          "latitude": 44.0041389465332,
+          "longitude": -92.46614837646484,
+          "operating_status": "open",
+          "primary_name": "Mayo Clinic Store",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "brand_branch"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:sickkids-toronto",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.009,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -79.3865,
+                43.6575
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "SickKids",
+            "rank": 1,
+            "result_count": 10,
+            "top1_distance_km": 0.009,
+            "top_names": [
+              "SickKids",
+              "SickKids Foundation",
+              "SickKids Centre for Community Mental Health"
+            ]
+          },
+          {
+            "matched_distance_km": 0.16,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -79.3865,
+                43.6575
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Hospital for Sick Children",
+            "rank": 1,
+            "result_count": 3,
+            "top1_distance_km": 0.16,
+            "top_names": [
+              "Hospital For Sick Children, The",
+              "The Hospital for Sick Children",
+              "The Hospital for Sick Children (SickKids)"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.009,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -79.3865,
+              43.6575
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.009,
+          "top_names": [
+            "SickKids",
+            "SickKids Foundation",
+            "SickKids Centre for Community Mental Health"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.009,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 3,
+          "result_count": 8,
+          "top1_distance_km": 0.213,
+          "top_names": [
+            "SickKids Foundation",
+            "SickKids Centre for Community Mental Health",
+            "SickKids"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.009,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -79.3865,
+              43.6575
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 5,
+          "result_count": 10,
+          "top1_distance_km": 0.213,
+          "top_names": [
+            "SickKids Foundation",
+            "SickKids Centre for Community Mental Health",
+            "SickKids Farmers Market"
+          ]
+        }
+      },
+      "query": "SickKids Toronto",
+      "query_style": "named_poi",
+      "source_bbox_rows": 30813,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "doctor",
+            "pediatrician"
+          ],
+          "basic_category": "hospital",
+          "brand_name": "Sickkids",
+          "category": "hospital",
+          "confidence": 0.8647282123565674,
+          "distance_km": 0.009,
+          "id": "eae349ef-31d1-437c-b77f-464a7400fe00",
+          "latitude": 43.65754318237305,
+          "longitude": -79.38658905029297,
+          "operating_status": null,
+          "primary_name": "SickKids",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "pediatrician",
+            "medical_center"
+          ],
+          "basic_category": "hospital",
+          "brand_name": "Sickkids",
+          "category": "hospital",
+          "confidence": 0.9679083228111267,
+          "distance_km": 0.011,
+          "id": "437d8f8e-5ff5-45cf-a691-c0bee401445b",
+          "latitude": 43.65760040283203,
+          "longitude": -79.38651275634766,
+          "operating_status": null,
+          "primary_name": "The Hospital for Sick Children",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "health_and_medical",
+            "medical_research_and_development"
+          ],
+          "basic_category": "hospital",
+          "brand_name": "Sickkids",
+          "category": "hospital",
+          "confidence": 0.8705488443374634,
+          "distance_km": 0.013,
+          "id": "c5e05ca8-4fd7-4abe-a4ff-be80a40062f6",
+          "latitude": 43.65743637084961,
+          "longitude": -79.38664245605469,
+          "operating_status": null,
+          "primary_name": "MRI Department Sick Kids Hospital",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "hospital",
+            "health_and_medical"
+          ],
+          "basic_category": null,
+          "brand_name": "Sickkids",
+          "category": "doctor",
+          "confidence": 0.5332781672477722,
+          "distance_km": 0.146,
+          "id": "d1f82d9d-5ac1-4110-8b3a-cf38e7324734",
+          "latitude": 43.657493591308594,
+          "longitude": -79.38831329345703,
+          "operating_status": null,
+          "primary_name": "Kiran More MD, Neonatal/Perinatal Medicine - Leading Physician of the World",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "commercial_industrial",
+            "industrial_company"
+          ],
+          "basic_category": "hospital",
+          "brand_name": null,
+          "category": "hospital",
+          "confidence": 0.4350917935371399,
+          "distance_km": 0.16,
+          "id": "0417056e-ce2c-43e4-a8f4-cc840614f7d5",
+          "latitude": 43.657474517822266,
+          "longitude": -79.38450622558594,
+          "operating_status": null,
+          "primary_name": "Hospital For Sick Children, The",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "grocery_store",
+            "shopping"
+          ],
+          "basic_category": "farmers_market",
+          "brand_name": "Sickkids",
+          "category": "farmers_market",
+          "confidence": 0.8222336173057556,
+          "distance_km": 0.179,
+          "id": "713d5f67-919b-4abb-bf51-32f388e38664",
+          "latitude": 43.65679168701172,
+          "longitude": -79.38850402832031,
+          "operating_status": null,
+          "primary_name": "The Farmers Market at Sickkids",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:royal-childrens-melbourne",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                144.9494,
+                -37.7938
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "The Royal Children's Hospital",
+            "rank": null,
+            "result_count": 0,
+            "top1_distance_km": null,
+            "top_names": []
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                144.9494,
+                -37.7938
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Royal Childrens Hospital",
+            "rank": null,
+            "result_count": 3,
+            "top1_distance_km": 0.136,
+            "top_names": [
+              "Royal Childrens Hospital Precinct ATM",
+              "atmx Royal Childrens Hospital",
+              "Kelpie Ward, Royal Childrens Hospital"
+            ]
+          },
+          {
+            "matched_distance_km": 0.051,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                144.9494,
+                -37.7938
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Royal Children's Hospital",
+            "rank": 1,
+            "result_count": 9,
+            "top1_distance_km": 0.051,
+            "top_names": [
+              "Royal Children's Hospital",
+              "Ronald McDonald House, Royal Children's Hospital",
+              "The Royal Children's Hospital, Melbourne"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              144.9494,
+              -37.7938
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "7000476d-2044-4faf-9bed-d25a4f3da214",
+              "division_type": "locality",
+              "query": "melbourne",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 3,
+          "top1_distance_km": 0.136,
+          "top_names": [
+            "Royal Childrens Hospital Precinct ATM",
+            "atmx Royal Childrens Hospital",
+            "Kelpie Ward, Royal Childrens Hospital"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              144.9494,
+              -37.7938
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 0.138,
+          "top_names": [
+            "Kelpie Ward, Royal Childrens Hospital"
+          ]
+        }
+      },
+      "query": "Royal Childrens Hospital Melbourne",
+      "query_style": "named_poi",
+      "source_bbox_rows": 8461,
+      "source_matches": [
+        {
+          "alternate_categories": null,
+          "basic_category": "specialty_hospital",
+          "brand_name": null,
+          "category": "childrens_hospital",
+          "confidence": 0.77,
+          "distance_km": 0.051,
+          "id": "afa2f280-c127-434f-9ffa-f48b6aaa1855",
+          "latitude": -37.79423522949219,
+          "longitude": 144.94921875,
+          "operating_status": null,
+          "primary_name": "Royal Children's Hospital",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "pediatrician",
+            "medical_center"
+          ],
+          "basic_category": "hospital",
+          "brand_name": null,
+          "category": "hospital",
+          "confidence": 0.953288733959198,
+          "distance_km": 0.054,
+          "id": "ec3b8375-4161-46a1-bb90-6af504a491b1",
+          "latitude": -37.79426193237305,
+          "longitude": 144.94921875,
+          "operating_status": null,
+          "primary_name": "The Royal Children's Hospital, Melbourne",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:singapore-general-hospital",
+      "classification": "global_head_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.139,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                103.8359,
+                1.2799
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Singapore General Hospital",
+            "rank": 1,
+            "result_count": 10,
+            "top1_distance_km": 0.139,
+            "top_names": [
+              "Singapore General Hospital",
+              "Singapore General Hospital",
+              "Singapore General Hospital"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                103.8359,
+                1.2799
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "SGH",
+            "rank": null,
+            "result_count": 10,
+            "top1_distance_km": 0.042,
+            "top_names": [
+              "SGH War Memorial",
+              "SGH ENT Centre",
+              "SGH Renal Medicine"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.139,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              103.8359,
+              1.2799
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.139,
+          "top_names": [
+            "Singapore General Hospital",
+            "Singapore General Hospital",
+            "Singapore General Hospital"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.139,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              103.8359,
+              1.2799
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.139,
+          "top_names": [
+            "Singapore General Hospital",
+            "Singapore General Hospital",
+            "Singapore General Hospital"
+          ]
+        }
+      },
+      "query": "Singapore General Hospital",
+      "query_style": "named_poi",
+      "source_bbox_rows": 42535,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "cafe",
+            "coffee_roastery"
+          ],
+          "basic_category": "coffee_shop",
+          "brand_name": "The Coffee Bean & Tea Leaf",
+          "category": "coffee_shop",
+          "confidence": 0.8,
+          "distance_km": 0.033,
+          "id": "2ef463c9-503d-4630-959f-707f9ad99a0b",
+          "latitude": 1.279599905014038,
+          "longitude": 103.83589935302734,
+          "operating_status": null,
+          "primary_name": "Singapore General Hospital",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "medical_center",
+            "health_and_medical"
+          ],
+          "basic_category": "hospital",
+          "brand_name": null,
+          "category": "hospital",
+          "confidence": 0.996903944015503,
+          "distance_km": 0.141,
+          "id": "96e65ac8-1430-419e-ac64-3f7405b04c29",
+          "latitude": 1.2804689407348633,
+          "longitude": 103.83477020263672,
+          "operating_status": null,
+          "primary_name": "Singapore General Hospital",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "health_and_medical"
+          ],
+          "basic_category": "hospital",
+          "brand_name": null,
+          "category": "hospital",
+          "confidence": 0.5873036980628967,
+          "distance_km": 0.163,
+          "id": "830da4c5-46ba-4430-a77b-e175a0050535",
+          "latitude": 1.28135347366333,
+          "longitude": 103.83607482910156,
+          "operating_status": null,
+          "primary_name": "Sgh",
+          "prominence_rank": 0
+        },
+        {
+          "alternate_categories": [
+            "hospital",
+            "medical_school"
+          ],
+          "basic_category": "outpatient_care_facility",
+          "brand_name": null,
+          "category": "medical_center",
+          "confidence": 0.9556481838226318,
+          "distance_km": 0.327,
+          "id": "b6899bdb-1a56-453a-8f0f-5c7d97aa58c9",
+          "latitude": 1.2801936864852905,
+          "longitude": 103.83882904052734,
+          "operating_status": null,
+          "primary_name": "Singapore General Hospital",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:seattle-central-library",
+      "classification": "global_head_or_locality_routing",
+      "entity_phrase_candidate_ids": [
+        "62106118-b51f-4c4e-b84c-a645320cc1b9"
+      ],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.573,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -122.3325,
+                47.6067
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Seattle Central Library",
+            "rank": 1,
+            "result_count": 5,
+            "top1_distance_km": 0.573,
+            "top_names": [
+              "Seattle Central library",
+              "Seattle Central  College",
+              "Wet Buns @ Central Library"
+            ]
+          },
+          {
+            "matched_distance_km": 0.573,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -122.3325,
+                47.6067
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Central Library",
+            "rank": 3,
+            "result_count": 5,
+            "top1_distance_km": 0.052,
+            "top_names": [
+              "Central Library Parking",
+              "Seattle Central  College",
+              "Seattle Central library"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.573,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -122.3325,
+              47.6067
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 5,
+          "top1_distance_km": 0.573,
+          "top_names": [
+            "Seattle Central library",
+            "Seattle Central  College",
+            "Wet Buns @ Central Library"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 0,
+          "top1_distance_km": null,
+          "top_names": []
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.573,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -122.3325,
+              47.6067
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 5,
+          "top1_distance_km": 0.573,
+          "top_names": [
+            "Seattle Central library",
+            "Seattle Central  College",
+            "Wet Buns @ Central Library"
+          ]
+        }
+      },
+      "query": "Seattle Central Library",
+      "query_style": "named_poi",
+      "source_bbox_rows": 15824,
+      "source_matches": [
+        {
+          "alternate_categories": null,
+          "basic_category": "library",
+          "brand_name": null,
+          "category": "library",
+          "confidence": 0.8008331656455994,
+          "distance_km": 0.573,
+          "id": "62106118-b51f-4c4e-b84c-a645320cc1b9",
+          "latitude": 47.60490417480469,
+          "longitude": -122.32533264160156,
+          "operating_status": "open",
+          "primary_name": "Seattle Central library",
+          "prominence_rank": 102
+        }
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:gpo-dublin",
+      "classification": "query_context_token_or_locality_routing",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.007,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -6.2603,
+                53.3494
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "General Post Office",
+            "rank": 1,
+            "result_count": 2,
+            "top1_distance_km": 0.007,
+            "top_names": [
+              "General Post Office",
+              "General Post Office Arcade"
+            ]
+          },
+          {
+            "matched_distance_km": null,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -6.2603,
+                53.3494
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "GPO",
+            "rank": null,
+            "result_count": 3,
+            "top1_distance_km": 0.021,
+            "top_names": [
+              "GPO Museum",
+              "GPO , O'Connell St. Dublin.",
+              "Nourish GPO Arcade"
+            ]
+          },
+          {
+            "matched_distance_km": 0.007,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -6.2603,
+                53.3494
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Dublin General Post Office",
+            "rank": 1,
+            "result_count": 2,
+            "top1_distance_km": 0.007,
+            "top_names": [
+              "General Post Office",
+              "General Post Office Arcade"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.007,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -6.2603,
+              53.3494
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 2,
+          "top1_distance_km": 0.007,
+          "top_names": [
+            "General Post Office",
+            "General Post Office Arcade"
+          ]
+        },
+        "original": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 1,
+          "top1_distance_km": 0.021,
+          "top_names": [
+            "GPO Museum"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": null,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -6.2603,
+              53.3494
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": null,
+          "result_count": 3,
+          "top1_distance_km": 0.021,
+          "top_names": [
+            "GPO Museum",
+            "Nourish GPO Arcade",
+            "GPO , O'Connell St. Dublin."
+          ]
+        }
+      },
+      "query": "GPO Dublin",
+      "query_style": "named_poi",
+      "source_bbox_rows": 14259,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "public_and_government_association",
+            "public_utility_company"
+          ],
+          "basic_category": "shipping_or_delivery_service",
+          "brand_name": "An Post",
+          "category": "post_office",
+          "confidence": 0.9749042069911957,
+          "distance_km": 0.006,
+          "id": "b6e20c17-9911-451e-be33-e17281115e66",
+          "latitude": 53.34943771362305,
+          "longitude": -6.2603654861450195,
+          "operating_status": null,
+          "primary_name": "General Post Office",
+          "prominence_rank": 0
+        }
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:burton-barr-library",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.267,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -112.0737,
+                33.4649
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Burton Barr Central Library",
+            "rank": 1,
+            "result_count": 1,
+            "top1_distance_km": 0.267,
+            "top_names": [
+              "Burton Barr Central Library"
+            ]
+          },
+          {
+            "matched_distance_km": 0.267,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -112.0737,
+                33.4649
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Burton Barr Library",
+            "rank": 1,
+            "result_count": 1,
+            "top1_distance_km": 0.267,
+            "top_names": [
+              "Burton Barr Central Library"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.267,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -112.0737,
+              33.4649
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.267,
+          "top_names": [
+            "Burton Barr Central Library"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.267,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "691048cf-5f57-4ca8-8918-b96c724e2c7a",
+              "division_type": "locality",
+              "query": "phoenix",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.267,
+          "top_names": [
+            "Burton Barr Central Library"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.267,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -112.0737,
+              33.4649
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 1,
+          "top1_distance_km": 0.267,
+          "top_names": [
+            "Burton Barr Central Library"
+          ]
+        }
+      },
+      "query": "Burton Barr Library Phoenix",
+      "query_style": "named_poi",
+      "source_bbox_rows": 5547,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "community_center"
+          ],
+          "basic_category": "library",
+          "brand_name": null,
+          "category": "library",
+          "confidence": 0.9152317643165588,
+          "distance_km": 0.267,
+          "id": "214b232e-0b9c-4804-aa1d-9264e57018b7",
+          "latitude": 33.46258544921875,
+          "longitude": -112.07292938232422,
+          "operating_status": "open",
+          "primary_name": "Burton Barr Central Library",
+          "prominence_rank": 102
+        }
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      }
+    },
+    {
+      "case_id": "gold:named_poi:union-station-toronto",
+      "classification": "retrieved",
+      "entity_phrase_candidate_ids": [],
+      "live_controls": {
+        "accepted_names_with_proximity": [
+          {
+            "matched_distance_km": 0.019,
+            "metadata": {
+              "mode": "text",
+              "proximity": [
+                -79.3806,
+                43.6453
+              ],
+              "types": [
+                "poi"
+              ]
+            },
+            "query": "Union Station",
+            "rank": 1,
+            "result_count": 10,
+            "top1_distance_km": 0.019,
+            "top_names": [
+              "Union Station",
+              "Union Station, via Rail Platform",
+              "Union Station Toronto"
+            ]
+          }
+        ],
+        "expected_name_with_proximity": {
+          "matched_distance_km": 0.019,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -79.3806,
+              43.6453
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.019,
+          "top_names": [
+            "Union Station",
+            "Union Station, via Rail Platform",
+            "Union Station Toronto"
+          ]
+        },
+        "original": {
+          "matched_distance_km": 0.019,
+          "metadata": {
+            "mode": "text",
+            "places_locality_inference": {
+              "division_id": "21381221-fa00-4111-bb1c-bb7020d75dfd",
+              "division_type": "locality",
+              "query": "toronto",
+              "routing": "locality_centroid"
+            },
+            "proximity": null,
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 1,
+          "result_count": 10,
+          "top1_distance_km": 0.019,
+          "top_names": [
+            "Union Station",
+            "Union Station, via Rail Platform",
+            "Union Station Toronto"
+          ]
+        },
+        "original_with_proximity": {
+          "matched_distance_km": 0.019,
+          "metadata": {
+            "mode": "text",
+            "proximity": [
+              -79.3806,
+              43.6453
+            ],
+            "types": [
+              "poi"
+            ]
+          },
+          "rank": 5,
+          "result_count": 10,
+          "top1_distance_km": 13.557,
+          "top_names": [
+            "Union Station Toronto",
+            "Union Station Train Terminal",
+            "Union Station (Toronto)"
+          ]
+        }
+      },
+      "query": "Union Station Toronto",
+      "query_style": "named_poi",
+      "source_bbox_rows": 23849,
+      "source_matches": [
+        {
+          "alternate_categories": [
+            "trains"
+          ],
+          "basic_category": "train_station",
+          "brand_name": null,
+          "category": "train_station",
+          "confidence": 0.983573851943016,
+          "distance_km": 0.019,
+          "id": "018a7bb9-d353-49d1-a562-3007b7b2a6dd",
+          "latitude": 43.64542007446289,
+          "longitude": -79.38076782226562,
+          "operating_status": null,
+          "primary_name": "Union Station",
+          "prominence_rank": 140
+        },
+        {
+          "alternate_categories": [
+            "travel"
+          ],
+          "basic_category": "train_station",
+          "brand_name": null,
+          "category": "train_station",
+          "confidence": 0.7932125329971313,
+          "distance_km": 0.096,
+          "id": "3ae50e45-4704-4365-8728-78b1b8a03951",
+          "latitude": 43.64446258544922,
+          "longitude": -79.38028717041016,
+          "operating_status": null,
+          "primary_name": "Union Station, via Rail Platform",
+          "prominence_rank": 140
+        },
+        {
+          "alternate_categories": [
+            "travel",
+            "transportation"
+          ],
+          "basic_category": "train_station",
+          "brand_name": "Union Station",
+          "category": "train_station",
+          "confidence": 0.7670907974243164,
+          "distance_km": 0.946,
+          "id": "f64b95ce-f5a3-4a7b-b22d-81903d26216c",
+          "latitude": 43.64665985107422,
+          "longitude": -79.36898803710938,
+          "operating_status": null,
+          "primary_name": "Toronto's Union Station",
+          "prominence_rank": 140
+        }
+      ],
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      }
+    }
+  ],
+  "classification_counts": {
+    "global_head_or_locality_routing": 6,
+    "query_context_token_or_locality_routing": 7,
+    "retrieved": 7,
+    "routed_forward_admission_or_tokenization": 3
+  },
+  "endpoint": "https://geocoder.bradr.dev",
+  "schema": "overture-poi-admission-audit-v1",
+  "source_release": "2026-06-17.0"
+}
