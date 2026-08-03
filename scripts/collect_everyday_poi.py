@@ -20,6 +20,12 @@ DEFAULT_SOURCE_DATA = ROOT / "benchmarks/everyday-poi-source-data-v1"
 SCHEMA = "benchmark-v2-forward-cases-v1"
 PROVIDERS = ["overture", "nominatim", "photon"]
 TAINAN_CORE_DISTRICTS = {"中西區", "東區", "北區", "南區", "安平區"}
+MELBOURNE_PHYSICAL_RETAIL_DIVISIONS = {"39", "40", "41", "42"}
+MELBOURNE_GENERIC_NAMES = {"vacant", "not stated", "unknown", "n/a"}
+MELBOURNE_REVIEW_EXCLUSIONS = {
+    "931e86d2d331e0e390fc00c3891813a75d7608b3":
+        "storage_only_not_public_retail",
+}
 
 
 class JavaScriptDataParser:
@@ -491,6 +497,210 @@ def collect_hong_kong(path: Path, source: dict, quota: int = 20) -> tuple[list, 
     }
 
 
+def collect_melbourne(path: Path, source: dict, quota: int = 25) -> tuple[list, dict]:
+    records = json.loads(path.read_bytes())
+    if not isinstance(records, list):
+        raise ValueError("Melbourne snapshot is not a JSON array")
+    record_ids = [str(item.get("recordid") or "") for item in records]
+    if "" in record_ids or len(record_ids) != len(set(record_ids)):
+        raise ValueError("Melbourne snapshot has missing or duplicate recordid values")
+    eligible = []
+    filter_counts = Counter()
+    for record in records:
+        fields = record.get("fields") or {}
+        name = fields.get("trading_name")
+        code = str(fields.get("industry_anzsic4_code") or "")
+        coordinates = [fields.get("longitude"), fields.get("latitude")]
+        if str(fields.get("census_year")) != "2024":
+            filter_counts["outside_2024_census"] += 1
+        elif code[:2] not in MELBOURNE_PHYSICAL_RETAIL_DIVISIONS:
+            filter_counts["outside_physical_retail_divisions"] += 1
+        elif not isinstance(name, str) or not name.strip():
+            filter_counts["missing_name"] += 1
+        elif normalized_name(name) in MELBOURNE_GENERIC_NAMES:
+            filter_counts["generic_name"] += 1
+        elif not valid_point(coordinates):
+            filter_counts["invalid_point"] += 1
+        else:
+            eligible.append(record)
+    name_counts = Counter(
+        normalized_name(item["fields"]["trading_name"]) for item in eligible
+    )
+    unambiguous = []
+    review_exclusions = []
+    for record in eligible:
+        if name_counts[normalized_name(record["fields"]["trading_name"])] > 1:
+            review_exclusions.append(
+                {
+                    "reason": "duplicate_official_name",
+                    "source_record_id": record["recordid"],
+                }
+            )
+        else:
+            unambiguous.append(record)
+    unambiguous.sort(
+        key=lambda item: selection_digest(source["id"], item["recordid"])
+    )
+    cases = []
+    for review_position, record in enumerate(unambiguous, 1):
+        record_id = record["recordid"]
+        if record_id in MELBOURNE_REVIEW_EXCLUSIONS:
+            review_exclusions.append(
+                {
+                    "reason": MELBOURNE_REVIEW_EXCLUSIONS[record_id],
+                    "source_record_id": record_id,
+                }
+            )
+            continue
+        fields = record["fields"]
+        selection_rank = len(cases) + 1
+        cases.append(
+            case(
+                case_id=f"everyday-au-{record_id}",
+                name=fields["trading_name"].strip(),
+                latitude=float(fields["latitude"]),
+                longitude=float(fields["longitude"]),
+                country="AU",
+                macroregion="oceania",
+                family="retail",
+                script="latin",
+                source=source,
+                record_id=record_id,
+                selection_method=(
+                    "2024 City of Melbourne establishment in physical-retail "
+                    "ANZSIC divisions 39-42; exclude generic and duplicate official "
+                    "names; review hash order and reject non-public retail records; "
+                    "rank by sha256(source_plan_id + NUL + source_record_id); "
+                    f"review position {review_position}; selection rank {selection_rank}"
+                ),
+                provenance_extra={
+                    "business_address": fields.get("business_address"),
+                    "census_year": fields["census_year"],
+                    "industry_anzsic4_code": fields["industry_anzsic4_code"],
+                    "industry_anzsic4_description": fields.get(
+                        "industry_anzsic4_description"
+                    ),
+                    "property_id": fields.get("property_id"),
+                },
+            )
+        )
+        if len(cases) == quota:
+            break
+    if len(cases) < quota:
+        raise ValueError(f"Melbourne has only {len(cases)} reviewed retail records")
+    return cases, {
+        "eligible_after_duplicate_filter": len(unambiguous),
+        "eligible_before_duplicate_filter": len(eligible),
+        "input_records": len(records),
+        "filter_counts": dict(sorted(filter_counts.items())),
+        "review_exclusions": review_exclusions,
+        "selected": len(cases),
+    }
+
+
+def collect_bogota(path: Path, source: dict, quota: int = 20) -> tuple[list, dict]:
+    payload = json.loads(path.read_bytes())
+    features = payload.get("features")
+    if payload.get("type") != "FeatureCollection" or not isinstance(features, list):
+        raise ValueError("Bogota snapshot is not a GeoJSON FeatureCollection")
+    source_ids = [
+        str((item.get("properties") or {}).get("ID") or "")
+        for item in features
+    ]
+    object_ids = [
+        str((item.get("properties") or {}).get("OBJECTID") or "")
+        for item in features
+    ]
+    if "" in source_ids or len(source_ids) != len(set(source_ids)):
+        raise ValueError("Bogota snapshot has missing or duplicate ID values")
+    if "" in object_ids or len(object_ids) != len(set(object_ids)):
+        raise ValueError("Bogota snapshot has missing or duplicate OBJECTID values")
+    eligible = []
+    filter_counts = Counter()
+    for feature in features:
+        properties = feature.get("properties") or {}
+        geometry = feature.get("geometry") or {}
+        coordinates = geometry.get("coordinates")
+        name = properties.get("NOMBRE_DEL")
+        if properties.get("TIPO_DE_PR") != "Pública":
+            filter_counts["not_public_provider"] += 1
+        elif properties.get("CLASE_DE_P") != (
+            "Instituciones Prestadoras de Servicios de Salud - IPS"
+        ):
+            filter_counts["not_healthcare_provider"] += 1
+        elif not isinstance(name, str) or not name.strip():
+            filter_counts["missing_name"] += 1
+        elif geometry.get("type") != "Point" or not valid_point(coordinates):
+            filter_counts["invalid_point"] += 1
+        elif not (-74.3 <= float(coordinates[0]) <= -73.9):
+            filter_counts["outside_bogota_bounds"] += 1
+        elif not (4.3 <= float(coordinates[1]) <= 4.9):
+            filter_counts["outside_bogota_bounds"] += 1
+        else:
+            eligible.append(feature)
+    name_counts = Counter(
+        normalized_name(item["properties"]["NOMBRE_DEL"]) for item in eligible
+    )
+    unambiguous = []
+    review_exclusions = []
+    for feature in eligible:
+        properties = feature["properties"]
+        if name_counts[normalized_name(properties["NOMBRE_DEL"])] > 1:
+            review_exclusions.append(
+                {
+                    "reason": "duplicate_official_name",
+                    "source_record_id": str(properties["ID"]),
+                }
+            )
+        else:
+            unambiguous.append(feature)
+    unambiguous.sort(
+        key=lambda item: selection_digest(
+            source["id"], str(item["properties"]["ID"])
+        )
+    )
+    if len(unambiguous) < quota:
+        raise ValueError(f"Bogota has only {len(unambiguous)} eligible facilities")
+    cases = []
+    for rank, feature in enumerate(unambiguous[:quota], 1):
+        properties = feature["properties"]
+        longitude, latitude = feature["geometry"]["coordinates"][:2]
+        record_id = str(properties["ID"])
+        cases.append(
+            case(
+                case_id=f"everyday-co-{record_id}",
+                name=properties["NOMBRE_DEL"].strip(),
+                latitude=float(latitude),
+                longitude=float(longitude),
+                country="CO",
+                macroregion="latin_america",
+                family="healthcare",
+                script="latin",
+                source=source,
+                record_id=record_id,
+                selection_method=(
+                    "named public IPS point in the Bogota district health network; "
+                    "exclude duplicate official names; rank by "
+                    "sha256(source_plan_id + NUL + source_record_id); "
+                    f"selection rank {rank}"
+                ),
+                provenance_extra={
+                    "address": properties.get("DIRECCION"),
+                    "provider_name": properties.get("NOMBRE_DE_"),
+                    "source_object_id": str(properties["OBJECTID"]),
+                },
+            )
+        )
+    return cases, {
+        "eligible_after_duplicate_filter": len(unambiguous),
+        "eligible_before_duplicate_filter": len(eligible),
+        "input_features": len(features),
+        "filter_counts": dict(sorted(filter_counts.items())),
+        "review_exclusions": review_exclusions,
+        "selected": len(cases),
+    }
+
+
 def parse_seoul_preview(path: Path) -> list[dict]:
     payload = JavaScriptDataParser(path.read_text()).parse()
     if not isinstance(payload, dict) or payload.get("result") != "ok":
@@ -654,6 +864,16 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=DEFAULT_SOURCE_DATA / "kr-seoul-hospitals.js",
     )
+    parser.add_argument(
+        "--melbourne",
+        type=Path,
+        default=DEFAULT_SOURCE_DATA / "au-melbourne-businesses-2024.json",
+    )
+    parser.add_argument(
+        "--bogota",
+        type=Path,
+        default=DEFAULT_SOURCE_DATA / "co-bogota-health-network.geojson",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -666,18 +886,24 @@ def main(argv: list[str] | None = None) -> int:
         taiwan = source_by_id(manifest, "tw-tourism-restaurants")
         hong_kong = source_by_id(manifest, "hk-ha-health-care-facilities")
         seoul = source_by_id(manifest, "kr-seoul-hospital-licenses")
+        melbourne = source_by_id(manifest, "au-melbourne-clue-businesses")
+        bogota = source_by_id(manifest, "co-bogota-public-health-network")
         verify_snapshot(singapore, args.singapore)
         verify_snapshot(taiwan, args.taiwan)
         verify_snapshot(hong_kong, args.hong_kong)
         verify_snapshot(seoul, args.seoul)
+        verify_snapshot(melbourne, args.melbourne)
+        verify_snapshot(bogota, args.bogota)
         sg_cases, sg_report = collect_singapore(args.singapore, singapore)
         tw_cases, tw_report = collect_taiwan(args.taiwan, taiwan)
         hk_cases, hk_report = collect_hong_kong(args.hong_kong, hong_kong)
         kr_cases, kr_report = collect_seoul(args.seoul, seoul)
+        co_cases, co_report = collect_bogota(args.bogota, bogota)
+        au_cases, au_report = collect_melbourne(args.melbourne, melbourne)
         payload = {
             "schema": SCHEMA,
-            "collection_status": "partial; 90 of 200 frozen before provider requests",
-            "cases": sg_cases + tw_cases + hk_cases + kr_cases,
+            "collection_status": "partial; 135 of 200 frozen before provider requests",
+            "cases": sg_cases + tw_cases + hk_cases + kr_cases + co_cases + au_cases,
         }
         output_bytes = canonical_json(payload)
         report = {
@@ -690,6 +916,8 @@ def main(argv: list[str] | None = None) -> int:
                 "tw-tourism-restaurants": tw_report,
                 "hk-ha-health-care-facilities": hk_report,
                 "kr-seoul-hospital-licenses": kr_report,
+                "co-bogota-public-health-network": co_report,
+                "au-melbourne-clue-businesses": au_report,
             },
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)

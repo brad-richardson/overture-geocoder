@@ -3,10 +3,10 @@
 Date: 2026-08-03
 
 Status: the cross-release identity measurement and the benchmark contracts are
-complete. The first 90 of 200 everyday-POI cases are frozen from Singapore,
-Taiwan, Hong Kong, and South Korea, before any provider request. GERS-to-QID
-candidate generation, the 200-decision match audit, and the remaining 110
-benchmark cases are not yet
+complete. The first 135 of 200 everyday-POI cases are frozen from Singapore,
+Taiwan, Hong Kong, South Korea, Colombia, and Australia, before any provider
+request. GERS-to-QID candidate generation, the 200-decision match audit, and
+the remaining 65 benchmark cases are not yet
 built. Nothing in this work changes a construction request, projection, serving
 artifact, catalog, or Worker.
 
@@ -137,10 +137,22 @@ PROJ 9.5.1 using the named EPSG operation at 1 m stated accuracy; original
 coordinates and the complete transformation contract are retained in every
 Seoul case. Batch 2 also made zero compared-provider requests.
 
-The frozen set is now 90 cases across four countries and three POI families,
-including 70 non-Latin cases. Readiness remains correctly red: 110 cases, two
-macroregions, four countries, two POI families, ten non-Latin cases, and 70
-government/open-primary cases remain to reach the v1 gates.
+Collection batch 3 adds 20 public healthcare facilities from Bogotá and 25
+physical-retail establishments from Melbourne. The Bogotá district layer has
+117 unique stable `ID` and `OBJECTID` values, 116 valid points, and 114 points
+inside the frozen dense-city bounds; hash selection admits 20 distinct official
+names. Melbourne's 2024 snapshot has 19,672 stable Opendatasoft `recordid`
+values. ANZSIC divisions 39-42 yield 1,852 named physical-retail candidates and
+1,286 after excluding duplicate official names. Review rejected one top-ranked
+storage-only record before filling the 25-case quota. Exact dataset, catalog,
+ArcGIS-layer, and CC BY 4.0 evidence bytes are retained. Batch 3 also made zero
+compared-provider requests.
+
+The frozen set is now 135 cases across six countries, four macroregions, and
+four POI families, including 70 non-Latin cases. Readiness remains correctly
+red on six incomplete gates: 65 cases, two countries, one POI family, ten
+non-Latin cases, and 25 government/open-primary cases remain to reach the v1
+minimums. Macroregion coverage is complete.
 
 The sources are official spatial restaurant, transit, medical-facility,
 business, and health-network datasets. Selection is deterministic from frozen

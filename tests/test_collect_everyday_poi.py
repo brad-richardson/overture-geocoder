@@ -59,6 +59,42 @@ def restaurant(record_id, name, *, town="中西區", status=1, lon=120.2, lat=23
     }
 
 
+def melbourne_record(record_id, name, *, code="4121", lon=144.96, lat=-37.81):
+    return {
+        "recordid": record_id,
+        "fields": {
+            "business_address": "1 Test Street MELBOURNE VIC 3000",
+            "census_year": "2024",
+            "industry_anzsic4_code": code,
+            "industry_anzsic4_description": "Fresh Meat, Fish and Poultry Retailing",
+            "latitude": lat,
+            "longitude": lon,
+            "property_id": "1",
+            "trading_name": name,
+        },
+    }
+
+
+def bogota_feature(record_id, object_id, name, *, provider="Pública", geometry=True):
+    return {
+        "type": "Feature",
+        "geometry": (
+            {"type": "Point", "coordinates": [-74.07, 4.65]}
+            if geometry
+            else None
+        ),
+        "properties": {
+            "CLASE_DE_P": "Instituciones Prestadoras de Servicios de Salud - IPS",
+            "DIRECCION": "Calle 1",
+            "ID": record_id,
+            "NOMBRE_DE_": "SUBRED TEST",
+            "NOMBRE_DEL": name,
+            "OBJECTID": object_id,
+            "TIPO_DE_PR": provider,
+        },
+    }
+
+
 def test_selection_digest_follows_frozen_nul_contract():
     expected = hashlib.sha256(b"plan\0record").hexdigest()
     assert collector.selection_digest("plan", "record") == expected
@@ -185,6 +221,59 @@ def test_seoul_filters_active_rows_and_retains_transform_provenance(
     assert report["filter_counts"] == {"not_active_trade_state": 1}
 
 
+def test_melbourne_filters_physical_retail_and_retains_review_exclusion(
+    tmp_path, monkeypatch
+):
+    records = [
+        melbourne_record("b", "Public Shop"),
+        melbourne_record("a", "Storage Only"),
+        melbourne_record("service", "Service", code="4310"),
+        melbourne_record("duplicate-one", "Duplicate Shop"),
+        melbourne_record("duplicate-two", " duplicate shop "),
+    ]
+    path = tmp_path / "melbourne.json"
+    path.write_text(json.dumps(records))
+    monkeypatch.setattr(
+        collector,
+        "MELBOURNE_REVIEW_EXCLUSIONS",
+        {"a": "storage_only_not_public_retail"},
+    )
+    cases, report = collector.collect_melbourne(
+        path, source("au-melbourne-clue-businesses"), quota=1
+    )
+    assert [item["expected_name"] for item in cases] == ["Public Shop"]
+    assert cases[0]["provenance"]["industry_anzsic4_code"] == "4121"
+    assert report["eligible_before_duplicate_filter"] == 4
+    assert report["eligible_after_duplicate_filter"] == 2
+    assert report["filter_counts"] == {"outside_physical_retail_divisions": 1}
+    assert {item["reason"] for item in report["review_exclusions"]} == {
+        "duplicate_official_name",
+        "storage_only_not_public_retail",
+    }
+
+
+def test_bogota_filters_public_valid_points_and_uses_stable_id(tmp_path):
+    payload = {
+        "type": "FeatureCollection",
+        "features": [
+            bogota_feature(2475, 1, "Unidad de Salud"),
+            bogota_feature(2476, 2, "Private Facility", provider="Privada"),
+            bogota_feature(2477, 3, "Missing Point", geometry=False),
+        ],
+    }
+    path = tmp_path / "bogota.geojson"
+    path.write_text(json.dumps(payload))
+    cases, report = collector.collect_bogota(
+        path, source("co-bogota-public-health-network"), quota=1
+    )
+    assert cases[0]["id"] == "everyday-co-2475"
+    assert cases[0]["provenance"]["source_object_id"] == "1"
+    assert report["filter_counts"] == {
+        "invalid_point": 1,
+        "not_public_provider": 1,
+    }
+
+
 def test_committed_batch_is_frozen_partial_evidence():
     payload_bytes = (ROOT / "benchmarks/everyday-poi-tripwire-cases-v1.json").read_bytes()
     payload = json.loads(payload_bytes)
@@ -193,13 +282,22 @@ def test_committed_batch_is_frozen_partial_evidence():
     )
     cases = payload["cases"]
     assert payload["schema"] == "benchmark-v2-forward-cases-v1"
-    assert len(cases) == 90
-    assert len({item["id"] for item in cases}) == 90
-    assert {item["strata"]["country"] for item in cases} == {"HK", "KR", "SG", "TW"}
+    assert len(cases) == 135
+    assert len({item["id"] for item in cases}) == 135
+    assert {item["strata"]["country"] for item in cases} == {
+        "AU",
+        "CO",
+        "HK",
+        "KR",
+        "SG",
+        "TW",
+    }
     assert sum(item["strata"]["country"] == "SG" for item in cases) == 20
     assert sum(item["strata"]["country"] == "TW" for item in cases) == 30
     assert sum(item["strata"]["country"] == "HK" for item in cases) == 20
     assert sum(item["strata"]["country"] == "KR" for item in cases) == 20
+    assert sum(item["strata"]["country"] == "CO" for item in cases) == 20
+    assert sum(item["strata"]["country"] == "AU" for item in cases) == 25
     assert all(item["selection_review"]["decision"] == "accepted" for item in cases)
     assert all("expected_gers_id" not in item for item in cases)
     assert report["provider_requests_made_during_selection"] == 0
@@ -216,6 +314,8 @@ def test_snapshot_manifest_has_exact_hashes_and_licence_evidence():
         "tw-tourism-restaurants",
         "hk-ha-health-care-facilities",
         "kr-seoul-hospital-licenses",
+        "co-bogota-public-health-network",
+        "au-melbourne-clue-businesses",
     }
     for item in manifest["sources"]:
         assert len(item["snapshot_sha256"]) == 64
@@ -230,6 +330,10 @@ def test_snapshot_manifest_has_exact_hashes_and_licence_evidence():
         assert licence.stat().st_size == item["license_snapshot_bytes"]
         assert collector.sha256_file(snapshot) == item["snapshot_sha256"]
         assert collector.sha256_file(licence) == item["license_snapshot_sha256"]
+        for metadata in item.get("metadata_snapshots", []):
+            metadata_path = ROOT / metadata["path"]
+            assert metadata_path.stat().st_size == metadata["bytes"]
+            assert collector.sha256_file(metadata_path) == metadata["sha256"]
 
 
 def test_committed_seoul_preview_is_complete_and_status_explicit():
@@ -242,3 +346,32 @@ def test_committed_seoul_preview_is_complete_and_status_explicit():
         for row in rows
     ) == 555
     assert len({row["MGTNO"] for row in rows}) == 929
+
+
+def test_committed_melbourne_snapshot_has_stable_record_ids():
+    records = json.loads(
+        (
+            ROOT
+            / "benchmarks/everyday-poi-source-data-v1/au-melbourne-businesses-2024.json"
+        ).read_text()
+    )
+    assert len(records) == 19672
+    assert len({item["recordid"] for item in records}) == 19672
+
+
+def test_committed_bogota_snapshot_has_stable_ids_and_116_points():
+    payload = json.loads(
+        (
+            ROOT
+            / "benchmarks/everyday-poi-source-data-v1/co-bogota-health-network.geojson"
+        ).read_text()
+    )
+    features = payload["features"]
+    assert len(features) == 117
+    assert len({item["properties"]["ID"] for item in features}) == 117
+    assert len({item["properties"]["OBJECTID"] for item in features}) == 117
+    assert sum(
+        (item.get("geometry") or {}).get("type") == "Point"
+        and collector.valid_point((item.get("geometry") or {}).get("coordinates"))
+        for item in features
+    ) == 116

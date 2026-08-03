@@ -1,0 +1,250 @@
+{
+ "currentVersion": 11.3,
+ "cimVersion": "3.3.0",
+ "id": 1,
+ "name": "Red Adscrita de Salud",
+ "type": "Feature Layer",
+ "description": "Institución pública prestadora de servicios de salud coordinada por la Secretaria Distrital de Salud de Bogotá, que en el Sistema General de Seguridad Social en Salud tiene la función de prestar los servicios en el respectivo nivel de atención a los afiliados y beneficiarios de los distintos regímenes en los que se divida el sistema.",
+ "geometryType": "esriGeometryPoint",
+ "sourceSpatialReference": {
+  "wkid": 102100,
+  "latestWkid": 3857,
+  "xyTolerance": 0.001,
+  "zTolerance": 0.001,
+  "mTolerance": 0.001,
+  "falseX": -20037700,
+  "falseY": -30241100,
+  "xyUnits": 10000,
+  "falseZ": 0,
+  "zUnits": 1,
+  "falseM": 0,
+  "mUnits": 1
+ },
+ "copyrightText": "Secretaria distrital de salud-SDS",
+ "parentLayer": null,
+ "subLayers": [],
+ "minScale": 0,
+ "maxScale": 0,
+ "drawingInfo": {
+  "renderer": {
+   "type": "simple",
+   "symbol": {
+    "type": "esriPMS",
+    "url": "49d4049d39119de2b8cec2535713581e",
+    "imageData": "iVBORw0KGgoAAAANSUhEUgAAABcAAAAXCAYAAADgKtSgAAAACXBIWXMAAA7EAAAOxAGVKw4bAAACDUlEQVRIid3VP2gTYRjH8e97aU3UpsaioFSHWjFOIipWB0VRo8SmNZbGdmjRuhZcnKSV4OIgFOqgIGLBxSQVbRvEPxQUlICx4iCadis4CJrBCC0JkveRi1hybU6TiIP+4D14Xh4+vHf33ns1/MXU/Md4Z6yOnPaB8qLFg6E+IWoKFy8YDeWrwztjq8jKAFndD7hAQAEi5gWy6iOt0UvsSt0gHNbl422xzeT0I6DZfl2yHsV1Xm8N4rt9kie9c7/Hj8YaEP0Y2ER58eF03gXxg5Jf48vyQ6AK8JbGOiYG9pOYTtM3nFxoudy7jeDeDfRdTZJIpc27OEYgepY4N+3xE5Fm8vT8LJ21DryNbj6k5y1t61a7CvMrXY7i6YuEw7eKn78V16oDxKC6bOSNdw+QKI2L3vljS1izvclDfHCfpS4ZUTvscYw1hW22KO7ltRawwe20wVlbXFpxRaaEzfP3nzky+GyhHjm3m9OHmkrpX+xxIQUEqTZKUvY4MgZcqJL+yjfPU3s83vWK1sgkisMV06KGeOjP2eNmDKMf0eYXU/92NoNqiy5pOTOcLIyivEOtuLK4byk+EZqhPdqBlnvmRiljzdNg+IkH5ss7uMZPTXI80oLBNeCADWoetyO4jPOMhjKVHbkPusw3f5D2Oy1oFUApLyL1QBpkCgf3Geue/bOfxXj3S8AcFeff/Yd+B3ldnHmsyicNAAAAAElFTkSuQmCC",
+    "contentType": "image/png",
+    "width": 17,
+    "height": 17,
+    "angle": 0,
+    "xoffset": 0,
+    "yoffset": 0
+   }
+  },
+  "scaleSymbols": false,
+  "transparency": 0,
+  "labelingInfo": null
+ },
+ "defaultVisibility": true,
+ "extent": {
+  "xmin": -8272938.3006,
+  "ymin": 448924.524599999,
+  "xmax": -8239460.0324,
+  "ymax": 531481.6979000011,
+  "spatialReference": {
+   "wkid": 102100,
+   "latestWkid": 3857,
+   "xyTolerance": 0.001,
+   "zTolerance": 0.001,
+   "mTolerance": 0.001,
+   "falseX": -20037700,
+   "falseY": -30241100,
+   "xyUnits": 1.4892314192838538E8,
+   "falseZ": -100000,
+   "zUnits": 10000,
+   "falseM": -100000,
+   "mUnits": 10000
+  }
+ },
+ "hasAttachments": false,
+ "htmlPopupType": "esriServerHTMLPopupTypeAsHTMLText",
+ "displayField": "IDENTIFICA",
+ "typeIdField": null,
+ "subtypeFieldName": null,
+ "subtypeField": null,
+ "defaultSubtypeCode": null,
+ "fields": [
+  {
+   "name": "OBJECTID",
+   "type": "esriFieldTypeOID",
+   "alias": "OBJECTID",
+   "domain": null
+  },
+  {
+   "name": "ID",
+   "type": "esriFieldTypeDouble",
+   "alias": "id",
+   "domain": null
+  },
+  {
+   "name": "IDENTIFICA",
+   "type": "esriFieldTypeString",
+   "alias": "Identificador",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "CODIGO_DE",
+   "type": "esriFieldTypeString",
+   "alias": "Código",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "NOMBRE_DE_",
+   "type": "esriFieldTypeString",
+   "alias": "Nombre del prestador",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "NOMBRE_DEL",
+   "type": "esriFieldTypeString",
+   "alias": "Nombre",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "DIRECCION",
+   "type": "esriFieldTypeString",
+   "alias": "direccion",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "TELEFONO",
+   "type": "esriFieldTypeString",
+   "alias": "telefono",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "CORREO_ELE",
+   "type": "esriFieldTypeString",
+   "alias": "Correo electrónico",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "TIPO_DE_PR",
+   "type": "esriFieldTypeString",
+   "alias": "Tipo de prestador",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "CLASE_DE_P",
+   "type": "esriFieldTypeString",
+   "alias": "Clase de prestador",
+   "length": 254,
+   "domain": null
+  },
+  {
+   "name": "CODIGO_LOC",
+   "type": "esriFieldTypeDouble",
+   "alias": "Localidad",
+   "domain": null
+  },
+  {
+   "name": "CODIGO_UPZ",
+   "type": "esriFieldTypeDouble",
+   "alias": "Codigó UPZ",
+   "domain": null
+  },
+  {
+   "name": "SHAPE",
+   "type": "esriFieldTypeGeometry",
+   "alias": "shape",
+   "domain": null
+  }
+ ],
+ "geometryField": {
+  "name": "SHAPE",
+  "type": "esriFieldTypeGeometry",
+  "alias": "shape"
+ },
+ "indexes": [
+  {
+   "name": "A301_IX1",
+   "fields": "SHAPE",
+   "isAscending": true,
+   "isUnique": true,
+   "description": ""
+  }
+ ],
+ "subtypes": [],
+ "relationships": [],
+ "canModifyLayer": true,
+ "canScaleSymbols": false,
+ "hasLabels": false,
+ "capabilities": "Map,Query,Data",
+ "maxRecordCount": 2000,
+ "supportsStatistics": true,
+ "supportsExceedsLimitStatistics": true,
+ "supportsAdvancedQueries": true,
+ "supportedQueryFormats": "JSON, geoJSON, PBF",
+ "isDataVersioned": false,
+ "ownershipBasedAccessControlForFeatures": {"allowOthersToQuery": true},
+ "useStandardizedQueries": true,
+ "supportedSpatialRelationships": [
+  "esriSpatialRelIntersects",
+  "esriSpatialRelContains",
+  "esriSpatialRelCrosses",
+  "esriSpatialRelEnvelopeIntersects",
+  "esriSpatialRelIndexIntersects",
+  "esriSpatialRelOverlaps",
+  "esriSpatialRelTouches",
+  "esriSpatialRelWithin",
+  "esriSpatialRelRelation"
+ ],
+ "advancedQueryCapabilities": {
+  "useStandardizedQueries": true,
+  "supportsStatistics": true,
+  "supportsPercentileStatistics": true,
+  "supportsHavingClause": true,
+  "supportsOrderBy": true,
+  "supportsDistinct": true,
+  "supportsCountDistinct": true,
+  "supportsAdvancedQueryRelated": true,
+  "supportsQueryRelatedPagination": true,
+  "supportsPagination": true,
+  "supportsLod": false,
+  "supportsQueryWithLodSR": false,
+  "supportsTrueCurve": true,
+  "supportsQueryWithDatumTransformation": true,
+  "supportsReturningQueryExtent": true,
+  "supportsQueryWithDistance": true,
+  "supportsSqlExpression": true,
+  "supportsTimeRelation": true,
+  "supportsSqlFormat": false,
+  "supportsQueryAnalytic": true,
+  "supportsCurrentUserQueries": true
+ },
+ "supportsDatumTransformation": true,
+ "advancedQueryAnalyticCapabilities": {
+  "supportsLinearRegression": true,
+  "supportsAsync": false,
+  "supportsPercentileAnalytic": true
+ },
+ "dateFieldsTimeReference": null,
+ "preferredTimeReference": null,
+ "datesInUnknownTimezone": false,
+ "hasMetadata": true,
+ "isDataArchived": false,
+ "archivingInfo": {
+  "supportsQueryWithHistoricMoment": false,
+  "startArchivingMoment": -1
+ },
+ "supportsCoordinatesQuantization": true,
+ "supportsDynamicLegends": true,
+ "serviceItemId": "86837045456d49c99799bab18d591d1d"
+}

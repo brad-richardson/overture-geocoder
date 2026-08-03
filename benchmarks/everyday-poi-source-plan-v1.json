@@ -1,7 +1,7 @@
 {
   "schema": "everyday-poi-source-plan-v1",
   "tripwire_spec": "benchmarks/everyday-poi-tripwire-spec-v1.json",
-  "status": "collection in progress; 90 cases frozen from Singapore, Taiwan, Hong Kong, and South Korea",
+  "status": "collection in progress; 135 cases frozen from Singapore, Taiwan, Hong Kong, South Korea, Colombia, and Australia",
   "target_totals": {
     "cases": 200,
     "government_or_open_primary": 200,
@@ -179,19 +179,20 @@
       "source_kind": "government",
       "source_name": "Red adscrita de salud para Bogota D.C.",
       "publisher": "Bogota District Health Secretariat",
-      "source_url": "https://www.datos.gov.co/en/dataset/Red-adscrita-de-salud-para-Bogot-D-C-/dhd9-k3tu/data",
+      "source_url": "https://datosabiertos.bogota.gov.co/dataset/red-adscrita-de-salud-para-bogota",
       "source_license": "Creative Commons Attribution 4.0",
-      "format": "GeoJSON or GeoPackage",
+      "format": "GeoJSON",
       "identity_fields": [
-        "source feature identifier"
+        "ID",
+        "OBJECTID"
       ],
       "name_fields": [
-        "facility name"
+        "NOMBRE_DEL"
       ],
       "coordinate_fields": [
         "point geometry"
       ],
-      "qualification": "The official district dataset exposes downloadable geospatial resources and CC BY 4.0 metadata."
+      "qualification": "The official district catalog and live ArcGIS layer expose CC BY 4.0 metadata, stable ID and OBJECTID values, provider status and point geometry. The frozen layer contains 117 unique IDs and names, of which 116 have valid Bogota points."
     },
     {
       "id": "mx-inegi-denue",
@@ -232,21 +233,22 @@
       "script": "latin",
       "case_quota": 25,
       "source_kind": "government",
-      "source_name": "Business establishments location and industry classification",
+      "source_name": "Business establishments with address and industry classification (2024)",
       "publisher": "City of Melbourne",
-      "source_url": "https://discover.data.vic.gov.au/dataset/business-establishments-location-and-industry-classification",
+      "source_url": "https://data.melbourne.vic.gov.au/explore/dataset/business-establishments-with-address-and-industry-classification/",
       "source_license": "Creative Commons Attribution 4.0",
-      "format": "GeoJSON or CSV",
+      "format": "JSON",
       "identity_fields": [
-        "source establishment identifier"
+        "recordid"
       ],
       "name_fields": [
-        "trading name"
+        "trading_name"
       ],
       "coordinate_fields": [
-        "GeoJSON point geometry"
+        "longitude",
+        "latitude"
       ],
-      "qualification": "The Victorian Government metadata documents named commercial occupants, business addresses, industry classifications, locations and CC BY 4.0 licensing."
+      "qualification": "The official City of Melbourne 2024 snapshot contains 19,672 establishments with stable Opendatasoft recordid values, names, addresses, ANZSIC classifications, WGS84 coordinates and CC BY 4.0 licensing. Physical retail is limited to ANZSIC divisions 39-42 before deterministic review."
     }
   ]
 }
