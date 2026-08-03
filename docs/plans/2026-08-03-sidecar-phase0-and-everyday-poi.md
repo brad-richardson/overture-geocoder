@@ -2,13 +2,13 @@
 
 Date: 2026-08-03
 
-Status: the cross-release identity measurement, benchmark contracts, and all
-200 everyday-POI cases are complete. The cases are frozen from eight government
-sources before any provider request, and the readiness report is green.
-The first three-provider ranked baseline and the companion current-OSM presence
-control are also complete.
-GERS-to-QID candidate generation and the 200-decision match audit are not yet
-built. Nothing in this work changes a construction request, projection, serving
+Status: the cross-release identity measurement, benchmark contracts, all 200
+everyday-POI cases, and the first deterministic GERS-to-QID candidate generation
+are complete. The cases are frozen from eight government sources before any
+provider request, and the readiness report is green. The first three-provider
+ranked baseline and companion current-OSM presence control are also complete.
+The 200-decision match audit and accepted-mapping broadcast measurement remain
+open. Nothing in this work changes a construction request, projection, serving
 artifact, catalog, or Worker.
 
 ## Decision
@@ -92,6 +92,41 @@ Zero false accepts in 200 checks is an operational tripwire, not proof of
 automatic-acceptance rule and retain false candidates and rejection reasons.
 Phase 0 remains incomplete until that audit and the broadcast byte/resident
 memory measurement exist.
+
+### First deterministic candidate set, 2026-08-03
+
+The first direct-ID rule is now implemented and measured without construction
+movement. A frozen 1,000-binding Wikidata SPARQL snapshot of P1968 (Foursquare
+City Guide venue ID) contains 978 QIDs and 985 direct claims. Joining those
+claims to Overture release `2026-06-17.0`'s public Foursquare bridge produced
+344 bridge rows, 343 GERS IDs, and 344 QIDs. The normalized public Places rows
+and Wikidata entity rows are frozen and hash-bound by
+`benchmarks/2026-08-03-sidecar-phase0-foursquare-collection-v1.json`.
+
+`scripts/sidecar_phase0.py` produces 344 deterministic candidates. It
+provisionally auto-accepts 342 unambiguous direct identifiers; one GERS ID maps
+to two QIDs, so both candidates correctly require review. A source identity
+assigned to multiple GERS IDs also fails into review by contract, although none
+occurred in this snapshot. Multiple Wikidata coordinates are retained as source
+evidence and never arbitrarily selected; coordinates do not decide a direct-ID
+match.
+
+The risk-first review queue freezes 200 decisions: both direct conflicts, all
+21 missing-distance cases, all five over-1-km observations, 134 cases with no
+normalized label overlap, and 50 clean direct controls. Risk flags overlap.
+This is a review queue, not an audit result: all candidates remain
+`eligible_for_prominence=false` until an independent verdict is bound to the
+exact candidate-set hash. The audit still needs at least 200 checked decisions
+with zero false provisional accepts, followed by the broadcast byte/resident
+NumPy measurement.
+
+Evidence:
+
+- `benchmarks/sidecar-phase0-foursquare-places-v1.jsonl`;
+- `benchmarks/sidecar-phase0-foursquare-wikidata-entities-v1.jsonl`;
+- `benchmarks/2026-08-03-sidecar-phase0-foursquare-collection-v1.json`;
+- `benchmarks/2026-08-03-sidecar-phase0-candidates-v1.json`; and
+- `benchmarks/2026-08-03-sidecar-phase0-review-queue-v1.json`.
 
 Any accepted sidecar that changes `prominence_rank` moves projection identity
 and construction evidence. v4 is already consumed by the in-flight phrase
