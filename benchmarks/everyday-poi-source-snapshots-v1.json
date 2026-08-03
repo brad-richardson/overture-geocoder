@@ -69,6 +69,58 @@
       "source_license": "Korea Open Government Licence Type 1",
       "source_name": "Seoul Hospital Licensing Information",
       "source_url": "https://data.seoul.go.kr/dataList/OA-16479/S/1/datasetView.do?tab=A"
+    },
+    {
+      "accessed_at": "2026-08-03T16:15:26Z",
+      "download_locator": "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/salud/instituciones/MapServer/1/query?where=1%3D1&outFields=%2A&returnGeometry=true&outSR=4326&f=geojson",
+      "id": "co-bogota-public-health-network",
+      "license_snapshot_bytes": 48970,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/cc-by-4.0.html",
+      "license_snapshot_sha256": "6d55b998ed5c54f43426d059a8c549ed58a3321e5463e6a6af1c6b56ab78c333",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.en",
+      "metadata_snapshots": [
+        {
+          "bytes": 74247,
+          "path": "benchmarks/everyday-poi-source-data-v1/co-bogota-dataset.html",
+          "sha256": "7298db7a692095c4c2bfdb7e55e84502ff87c54dad64a5f7352eb1f886a6c578",
+          "url": "https://datosabiertos.bogota.gov.co/dataset/red-adscrita-de-salud-para-bogota"
+        },
+        {
+          "bytes": 6797,
+          "path": "benchmarks/everyday-poi-source-data-v1/co-bogota-layer.json",
+          "sha256": "f2fe311ed402ec4504339e34320cfa95ce24066ef069ea0f1c87e7b3e7e1c4f1",
+          "url": "https://serviciosgis.catastrobogota.gov.co/arcgis/rest/services/salud/instituciones/MapServer/1?f=pjson"
+        }
+      ],
+      "snapshot_bytes": 65294,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/co-bogota-health-network.geojson",
+      "snapshot_sha256": "0df3e221f62b3ba2b94231634ba13c07d68535bc23b91001819af3e0044c2fec",
+      "source_license": "Creative Commons Attribution 4.0",
+      "source_name": "Red adscrita de salud para Bogotá D.C.",
+      "source_url": "https://datosabiertos.bogota.gov.co/dataset/red-adscrita-de-salud-para-bogota"
+    },
+    {
+      "accessed_at": "2026-08-03T16:10:42Z",
+      "download_locator": "https://data.melbourne.vic.gov.au/api/records/1.0/download?dataset=business-establishments-with-address-and-industry-classification&format=json&refine.census_year=2024",
+      "id": "au-melbourne-clue-businesses",
+      "license_snapshot_bytes": 48970,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/cc-by-4.0.html",
+      "license_snapshot_sha256": "6d55b998ed5c54f43426d059a8c549ed58a3321e5463e6a6af1c6b56ab78c333",
+      "license_url": "https://creativecommons.org/licenses/by/4.0/legalcode.en",
+      "metadata_snapshots": [
+        {
+          "bytes": 7253,
+          "path": "benchmarks/everyday-poi-source-data-v1/au-melbourne-dataset-metadata.json",
+          "sha256": "43e16461ae75e46b470a149cd896bc0fcb5e461751f64a4a3bf54a19696846f0",
+          "url": "https://data.melbourne.vic.gov.au/api/explore/v2.1/catalog/datasets/business-establishments-with-address-and-industry-classification"
+        }
+      ],
+      "snapshot_bytes": 13855348,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/au-melbourne-businesses-2024.json",
+      "snapshot_sha256": "8487c2a06007a533860297040baefe9852691425d668f8d9f3677a1ac3d7e072",
+      "source_license": "Creative Commons Attribution 4.0",
+      "source_name": "Business establishments with address and industry classification (2024)",
+      "source_url": "https://data.melbourne.vic.gov.au/explore/dataset/business-establishments-with-address-and-industry-classification/"
     }
   ]
 }
