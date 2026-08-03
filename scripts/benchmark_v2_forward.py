@@ -1434,11 +1434,10 @@ def run_run(args):
 
     providers = list(dict.fromkeys(args.provider or ["overture"]))
     comparison_mode = any(provider != "overture" for provider in providers)
-    if comparison_mode and (
-            args.compare is not None or args.assert_recall is not None):
+    if comparison_mode and args.assert_recall is not None:
         print(
-            "--compare and --assert-recall apply only to Overture-only "
-            "exact-ID self-recall runs",
+            "--assert-recall applies only to Overture-only exact-ID "
+            "self-recall runs",
             file=sys.stderr,
         )
         return 2
@@ -1604,7 +1603,7 @@ def main(argv=None):
     run.add_argument("--output", type=str, help="write results JSON here")
     run.add_argument(
         "--compare", type=str,
-        help="Overture-only exact-ID baseline results JSON to diff against",
+        help="baseline results JSON with the same scoring mode to diff against",
     )
     run.add_argument("--regression-threshold", type=float, default=0.05,
                      help="absolute recall drop flagged as regression "

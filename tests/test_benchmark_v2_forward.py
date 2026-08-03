@@ -478,6 +478,14 @@ def test_paired_discordance_reports_direction_and_exact_mcnemar_p():
         }
         baseline.append({**shared, "found_at_1": False, "found_at_10": index == 6})
         current.append({**shared, "found_at_1": index < 6, "found_at_10": False})
+    # Multi-provider reports store external rows in the same results array;
+    # those rows must not enter Overture's paired counts.
+    baseline.append({
+        **baseline[0], "provider": "nominatim", "found_at_1": True,
+    })
+    current.append({
+        **current[0], "provider": "nominatim", "found_at_1": False,
+    })
 
     report = bench.paired_discordance(baseline, current, "overture")
     overall = report["groups"]["overall"]
@@ -967,10 +975,7 @@ def test_cli_defaults_to_overture_only_and_preserves_legacy_summary(
     assert {row["provider"] for row in payload["results"]} == {"overture"}
 
 
-@pytest.mark.parametrize(
-    "exact_only_option", [("--compare", "baseline.json"), ("--assert-recall", "0.9")])
-def test_cli_rejects_exact_only_gates_in_provider_comparison(
-        tmp_path, exact_only_option):
+def test_cli_rejects_exact_recall_gate_in_provider_comparison(tmp_path):
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(json.dumps({
         "schema": bench.CASES_SCHEMA,
@@ -982,8 +987,66 @@ def test_cli_rejects_exact_only_gates_in_provider_comparison(
         "run", "--cases", str(cases_path), "--skip-builtin",
         "--geocoder-tester", str(tmp_path / "missing"),
         "--provider", "overture", "--provider", "nominatim",
-        *exact_only_option,
+        "--assert-recall", "0.9",
     ]) == 2
+
+
+def test_cli_allows_paired_compare_in_provider_comparison(tmp_path, monkeypatch):
+    case = dict(
+        PLACE_CASE,
+        expected_name="Cafe de Paris",
+        tolerance_km=1.0,
+        query_style="named_poi",
+    )
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps({
+        "schema": bench.CASES_SCHEMA, "meta": {}, "cases": [case],
+    }), encoding="utf-8")
+
+    def result(provider):
+        return {
+            "case_id": case["id"],
+            "provider": provider,
+            "capability": "supported",
+            "kind": "place",
+            "query_style": "named_poi",
+            "strata": case["strata"],
+            "error": None,
+            "rank": 1,
+            "found_at_1": True,
+            "found_at_10": True,
+            "top1_distance_km": 0.01,
+            "ms": 1.0,
+            "type_at_1": provider == "overture",
+            "type_present": provider == "overture",
+        }
+
+    class StubRunner:
+        def __init__(self, *_args, provider, **_kwargs):
+            self.provider = provider
+            self.results = []
+            self.data_version = "test-build"
+
+        def execute(self, _case):
+            self.results.append(result(self.provider))
+
+    monkeypatch.setattr(bench, "Runner", StubRunner)
+    baseline_path = tmp_path / "baseline.json"
+    baseline_path.write_text(json.dumps({
+        "meta": {"timestamp": "before", "git_sha": "base"},
+        "summary": bench.summarize_results([result("overture")]),
+        "results": [result("overture"), result("nominatim")],
+    }), encoding="utf-8")
+    output_path = tmp_path / "current.json"
+
+    assert bench.main([
+        "run", "--cases", str(cases_path), "--skip-builtin",
+        "--geocoder-tester", str(tmp_path / "missing"),
+        "--provider", "overture", "--provider", "nominatim",
+        "--compare", str(baseline_path), "--output", str(output_path),
+    ]) == 0
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["paired_comparison"]["groups"]["overall"]["paired_cases"] == 1
 
 
 # ---------------------------------------------------------------------------
