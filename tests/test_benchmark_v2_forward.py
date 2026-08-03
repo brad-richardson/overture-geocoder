@@ -995,6 +995,41 @@ def test_cli_defaults_to_overture_only_and_preserves_legacy_summary(
     assert {row["provider"] for row in payload["results"]} == {"overture"}
 
 
+def test_cli_allows_provider_neutral_semantic_overture_only_run(
+        tmp_path, monkeypatch):
+    case = dict(
+        PLACE_CASE,
+        expected_gers_id="expected-gers-id",
+        expected_name="Cafe de Paris",
+        tolerance_km=1.0,
+    )
+    cases_path = tmp_path / "cases.json"
+    cases_path.write_text(json.dumps({
+        "schema": bench.CASES_SCHEMA, "meta": {}, "cases": [case],
+    }), encoding="utf-8")
+    output_path = tmp_path / "results.json"
+    session = FakeSession(FakeResponse(
+        200,
+        {"features": [feature(
+            "different-gers-id", 7.42, 43.73, name="Cafe de Paris")]},
+        {"X-Geocoder-Build": "test-build"},
+    ))
+    monkeypatch.setattr(bench.requests, "Session", lambda: session)
+
+    assert bench.main([
+        "run", "--cases", str(cases_path), "--skip-builtin",
+        "--geocoder-tester", str(tmp_path / "missing"),
+        "--provider", "overture", "--semantic-scoring",
+        "--output", str(output_path),
+    ]) == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["meta"]["benchmark_mode"] == "provider_neutral_semantic"
+    assert payload["meta"]["providers"]["overture"]["scoring_mode"] == "semantic"
+    assert payload["results"][0]["scoring_mode"] == "semantic"
+    assert payload["results"][0]["found_at_1"] is True
+
+
 def test_cli_rejects_exact_recall_gate_in_provider_comparison(tmp_path):
     cases_path = tmp_path / "cases.json"
     cases_path.write_text(json.dumps({

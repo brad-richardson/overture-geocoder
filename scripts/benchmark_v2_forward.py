@@ -1450,8 +1450,11 @@ def run_run(args):
         return 2
 
     providers = list(dict.fromkeys(args.provider or ["overture"]))
-    comparison_mode = any(provider != "overture" for provider in providers)
-    if comparison_mode and args.assert_recall is not None:
+    semantic_scoring = (
+        args.semantic_scoring
+        or any(provider != "overture" for provider in providers)
+    )
+    if semantic_scoring and args.assert_recall is not None:
         print(
             "--assert-recall applies only to Overture-only exact-ID "
             "self-recall runs",
@@ -1485,9 +1488,9 @@ def run_run(args):
             provider=provider,
             user_agent=args.user_agent,
             # A multi-provider report must judge Overture by the same semantic
-            # gold as the external providers. Overture-only runs retain the
-            # stricter exact-GERS-ID self-recall contract.
-            semantic_scoring=comparison_mode,
+            # gold as the external providers. Overture-only runs may explicitly
+            # opt into that contract when measuring a provider-neutral baseline.
+            semantic_scoring=semantic_scoring,
         )
         try:
             for case in cases:
@@ -1508,7 +1511,7 @@ def run_run(args):
                 "address_structured": True,
             },
             "scoring_mode": (
-                "semantic" if comparison_mode else "exact_gers_id"
+                "semantic" if semantic_scoring else "exact_gers_id"
             ),
         }
         if provider == "overture":
@@ -1532,7 +1535,7 @@ def run_run(args):
             "primary_provider": primary_provider,
             "benchmark_mode": (
                 "provider_neutral_semantic"
-                if comparison_mode else "exact_id_self_recall"
+                if semantic_scoring else "exact_id_self_recall"
             ),
             "providers": provider_metadata,
             "case_counts": case_counts(cases),
@@ -1598,6 +1601,11 @@ def main(argv=None):
     run.add_argument(
         "--provider", action="append", choices=PROVIDERS,
         help="provider to run; repeatable (default: overture only)",
+    )
+    run.add_argument(
+        "--semantic-scoring", action="store_true",
+        help="score an Overture-only run against provider-neutral semantic "
+             "gold instead of exact GERS IDs; implied for multi-provider runs",
     )
     run.add_argument("--nominatim-url", default=DEFAULT_NOMINATIM_URL)
     run.add_argument("--photon-url", default=DEFAULT_PHOTON_URL)

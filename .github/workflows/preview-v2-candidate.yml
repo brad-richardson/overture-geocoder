@@ -1,0 +1,302 @@
+name: Preview v2 candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      slice_version:
+        description: Promoted candidate slice containing the replacement Places family.
+        required: true
+        type: string
+      geocoder_build:
+        description: Preview data-version label (YYYY-MM-DD.N).
+        required: true
+        type: string
+      expected_production_build:
+        description: Fail if production moved before the overlay was assembled.
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: preview-v2-candidate
+  cancel-in-progress: false
+
+env:
+  R2_BUCKET: geocoder-shards
+  OVERTURE_RELEASE: 2026-06-17.0
+  CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+  CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+  AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+  AWS_REQUEST_CHECKSUM_CALCULATION: when_required
+  AWS_RESPONSE_CHECKSUM_VALIDATION: when_required
+
+jobs:
+  preview:
+    name: Assemble, deploy, measure, and remove isolated preview
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      SLICE_VERSION: ${{ inputs.slice_version }}
+      GEOCODER_BUILD: ${{ inputs.geocoder_build }}
+      EXPECTED_PRODUCTION_BUILD: ${{ inputs.expected_production_build }}
+      R2_ENDPOINT: https://${{ secrets.CLOUDFLARE_ACCOUNT_ID }}.r2.cloudflarestorage.com
+      PREVIEW_PREFIX: smoketest-v2/${{ github.run_id }}-${{ github.run_attempt }}
+      PREVIEW_CATALOG_KEY: smoketest-v2/${{ github.run_id }}-${{ github.run_attempt }}/catalog.json
+    steps:
+      - name: Check out main without persisted credentials
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+        with:
+          persist-credentials: false
+
+      - name: Validate the isolated preview inputs without secrets
+        run: |
+          set -euo pipefail
+          printf '%s' "$SLICE_VERSION" | grep -Eq '^slice-[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'
+          printf '%s' "$GEOCODER_BUILD" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'
+          printf '%s' "$EXPECTED_PRODUCTION_BUILD" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+$'
+          printf '%s' "$PREVIEW_CATALOG_KEY" | grep -Eq '^smoketest-v2/[0-9]+-[0-9]+/catalog\.json$'
+
+      - name: Set up exact Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: "3.11.14"
+
+      - name: Install hash-pinned hosted dependencies
+        run: >-
+          python -m pip install --only-binary=:all: --require-hashes
+          -r .github/requirements-hosted-rowgroup.txt
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+
+      - name: Set up Rust for the preview Worker
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Install preview Worker build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y llvm clang
+          cargo install worker-build
+          npm install --global wrangler
+
+      - name: Fetch and bind the live release plus candidate Places slice
+        run: |
+          set -euo pipefail
+          mkdir -p preview/input preview/output
+          get_object () {
+            local key="$1" output="$2"
+            aws s3api get-object \
+              --bucket "$R2_BUCKET" --key "$key" \
+              --endpoint-url "$R2_ENDPOINT" --region auto \
+              "$output" >/dev/null
+          }
+
+          get_object v2/catalog.json preview/input/production-catalog.json
+          PRODUCTION_BUILD=$(jq -er '.latest' preview/input/production-catalog.json)
+          if [ "$PRODUCTION_BUILD" != "$EXPECTED_PRODUCTION_BUILD" ]; then
+            echo "::error::production moved to ${PRODUCTION_BUILD}; expected ${EXPECTED_PRODUCTION_BUILD}"
+            exit 1
+          fi
+          RELEASE_KEY=$(jq -er --arg build "$PRODUCTION_BUILD" '
+            .releases[] | select(.geocoder_build == $build) | .manifest_key
+          ' preview/input/production-catalog.json)
+          get_object "$RELEASE_KEY" preview/input/base-release.json
+          jq -e --arg build "$PRODUCTION_BUILD" '
+            .geocoder_build == $build
+            and (.families | keys | sort) == ["addresses", "places"]
+          ' preview/input/base-release.json >/dev/null
+
+          LEGACY_KEY=$(jq -er '.legacy_core.manifest_key' preview/input/base-release.json)
+          ADDRESS_SOURCE_KEY=$(jq -er '.families.addresses.source.manifest_key' preview/input/base-release.json)
+          ADDRESS_MANIFEST_KEY=$(jq -er '.families.addresses.manifest_key' preview/input/base-release.json)
+          get_object "$LEGACY_KEY" preview/input/legacy-release-manifest.json
+          get_object "$ADDRESS_SOURCE_KEY" preview/input/address-source-manifest.json
+          get_object "$ADDRESS_MANIFEST_KEY" preview/input/address-family-manifest.json
+          get_object "${SLICE_VERSION}/slice-manifest.json" preview/input/candidate-slice-manifest.json
+          get_object "${SLICE_VERSION}/families/places/family-manifest.json" preview/input/candidate-places-manifest.json
+
+          jq -e --arg version "$SLICE_VERSION" '
+            .is_slice == true
+            and .promotion_eligible == false
+            and .slice_version == $version
+            and (.families | keys) == ["places"]
+          ' preview/input/candidate-slice-manifest.json >/dev/null
+
+          python -u scripts/prepare_v2_preview_overlay.py \
+            --base-release preview/input/base-release.json \
+            --legacy-release-manifest preview/input/legacy-release-manifest.json \
+            --base-family-manifest addresses=preview/input/address-family-manifest.json \
+            --base-family-source-manifest addresses=preview/input/address-source-manifest.json \
+            --candidate-family places \
+            --candidate-family-manifest preview/input/candidate-places-manifest.json \
+            --candidate-family-source-manifest preview/input/candidate-slice-manifest.json \
+            --geocoder-build "$GEOCODER_BUILD" \
+            --output preview/output/release.json \
+            --report preview/output/overlay-report.json
+
+      - name: Publish the isolated release and create-only preview catalog
+        run: |
+          set -euo pipefail
+          python -u scripts/v2_release_manifest.py publish-release \
+            --store "r2:${R2_BUCKET}" \
+            --release preview/output/release.json \
+            --catalog-key "$PREVIEW_CATALOG_KEY" \
+            --execute | tee preview/output/publish-release.json
+          python -u scripts/v2_release_manifest.py promote \
+            --store "r2:${R2_BUCKET}" \
+            --build "$GEOCODER_BUILD" \
+            --catalog-key "$PREVIEW_CATALOG_KEY" \
+            --expect-absent \
+            --execute | tee preview/output/promote-catalog.json
+
+      - name: Configure and deploy the isolated preview Worker
+        working-directory: crates/geocoder-worker
+        run: |
+          set -euo pipefail
+          sed -i \
+            -e "s#smoketest-v2/placeholder/catalog.json#${PREVIEW_CATALOG_KEY}#g" \
+            -e "s#EXPECTED_GEOCODER_BUILD = \".*\"#EXPECTED_GEOCODER_BUILD = \"${GEOCODER_BUILD}\"#" \
+            -e "s#EXPECTED_OVERTURE_RELEASE = \".*\"#EXPECTED_OVERTURE_RELEASE = \"${OVERTURE_RELEASE}\"#" \
+            wrangler.global-v2-preview.toml
+          grep -F "V2_CATALOG_KEY_OVERRIDE = \"${PREVIEW_CATALOG_KEY}\"" wrangler.global-v2-preview.toml
+          grep -F "EXPECTED_GEOCODER_BUILD = \"${GEOCODER_BUILD}\"" wrangler.global-v2-preview.toml
+          grep -F "EXPECTED_OVERTURE_RELEASE = \"${OVERTURE_RELEASE}\"" wrangler.global-v2-preview.toml
+
+          DEPLOY_LOG=$(mktemp)
+          wrangler deploy --config wrangler.global-v2-preview.toml 2>&1 | tee "$DEPLOY_LOG"
+          PREVIEW_URL=$(grep -oE 'https://[^[:space:]]+\.workers\.dev' "$DEPLOY_LOG" | tail -1)
+          if [ -z "$PREVIEW_URL" ]; then
+            echo "::error::Wrangler output did not contain the preview Worker URL"
+            exit 1
+          fi
+          echo "PREVIEW_URL=$PREVIEW_URL" >> "$GITHUB_ENV"
+          echo "Preview Worker: $PREVIEW_URL"
+
+      - name: Wait for the preview build and run direct phrase gates
+        run: |
+          set -euo pipefail
+          request_forward () {
+            local query="$1" output="$2" code
+            for attempt in $(seq 1 12); do
+              code=$(curl -sS --max-time 30 -o "$output" -w '%{http_code}' \
+                --get "${PREVIEW_URL}/v2/forward" \
+                --data-urlencode "q=${query}" \
+                --data-urlencode 'types=poi' \
+                --data-urlencode 'limit=10' || true)
+              if [ "$code" = "200" ] && jq -e --arg build "$GEOCODER_BUILD" '
+                .data_version.geocoder_build == $build
+              ' "$output" >/dev/null; then
+                return 0
+              fi
+              echo "attempt ${attempt}: ${query} returned ${code}"
+              sleep 10
+            done
+            return 1
+          }
+          request_forward "Big Ben" preview/output/big-ben.json
+          request_forward "Empire State Building" preview/output/empire-state-building.json
+          jq -e '.features | length > 0' preview/output/big-ben.json >/dev/null
+          jq -e '.features | length > 0' preview/output/empire-state-building.json >/dev/null
+
+      - name: Run the frozen 55-case semantic benchmark
+        run: |
+          python -u scripts/benchmark_v2_forward.py run \
+            --cases benchmarks/v2-forward-gold-cases-v1.json \
+            --skip-builtin \
+            --provider overture \
+            --semantic-scoring \
+            --base-url "$PREVIEW_URL" \
+            --interval 0.1 \
+            --compare benchmarks/2026-08-03-forward-gold-external-after-a2bc.json \
+            --output preview/output/gold-preview.json
+
+      - name: Run the frozen 200-case everyday-POI benchmark
+        run: |
+          python -u scripts/benchmark_v2_forward.py run \
+            --cases benchmarks/everyday-poi-tripwire-cases-v1.json \
+            --skip-builtin \
+            --provider overture \
+            --semantic-scoring \
+            --base-url "$PREVIEW_URL" \
+            --interval 0.1 \
+            --compare benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json \
+            --output preview/output/everyday-poi-preview.json
+
+      - name: Enforce paired acceptance and the two phrase recoveries
+        run: |
+          python -u scripts/validate_v2_preview_results.py \
+            --expected-build "$GEOCODER_BUILD" \
+            --gold-preview preview/output/gold-preview.json \
+            --gold-baseline benchmarks/2026-08-03-forward-gold-external-after-a2bc.json \
+            --everyday-preview preview/output/everyday-poi-preview.json \
+            --everyday-baseline benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json \
+            --output preview/output/acceptance.json
+          {
+            echo "## v2 candidate preview accepted"
+            echo
+            echo "- Candidate slice: \`${SLICE_VERSION}\`"
+            echo "- Preview build: \`${GEOCODER_BUILD}\`"
+            echo "- Gold r@1: $(jq -r '.gold.baseline.recall_at_1' preview/output/acceptance.json) -> $(jq -r '.gold.preview.recall_at_1' preview/output/acceptance.json)"
+            echo "- Gold r@10: $(jq -r '.gold.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.gold.preview.recall_at_10' preview/output/acceptance.json)"
+            echo "- Everyday r@1: $(jq -r '.everyday_poi.baseline.recall_at_1' preview/output/acceptance.json) -> $(jq -r '.everyday_poi.preview.recall_at_1' preview/output/acceptance.json)"
+            echo "- Everyday r@10: $(jq -r '.everyday_poi.baseline.recall_at_10' preview/output/acceptance.json) -> $(jq -r '.everyday_poi.preview.recall_at_10' preview/output/acceptance.json)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload preview evidence
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: v2-preview-${{ github.run_id }}-${{ github.run_attempt }}
+          retention-days: 90
+          if-no-files-found: warn
+          path: preview/output/
+
+      - name: Delete the preview Worker and run-scoped catalog objects
+        if: always()
+        run: |
+          set +e
+          FAILED=0
+          if [ -f crates/geocoder-worker/wrangler.global-v2-preview.toml ]; then
+            for attempt in 1 2 3; do
+              wrangler delete \
+                --config crates/geocoder-worker/wrangler.global-v2-preview.toml \
+                --force && break
+              sleep $((attempt * 5))
+            done
+          fi
+          WORKER_API="https://api.cloudflare.com/client/v4/accounts/${CLOUDFLARE_ACCOUNT_ID}/workers/scripts/geocoder-global-v2-preview"
+          WORKER_ABSENT=0
+          for attempt in 1 2 3; do
+            STATUS=$(curl -sS -o /dev/null -w '%{http_code}' \
+              -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              "$WORKER_API")
+            if [ "$STATUS" = "404" ]; then
+              WORKER_ABSENT=1
+              break
+            fi
+            sleep $((attempt * 5))
+          done
+          if [ "$WORKER_ABSENT" -ne 1 ]; then
+            echo "::error::could not verify preview Worker deletion"
+            FAILED=1
+          fi
+
+          aws s3 rm "s3://${R2_BUCKET}/${PREVIEW_PREFIX}/" --recursive \
+            --only-show-errors --endpoint-url "$R2_ENDPOINT" --region auto
+          REMAINING=$(aws s3api list-objects-v2 \
+            --bucket "$R2_BUCKET" --prefix "${PREVIEW_PREFIX}/" --max-keys 1 \
+            --query KeyCount --output text \
+            --endpoint-url "$R2_ENDPOINT" --region auto)
+          if [ "$REMAINING" != "0" ]; then
+            echo "::error::preview cleanup left ${REMAINING} object(s)"
+            FAILED=1
+          fi
+          exit "$FAILED"
