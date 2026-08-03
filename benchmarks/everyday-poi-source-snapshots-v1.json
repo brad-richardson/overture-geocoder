@@ -1,0 +1,35 @@
+{
+  "schema": "everyday-poi-source-snapshots-v1",
+  "sources": [
+    {
+      "accessed_at": "2026-08-03T14:59:38Z",
+      "download_locator": "https://api-open.data.gov.sg/v1/public/api/datasets/d_b39d3a0871985372d7e1637193335da5/poll-download",
+      "id": "sg-lta-mrt-exits",
+      "license_snapshot_bytes": 105793,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/sg-license.html",
+      "license_snapshot_sha256": "e942f8c4d2c1039c235d5944f44e943eeb95d9b93f52667ad26092e279345836",
+      "license_url": "https://data.gov.sg/open-data-licence",
+      "snapshot_bytes": 213057,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/sg-mrt-exits.geojson",
+      "snapshot_sha256": "a7eaa90f30991dc0ac4aa970d704123ce3ec9e60c82b42c32a32e74be7dc0327",
+      "source_license": "Singapore Open Data Licence version 1.0",
+      "source_name": "LTA MRT Station Exit (GEOJSON)",
+      "source_url": "https://data.gov.sg/datasets/d_b39d3a0871985372d7e1637193335da5/view"
+    },
+    {
+      "accessed_at": "2026-08-03T14:59:38Z",
+      "download_locator": "https://media.taiwan.net.tw/XMLReleaseAll_public/v2.0/Zh_tw/Restaurant-json.zip",
+      "id": "tw-tourism-restaurants",
+      "license_snapshot_bytes": 448106,
+      "license_snapshot_path": "benchmarks/everyday-poi-source-data-v1/tw-license.html",
+      "license_snapshot_sha256": "bcf9f14e8159f75be96758dd4f7f4dac4753727a4600a7caae793771a29f5363",
+      "license_url": "https://data.gov.tw/en/license",
+      "snapshot_bytes": 1028866,
+      "snapshot_path": "benchmarks/everyday-poi-source-data-v1/tw-restaurants.zip",
+      "snapshot_sha256": "685aec56a9dcd37be61fabc7c02085eaf6afe323f02baf4d8ad2303c57ad0fd9",
+      "source_license": "Open Government Data License, version 1.0",
+      "source_name": "Tourism Information Database - Restaurants",
+      "source_url": "https://data.gov.tw/dataset/7779"
+    }
+  ]
+}

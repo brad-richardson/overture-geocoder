@@ -3,9 +3,11 @@
 Date: 2026-08-03
 
 Status: the cross-release identity measurement and the benchmark contracts are
-complete. GERS-to-QID candidate generation, the 200-decision match audit, and
-the 200 benchmark cases are not yet built. Nothing in this work changes a
-construction request, projection, serving artifact, catalog, or Worker.
+complete. The first 50 of 200 everyday-POI cases are frozen from Singapore and
+Taiwan, before any provider request. GERS-to-QID candidate generation, the
+200-decision match audit, and the remaining 150 benchmark cases are not yet
+built. Nothing in this work changes a construction request, projection, serving
+artifact, catalog, or Worker.
 
 ## Decision
 
@@ -111,6 +113,16 @@ The planned family totals are civic/transit 20, food/drink 30, healthcare 90,
 lodging 20, and retail 40. One hundred cases use non-Latin source names. No
 country contributes more than 35 cases.
 
+Collection batch 1 freezes 20 distinct Singapore rail stations and 30 active
+named restaurants in Tainan's Zhongxi, East, North, South, and Anping districts.
+The Taiwan pivot is evidence-driven: the downloaded 2026-08-03 national
+snapshot contains no Taipei records, while those five source-coded Tainan core
+districts contain 237 active named points (235 after excluding both rows in one
+duplicate-name group). The Singapore feed contains 613 exits collapsing to 190
+stations. Selection made zero compared-provider requests and retained the exact
+dataset and licence bytes under `benchmarks/everyday-poi-source-data-v1/`, with
+their hashes in `benchmarks/everyday-poi-source-snapshots-v1.json`.
+
 The sources are official spatial restaurant, transit, medical-facility,
 business, and health-network datasets. Selection is deterministic from frozen
 source bytes and stable source record IDs before any compared-provider request.
@@ -166,3 +178,11 @@ python scripts/validate_everyday_poi_tripwire.py \
 
 During collection, `--allow-incomplete` may write a readiness report, but it
 does not weaken or mark any frozen gate as passed.
+
+Reproduce collection batch 1 from the frozen local source bytes:
+
+```bash
+python3 scripts/collect_everyday_poi_batch1.py \
+  --output benchmarks/everyday-poi-tripwire-cases-v1.json \
+  --report benchmarks/everyday-poi-selection-report-v1.json
+```

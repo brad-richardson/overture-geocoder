@@ -1,7 +1,7 @@
 {
   "schema": "everyday-poi-source-plan-v1",
   "tripwire_spec": "benchmarks/everyday-poi-tripwire-spec-v1.json",
-  "status": "source-qualified; case collection not started",
+  "status": "collection in progress; 50 cases frozen from Singapore and Taiwan",
   "target_totals": {
     "cases": 200,
     "government_or_open_primary": 200,
@@ -41,7 +41,7 @@
     {
       "id": "tw-tourism-restaurants",
       "country": "TW",
-      "city_filter": "Taipei dense urban area",
+      "city_filter": "Tainan dense urban core: Zhongxi, East, North, South, and Anping districts",
       "macroregion": "east_asia",
       "poi_family": "food_drink",
       "script": "non_latin",
@@ -63,7 +63,7 @@
         "PositionLat",
         "PositionLon"
       ],
-      "qualification": "The official catalog documents daily spatial restaurant data, identifiers, names, WGS84 coordinates, and the stated open-government license."
+      "qualification": "The official catalog documents daily spatial restaurant data, identifiers, names, WGS84 coordinates, and the stated open-government license. The frozen 2026-08-03 snapshot contains no Taipei rows, so collection uses its 237 active named point records in Tainan's five core districts."
     },
     {
       "id": "sg-lta-mrt-exits",
