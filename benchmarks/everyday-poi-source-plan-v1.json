@@ -1,0 +1,252 @@
+{
+  "schema": "everyday-poi-source-plan-v1",
+  "tripwire_spec": "benchmarks/everyday-poi-tripwire-spec-v1.json",
+  "status": "source-qualified; case collection not started",
+  "target_totals": {
+    "cases": 200,
+    "government_or_open_primary": 200,
+    "outside_europe_north_america": 200,
+    "non_latin_script": 100,
+    "countries": 8,
+    "macroregions": 4
+  },
+  "quota_by_family": {
+    "civic_transit": 20,
+    "food_drink": 30,
+    "healthcare": 90,
+    "lodging": 20,
+    "retail": 40
+  },
+  "quota_by_country": {
+    "AU": 25,
+    "CO": 20,
+    "HK": 20,
+    "JP": 30,
+    "KR": 20,
+    "MX": 35,
+    "SG": 20,
+    "TW": 30
+  },
+  "selection_contract": [
+    "Download and retain the exact source bytes, access timestamp, source URL, license text, and sha256 before selecting records.",
+    "Filter only by source fields: active status, dense-city boundary, allowed POI family, non-empty official name, stable source record ID, and valid coordinates. Never query a compared provider during selection.",
+    "Within each source and family, sort eligible records by sha256(source_plan_id + NUL + source_record_id) and review in that order until the quota is filled.",
+    "Reject tourist icons, generic unnamed facilities, duplicate branches, records whose official status cannot be confirmed, and records whose source coordinate is visibly an administrative centroid. Retain every rejection and reason.",
+    "For projected coordinates, retain the original values, source CRS, transformation command and version, and transformed WGS84 values.",
+    "Freeze the 200 cases and their case-file sha256 before the first Overture, Nominatim, or Photon request.",
+    "Do not geocode a source address with Overture, Nominatim, Photon, Google, or another compared or closed provider to manufacture gold coordinates.",
+    "If any source is found to be OSM-derived, mark osm_derived=true and make its cases Overture-only before measurement."
+  ],
+  "sources": [
+    {
+      "id": "tw-tourism-restaurants",
+      "country": "TW",
+      "city_filter": "Taipei dense urban area",
+      "macroregion": "east_asia",
+      "poi_family": "food_drink",
+      "script": "non_latin",
+      "case_quota": 30,
+      "source_kind": "government",
+      "source_name": "Tourism Information Database - Restaurants",
+      "publisher": "Taiwan Tourism Administration, Ministry of Transportation and Communications",
+      "source_url": "https://data.gov.tw/dataset/7779",
+      "source_license": "Open Government Data License, version 1.0",
+      "format": "JSON or XML",
+      "identity_fields": [
+        "RestaurantID"
+      ],
+      "name_fields": [
+        "RestaurantName",
+        "AlternateNames"
+      ],
+      "coordinate_fields": [
+        "PositionLat",
+        "PositionLon"
+      ],
+      "qualification": "The official catalog documents daily spatial restaurant data, identifiers, names, WGS84 coordinates, and the stated open-government license."
+    },
+    {
+      "id": "sg-lta-mrt-exits",
+      "country": "SG",
+      "city_filter": "Singapore dense urban area",
+      "macroregion": "southeast_asia",
+      "poi_family": "civic_transit",
+      "script": "latin",
+      "case_quota": 20,
+      "source_kind": "government",
+      "source_name": "LTA MRT Station Exit (GEOJSON)",
+      "publisher": "Singapore Land Transport Authority",
+      "source_url": "https://data.gov.sg/datasets/d_b39d3a0871985372d7e1637193335da5/view",
+      "source_license": "Singapore Open Data Licence",
+      "format": "GeoJSON",
+      "identity_fields": [
+        "OBJECTID"
+      ],
+      "name_fields": [
+        "STATION_NA",
+        "EXIT_CODE"
+      ],
+      "coordinate_fields": [
+        "geometry.coordinates"
+      ],
+      "qualification": "Collapse exits by STATION_NA, then use the lowest natural EXIT_CODE as the deterministic source point and retain that exit's OBJECTID."
+    },
+    {
+      "id": "jp-mlit-medical-facilities",
+      "country": "JP",
+      "city_filter": "Tokyo dense urban area",
+      "macroregion": "east_asia",
+      "poi_family": "healthcare",
+      "script": "non_latin",
+      "case_quota": 30,
+      "source_kind": "government",
+      "source_name": "National Land Numerical Information - Medical Institutions",
+      "publisher": "Japan Ministry of Land, Infrastructure, Transport and Tourism",
+      "source_url": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P04-v3_0.html",
+      "source_license": "MLIT National Land Numerical Information open-data terms",
+      "format": "GML or Shapefile",
+      "identity_fields": [
+        "source feature identifier"
+      ],
+      "name_fields": [
+        "P04_002"
+      ],
+      "coordinate_fields": [
+        "point geometry in JGD2011"
+      ],
+      "qualification": "The official catalog provides point geometry, facility names and addresses. Because the current edition is 2020, every selected facility requires an active-status check against the newer government medical-information release before admission."
+    },
+    {
+      "id": "kr-seoul-hospital-licenses",
+      "country": "KR",
+      "city_filter": "Seoul dense urban area",
+      "macroregion": "east_asia",
+      "poi_family": "healthcare",
+      "script": "non_latin",
+      "case_quota": 20,
+      "source_kind": "government",
+      "source_name": "Seoul Hospital Licensing Information",
+      "publisher": "Seoul Metropolitan Government",
+      "source_url": "https://data.seoul.go.kr/dataList/OA-16479/S/1/datasetView.do?tab=A",
+      "source_license": "Korea Open Government Licence Type 1 (attribution; commercial use and modification permitted)",
+      "format": "Open API",
+      "identity_fields": [
+        "licensing management number"
+      ],
+      "name_fields": [
+        "business-place name"
+      ],
+      "coordinate_fields": [
+        "EPSG:5174 easting",
+        "EPSG:5174 northing"
+      ],
+      "qualification": "The official catalog is updated daily and explicitly documents EPSG:5174 coordinates; conversion to WGS84 must be reproducible and retained with each case."
+    },
+    {
+      "id": "hk-ha-health-care-facilities",
+      "country": "HK",
+      "city_filter": "Hong Kong dense urban area",
+      "macroregion": "east_asia",
+      "poi_family": "healthcare",
+      "script": "non_latin",
+      "case_quota": 20,
+      "source_kind": "government",
+      "source_name": "Hospital Authority hospitals, institutions and clinics directory",
+      "publisher": "Hong Kong Hospital Authority",
+      "source_url": "https://data.gov.hk/tc-data/dataset/hospital-hadata-health-care-facilities/resource/db3a9da3-9ecd-40ec-b91d-0f1c2dd2a08c",
+      "source_license": "DATA.GOV.HK Terms and Conditions",
+      "format": "Common Spatial Data Infrastructure API",
+      "identity_fields": [
+        "source feature identifier"
+      ],
+      "name_fields": [
+        "Traditional Chinese facility name",
+        "English facility name"
+      ],
+      "coordinate_fields": [
+        "point geometry"
+      ],
+      "qualification": "The official quarterly spatial directory is bilingual. Prefer the Traditional Chinese name as the query surface and retain English only as an accepted alias."
+    },
+    {
+      "id": "co-bogota-public-health-network",
+      "country": "CO",
+      "city_filter": "Bogota dense urban area",
+      "macroregion": "latin_america",
+      "poi_family": "healthcare",
+      "script": "latin",
+      "case_quota": 20,
+      "source_kind": "government",
+      "source_name": "Red adscrita de salud para Bogota D.C.",
+      "publisher": "Bogota District Health Secretariat",
+      "source_url": "https://www.datos.gov.co/en/dataset/Red-adscrita-de-salud-para-Bogot-D-C-/dhd9-k3tu/data",
+      "source_license": "Creative Commons Attribution 4.0",
+      "format": "GeoJSON or GeoPackage",
+      "identity_fields": [
+        "source feature identifier"
+      ],
+      "name_fields": [
+        "facility name"
+      ],
+      "coordinate_fields": [
+        "point geometry"
+      ],
+      "qualification": "The official district dataset exposes downloadable geospatial resources and CC BY 4.0 metadata."
+    },
+    {
+      "id": "mx-inegi-denue",
+      "country": "MX",
+      "city_filter": "Mexico City dense urban area",
+      "macroregion": "latin_america",
+      "poi_family_quotas": {
+        "lodging": 20,
+        "retail": 15
+      },
+      "script": "latin",
+      "case_quota": 35,
+      "source_kind": "government",
+      "source_name": "Directorio Estadistico Nacional de Unidades Economicas (DENUE) 05_2026",
+      "publisher": "Instituto Nacional de Estadistica y Geografia",
+      "source_url": "https://www.inegi.org.mx/temas/directorio/",
+      "source_license": "INEGI Terms of Free Use",
+      "format": "CSV or Shapefile",
+      "identity_fields": [
+        "DENUE establishment ID",
+        "CLEE"
+      ],
+      "name_fields": [
+        "commercial establishment name"
+      ],
+      "coordinate_fields": [
+        "latitude",
+        "longitude"
+      ],
+      "qualification": "The official directory publishes establishment identity, economic activity, address and geographic coordinates under terms permitting extraction, adaptation and commercial reuse with attribution."
+    },
+    {
+      "id": "au-melbourne-clue-businesses",
+      "country": "AU",
+      "city_filter": "Melbourne dense urban area",
+      "macroregion": "oceania",
+      "poi_family": "retail",
+      "script": "latin",
+      "case_quota": 25,
+      "source_kind": "government",
+      "source_name": "Business establishments location and industry classification",
+      "publisher": "City of Melbourne",
+      "source_url": "https://discover.data.vic.gov.au/dataset/business-establishments-location-and-industry-classification",
+      "source_license": "Creative Commons Attribution 4.0",
+      "format": "GeoJSON or CSV",
+      "identity_fields": [
+        "source establishment identifier"
+      ],
+      "name_fields": [
+        "trading name"
+      ],
+      "coordinate_fields": [
+        "GeoJSON point geometry"
+      ],
+      "qualification": "The Victorian Government metadata documents named commercial occupants, business addresses, industry classifications, locations and CC BY 4.0 licensing."
+    }
+  ]
+}

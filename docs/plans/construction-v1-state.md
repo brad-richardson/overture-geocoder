@@ -1,7 +1,8 @@
 # construction-v1: current state
 
 Last updated 2026-08-03 after the bounded entity-phrase admission implementation,
-the independent correctness audit, and fresh v4 formal evidence.
+the independent correctness audit, fresh v4 formal evidence, and sidecar Phase
+0's cross-release identity measurement.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -22,8 +23,8 @@ expose German/Spanish names, not the English query surface, and even the German
 routed control misses the canonical record. It is an alias/tokenization plus
 routed-cap problem, not the same global-head eviction. Fresh v4 formal evidence
 is now green, including the planet-wide phrase-posting falsification probe. **The
-next construction gate is a non-promoting Places-only planet build under v4,
-followed by preview measurement before any catalog promotion.** Keep Brandenburg
+non-promoting Places-only planet build under v4 is now in progress; preview
+measurement remains the next gate before any catalog promotion.** Keep Brandenburg
 Gate and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
 phrase admission again in this generation: the repeated functional rehearsal
 has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
@@ -1503,9 +1504,19 @@ Durable evidence:
 - `benchmarks/places-construction-v1-data/evidence/readiness-v4.json` (`ready=true`).
 
 The control plane and slice workflow now bind v4 and its exact hashes. This
-closes the review's v2/v3 inconsistency. The next construction action is a
-**Places-only, non-promoting planet build**, then preview measurement; catalog
-promotion still requires measured quality and integrity gates.
+closes the review's v2/v3 inconsistency. The **Places-only, non-promoting planet
+build** is dispatched as run `30799029151` from exact producer
+`ad3ff5de72d20f7c8c52707ac08d624eed037cc7`. Admission, binaries, all 89 maps,
+and planning passed. At the 2026-08-03T14:33Z observation, 60 of 128 reducer
+batches had passed, four were active, 64 were queued, and none had failed. At
+14:46Z, 71 had passed and batch 30 had acquired an infrastructure-like failure:
+GitHub closed the job after 46 minutes while its reducer step still reported
+`in_progress`, no post step ran, and the job-log blob was absent. Other reducer
+batches continued normally. Wait for matrix completion, inspect the finalized
+log, then rerun failed jobs in the same run; do not discard the run-scoped
+staging progress by starting a new request. Preview measurement follows a green
+completion; catalog promotion still requires measured quality and integrity
+gates.
 
 **The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
 deploy run `30796985582` published Worker version
@@ -1554,12 +1565,55 @@ admission is authorized by this result.
 `names.common` empty and `names.rules` populated away from the landmark classes;
 none of the seven landmark gold entities has a useful rules alias. Exact
 URL/social clustering is either unsafe or negligible and is deferred. The
-durable sidecar direction is fame first: a stable QID-keyed table plus a
-release-scoped GERS-to-QID match table, with audited match precision as the Phase
-0 go/no-go. Since this work has consumed evidence generation v4, a sidecar that
+durable sidecar direction is fame first: a stable QID-keyed table plus a durable
+GERS-to-QID match ledger and release-attested membership/deltas, with audited
+match precision as the Phase 0 go/no-go. Since this work has consumed evidence
+generation v4, a sidecar that
 changes projection identity must start at **v5**, not reuse the audit's
 provisional v4 label. Everyday-POI benchmark expansion precedes any commitment
 beyond sidecar Phase 0.
+
+### Sidecar Phase 0 identity result and everyday-POI tripwire, 2026-08-03
+
+Durable plan:
+`docs/plans/2026-08-03-sidecar-phase0-and-everyday-poi.md`. Contracts and
+evidence:
+
+- `benchmarks/gers-qid-sidecar-phase0-spec-v1.json`;
+- `benchmarks/2026-08-03-gers-place-stability-v1.json`;
+- `benchmarks/everyday-poi-tripwire-spec-v1.json`; and
+- `benchmarks/everyday-poi-source-plan-v1.json`.
+
+The audit report's “release-scoped GERS-to-QID match table” is corrected.
+Overture intends GERS IDs to be stable, so accepted GERS-to-QID associations are
+durable and surviving unchanged IDs are not rematched each month. What is
+release-scoped is the membership/delta/attestation used to identify added,
+removed, data-changed, and reassigned exceptions.
+
+The public-data probe joined the exact same `(dataset, record_id)` across June
+and July for all nine Places bridge datasets present in both releases. Of
+81,224,863 comparable persistent source records, 76,440,029 kept the same GERS
+ID and 4,784,834 moved to another GERS ID: **94.109151% stable** at this source
+assignment layer, with zero ambiguous keys. This is not an entity-level GERS
+survival estimate: merge/split and conflation changes can move a source record
+between GERS entities. It does prove that the exception path is material and a
+blind unversioned carry-forward is unsafe. Krick exposed a separate limitation:
+it regenerated every observed source record ID, leaving no comparable keys.
+
+Phase 0 still requires a deterministic candidate set, at least 200 hand-checked
+decisions with zero false accepts, and measured mapping bytes/resident join
+memory. Only direct external IDs may auto-accept; fuzzy candidates require
+review, and no unreviewed match may affect prominence. This phase cannot alter
+construction output.
+
+The frozen everyday-POI fast loop targets 200 cases from eight government
+sources and four macroregions, all outside Europe/North America, with 100
+non-Latin cases and five families: civic/transit, food/drink, healthcare,
+lodging, and retail. Selection is deterministic from source records before any
+provider request. The validator enforces independent provenance and excludes
+Nominatim/Photon for any gold later found to be OSM-derived. Case collection is
+not yet complete. Do not commit past sidecar Phase 0 until this tripwire is
+frozen and measured.
 
 ### Correction: the 2026-07-31 smoke red was TRUE, not false
 
@@ -1733,9 +1787,10 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    contract; the extra point is the official Machu Picchu alias, not a Worker
    change. Bounded exact-primary-name admission is implemented and slice-proven
    for the confirmed Empire State Building and Big Ben global-head misses. Its
-   planet phrase-posting probe and fresh v4 formal evidence are green. The next
-   gate is a non-promoting Places-only planet build, then preview measurement
-   before any catalog promotion. Brandenburg Gate is corrected to the
+   planet phrase-posting probe and fresh v4 formal evidence are green. The
+   non-promoting Places-only planet build is in progress as run `30799029151`;
+   preview measurement is the next gate before any catalog promotion.
+   Brandenburg Gate is corrected to the
    source-alias/tokenization plus routed-cap backlog, and Machu Picchu Cusco
    remains in region-context routing. Do not reopen build ordering, duplicate
    collapse, phrase scope, or the head cap without contradictory evidence.
