@@ -5,6 +5,8 @@ Date: 2026-08-03
 Status: the cross-release identity measurement, benchmark contracts, and all
 200 everyday-POI cases are complete. The cases are frozen from eight government
 sources before any provider request, and the readiness report is green.
+The first three-provider ranked baseline and the companion current-OSM presence
+control are also complete.
 GERS-to-QID candidate generation and the 200-decision match audit are not yet
 built. Nothing in this work changes a construction request, projection, serving
 artifact, catalog, or Worker.
@@ -199,6 +201,27 @@ the top ten for 114 cases. That makes admission/routing coverage the leading
 diagnostic, while the identical post-v4-preview rerun remains the next measured
 gate.
 
+The companion OSM-presence control is frozen in
+`benchmarks/2026-08-03-everyday-poi-overpass-presence-v1.json`. Report it beside
+the three ranked providers as a fourth **control**, not as a fourth geocoder:
+Overpass queries nearby OSM nodes, ways, and relations and does no comparable
+free-text ranking. Within 500 m of the independent authority coordinate, 46 of
+200 cases have an exact normalized accepted name in current OSM and 12 have a
+fuzzy name candidate requiring review. Another 134 have a named same-family
+feature nearby without an accepted-name match; those are density evidence, not
+proof that the gold entity exists in OSM. Eight have no named same-family
+candidate.
+
+The control materially changes failure attribution. All 22 Nominatim hits and
+22 of 23 Photon hits coincide with exact current OSM names, but each provider
+also misses 24 cases where the exact name is present. Those 24 are direct
+search/index/query-surface failures rather than OSM-absence explanations.
+Overture hits 37 cases without an exact current OSM name match, evidence that
+its useful coverage is not limited to this current OSM representation. The
+artifact retains OSM element IDs, relevant tags, distances, OSM base timestamps,
+query hashes, authority record IDs, and the cross-tab against the frozen ranked
+baseline. Fuzzy candidates remain unaccepted until manual review.
+
 The 200-case set is the development tripwire. It does not replace the audit's
 recommended 1,200-case decision set with at least 150 cases per reportable
 stratum. Build the larger set only after the tripwire exposes which strata are
@@ -237,6 +260,16 @@ Validate a collected tripwire before measurement:
 python scripts/validate_everyday_poi_tripwire.py \
   --cases benchmarks/everyday-poi-tripwire-cases-v1.json \
   --output benchmarks/everyday-poi-tripwire-readiness-v1.json
+```
+
+Reproduce the current-OSM presence control with ten sequential, rate-limited
+Overpass queries:
+
+```bash
+python scripts/audit_everyday_poi_overpass.py \
+  --cases benchmarks/everyday-poi-tripwire-cases-v1.json \
+  --baseline benchmarks/2026-08-03-everyday-poi-external-baseline-v1.json \
+  --output benchmarks/2026-08-03-everyday-poi-overpass-presence-v1.json
 ```
 
 During collection, `--allow-incomplete` may write a readiness report, but it
