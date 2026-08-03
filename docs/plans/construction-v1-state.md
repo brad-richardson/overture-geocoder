@@ -1507,6 +1507,38 @@ closes the review's v2/v3 inconsistency. The next construction action is a
 **Places-only, non-promoting planet build**, then preview measurement; catalog
 promotion still requires measured quality and integrity gates.
 
+**The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
+deploy run `30796985582` published Worker version
+`817ffd86-4dba-4502-9ef0-27e143d024d4`. The strengthened gate passed on attempt
+1: 15 consecutive root starts plus health, search, reverse, and ID checks.
+
+The paired 55-case semantic run is
+`benchmarks/2026-08-03-forward-gold-external-after-a2bc.json`. Against the
+audited pre-change baseline, Overture moved:
+
+| metric | before | after | paired flips | exact p |
+|---|---:|---:|---:|---:|
+| recall@1 | 0.345 (19/55) | **0.473 (26/55)** | **7 gains / 0 losses** | **0.015625** |
+| recall@10 | 0.527 (29/55) | **0.618 (34/55)** | 5 gains / 0 losses | 0.0625 |
+| MRR | 0.412 | **0.521** | — | — |
+| type-starved | 14 | **12** | — | — |
+
+This is a statistically detectable rank@1 result under the audit's paired gate;
+the rank@10 movement is positive and regression-free but remains just outside
+that gate. `name` rank@1 moved 2/10 -> 5/10, `name_locality` rank@1 moved 3/10
+-> 6/10 and rank@10 5/10 -> 8/10, and `named_poi` rank@10 moved 7/17 -> 9/17.
+The seam stratum had zero flips, and no reportable stratum regressed. Nominatim
+and Photon both remain at 0.891 rank@10 on this cross-corpus set.
+
+Do not attribute the remaining context-free Big Ben or Empire State Building
+misses to this Worker pass: both still miss without locality and await the v4
+phrase-admission build. The live gains are the composite result of query-time
+scoring, primary-category correction, score-before-truncate, and locality
+routing; this run does not attribute individual flips among those rules. The
+benchmark harness now permits a like-for-like semantic baseline under
+multi-provider mode and persists paired McNemar counts for Overture while
+excluding external rows.
+
 **The category audit changes both spellings and scope, but stays bounded.** The
 planet scan found 2,261 distinct category strings across 228,421,560 values.
 Observed commodity spellings include `atms`, `banks`, `bank_credit_union`,
