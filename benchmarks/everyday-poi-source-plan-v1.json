@@ -1,7 +1,7 @@
 {
   "schema": "everyday-poi-source-plan-v1",
   "tripwire_spec": "benchmarks/everyday-poi-tripwire-spec-v1.json",
-  "status": "collection in progress; 135 cases frozen from Singapore, Taiwan, Hong Kong, South Korea, Colombia, and Australia",
+  "status": "collection complete; 200 cases frozen from all eight qualified government sources before provider requests",
   "target_totals": {
     "cases": 200,
     "government_or_open_primary": 200,
@@ -92,7 +92,7 @@
       "qualification": "Collapse exits by STATION_NA, then use the lowest natural EXIT_CODE as the deterministic source point and retain that exit's OBJECTID."
     },
     {
-      "id": "jp-mlit-medical-facilities",
+      "id": "jp-shinjuku-medical-facilities",
       "country": "JP",
       "city_filter": "Tokyo dense urban area",
       "macroregion": "east_asia",
@@ -100,21 +100,22 @@
       "script": "non_latin",
       "case_quota": 30,
       "source_kind": "government",
-      "source_name": "National Land Numerical Information - Medical Institutions",
-      "publisher": "Japan Ministry of Land, Infrastructure, Transport and Tourism",
-      "source_url": "https://nlftp.mlit.go.jp/ksj/gml/datalist/KsjTmplt-P04-v3_0.html",
-      "source_license": "MLIT National Land Numerical Information open-data terms",
-      "format": "GML or Shapefile",
+      "source_name": "新宿区の医療機関一覧",
+      "publisher": "Shinjuku City",
+      "source_url": "https://catalog.data.metro.tokyo.lg.jp/dataset/t131041d0000000121",
+      "source_license": "Creative Commons Attribution 4.0",
+      "format": "CSV (municipal standard dataset)",
       "identity_fields": [
-        "source feature identifier"
+        "ID"
       ],
       "name_fields": [
-        "P04_002"
+        "名称"
       ],
       "coordinate_fields": [
-        "point geometry in JGD2011"
+        "緯度",
+        "経度"
       ],
-      "qualification": "The official catalog provides point geometry, facility names and addresses. Because the current edition is 2020, every selected facility requires an active-status check against the newer government medical-information release before admission."
+      "qualification": "The planned 2020 MLIT source explicitly includes suspended facilities and was not admitted. The replacement official Shinjuku municipal-standard dataset was updated 2025-12-12 and contains 695 current clinic rows with 695 unique stable ID values, Japanese names, addresses and valid points under CC BY 4.0. Selection requires a Japanese-script query surface and rejects duplicate names and one temporary vaccination site."
     },
     {
       "id": "kr-seoul-hospital-licenses",
@@ -222,7 +223,7 @@
         "latitude",
         "longitude"
       ],
-      "qualification": "The official directory publishes establishment identity, economic activity, address and geographic coordinates under terms permitting extraction, adaptation and commercial reuse with attribution."
+      "qualification": "The corrected official 05/2026 Ciudad de Mexico bulk snapshot contains 462,732 active establishments with unique DENUE id and CLEE values. Fixed establishments are classified from official SCIAN activity codes: 721 for lodging and 46 for retail. Exact source, methodology, correction notice and free-use terms are retained; selection excludes generic and duplicate names and points outside the frozen dense-city bounds."
     },
     {
       "id": "au-melbourne-clue-businesses",

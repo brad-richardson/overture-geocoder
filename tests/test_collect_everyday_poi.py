@@ -1,7 +1,9 @@
 """Contract tests for deterministic everyday-POI source collection."""
 
+import csv
 import hashlib
 import importlib.util
+import io
 import json
 from pathlib import Path
 import zipfile
@@ -93,6 +95,56 @@ def bogota_feature(record_id, object_id, name, *, provider="Pública", geometry=
             "TIPO_DE_PR": provider,
         },
     }
+
+
+def japan_row(record_id, name, *, lon=139.71, lat=35.69):
+    return {
+        "全国地方公共団体コード": "131041",
+        "ID": record_id,
+        "地方公共団体名": "新宿区",
+        "名称": name,
+        "医療機関の種類": "診療所",
+        "所在地_連結表記": "東京都新宿区テスト1-1",
+        "緯度": str(lat),
+        "経度": str(lon),
+        "診療科目": "内科",
+    }
+
+
+def mexico_row(
+    record_id,
+    name,
+    code,
+    *,
+    unit_type="Fijo",
+    lon=-99.13,
+    lat=19.43,
+):
+    return {
+        "id": record_id,
+        "clee": f"CLEE-{record_id}",
+        "nom_estab": name,
+        "codigo_act": code,
+        "nombre_act": "Actividad oficial",
+        "tipoUniEco": unit_type,
+        "latitud": str(lat),
+        "longitud": str(lon),
+        "municipio": "Cuauhtémoc",
+        "nomb_asent": "Centro",
+        "fecha_alta": "2026-04",
+    }
+
+
+def write_mexico_zip(path, rows):
+    output = io.StringIO(newline="")
+    writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+    writer.writeheader()
+    writer.writerows(rows)
+    with zipfile.ZipFile(path, "w") as archive:
+        archive.writestr(
+            collector.MEXICO_DENUE_MEMBER,
+            output.getvalue().encode("cp1252"),
+        )
 
 
 def test_selection_digest_follows_frozen_nul_contract():
@@ -274,6 +326,83 @@ def test_bogota_filters_public_valid_points_and_uses_stable_id(tmp_path):
     }
 
 
+def test_japan_requires_japanese_names_and_retains_temporary_exclusion(
+    tmp_path, monkeypatch
+):
+    rows = [
+        japan_row("a", "新宿ワクチン会場"),
+        japan_row("b", "新宿テストクリニック"),
+        japan_row("c", "LATIN CLINIC"),
+        japan_row("d", "重複クリニック"),
+        japan_row("e", " 重複クリニック "),
+    ]
+    path = tmp_path / "japan.csv"
+    with path.open("w", encoding="utf-16", newline="") as output:
+        writer = csv.DictWriter(output, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+    monkeypatch.setattr(
+        collector,
+        "JAPAN_REVIEW_EXCLUSIONS",
+        {"a": "temporary_vaccination_site_not_enduring_everyday_poi"},
+    )
+    monkeypatch.setattr(collector, "selection_digest", lambda _source, value: value)
+    cases, report = collector.collect_japan(
+        path, source("jp-shinjuku-medical-facilities"), quota=1
+    )
+    assert [item["expected_name"] for item in cases] == [
+        "新宿テストクリニック"
+    ]
+    assert report["eligible_before_duplicate_filter"] == 4
+    assert report["eligible_after_duplicate_filter"] == 2
+    assert report["filter_counts"] == {"name_has_no_japanese_script": 1}
+    assert {item["reason"] for item in report["review_exclusions"]} == {
+        "duplicate_official_name",
+        "temporary_vaccination_site_not_enduring_everyday_poi",
+    }
+
+
+def test_mexico_fills_both_families_and_retains_source_identity(
+    tmp_path, monkeypatch
+):
+    rows = [
+        mexico_row("a", "PARQUE NO HOTEL", "721111"),
+        mexico_row("b", "HOTEL PRUEBA", "721112"),
+        mexico_row("c", "TIENDA PRUEBA", "461110"),
+        mexico_row("d", "LOCAL DE ROPA", "463211"),
+        mexico_row("e", "TIENDA MOVIL", "461110", unit_type="Semifijo"),
+        mexico_row("f", "TIENDA REPETIDA", "461110"),
+        mexico_row("g", " tienda repetida ", "461110"),
+    ]
+    path = tmp_path / "mexico.zip"
+    write_mexico_zip(path, rows)
+    monkeypatch.setattr(
+        collector,
+        "MEXICO_REVIEW_EXCLUSIONS",
+        {"a": "source_name_is_external_attraction_not_lodging_facility"},
+    )
+    monkeypatch.setattr(collector, "selection_digest", lambda _source, value: value)
+    cases, report = collector.collect_mexico(
+        path,
+        source("mx-inegi-denue"),
+        lodging_quota=1,
+        retail_quota=1,
+    )
+    assert [(item["strata"]["poi_family"], item["expected_name"]) for item in cases] == [
+        ("lodging", "HOTEL PRUEBA"),
+        ("retail", "TIENDA PRUEBA"),
+    ]
+    assert cases[1]["provenance"]["clee"] == "CLEE-c"
+    assert report["input_rows"] == 7
+    assert report["families"]["retail"]["filter_counts"] == {
+        "generic_activity_name": 1,
+        "not_fixed_establishment": 1,
+    }
+    assert {item["reason"] for item in report["families"]["retail"]["review_exclusions"]} == {
+        "duplicate_official_name"
+    }
+
+
 def test_committed_batch_is_frozen_partial_evidence():
     payload_bytes = (ROOT / "benchmarks/everyday-poi-tripwire-cases-v1.json").read_bytes()
     payload = json.loads(payload_bytes)
@@ -282,13 +411,15 @@ def test_committed_batch_is_frozen_partial_evidence():
     )
     cases = payload["cases"]
     assert payload["schema"] == "benchmark-v2-forward-cases-v1"
-    assert len(cases) == 135
-    assert len({item["id"] for item in cases}) == 135
+    assert len(cases) == 200
+    assert len({item["id"] for item in cases}) == 200
     assert {item["strata"]["country"] for item in cases} == {
         "AU",
         "CO",
         "HK",
         "KR",
+        "JP",
+        "MX",
         "SG",
         "TW",
     }
@@ -298,6 +429,10 @@ def test_committed_batch_is_frozen_partial_evidence():
     assert sum(item["strata"]["country"] == "KR" for item in cases) == 20
     assert sum(item["strata"]["country"] == "CO" for item in cases) == 20
     assert sum(item["strata"]["country"] == "AU" for item in cases) == 25
+    assert sum(item["strata"]["country"] == "JP" for item in cases) == 30
+    assert sum(item["strata"]["country"] == "MX" for item in cases) == 35
+    assert sum(item["strata"]["poi_family"] == "lodging" for item in cases) == 20
+    assert sum(item["strata"]["poi_family"] == "retail" for item in cases) == 40
     assert all(item["selection_review"]["decision"] == "accepted" for item in cases)
     assert all("expected_gers_id" not in item for item in cases)
     assert report["provider_requests_made_during_selection"] == 0
@@ -316,6 +451,8 @@ def test_snapshot_manifest_has_exact_hashes_and_licence_evidence():
         "kr-seoul-hospital-licenses",
         "co-bogota-public-health-network",
         "au-melbourne-clue-businesses",
+        "jp-shinjuku-medical-facilities",
+        "mx-inegi-denue",
     }
     for item in manifest["sources"]:
         assert len(item["snapshot_sha256"]) == 64
@@ -375,3 +512,30 @@ def test_committed_bogota_snapshot_has_stable_ids_and_116_points():
         and collector.valid_point((item.get("geometry") or {}).get("coordinates"))
         for item in features
     ) == 116
+
+
+def test_committed_japan_snapshot_has_stable_ids_and_current_points():
+    with (
+        ROOT / "benchmarks/everyday-poi-source-data-v1/jp-shinjuku-medical.csv"
+    ).open(encoding="utf-16", newline="") as input_file:
+        rows = list(csv.DictReader(input_file))
+    assert len(rows) == 695
+    assert len({item["ID"] for item in rows}) == 695
+    assert all(collector.valid_point([item["経度"], item["緯度"]]) for item in rows)
+
+
+def test_committed_mexico_snapshot_has_stable_denue_and_clee_ids():
+    path = ROOT / "benchmarks/everyday-poi-source-data-v1/mx-denue-09-2026.zip"
+    denue_ids = set()
+    clee_values = set()
+    row_count = 0
+    with zipfile.ZipFile(path) as archive:
+        with archive.open(collector.MEXICO_DENUE_MEMBER) as raw_input:
+            input_file = io.TextIOWrapper(raw_input, encoding="cp1252", newline="")
+            for row in csv.DictReader(input_file):
+                row_count += 1
+                denue_ids.add(row["id"])
+                clee_values.add(row["clee"])
+    assert row_count == 462732
+    assert len(denue_ids) == row_count
+    assert len(clee_values) == row_count

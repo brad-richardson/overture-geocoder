@@ -5,7 +5,9 @@ from __future__ import annotations
 
 import argparse
 from collections import Counter, defaultdict
+import csv
 import hashlib
+import io
 import json
 import math
 from pathlib import Path
@@ -26,6 +28,14 @@ MELBOURNE_REVIEW_EXCLUSIONS = {
     "931e86d2d331e0e390fc00c3891813a75d7608b3":
         "storage_only_not_public_retail",
 }
+JAPAN_REVIEW_EXCLUSIONS = {
+    "131041900546": "temporary_vaccination_site_not_enduring_everyday_poi",
+}
+MEXICO_CITY_BOUNDS = (-99.35, -98.94, 19.20, 19.60)
+MEXICO_REVIEW_EXCLUSIONS = {
+    "933195": "source_name_is_external_attraction_not_lodging_facility",
+}
+MEXICO_DENUE_MEMBER = "conjunto_de_datos/denue_inegi_09_.csv"
 
 
 class JavaScriptDataParser:
@@ -341,6 +351,19 @@ def collect_singapore(path: Path, source: dict, quota: int = 20) -> tuple[list, 
 
 def normalized_name(value: str) -> str:
     return " ".join(value.casefold().split())
+
+
+def contains_japanese_script(value: str) -> bool:
+    return bool(re.search(r"[\u3040-\u30ff\u3400-\u9fff]", value))
+
+
+def mexico_generic_name(value: str) -> bool:
+    name = normalized_name(value)
+    return (
+        "sin nombre" in name
+        or name.startswith("local de ")
+        or name == "oficina administrativa"
+    )
 
 
 def collect_taiwan(path: Path, source: dict, quota: int = 30) -> tuple[list, dict]:
@@ -701,6 +724,268 @@ def collect_bogota(path: Path, source: dict, quota: int = 20) -> tuple[list, dic
     }
 
 
+def collect_japan(path: Path, source: dict, quota: int = 30) -> tuple[list, dict]:
+    with path.open(encoding="utf-16", newline="") as input_file:
+        rows = list(csv.DictReader(input_file))
+    record_ids = [str(row.get("ID") or "").strip() for row in rows]
+    if "" in record_ids or len(record_ids) != len(set(record_ids)):
+        raise ValueError("Japan snapshot has missing or duplicate ID values")
+    eligible = []
+    filter_counts = Counter()
+    for row in rows:
+        name = str(row.get("名称") or "").strip()
+        coordinates = [row.get("経度"), row.get("緯度")]
+        if str(row.get("地方公共団体名") or "").strip() != "新宿区":
+            filter_counts["outside_shinjuku"] += 1
+        elif not name:
+            filter_counts["missing_name"] += 1
+        elif not contains_japanese_script(name):
+            filter_counts["name_has_no_japanese_script"] += 1
+        elif not str(row.get("医療機関の種類") or "").strip():
+            filter_counts["missing_facility_type"] += 1
+        elif not valid_point(coordinates):
+            filter_counts["invalid_point"] += 1
+        elif not (139.67 <= float(coordinates[0]) <= 139.76):
+            filter_counts["outside_shinjuku_bounds"] += 1
+        elif not (35.67 <= float(coordinates[1]) <= 35.74):
+            filter_counts["outside_shinjuku_bounds"] += 1
+        else:
+            eligible.append(row)
+    name_counts = Counter(normalized_name(row["名称"]) for row in eligible)
+    unambiguous = []
+    review_exclusions = []
+    for row in eligible:
+        record_id = row["ID"].strip()
+        if name_counts[normalized_name(row["名称"])] > 1:
+            review_exclusions.append(
+                {
+                    "reason": "duplicate_official_name",
+                    "source_record_id": record_id,
+                }
+            )
+        else:
+            unambiguous.append(row)
+    unambiguous.sort(
+        key=lambda row: selection_digest(source["id"], row["ID"].strip())
+    )
+    cases = []
+    for review_position, row in enumerate(unambiguous, 1):
+        record_id = row["ID"].strip()
+        if record_id in JAPAN_REVIEW_EXCLUSIONS:
+            review_exclusions.append(
+                {
+                    "reason": JAPAN_REVIEW_EXCLUSIONS[record_id],
+                    "source_record_id": record_id,
+                }
+            )
+            continue
+        selection_rank = len(cases) + 1
+        cases.append(
+            case(
+                case_id=f"everyday-jp-{record_id}",
+                name=row["名称"].strip(),
+                latitude=float(row["緯度"]),
+                longitude=float(row["経度"]),
+                country="JP",
+                macroregion="east_asia",
+                family="healthcare",
+                script="non_latin",
+                source=source,
+                record_id=record_id,
+                selection_method=(
+                    "current named Shinjuku municipal-standard medical-facility "
+                    "point with Japanese-script query surface; exclude duplicate "
+                    "official names and temporary facilities; rank by "
+                    "sha256(source_plan_id + NUL + source_record_id); "
+                    f"review position {review_position}; selection rank {selection_rank}"
+                ),
+                provenance_extra={
+                    "address": row.get("所在地_連結表記"),
+                    "facility_type": row.get("医療機関の種類"),
+                    "medical_subjects": row.get("診療科目"),
+                    "municipality_code": row.get("全国地方公共団体コード"),
+                },
+            )
+        )
+        if len(cases) == quota:
+            break
+    if len(cases) < quota:
+        raise ValueError(f"Japan has only {len(cases)} reviewed medical facilities")
+    return cases, {
+        "eligible_after_duplicate_filter": len(unambiguous),
+        "eligible_before_duplicate_filter": len(eligible),
+        "input_rows": len(rows),
+        "filter_counts": dict(sorted(filter_counts.items())),
+        "review_exclusions": review_exclusions,
+        "selected": len(cases),
+    }
+
+
+def collect_mexico(
+    path: Path,
+    source: dict,
+    lodging_quota: int = 20,
+    retail_quota: int = 15,
+) -> tuple[list, dict]:
+    candidates = {"lodging": [], "retail": []}
+    filter_counts = {"lodging": Counter(), "retail": Counter()}
+    record_ids = set()
+    clee_values = set()
+    input_rows = 0
+    try:
+        with zipfile.ZipFile(path) as archive:
+            with archive.open(MEXICO_DENUE_MEMBER) as raw_input:
+                input_file = io.TextIOWrapper(
+                    raw_input, encoding="cp1252", newline=""
+                )
+                for row in csv.DictReader(input_file):
+                    input_rows += 1
+                    record_id = str(row.get("id") or "").strip()
+                    clee = str(row.get("clee") or "").strip()
+                    if not record_id or record_id in record_ids:
+                        raise ValueError(
+                            "Mexico snapshot has missing or duplicate DENUE IDs"
+                        )
+                    if not clee or clee in clee_values:
+                        raise ValueError(
+                            "Mexico snapshot has missing or duplicate CLEE values"
+                        )
+                    record_ids.add(record_id)
+                    clee_values.add(clee)
+                    activity_code = str(row.get("codigo_act") or "").strip()
+                    if activity_code.startswith("721"):
+                        family = "lodging"
+                    elif activity_code.startswith("46"):
+                        family = "retail"
+                    else:
+                        continue
+                    name = str(row.get("nom_estab") or "").strip()
+                    coordinates = [row.get("longitud"), row.get("latitud")]
+                    if str(row.get("tipoUniEco") or "").strip() != "Fijo":
+                        filter_counts[family]["not_fixed_establishment"] += 1
+                    elif not name:
+                        filter_counts[family]["missing_name"] += 1
+                    elif mexico_generic_name(name):
+                        filter_counts[family]["generic_activity_name"] += 1
+                    elif not valid_point(coordinates):
+                        filter_counts[family]["invalid_point"] += 1
+                    elif not (
+                        MEXICO_CITY_BOUNDS[0]
+                        <= float(coordinates[0])
+                        <= MEXICO_CITY_BOUNDS[1]
+                    ):
+                        filter_counts[family]["outside_mexico_city_bounds"] += 1
+                    elif not (
+                        MEXICO_CITY_BOUNDS[2]
+                        <= float(coordinates[1])
+                        <= MEXICO_CITY_BOUNDS[3]
+                    ):
+                        filter_counts[family]["outside_mexico_city_bounds"] += 1
+                    else:
+                        candidates[family].append(
+                            {
+                                "activity_code": activity_code,
+                                "activity_name": row.get("nombre_act"),
+                                "clee": clee,
+                                "id": record_id,
+                                "latitude": row.get("latitud"),
+                                "longitude": row.get("longitud"),
+                                "municipality": row.get("municipio"),
+                                "name": name,
+                                "settlement": row.get("nomb_asent"),
+                                "source_added_date": row.get("fecha_alta"),
+                            }
+                        )
+    except KeyError as exception:
+        raise ValueError(
+            f"Mexico snapshot is missing archive member {MEXICO_DENUE_MEMBER}"
+        ) from exception
+
+    selected_cases = []
+    family_reports = {}
+    for family, quota in (("lodging", lodging_quota), ("retail", retail_quota)):
+        eligible = candidates[family]
+        name_counts = Counter(normalized_name(row["name"]) for row in eligible)
+        unambiguous = []
+        review_exclusions = []
+        for row in eligible:
+            if name_counts[normalized_name(row["name"])] > 1:
+                review_exclusions.append(
+                    {
+                        "reason": "duplicate_official_name",
+                        "source_record_id": row["id"],
+                    }
+                )
+            else:
+                unambiguous.append(row)
+        unambiguous.sort(
+            key=lambda row: selection_digest(source["id"], row["id"])
+        )
+        family_cases = []
+        for review_position, row in enumerate(unambiguous, 1):
+            record_id = row["id"]
+            if record_id in MEXICO_REVIEW_EXCLUSIONS:
+                review_exclusions.append(
+                    {
+                        "reason": MEXICO_REVIEW_EXCLUSIONS[record_id],
+                        "source_record_id": record_id,
+                    }
+                )
+                continue
+            selection_rank = len(family_cases) + 1
+            family_cases.append(
+                case(
+                    case_id=f"everyday-mx-{record_id}",
+                    name=row["name"],
+                    latitude=float(row["latitude"]),
+                    longitude=float(row["longitude"]),
+                    country="MX",
+                    macroregion="latin_america",
+                    family=family,
+                    script="latin",
+                    source=source,
+                    record_id=record_id,
+                    selection_method=(
+                        f"active fixed DENUE {family} establishment in frozen "
+                        "Mexico City bounds; exclude generic and duplicate official "
+                        "names; review hash order for public POI suitability; rank "
+                        "by sha256(source_plan_id + NUL + source_record_id); "
+                        f"review position {review_position}; selection rank "
+                        f"{selection_rank}"
+                    ),
+                    provenance_extra={
+                        "activity_code": row["activity_code"],
+                        "activity_name": row["activity_name"],
+                        "clee": row["clee"],
+                        "municipality": row["municipality"],
+                        "settlement": row["settlement"],
+                        "source_added_date": row["source_added_date"],
+                    },
+                )
+            )
+            if len(family_cases) == quota:
+                break
+        if len(family_cases) < quota:
+            raise ValueError(
+                f"Mexico has only {len(family_cases)} reviewed {family} records"
+            )
+        selected_cases.extend(family_cases)
+        family_reports[family] = {
+            "eligible_after_duplicate_filter": len(unambiguous),
+            "eligible_before_duplicate_filter": len(eligible),
+            "filter_counts": dict(sorted(filter_counts[family].items())),
+            "review_exclusions": review_exclusions,
+            "selected": len(family_cases),
+        }
+    return selected_cases, {
+        "families": family_reports,
+        "input_rows": input_rows,
+        "unique_clee_values": len(clee_values),
+        "unique_denue_ids": len(record_ids),
+        "selected": len(selected_cases),
+    }
+
+
 def parse_seoul_preview(path: Path) -> list[dict]:
     payload = JavaScriptDataParser(path.read_text()).parse()
     if not isinstance(payload, dict) or payload.get("result") != "ok":
@@ -874,6 +1159,16 @@ def main(argv: list[str] | None = None) -> int:
         type=Path,
         default=DEFAULT_SOURCE_DATA / "co-bogota-health-network.geojson",
     )
+    parser.add_argument(
+        "--japan",
+        type=Path,
+        default=DEFAULT_SOURCE_DATA / "jp-shinjuku-medical.csv",
+    )
+    parser.add_argument(
+        "--mexico",
+        type=Path,
+        default=DEFAULT_SOURCE_DATA / "mx-denue-09-2026.zip",
+    )
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--report", type=Path, required=True)
     args = parser.parse_args(argv)
@@ -888,22 +1183,37 @@ def main(argv: list[str] | None = None) -> int:
         seoul = source_by_id(manifest, "kr-seoul-hospital-licenses")
         melbourne = source_by_id(manifest, "au-melbourne-clue-businesses")
         bogota = source_by_id(manifest, "co-bogota-public-health-network")
+        japan = source_by_id(manifest, "jp-shinjuku-medical-facilities")
+        mexico = source_by_id(manifest, "mx-inegi-denue")
         verify_snapshot(singapore, args.singapore)
         verify_snapshot(taiwan, args.taiwan)
         verify_snapshot(hong_kong, args.hong_kong)
         verify_snapshot(seoul, args.seoul)
         verify_snapshot(melbourne, args.melbourne)
         verify_snapshot(bogota, args.bogota)
+        verify_snapshot(japan, args.japan)
+        verify_snapshot(mexico, args.mexico)
         sg_cases, sg_report = collect_singapore(args.singapore, singapore)
         tw_cases, tw_report = collect_taiwan(args.taiwan, taiwan)
         hk_cases, hk_report = collect_hong_kong(args.hong_kong, hong_kong)
         kr_cases, kr_report = collect_seoul(args.seoul, seoul)
         co_cases, co_report = collect_bogota(args.bogota, bogota)
         au_cases, au_report = collect_melbourne(args.melbourne, melbourne)
+        jp_cases, jp_report = collect_japan(args.japan, japan)
+        mx_cases, mx_report = collect_mexico(args.mexico, mexico)
         payload = {
             "schema": SCHEMA,
-            "collection_status": "partial; 135 of 200 frozen before provider requests",
-            "cases": sg_cases + tw_cases + hk_cases + kr_cases + co_cases + au_cases,
+            "collection_status": "complete; 200 of 200 frozen before provider requests",
+            "cases": (
+                sg_cases
+                + tw_cases
+                + hk_cases
+                + kr_cases
+                + co_cases
+                + au_cases
+                + jp_cases
+                + mx_cases
+            ),
         }
         output_bytes = canonical_json(payload)
         report = {
@@ -918,6 +1228,8 @@ def main(argv: list[str] | None = None) -> int:
                 "kr-seoul-hospital-licenses": kr_report,
                 "co-bogota-public-health-network": co_report,
                 "au-melbourne-clue-businesses": au_report,
+                "jp-shinjuku-medical-facilities": jp_report,
+                "mx-inegi-denue": mx_report,
             },
         }
         args.output.parent.mkdir(parents=True, exist_ok=True)
