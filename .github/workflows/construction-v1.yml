@@ -30,8 +30,8 @@ name: Construction v1 planet build
 #
 # Runner-minute ledger: every phase appends its actual elapsed minutes to a
 # ledger artifact, and each fan-in re-sums prior + spent + next and FAILS CLOSED
-# before provisioning the next matrix. Resume is a fresh dispatch (never Re-run
-# failed jobs): supply resume_from with the prior run id; the admission job
+# before provisioning the next matrix. Recovery execution is a fresh dispatch;
+# supply resume_from with the prior run id and the admission job
 # downloads the prior ledger read-only, proves that it belongs to the same
 # request and family, and carries its consumed total into the new ledger. The
 # request hash stays unchanged so the fresh dispatch reuses the same immutable
@@ -407,20 +407,23 @@ jobs:
           mkdir -p prior-control prior-plan prior-reducers resume-plan resume-reductions/reductions resume-reductions/phase
 
           # This recovery path is deliberately narrower than general resume:
-          # same workflow, main branch, first attempt, completed failure. The
-          # byte comparisons below then bind its artifacts to this admission.
+          # same workflow, main branch, completed failure. A GitHub failed-jobs
+          # rerun can raise run_attempt and can repeat an entire matrix, so the
+          # exact successful reducer set is authenticated below from the final
+          # attempt instead of trusting run_attempt == 1.
           gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}" > prior-run.json
           jq -e '
             .name == "Construction v1 planet build"
             and .event == "workflow_dispatch"
             and .head_branch == "main"
-            and .run_attempt == 1
+            and .run_attempt >= 1
             and .status == "completed"
             and .conclusion == "failure"
           ' prior-run.json >/dev/null || {
-            echo "head-only resume failed closed: prior run is not a completed first-attempt failure of this workflow on main" >&2
+            echo "head-only resume failed closed: prior run is not a completed failure of this workflow on main" >&2
             exit 1
           }
+          RUN_ATTEMPT="$(jq -er '.run_attempt | numbers' prior-run.json)"
 
           gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-control --dir prior-control
           gh run download "$RESUME_FROM" --repo "$GITHUB_REPOSITORY" --name cv1-plan --dir prior-plan
@@ -483,12 +486,22 @@ jobs:
 
           # Artifact presence is not enough: independently require every
           # corresponding matrix job to have completed successfully.
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/jobs?per_page=100" \
-            --jq '.jobs[] | select(.name | startswith("places reduce batch ")) | [.name,.conclusion] | @tsv' \
-            > prior-reducer-jobs.tsv
-          SUCCESS_COUNT="$(awk -F '\t' '$2 == "success" {count++} END {print count+0}' prior-reducer-jobs.tsv)"
+          for ATTEMPT in 1 2 3; do
+            if gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs/${RESUME_FROM}/attempts/${RUN_ATTEMPT}/jobs?per_page=50" \
+              --jq '.jobs[] | select(.name | startswith("places reduce batch ")) | [.name,.conclusion] | @tsv' \
+              > prior-reducer-jobs.tmp; then
+              mv prior-reducer-jobs.tmp prior-reducer-jobs.tsv
+              break
+            fi
+            echo "job-history query attempt ${ATTEMPT} failed" >&2
+          done
+          test -s prior-reducer-jobs.tsv || {
+            echo "head-only resume failed closed: reducer job history was unavailable after bounded retries" >&2
+            exit 1
+          }
+          SUCCESS_COUNT="$(awk -F '\t' '$2 == "success" {seen[$1]=1} END {for (name in seen) count++; print count+0}' prior-reducer-jobs.tsv)"
           test "$SUCCESS_COUNT" -eq "$REDUCE_COUNT" || {
-            echo "head-only resume failed closed: expected $REDUCE_COUNT successful reducer jobs, found $SUCCESS_COUNT" >&2
+            echo "head-only resume failed closed: expected $REDUCE_COUNT unique successful reducer jobs in final attempt $RUN_ATTEMPT, found $SUCCESS_COUNT" >&2
             exit 1
           }
 
@@ -1358,15 +1371,17 @@ jobs:
             python scripts/construction_v1_hosted.py ledger-check \
               --ledger cv1plan/control/ledger.json --next-phase-minutes "$HEAD_PHASE_ESTIMATE_MINUTES"
             BINDIR="crates/target/release"
-            # The authenticated producer for an in-flight resume predates the
-            # head-specific half-share fix. Apply the equivalent resource-only
-            # setting in-process: it changes no keys, rows, ordering, or encoders,
-            # and the unchanged 17 GiB whole-stage scratch watchdog still fails
-            # closed. Places dynamically loads its own address helper module, so
-            # mutate that exact object (H.PLACES.A), then prove the effective
-            # DuckDB literal is half of the admitted contract scratch cap before
-            # starting the expensive statement.
-            python -c 'import json, sys; sys.path.insert(0, "scripts"); import construction_v1_hosted as H; limits = H._limits_for(json.load(open("cv1plan/control/contract.json")), "places"); shared = H.PLACES.A; assert shared.DUCKDB_TEMP_SHARE == 4; shared.DUCKDB_TEMP_SHARE = 2; expected = f"{limits.max_scratch_bytes // 2}B"; actual = shared.duckdb_temp_limit(limits.max_scratch_bytes); assert actual == expected, (actual, expected); print(f"verified Places head DuckDB spill cap: {actual}", flush=True); raise SystemExit(H.main())' run-head \
+            # The authenticated producer for an in-flight resume predates this
+            # head-specific measured correction. Apply the resource-only setting
+            # in-process: it changes no keys, rows, ordering, or encoders. The v4
+            # planet head exhausted the prior half-share at 79%; admit three
+            # quarters for DuckDB spill while the unchanged 17 GiB whole-stage
+            # scratch watchdog still fails closed. Places dynamically loads its
+            # own address helper module, so mutate that exact object's helper and
+            # prove both the pinned quarter-share default and the effective
+            # three-quarter literal before starting the expensive statement.
+            # The unchanged 17 GiB whole-stage scratch watchdog remains the cap.
+            python -c 'import json, sys; sys.path.insert(0, "scripts"); import construction_v1_hosted as H; limits = H._limits_for(json.load(open("cv1plan/control/contract.json")), "places"); shared = H.PLACES.A; assert shared.DUCKDB_TEMP_SHARE == 4; original = shared.duckdb_temp_limit(limits.max_scratch_bytes); assert original == f"{limits.max_scratch_bytes // 4}B", original; shared.duckdb_temp_limit = lambda cap: f"{cap * 3 // 4}B"; expected = f"{limits.max_scratch_bytes * 3 // 4}B"; actual = shared.duckdb_temp_limit(limits.max_scratch_bytes); assert actual == expected, (actual, expected); print(f"verified Places head DuckDB spill cap: {actual}", flush=True); raise SystemExit(H.main())' run-head \
               --contract cv1plan/control/contract.json --store-root store \
               --staging-bucket "$R2_BUCKET" --staging-endpoint-url "$R2_ENDPOINT" \
               --family places --markers-dir cv1plan/plan/map-markers \
@@ -1675,5 +1690,5 @@ jobs:
             echo "- Max concurrency: ${{ needs.admit.outputs.max_parallel }} | Cap: ${{ needs.admit.outputs.max_total_runner_minutes }} runner-min | Prior: ${{ needs.admit.outputs.prior_runner_minutes }}"
             echo "- Consumed runner minutes (ledger): $(jq -r '(.prior_runner_minutes // 0) + ([.phases[].runner_minutes] | add // 0)' cv1plan/control/ledger.json 2>/dev/null || echo unavailable)"
             echo "- Slice: immutable, NON-PROMOTING; completion marker create-only and written last"
-            echo "- Resume rule: fresh workflow_dispatch only; never Re-run failed jobs"
+            echo "- Recovery execution: fresh workflow_dispatch; prior rerun attempts are authenticated"
           } >> "$GITHUB_STEP_SUMMARY"
