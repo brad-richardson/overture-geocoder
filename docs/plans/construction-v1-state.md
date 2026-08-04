@@ -1,11 +1,11 @@
 # construction-v1: current state
 
-Last updated 2026-08-04 after the final v4 preview accepted both bounded phrase
-composition corrections with zero paired losses. Additive composition closed
-Union Station Toronto and the saturated-phrase recovery slot closed Statue of
-Liberty; the zero-error repeat passed every direct, semantic, acceptance, and
-cleanup gate. It also incorporates the independent correctness audit, fresh v4
-formal evidence, sidecar Phase 0's cross-release identity measurement,
+Last updated 2026-08-04 after the accepted v4 candidate was published and
+promoted to production without dropping any live operation. Build
+`2026-08-03.0` now serves the bounded phrase-admission result; the catalog CAS,
+all six forward/reverse production smokes, and independent live phrase and
+reverse probes passed. It also incorporates the independent correctness audit,
+fresh v4 formal evidence, sidecar Phase 0's cross-release identity measurement,
 completion of the 200-case everyday-POI tripwire, and its current-OSM presence
 control.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
@@ -29,14 +29,13 @@ routed control misses the canonical record. It is an alias/tokenization plus
 routed-cap problem, not the same global-head eviction. Fresh v4 formal evidence
 is now green, including the planet-wide phrase-posting falsification probe. The
 non-promoting Places-only planet build and scoped head-only recovery completed.
-**The final preview is accepted. Against the 55-case baseline, rank@1 moved
+**The final preview is accepted and is live in production. Against the 55-case baseline, rank@1 moved
 26 -> 30 and rank@10 34 -> 39 with four/zero and five/zero paired
 gains/losses. Against the 200-case everyday-POI baseline, rank@1 moved 62 -> 65
 and rank@10 65 -> 66 with three/zero and one/zero paired gains/losses. Both
 direct phrase gates passed, the run had zero request errors, and cleanup left
-production untouched. Production release publication and catalog promotion,
-without dropping the live reverse operations, are the active gate.** Keep
-Brandenburg Gate
+production untouched. The operation-preserving release publication and catalog
+promotion then passed, including both retained reverse families.** Keep Brandenburg Gate
 and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
 phrase admission again in this generation: the repeated functional rehearsal
 has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
@@ -50,7 +49,7 @@ here.
 ## Current milestone
 
 The previous milestone -- **reverse serving for both families** -- is **MET**
-as of 2026-07-31T19:05Z. v2 release `2026-07-31.0` is live and `/v2/reverse`
+as of 2026-07-31T19:05Z. v2 release `2026-07-31.0` became live and `/v2/reverse`
 answers `types=poi` and `types=address` from planet-scale point-family indexes;
 it no longer returns `capability_unavailable`. Both reverse builds, the slice
 promotion, the release publication, and the catalog CAS are all done. See
@@ -75,6 +74,18 @@ name; that extra point is a gold correction, not another Worker improvement.
 Operator approved Stages 0 and 1 of
 `docs/plans/2026-07-31-search-quality-and-street-layer.md` (merged #220). The
 planet rebuild and the street layer both wait behind it.
+
+**2026-08-04 UPDATE.** The bounded v4 phrase-admission increment is live as
+build `2026-08-03.0`; its production acceptance and exact identities are in
+"v4 production promotion, 2026-08-04". The next correctness measurement is a
+failure-mode classification of the 134 everyday-POI cases still missed at
+rank 10 by the accepted candidate, using the frozen authority gold and OSM
+presence control before choosing another admission or routing mechanism. Do
+not widen the phrase lane from the existing result. Sidecar Phase 0 remains a
+separate queued gate: 200 independently hand-checked decisions with zero false
+provisional accepts, followed by the already-defined broadcast memory/byte
+measurement. Structured Address latency remains the next serving-performance
+gate.
 
 The justification is measured, not aesthetic. Against the build promoted today:
 
@@ -626,27 +637,22 @@ needs stating before anyone implements against the phrase.
 
 ### Still open, unscheduled
 
-RC2 is closed by deployed Worker commit `3d3b33c` and the live measurement in
-"Head saturated-posting correction, 2026-08-02". RC3 is live in `8f9a90f`, but
-its acceptance gate remains open until the local locality-routing follow-up is
-deployed and measured. Duplicate collapse, producer admission for Empire State
-Building / Big Ben / Brandenburg Gate, and any future `head_result_cap` change
-remain unscheduled. Machu Picchu is not part of that producer-admission work.
-Do not bundle these mechanisms into another ranking or rebuild pass.
+RC2 and RC3 are closed. Bounded producer admission for Empire State Building
+and Big Ben is also complete and live in `2026-08-03.0`. Duplicate collapse and
+any future `head_result_cap` change remain unscheduled. Brandenburg Gate belongs
+to source alias/tokenization plus routed-cap work; Machu Picchu Cusco belongs to
+region-context routing. Do not bundle these mechanisms into another ranking or
+rebuild pass.
 
 ## Current snapshot
 
-The checkpoint on `main` is `8aea031`. On top of the forward publisher and
-finalizer series it carries the v2 promotion series (#194, #197-#201), the
-reverse construction/serving series (#202, #204-#210, #212), the forward
-quality fixes (#213 address locality aliases, #214 Places locality suffixes),
-the ID-lookup route (#209), the open-geocoder benchmark harness (#211, #216),
-the read-only Address density probe (#215, #217), the ARDX0002 per-field
-dictionary code widths (#218), the workflow confirmation-gate removal (#219),
-and the `promote-slice` reduction-artifact fallback (`8aea031`). There are no
-open construction-v1 code PRs.
+The checkpoint on `main` before this state-only update is `93f63e6`. It includes
+the accepted phrase-serving corrections (`01856db`), final preview evidence
+(#248), the operation-preserving overlay publisher (#249), and post-promotion
+reverse smoke (#250). There are no open construction-v1 code PRs.
 
-`8aea031` matters for the promotion immediately ahead. `promote-slice` fetched
+Historical checkpoint `8aea031` mattered for the 2026-07-31 promotion.
+`promote-slice` fetched
 reduction records with `gh run download --pattern 'cv1-reduce-*'` only, but a
 finalize-only recovery run runs no reducers and so publishes no such artifact —
 it carries the reduction set it authenticated and reused as
@@ -661,11 +667,13 @@ run `30215529919` keeps the per-batch path at 117 batches and 581 records.
 
 ### Live serving
 
-**v2 release `2026-07-31.0` is live as of 2026-07-31T19:05Z**, backed by
-protected core `2026-07-18.0` and Overture `2026-06-17.0`, with both families
-served from `slice-2026-07-30.0`. Global-head `/v2/forward`, routed
-`/v2/forward`, structured Address `/v2/forward`, division `/v2/reverse`, and
-release-pinned ID lookup all return the advertised build.
+**v2 release `2026-08-03.0` is live as of 2026-08-04T03:31Z**, backed by
+protected core `2026-07-18.0` and Overture `2026-06-17.0`. Places forward is
+served from `slice-2026-08-03.0`, request-matched Places reverse from
+`slice-2026-08-04.0`, Address structured forward from `slice-2026-08-02.0`, and
+Address reverse from `slice-2026-07-30.0`. Global-head and routed `/v2/forward`,
+structured Address `/v2/forward`, all three `/v2/reverse` families, and
+release-pinned ID lookup return the advertised build.
 
 **Point-family `/v2/reverse` is live.** The milestone is met. Verified against
 the public endpoint, not only by the workflow's own smoke:
@@ -680,13 +688,11 @@ the public endpoint, not only by the workflow's own smoke:
 `docs/api-v2.md` was updated in the same change — it still claimed `poi` and
 `address` were rejected.
 
-The promotion's own `/v2/forward` smoke FAILED, and it is the recorded
-false-red: 10/10 attempts logged `OK divisions (q=Berlin, build 2026-07-31.0)`
-followed by `FAIL places: no features for Eiffel Tower`. Live probes confirm
-the shape is name-only global retrieval, not a promotion defect — `Eiffel
-Tower` and `Space Needle` each return zero features while `Eiffel Tower Paris`
-returns 3 and `Space Needle Seattle` returns 2. The catalog CAS itself
-succeeded and nothing auto-recovered. See open gates 3 and 4.
+Historical note: the 2026-07-31 promotion's `/v2/forward` smoke failed 10/10
+times after `OK divisions` because `Eiffel Tower` returned no features. That
+was a true observation of the then-open name-only quality defect, but the wrong
+fixture for a publication smoke. Later RC2 and v4 work fixed the query, and the
+current smoke separates publication capability from the semantic benchmark.
 
 ### Reverse execution, 2026-07-31
 
@@ -1454,13 +1460,13 @@ form is now accepted and regression-tested. On the unchanged live service, the
 audited named-POI r@10 moves 0.353 -> **0.412** and overall r@10 0.509 ->
 **0.527**. This is a contract correction, not a serving improvement.
 
-**The changed producer is not deployed.** Its code, real-slice rung, formal v4
-inventory/readiness/scale evidence, control pins, and explicit rebuild decision
-are now complete. The next step is the non-promoting Places-only planet build
-described below. If that build moves to a post-August Overture release, the
-taxonomy source gate above runs first. Do not widen phrase admission to
-commodity POIs; keep the remaining ordinary routing/alias cases on their
-separate Worker and external-data tracks.
+**The changed producer is deployed as build `2026-08-03.0`.** Its code,
+real-slice rung, formal v4 inventory/readiness/scale evidence, control pins,
+planet build, preview acceptance, operation-preserving publication, and catalog
+promotion are complete. See "v4 production promotion, 2026-08-04". If a later
+build moves to a post-August Overture release, the taxonomy source gate above
+runs first. Do not widen phrase admission to commodity POIs; keep the remaining
+ordinary routing/alias cases on their separate Worker and external-data tracks.
 
 ### Independent audit closure and v4 decision, 2026-08-03
 
@@ -1557,7 +1563,8 @@ allowance to three quarters of the admitted scratch cap: 13,690,208,256 of
 the runner's 25,000,000-KiB free-disk floor remained unchanged. The workflow
 proved both the producer's quarter-share default and the effective
 three-quarter value before starting the expensive statement. The completed
-candidate then entered the preview gate below; it has not been promoted.
+candidate then entered the preview gate below and was promoted after that gate
+passed; see "v4 production promotion, 2026-08-04".
 
 **The head-only recovery and first complete preview are finished.** Preview run
 `30865331854` deployed the run-scoped Worker, passed the Big Ben and Empire State
@@ -1612,10 +1619,41 @@ and Empire State Building remained present, and both Statue of Liberty and
 Union Station Toronto were recovered. Run `30870174744` had already produced
 the same semantic result but was correctly rejected by the zero-error gate for
 one timeout and two HTTP 500 responses; the accepted repeat had none. The
-candidate slice is admitted for production publication. The preview overlay
+candidate slice was admitted and then published. The preview overlay
 intentionally omitted external reverse operations, so production publication
 must explicitly preserve the already-live reverse capabilities rather than
 promoting that preview document verbatim.
+
+### v4 production promotion, 2026-08-04
+
+**The accepted v4 candidate is live as build `2026-08-03.0`.** Publication used
+an operation-preserving overlay rather than the preview release document or the
+single-family publisher, either of which would have omitted live reverse and/or
+Address capabilities.
+
+| stage | run | result |
+|---|---|---|
+| request-matched Places reverse | `30871526883` | 16/16 ranges green; 75,631,061 records, 16,511 cells, 16,528 artifacts / 8,397,603,739 bytes; marker-last catalog green |
+| overlay dry-run | `30874752691` | exact main `93f63e6`; retained production operation graph; release sha256 `9fdc9eb1585ad61d45d5d6ce523122065bc8b9c718ed8e6128f1ea00d92d528b` |
+| overlay execute | `30874857103` | create-only `v2/releases/2026-08-03.0/release.json`; R2 read-back byte-identical to dry-run |
+| catalog promotion | `30874928696` | CAS `0457d57f...04cf9ef` -> `fc624cd3...d9dd64e3`; all production smokes green on attempt 1/10 |
+
+The release retains exactly the prior operation set: ID lookup; division and
+Places forward; Address, division, and Places reverse; and structured Address
+forward. The retained Address manifest is byte-identical to production. Places
+forward comes from `slice-2026-08-03.0`; its request-matched reverse comes from
+`slice-2026-08-04.0` under construction request
+`821cff0bcedefd02dbbefa01cd0758ac027dfe90aa047a85ac74cabfd52dd128`.
+
+The enhanced post-CAS smoke passed Berlin divisions, context-free IKEA,
+locality-routed Eiffel Tower Paris, structured 400 BROAD Street, Space Needle
+POI reverse, and 400 BROAD Street Address reverse on its first attempt.
+Independent live probes additionally recovered Big Ben, Empire State Building,
+the canonical NPS Statue Of Liberty National Monument row, and Union Station
+Toronto while both reverse fixtures remained present. Every response advertised
+`data_version.geocoder_build = 2026-08-03.0`. The production Worker remains
+exact phrase commit `01856db`, deployed by run `30869980540` as version
+`d140ad74-251c-4b2f-a5ad-88db43d1c1b1`.
 
 **The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
 deploy run `30796985582` published Worker version
@@ -1954,7 +1992,7 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    broken fixture: the structured address check omitted the required country
    field and had never actually executed. Verified against live production,
    all four checks pass on attempt 1.
-2. **Forward Places quality — NOW THE AGREED MILESTONE.** Stage 1, the
+2. **Forward Places quality — BOUNDED V4 MILESTONE MET 2026-08-04.** Stage 1, the
    prominence rebuild, RC2, and RC3 improved distinct strata. Name-only head
    recall@10 is 6/10 under the accepted RC3 contract and 7/10 under the audited
    contract; the extra point is the official Machu Picchu alias, not a Worker
@@ -1964,10 +2002,10 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    non-promoting Places-only planet build and first preview are complete. The
    preview was net positive but found two exact phrase short-circuit losses.
    Additive composition closed Union Station and the one-slot saturated-phrase
-   prominence guard closed Statue; the final preview is accepted with zero
-   paired losses and zero request errors. Publish `slice-2026-08-03.0` as build
-   `2026-08-03.0`, preserving the live reverse operations, then promote the
-   catalog from the exact current `2026-08-02.0` expectation.
+   prominence guard closed Statue; the final preview was accepted with zero
+   paired losses and zero request errors. `slice-2026-08-03.0` is now live as
+   build `2026-08-03.0`; operation-preserving publication retained both reverse
+   families and the catalog CAS plus six production smokes passed.
    Brandenburg Gate is corrected to the
    source-alias/tokenization plus routed-cap backlog, and Machu Picchu Cusco
    remains in region-context routing. Do not reopen build ordering, duplicate
