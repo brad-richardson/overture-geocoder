@@ -1626,11 +1626,23 @@ between GERS entities. It does prove that the exception path is material and a
 blind unversioned carry-forward is unsafe. Krick exposed a separate limitation:
 it regenerated every observed source record ID, leaving no comparable keys.
 
-Phase 0 still requires a deterministic candidate set, at least 200 hand-checked
-decisions with zero false accepts, and measured mapping bytes/resident join
-memory. Only direct external IDs may auto-accept; fuzzy candidates require
-review, and no unreviewed match may affect prominence. This phase cannot alter
-construction output.
+The first deterministic candidate set is now complete. A frozen 1,000-binding
+Wikidata P1968 snapshot joined through Overture `2026-06-17.0`'s public
+Foursquare bridge to 344 rows, 343 GERS IDs, and 344 QIDs. Of 344 candidates,
+342 are unambiguous provisional direct-ID accepts; one GERS maps to two QIDs and
+both candidates fail into review. The 200-row risk-first queue includes both
+conflicts, every missing/over-gate distance observation, 134 label-mismatch
+cases, and 50 clean controls. Evidence is
+`benchmarks/2026-08-03-sidecar-phase0-foursquare-collection-v1.json`,
+`benchmarks/2026-08-03-sidecar-phase0-candidates-v1.json`, and
+`benchmarks/2026-08-03-sidecar-phase0-review-queue-v1.json`, with normalized
+source rows hash-bound beside them.
+
+Phase 0 still requires at least 200 independently hand-checked decisions with
+zero false provisional accepts and measured mapping bytes/resident join memory.
+Only direct external IDs may auto-accept; fuzzy candidates require review, and
+no unreviewed match may affect prominence. This phase cannot alter construction
+output.
 
 The frozen everyday-POI fast loop targets 200 cases from eight government
 sources and four macroregions, all outside Europe/North America, with 100
