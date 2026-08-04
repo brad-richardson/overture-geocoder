@@ -263,6 +263,24 @@ Test/CI cost also came down: the pipeline suite runs **1773 tests in ~26 s**
 consecutive startup probes, retries and functional checks are byte-for-byte
 unchanged — verified by diff — so none of that speedup came from checking less.
 
+## 6.1 Standing red signal, unrelated to this wave
+
+`Smoke Test R2 Shards` has failed on every run since **2026-07-28** (last
+success 2026-07-17), and it is not caused by the 2026-08-04 changes — the run
+history predates them. It fails at `scripts/download_divisions_smoke.py:616`:
+
+```
+RuntimeError: Monaco hierarchy closure rows are missing:
+['87aaf449-d1f6-49c1-ab5a-9fb8e50d85df']
+```
+
+The smoke runs `OVERTURE_RELEASE=2026-07-22.0` while production still serves
+`2026-06-17.0`, so this is an early warning that the newer release breaks a
+division hierarchy closure assumption. Settle it as part of the queued August
+release re-audit: establish whether the closure invariant or the upstream data
+changed, **before** any release move. Note separately that a red smoke went
+unnoticed for a week — scheduled smoke failures appear to have no alerting.
+
 ## 7. Readiness checklist
 
 v5 may be specified when every line is YES. It may be **built** when §2 is
