@@ -1326,6 +1326,33 @@ fn record_display_tokens(record: &PlacesV1Record) -> HashSet<String> {
     ]
     .into_iter()
     .flat_map(|value| crate::places_pages::query_terms(value))
+    // A record's own evidence includes the COMPONENTS of a compound token, not
+    // just the compound. `normalized_words` treats `_` as a word character, so
+    // Overture's category vocabulary tokenizes to single tokens like
+    // `train_station` that never yield `station`.
+    //
+    // Measured consequence on Overture 2026-07-22.0: Singapore's stations are
+    // stored as `Geylang Bahru MRT` -- WITHOUT "Station" -- under category
+    // `train_station`. The query `GEYLANG BAHRU MRT STATION` drives the
+    // prefix-head fallback, which composes `e3:geylang bahru mrt`, finds it,
+    // and retrieves the CORRECT record -- and this set then failed to prove the
+    // dropped `station`, so the right answer was discarded and the response was
+    // empty. Six everyday-POI cases returned nothing for exactly that reason
+    // (docs/plans/2026-08-04-head-miss-interrogation.md).
+    //
+    // Splitting on `_` only, never on substrings: `station` is proof because it
+    // is a whole component of `train_station`, while `stat` is not proof of
+    // anything. Underscores are effectively a category-vocabulary separator and
+    // do not occur in real display names, so this widens the evidence without
+    // widening what counts as a match.
+    .flat_map(|token| {
+        let components: Vec<String> = if token.contains('_') {
+            token.split('_').filter(|part| !part.is_empty()).map(str::to_string).collect()
+        } else {
+            Vec::new()
+        };
+        std::iter::once(token).chain(components)
+    })
     .collect()
 }
 
@@ -2822,6 +2849,72 @@ mod tests {
         assert!(
             retain_records_proving_dropped_tokens(vec![named("Geylang Bahru MRT", 6)], &[])
                 .is_empty()
+        );
+    }
+
+    #[test]
+    fn dropped_token_is_proven_by_a_component_of_a_compound_category() {
+        // The real shape measured on Overture 2026-07-22.0: Singapore's
+        // stations are stored as "Geylang Bahru MRT" -- WITHOUT "Station" --
+        // under category `train_station`.
+        //
+        // The four-token query `GEYLANG BAHRU MRT STATION` drives the
+        // prefix-head fallback, which composes `e3:geylang bahru mrt`, finds
+        // it in the head, and retrieves the correct record. This proof step
+        // then decided whether that record survives.
+        //
+        // `normalized_words` treats `_` as a word character, so the category
+        // tokenizes to the single token `train_station` and never yields
+        // `station`. The right answer was retrieved and thrown away. Six
+        // everyday-POI cases returned EMPTY for exactly this reason; see
+        // docs/plans/2026-08-04-head-miss-interrogation.md.
+        let mut record = entry_record("mrt", 255, 1);
+        record.primary_name = "Geylang Bahru MRT".to_string();
+        record.category = "train_station".to_string();
+
+        let kept =
+            retain_records_proving_dropped_tokens(vec![record], &["station".to_string()]);
+        assert_eq!(kept.len(), 1, "compound category must prove its components");
+        assert_eq!(kept[0].id, format_uuid_of(1));
+    }
+
+    #[test]
+    fn compound_component_proof_does_not_admit_unrelated_tails() {
+        // The relaxation is scoped to components of a compound token, not to
+        // substring matching. PlacesV1Record is not Clone, so each assertion
+        // builds its own station record.
+        let station = |id: u128| {
+            let mut record = entry_record("mrt", 255, id);
+            record.primary_name = "Geylang Bahru MRT".to_string();
+            record.category = "train_station".to_string();
+            record
+        };
+
+        assert!(
+            retain_records_proving_dropped_tokens(vec![station(2)], &["museum".to_string()])
+                .is_empty(),
+            "an unrelated dropped token must still fail closed"
+        );
+        // A component that is genuinely part of the compound is proven...
+        assert_eq!(
+            retain_records_proving_dropped_tokens(vec![station(3)], &["train".to_string()])
+                .len(),
+            1
+        );
+        // ...but a partial substring of a component is not.
+        assert!(
+            retain_records_proving_dropped_tokens(vec![station(4)], &["stat".to_string()])
+                .is_empty(),
+            "substring of a component is not proof"
+        );
+        // And the whole compound still proves itself.
+        assert_eq!(
+            retain_records_proving_dropped_tokens(
+                vec![station(5)],
+                &["train_station".to_string()],
+            )
+            .len(),
+            1
         );
     }
 
