@@ -923,8 +923,59 @@ def score_type_composition(case, features, provider="overture"):
 
 
 def check_release_unavailable(status, body):
-    if status == 503 and isinstance(body, dict) and body.get("error") == "release_unavailable":
+    if is_release_unavailable(status, body):
         raise ReleaseUnavailableError(body.get("message") or "release unavailable")
+
+
+def is_release_unavailable(status, body):
+    return (
+        status == 503
+        and isinstance(body, dict)
+        and body.get("error") == "release_unavailable"
+    )
+
+
+# Bounded retry for DEFINITE transient failures, mirroring the R2 store's
+# definite-5xx retry. Preview attempt 6 failed on one timeout and two HTTP 500s
+# out of 255 requests -- three transport blips that surfaced as "preview failed"
+# and were indistinguishable from a real quality regression, costing a full
+# re-run of a ~25-minute measurement.
+#
+# The definite/ambiguous distinction is the whole point, exactly as it is for
+# writes. Retried:
+#
+# * a parsed 5xx -- the server ANSWERED, there is nothing in flight;
+# * a connect or read timeout on a GET -- this request is idempotent by
+#   construction (a forward query mutates nothing), so a replay cannot double
+#   anything. That is what makes it definite here and ambiguous for a PUT.
+#
+# NOT retried, deliberately: any 4xx (including the 55x404 of attempt 5, which
+# is a routing/deploy fact, not a blip), a 200 with an invalid shape, any other
+# RequestException, and the release_unavailable 503, which is an abort. And no
+# retry can touch a QUALITY signal: an empty or badly-ranked 200 is a result,
+# not a failure, so it is never re-requested.
+TRANSIENT_RETRIES = 2
+TRANSIENT_RETRY_CEILING_SECONDS = 4.0
+
+
+def definite_transient_exceptions():
+    """The requests exception classes that are definitely transient for a GET.
+
+    Resolved by name rather than referenced directly: the unit tests stub
+    `requests` down to `Session`/`RequestException`, and an empty tuple in an
+    `except` clause simply never matches, which is the correct degradation.
+    """
+    found = []
+    for name in ("Timeout", "ConnectionError"):
+        candidate = getattr(requests, name, None)
+        if isinstance(candidate, type) and issubclass(candidate, BaseException):
+            found.append(candidate)
+    return tuple(found)
+
+
+def transient_backoff_seconds(retry_number):
+    """0.5 s, 1 s, 2 s ... capped. Same shape as `copy_within_bucket`."""
+    return min(0.5 * (2 ** (retry_number - 1)), TRANSIENT_RETRY_CEILING_SECONDS)
 
 
 class Runner:
@@ -933,7 +984,8 @@ class Runner:
     def __init__(self, base_url, interval, timeout, limit=FOUND_AT,
                  sleep_fn=time.sleep, monotonic_fn=time.monotonic,
                  rate_limit_retries=1, provider="overture",
-                 user_agent=USER_AGENT, semantic_scoring=None):
+                 user_agent=USER_AGENT, semantic_scoring=None,
+                 transient_retries=TRANSIENT_RETRIES):
         if provider not in PROVIDERS:
             raise ValueError(f"unknown provider: {provider}")
         self.provider = provider
@@ -951,6 +1003,8 @@ class Runner:
         self._monotonic = monotonic_fn
         self._last_request = None
         self.rate_limit_retries = max(0, rate_limit_retries)
+        self.transient_retries = max(0, transient_retries)
+        self._definite_transient = definite_transient_exceptions()
         self.results = []
         self.data_version = None
 
@@ -991,6 +1045,8 @@ class Runner:
                 "top1_feature_type": None,
                 "type_at_1": None,
                 "type_present": None,
+                "transient_retries": 0,
+                "transient_retry_reasons": [],
             }
             if "strata" in case:
                 result["strata"] = case["strata"]
@@ -1003,10 +1059,17 @@ class Runner:
             self.provider, case, self.base_url, self.limit)
         status, body, error = None, None, None
         ms = 0.0
-        for attempt in range(self.rate_limit_retries + 1):
+        rate_limit_budget = self.rate_limit_retries
+        transient_budget = self.transient_retries
+        transient_retries = 0
+        transient_reasons = []
+        while True:
             # Pacing and Retry-After sleeps happen before the timer starts, so
             # ms measures only the (last) HTTP attempt, not the send schedule.
             self._pace()
+            # Reset per attempt: a 500 followed by a timeout must not leave the
+            # stale 500 attached to a result whose error is the timeout.
+            status, body, error = None, None, None
             start = time.perf_counter()
             try:
                 resp = self.session.get(
@@ -1017,7 +1080,8 @@ class Runner:
                 )
                 ms = (time.perf_counter() - start) * 1000
                 status = resp.status_code
-                if status == 429 and attempt < self.rate_limit_retries:
+                if status == 429 and rate_limit_budget > 0:
+                    rate_limit_budget -= 1
                     try:
                         retry_after = float(resp.headers.get("Retry-After", 30))
                     except (TypeError, ValueError):
@@ -1030,6 +1094,28 @@ class Runner:
                     body = None
                 if self.provider == "overture" and self.data_version is None:
                     self.data_version = resp.headers.get("X-Geocoder-Build")
+                # The release_unavailable 503 aborts the whole run. Retrying it
+                # would only delay an abort that is already correct.
+                if (
+                    500 <= status < 600
+                    and transient_budget > 0
+                    and not is_release_unavailable(status, body)
+                ):
+                    transient_budget -= 1
+                    transient_retries += 1
+                    transient_reasons.append(f"http {status}")
+                    self._sleep(transient_backoff_seconds(transient_retries))
+                    continue
+                break
+            except self._definite_transient as exception:
+                ms = (time.perf_counter() - start) * 1000
+                error = str(exception)
+                if transient_budget > 0:
+                    transient_budget -= 1
+                    transient_retries += 1
+                    transient_reasons.append(type(exception).__name__)
+                    self._sleep(transient_backoff_seconds(transient_retries))
+                    continue
                 break
             except requests.RequestException as exception:
                 ms = (time.perf_counter() - start) * 1000
@@ -1075,6 +1161,11 @@ class Runner:
             "top1_feature_type": top1_type,
             "type_at_1": type_at_1,
             "type_present": type_present,
+            # Counted and reported, never hidden. A run that needed retries to
+            # look clean is a different run from one that did not, and the
+            # artifact has to say so.
+            "transient_retries": transient_retries,
+            "transient_retry_reasons": transient_reasons,
         }
         if "strata" in case:
             result["strata"] = case["strata"]
@@ -1149,6 +1240,13 @@ def _aggregate(rows):
                                     if distances else None),
         "p50_ms": round(statistics.median(latencies), 1) if latencies else None,
         "p95_ms": round(_percentile(latencies, 0.95), 1) if latencies else None,
+        # Retries are reported alongside the metrics they could otherwise
+        # quietly improve. A non-zero count here means the endpoint was flaky
+        # during the measurement, which is itself a finding.
+        "transient_retries": sum(row.get("transient_retries") or 0 for row in rows),
+        "cases_with_transient_retry": sum(
+            1 for row in rows if row.get("transient_retries")
+        ),
     }
 
 
@@ -1491,6 +1589,7 @@ def run_run(args):
             # gold as the external providers. Overture-only runs may explicitly
             # opt into that contract when measuring a provider-neutral baseline.
             semantic_scoring=semantic_scoring,
+            transient_retries=args.transient_retries,
         )
         try:
             for case in cases:
@@ -1539,6 +1638,16 @@ def run_run(args):
             ),
             "providers": provider_metadata,
             "case_counts": case_counts(cases),
+            # Surfaced at the top of the artifact, not just inside the
+            # aggregates: a reader deciding whether a measurement is trustworthy
+            # should not have to go looking for how flaky the endpoint was.
+            "transient_retries_allowed": args.transient_retries,
+            "transient_retries_used": sum(
+                row.get("transient_retries") or 0 for row in all_results
+            ),
+            "cases_with_transient_retry": sum(
+                1 for row in all_results if row.get("transient_retries")
+            ),
         },
         "summary": summary,
         "provider_summaries": provider_summaries,
@@ -1617,6 +1726,11 @@ def main(argv=None):
                      help="requested seconds between calls; public-provider "
                           "minimums are enforced (default: 1.2)")
     run.add_argument("--timeout", type=float, default=20.0)
+    run.add_argument("--transient-retries", type=int, default=TRANSIENT_RETRIES,
+                     help="retries per request for DEFINITE transient failures "
+                          "(parsed 5xx, GET timeout) only; 0 disables. Never "
+                          "applies to 4xx, invalid shapes, or empty results "
+                          f"(default: {TRANSIENT_RETRIES})")
     run.add_argument("--seed", type=int, default=42,
                      help="seed for geocoder-tester case selection")
     run.add_argument("--skip-builtin", action="store_true",
