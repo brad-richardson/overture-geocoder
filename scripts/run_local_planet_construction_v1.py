@@ -163,6 +163,23 @@ def main(argv=None) -> int:
     parser.add_argument("--shard-bits", type=int, default=PLANET_HEAD_SHARD_BITS)
     parser.add_argument("--stop-after", choices=PHASES, default="head")
     parser.add_argument("--max-reduce-jobs", type=int, default=None)
+    # The reason a workstation run needs this at all. HOSTED_MAX_SCRATCH_BYTES
+    # is 17 GiB, sized against a GitHub runner's ~25.6 GB free-disk floor, and
+    # the head merge's DuckDB temp cap is derived from it as a fraction --
+    # 4.2 GiB in practice. On planet Places the merge exhausts that and dies
+    # with `failed to offload data block ... set by the max_temp_directory_size
+    # setting`, which is the v4 failure. It is a CONFIGURED bound, not this
+    # machine's: raising it is the entire point of staging here, and on 1.1 TB
+    # of free disk it is safe. Left unset the run uses the hosted limits, so a
+    # local run reproduces the hosted failure by default rather than silently
+    # diverging from it.
+    parser.add_argument("--max-scratch-gib", type=int, default=None,
+                        help="LOCAL ONLY: raise the contract's places "
+                             "max_scratch_bytes (hosted default 17 GiB). Keep "
+                             "it below free disk -- above that the guard can no "
+                             "longer fire before ENOSPC. Recorded in the run "
+                             "summary so a local result is never mistaken for a "
+                             "hosted-shaped one.")
     parser.add_argument("--tasks", default=None,
                         help="Comma/dash task selection (e.g. 0-9,20). "
                              "Default: every task in the inventory.")
@@ -227,6 +244,18 @@ def main(argv=None) -> int:
     contract = work / "contract.json"
     hosted("derive-contract", "--request", request, "--output", contract,
            "--runtime", work / "runtime.json", "--allow-unpinned-duckdb")
+    if args.max_scratch_gib is not None:
+        # Patched AFTER derivation rather than threaded through the request:
+        # the request digest is what binds a run to its reviewed shape, and a
+        # local disk allowance must not change it. The limits are not part of
+        # that digest.
+        document = json.loads(contract.read_text())
+        raised = args.max_scratch_gib * 1024**3
+        hosted_default = document["limits"]["places"]["max_scratch_bytes"]
+        document["limits"]["places"]["max_scratch_bytes"] = raised
+        contract.write_text(json.dumps(document, indent=2) + "\n")
+        print(f"limits       max_scratch_bytes {hosted_default / 1024**3:.0f} GiB "
+              f"-> {args.max_scratch_gib} GiB (LOCAL override)", flush=True)
 
     # --- map --------------------------------------------------------------
     started = time.time()
@@ -348,6 +377,7 @@ def main(argv=None) -> int:
         "release": args.release,
         "inventory_sha256": inventory["inventory_sha256"],
         "source_mirror": mirror,
+        "max_scratch_gib_override": args.max_scratch_gib,
         "tasks": len(tasks),
         "records": total_records,
         "map_seconds": round(map_seconds, 1),
