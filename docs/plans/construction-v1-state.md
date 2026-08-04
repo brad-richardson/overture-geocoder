@@ -1,9 +1,11 @@
 # construction-v1: current state
 
 Last updated 2026-08-04 after the first complete v4 preview exposed two exact
-phrase short-circuit regressions and the bounded additive phrase-composition
-correction was implemented and validated against the immutable candidate head
-shards. It also incorporates the independent correctness audit, fresh v4 formal
+phrase short-circuit regressions and two bounded composition corrections were
+validated against the immutable candidate head shards. The first correction
+closed Union Station; its repeat preview isolated one remaining saturated-
+replica loss for Statue of Liberty and motivated a one-slot prominence guard.
+It also incorporates the independent correctness audit, fresh v4 formal
 evidence, sidecar Phase 0's cross-release identity measurement, completion of
 the 200-case everyday-POI tripwire, and its current-OSM presence control.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
@@ -30,8 +32,9 @@ non-promoting Places-only planet build and scoped head-only recovery completed.
 **The first complete preview was net positive but correctly failed its paired
 zero-loss gate: 55-case rank@1 moved 26 -> 29 and rank@10 34 -> 37, while exact
 losses for Statue of Liberty and Union Station Toronto identified a bounded
-Worker phrase-composition bug. The additive Worker correction and repeat
-preview are the active gate before catalog promotion.** Keep Brandenburg Gate
+Worker phrase-composition bug. Additive composition closed Union Station; a
+saturated-phrase recovery slot for Statue and one final identical preview are
+the active gate before catalog promotion.** Keep Brandenburg Gate
 and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
 phrase admission again in this generation: the repeated functional rehearsal
 has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
@@ -1488,7 +1491,11 @@ full phrase, its exact two-token prefix, and the three ordinary postings, then
 deduplicates identical source rows. This is bounded at five head reads and 50
 pre-score candidates. It lets a selective ordinary posting recover a canonical
 feature evicted from a saturated phrase posting, and lets an exact prefix feed
-the already-bounded locality-suffix path.
+the already-bounded locality-suffix path. A saturated full phrase reserves one
+slot only when a distinct ordinary candidate has strictly greater producer
+prominence than its weakest row. This measured Statue guard retains nine exact
+phrase results while admitting the canonical longer official name; equal or
+weaker ordinary evidence cannot evict a phrase row.
 
 The gold contract now records point-vs-extent tolerance explicitly, accepts the
 official Machu Picchu extent case without loosening Big Ben, and reports paired
@@ -1580,6 +1587,20 @@ rejected all nine deliberate misroutes, and 22 phrase rows passed the exact
 contract. The `e2:statue of` posting was correctly empty; the Statue recovery
 comes from ordinary `liberty`. Repeat the identical preview after this Worker
 change merges. Promotion remains prohibited until the paired loss count is zero.
+
+The first additive-composition repeat was run `30867768153` from merged commit
+`cf12f0e`. It passed both direct phrase gates and fixed Union Station Toronto.
+Gold recall@1 improved to 30/55 with four gains and zero losses; recall@10
+improved to 38/55 with five gains and one loss. Everyday POI remained 65/200 at
+rank 1 and 66/200 at rank 10 with zero paired losses. The sole remaining loss
+was Statue of Liberty. Its composed candidate set did contain the canonical NPS
+row, but all ten exact-name replicas scored ahead of the longer official name
+and exhausted the public result cap. The second correction therefore removes
+only the weakest full-phrase row when the phrase posting is saturated and a
+distinct ordinary candidate has strictly greater producer prominence. On the
+immutable shard the canonical NPS row has prominence 255 and the weakest phrase
+replica has prominence 89. Repeat the identical preview after this guard merges;
+promotion remains prohibited until it passes.
 
 **The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
 deploy run `30796985582` published Worker version
@@ -1926,9 +1947,10 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    for the confirmed Empire State Building and Big Ben global-head misses. Its
    planet phrase-posting probe and fresh v4 formal evidence are green. The
    non-promoting Places-only planet build and first preview are complete. The
-   preview was net positive but found two exact phrase short-circuit losses;
-   merge the bounded additive Worker correction and repeat the identical
-   preview before any catalog promotion.
+   preview was net positive but found two exact phrase short-circuit losses.
+   Additive composition closed Union Station; merge the one-slot saturated-
+   phrase prominence guard for the remaining Statue loss and repeat the
+   identical preview before any catalog promotion.
    Brandenburg Gate is corrected to the
    source-alias/tokenization plus routed-cap backlog, and Machu Picchu Cusco
    remains in region-context routing. Do not reopen build ordering, duplicate

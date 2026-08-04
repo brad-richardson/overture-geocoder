@@ -1343,12 +1343,16 @@ pub(crate) fn merge_head_candidates(
 /// Phrase postings are additive rather than terminal: the full phrase can be
 /// saturated with replicas while a selective ordinary token still retrieves
 /// the canonical feature, and a two-token prefix can preserve locality-suffix
-/// routing for queries such as `Union Station Toronto`. Preserve fetch order
-/// (full phrase, optional prefix, ordinary producer rank) and deduplicate only
-/// identical source rows; construction-v1 deliberately keeps duplicate UUIDs
-/// at distinct source positions.
+/// routing for queries such as `Union Station Toronto`. If the full phrase is
+/// saturated and a distinct ordinary candidate has strictly greater producer
+/// prominence than its weakest row, reserve one recovery slot by dropping only
+/// that weakest phrase row. This prevents ten low-value replicas from erasing a
+/// canonical, prominent longer official name while retaining nine exact phrase
+/// results. Preserve fetch order (full phrase, optional prefix, ordinary
+/// producer rank) and deduplicate only identical source rows; construction-v1
+/// deliberately keeps duplicate UUIDs at distinct source positions.
 pub(crate) fn compose_entity_phrase_candidates(
-    phrase_groups: Vec<Vec<PlacesV1Record>>,
+    mut phrase_groups: Vec<Vec<PlacesV1Record>>,
     ordinary: Vec<PlacesV1Record>,
 ) -> Result<Vec<PlacesV1Record>> {
     if phrase_groups.len() > ENTITY_PHRASE_GROUP_CAP {
@@ -1362,6 +1366,41 @@ pub(crate) fn compose_entity_phrase_candidates(
     }
     if ordinary.len() > HEAD_QUERY_TOKEN_CAP * HEAD_RESULT_CAP {
         return Err("Places v1 composed ordinary head cap exceeded".into());
+    }
+
+    let reserve_recovery_slot = {
+        let phrase_identities: HashSet<(&str, u32, u32, u64)> = phrase_groups
+            .iter()
+            .flatten()
+            .map(|record| {
+                (
+                    record.id.as_str(),
+                    record.source_object_index,
+                    record.source_row_group,
+                    record.source_row_index,
+                )
+            })
+            .collect();
+        let weakest_full_phrase_prominence = phrase_groups
+            .first()
+            .filter(|records| records.len() == HEAD_RESULT_CAP)
+            .and_then(|records| records.last())
+            .map(|record| record.prominence_rank);
+        weakest_full_phrase_prominence.is_some_and(|weakest| {
+            ordinary.iter().any(|record| {
+                !phrase_identities.contains(&(
+                    record.id.as_str(),
+                    record.source_object_index,
+                    record.source_row_group,
+                    record.source_row_index,
+                )) && record.prominence_rank > weakest
+            })
+        })
+    };
+    if reserve_recovery_slot {
+        if let Some(full_phrase) = phrase_groups.first_mut() {
+            full_phrase.pop();
+        }
     }
 
     let mut seen = HashSet::new();
@@ -2665,6 +2704,57 @@ mod tests {
             vec![format_uuid_of(1), format_uuid_of(2), format_uuid_of(3)]
         );
         assert_eq!(composed[1].token, "e2:union station");
+    }
+
+    #[test]
+    fn saturated_phrase_reserves_one_slot_for_stronger_distinct_ordinary_evidence() {
+        let mut full = (1..=10)
+            .map(|id| entry_record("e3:statue of liberty", 255, id))
+            .collect::<Vec<_>>();
+        for record in &mut full {
+            record.prominence_rank = 128;
+        }
+        full.last_mut().unwrap().prominence_rank = 89;
+        let mut canonical = entry_record("liberty", 248, 99);
+        canonical.prominence_rank = 255;
+
+        let composed = compose_entity_phrase_candidates(vec![full], vec![canonical]).unwrap();
+        assert_eq!(composed.len(), 10);
+        assert!(composed
+            .iter()
+            .any(|record| record.id == format_uuid_of(99)));
+        assert!(!composed
+            .iter()
+            .any(|record| record.id == format_uuid_of(10)));
+
+        let mut full = (1..=10)
+            .map(|id| entry_record("e3:statue of liberty", 255, id))
+            .collect::<Vec<_>>();
+        for record in &mut full {
+            record.prominence_rank = 128;
+        }
+        let mut weaker = entry_record("liberty", 255, 99);
+        weaker.prominence_rank = 89;
+        let composed = compose_entity_phrase_candidates(vec![full], vec![weaker]).unwrap();
+        assert_eq!(composed.len(), 11);
+        assert!(composed
+            .iter()
+            .any(|record| record.id == format_uuid_of(10)));
+
+        let mut full = (1..=10)
+            .map(|id| entry_record("e3:statue of liberty", 255, id))
+            .collect::<Vec<_>>();
+        for record in &mut full {
+            record.prominence_rank = 128;
+        }
+        full.last_mut().unwrap().prominence_rank = 89;
+        let mut duplicate = entry_record("liberty", 255, 1);
+        duplicate.prominence_rank = 255;
+        let composed = compose_entity_phrase_candidates(vec![full], vec![duplicate]).unwrap();
+        assert_eq!(composed.len(), 10);
+        assert!(composed
+            .iter()
+            .any(|record| record.id == format_uuid_of(10)));
     }
 
     #[test]

@@ -2108,6 +2108,7 @@ async fn search_places_construction(
     let mut phrase_groups = Vec::new();
     if head.admits_entity_phrases() {
         for phrase_tokens in entity_phrase_token_groups(&tokens) {
+            let mut phrase_records = Vec::new();
             if let Some(phrase_key) = entity_phrase_key(phrase_tokens) {
                 let shard_id = head_shard_id(&phrase_key, head.shard_bits);
                 if let Some(shard) = head.shard(shard_id) {
@@ -2117,12 +2118,12 @@ async fn search_places_construction(
                         .await?;
                     let records = head_shard_lookup(&bytes, shard_id, head.shard_bits, &phrase_key)
                         .map_err(Error::RustError)?;
-                    let records = validate_entity_phrase_records(phrase_tokens, records);
-                    if !records.is_empty() {
-                        phrase_groups.push(records);
-                    }
+                    phrase_records = validate_entity_phrase_records(phrase_tokens, records);
                 }
             }
+            // Keep empty groups so index zero always denotes the full query;
+            // composition may apply its saturated-full-phrase recovery rule.
+            phrase_groups.push(phrase_records);
         }
     }
     let mut per_token = Vec::with_capacity(tokens.len());
