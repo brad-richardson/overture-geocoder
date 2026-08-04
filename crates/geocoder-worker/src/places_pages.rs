@@ -79,7 +79,6 @@ fn supported_tokenizer(value: &str) -> bool {
     matches!(value, TOKENIZER_VERSION | LEGACY_TOKENIZER_VERSION)
 }
 
-#[cfg(test)]
 fn is_cjk(character: char) -> bool {
     matches!(
         character as u32,
@@ -175,6 +174,49 @@ pub(crate) fn tokenize_query(value: &str) -> Vec<String> {
 /// clause would make ordinary long CJK names exceed the four-clause read cap.
 pub(crate) fn query_terms(value: &str) -> Vec<String> {
     normalized_words(value)
+}
+
+/// Bigram clauses for an unsegmented CJK query, or `None` when the query is not
+/// one.
+///
+/// CJK text carries no word separators, so a whole CJK name normalizes to ONE
+/// word. The index emits that whole run plus every character bigram; the exact
+/// clauses `query_terms` builds carry the whole run only, which exists in the
+/// index solely for a record whose run is EXACTLY the query. The bigrams are
+/// what the index actually holds for a longer name, so they are the clauses that
+/// can reach one.
+///
+/// The expansion is deliberately narrow and bounded:
+///
+/// * only a single-word query that is entirely CJK, so no Latin or mixed query
+///   changes clause count;
+/// * only 3+ characters -- a 1- or 2-character run already equals its own
+///   indexed token;
+/// * `None` when the run needs more than `cap` bigrams, because a truncated
+///   subset of an AND is a different query and the read caps
+///   (`HEAD_QUERY_TOKEN_CAP`, the routed four-clause cap) are hard bounds, not
+///   budgets to spend.
+///
+/// A bigram conjunction over-matches (bigram sets do not prove adjacency), so
+/// every caller MUST verify survivors against their own stored display fields.
+pub(crate) fn cjk_query_expansion(value: &str, cap: usize) -> Option<Vec<String>> {
+    let words = normalized_words(value);
+    let [run] = words.as_slice() else {
+        return None;
+    };
+    let characters: Vec<char> = run.chars().collect();
+    if characters.len() < 3 || !characters.iter().copied().all(is_cjk) {
+        return None;
+    }
+    if characters.len() - 1 > cap {
+        return None;
+    }
+    Some(
+        characters
+            .windows(2)
+            .map(|pair| pair.iter().collect())
+            .collect(),
+    )
 }
 
 const FIELD_NAME: u8 = 1;

@@ -100,6 +100,10 @@ pub(crate) const ENTITY_PHRASE_ADMISSION: &str = "prominence-primary-name-v1";
 /// three-token query, its two-token prefix). Routed lookup retains its
 /// independent four-token cap.
 pub(crate) const HEAD_QUERY_TOKEN_CAP: usize = 3;
+/// Maximum routed (proximity) query width, unchanged from the four-clause cap
+/// `search_places_construction` has always enforced; named here because the CJK
+/// bigram expansion has to be bounded by it.
+pub(crate) const ROUTED_QUERY_TOKEN_CAP: usize = 4;
 /// Widest query the additive prefix-head fallback attempts. A tail longer than
 /// three dropped tokens is not a POI name with a category or locality suffix,
 /// which is the class this fallback exists for.
@@ -1399,6 +1403,35 @@ pub(crate) fn retain_records_proving_dropped_tokens(
     verified
 }
 
+/// Fail-closed verification for the CJK bigram expansion.
+///
+/// A bigram conjunction proves only that the record carries each PAIR, not that
+/// the pairs are adjacent in that order, so the expansion over-matches by
+/// construction. Keep a candidate only when one of its own stored display words
+/// contains the query's normalized run as a substring -- the same
+/// record-proves-itself rule the prefix-head fallback uses, on the same
+/// tokenizer. Anything else would turn a bounded expansion into a substring
+/// search.
+pub(crate) fn retain_records_proving_query_run(
+    records: Vec<PlacesV1Record>,
+    query: &str,
+) -> Vec<PlacesV1Record> {
+    let words = crate::places_pages::query_terms(query);
+    let [run] = words.as_slice() else {
+        return Vec::new();
+    };
+    let mut verified: Vec<PlacesV1Record> = records
+        .into_iter()
+        .filter(|record| {
+            record_display_tokens(record)
+                .iter()
+                .any(|word| word.contains(run.as_str()))
+        })
+        .collect();
+    verified.truncate(ROUTED_CANDIDATE_CAP);
+    verified
+}
+
 /// Merge routed `(cell, token)` postings, each capped at 256 records.
 pub(crate) fn merge_routed_candidates(
     tokens: &[String],
@@ -1808,10 +1841,11 @@ mod tests {
         index_hash, lookup_head_shard, merge_head_candidates, merge_routed_candidates,
         parse_routed_range_header, parse_routed_range_index, prefix_head_fallback_split, query_key,
         ranged_index_candidates, record_projection, retain_records_proving_dropped_tokens,
-        routed_fetch_plan, routed_lookup, routed_token_hash, validate_entity_phrase_records,
-        validate_routed_range_payload_extent, HeadRoutingManifest, PlacesRouting, PlacesV1Artifact,
-        PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record, PlacesV1Version, ENTITY_PHRASE_ADMISSION,
-        MAX_ARTIFACT_ENTRY_BYTES, PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
+        retain_records_proving_query_run, routed_fetch_plan, routed_lookup, routed_token_hash,
+        validate_entity_phrase_records, validate_routed_range_payload_extent, HeadRoutingManifest,
+        PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record,
+        PlacesV1Version, ENTITY_PHRASE_ADMISSION, MAX_ARTIFACT_ENTRY_BYTES,
+        PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA, ROUTED_QUERY_TOKEN_CAP,
     };
     use serde_json::{json, Value};
     use sha2::{Digest, Sha256};
@@ -1824,6 +1858,31 @@ mod tests {
 
     fn entry(token: &str, cell: Option<&str>, rank: u8, id: u128, row: u64) -> Vec<u8> {
         entry_masked(token, cell, super::FIELD_NAME, rank, id, row)
+    }
+
+    /// `entry` carrying an explicit stored primary name, for the lanes that
+    /// verify a candidate against its own display fields.
+    fn entry_named(
+        token: &str,
+        cell: Option<&str>,
+        rank: u8,
+        id: u128,
+        row: u64,
+        primary_name: &str,
+    ) -> Vec<u8> {
+        let mut output = entry_masked(token, cell, super::FIELD_NAME, rank, id, row);
+        let tail = output.len() - display_tail("Cafe").len();
+        output.truncate(tail);
+        output.extend_from_slice(&display_tail(primary_name));
+        output
+    }
+
+    fn display_tail(primary_name: &str) -> Vec<u8> {
+        let mut output = Vec::new();
+        for value in [primary_name, "", "restaurant", "Town", "Region", "XX"] {
+            text(&mut output, value);
+        }
+        output
     }
 
     /// `entry` with an explicit field mask: 1 name, 2 brand, 4 category,
@@ -1949,6 +2008,63 @@ mod tests {
         let start = selected.payload_offset as usize;
         let end = start + selected.payload_bytes as usize;
         decode_routed_range_payload(&bytes[start..end], selected, cell, token, header.version)
+    }
+
+    /// A CJK query must reach a record whose name merely CONTAINS it.
+    ///
+    /// The index (`tokens` in
+    /// crates/geocoder-construction/src/bin/places_transform_v1.rs) emits, per
+    /// CJK run, the whole run PLUS every character bigram. The serving
+    /// tokenizer `query_terms` emits the whole run only, so a 3+-character CJK
+    /// query carries a token that exists in the index ONLY for a record whose
+    /// run is exactly the query -- `\u{5c6f}\u{9580}\u{91ab}\u{9662}` can never
+    /// retrieve `\u{5c6f}\u{9580}\u{91ab}\u{9662}\u{5eb7}\u{5fa9}\u{5927}\u{6a13}`.
+    #[test]
+    fn cjk_query_reaches_a_longer_indexed_routed_name() {
+        const NAME: &str = "\u{5c6f}\u{9580}\u{91ab}\u{9662}\u{5eb7}\u{5fa9}\u{5927}\u{6a13}";
+        const QUERY: &str = "\u{5c6f}\u{9580}\u{91ab}\u{9662}";
+        let cell = "8080";
+        // Index the record with the producer's document tokenizer.
+        let mut indexed = crate::places_pages::tokenize_query(NAME);
+        indexed.sort();
+        let entries: Vec<Vec<u8>> = indexed
+            .iter()
+            .map(|token| entry_named(token, Some(cell), 255, 1, 0, NAME))
+            .collect();
+        let bytes = artifact(PlacesV1Mode::Routed, &entries);
+        let parsed =
+            PlacesV1Artifact::parse(&bytes, PlacesV1Mode::Routed, 1 << 20, 1_000, 4096).unwrap();
+        let serve = |tokens: &[String]| -> Vec<PlacesV1Record> {
+            let mut per_token = Vec::new();
+            for token in tokens {
+                let hits = parsed.lookup(token, Some(cell), 256, 256).unwrap();
+                if hits.is_empty() {
+                    return Vec::new();
+                }
+                per_token.push(hits);
+            }
+            merge_routed_candidates(tokens, per_token).unwrap()
+        };
+
+        // The whole-run query token is simply not in the index.
+        assert!(serve(&crate::places_pages::query_terms(QUERY)).is_empty());
+
+        // The serving expansion must recover it from the indexed bigrams, and
+        // the recovered candidate must prove the full run from its own name.
+        let expanded = crate::places_pages::cjk_query_expansion(QUERY, ROUTED_QUERY_TOKEN_CAP)
+            .expect("a 4-character CJK run expands");
+        assert_eq!(expanded.len(), 3);
+        let found = retain_records_proving_query_run(serve(&expanded), QUERY);
+        assert_eq!(found.len(), 1);
+        assert_eq!(found[0].primary_name, NAME);
+
+        // Verification is what admits the record: an over-matched candidate
+        // whose stored name does not carry the run is rejected.
+        assert!(retain_records_proving_query_run(
+            serve(&expanded),
+            "\u{5357}\u{9580}\u{91ab}\u{9662}",
+        )
+        .is_empty());
     }
 
     #[test]

@@ -22,12 +22,14 @@ use crate::places_construction_v1::{
     compose_entity_phrase_candidates, construction_cell, entity_phrase_key,
     entity_phrase_token_groups, head_shard_id, head_shard_lookup, merge_head_candidates,
     merge_routed_candidates, prefix_head_fallback_split, record_projection,
-    retain_records_proving_dropped_tokens, routed_fetch_plan, supports_places_construction_format,
-    validate_entity_phrase_records, HeadRoutingManifest, PlacesRouting, HEAD_QUERY_TOKEN_CAP,
-    MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
+    retain_records_proving_dropped_tokens, retain_records_proving_query_run, routed_fetch_plan,
+    supports_places_construction_format, validate_entity_phrase_records, HeadRoutingManifest,
+    PlacesRouting, HEAD_QUERY_TOKEN_CAP, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES,
+    MAX_PLACES_ROUTING_BYTES, ROUTED_QUERY_TOKEN_CAP,
 };
 use crate::places_pages::{
-    query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
+    cjk_query_expansion, query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES,
+    TOKENIZER_VERSION,
 };
 use crate::reverse_construction_v1::{ReverseFamily, ReverseHit};
 use crate::stac::cache::{CATALOG_CACHE_TTL, IMMUTABLE_CACHE_TTL, TEXT_MEMO_TTL_MS};
@@ -2128,7 +2130,7 @@ async fn search_places_construction(
         .strip_suffix(SUFFIX)
         .ok_or_else(|| Error::RustError("v2 Places entrypoint is not a routing object".into()))?;
     let tokens = query_terms(query);
-    if tokens.is_empty() || tokens.len() > 4 {
+    if tokens.is_empty() || tokens.len() > ROUTED_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
     let routing = loader
@@ -2138,44 +2140,29 @@ async fn search_places_construction(
         let Some(cell) = construction_cell(longitude, latitude) else {
             return Ok(Vec::new());
         };
-        // A bias point in an unpopulated cell is an empty result, not an
-        // error; a populated cell that owns no subpartition for a token hash
-        // is a broken tiling invariant and fails closed inside the plan.
-        let Some(plan) = routed_fetch_plan(&routing, &cell, &tokens).map_err(Error::RustError)?
-        else {
-            return Ok(Vec::new());
-        };
-        // Aggregate residency bound: the plan groups tokens by owning object.
-        // Each object is range-read through its fixed index and one bounded
-        // payload at a time; a 209 MiB planet object is never materialized in
-        // the 128 MiB isolate. The edge cache absorbs cross-request refetches.
-        let mut per_token: Vec<Option<Vec<crate::places_construction_v1::PlacesV1Record>>> =
-            (0..tokens.len()).map(|_| None).collect();
-        for (object, token_indexes) in plan {
-            let object_key = format!("{object_root}/objects/{object}");
-            let object_tokens: Vec<String> = token_indexes
-                .iter()
-                .map(|index| tokens[*index].clone())
-                .collect();
-            let object_records = loader
-                .lookup_places_construction_routed(&object_key, &cell, &object_tokens)
+        let mut records =
+            places_construction_routed_records(loader, object_root, &routing, &cell, &tokens)
                 .await?;
-            for (index, records) in token_indexes.into_iter().zip(object_records) {
-                if records.is_empty() {
-                    return Ok(Vec::new());
-                }
-                per_token[index] = Some(records);
+        // Additive CJK recovery, on an otherwise-empty routed answer only. An
+        // unsegmented CJK query is one word, and the index holds that whole run
+        // only for a record named exactly it; the run's bigrams ARE indexed for
+        // longer names. Re-probe with them, then keep only candidates whose own
+        // stored name carries the run. Bounded by the same four-clause cap, so
+        // this costs at most one extra routed plan and four token reads, and it
+        // can never displace a result the exact clauses produced.
+        if records.is_empty() {
+            if let Some(expansion) = cjk_query_expansion(query, ROUTED_QUERY_TOKEN_CAP) {
+                let candidates = places_construction_routed_records(
+                    loader,
+                    object_root,
+                    &routing,
+                    &cell,
+                    &expansion,
+                )
+                .await?;
+                records = retain_records_proving_query_run(candidates, query);
             }
         }
-        let per_token = per_token
-            .into_iter()
-            .map(|records| {
-                records.ok_or_else(|| {
-                    Error::RustError("v2 Places routed fetch plan missed a token".into())
-                })
-            })
-            .collect::<Result<Vec<_>>>()?;
-        let records = merge_routed_candidates(&tokens, per_token).map_err(Error::RustError)?;
         let mut results: Vec<PlaceProjection> = records.iter().map(record_projection).collect();
         for place in &mut results {
             place.distance_km = Some(haversine_km(
@@ -2192,6 +2179,57 @@ async fn search_places_construction(
     }
     let records = places_construction_head_records(loader, object_root, &routing, &tokens).await?;
     Ok(records.iter().map(record_projection).collect())
+}
+
+/// Resolve one routed (proximity) clause set inside `cell`.
+///
+/// A bias point in an unpopulated cell is an empty result, not an error; a
+/// populated cell that owns no subpartition for a token hash is a broken tiling
+/// invariant and fails closed inside the plan.
+async fn places_construction_routed_records(
+    loader: &ShardLoader,
+    object_root: &str,
+    routing: &PlacesRouting,
+    cell: &str,
+    tokens: &[String],
+) -> Result<Vec<crate::places_construction_v1::PlacesV1Record>> {
+    if tokens.is_empty() || tokens.len() > ROUTED_QUERY_TOKEN_CAP {
+        return Ok(Vec::new());
+    }
+    let Some(plan) = routed_fetch_plan(routing, cell, tokens).map_err(Error::RustError)? else {
+        return Ok(Vec::new());
+    };
+    // Aggregate residency bound: the plan groups tokens by owning object. Each
+    // object is range-read through its fixed index and one bounded payload at a
+    // time; a 209 MiB planet object is never materialized in the 128 MiB
+    // isolate. The edge cache absorbs cross-request refetches.
+    let mut per_token: Vec<Option<Vec<crate::places_construction_v1::PlacesV1Record>>> =
+        (0..tokens.len()).map(|_| None).collect();
+    for (object, token_indexes) in plan {
+        let object_key = format!("{object_root}/objects/{object}");
+        let object_tokens: Vec<String> = token_indexes
+            .iter()
+            .map(|index| tokens[*index].clone())
+            .collect();
+        let object_records = loader
+            .lookup_places_construction_routed(&object_key, cell, &object_tokens)
+            .await?;
+        for (index, records) in token_indexes.into_iter().zip(object_records) {
+            if records.is_empty() {
+                return Ok(Vec::new());
+            }
+            per_token[index] = Some(records);
+        }
+    }
+    let per_token = per_token
+        .into_iter()
+        .map(|records| {
+            records.ok_or_else(|| {
+                Error::RustError("v2 Places routed fetch plan missed a token".into())
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
+    merge_routed_candidates(tokens, per_token).map_err(Error::RustError)
 }
 
 /// Resolve up to `HEAD_QUERY_TOKEN_CAP` exact tokens through the sharded global
