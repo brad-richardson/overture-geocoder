@@ -90,3 +90,54 @@ def spill_safe_connect(memory_limit: str = "10GB") -> "duckdb.DuckDBPyConnection
     con.execute(f"SET temp_directory = '{spill_dir}';")
     con.execute("SET threads = 2;")
     return con
+
+
+SOURCE_MIRROR_ENV = "OVERTURE_SOURCE_MIRROR"
+
+
+def source_filesystem(pafs, *, region: str, quiet: bool = False):
+    """The filesystem Overture source bytes are read through.
+
+    Defaults to anonymous S3, which is what CI and every promotion path use.
+    When ``OVERTURE_SOURCE_MIRROR`` names a directory, reads resolve there
+    instead. The directory must be BUCKET-SHAPED -- containing
+    ``overturemaps-us-west-2/release/<release>/theme=.../type=.../`` -- because
+    callers strip only the ``s3://`` scheme and pass the remaining key.
+
+    This swaps the byte transport and NOTHING else:
+
+    * Object LISTING and the ``head_identity`` etag/size check still go to S3,
+      so which objects exist and what they contain stay authoritative. A stale
+      or partial mirror fails loudly rather than silently planning over a
+      different world -- and the projector's post-inventory size check compares
+      the mirror's bytes against the S3 listing, so a truncated mirror is
+      caught before it can produce output.
+    * URIs stay canonical ``s3://`` strings, so ``approved_prefix`` and
+      ``is_approved_source_uri`` keep working unweakened, and the inventory and
+      every PUBLISHED serving artifact are byte-identical to a pure-S3 run.
+      That equality is the integrity check: if they ever disagree, the mirror
+      is wrong.
+
+      Scope that claim carefully. The intermediate ``map/places-v1`` class is
+      NOT byte-stable -- two consecutive pure-S3 runs of the same Monaco task
+      published 25,876,445 and 25,876,446 bytes, and the mirror 25,876,443, so
+      the variance is inherent to that artifact and independent of transport.
+      Compare inventory digests and the serving objects, never map bytes.
+
+    Fails closed on a configured-but-missing directory rather than falling back
+    to S3, which would silently cost a slow run the operator believed was local.
+
+    Local mirrors are a staging convenience for experimentation. Evidence
+    intended for promotion should still come from the sanctioned path.
+    """
+    mirror = os.environ.get(SOURCE_MIRROR_ENV)
+    if not mirror:
+        return pafs.S3FileSystem(anonymous=True, region=region)
+    root = Path(mirror).expanduser()
+    if not root.is_dir():
+        raise SystemExit(f"{SOURCE_MIRROR_ENV} is not a directory: {root}")
+    if not quiet:
+        import sys
+
+        print(f"[source] reading bytes from local mirror {root}", file=sys.stderr)
+    return pafs.SubTreeFileSystem(str(root), pafs.LocalFileSystem())

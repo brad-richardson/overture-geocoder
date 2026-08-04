@@ -371,7 +371,7 @@ def test_source_filesystem_defaults_to_anonymous_s3(monkeypatch):
     monkeypatch.delenv(builder.SOURCE_MIRROR_ENV, raising=False)
     import pyarrow.fs as pafs
 
-    assert isinstance(builder.source_filesystem(pafs), pafs.S3FileSystem)
+    assert isinstance(builder.source_filesystem(pafs, region="us-west-2"), pafs.S3FileSystem)
 
 
 def test_source_filesystem_reads_through_a_configured_mirror(monkeypatch, tmp_path):
@@ -383,7 +383,7 @@ def test_source_filesystem_reads_through_a_configured_mirror(monkeypatch, tmp_pa
     target.write_bytes(b"mirror-bytes")
 
     monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, str(tmp_path))
-    filesystem = builder.source_filesystem(pafs)
+    filesystem = builder.source_filesystem(pafs, region="us-west-2")
     # Callers strip only the `s3://` scheme, so the mirror must be
     # bucket-shaped and resolve the remaining key verbatim.
     with filesystem.open_input_file(key) as handle:
@@ -397,11 +397,40 @@ def test_missing_mirror_directory_fails_closed(monkeypatch, tmp_path):
 
     monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, str(tmp_path / "absent"))
     with pytest.raises(SystemExit, match="not a directory"):
-        builder.source_filesystem(pafs)
+        builder.source_filesystem(pafs, region="us-west-2")
 
 
 def test_empty_mirror_value_is_treated_as_unset(monkeypatch):
     import pyarrow.fs as pafs
 
     monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, "")
-    assert isinstance(builder.source_filesystem(pafs), pafs.S3FileSystem)
+    assert isinstance(builder.source_filesystem(pafs, region="us-west-2"), pafs.S3FileSystem)
+
+
+def test_projector_default_filesystem_honours_the_mirror(monkeypatch, tmp_path):
+    # The projector is the path a head build reads through, so its DEFAULT has
+    # to honour the mirror -- not just the inventory builder's.
+    import pyarrow.fs as pafs
+
+    projector = _load(
+        "project_places_construction_v1_mirror",
+        "scripts/project_places_construction_v1.py",
+    )
+    monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, str(tmp_path))
+    resolved = projector.source_filesystem(pafs, region="us-west-2")
+    assert isinstance(resolved, pafs.SubTreeFileSystem)
+
+    monkeypatch.delenv(builder.SOURCE_MIRROR_ENV, raising=False)
+    assert isinstance(
+        projector.source_filesystem(pafs, region="us-west-2"), pafs.S3FileSystem
+    )
+
+
+def test_slice_builder_and_projector_share_one_mirror_implementation():
+    # Two copies would drift, and the one that drifted would be the one that
+    # quietly stopped honouring the mirror.
+    projector = _load(
+        "project_places_construction_v1_shared",
+        "scripts/project_places_construction_v1.py",
+    )
+    assert builder.source_filesystem is projector.source_filesystem

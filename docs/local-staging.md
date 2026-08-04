@@ -89,15 +89,28 @@ It swaps the byte transport and nothing else.
   keep working unweakened, and the recorded `inventory_sha256` is unchanged.
 
 That last point is the integrity check, and it is worth running whenever the
-mirror is rebuilt: a mirror run and an S3 run must produce byte-identical
-output. Measured on Monaco Places against 2026-07-22.0:
+mirror is rebuilt. Measured on Monaco Places (task 33) against 2026-07-22.0:
 
 ```
 S3     inventory_sha256 db2a6430...9d1615   6.58 s
 mirror inventory_sha256 db2a6430...9d1615   0.52 s   (artifacts diff clean)
+
+full five-phase run, 63 published serving artifacts:
+  S3     sha256 of the digest list  8d421843...02beac
+  mirror sha256 of the digest list  8d421843...02beac
 ```
 
-If those ever differ, the mirror is wrong and the run must not be trusted.
+**Compare the inventory digest and the serving artifacts. Do not compare map
+bytes.** The intermediate `map/places-v1` class is not byte-stable: two
+consecutive pure-S3 runs of the same task published 25,876,445 and 25,876,446
+bytes, and the mirror 25,876,443. That variance is inherent to the artifact and
+independent of transport, so it proves nothing either way. Everything that
+matters is stable across all three runs -- `serve/places-v1` 34,793,545,
+`reduce/places-v1` 16,604,807, the staging-prefix digest, `records` 38,182 and
+every term-row count.
+
+If the inventory digest or the serving artifacts ever differ, the mirror is
+wrong and the run must not be trusted.
 
 ## Discipline
 

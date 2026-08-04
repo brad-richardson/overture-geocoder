@@ -26,6 +26,7 @@ if str(SCRIPT_DIR) not in sys.path:
     sys.path.insert(0, str(SCRIPT_DIR))
 
 import places_inventory_v1 as inventory  # noqa: E402
+from common import source_filesystem  # noqa: E402
 import places_type_prior_v1 as type_prior  # noqa: E402
 from experiment_hosted_rowgroups import (  # noqa: E402
     BoundedWriter,
@@ -437,9 +438,12 @@ def run(args: argparse.Namespace, *, filesystem: Any | None = None) -> dict[str,
         b"overture.places_task_digest": task["task_digest"].encode(),
         b"overture.places_task_source_digest": task["source_digest"].encode(),
     }
-    filesystem = filesystem or pafs.S3FileSystem(
-        anonymous=True, region=inventory.REGION
-    )
+    # An explicitly injected filesystem still wins (the tests inject one).
+    # Otherwise this honours OVERTURE_SOURCE_MIRROR, so a local staging run
+    # reads bytes from disk while the etag/size identity checks below still
+    # verify against S3 -- a truncated or stale mirror is caught here, before
+    # it can produce output.
+    filesystem = filesystem or source_filesystem(pafs, region=inventory.REGION)
     writer = None
     bounded = BoundedWriter(args.output, args.max_output_bytes)
     rows = batches = maximum_batch_rows = 0
