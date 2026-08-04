@@ -752,7 +752,11 @@ def main() -> None:
         import pyarrow.fs as pafs
     except ImportError as exc:  # pragma: no cover - hosted dependency boundary
         raise SystemExit("places_inventory_v1.py requires pyarrow") from exc
-    filesystem = pafs.S3FileSystem(anonymous=True, region=REGION)
+    # Honours OVERTURE_SOURCE_MIRROR for local staging. Listing below is
+    # unaffected and still authoritative; only footer reads move.
+    from common import source_filesystem
+
+    filesystem = source_filesystem(pafs, region=REGION)
     listed = list_source_objects(args.release)
     with concurrent.futures.ThreadPoolExecutor(max_workers=args.workers) as executor:
         inspected = list(
