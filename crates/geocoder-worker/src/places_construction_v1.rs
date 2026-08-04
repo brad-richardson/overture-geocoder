@@ -1347,7 +1347,11 @@ fn record_display_tokens(record: &PlacesV1Record) -> HashSet<String> {
     // widening what counts as a match.
     .flat_map(|token| {
         let components: Vec<String> = if token.contains('_') {
-            token.split('_').filter(|part| !part.is_empty()).map(str::to_string).collect()
+            token
+                .split('_')
+                .filter(|part| !part.is_empty())
+                .map(str::to_string)
+                .collect()
         } else {
             Vec::new()
         };
@@ -2872,8 +2876,7 @@ mod tests {
         record.primary_name = "Geylang Bahru MRT".to_string();
         record.category = "train_station".to_string();
 
-        let kept =
-            retain_records_proving_dropped_tokens(vec![record], &["station".to_string()]);
+        let kept = retain_records_proving_dropped_tokens(vec![record], &["station".to_string()]);
         assert_eq!(kept.len(), 1, "compound category must prove its components");
         assert_eq!(kept[0].id, format_uuid_of(1));
     }
@@ -2897,8 +2900,7 @@ mod tests {
         );
         // A component that is genuinely part of the compound is proven...
         assert_eq!(
-            retain_records_proving_dropped_tokens(vec![station(3)], &["train".to_string()])
-                .len(),
+            retain_records_proving_dropped_tokens(vec![station(3)], &["train".to_string()]).len(),
             1
         );
         // ...but a partial substring of a component is not.
