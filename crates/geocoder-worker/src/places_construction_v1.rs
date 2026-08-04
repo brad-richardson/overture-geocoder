@@ -95,9 +95,12 @@ const ROUTED_CANDIDATE_CAP: usize = 256;
 const HEAD_RESULT_CAP: usize = 10;
 pub(crate) const ENTITY_PHRASE_ADMISSION: &str = "prominence-primary-name-v1";
 /// Maximum global-head query width. Three admits common landmark names such as
-/// `Statue of Liberty` while keeping the no-proximity lane to three bounded R2
-/// reads. Routed lookup retains its independent four-token cap.
+/// `Statue of Liberty`. The no-proximity lane performs at most three ordinary
+/// token reads plus two exact phrase reads (the full phrase and, for a
+/// three-token query, its two-token prefix). Routed lookup retains its
+/// independent four-token cap.
 pub(crate) const HEAD_QUERY_TOKEN_CAP: usize = 3;
+const ENTITY_PHRASE_GROUP_CAP: usize = 2;
 const HEAD_CANDIDATE_CAP: usize = 256;
 const MAX_ROUTING_CELLS: usize = 65_536;
 const MAX_CELL_SUBPARTITIONS: usize = 4_096;
@@ -1335,6 +1338,49 @@ pub(crate) fn merge_head_candidates(
     )
 }
 
+/// Compose exact-primary-name phrase evidence with the ordinary global head.
+///
+/// Phrase postings are additive rather than terminal: the full phrase can be
+/// saturated with replicas while a selective ordinary token still retrieves
+/// the canonical feature, and a two-token prefix can preserve locality-suffix
+/// routing for queries such as `Union Station Toronto`. Preserve fetch order
+/// (full phrase, optional prefix, ordinary producer rank) and deduplicate only
+/// identical source rows; construction-v1 deliberately keeps duplicate UUIDs
+/// at distinct source positions.
+pub(crate) fn compose_entity_phrase_candidates(
+    phrase_groups: Vec<Vec<PlacesV1Record>>,
+    ordinary: Vec<PlacesV1Record>,
+) -> Result<Vec<PlacesV1Record>> {
+    if phrase_groups.len() > ENTITY_PHRASE_GROUP_CAP {
+        return Err("Places v1 entity phrase group cap exceeded".into());
+    }
+    if phrase_groups
+        .iter()
+        .any(|records| records.len() > HEAD_RESULT_CAP)
+    {
+        return Err("Places v1 entity phrase posting exceeds producer cap".into());
+    }
+    if ordinary.len() > HEAD_QUERY_TOKEN_CAP * HEAD_RESULT_CAP {
+        return Err("Places v1 composed ordinary head cap exceeded".into());
+    }
+
+    let mut seen = HashSet::new();
+    let mut results =
+        Vec::with_capacity(phrase_groups.iter().map(Vec::len).sum::<usize>() + ordinary.len());
+    for record in phrase_groups.into_iter().flatten().chain(ordinary) {
+        let identity = (
+            record.id.clone(),
+            record.source_object_index,
+            record.source_row_group,
+            record.source_row_index,
+        );
+        if seen.insert(identity) {
+            results.push(record);
+        }
+    }
+    Ok(results)
+}
+
 /// Synthetic exact-primary-name key shared with `places-transform-v1`.
 /// `query_terms` already supplies the frozen normalized word sequence.
 pub(crate) fn entity_phrase_key(tokens: &[String]) -> Option<String> {
@@ -1342,6 +1388,21 @@ pub(crate) fn entity_phrase_key(tokens: &[String]) -> Option<String> {
         return None;
     }
     Some(format!("e{}:{}", tokens.len(), tokens.join(" ")))
+}
+
+/// Ordered exact-phrase lookups for the global head. The full phrase retains
+/// direct exact-name evidence; a three-token query also probes its two-token
+/// prefix so locality-suffix inference can distinguish `Union Station Toronto`
+/// from a three-token landmark name.
+pub(crate) fn entity_phrase_token_groups(tokens: &[String]) -> Vec<&[String]> {
+    if entity_phrase_key(tokens).is_none() {
+        return Vec::new();
+    }
+    let mut groups = vec![tokens];
+    if tokens.len() == 3 {
+        groups.push(&tokens[..2]);
+    }
+    groups
 }
 
 /// Fail closed if a malformed phrase posting does not prove its own key.
@@ -1615,13 +1676,14 @@ pub(crate) fn cache_put<T>(cache: &'static ParsedDocumentCache<T>, key: &str, va
 #[cfg(test)]
 mod tests {
     use super::{
-        construction_cell, decode_routed_range_payload, entity_phrase_key, head_shard_id,
-        head_shard_lookup, index_hash, lookup_head_shard, merge_head_candidates,
-        merge_routed_candidates, parse_routed_range_header, parse_routed_range_index, query_key,
-        ranged_index_candidates, record_projection, routed_fetch_plan, routed_lookup,
-        routed_token_hash, validate_entity_phrase_records, validate_routed_range_payload_extent,
-        HeadRoutingManifest, PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex,
-        PlacesV1Record, PlacesV1Version, ENTITY_PHRASE_ADMISSION, MAX_ARTIFACT_ENTRY_BYTES,
+        compose_entity_phrase_candidates, construction_cell, decode_routed_range_payload,
+        entity_phrase_key, entity_phrase_token_groups, head_shard_id, head_shard_lookup,
+        index_hash, lookup_head_shard, merge_head_candidates, merge_routed_candidates,
+        parse_routed_range_header, parse_routed_range_index, query_key, ranged_index_candidates,
+        record_projection, routed_fetch_plan, routed_lookup, routed_token_hash,
+        validate_entity_phrase_records, validate_routed_range_payload_extent, HeadRoutingManifest,
+        PlacesRouting, PlacesV1Artifact, PlacesV1Mode, PlacesV1RangeIndex, PlacesV1Record,
+        PlacesV1Version, ENTITY_PHRASE_ADMISSION, MAX_ARTIFACT_ENTRY_BYTES,
         PLACES_HEAD_MANIFEST_SCHEMA, PLACES_ROUTING_SCHEMA,
     };
     use serde_json::{json, Value};
@@ -2584,6 +2646,44 @@ mod tests {
     }
 
     #[test]
+    fn entity_phrase_composition_keeps_phrase_prefix_and_ordinary_evidence() {
+        let full = entry_record_at("e3:union station toronto", 255, 1, 10);
+        let prefix = entry_record_at("e2:union station", 254, 2, 20);
+        let duplicate_prefix = entry_record_at("union", 254, 2, 20);
+        let canonical = entry_record_at("liberty", 253, 3, 30);
+
+        let composed = compose_entity_phrase_candidates(
+            vec![vec![full], vec![prefix]],
+            vec![duplicate_prefix, canonical],
+        )
+        .unwrap();
+        assert_eq!(
+            composed
+                .iter()
+                .map(|record| record.id.clone())
+                .collect::<Vec<_>>(),
+            vec![format_uuid_of(1), format_uuid_of(2), format_uuid_of(3)]
+        );
+        assert_eq!(composed[1].token, "e2:union station");
+    }
+
+    #[test]
+    fn entity_phrase_composition_fails_closed_on_oversized_inputs() {
+        let groups = vec![
+            vec![entry_record("e2:a b", 1, 1)],
+            vec![entry_record("e2:a b", 1, 2)],
+            vec![entry_record("e2:a b", 1, 3)],
+        ];
+        assert!(compose_entity_phrase_candidates(groups, Vec::new()).is_err());
+
+        let oversized_phrase = (1..=11).map(|id| entry_record("e2:a b", 1, id)).collect();
+        assert!(compose_entity_phrase_candidates(vec![oversized_phrase], Vec::new()).is_err());
+
+        let oversized_ordinary = (1..=31).map(|id| entry_record("ordinary", 1, id)).collect();
+        assert!(compose_entity_phrase_candidates(Vec::new(), oversized_ordinary).is_err());
+    }
+
+    #[test]
     fn head_merge_fails_closed_on_contract_mismatch_or_oversized_posting() {
         let tokens = vec!["eiffel".to_string(), "tower".to_string()];
         assert!(merge_head_candidates(&tokens, vec![vec![entry_record("eiffel", 1, 1)]]).is_err());
@@ -2908,6 +3008,14 @@ mod tests {
             "four".to_string(),
         ])
         .is_none());
+        let three = vec!["union".into(), "station".into(), "toronto".into()];
+        assert_eq!(
+            entity_phrase_token_groups(&three),
+            vec![three.as_slice(), &three[..2]]
+        );
+        let two = vec!["big".into(), "ben".into()];
+        assert_eq!(entity_phrase_token_groups(&two), vec![two.as_slice()]);
+        assert!(entity_phrase_token_groups(&["liberty".into()]).is_empty());
 
         let mut exact = entry_record("e2:big ben", 255, 1);
         exact.primary_name = "Big Ben".to_string();
