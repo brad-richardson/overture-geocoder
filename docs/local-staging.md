@@ -5,10 +5,15 @@ everything except producing promotion evidence. This is how to stand it up.
 
 ## Why
 
-The measured blocker it removes is not wall time, it is memory. v4's head merge
-died at 79% on 8.5 GiB of DuckDB spill and needed a scoped resume at 13.69 GB.
-A workstation with 62 GB does not have that problem, so a head build that
-cannot complete in CI can complete here.
+The measured blocker it removes is neither wall time nor RAM. It is **disk
+scratch**, and specifically a cap that exists only to fit a runner.
+
+That correction came from the first run. RAM peaked around 13 GB of 62, so the
+"a workstation has more memory" argument this page originally made was simply
+not the mechanism. What actually stops the planet head merge is
+`HOSTED_MAX_SCRATCH_BYTES` (17 GiB), from which DuckDB's `temp_directory` cap is
+derived as a quarter -- 4.56 GB -- against a merge that needs 9.93 GB. See the
+measured section at the end.
 
 The rung ladder in `CLAUDE.md` §3 goes 13-second slice -> planet run, with
 nothing in between. This is the missing middle.
@@ -120,10 +125,41 @@ local result must not become a promotion artifact by accident.
 
 ## Scope
 
-`OVERTURE_SOURCE_MIRROR` is wired into `scripts/build_slice_inventory_v1.py`.
-Other entry points still construct their own `S3FileSystem` and would each need
-the same `source_filesystem()` seam; do that when a specific one is needed
-rather than pre-emptively.
+`OVERTURE_SOURCE_MIRROR` is wired into the three entry points a Places run
+reads source bytes through:
+
+- `scripts/build_slice_inventory_v1.py` (slice inventory)
+- `scripts/places_inventory_v1.py` (planet inventory)
+- `scripts/project_places_construction_v1.py` (the projector, and therefore
+  every map task)
+
+All three share one `source_filesystem()` in `scripts/common.py`. Other entry
+points -- the address family, the ID index, the shard builders -- still
+construct their own `S3FileSystem` and would each need the same seam; do that
+when a specific one is needed rather than pre-emptively.
+
+## Driving a full local planet run
+
+```bash
+OVERTURE_SOURCE_MIRROR=/home/brad/dev/overture-local/mirror \
+  .venv/bin/python scripts/run_local_planet_construction_v1.py \
+    --inventory /home/brad/dev/overture-local/work/inventory-places-2026-07-22.0.json \
+    --release 2026-07-22.0 --work /home/brad/dev/overture-local/planet \
+    --map-workers 6 --reduce-workers 4 --max-scratch-gib 300
+```
+
+Two things that are easy to get wrong and cost a run:
+
+- **Every phase needs its OWN store root.** The driver does this; do not
+  "simplify" it to one shared directory. A hosted phase starts on a fresh
+  runner with an empty store, and the head phase's disk check measures the
+  whole store root as its hydrated candidate cache. Sharing one root charged
+  head 110.5 GB (serve 39 + map 38 + reduce 28) for disk it never touched and
+  failed it against an 18.25 GB cap, blaming `head_merge_fan_in` -- a knob with
+  nothing to do with it.
+- **`--max-scratch-gib` is required for a planet head build** and is deliberately
+  not defaulted, so an unset run reproduces the hosted failure rather than
+  silently diverging from it.
 
 ## Measured: a complete planet Places run, 2026-07-22.0
 
