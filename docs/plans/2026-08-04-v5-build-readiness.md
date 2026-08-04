@@ -229,7 +229,39 @@ planet run and will be paid again:
 - Preview failures must self-classify as setup / operational-transient /
   quality-regression so retries are mechanical.
 
-Status of these: PENDING (in flight as the hardening batch).
+Status: **landed 2026-08-04**, with two corrections worth carrying forward.
+
+- Workflow dependency pinning + a cold-start smoke (weekly + on workflow PRs)
+  now exist, and a `tests/test_workflow_dependency_pinning.py` gate refuses
+  unpinned installs and floating action refs. The #243 bug was found **still
+  live on the production deploy path** (not only in preview), and a latent
+  cold-start break was fixed in `release-slice-families.yml`, which mixed
+  `download-artifact@v5` with `upload-artifact@v7`.
+- **Correction to the earlier claim about `worker-build`:** the theory that
+  0.8.x refuses `worker = "0.7"` is stale. The 2026-08-04 production deploy
+  installed and built **0.8.5** against `worker = "0.7"` successfully — the pin
+  is now 0.8.5 and must not be "restored" to `^0.7`, which would move the
+  deploy off the only proven combination.
+- **Correction to §6's promote-slice claim:** the ~4,096-marker serial loop is
+  in `construction_v1_hosted.py::cmd_export_reductions`, not
+  `promote_construction_slice.py` (whose HEAD loops were already parallel). It
+  now emits progress every 128 markers and fans out bounded; safe because every
+  request on that path is a read, so no create-only semantic is weakened.
+- Preview failures now self-classify (setup / operational-transient /
+  quality-regression) and write an acceptance document on failure instead of a
+  bare traceback; the benchmark harness retries only definite transient codes
+  (parsed 5xx, GET timeout) and never 4xx, with retry counts reported at row,
+  aggregate and summary level so a retry can never launder a quality signal.
+- **The DuckDB spill readiness check is red by design and not yet wired into a
+  blocking workflow.** Every stage is currently unmeasured, and the v4 head's
+  9,126,805,504 B is a lower bound from a run that *died*, not a peak. Wiring
+  it before a first instrumented head completes would simply fail every
+  construction run. Wire it with that first measurement.
+
+Test/CI cost also came down: the pipeline suite runs **1773 tests in ~26 s**
+(from ~175 s serial), with CI/deploy build caching added. The deploy's 15
+consecutive startup probes, retries and functional checks are byte-for-byte
+unchanged — verified by diff — so none of that speedup came from checking less.
 
 ## 7. Readiness checklist
 
