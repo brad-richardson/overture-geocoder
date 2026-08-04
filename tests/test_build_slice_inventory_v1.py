@@ -358,3 +358,50 @@ def test_main_writes_the_inventory_and_reports_one_records_key(monkeypatch, tmp_
     assert inventory.validate_canonical_inventory(written)["inventory_sha256"] == (
         summary["inventory_sha256"]
     )
+
+
+# ---------------------------------------------------------------------------
+# Local source mirror (OVERTURE_SOURCE_MIRROR)
+# ---------------------------------------------------------------------------
+
+
+def test_source_filesystem_defaults_to_anonymous_s3(monkeypatch):
+    # The default must stay S3: CI and every promotion path depend on it, and
+    # an accidentally-set mirror must never be the silent default.
+    monkeypatch.delenv(builder.SOURCE_MIRROR_ENV, raising=False)
+    import pyarrow.fs as pafs
+
+    assert isinstance(builder.source_filesystem(pafs), pafs.S3FileSystem)
+
+
+def test_source_filesystem_reads_through_a_configured_mirror(monkeypatch, tmp_path):
+    import pyarrow.fs as pafs
+
+    key = "overturemaps-us-west-2/release/2026-07-22.0/theme=places/x.parquet"
+    target = tmp_path / key
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"mirror-bytes")
+
+    monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, str(tmp_path))
+    filesystem = builder.source_filesystem(pafs)
+    # Callers strip only the `s3://` scheme, so the mirror must be
+    # bucket-shaped and resolve the remaining key verbatim.
+    with filesystem.open_input_file(key) as handle:
+        assert handle.readall() == b"mirror-bytes"
+
+
+def test_missing_mirror_directory_fails_closed(monkeypatch, tmp_path):
+    # Rather than silently falling back to S3 and quietly costing a slow run
+    # that the operator believed was local.
+    import pyarrow.fs as pafs
+
+    monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, str(tmp_path / "absent"))
+    with pytest.raises(SystemExit, match="not a directory"):
+        builder.source_filesystem(pafs)
+
+
+def test_empty_mirror_value_is_treated_as_unset(monkeypatch):
+    import pyarrow.fs as pafs
+
+    monkeypatch.setenv(builder.SOURCE_MIRROR_ENV, "")
+    assert isinstance(builder.source_filesystem(pafs), pafs.S3FileSystem)

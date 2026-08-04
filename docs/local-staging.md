@@ -1,0 +1,113 @@
+# Local planet staging
+
+A machine with real RAM and cores is a better staging rung than a CI runner for
+everything except producing promotion evidence. This is how to stand it up.
+
+## Why
+
+The measured blocker it removes is not wall time, it is memory. v4's head merge
+died at 79% on 8.5 GiB of DuckDB spill and needed a scoped resume at 13.69 GB.
+A workstation with 62 GB does not have that problem, so a head build that
+cannot complete in CI can complete here.
+
+The rung ladder in `CLAUDE.md` §3 goes 13-second slice -> planet run, with
+nothing in between. This is the missing middle.
+
+## Cost
+
+The whole planet is small, because Overture ships zstd parquet:
+
+| theme | compressed |
+|---|---|
+| places | 10.5 GiB |
+| divisions | 5.2 GiB (division + division_area) |
+| addresses | 20.4 GiB |
+
+Working space is the real cost, and it scales off records, not source bytes.
+The Europe run in `/home/brad/dev/wt-176-europe-work` covers 32.56 M of the
+planet's 74.22 M places -- 43.9% -- in 66 GB, so planet Places staging projects
+to roughly **150 GB**.
+
+## Setup
+
+Python must be 3.11 to match CI. The hash-pinned requirements are cp311 wheels
+and `--require-hashes` rejects anything else, so 3.12 fails to install rather
+than failing at runtime.
+
+```bash
+uv venv --python 3.11 .venv
+uv pip install --python .venv/bin/python --require-hashes \
+    -r .github/requirements-hosted-rowgroup.txt
+uv pip install --python .venv/bin/python \
+    pytest==9.1.1 pytest-xdist==3.8.0 pyyaml==6.0.3 h3==4.3.1 \
+    shapely==2.1.2 psutil==7.2.2 requests
+```
+
+That pins `duckdb==1.5.1`, which is required: 1.5.5 moves address pack bytes, so
+the version is rebuild-scoped rather than cosmetic. Verify with
+`.venv/bin/python -m pytest tests/ -q` -- 1798 passed, ~25 s.
+
+Note `unicodedata2==17.0.0` in the pinned set. The tokenizer contract needs a
+Unicode version newer than the stdlib's, and tokenizer tests fail against
+stdlib `unicodedata` alone.
+
+## Mirroring the source
+
+Download into a plain tree, then present it bucket-shaped via symlinks:
+
+```bash
+D=/home/brad/dev/overture-local/2026-07-22.0
+for t in "theme=places/type=place" "theme=divisions/type=division" \
+         "theme=divisions/type=division_area"; do
+  aws s3 sync --no-sign-request \
+    "s3://overturemaps-us-west-2/release/2026-07-22.0/$t/" "$D/$t/"
+done
+
+M=/home/brad/dev/overture-local/mirror/overturemaps-us-west-2/release/2026-07-22.0
+mkdir -p "$M/theme=places" "$M/theme=divisions"
+ln -sfn "$D/theme=places/type=place"          "$M/theme=places/type=place"
+ln -sfn "$D/theme=divisions/type=division"      "$M/theme=divisions/type=division"
+ln -sfn "$D/theme=divisions/type=division_area" "$M/theme=divisions/type=division_area"
+```
+
+Then set `OVERTURE_SOURCE_MIRROR` to the mirror root:
+
+```bash
+OVERTURE_SOURCE_MIRROR=/home/brad/dev/overture-local/mirror \
+  .venv/bin/python scripts/build_slice_inventory_v1.py \
+    --release 2026-07-22.0 --bbox 7.36 43.71 7.47 43.78 --output slice/inventory.json
+```
+
+## What the mirror does and does not change
+
+It swaps the byte transport and nothing else.
+
+- **Listing still goes to S3.** Which objects exist, their sizes and their
+  etags stay authoritative, so a stale or partial mirror fails loudly on read
+  instead of silently planning over a different world.
+- **URIs stay canonical `s3://`.** `approved_prefix` / `is_approved_source_uri`
+  keep working unweakened, and the recorded `inventory_sha256` is unchanged.
+
+That last point is the integrity check, and it is worth running whenever the
+mirror is rebuilt: a mirror run and an S3 run must produce byte-identical
+output. Measured on Monaco Places against 2026-07-22.0:
+
+```
+S3     inventory_sha256 db2a6430...9d1615   6.58 s
+mirror inventory_sha256 db2a6430...9d1615   0.52 s   (artifacts diff clean)
+```
+
+If those ever differ, the mirror is wrong and the run must not be trusted.
+
+## Discipline
+
+Local runs are for experimentation. Evidence intended for promotion still comes
+from the sanctioned path -- the evidence specs carry sha256 pins, and a fast
+local result must not become a promotion artifact by accident.
+
+## Scope
+
+`OVERTURE_SOURCE_MIRROR` is wired into `scripts/build_slice_inventory_v1.py`.
+Other entry points still construct their own `S3FileSystem` and would each need
+the same `source_filesystem()` seam; do that when a specific one is needed
+rather than pre-emptively.

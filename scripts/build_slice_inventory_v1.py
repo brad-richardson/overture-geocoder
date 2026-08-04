@@ -44,6 +44,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -74,6 +75,42 @@ def finest_groups_per_task(row_groups: int) -> int:
     if row_groups <= 0:
         raise SystemExit("source object reports no row groups")
     return -(-row_groups // MAX_TASKS)
+
+
+SOURCE_MIRROR_ENV = "OVERTURE_SOURCE_MIRROR"
+
+
+def source_filesystem(pafs):
+    """The filesystem source bytes are read through.
+
+    Defaults to anonymous S3, which is the only thing CI and any promotion
+    path ever use. When ``OVERTURE_SOURCE_MIRROR`` points at a directory, reads
+    resolve there instead -- the directory must be BUCKET-SHAPED, i.e. contain
+    ``overturemaps-us-west-2/release/<release>/theme=.../type=.../``, because
+    callers strip only the ``s3://`` scheme and pass the remaining key.
+
+    This deliberately swaps the transport and NOTHING else:
+
+    * Object LISTING still goes to S3, so which objects exist, their sizes and
+      their etags remain authoritative. A mirror that is missing or stale fails
+      loudly on read rather than silently planning over a different world.
+    * URIs recorded in the inventory stay canonical ``s3://`` strings, so
+      ``approved_prefix`` / ``is_approved_source_uri`` keep working unweakened
+      and ``inventory_sha256`` is byte-identical to a pure-S3 run. That
+      equality is the proof the mirror is faithful -- if it ever differs, the
+      mirror is wrong and the run must not be trusted.
+
+    The mirror is a local staging convenience for experimentation. Evidence
+    intended for promotion should still come from the sanctioned path.
+    """
+    mirror = os.environ.get(SOURCE_MIRROR_ENV)
+    if not mirror:
+        return pafs.S3FileSystem(anonymous=True, region=INV.REGION)
+    root = Path(mirror).expanduser()
+    if not root.is_dir():
+        raise SystemExit(f"{SOURCE_MIRROR_ENV} is not a directory: {root}")
+    print(f"[source] reading bytes from local mirror {root}", file=sys.stderr)
+    return pafs.SubTreeFileSystem(str(root), pafs.LocalFileSystem())
 
 
 def covering_row_group(
@@ -214,7 +251,7 @@ def main(argv: list[str] | None = None) -> int:
 
     import pyarrow.fs as pafs
 
-    filesystem = pafs.S3FileSystem(anonymous=True, region=INV.REGION)
+    filesystem = source_filesystem(pafs)
     if args.family == "addresses":
         if args.schema_profile != "auto":
             raise SystemExit("--schema-profile applies only to the places family")
