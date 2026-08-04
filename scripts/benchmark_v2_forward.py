@@ -167,6 +167,47 @@ def normalize_name(value):
     return "".join(char for char in value if not unicodedata.combining(char))
 
 
+def name_tokens(value):
+    """Normalized alphanumeric tokens of a name, order-independent.
+
+    Splitting on non-alphanumerics is what lets a registry string and a signage
+    string be compared at all: `L'Hopital-St. Pierre` and `L Hopital St Pierre`
+    are the same tokens, and `normalize_name` alone says they differ.
+    """
+    normalized = normalize_name(value)
+    return frozenset(
+        token for token in re.split(r"[^0-9a-z]+", normalized) if token
+    )
+
+
+# Minimum tokens the shorter name must carry, and the minimum fraction of the
+# longer name it must cover, before containment counts as a match. Both floors
+# exist to stop the rule degenerating: without the token floor `Hotel` matches
+# `Hotel Central`, and without the coverage floor `Changi` matches `Changi
+# Airport MRT Station Exit A`. See CONTAINMENT_NAME_MATCH_RATIONALE.
+CONTAINMENT_MIN_TOKENS = 2
+CONTAINMENT_MIN_COVERAGE = 0.5
+
+CONTAINMENT_NAME_MATCH_RATIONALE = """\
+Every non-address place match is already gated on distance (tolerance_km,
+1.0 km for the everyday-POI set), so relaxing the NAME test cannot admit an
+unrelated entity in another city -- it can only admit a differently-named
+entity within a kilometre of the expected point. That is the whole risk
+surface, and the two floors above bound it.
+
+The defect this addresses: gold names are verbatim government-registry
+strings while Overture carries signage/OSM names. Under exact equality
+`BEDOK RESERVOIR MRT STATION` cannot match `Bedok Reservoir Station` even
+when returned at 10 m, so a perfect retrieval fix still scores a miss.
+
+This mode is OPT-IN and never the default. A metric may not silently change
+meaning between runs, and every case it newly accepts is emitted for human
+audit rather than folded into a headline number.\
+"""
+
+NAME_MATCH_MODES = ("exact", "containment")
+
+
 def format_gers_id(feature_id):
     """Hyphenated lowercase UUID from a 16-byte feature_id (str passes through)."""
     if isinstance(feature_id, str):
@@ -797,19 +838,42 @@ def feature_point(feature):
     return float(coordinates[1]), float(coordinates[0])
 
 
-def _name_matches(case, feature):
+def _names_contain(observed, expected):
+    """Whether two names match by bounded token containment.
+
+    Order-independent and punctuation-independent; one name's tokens must be a
+    subset of the other's, and the shorter must clear both floors.
+    """
+    left, right = name_tokens(observed), name_tokens(expected)
+    if not left or not right:
+        return False
+    if left == right:
+        return True
+    smaller, larger = (left, right) if len(left) <= len(right) else (right, left)
+    if not smaller <= larger:
+        return False
+    return (
+        len(smaller) >= CONTAINMENT_MIN_TOKENS
+        and len(smaller) / len(larger) >= CONTAINMENT_MIN_COVERAGE
+    )
+
+
+def _name_matches(case, feature, name_match="exact"):
     properties = feature.get("properties")
     properties = properties if isinstance(properties, dict) else {}
     observed = properties.get("name")
     if not isinstance(observed, str) or not observed:
         return False
-    observed = normalize_name(observed.split(",")[0])
-    accepted = [case.get("expected_name"), *case.get("alt_names", [])]
-    return any(
-        observed == normalize_name(name)
-        for name in accepted
-        if name
-    )
+    observed = observed.split(",")[0]
+    accepted = [name for name in
+                (case.get("expected_name"), *case.get("alt_names", []))
+                if name]
+    if any(normalize_name(observed) == normalize_name(name)
+           for name in accepted):
+        return True
+    if name_match == "containment":
+        return any(_names_contain(observed, name) for name in accepted)
+    return False
 
 
 def _address_matches(case, feature):
@@ -859,7 +923,8 @@ def _normalize_street(value):
     return " ".join(tokens)
 
 
-def score_case(case, features, provider="overture", semantic_scoring=None):
+def score_case(case, features, provider="overture", semantic_scoring=None,
+               name_match="exact"):
     """rank (1-based or None), distance to matched feature, top-1 distance."""
     if semantic_scoring is None:
         semantic_scoring = provider != "overture"
@@ -882,7 +947,7 @@ def score_case(case, features, provider="overture", semantic_scoring=None):
         elif case["kind"] == "address":
             hit = _address_matches(case, feature)
         else:
-            hit = (_name_matches(case, feature) and point is not None
+            hit = (_name_matches(case, feature, name_match) and point is not None
                    and haversine_km(*expected, *point) <= case.get("tolerance_km", 50.0))
         if hit:
             rank = index + 1
@@ -893,6 +958,38 @@ def score_case(case, features, provider="overture", semantic_scoring=None):
     if features and (point := feature_point(features[0])) is not None:
         top1_distance = haversine_km(*expected, *point)
     return rank, matched_distance, top1_distance
+
+
+def retained_candidates(case, features, limit=FOUND_AT):
+    """The returned candidates, kept so a run can be re-scored offline.
+
+    Runs used to record only `top1_*`, which threw away the evidence needed to
+    answer the two questions that matter most after the fact: was the right
+    entity retrieved but ranked below the cutoff, and was it retrieved but
+    rejected on an exact-name test. Neither is recoverable from a frozen run
+    without this, and re-querying to find out is both slow and no longer a
+    measurement of the same build.
+    """
+    expected = (case.get("expected_lat"), case.get("expected_lon"))
+    kept = []
+    for feature in features[:limit]:
+        properties = feature.get("properties")
+        properties = properties if isinstance(properties, dict) else {}
+        point = feature_point(feature)
+        distance = None
+        if point is not None and None not in expected:
+            distance = _round_or_none(haversine_km(*expected, *point))
+        kept.append({
+            "id": feature.get("id"),
+            "name": properties.get("name"),
+            "feature_type": properties.get("feature_type"),
+            # 6 decimals ~ 0.11 m. _round_or_none's 3 would be ~110 m, which
+            # is coarser than the 1 km match tolerance can afford to lose.
+            "lat": round(point[0], 6) if point else None,
+            "lon": round(point[1], 6) if point else None,
+            "distance_km": distance,
+        })
+    return kept
 
 
 def feature_type_of(feature):
@@ -985,10 +1082,13 @@ class Runner:
                  sleep_fn=time.sleep, monotonic_fn=time.monotonic,
                  rate_limit_retries=1, provider="overture",
                  user_agent=USER_AGENT, semantic_scoring=None,
-                 transient_retries=TRANSIENT_RETRIES):
+                 transient_retries=TRANSIENT_RETRIES, name_match="exact"):
         if provider not in PROVIDERS:
             raise ValueError(f"unknown provider: {provider}")
+        if name_match not in NAME_MATCH_MODES:
+            raise ValueError(f"unknown name_match mode: {name_match}")
         self.provider = provider
+        self.name_match = name_match
         self.semantic_scoring = (
             provider != "overture"
             if semantic_scoring is None else bool(semantic_scoring)
@@ -1133,7 +1233,8 @@ class Runner:
         top1_type = type_at_1 = type_present = None
         if ok:
             rank, matched_distance, top1_distance = score_case(
-                case, features, self.provider, self.semantic_scoring)
+                case, features, self.provider, self.semantic_scoring,
+                self.name_match)
             top1_type, type_at_1, type_present = score_type_composition(
                 case, features, self.provider)
         elif error is None:
@@ -1166,6 +1267,8 @@ class Runner:
             # artifact has to say so.
             "transient_retries": transient_retries,
             "transient_retry_reasons": transient_reasons,
+            # Retained so this run stays re-scorable without re-querying.
+            "candidates": retained_candidates(case, features) if ok else [],
         }
         if "strata" in case:
             result["strata"] = case["strata"]
@@ -1590,6 +1693,7 @@ def run_run(args):
             # opt into that contract when measuring a provider-neutral baseline.
             semantic_scoring=semantic_scoring,
             transient_retries=args.transient_retries,
+            name_match=args.name_match,
         )
         try:
             for case in cases:
@@ -1637,6 +1741,10 @@ def run_run(args):
                 if semantic_scoring else "exact_id_self_recall"
             ),
             "providers": provider_metadata,
+            # A number scored under a relaxed name test is not comparable to
+            # one scored under the strict test. Record which was used so the
+            # two can never be silently compared.
+            "name_match": args.name_match,
             "case_counts": case_counts(cases),
             # Surfaced at the top of the artifact, not just inside the
             # aggregates: a reader deciding whether a measurement is trustworthy
@@ -1750,6 +1858,13 @@ def main(argv=None):
     run.add_argument("--assert-recall", type=float,
                      help="Overture-only: exit non-zero if exact-ID "
                           "self-recall found@10 is below this")
+    run.add_argument("--name-match", choices=NAME_MATCH_MODES, default="exact",
+                     help="semantic place name test. 'exact' (default) needs "
+                          "normalized string equality against expected_name or "
+                          "alt_names. 'containment' also accepts bounded token "
+                          "containment, so a registry name can match a signage "
+                          "name; still gated on tolerance_km. Never compare "
+                          "numbers across modes")
     run.set_defaults(func=run_run)
 
     args = parser.parse_args(argv)

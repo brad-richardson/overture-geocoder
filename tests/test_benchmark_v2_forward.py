@@ -1367,3 +1367,104 @@ def test_backoff_matches_the_r2_store_shape_and_is_capped():
         bench.transient_backoff_seconds(20)
         == bench.TRANSIENT_RETRY_CEILING_SECONDS
     )
+
+
+# ---------------------------------------------------------------------------
+# Relaxed name matching (--name-match containment) and candidate retention
+# ---------------------------------------------------------------------------
+
+
+def test_containment_matches_registry_names_against_signage_names():
+    # The defect this exists for: gold names are verbatim government-registry
+    # strings, Overture carries signage names, and exact equality scored a
+    # correct answer at 10 m as a miss.
+    assert bench._names_contain(
+        "Bedok Reservoir Station", "BEDOK RESERVOIR MRT STATION")
+    assert bench._names_contain(
+        "Upper Thomson Station", "UPPER THOMSON MRT STATION")
+
+
+def test_containment_ignores_punctuation_and_token_order():
+    assert bench._names_contain("L'Hopital-St. Pierre", "L Hopital St Pierre")
+    assert bench._names_contain("Pierre St Hopital L", "L Hopital St Pierre")
+
+
+def test_containment_token_floor_blocks_single_token_names():
+    # Without this floor, `Hotel` matches `HOTEL CENTRAL` -- and the everyday
+    # set is full of generic single-token lodging and retail names.
+    assert not bench._names_contain("Hotel", "HOTEL CENTRAL")
+    assert not bench._names_contain("Changi", "CHANGI AIRPORT MRT STATION")
+
+
+def test_containment_coverage_floor_blocks_thin_overlap():
+    assert not bench._names_contain(
+        "Hotel Central", "HOTEL CENTRAL PARK RESORT SPA")
+
+
+def test_containment_requires_a_subset_not_mere_overlap():
+    assert not bench._names_contain("Starbucks Orchard", "Starbucks Marina Bay")
+
+
+def test_containment_is_deliberately_loose_and_leans_on_the_distance_gate():
+    # `Bedok Station` and `Bedok Reservoir MRT Station` are DIFFERENT Singapore
+    # stations ~2 km apart, and the name rule alone accepts the pair. That is
+    # intended: containment is a candidate generator, not an oracle. The 1 km
+    # tolerance_km gate in score_case rejects it, and every flip it does
+    # produce is emitted for human audit rather than folded into a headline.
+    assert bench._names_contain("Bedok Station", "BEDOK RESERVOIR MRT STATION")
+
+
+def test_containment_is_a_strict_superset_of_exact_matching():
+    case = {"expected_name": "BEDOK RESERVOIR MRT STATION"}
+    feature = {"properties": {"name": "Bedok Reservoir Station"}}
+    assert not bench._name_matches(case, feature)
+    assert not bench._name_matches(case, feature, "exact")
+    assert bench._name_matches(case, feature, "containment")
+    exact_hit = {"properties": {"name": "BEDOK RESERVOIR MRT STATION"}}
+    for mode in bench.NAME_MATCH_MODES:
+        assert bench._name_matches(case, exact_hit, mode)
+
+
+def test_relaxed_name_match_still_obeys_the_distance_tolerance():
+    # A name the relaxed rule accepts, returned 2000 km away, is still a miss.
+    case = {"kind": "place", "expected_name": "BEDOK RESERVOIR MRT STATION",
+            "expected_lat": 1.3, "expected_lon": 103.9, "tolerance_km": 1.0}
+    far = {"properties": {"name": "Bedok Reservoir Station"},
+           "geometry": {"type": "Point", "coordinates": [121.0, 14.6]}}
+    rank, _, _ = bench.score_case(case, [far], "overture", True, "containment")
+    assert rank is None
+    near = {"properties": {"name": "Bedok Reservoir Station"},
+            "geometry": {"type": "Point", "coordinates": [103.9, 1.3]}}
+    rank, _, _ = bench.score_case(case, [near], "overture", True, "containment")
+    assert rank == 1
+
+
+def test_unknown_name_match_mode_is_rejected_at_construction():
+    with pytest.raises(ValueError):
+        bench.Runner("http://x", 0.0, 1.0, name_match="fuzzy")
+
+
+def test_retained_candidates_keep_what_rescoring_needs():
+    case = {"expected_lat": 1.3, "expected_lon": 103.9}
+    features = [
+        {"id": "a", "properties": {"name": "One", "feature_type": "poi"},
+         "geometry": {"type": "Point", "coordinates": [103.9, 1.3]}},
+        {"id": "b", "properties": {"name": "Two", "feature_type": "locality"},
+         "geometry": {"type": "Point", "coordinates": [103.91, 1.31]}},
+    ]
+    kept = bench.retained_candidates(case, features)
+    assert [entry["id"] for entry in kept] == ["a", "b"]
+    assert [entry["name"] for entry in kept] == ["One", "Two"]
+    assert kept[0]["distance_km"] == 0.0
+    # Coordinates must survive at better than the 1 km match tolerance.
+    assert kept[1]["lat"] == 1.31 and kept[1]["lon"] == 103.91
+
+
+def test_retained_candidates_are_bounded_by_the_reported_cutoff():
+    case = {"expected_lat": 0.0, "expected_lon": 0.0}
+    features = [
+        {"id": str(index), "properties": {"name": str(index)},
+         "geometry": {"type": "Point", "coordinates": [0.0, 0.0]}}
+        for index in range(25)
+    ]
+    assert len(bench.retained_candidates(case, features)) == bench.FOUND_AT
