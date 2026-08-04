@@ -54,7 +54,7 @@ name: Promote v2 Release
 #   promote-catalog  v2_release_manifest.py promote: If-Match compare-and-swap
 #                    of v2/catalog.json against exactly one stated expectation
 #                    (`catalog_expectation` = "absent" or the current catalog
-#                    sha256), then a bounded /v2/forward smoke. A failed smoke
+#                    sha256), then a bounded forward/reverse v2 API smoke. A failed smoke
 #                    fails the job LOUDLY and prints the exact recover
 #                    command; it never auto-recovers (the catalog CAS makes
 #                    manual recovery safe, and an auto-recover could fight a
@@ -1144,7 +1144,7 @@ jobs:
 
   # --- Stage: promote-catalog ----------------------------------------------------
   promote-catalog:
-    name: Compare-and-swap the v2 catalog, then smoke /v2/forward
+    name: Compare-and-swap the v2 catalog, then smoke v2 APIs
     needs: gate
     if: inputs.stage == 'promote-catalog' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -1210,7 +1210,7 @@ jobs:
             echo "- Recovery expectation for any later recover/promote: \`${PROMOTED_SHA}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Bounded post-promote smoke of /v2/forward (never auto-recovers)
+      - name: Bounded post-promote smoke of forward and reverse (never auto-recovers)
         if: inputs.mode == 'execute'
         run: |
           set -uo pipefail
@@ -1220,6 +1220,9 @@ jobs:
           # recover commands and fails loudly; it NEVER runs recover itself.
           fetch () {
             curl -sS --max-time 20 --get "$BASE_URL/v2/forward" "$@"
+          }
+          fetch_reverse () {
+            curl -sS --max-time 20 --get "$BASE_URL/v2/reverse" "$@"
           }
           check_envelope () {
             local body="$1" label="$2"
@@ -1306,6 +1309,44 @@ jobs:
               echo "  FAIL addresses: no exact match for 400 BROAD Street, Seattle WA 98109"
               return 1; }
             echo "  OK   addresses (structured forward, build $GEOCODER_BUILD)"
+
+            # Replacement-family overlays must not turn a forward quality
+            # promotion into a reverse capability regression. These are the
+            # same frozen Seattle point-family fixtures that closed the reverse
+            # milestone; checking both types also proves the release retained
+            # the independently sourced Address reverse operation.
+            body=$(fetch_reverse --data-urlencode "lat=47.6205" \
+              --data-urlencode "lon=-122.3493" \
+              --data-urlencode "types=poi" \
+              --data-urlencode "limit=3") || {
+              echo "  FAIL places reverse: request error"; return 1; }
+            check_envelope "$body" "places reverse" || return 1
+            echo "$body" | jq -e '
+              (.features | length) >= 1
+              and (.features | all(.properties.feature_type == "poi"))
+              and any(.features[]; .properties.name == "Space Needle")
+            ' > /dev/null || {
+              echo "  FAIL places reverse: Space Needle fixture missing"
+              return 1; }
+            echo "  OK   places reverse (Space Needle, build $GEOCODER_BUILD)"
+
+            body=$(fetch_reverse --data-urlencode "lat=47.6205" \
+              --data-urlencode "lon=-122.3493" \
+              --data-urlencode "types=address" \
+              --data-urlencode "limit=3") || {
+              echo "  FAIL addresses reverse: request error"; return 1; }
+            check_envelope "$body" "addresses reverse" || return 1
+            echo "$body" | jq -e '
+              (.features | length) >= 1
+              and (.features | all(.properties.feature_type == "address"))
+              and any(.features[];
+                .properties.number == "400"
+                and .properties.street == "BROAD Street"
+                and .properties.postcode == "98109")
+            ' > /dev/null || {
+              echo "  FAIL addresses reverse: 400 BROAD Street fixture missing"
+              return 1; }
+            echo "  OK   addresses reverse (400 BROAD Street, build $GEOCODER_BUILD)"
             return 0
           }
           for ATTEMPT in 1 2 3 4 5 6 7 8 9 10; do
@@ -1319,7 +1360,7 @@ jobs:
               sleep 45
             fi
           done
-          echo "::error::/v2/forward smoke failed after 10 attempts on build $GEOCODER_BUILD."
+          echo "::error::v2 API smoke failed after 10 attempts on build $GEOCODER_BUILD."
           {
             echo "## Post-promote smoke FAILED -- manual recovery required"
             echo
