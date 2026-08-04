@@ -1,0 +1,176 @@
+# v5 build readiness
+
+Date: 2026-08-04
+
+Status: **DRAFT — not ready to build.** This document is the gate sheet for the
+next Places construction generation (v5). It exists so that when the open items
+below close, the build is a decision that has already been made rather than one
+made under time pressure. Sections marked PENDING have a named owner artifact
+and must be filled with measured values, not estimates.
+
+Companion documents: `2026-08-04-benchmark-failure-modes-and-next-wave.md` (why
+these changes), `construction-v1-state.md` (authoritative operational state).
+
+## 1. Why v5 exists at all
+
+v4 (`2026-08-03.0`, live since 2026-08-04T03:31Z) closed the bounded phrase
+admission milestone. Measured post-promotion against the live build,
+Overture-only:
+
+| set | metric | pre-v4 (`2026-08-02.0`) | live v4 (`2026-08-03.0`) |
+|---|---|---|---|
+| 55-case gold | recall@1 | 0.473 | **0.527** |
+| 55-case gold | recall@10 | 0.618 | **0.691** |
+| 200-case everyday-POI | recall@1 | 0.310 | PENDING |
+| 200-case everyday-POI | recall@10 | 0.325 | PENDING |
+
+(The gold re-measure flagged a `name_locality` recall drop; it is entirely one
+`Buckingham Palace London` read timeout, not a quality loss. Re-run before
+citing that stratum.)
+
+What v4 **cannot** fix, by construction, and therefore what v5 is for:
+
+1. **≥4-token queries** never reach the index. `HEAD_QUERY_TOKEN_CAP = 3`
+   returns empty before any read. `entity_phrase_key` also refuses >3 words, so
+   no phrase key exists for four-word primary names.
+2. **`prominence_rank == 0` entities** get no phrase key at all — ordinary POIs
+   ("Dover MRT Station") stay starved even at 3 tokens.
+3. **Instance-level fame does not exist in the shards.** `prominence_rank` is a
+   category-class prior, so a replica in a "louder" category legitimately
+   outranks the real landmark. No Worker change fixes this honestly.
+
+Items 1 and 2 are *partly* addressable in the Worker (see §2); the residue is
+what v5 must carry. Item 3 is v5-only and gated on the sidecar.
+
+## 2. What must land BEFORE v5 is specified
+
+v5 admission must be sized by what the Worker-only fixes fail to reach — not by
+the pre-fix miss list. Each item below changes the residue that v5 has to cover.
+
+| # | Change | Scope | Status |
+|---|---|---|---|
+| 1 | Prefix-head fallback for 4–6-token empty queries | Worker | PENDING |
+| 2 | Locality inference: alt-name divisions + bounded homonym retry | Worker | PENDING |
+| 3 | Locality blend + centroid-distance near-tie demotion | Worker | PENDING |
+| 4 | Exact-name small-radius assembly clustering | Worker | PENDING |
+| 5 | Division population tie-break | Worker | PENDING |
+
+Gate: all five measured against both frozen sets with
+`benchmark_v2_forward.py --compare`, paired no-loss, before the v5 residue is
+computed. This is the "require the paired gate for Worker ranking/routing
+changes" rule — RC3 regressed production precisely because a ranking change
+shipped ahead of its measurement.
+
+## 3. Candidate v5 contents (each independently justified, none yet approved)
+
+### 3.1 `e4:` phrase keys for four-word primary names
+Lets a 4-token query run **only** the phrase probe past the token cap; ordinary
+head reads stay at ≤3 tokens. Directly addresses the "X Y MRT Station" class.
+
+- Cost: head bytes. **Hard constraint: 31.7 MB formal reserve above the 25%
+  headroom floor** (773,590,640 of 805,306,368 B). Must be measured on the
+  scale probe before acceptance, not estimated.
+- Blocked by: §2 item 1 — if the prefix-head fallback recovers this class at
+  query time, `e4:` may be unnecessary and the bytes are better spent on 3.2.
+- Decision input PENDING: post-fix residue count for ≥4-token cases.
+
+### 3.2 Admission-gate softening (`prominence_rank > 0`)
+Admits phrase keys for ordinary POIs. Largest byte cost of any candidate; also
+the largest everyday-POI upside if the residue is dominated by
+`prominence_rank == 0` entities.
+
+- Decision input PENDING: of the post-fix everyday-POI misses, how many are
+  `prominence_rank == 0` with a 2–3-word primary name. Requires joining the
+  miss list against the producer's prominence assignment.
+- Must be sized against the same 31.7 MB reserve as 3.1. **3.1 and 3.2 compete
+  for the same budget** — this is the central v5 product decision.
+
+### 3.3 Instance fame from the GERS↔QID sidecar
+The only honest fix for the homonym/fame class (Colosseum replicas, Statue of
+Liberty, Harrods vs the Depository, Times Square, Raffles, Manchester's POI
+analogue).
+
+- **Hard gate**: sidecar Phase 0 requires ≥200 independently hand-checked
+  decisions with **zero false accepts**, then a broadcast byte/resident-memory
+  measurement. The review instrument is built (see §5); the review is a human
+  judgment that must not be self-certified by an agent.
+- Any accepted sidecar that changes `prominence_rank` moves projection identity
+  and construction evidence — so it lands as evidence generation **v5**, never
+  as a patch to v4.
+- Carrying accepted mappings forward across releases is unsafe without a delta:
+  measured GERS source-assignment stability is 94.109151% (4,784,834 of
+  81,224,863 comparable records reassigned between `2026-06-17.0` and
+  `2026-07-22.0`).
+
+### 3.4 Tokenizer / alias work
+Apostrophe folding ("Childrens" ↔ "Children's" — the Royal Children's Hospital
+is indexed 51 m from gold and hits rank 1 only with the apostrophe) and an
+alias route for abbreviations ("GPO" ↔ "General Post Office" — target indexed
+7 m away). Cheap relative to phrase keys; verify whether folding is Worker-side
+(query normalization) or producer-side (index keys) before scheduling, since
+that determines whether it needs v5 at all.
+
+## 4. Standing prohibitions (do not relitigate inside v5)
+
+- `head_result_cap` stays at 10 — contract-bound; any change needs spec-hash
+  re-attestation sized against Wave C Q4, and required caps grow ~sqrt(n) at
+  planet scale.
+- Confidence never ranks (source-relative flat constants).
+- The address partition key (`address_key_hash` / `route_hash` / `hash_bucket`)
+  and `MAXIMUM_HASH_BITS` are FROZEN; the address map shuffle is not ported.
+- DuckDB stays pinned at 1.5.1 for construction (1.5.5 moves address forward
+  pack bytes and would drag Addresses into a Places-only generation).
+- Anything touching the frozen evidence spec batches into ONE re-attestation
+  pass. Never rewrite pins to match output.
+- Fuzzy same-name merging stays disqualified (no threshold separates "Statue of
+  Liberty" from "Statue of Liberty Deli").
+
+## 5. Sidecar review instrument
+
+Built 2026-08-04 so the Phase 0 audit can proceed asynchronously: the 200
+frozen decisions joined to complete per-decision evidence, a resumable verdict
+file bound to the candidate-set hash, a fail-closed validator that computes the
+zero-false-accept gate, and a human-readable review sheet ordered risk-first.
+Paths, schema, and exact commands: see §5 of the wave doc and the artifacts
+committed alongside it.
+
+The gate is **not met** until the review is done by a human and the validator
+reports full coverage with zero false accepts. Partial review is "gate not
+met", never "passed".
+
+## 6. Operational readiness for the build itself
+
+From the v4 session forensics — every item cost real wall-clock in the last
+planet run and will be paid again:
+
+- DuckDB spill allowances must be stated per stage and ≥ measured peak + 25%.
+  The head temp peak is still unmeasured; v4's head merge died at 79% with the
+  8.5 GiB half-share cap full and was recovered only by a scoped
+  `head_only_resume` at three-quarters (13,690,208,256 B).
+- Prefer targeted resume dispatches over GitHub's "rerun failed jobs" — it
+  re-ran the entire 128-reducer matrix and broke the resume gate's
+  expectations (mitigated by #237, but the semantics remain matrix-wide).
+- Pin every workflow dependency at authoring time; two preview attempts were
+  lost to an unpinned `worker-build` and a missing Python `requests`.
+- promote-slice's ~4,096 serial marker reads take ~2h with no progress signal.
+- Preview failures must self-classify as setup / operational-transient /
+  quality-regression so retries are mechanical.
+
+Status of these: PENDING (in flight as the hardening batch).
+
+## 7. Readiness checklist
+
+v5 may be specified when every line is YES. It may be **built** when §2 is
+measured and the product decision in 3.1-vs-3.2 is made explicitly.
+
+- [ ] §2 items 1–5 landed, paired-gated, no losses on either frozen set
+- [ ] Post-fix residue classified: ≥4-token vs `prominence_rank == 0` vs
+      absent-from-source, with counts
+- [ ] 3.1 and 3.2 byte costs measured on the scale probe against the 31.7 MB
+      reserve; the competing-budget decision made and recorded
+- [ ] Sidecar Phase 0 gate met by human review (zero false accepts) and
+      broadcast memory measured — or 3.3 explicitly deferred out of v5
+- [ ] Evidence spec v5 drafted as ONE re-attestation pass
+- [ ] §6 operational items landed or explicitly accepted as risk
+- [ ] Rebuild scope restated: families, DuckDB pin, reverse rebuild yes/no,
+      `head_result_cap`, promotion copy mode
