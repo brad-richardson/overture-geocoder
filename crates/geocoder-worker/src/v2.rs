@@ -21,10 +21,10 @@ use crate::address_construction_v1::{
 use crate::places_construction_v1::{
     compose_entity_phrase_candidates, construction_cell, entity_phrase_key,
     entity_phrase_token_groups, head_shard_id, head_shard_lookup, merge_head_candidates,
-    merge_routed_candidates, record_projection, routed_fetch_plan,
-    supports_places_construction_format, validate_entity_phrase_records, HeadRoutingManifest,
-    PlacesRouting, HEAD_QUERY_TOKEN_CAP, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES,
-    MAX_PLACES_ROUTING_BYTES,
+    merge_routed_candidates, prefix_head_fallback_split, record_projection,
+    retain_records_proving_dropped_tokens, routed_fetch_plan, supports_places_construction_format,
+    validate_entity_phrase_records, HeadRoutingManifest, PlacesRouting, HEAD_QUERY_TOKEN_CAP,
+    MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES, MAX_PLACES_ROUTING_BYTES,
 };
 use crate::places_pages::{
     query_terms, PlaceProjection, PlacesClause, MAX_CATALOG_OBJECT_BYTES, TOKENIZER_VERSION,
@@ -2027,6 +2027,7 @@ fn text_metadata(
     types: &HashSet<String>,
     proximity: Option<(f64, f64)>,
     places_locality_inference: Option<Value>,
+    places_prefix_head_fallback: Option<Value>,
 ) -> Value {
     let mut metadata = json!({
         "mode": "text",
@@ -2036,7 +2037,21 @@ fn text_metadata(
     if let Some(inference) = places_locality_inference {
         metadata["places_locality_inference"] = inference;
     }
+    if let Some(fallback) = places_prefix_head_fallback {
+        metadata["places_prefix_head_fallback"] = fallback;
+    }
     metadata
+}
+
+/// Describe a fired prefix-head fallback: which tokens were probed and which
+/// were proven from stored display fields rather than from a posting.
+fn prefix_head_fallback_metadata(tokens: &[String]) -> Option<Value> {
+    let (head_tokens, dropped) = prefix_head_fallback_split(tokens)?;
+    Some(json!({
+        "probe_query": head_tokens.join(" "),
+        "verified_tokens": dropped,
+        "verification": "display_fields",
+    }))
 }
 
 fn reverse_hit_feature(hit: ReverseHit) -> Value {
@@ -2175,13 +2190,29 @@ async fn search_places_construction(
     if tokens.len() > HEAD_QUERY_TOKEN_CAP {
         return Ok(Vec::new());
     }
+    let records = places_construction_head_records(loader, object_root, &routing, &tokens).await?;
+    Ok(records.iter().map(record_projection).collect())
+}
+
+/// Resolve up to `HEAD_QUERY_TOKEN_CAP` exact tokens through the sharded global
+/// head, composing the entity-phrase lane with the ordinary token lane. At most
+/// three ordinary reads plus two phrase reads per call.
+async fn places_construction_head_records(
+    loader: &ShardLoader,
+    object_root: &str,
+    routing: &PlacesRouting,
+    tokens: &[String],
+) -> Result<Vec<crate::places_construction_v1::PlacesV1Record>> {
+    if tokens.is_empty() || tokens.len() > HEAD_QUERY_TOKEN_CAP {
+        return Ok(Vec::new());
+    }
     let head_manifest_key = format!("{object_root}/objects/{}", routing.head.manifest_object);
     let head = loader
         .lookup_places_construction_head_routing(&head_manifest_key, &routing.head)
         .await?;
     let mut phrase_groups = Vec::new();
     if head.admits_entity_phrases() {
-        for phrase_tokens in entity_phrase_token_groups(&tokens) {
+        for phrase_tokens in entity_phrase_token_groups(tokens) {
             let mut phrase_records = Vec::new();
             if let Some(phrase_key) = entity_phrase_key(phrase_tokens) {
                 let shard_id = head_shard_id(&phrase_key, head.shard_bits);
@@ -2202,7 +2233,7 @@ async fn search_places_construction(
     }
     let mut per_token = Vec::with_capacity(tokens.len());
     let mut ordinary_complete = true;
-    for token in &tokens {
+    for token in tokens {
         let shard_id = head_shard_id(token, head.shard_bits);
         // An unpopulated shard means no head record exists for the token.
         let Some(shard) = head.shard(shard_id) else {
@@ -2222,13 +2253,52 @@ async fn search_places_construction(
         per_token.push(records);
     }
     let ordinary = if ordinary_complete {
-        merge_head_candidates(&tokens, per_token).map_err(Error::RustError)?
+        merge_head_candidates(tokens, per_token).map_err(Error::RustError)?
     } else {
         Vec::new()
     };
+    compose_entity_phrase_candidates(phrase_groups, ordinary).map_err(Error::RustError)
+}
+
+/// Additive prefix-head fallback for 4-6-token no-proximity queries.
+///
+/// `HEAD_QUERY_TOKEN_CAP` empties every wider no-proximity query before any
+/// index read, which is why "GEYLANG BAHRU MRT STATION" returns nothing while
+/// "YISHUN MRT STATION" hits. Probe the head ONCE with the first three tokens
+/// (their `e2:`/`e3:` phrase keys included, so an exact two- or three-word name
+/// prefix still carries its phrase evidence), then fail-closed verify the
+/// dropped tail against each candidate's stored display fields.
+///
+/// This lane is additive only: `handle_text` runs it exclusively on an
+/// otherwise-empty response, so it can never displace, reorder, or regress a
+/// result the ordinary lanes produced. It adds at most one head-manifest lookup
+/// and five head shard reads.
+async fn search_places_prefix_head_fallback(
+    loader: &ShardLoader,
+    family: &FamilyReference,
+    query: &str,
+) -> Result<Vec<PlaceProjection>> {
+    if !supports_places_construction_format(&family.versions.format) {
+        return Ok(Vec::new());
+    }
+    let Some(entrypoint) = family.entrypoints.get("forward") else {
+        return Ok(Vec::new());
+    };
+    const SUFFIX: &str = "/routing.json";
+    let Some(object_root) = entrypoint.object_key.strip_suffix(SUFFIX) else {
+        return Ok(Vec::new());
+    };
+    let tokens = query_terms(query);
+    let Some((head_tokens, dropped)) = prefix_head_fallback_split(&tokens) else {
+        return Ok(Vec::new());
+    };
+    let routing = loader
+        .lookup_places_construction_routing(&entrypoint.object_key)
+        .await?;
     let records =
-        compose_entity_phrase_candidates(phrase_groups, ordinary).map_err(Error::RustError)?;
-    Ok(records.iter().map(record_projection).collect())
+        places_construction_head_records(loader, object_root, &routing, head_tokens).await?;
+    let verified = retain_records_proving_dropped_tokens(records, dropped);
+    Ok(verified.iter().map(record_projection).collect())
 }
 
 async fn search_places(
@@ -2529,6 +2599,7 @@ pub(crate) async fn handle_forward(
         ranked.extend(search.results.iter().map(division_feature));
     }
     let mut places_locality_inference = None;
+    let mut places_prefix_head_fallback = None;
     if types.contains("poi") {
         let places_family = release
             .families
@@ -2595,6 +2666,23 @@ pub(crate) async fn handle_forward(
                 break;
             }
         }
+        // Additive last resort. It runs only when the whole response is still
+        // empty -- no division candidate, no POI from the head/phrase lanes, and
+        // no locality-inferred routed result -- so it cannot displace, reorder,
+        // or regress anything the ordinary lanes produced.
+        if ranked.is_empty() && places.is_empty() && proximity.is_none() {
+            let fallback =
+                search_places_prefix_head_fallback(&loader, family, query.as_str()).await?;
+            if !fallback.is_empty() {
+                places = fallback;
+                // These results answer the full query and were never routed
+                // through a locality centroid, so scoring and metadata both
+                // return to the query as typed.
+                effective_query = query.to_string();
+                places_locality_inference = None;
+                places_prefix_head_fallback = prefix_head_fallback_metadata(&tokens);
+            }
+        }
         let normalized = NormalizedQuery::new(&effective_query);
         let normalized = (!normalized.is_empty()).then_some(normalized);
         ranked.extend(
@@ -2615,7 +2703,12 @@ pub(crate) async fn handle_forward(
     let body = data_version_body(
         &release.data_version,
         features,
-        text_metadata(&types, proximity, places_locality_inference),
+        text_metadata(
+            &types,
+            proximity,
+            places_locality_inference,
+            places_prefix_head_fallback,
+        ),
     );
     versioned_response(&body, &release.data_version, 200)
 }
@@ -4737,15 +4830,42 @@ mod tests {
         assert_eq!(marker["routing"], "locality_centroid");
 
         let types = HashSet::from(["poi".into()]);
-        let metadata = text_metadata(&types, None, Some(marker));
+        let metadata = text_metadata(&types, None, Some(marker), None);
         assert_eq!(
             metadata["places_locality_inference"]["division_type"],
             "locality"
         );
         assert!(metadata["proximity"].is_null());
-        assert!(text_metadata(&types, None, None)
-            .get("places_locality_inference")
-            .is_none());
+        let plain = text_metadata(&types, None, None, None);
+        assert!(plain.get("places_locality_inference").is_none());
+        // A response the fallback did not touch carries no fallback marker.
+        assert!(plain.get("places_prefix_head_fallback").is_none());
+    }
+
+    #[test]
+    fn prefix_head_fallback_marker_names_the_probe_and_the_verified_tail() {
+        let tokens = query_terms("Geylang Bahru MRT Station");
+        let marker = prefix_head_fallback_metadata(&tokens).expect("four tokens are in range");
+        assert_eq!(marker["probe_query"], "geylang bahru mrt");
+        assert_eq!(marker["verified_tokens"], json!(["station"]));
+        assert_eq!(marker["verification"], "display_fields");
+
+        let types = HashSet::from(["poi".into()]);
+        let metadata = text_metadata(&types, None, None, Some(marker));
+        assert_eq!(
+            metadata["places_prefix_head_fallback"]["probe_query"],
+            "geylang bahru mrt"
+        );
+        assert!(metadata.get("places_locality_inference").is_none());
+
+        // Widths the ordinary head lane already serves never produce a marker,
+        // which is the same predicate that keeps the fallback itself inert
+        // there.
+        assert!(prefix_head_fallback_metadata(&query_terms("Yishun MRT Station")).is_none());
+        assert!(
+            prefix_head_fallback_metadata(&query_terms("one two three four five six seven"))
+                .is_none()
+        );
     }
 
     #[test]
