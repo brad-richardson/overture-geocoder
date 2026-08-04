@@ -409,39 +409,45 @@ the code under test. With it the suite is 1569 passed, 0 failed.
 sequential HEADs, and the second half of item 1's precondition) is optional
 efficiency, not a blocker.
 
-### 2026-08-04: "cap eviction sinks everyday POIs out of the head" is REFUTED
+### 2026-08-04: commodity POIs are cap-evicted, and a cap raise still does not fix it
 
-The working hypothesis behind the cap-raise question was that everyday POIs are
-indexed but sink below `HEAD_RESULT_CAP` on their own name token, so a bigger
-cap would recover them. It was formed from one case read at low resolution
-(`Hotel Habana`, rank 58 of 452 among head candidates) and generalized.
+Ranking all 13 everyday and 9 gold EXACT-match IN_HEAD misses against
+`CAP_ORDER` straight from the head-candidate packs. Two losses, independent,
+and fixing either alone changes nothing.
 
-**It is wrong, and a cap raise recovers NOTHING.** Ranking all 13 everyday and
-9 gold EXACT-match IN_HEAD misses against `CAP_ORDER` straight from the
-head-candidate packs found zero records sitting just outside the cap on the
-token that identifies them. `Hotel Habana` really does rank 72 of 452 on
-`habana` -- but it was never `habana` that lost the query. It is evicted on
-`hotel`, and `Harrods` on `london`, and `Mayo Clinic` on `clinic`.
+**Loss 1 — the distinctive token.** Commodity POIs really do sink below
+`HEAD_RESULT_CAP` on their own name word, and by a wide margin: `habana` 72 of
+452, `harrods` 22 of 69, `novotel` 91 of 500, `mayo` 213 of 753 — all lower
+bounds, since candidate packs are already capped per map task. Every one
+carries `prominence_rank = 0` from `COMMODITY_CATEGORIES`. So the record is in
+NO posting at all.
 
-The mechanism is the intersection, not the cap: the head keeps a top-`n` list
-PER QUERY TOKEN and intersects them, so a record must survive the cap in every
-token, and the least informative word in the query is enough to empty the
-result. That makes adding a locality word strictly harmful -- `Harrods` ranks
-22 on its own token while `Harrods London` cannot resolve at any cap size,
-because Harrods is not among the ten most prominent things on Earth carrying
-`london`.
+**Loss 2 — the generic token.** The head intersects a top-`n` list per query
+word, so a record must survive the cap in EVERY token, and `hotel` / `london` /
+`clinic` / `museum` cannot be won at any cap. This inverts the user's
+expectation: `Harrods London` is harder than `Harrods`, not easier.
 
-Two corollaries worth keeping:
+So **a cap raise remains the wrong plan** — it addresses loss 1 and leaves
+loss 2 untouched — but not because the cap is innocent. The cap-raise machinery
+below stays moot, independently of its attestation cost.
 
-- The entity-phrase lane does not rescue this class either. It admits only
-  `prominence_rank > 0` and `COMMODITY_CATEGORIES` puts hotels at 0, so
-  `e2:hotel habana` has zero rows. The class that most needs a phrase key is
-  the one excluded from it.
-- So the cap-raise machinery below stays moot on its own merits, independently
-  of the attestation cost. **The lever is selectivity.** The cheapest form
-  needs no rebuild: head entries already carry `primary_name`, so on an empty
-  intersection the Worker can re-query the most selective token alone and
-  filter by the remaining words.
+**The lever is admission.** An `e2:hotel habana` phrase posting has ten slots
+for a phrase almost nothing else carries, where `hotel` has ten slots contested
+by every hotel on Earth. That posting has zero rows today because the phrase
+lane admits only `prominence_rank > 0` — the class that most needs a phrase key
+is the one excluded from it. One admission-rule change, rebuild-scoped.
+
+One refuted clause worth keeping: the sinking is NOT `feature_id` order.
+`tokens_decided_by_feature_id` is 0 across both sets; these records lose to
+genuinely more prominent contenders, not to a UUID coin flip.
+
+**Do not look for a query-time fix here.** `merge_bounded_candidates` already
+relaxes a saturated posting and proves the missing token from
+`record_display_tokens`, which already spans `locality`, `region` and
+`country`. It cannot help, because it rescues only records that survived the
+cap in at least one token and these survive in none. An earlier draft of this
+section recommended exactly that redundant Worker change; the error surfaced on
+trying to implement it.
 
 Full measurement, and the three things the probe deliberately refuses to
 overstate, in `docs/plans/2026-08-04-head-cap-eviction-ranks.md`.

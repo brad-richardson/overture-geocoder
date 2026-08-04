@@ -12,34 +12,59 @@ or after the merge. It does not say *how* the record lost, and the plans that
 follow from "raise the cap" and from "the cap is not the problem" are entirely
 different.
 
-## The hypothesis this probe was built to test, and which it refuted
+## The hypothesis, what survived, and what did not
 
-**Hypothesis (2026-08-04, wrong):** everyday POIs are indexed but sink below
+**Hypothesis (2026-08-04):** everyday POIs are indexed but sink below
 `HEAD_RESULT_CAP` on their own name token, because `COMMODITY_CATEGORIES` gives
 them `prominence_rank = 0` and confidence is a flat per-source constant, so the
-cap key degenerates to UUID order. Predicted fix: raise the cap.
+cap key degenerates to `feature_id` order. Predicted fix: raise the cap.
 
-**Refuted on every clause.** No case is lost on its own name token. Not one
-token in either set has its top ten decided by `feature_id` order
-(`tokens_decided_by_feature_id: 0`). And a cap raise recovers nothing at any
-size tested, out to 1000.
+**Mostly CONFIRMED, with one clause refuted and one wrong prediction.**
 
-The hypothesis was formed from a single case read at low resolution --
-`Hotel Habana` at rank 58 of 452 -- and generalized without checking which
-token actually emptied the query. The rank was roughly right (72 of 452 here,
-on a different release). The inference from it was not: `habana` never lost the
-query. `hotel` did.
+CONFIRMED -- the sinking is real, and it is on the DISTINCTIVE token, not just
+generic ones. Every commodity case is evicted from its own name token, usually
+by a wide margin:
 
-Worth stating plainly because the wrong version was actionable and cheap-looking
-("raise a constant"), while the right one points at query-time selectivity and
-at rebuild-scoped index coverage. Three probe iterations were needed before the
-numbers could be trusted at all -- see "What this probe can and cannot state".
+```
+habana  rank  72     pensil  rank  20     estoril rank  79
+antenas rank  97     harare  rank  25     porto   rank 332 / novo rank 304
+harrods rank  22     novotel rank  91     mayo    rank 213
+```
+
+All are above the cap of 10, so the record is in **no posting at all**, and
+every one of them carries `prominence_rank = 0`.
+
+REFUTED -- the `feature_id`-order clause. Not one token in either set has its
+top ten decided by UUID order (`tokens_decided_by_feature_id: 0`). The records
+above lose to contenders with genuinely higher prominence, not to a coin flip.
+
+WRONG PREDICTION -- "raise the cap" still does not work, but not for the reason
+first written here. It fails because these queries ALSO carry a generic token
+(`hotel`, `london`, `clinic`, `museum`) where no cap is enough: recovering
+`Harrods London` would mean out-ranking every record on Earth carrying
+`london`. A cap large enough for `habana` (>= 72, and that is a lower bound)
+still leaves `hotel` unsatisfiable.
+
+### Correction, 2026-08-04
+
+The first version of this document claimed "the distinctive word is never the
+problem" and pointed the fix at query-time selectivity. **Both were wrong**, and
+the error was caught by trying to implement the recommendation: the Worker
+ALREADY has exactly the proposed mechanism. `merge_bounded_candidates` relaxes
+a saturated posting and proves the missing token from `record_display_tokens`,
+which already spans `primary_name`, `brand_name`, `category`, `locality`,
+`region` and `country`.
+
+It does not fire here because it can only rescue a record that survived the cap
+in at least ONE token, and these survive in none. **No query-time change can
+retrieve what the index does not store.** The fixes are therefore all
+rebuild-scoped, which is the opposite of the original conclusion.
 
 ## Headline
 
-**Raising `HEAD_RESULT_CAP` recovers none of these cases.** Not one miss in
-either set is a record that sits just outside the cap on the token that
-identifies it. The losses are:
+**Raising `HEAD_RESULT_CAP` alone recovers none of these cases** -- not because
+the records are near the cap, but because they are far below it on their own
+name token AND vetoed by a generic token no cap can satisfy. The losses are:
 
 | what happened | everyday | gold |
 |---|---|---|
@@ -50,11 +75,11 @@ identifies it. The losses are:
 | already inside the cap — the head is not what loses them | 2 | 0 |
 | **EXACT-match IN_HEAD misses examined** | **13** | **9** |
 
-## The generic token is a veto, not a hint
+## Two independent losses, and both must be fixed
 
 The head intersects a per-token top-`HEAD_RESULT_CAP` list for every query
-word. A record must therefore survive the cap in **all** of them. The
-distinctive word is never the problem:
+word, so a record must survive the cap in **all** of them. These cases fail
+twice over:
 
 ```
 HOTEL HABANA      habana  rank  72 of 452     hotel  EVICTED (pack 10/10)
@@ -66,17 +91,21 @@ Mayo Clinic Rochester mayo rank 213 of 753    clinic, rochester EVICTED
 Louvre Museum     -                           louvre, museum EVICTED
 ```
 
-`hotel`, `london`, `clinic`, `museum`, `berlin` are the *least* informative
-words in those queries, and each one alone is enough to empty the
-intersection. The consequence is inverted from what a user expects: **adding a
-locality word makes a query strictly harder**. `Harrods` ranks 22 on its own
-token; `Harrods London` cannot resolve, because Harrods is not one of the ten
-most prominent things on Earth carrying the token `london`.
+**Loss 1, the distinctive token.** Every rank above is > 10, and each is a
+LOWER bound. A commodity POI at `prominence_rank = 0` loses its own name token
+to every non-commodity contender that happens to carry the same word. This is
+fixable by cap size in principle, but the required cap is measured in hundreds.
 
-No cap raise fixes this. `hotel` is saturated at the measurement ceiling
-(880 = 88 packs x 10) and its true planet-wide count is far higher; recovering
-Hotel Habana by cap size alone would mean out-ranking every record on Earth
-carrying the word `hotel`.
+**Loss 2, the generic token.** `hotel`, `london`, `clinic`, `museum`, `berlin`
+are the *least* informative words in these queries and each alone empties the
+intersection at any cap. `hotel` is saturated at the measurement ceiling
+(880 = 88 packs x 10) and its true planet-wide count is far higher. The
+consequence is inverted from what a user expects: **adding a locality word makes
+a query strictly harder**. `Harrods London` is harder than `Harrods`, not
+easier.
+
+Fixing either one alone changes nothing, which is why "raise the cap" fails as
+a plan even though the cap is genuinely part of the problem.
 
 ### Why the phrase lane does not catch them either
 
@@ -86,11 +115,19 @@ to 0. So the class that most needs a phrase key is precisely the class
 excluded from it — and every one of the six Mexican hotels measured here
 carries `prominence_rank = 0`.
 
-**The lever is selectivity, not cap size.** The cheapest fix is query-time and
-needs no rebuild: head entries already carry `primary_name`, so when a
-multi-token intersection comes back empty the Worker can re-query the most
-selective token alone and filter the returned entries by the remaining words.
-That is a Worker change against data that already exists.
+**The lever is admission, and it is rebuild-scoped.** Give this class a key
+that is selective by construction instead of hoping it wins a generic one: an
+`e2:`/`e3:` phrase posting for `hotel habana` has ten slots for a phrase almost
+nothing else carries, where the word `hotel` has ten slots contested by every
+hotel on the planet. That is one admission-rule change --
+`prominence_rank > 0` -- and it targets the exact class the rule excludes.
+
+It is NOT a query-time fix, and this is where the first draft of this document
+was wrong. The Worker already relaxes a saturated posting and proves the
+missing token from `record_display_tokens` (which already spans `locality`,
+`region` and `country`). That machinery cannot help here because it rescues
+only records that survived the cap in at least one token, and these survive in
+none.
 
 ## Tokens never emitted
 
@@ -135,12 +172,19 @@ name "Brandenburg Gate", the English query has nothing to match.
 
 ## Follow-ups this opens
 
-1. Worker: empty-intersection retry on the most selective token with a
-   display-name filter. No rebuild, and it targets the largest measured class.
-2. Selectivity in the head at build time — either drop very low-information
-   tokens from the intersection set or make the cap per-token-selectivity
-   aware. Rebuild-scoped, so it belongs to a release that is rebuilding anyway.
-3. Alternate/common-name coverage in the head for non-Latin queries against
-   English-named records. Rebuild-scoped.
+All rebuild-scoped, because no query-time change can retrieve a record the
+index does not store.
+
+1. Admit `prominence_rank = 0` records to the entity-phrase lane. Targets the
+   largest measured class and gives it a key generic-word contention cannot
+   reach. Size it against the Wave C posting-growth numbers first.
+2. Selectivity in the head — either exclude very low-information tokens from
+   the intersection requirement or make the cap selectivity-aware, so `hotel`
+   stops acting as a veto.
+3. Alternate/common-name coverage for non-Latin queries against English-named
+   records (the three HK cases).
 4. Settle the three indeterminate tokens by reading the merged head or the
    source `names.common` directly.
+
+A cap raise on its own is NOT on this list: it addresses loss 1 and leaves
+loss 2 untouched, so nothing measured here would start resolving.
