@@ -1,13 +1,13 @@
 # construction-v1: current state
 
-Last updated 2026-08-04 after the first complete v4 preview exposed two exact
-phrase short-circuit regressions and two bounded composition corrections were
-validated against the immutable candidate head shards. The first correction
-closed Union Station; its repeat preview isolated one remaining saturated-
-replica loss for Statue of Liberty and motivated a one-slot prominence guard.
-It also incorporates the independent correctness audit, fresh v4 formal
-evidence, sidecar Phase 0's cross-release identity measurement, completion of
-the 200-case everyday-POI tripwire, and its current-OSM presence control.
+Last updated 2026-08-04 after the final v4 preview accepted both bounded phrase
+composition corrections with zero paired losses. Additive composition closed
+Union Station Toronto and the saturated-phrase recovery slot closed Statue of
+Liberty; the zero-error repeat passed every direct, semantic, acceptance, and
+cleanup gate. It also incorporates the independent correctness audit, fresh v4
+formal evidence, sidecar Phase 0's cross-release identity measurement,
+completion of the 200-case everyday-POI tripwire, and its current-OSM presence
+control.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -29,12 +29,14 @@ routed control misses the canonical record. It is an alias/tokenization plus
 routed-cap problem, not the same global-head eviction. Fresh v4 formal evidence
 is now green, including the planet-wide phrase-posting falsification probe. The
 non-promoting Places-only planet build and scoped head-only recovery completed.
-**The first complete preview was net positive but correctly failed its paired
-zero-loss gate: 55-case rank@1 moved 26 -> 29 and rank@10 34 -> 37, while exact
-losses for Statue of Liberty and Union Station Toronto identified a bounded
-Worker phrase-composition bug. Additive composition closed Union Station; a
-saturated-phrase recovery slot for Statue and one final identical preview are
-the active gate before catalog promotion.** Keep Brandenburg Gate
+**The final preview is accepted. Against the 55-case baseline, rank@1 moved
+26 -> 30 and rank@10 34 -> 39 with four/zero and five/zero paired
+gains/losses. Against the 200-case everyday-POI baseline, rank@1 moved 62 -> 65
+and rank@10 65 -> 66 with three/zero and one/zero paired gains/losses. Both
+direct phrase gates passed, the run had zero request errors, and cleanup left
+production untouched. Production release publication and catalog promotion,
+without dropping the live reverse operations, are the active gate.** Keep
+Brandenburg Gate
 and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
 phrase admission again in this generation: the repeated functional rehearsal
 has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
@@ -1585,8 +1587,7 @@ the ten content-addressed candidate shards: all filenames matched their SHA-256,
 the real Worker decoder resolved nine non-empty token/phrase postings and
 rejected all nine deliberate misroutes, and 22 phrase rows passed the exact
 contract. The `e2:statue of` posting was correctly empty; the Statue recovery
-comes from ordinary `liberty`. Repeat the identical preview after this Worker
-change merges. Promotion remains prohibited until the paired loss count is zero.
+comes from ordinary `liberty`.
 
 The first additive-composition repeat was run `30867768153` from merged commit
 `cf12f0e`. It passed both direct phrase gates and fixed Union Station Toronto.
@@ -1599,8 +1600,22 @@ and exhausted the public result cap. The second correction therefore removes
 only the weakest full-phrase row when the phrase posting is saturated and a
 distinct ordinary candidate has strictly greater producer prominence. On the
 immutable shard the canonical NPS row has prominence 255 and the weakest phrase
-replica has prominence 89. Repeat the identical preview after this guard merges;
-promotion remains prohibited until it passes.
+replica has prominence 89.
+
+The final zero-error repeat was run `30870735398` from merged commit `01856db`.
+It passed both direct phrase gates and every acceptance and cleanup step. Gold
+recall@1 improved from 26/55 to 30/55 with four gains and zero losses; recall@10
+improved from 34/55 to 39/55 with five gains and zero losses. Everyday-POI
+recall@1 improved from 62/200 to 65/200 with three gains and zero losses;
+recall@10 improved from 65/200 to 66/200 with one gain and zero losses. Big Ben
+and Empire State Building remained present, and both Statue of Liberty and
+Union Station Toronto were recovered. Run `30870174744` had already produced
+the same semantic result but was correctly rejected by the zero-error gate for
+one timeout and two HTTP 500 responses; the accepted repeat had none. The
+candidate slice is admitted for production publication. The preview overlay
+intentionally omitted external reverse operations, so production publication
+must explicitly preserve the already-live reverse capabilities rather than
+promoting that preview document verbatim.
 
 **The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
 deploy run `30796985582` published Worker version
@@ -1948,9 +1963,11 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    planet phrase-posting probe and fresh v4 formal evidence are green. The
    non-promoting Places-only planet build and first preview are complete. The
    preview was net positive but found two exact phrase short-circuit losses.
-   Additive composition closed Union Station; merge the one-slot saturated-
-   phrase prominence guard for the remaining Statue loss and repeat the
-   identical preview before any catalog promotion.
+   Additive composition closed Union Station and the one-slot saturated-phrase
+   prominence guard closed Statue; the final preview is accepted with zero
+   paired losses and zero request errors. Publish `slice-2026-08-03.0` as build
+   `2026-08-03.0`, preserving the live reverse operations, then promote the
+   catalog from the exact current `2026-08-02.0` expectation.
    Brandenburg Gate is corrected to the
    source-alias/tokenization plus routed-cap backlog, and Machu Picchu Cusco
    remains in region-context routing. Do not reopen build ordering, duplicate
