@@ -49,9 +49,9 @@
   "flips_pending_audit": [
     {
       "case_id": "everyday-tw-Restaurant_395000000A_001459",
-      "query": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713/\u828b\u7cbf",
-      "expected_name": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713/\u828b\u7cbf",
-      "accepted_name": "\u8a31\u5bb6\u8766\u4ec1\u8089\u5713 \u828b\u7cbf",
+      "query": "許家蝦仁肉圓/芋粿",
+      "expected_name": "許家蝦仁肉圓/芋粿",
+      "accepted_name": "許家蝦仁肉圓 芋粿",
       "accepted_id": "ea398f5c-ec83-476c-aa74-592dbbf5dbd8",
       "accepted_distance_km": 0.007,
       "rank": 1,
@@ -63,7 +63,8 @@
         "scope": "everyday",
         "script": "non_latin"
       },
-      "audit": "PENDING"
+      "audit": "ACCEPTED",
+      "audit_note": "Same restaurant: the gold name separates the two dishes with \"/\" and Overture with a space. Returned 7 m from the expected point. Confirmed by the repo owner 2026-08-04."
     }
   ]
 }

@@ -96,3 +96,90 @@ Colombia is 20 of 20 — the entire Bogotá health-post stratum, consistent with
 all three geocoders scoring zero on it in every round. Those cases are
 measuring a registry that Overture does not carry, and they should be
 quarantined rather than counted as failures.
+
+---
+
+# Both sets, and a correction to the numbers above
+
+The section above covered only the 200-case everyday-POI set. Running the gold
+55 as well changed both the method and the conclusion.
+
+## Two method fixes the gold set forced
+
+**The probe box now follows each case's own tolerance** (2x tolerance, floored
+at 1 km). A fixed +/-2.2 km box was fine for the everyday set, where every case
+is 1.0 km, but the gold set ranges 0.25 km to 25 km and a 25 km locality case
+would have been reported ABSENT for something plainly present.
+
+**Locality cases are excluded.** 10 of the 55 gold cases expect a `locality`,
+which the DIVISION lane serves, not the Places head. Probing the head for them
+would manufacture ABSENT verdicts. All 10 are hits, so the division lane is not
+implicated in any gold miss.
+
+## The correction: containment inflates the verdicts
+
+Chasing a gold result exposed a flaw in the first run. `Times Square` was
+reported IN_HEAD -- but `e2:times square` has only **6 rows globally**, well
+under the cap of 10, and **none of them is Manhattan's Times Square**; the most
+prominent sits in Brooklyn, 8.7 km away. What the probe actually matched was
+`Discovery Times Square`, a museum named after the square.
+
+So containment matching accepts entities merely NAMED AFTER the target, and
+counting those as "the target is indexed" turns "the landmark is missing" into
+"the serving path is broken" -- which sends work to the wrong place. Verdicts
+are now split into an exact-name tier and a containment-only tier, and anything
+resting on containment alone is flagged for eyes rather than trusted.
+
+Containment-only is not automatically wrong: `Upper Thomson MRT` for
+`UPPER THOMSON MRT STATION` is the same entity under a shorter name, while
+`MoneyMax Pawnshop - Marsiling MRT Station` and `AKA Times Square` are not.
+The flag means "unresolved", not "false".
+
+## Both sets, exact-name tier only
+
+| | gold (45 head-lane) | everyday (200) | total |
+|---|---|---|---|
+| misses | 15 | 130 | 145 |
+| ABSENT | 1 | 92 | **93** |
+| NOT_ADMITTED, exact | 0 | 9 | **9** |
+| IN_HEAD, exact | 9 | 13 | **22** |
+| containment-only, unresolved | 5 | 16 | 21 |
+
+Calibration holds on both: 29 of 30 gold known hits (96.7%) and 68 of 70
+everyday (97.1%) are found IN_HEAD.
+
+**Confidently actionable work is 22 serving-side cases against 9 that need a
+rebuild — roughly 2.4 to 1.** That ratio, not the earlier 23-vs-15, is the one
+to plan against, and it points the same way: the nearest wins are in the Worker.
+
+## The two sets fail for opposite reasons
+
+The everyday set is dominated by ABSENT (92 of 130, 70.8%) — its cases largely
+name entities Overture does not carry. The gold set is dominated by IN_HEAD
+(13 of 15) with only ONE ABSENT — its entities are almost all indexed, and the
+failures are in serving them.
+
+They are therefore not interchangeable evidence, and a single headline number
+across both would hide this. Concretely: the everyday set cannot measure ranking
+work (its recall@10 equals recall@1), while the gold set can and is where the
+three unshipped ranking changes have their target.
+
+## Gold misses are wrong-instance, not missing
+
+Every gold IN_HEAD miss returns the RIGHT NAME at the WRONG PLACE, and none has
+a candidate inside tolerance:
+
+```
+Times Square        (tol 2.0 km)  ->  777 km, 15992 km, 5356 km, 8.7 km, 5361 km
+Golden Gate Bridge  (tol 2.0 km)  ->  13510 km, 7.2 km, 7.1 km, 9114 km, 12174 km
+Louvre Museum       (tol 2.0 km)  ->  4.4 km, 5.1 km, 3.3 km, 25.2 km, 6.8 km
+Brandenburg Gate    (tol 2.0 km)  ->  25.8 km, 1417 km
+Harrods London      (tol 1.0 km)  ->  Harrods Furniture Depository, 4.8 km
+```
+
+This is a homonym-arbitration problem, not a retrieval one: the head holds many
+same-named POIs worldwide and nothing selects the famous instance for a
+no-proximity query. It is NOT cap eviction — `e2:times square` has 6 rows
+against a cap of 10 — so raising the cap would not help. Note also that the
+landmark itself is often absent while derived businesses are present, which is
+a construction-side admission question rather than a serving one.

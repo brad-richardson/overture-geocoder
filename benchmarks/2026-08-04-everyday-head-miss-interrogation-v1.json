@@ -1,12 +1,14 @@
 {
   "schema": "head-miss-interrogation-v1",
-  "probe_degrees": 0.02,
+  "probe_tolerance_multiple": 2.0,
+  "probe_min_km": 1.0,
   "cases": "benchmarks/everyday-poi-tripwire-cases-v1.json",
   "run": "benchmarks/2026-08-04-everyday-poi-post-additive-wave.json",
+  "division_lane_cases": 0,
   "misses": 130,
   "counts": {
-    "IN_HEAD": 23,
-    "NOT_ADMITTED": 15,
+    "IN_HEAD": 22,
+    "NOT_ADMITTED": 16,
     "ABSENT": 92
   },
   "calibration_hits": 70,
@@ -16,6 +18,8 @@
       "case_id": "everyday-sg-21193",
       "query": "GEYLANG BAHRU MRT STATION",
       "expected_name": "GEYLANG BAHRU MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -27,13 +31,14 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 17317,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 12698,
       "corpus_name_matches": [
         "Geylang Bahru",
         "Geylang Bahru",
         "Geylang Bahru MRT"
       ],
-      "head_rows_near": 16778,
+      "head_rows_near": 12425,
       "head_name_matches": [
         "Geylang Bahru",
         "Geylang Bahru MRT",
@@ -51,6 +56,8 @@
       "case_id": "everyday-sg-21727",
       "query": "LABRADOR PARK MRT STATION",
       "expected_name": "LABRADOR PARK MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -62,11 +69,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 5085,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3819,
       "corpus_name_matches": [
         "Labrador Park MRT Station"
       ],
-      "head_rows_near": 4807,
+      "head_rows_near": 3524,
       "head_name_matches": [
         "Labrador Park MRT Station",
         "Labrador Park MRT Station",
@@ -82,6 +90,8 @@
       "case_id": "everyday-sg-21302",
       "query": "UPPER THOMSON MRT STATION",
       "expected_name": "UPPER THOMSON MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -93,13 +103,14 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 5323,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 4703,
       "corpus_name_matches": [
         "Upper Thomson",
         "Upper Thomson MRT",
         "Upper Thomson"
       ],
-      "head_rows_near": 4941,
+      "head_rows_near": 4298,
       "head_name_matches": [
         "Upper Thomson MRT"
       ],
@@ -111,6 +122,8 @@
       "case_id": "everyday-sg-21587",
       "query": "TECK LEE LRT STATION",
       "expected_name": "TECK LEE LRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -122,11 +135,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 1661,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 1366,
       "corpus_name_matches": [
         "Teck Lee LRT Station"
       ],
-      "head_rows_near": 1484,
+      "head_rows_near": 1215,
       "head_name_matches": [
         "Teck Lee LRT Station",
         "Teck Lee LRT Station"
@@ -140,6 +154,8 @@
       "case_id": "everyday-sg-21125",
       "query": "MARSILING MRT STATION",
       "expected_name": "MARSILING MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -151,12 +167,13 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 2030,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 1700,
       "corpus_name_matches": [
         "MoneyMax Pawnshop - Marsiling MRT Station",
         "UOB ATM - Marsiling MRT Station"
       ],
-      "head_rows_near": 1668,
+      "head_rows_near": 1383,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -164,6 +181,8 @@
       "case_id": "everyday-sg-21494",
       "query": "YISHUN MRT STATION",
       "expected_name": "YISHUN MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -175,17 +194,18 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 4103,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3727,
       "corpus_name_matches": [
         "Yishun MRT Station",
         "Yishun MRT",
         "Yishun Mrt Station Wt Berth"
       ],
-      "head_rows_near": 3713,
+      "head_rows_near": 3430,
       "head_name_matches": [
-        "Yishun Mrt Station Wt Berth",
-        "Yishun MRT",
-        "Yishun MRT Station"
+        "Yishun MRT Station",
+        "Yishun MRT Station",
+        "Yishun Mrt Station Wt Berth"
       ],
       "head_tokens": [
         "berth",
@@ -198,6 +218,8 @@
       "case_id": "everyday-sg-21629",
       "query": "BOON KENG MRT STATION",
       "expected_name": "BOON KENG MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -209,13 +231,14 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 18926,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 14657,
       "corpus_name_matches": [
-        "UOB ATM - Boon Keng NEL MRT Station",
         "Boon Keng MRT Station",
+        "UOB ATM - Boon Keng NEL MRT Station",
         "Boon Keng"
       ],
-      "head_rows_near": 18197,
+      "head_rows_near": 13936,
       "head_name_matches": [
         "Boon Keng MRT Station",
         "Boon Keng MRT Station",
@@ -231,6 +254,8 @@
       "case_id": "everyday-sg-21321",
       "query": "LAYAR LRT STATION",
       "expected_name": "LAYAR LRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -242,11 +267,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 3597,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3027,
       "corpus_name_matches": [
         "Layar LRT Station"
       ],
-      "head_rows_near": 3162,
+      "head_rows_near": 2701,
       "head_name_matches": [
         "Layar LRT Station",
         "Layar LRT Station"
@@ -260,6 +286,8 @@
       "case_id": "everyday-sg-21349",
       "query": "BEDOK RESERVOIR MRT STATION",
       "expected_name": "BEDOK RESERVOIR MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -271,16 +299,17 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 5598,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 4866,
       "corpus_name_matches": [
-        "Bedok Reservoir",
+        "Bedok Reservoir MRT Station",
         "Bedok Reservoir",
         "Bedok Reservoir"
       ],
-      "head_rows_near": 4834,
+      "head_rows_near": 4217,
       "head_name_matches": [
         "Bedok Reservoir MRT Station",
-        "Bedok Reservoir",
+        "Bedok Reservoir MRT Station",
         "Bedok Reservoir"
       ],
       "head_tokens": [
@@ -293,6 +322,8 @@
       "case_id": "everyday-sg-21360",
       "query": "CHANGI AIRPORT MRT STATION",
       "expected_name": "CHANGI AIRPORT MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -304,11 +335,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 1211,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 1017,
       "corpus_name_matches": [
         "Changi Airport MRT Station"
       ],
-      "head_rows_near": 1330,
+      "head_rows_near": 1160,
       "head_name_matches": [
         "Changi Airport MRT Station",
         "Changi Airport MRT Station",
@@ -324,6 +356,8 @@
       "case_id": "everyday-sg-21222",
       "query": "MARINE PARADE MRT STATION",
       "expected_name": "MARINE PARADE MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -335,12 +369,13 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 7467,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 6620,
       "corpus_name_matches": [
         "Marine Parade MRT",
         "Marine Parade"
       ],
-      "head_rows_near": 7165,
+      "head_rows_near": 6286,
       "head_name_matches": [
         "Marine Parade MRT"
       ],
@@ -352,6 +387,8 @@
       "case_id": "everyday-sg-21712",
       "query": "RENJONG LRT STATION",
       "expected_name": "RENJONG LRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -363,11 +400,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 4387,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3805,
       "corpus_name_matches": [
         "Renjong LRT Station"
       ],
-      "head_rows_near": 3759,
+      "head_rows_near": 3206,
       "head_name_matches": [
         "Renjong LRT Station",
         "Renjong LRT Station"
@@ -381,6 +419,8 @@
       "case_id": "everyday-sg-21729",
       "query": "TAN KAH KEE MRT STATION",
       "expected_name": "TAN KAH KEE MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -392,11 +432,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2839,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 1930,
       "corpus_name_matches": [
         "Tan Kah Kee MRT Station"
       ],
-      "head_rows_near": 3035,
+      "head_rows_near": 2000,
       "head_name_matches": [
         "Tan Kah Kee MRT Station",
         "Tan Kah Kee MRT Station"
@@ -410,6 +451,8 @@
       "case_id": "everyday-sg-21283",
       "query": "BUGIS MRT STATION",
       "expected_name": "BUGIS MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -421,11 +464,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 32009,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27984,
       "corpus_name_matches": [
         "Bugis MRT Station"
       ],
-      "head_rows_near": 31989,
+      "head_rows_near": 27861,
       "head_name_matches": [
         "Bugis MRT Station",
         "Bugis MRT Station"
@@ -439,6 +483,8 @@
       "case_id": "everyday-sg-21166",
       "query": "MOUNTBATTEN MRT STATION",
       "expected_name": "MOUNTBATTEN MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -450,11 +496,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 11162,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 7676,
       "corpus_name_matches": [
         "Mountbatten MRT Station"
       ],
-      "head_rows_near": 10961,
+      "head_rows_near": 7788,
       "head_name_matches": [
         "Mountbatten MRT Station",
         "Mountbatten MRT Station"
@@ -468,6 +515,8 @@
       "case_id": "everyday-sg-21198",
       "query": "BENCOOLEN MRT STATION",
       "expected_name": "BENCOOLEN MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -479,12 +528,13 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 36413,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 32071,
       "corpus_name_matches": [
         "Bencoolen MRT Station",
         "Bencoolen MRT"
       ],
-      "head_rows_near": 36205,
+      "head_rows_near": 31874,
       "head_name_matches": [
         "Bencoolen MRT Station",
         "Bencoolen MRT Station"
@@ -498,6 +548,8 @@
       "case_id": "everyday-sg-21492",
       "query": "SEMBAWANG MRT STATION",
       "expected_name": "SEMBAWANG MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -509,12 +561,13 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 4268,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 3560,
       "corpus_name_matches": [
         "MoneyMax Pawnshop - Sembawang MRT Station",
         "UOB ATM - Sembawang MRT Station"
       ],
-      "head_rows_near": 3648,
+      "head_rows_near": 3015,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -522,6 +575,8 @@
       "case_id": "everyday-sg-21185",
       "query": "BUKIT PANJANG MRT STATION",
       "expected_name": "BUKIT PANJANG MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -533,13 +588,14 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2504,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 2290,
       "corpus_name_matches": [
+        "Bukit Panjang MRT Station",
         "Bukit Panjang",
-        "Bukit Panjang",
-        "Bukit Panjang MRT Station"
+        "Bukit Panjang"
       ],
-      "head_rows_near": 2247,
+      "head_rows_near": 2033,
       "head_name_matches": [
         "Bukit Panjang"
       ],
@@ -551,6 +607,8 @@
       "case_id": "everyday-sg-21139",
       "query": "GREAT WORLD MRT STATION",
       "expected_name": "GREAT WORLD MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -562,12 +620,13 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 32275,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 27552,
       "corpus_name_matches": [
         "Great World",
         "Great World MRT"
       ],
-      "head_rows_near": 32058,
+      "head_rows_near": 27578,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -575,6 +634,8 @@
       "case_id": "everyday-sg-21431",
       "query": "DOVER MRT STATION",
       "expected_name": "DOVER MRT STATION",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -586,9 +647,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 4701,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3885,
       "corpus_name_matches": [],
-      "head_rows_near": 4418,
+      "head_rows_near": 3629,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -596,6 +658,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001087",
       "query": "修安扁擔豆花",
       "expected_name": "修安扁擔豆花",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -607,11 +671,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21242,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 19009,
       "corpus_name_matches": [
         "修安扁擔豆花"
       ],
-      "head_rows_near": 65322,
+      "head_rows_near": 58530,
       "head_name_matches": [
         "修安扁擔豆花",
         "修安扁擔豆花",
@@ -629,6 +694,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001176",
       "query": "美記肉圓",
       "expected_name": "美記肉圓",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -640,11 +707,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 18454,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 16274,
       "corpus_name_matches": [
         "美記肉圓"
       ],
-      "head_rows_near": 57278,
+      "head_rows_near": 50555,
       "head_name_matches": [
         "美記肉圓",
         "美記肉圓"
@@ -658,6 +726,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_006371",
       "query": "椿友手工烘焙坊",
       "expected_name": "椿友手工烘焙坊",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -669,11 +739,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 23167,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 20534,
       "corpus_name_matches": [
         "椿友手工烘焙坊"
       ],
-      "head_rows_near": 71170,
+      "head_rows_near": 63119,
       "head_name_matches": [
         "椿友手工烘焙坊",
         "椿友手工烘焙坊",
@@ -690,6 +761,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_006378",
       "query": "咖啡部屋",
       "expected_name": "咖啡部屋",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -701,11 +774,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 12968,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 10785,
       "corpus_name_matches": [
         "咖啡部屋"
       ],
-      "head_rows_near": 40334,
+      "head_rows_near": 33697,
       "head_name_matches": [
         "咖啡部屋"
       ],
@@ -717,6 +791,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001151",
       "query": "蝦到爆",
       "expected_name": "蝦到爆",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -728,9 +804,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6279,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5284,
       "corpus_name_matches": [],
-      "head_rows_near": 20377,
+      "head_rows_near": 17287,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -738,6 +815,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001132",
       "query": "振發茶行",
       "expected_name": "振發茶行",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -749,11 +828,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 23254,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 20684,
       "corpus_name_matches": [
         "振發茶行"
       ],
-      "head_rows_near": 71368,
+      "head_rows_near": 63496,
       "head_name_matches": [
         "振發茶行",
         "振發茶行",
@@ -769,6 +849,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_002030",
       "query": "阿娟咖哩飯鴨肉羹",
       "expected_name": "阿娟咖哩飯鴨肉羹",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -780,11 +862,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 20450,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18253,
       "corpus_name_matches": [
         "阿娟咖哩飯鴨肉羹"
       ],
-      "head_rows_near": 63070,
+      "head_rows_near": 56214,
       "head_name_matches": [
         "阿娟咖哩飯鴨肉羹",
         "阿娟咖哩飯鴨肉羹",
@@ -805,6 +888,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001058",
       "query": "楊哥楊嫂肉粽店",
       "expected_name": "楊哥楊嫂肉粽店",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -816,11 +901,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 20870,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18612,
       "corpus_name_matches": [
         "楊哥楊嫂肉粽店"
       ],
-      "head_rows_near": 64341,
+      "head_rows_near": 57220,
       "head_name_matches": [
         "楊哥楊嫂肉粽店",
         "楊哥楊嫂肉粽店",
@@ -840,6 +926,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_008102",
       "query": "小葉布丁",
       "expected_name": "小葉布丁",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -851,11 +939,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 5910,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 5094,
       "corpus_name_matches": [
         "小葉布丁"
       ],
-      "head_rows_near": 19213,
+      "head_rows_near": 16661,
       "head_name_matches": [
         "小葉布丁",
         "小葉布丁",
@@ -871,6 +960,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001131",
       "query": "連得堂餅家",
       "expected_name": "連得堂餅家",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -882,11 +973,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 22558,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 19235,
       "corpus_name_matches": [
         "連得堂餅家"
       ],
-      "head_rows_near": 69096,
+      "head_rows_near": 58650,
       "head_name_matches": [
         "連得堂餅家",
         "連得堂餅家",
@@ -903,6 +995,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001518",
       "query": "大同包子店",
       "expected_name": "大同包子店",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -914,11 +1008,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21299,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18560,
       "corpus_name_matches": [
         "大同包子店"
       ],
-      "head_rows_near": 65517,
+      "head_rows_near": 57186,
       "head_name_matches": [
         "大同包子店",
         "大同包子店"
@@ -932,6 +1027,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001134",
       "query": "文峰茶莊",
       "expected_name": "文峰茶莊",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -943,11 +1040,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 23233,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 20232,
       "corpus_name_matches": [
         "文峰茶莊"
       ],
-      "head_rows_near": 71219,
+      "head_rows_near": 61953,
       "head_name_matches": [
         "文峰茶莊",
         "文峰茶莊",
@@ -964,6 +1062,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001459",
       "query": "許家蝦仁肉圓/芋粿",
       "expected_name": "許家蝦仁肉圓/芋粿",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -975,11 +1075,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21020,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 18626,
       "corpus_name_matches": [
         "許家蝦仁肉圓 芋粿"
       ],
-      "head_rows_near": 64646,
+      "head_rows_near": 57293,
       "head_name_matches": [
         "許家蝦仁肉圓 芋粿",
         "許家蝦仁肉圓 芋粿"
@@ -993,6 +1094,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001489",
       "query": "森茂碗粿(開山店)",
       "expected_name": "森茂碗粿(開山店)",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1004,9 +1107,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 22300,
+      "match_strength": "NONE",
+      "corpus_rows_near": 19416,
       "corpus_name_matches": [],
-      "head_rows_near": 68569,
+      "head_rows_near": 59811,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1014,6 +1118,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001114",
       "query": "阿憨鹹粥",
       "expected_name": "阿憨鹹粥",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1025,11 +1131,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21963,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18939,
       "corpus_name_matches": [
         "阿憨鹹粥"
       ],
-      "head_rows_near": 67241,
+      "head_rows_near": 57736,
       "head_name_matches": [
         "阿憨鹹粥",
         "阿憨鹹粥",
@@ -1046,6 +1153,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001477",
       "query": "窄門咖啡館",
       "expected_name": "窄門咖啡館",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1057,9 +1166,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 22071,
+      "match_strength": "NONE",
+      "corpus_rows_near": 19868,
       "corpus_name_matches": [],
-      "head_rows_near": 67800,
+      "head_rows_near": 61122,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1067,6 +1177,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001115",
       "query": "福榮小吃店",
       "expected_name": "福榮小吃店",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1078,11 +1190,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21002,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18575,
       "corpus_name_matches": [
         "福榮小吃店"
       ],
-      "head_rows_near": 64599,
+      "head_rows_near": 57214,
       "head_name_matches": [
         "福榮小吃店",
         "福榮小吃店",
@@ -1098,6 +1211,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_006405",
       "query": "益生興蜜餞",
       "expected_name": "益生興蜜餞",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1109,11 +1224,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 4275,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3782,
       "corpus_name_matches": [
         "益生興蜜餞"
       ],
-      "head_rows_near": 14132,
+      "head_rows_near": 12541,
       "head_name_matches": [
         "益生興蜜餞",
         "益生興蜜餞",
@@ -1129,6 +1245,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001057",
       "query": "台南度小月擔仔麵原始店本舖",
       "expected_name": "台南度小月擔仔麵原始店本舖",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1140,9 +1258,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 22488,
+      "match_strength": "NONE",
+      "corpus_rows_near": 20176,
       "corpus_name_matches": [],
-      "head_rows_near": 69154,
+      "head_rows_near": 61896,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1150,6 +1269,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001892",
       "query": "石精臼點心城",
       "expected_name": "石精臼點心城",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1161,11 +1282,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21880,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 19527,
       "corpus_name_matches": [
         "石精臼點心城"
       ],
-      "head_rows_near": 67106,
+      "head_rows_near": 59928,
       "head_name_matches": [
         "石精臼點心城",
         "石精臼點心城",
@@ -1181,6 +1303,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_006381",
       "query": "佛都愛玉",
       "expected_name": "佛都愛玉",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1192,11 +1316,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 20716,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18568,
       "corpus_name_matches": [
         "佛都愛玉"
       ],
-      "head_rows_near": 63840,
+      "head_rows_near": 57214,
       "head_name_matches": [
         "佛都愛玉",
         "佛都愛玉",
@@ -1212,6 +1337,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_002003",
       "query": "東東宴會式場-華平囍嫁館",
       "expected_name": "東東宴會式場-華平囍嫁館",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1223,9 +1350,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 9929,
+      "match_strength": "NONE",
+      "corpus_rows_near": 7794,
       "corpus_name_matches": [],
-      "head_rows_near": 31804,
+      "head_rows_near": 24970,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1233,6 +1361,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001730",
       "query": "冬瓜寶冬瓜茶冷飲專賣店",
       "expected_name": "冬瓜寶冬瓜茶冷飲專賣店",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1244,11 +1374,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 19417,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 17508,
       "corpus_name_matches": [
         "冬瓜寶冬瓜茶冷飲專賣店"
       ],
-      "head_rows_near": 60107,
+      "head_rows_near": 53979,
       "head_name_matches": [
         "冬瓜寶冬瓜茶冷飲專賣店",
         "冬瓜寶冬瓜茶冷飲專賣店",
@@ -1265,6 +1396,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001742",
       "query": "沙淘宮菜粽",
       "expected_name": "沙淘宮菜粽",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1276,11 +1409,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 21490,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 19062,
       "corpus_name_matches": [
         "沙淘宮菜粽"
       ],
-      "head_rows_near": 66130,
+      "head_rows_near": 58710,
       "head_name_matches": [
         "沙淘宮菜粽",
         "沙淘宮菜粽",
@@ -1298,6 +1432,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001161",
       "query": "小南米糕",
       "expected_name": "小南米糕",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1309,12 +1445,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 22079,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 19185,
       "corpus_name_matches": [
         "小南米糕",
         "小南米糕"
       ],
-      "head_rows_near": 67908,
+      "head_rows_near": 59058,
       "head_name_matches": [
         "小南米糕",
         "小南米糕"
@@ -1327,6 +1464,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_006415",
       "query": "小方舟串燒酒場",
       "expected_name": "小方舟串燒酒場",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1338,11 +1477,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 17218,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 15019,
       "corpus_name_matches": [
         "小方舟串燒酒場"
       ],
-      "head_rows_near": 52892,
+      "head_rows_near": 46032,
       "head_name_matches": [
         "小方舟串燒酒場",
         "小方舟串燒酒場",
@@ -1358,6 +1498,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001539",
       "query": "安徒生咖啡館",
       "expected_name": "安徒生咖啡館",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1369,9 +1511,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 17967,
+      "match_strength": "NONE",
+      "corpus_rows_near": 15172,
       "corpus_name_matches": [],
-      "head_rows_near": 54497,
+      "head_rows_near": 45710,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1379,6 +1522,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001964",
       "query": "呷霸浮水魚羹",
       "expected_name": "呷霸浮水魚羹",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1390,9 +1535,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 22092,
+      "match_strength": "NONE",
+      "corpus_rows_near": 19670,
       "corpus_name_matches": [],
-      "head_rows_near": 67795,
+      "head_rows_near": 60341,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1400,6 +1546,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_006493",
       "query": "忠嫂牛肉湯",
       "expected_name": "忠嫂牛肉湯",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1411,11 +1559,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 10424,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 8562,
       "corpus_name_matches": [
         "忠嫂牛肉湯"
       ],
-      "head_rows_near": 32102,
+      "head_rows_near": 26535,
       "head_name_matches": [
         "忠嫂牛肉湯",
         "忠嫂牛肉湯",
@@ -1431,6 +1580,8 @@
       "case_id": "everyday-tw-Restaurant_395000000A_001485",
       "query": "真正紅燒土魠",
       "expected_name": "真正紅燒土魠",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1442,11 +1593,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 23877,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 20539,
       "corpus_name_matches": [
         "真正紅燒土魠"
       ],
-      "head_rows_near": 73091,
+      "head_rows_near": 62875,
       "head_name_matches": [
         "真正紅燒土魠",
         "真正紅燒土魠",
@@ -1463,6 +1615,8 @@
       "case_id": "everyday-hk-23",
       "query": "東華三院黃大仙醫院",
       "expected_name": "東華三院黃大仙醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1474,12 +1628,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 5934,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 5066,
       "corpus_name_matches": [
         "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
         "東華三院黃大仙醫院"
       ],
-      "head_rows_near": 12662,
+      "head_rows_near": 10912,
       "head_name_matches": [
         "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
         "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
@@ -1500,6 +1655,8 @@
       "case_id": "everyday-hk-3",
       "query": "東華東院",
       "expected_name": "東華東院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1511,12 +1668,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 19166,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 17286,
       "corpus_name_matches": [
         "Tung Wah Eastern Hospital",
         "東華東院"
       ],
-      "head_rows_near": 34822,
+      "head_rows_near": 31543,
       "head_name_matches": [
         "Tung Wah Eastern Hospital",
         "Tung Wah Eastern Hospital",
@@ -1534,6 +1692,8 @@
       "case_id": "everyday-hk-40",
       "query": "青山醫院",
       "expected_name": "青山醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1545,14 +1705,15 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 3159,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 2842,
       "corpus_name_matches": [
-        "Castle Peak Hospital Block B",
-        "青山醫院"
+        "青山醫院",
+        "Castle Peak Hospital Block B"
       ],
-      "head_rows_near": 9639,
+      "head_rows_near": 8762,
       "head_name_matches": [
-        "Castle Peak Hospital Block B",
+        "青山醫院",
         "青山醫院",
         "青山醫院"
       ],
@@ -1567,6 +1728,8 @@
       "case_id": "everyday-hk-9",
       "query": "瑪麗醫院",
       "expected_name": "瑪麗醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1578,12 +1741,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 8279,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 5899,
       "corpus_name_matches": [
         "瑪麗醫院",
         "Queen Mary Hospital Bus Stop"
       ],
-      "head_rows_near": 19246,
+      "head_rows_near": 14553,
       "head_name_matches": [
         "瑪麗醫院",
         "瑪麗醫院",
@@ -1599,6 +1763,8 @@
       "case_id": "everyday-hk-14",
       "query": "東華三院馮堯敬醫院",
       "expected_name": "東華三院馮堯敬醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1610,11 +1776,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 4257,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3868,
       "corpus_name_matches": [
         "東華三院馮堯敬醫院"
       ],
-      "head_rows_near": 10966,
+      "head_rows_near": 9901,
       "head_name_matches": [
         "東華三院馮堯敬醫院",
         "東華三院馮堯敬醫院",
@@ -1635,6 +1802,8 @@
       "case_id": "everyday-hk-32",
       "query": "聖母醫院",
       "expected_name": "聖母醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1646,11 +1815,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 6100,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 5459,
       "corpus_name_matches": [
         "Our Lady of Maryknoll Hospital"
       ],
-      "head_rows_near": 13088,
+      "head_rows_near": 11697,
       "head_name_matches": [
         "Our Lady of Maryknoll Hospital"
       ],
@@ -1662,6 +1832,8 @@
       "case_id": "everyday-hk-20",
       "query": "靈實醫院",
       "expected_name": "靈實醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1673,12 +1845,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 3018,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 2558,
       "corpus_name_matches": [
         "Haven of Hope Hospital",
         "靈實醫院"
       ],
-      "head_rows_near": 6274,
+      "head_rows_near": 5322,
       "head_name_matches": [
         "靈實醫院",
         "靈實醫院",
@@ -1694,6 +1867,8 @@
       "case_id": "everyday-hk-25",
       "query": "大埔醫院",
       "expected_name": "大埔醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1705,16 +1880,17 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2232,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 2119,
       "corpus_name_matches": [
         "Tai Po Hospital",
         "大埔醫院",
         "Tai Po"
       ],
-      "head_rows_near": 4954,
+      "head_rows_near": 4672,
       "head_name_matches": [
-        "Tai Po",
         "Tai Po Hospital",
+        "大埔醫院",
         "大埔醫院"
       ],
       "head_tokens": [
@@ -1728,6 +1904,8 @@
       "case_id": "everyday-hk-15",
       "query": "葛量洪醫院",
       "expected_name": "葛量洪醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1739,12 +1917,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2890,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 2282,
       "corpus_name_matches": [
         "Grantham Hospital",
         "葛量洪醫院"
       ],
-      "head_rows_near": 5874,
+      "head_rows_near": 4505,
       "head_name_matches": [
         "Grantham Hospital",
         "Grantham Hospital",
@@ -1763,6 +1942,8 @@
       "case_id": "everyday-hk-11",
       "query": "東華醫院",
       "expected_name": "東華醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1774,11 +1955,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 17363,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 16126,
       "corpus_name_matches": [
         "Tung Wah Hospital"
       ],
-      "head_rows_near": 33944,
+      "head_rows_near": 31750,
       "head_name_matches": [
         "Tung Wah Hospital",
         "Tung Wah Hospital"
@@ -1792,6 +1974,8 @@
       "case_id": "everyday-hk-10",
       "query": "律敦治醫院",
       "expected_name": "律敦治醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1803,16 +1987,17 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 25751,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 21127,
       "corpus_name_matches": [
-        "Ruttonjee Hospital Pharmacy",
-        "律敦治醫院"
-      ],
-      "head_rows_near": 45112,
-      "head_name_matches": [
-        "Ruttonjee Hospital Pharmacy",
-        "Ruttonjee Hospital Pharmacy",
+        "律敦治醫院",
         "Ruttonjee Hospital Pharmacy"
+      ],
+      "head_rows_near": 37128,
+      "head_name_matches": [
+        "律敦治醫院",
+        "律敦治醫院",
+        "律敦治醫院"
       ],
       "head_tokens": [
         "e3:ruttonjee hospital pharmacy",
@@ -1828,6 +2013,8 @@
       "case_id": "everyday-hk-17",
       "query": "屯門醫院",
       "expected_name": "屯門醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -1839,16 +2026,17 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 3583,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3213,
       "corpus_name_matches": [
-        "Tuen Mun Hospital Authority Staff Clinic",
         "Tuen Mun Hospital",
+        "Tuen Mun Hospital Authority Staff Clinic",
         "Tuen Mun Social Hygiene Clinic, Tuen Mun Hospital"
       ],
-      "head_rows_near": 10878,
+      "head_rows_near": 9758,
       "head_name_matches": [
-        "Tuen Mun",
         "Tuen Mun Hospital",
+        "Tuen Mun",
         "Tuen Mun Social Hygiene Clinic, Tuen Mun Hospital"
       ],
       "head_tokens": [
@@ -1862,6 +2050,8 @@
       "case_id": "everyday-hk-28",
       "query": "沙田醫院",
       "expected_name": "沙田醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1873,9 +2063,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2932,
+      "match_strength": "NONE",
+      "corpus_rows_near": 2331,
       "corpus_name_matches": [],
-      "head_rows_near": 6430,
+      "head_rows_near": 5015,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -1883,6 +2074,8 @@
       "case_id": "everyday-hk-31",
       "query": "北大嶼山醫院",
       "expected_name": "北大嶼山醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1894,11 +2087,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 858,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 843,
       "corpus_name_matches": [
         "North Lantau Hospital"
       ],
-      "head_rows_near": 1982,
+      "head_rows_near": 1933,
       "head_name_matches": [
         "North Lantau Hospital",
         "North Lantau Hospital"
@@ -1912,6 +2106,8 @@
       "case_id": "everyday-hk-8",
       "query": "贊育醫院",
       "expected_name": "贊育醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1923,12 +2119,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 16804,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 15682,
       "corpus_name_matches": [
         "贊育醫院",
         "Tsan Yuk Hospital"
       ],
-      "head_rows_near": 33233,
+      "head_rows_near": 31191,
       "head_name_matches": [
         "Tsan Yuk Hospital",
         "Tsan Yuk Hospital",
@@ -1947,6 +2144,8 @@
       "case_id": "everyday-hk-33",
       "query": "博愛醫院",
       "expected_name": "博愛醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1958,11 +2157,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 4073,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3799,
       "corpus_name_matches": [
         "博愛醫院"
       ],
-      "head_rows_near": 12354,
+      "head_rows_near": 11518,
       "head_name_matches": [
         "博愛醫院",
         "博愛醫院",
@@ -1978,6 +2178,8 @@
       "case_id": "everyday-hk-41",
       "query": "沙田慈氏護養院",
       "expected_name": "沙田慈氏護養院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -1989,15 +2191,16 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2277,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 1685,
       "corpus_name_matches": [
         "沙田慈氏護養院",
         "Cheshire Home"
       ],
-      "head_rows_near": 5002,
+      "head_rows_near": 3707,
       "head_name_matches": [
-        "Cheshire Home",
-        "Cheshire Home",
+        "沙田慈氏護養院",
+        "沙田慈氏護養院",
         "沙田慈氏護養院"
       ],
       "head_tokens": [
@@ -2015,6 +2218,8 @@
       "case_id": "everyday-hk-30",
       "query": "威爾斯親王醫院",
       "expected_name": "威爾斯親王醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -2026,11 +2231,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 3970,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3440,
       "corpus_name_matches": [
         "Prince of Wales Hospital"
       ],
-      "head_rows_near": 8374,
+      "head_rows_near": 7246,
       "head_name_matches": [
         "Prince of Wales Hospital",
         "Prince of Wales Hospital",
@@ -2046,6 +2252,8 @@
       "case_id": "everyday-hk-4",
       "query": "麥理浩復康院",
       "expected_name": "麥理浩復康院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2057,11 +2265,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 4177,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3480,
       "corpus_name_matches": [
         "Maclehose Medical Rehabilitation Centre"
       ],
-      "head_rows_near": 10784,
+      "head_rows_near": 8918,
       "head_name_matches": [
         "Maclehose Medical Rehabilitation Centre",
         "Maclehose Medical Rehabilitation Centre"
@@ -2075,6 +2284,8 @@
       "case_id": "everyday-hk-38",
       "query": "香港兒童醫院",
       "expected_name": "香港兒童醫院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2086,12 +2297,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 14354,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 11152,
       "corpus_name_matches": [
-        "Kai Tak Promenade (Hong Kong Children's Hospital Section) Children's Playground",
-        "Hong Kong Children's Hospital"
+        "Hong Kong Children's Hospital",
+        "Kai Tak Promenade (Hong Kong Children's Hospital Section) Children's Playground"
       ],
-      "head_rows_near": 27463,
+      "head_rows_near": 20613,
       "head_name_matches": [
         "Kai Tak Promenade (Hong Kong Children's Hospital Section) Children's Playground"
       ],
@@ -2103,6 +2315,8 @@
       "case_id": "everyday-kr-PHMA220043190033021200001",
       "query": "중앙대학교병원",
       "expected_name": "중앙대학교병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -2114,11 +2328,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2660,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 1990,
       "corpus_name_matches": [
         "중앙대학교병원"
       ],
-      "head_rows_near": 3205,
+      "head_rows_near": 2390,
       "head_name_matches": [
         "중앙대학교병원",
         "중앙대학교병원"
@@ -2132,6 +2347,8 @@
       "case_id": "everyday-kr-PHMA220123240033021200001",
       "query": "공안과병원",
       "expected_name": "공안과병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2143,9 +2360,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 4175,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3370,
       "corpus_name_matches": [],
-      "head_rows_near": 4627,
+      "head_rows_near": 3751,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2153,6 +2371,8 @@
       "case_id": "everyday-kr-PHMA220213160034021200001",
       "query": "남서울요양병원",
       "expected_name": "남서울요양병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2164,9 +2384,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 3960,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3531,
       "corpus_name_matches": [],
-      "head_rows_near": 4535,
+      "head_rows_near": 4049,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2174,6 +2395,8 @@
       "case_id": "everyday-kr-PHMA220123220033021200006",
       "query": "튼튼병원",
       "expected_name": "튼튼병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -2185,9 +2408,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 14251,
+      "match_strength": "NONE",
+      "corpus_rows_near": 11471,
       "corpus_name_matches": [],
-      "head_rows_near": 16530,
+      "head_rows_near": 13330,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2195,6 +2419,8 @@
       "case_id": "everyday-kr-PHMA219903220033021200001",
       "query": "차의과학대학교 강남차병원",
       "expected_name": "차의과학대학교 강남차병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2206,9 +2432,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 25826,
+      "match_strength": "NONE",
+      "corpus_rows_near": 21977,
       "corpus_name_matches": [],
-      "head_rows_near": 30451,
+      "head_rows_near": 25988,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2216,6 +2443,8 @@
       "case_id": "everyday-kr-PHMA219793000034021200001",
       "query": "강북삼성병원",
       "expected_name": "강북삼성병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -2227,11 +2456,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 15937,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 14235,
       "corpus_name_matches": [
         "강북삼성병원"
       ],
-      "head_rows_near": 19563,
+      "head_rows_near": 17579,
       "head_name_matches": [
         "강북삼성병원"
       ],
@@ -2243,6 +2473,8 @@
       "case_id": "everyday-kr-PHMA220203220033021200002",
       "query": "라이브치과병원",
       "expected_name": "라이브치과병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -2254,9 +2486,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 24167,
+      "match_strength": "NONE",
+      "corpus_rows_near": 20520,
       "corpus_name_matches": [],
-      "head_rows_near": 28487,
+      "head_rows_near": 24318,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2264,6 +2497,8 @@
       "case_id": "everyday-kr-PHMA220073110032021200001",
       "query": "하나효요양병원",
       "expected_name": "하나효요양병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2275,11 +2510,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2368,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 2225,
       "corpus_name_matches": [
         "하나효요양병원"
       ],
-      "head_rows_near": 2725,
+      "head_rows_near": 2535,
       "head_name_matches": [
         "하나효요양병원"
       ],
@@ -2291,6 +2527,8 @@
       "case_id": "everyday-kr-PHMA220113050034021200001",
       "query": "서울나은병원",
       "expected_name": "서울나은병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -2302,11 +2540,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 6005,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 4931,
       "corpus_name_matches": [
         "서울나은병원"
       ],
-      "head_rows_near": 6850,
+      "head_rows_near": 5615,
       "head_name_matches": [
         "서울나은병원",
         "서울나은병원"
@@ -2320,6 +2559,8 @@
       "case_id": "everyday-kr-PHMA220043000034021200001",
       "query": "서울대학교치과병원",
       "expected_name": "서울대학교치과병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -2331,9 +2572,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 17258,
+      "match_strength": "NONE",
+      "corpus_rows_near": 15141,
       "corpus_name_matches": [],
-      "head_rows_near": 21080,
+      "head_rows_near": 18604,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2341,6 +2583,8 @@
       "case_id": "everyday-kr-PHMA220223090033021200003",
       "query": "자향한방병원",
       "expected_name": "자향한방병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -2352,9 +2596,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2680,
+      "match_strength": "NONE",
+      "corpus_rows_near": 2114,
       "corpus_name_matches": [],
-      "head_rows_near": 3065,
+      "head_rows_near": 2396,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2362,6 +2607,8 @@
       "case_id": "everyday-kr-PHMA220213230034021200001",
       "query": "서울세계로병원",
       "expected_name": "서울세계로병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -2373,11 +2620,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 2560,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 2143,
       "corpus_name_matches": [
         "서울세계로병원"
       ],
-      "head_rows_near": 2901,
+      "head_rows_near": 2399,
       "head_name_matches": [
         "서울세계로병원",
         "서울세계로병원"
@@ -2391,6 +2639,8 @@
       "case_id": "everyday-kr-PHMA219763160034021200005",
       "query": "의료법인다나의료재단구로다나병원",
       "expected_name": "의료법인다나의료재단구로다나병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2402,9 +2652,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2072,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1411,
       "corpus_name_matches": [],
-      "head_rows_near": 2493,
+      "head_rows_near": 1702,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2412,6 +2663,8 @@
       "case_id": "everyday-kr-PHMA220223200033021200001",
       "query": "바를정한방병원",
       "expected_name": "바를정한방병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2423,9 +2676,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 4287,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3753,
       "corpus_name_matches": [],
-      "head_rows_near": 4914,
+      "head_rows_near": 4284,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2433,6 +2687,8 @@
       "case_id": "everyday-kr-PHMA220223230034021200005",
       "query": "연세우리병원",
       "expected_name": "연세우리병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2444,9 +2700,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 5577,
+      "match_strength": "NONE",
+      "corpus_rows_near": 4710,
       "corpus_name_matches": [],
-      "head_rows_near": 6377,
+      "head_rows_near": 5419,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2454,6 +2711,8 @@
       "case_id": "everyday-kr-PHMA220053240033021200004",
       "query": "양병원",
       "expected_name": "양병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -2465,9 +2724,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 3467,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3037,
       "corpus_name_matches": [],
-      "head_rows_near": 3861,
+      "head_rows_near": 3392,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2475,6 +2735,8 @@
       "case_id": "everyday-kr-PHMA220073210034021200001",
       "query": "의료법인 부원의료재단 서초요양병원",
       "expected_name": "의료법인 부원의료재단 서초요양병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2486,9 +2748,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 9449,
+      "match_strength": "NONE",
+      "corpus_rows_near": 7335,
       "corpus_name_matches": [],
-      "head_rows_near": 10974,
+      "head_rows_near": 8580,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2496,6 +2759,8 @@
       "case_id": "everyday-kr-PHMA220203110032021200001",
       "query": "이우요양병원",
       "expected_name": "이우요양병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2507,9 +2772,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2258,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1991,
       "corpus_name_matches": [],
-      "head_rows_near": 2563,
+      "head_rows_near": 2254,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2517,6 +2783,8 @@
       "case_id": "everyday-kr-PHMA220253220033021200002",
       "query": "하병원",
       "expected_name": "하병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -2528,11 +2796,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 22155,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 19770,
       "corpus_name_matches": [
         "하병원"
       ],
-      "head_rows_near": 26253,
+      "head_rows_near": 23425,
       "head_name_matches": [
         "하병원"
       ],
@@ -2544,6 +2813,8 @@
       "case_id": "everyday-kr-PHMA220213140033021200001",
       "query": "바른지성한방병원",
       "expected_name": "바른지성한방병원",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2555,9 +2826,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 3678,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3015,
       "corpus_name_matches": [],
-      "head_rows_near": 4180,
+      "head_rows_near": 3420,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2565,6 +2837,8 @@
       "case_id": "everyday-co-2475",
       "query": "Unidad de Servicios de Salud 10 Abastos",
       "expected_name": "Unidad de Servicios de Salud 10 Abastos",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2576,9 +2850,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6755,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5566,
       "corpus_name_matches": [],
-      "head_rows_near": 4282,
+      "head_rows_near": 3499,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2586,6 +2861,8 @@
       "case_id": "everyday-co-2407",
       "query": "UNIDAD DE SERVICIOS DE SALUD CRUCES",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD CRUCES",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2597,9 +2874,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 12400,
+      "match_strength": "NONE",
+      "corpus_rows_near": 10325,
       "corpus_name_matches": [],
-      "head_rows_near": 8317,
+      "head_rows_near": 6969,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2607,6 +2885,8 @@
       "case_id": "everyday-co-2452",
       "query": "UNIDAD DE SERVICIOS DE SALUD AMBULATORIA - ABRAHAM LINCON",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD AMBULATORIA - ABRAHAM LINCON",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2618,9 +2898,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2496,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1883,
       "corpus_name_matches": [],
-      "head_rows_near": 1578,
+      "head_rows_near": 1208,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2628,6 +2909,8 @@
       "case_id": "everyday-co-2477",
       "query": "Unidad de Servicios de Salud 30 Bomberos",
       "expected_name": "Unidad de Servicios de Salud 30 Bomberos",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2639,9 +2922,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6169,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5052,
       "corpus_name_matches": [],
-      "head_rows_near": 3950,
+      "head_rows_near": 3215,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2649,6 +2933,8 @@
       "case_id": "everyday-co-2482",
       "query": "Unidad de Servicios de Salud 60 Visión de Colombia",
       "expected_name": "Unidad de Servicios de Salud 60 Visión de Colombia",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2660,9 +2946,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 5346,
+      "match_strength": "NONE",
+      "corpus_rows_near": 4218,
       "corpus_name_matches": [],
-      "head_rows_near": 3494,
+      "head_rows_near": 2758,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2670,6 +2957,8 @@
       "case_id": "everyday-co-2460",
       "query": "UNIDAD DE SERVICIOS DE SALUD USME",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD USME",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2681,9 +2970,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 159,
+      "match_strength": "NONE",
+      "corpus_rows_near": 132,
       "corpus_name_matches": [],
-      "head_rows_near": 99,
+      "head_rows_near": 79,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2691,6 +2981,8 @@
       "case_id": "everyday-co-2438",
       "query": "UNIDAD DE SERVICIOS DE SALUD SAN LUIS",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD SAN LUIS",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2702,9 +2994,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 387,
+      "match_strength": "NONE",
+      "corpus_rows_near": 294,
       "corpus_name_matches": [],
-      "head_rows_near": 285,
+      "head_rows_near": 215,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2712,6 +3005,8 @@
       "case_id": "everyday-co-2479",
       "query": "Unidad de Servicios de Salud 36 Asunción Bochica",
       "expected_name": "Unidad de Servicios de Salud 36 Asunción Bochica",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2723,9 +3018,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 11364,
+      "match_strength": "NONE",
+      "corpus_rows_near": 9154,
       "corpus_name_matches": [],
-      "head_rows_near": 7538,
+      "head_rows_near": 6063,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2733,6 +3029,8 @@
       "case_id": "everyday-co-2513",
       "query": "Unidad de Servicios de Salud Nuevas Delicias",
       "expected_name": "Unidad de Servicios de Salud Nuevas Delicias",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2744,9 +3042,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6124,
+      "match_strength": "NONE",
+      "corpus_rows_near": 4883,
       "corpus_name_matches": [],
-      "head_rows_near": 3958,
+      "head_rows_near": 3227,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2754,6 +3053,8 @@
       "case_id": "everyday-co-2434",
       "query": "UNIDAD DE SERVICIOS DE SALUD GAITANA I",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD GAITANA I",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2765,9 +3066,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 4379,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3788,
       "corpus_name_matches": [],
-      "head_rows_near": 2708,
+      "head_rows_near": 2322,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2775,6 +3077,8 @@
       "case_id": "everyday-co-2448",
       "query": "UNIDAD DE SERVICIOS DE SALUD MEISSEN",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD MEISSEN",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2786,9 +3090,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2408,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1962,
       "corpus_name_matches": [],
-      "head_rows_near": 1525,
+      "head_rows_near": 1254,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2796,6 +3101,8 @@
       "case_id": "everyday-co-2504",
       "query": "Unidad de Servicios de Salud San Bernardino",
       "expected_name": "Unidad de Servicios de Salud San Bernardino",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2807,9 +3114,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2474,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1972,
       "corpus_name_matches": [],
-      "head_rows_near": 1480,
+      "head_rows_near": 1193,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2817,6 +3125,8 @@
       "case_id": "everyday-co-2462",
       "query": "UNIDAD DE SERVICIOS DE SALUD LA REFORMA",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD LA REFORMA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2828,9 +3138,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 1026,
+      "match_strength": "NONE",
+      "corpus_rows_near": 973,
       "corpus_name_matches": [],
-      "head_rows_near": 667,
+      "head_rows_near": 632,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2838,6 +3149,8 @@
       "case_id": "everyday-co-2487",
       "query": "Unidad de Servicios de Salud 79 Carvajal",
       "expected_name": "Unidad de Servicios de Salud 79 Carvajal",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2849,9 +3162,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6881,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5689,
       "corpus_name_matches": [],
-      "head_rows_near": 4566,
+      "head_rows_near": 3812,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2859,6 +3173,8 @@
       "case_id": "everyday-co-2435",
       "query": "UNIDAD DE SERVICIOS DE SALUD PRADO VERANIEGO",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD PRADO VERANIEGO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2870,9 +3186,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 10793,
+      "match_strength": "NONE",
+      "corpus_rows_near": 8614,
       "corpus_name_matches": [],
-      "head_rows_near": 7668,
+      "head_rows_near": 6138,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2880,6 +3197,8 @@
       "case_id": "everyday-co-2419",
       "query": "LIBERTADORES",
       "expected_name": "LIBERTADORES",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -2891,9 +3210,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 468,
+      "match_strength": "NONE",
+      "corpus_rows_near": 365,
       "corpus_name_matches": [],
-      "head_rows_near": 306,
+      "head_rows_near": 247,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2901,6 +3221,8 @@
       "case_id": "everyday-co-2510",
       "query": "Unidad de Servicios de Salud Olarte",
       "expected_name": "Unidad de Servicios de Salud Olarte",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2912,9 +3234,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 4183,
+      "match_strength": "NONE",
+      "corpus_rows_near": 3226,
       "corpus_name_matches": [],
-      "head_rows_near": 2683,
+      "head_rows_near": 2089,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2922,6 +3245,8 @@
       "case_id": "everyday-co-2430",
       "query": "UNIDAD DE SERVICIOS DE SALUD ALAMOS",
       "expected_name": "UNIDAD DE SERVICIOS DE SALUD ALAMOS",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2933,9 +3258,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6748,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5345,
       "corpus_name_matches": [],
-      "head_rows_near": 4413,
+      "head_rows_near": 3512,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2943,6 +3269,8 @@
       "case_id": "everyday-co-2500",
       "query": "Unidad de Servicios de Salud Terminal Aéreo",
       "expected_name": "Unidad de Servicios de Salud Terminal Aéreo",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2954,9 +3282,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2073,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1598,
       "corpus_name_matches": [],
-      "head_rows_near": 1222,
+      "head_rows_near": 945,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2964,6 +3293,8 @@
       "case_id": "everyday-co-2472",
       "query": "Unidad de Servicios de Salud Mental Floralia",
       "expected_name": "Unidad de Servicios de Salud Mental Floralia",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2975,9 +3306,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 7556,
+      "match_strength": "NONE",
+      "corpus_rows_near": 6387,
       "corpus_name_matches": [],
-      "head_rows_near": 4910,
+      "head_rows_near": 4105,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -2985,6 +3317,8 @@
       "case_id": "everyday-au-41e89cc49682207b453703c2157cd0fb66361c32",
       "query": "Rapha Australia",
       "expected_name": "Rapha Australia",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -2996,9 +3330,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 28223,
+      "match_strength": "NONE",
+      "corpus_rows_near": 25679,
       "corpus_name_matches": [],
-      "head_rows_near": 19377,
+      "head_rows_near": 17678,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3006,6 +3341,8 @@
       "case_id": "everyday-au-e31d8b14d1e137f255168dd67225336734bfb7a8",
       "query": "Sub-Zero Group Australia Pty Ltd",
       "expected_name": "Sub-Zero Group Australia Pty Ltd",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3017,9 +3354,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 29987,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27020,
       "corpus_name_matches": [],
-      "head_rows_near": 20470,
+      "head_rows_near": 18421,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3027,6 +3365,8 @@
       "case_id": "everyday-au-224c48b242355b00d960b6a9eef94494e2da33ee",
       "query": "Australian Diamond Company",
       "expected_name": "Australian Diamond Company",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3038,11 +3378,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 29075,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 26500,
       "corpus_name_matches": [
         "Australian Diamond Company"
       ],
-      "head_rows_near": 19847,
+      "head_rows_near": 18304,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3050,6 +3391,8 @@
       "case_id": "everyday-au-fb57afd9c1cad41fc3bed8cadf672e114be9fce6",
       "query": "13 Demarzo",
       "expected_name": "13 Demarzo",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3061,9 +3404,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 29415,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26903,
       "corpus_name_matches": [],
-      "head_rows_near": 20098,
+      "head_rows_near": 18568,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3071,6 +3415,8 @@
       "case_id": "everyday-au-01e3e5f469ccfbb4e5817f23ef68fac033dec0d2",
       "query": "Rossi Clothing Pty Ltd",
       "expected_name": "Rossi Clothing Pty Ltd",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3082,9 +3428,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 28559,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26959,
       "corpus_name_matches": [],
-      "head_rows_near": 19304,
+      "head_rows_near": 18269,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3092,6 +3439,8 @@
       "case_id": "everyday-au-3510d00d35672b00b3db5c73c668eb99639a234d",
       "query": "Taylor Family Meats",
       "expected_name": "Taylor Family Meats",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3103,9 +3452,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 26269,
+      "match_strength": "NONE",
+      "corpus_rows_near": 25179,
       "corpus_name_matches": [],
-      "head_rows_near": 18139,
+      "head_rows_near": 17343,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3113,6 +3463,8 @@
       "case_id": "everyday-au-a79ceab69fccfc40354bfbf2761730c4ba847c4d",
       "query": "Swords Select",
       "expected_name": "Swords Select",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3124,9 +3476,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 26269,
+      "match_strength": "NONE",
+      "corpus_rows_near": 25179,
       "corpus_name_matches": [],
-      "head_rows_near": 18139,
+      "head_rows_near": 17343,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3134,6 +3487,8 @@
       "case_id": "everyday-au-19ce76543e11521c819e46620ff527297de17701",
       "query": "Moko Select",
       "expected_name": "Moko Select",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3145,11 +3500,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 29415,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 26903,
       "corpus_name_matches": [
         "Moko Select"
       ],
-      "head_rows_near": 20098,
+      "head_rows_near": 18568,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3157,6 +3513,8 @@
       "case_id": "everyday-au-847f08d1589077e7327d75461df40c9565a14fea",
       "query": "Matchbox",
       "expected_name": "Matchbox",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3168,9 +3526,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 27212,
+      "match_strength": "NONE",
+      "corpus_rows_near": 25397,
       "corpus_name_matches": [],
-      "head_rows_near": 18240,
+      "head_rows_near": 17038,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3178,6 +3537,8 @@
       "case_id": "everyday-au-517db0e62f63aeed5afabcd6f8f6e9a1ee3262da",
       "query": "Amott Quality Meats",
       "expected_name": "Amott Quality Meats",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3189,11 +3550,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 26269,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 25179,
       "corpus_name_matches": [
         "Amott Quality Meats"
       ],
-      "head_rows_near": 18139,
+      "head_rows_near": 17343,
       "head_name_matches": [
         "Amott Quality Meats"
       ],
@@ -3205,6 +3567,8 @@
       "case_id": "everyday-au-375a74267cd52f955cb3ca8c8b5d6a26c41a7adf",
       "query": "Spencer Street Pharmacy",
       "expected_name": "Spencer Street Pharmacy",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3216,12 +3580,13 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 27372,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 25746,
       "corpus_name_matches": [
         "Spencer Street Pharmacy",
         "Spencer Street"
       ],
-      "head_rows_near": 18601,
+      "head_rows_near": 17495,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3229,6 +3594,8 @@
       "case_id": "everyday-au-a2ca9a6817ec1fc2cbd44f227d74b0290fb627ea",
       "query": "St Station",
       "expected_name": "St Station",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3240,13 +3607,14 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 28523,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 26320,
       "corpus_name_matches": [
+        "St Station",
         "Spencer St Railway Station",
-        "Finder St Station",
-        "St Station"
+        "Finder St Station"
       ],
-      "head_rows_near": 19599,
+      "head_rows_near": 18204,
       "head_name_matches": [
         "Filnders St Station",
         "Finder St Station",
@@ -3264,6 +3632,8 @@
       "case_id": "everyday-au-625a78220cb02f985dea45b2b2097cec3eda111e",
       "query": "NBA Store",
       "expected_name": "NBA Store",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3275,9 +3645,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 29415,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26903,
       "corpus_name_matches": [],
-      "head_rows_near": 20098,
+      "head_rows_near": 18568,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3285,6 +3656,8 @@
       "case_id": "everyday-au-8be3a162213c07b0f1bbc7255f8ba15d2b5071bb",
       "query": "Kidstuff",
       "expected_name": "Kidstuff",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3296,9 +3669,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 29415,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26903,
       "corpus_name_matches": [],
-      "head_rows_near": 20098,
+      "head_rows_near": 18568,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3306,6 +3680,8 @@
       "case_id": "everyday-au-05c2135d682827c2443e18208a98c27a49254038",
       "query": "The Vault 389",
       "expected_name": "The Vault 389",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3317,9 +3693,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 22925,
+      "match_strength": "NONE",
+      "corpus_rows_near": 16946,
       "corpus_name_matches": [],
-      "head_rows_near": 16006,
+      "head_rows_near": 11987,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3327,6 +3704,8 @@
       "case_id": "everyday-au-92affd29602cdc089104cebd688ce8d2e07d4ba3",
       "query": "Innisfree",
       "expected_name": "Innisfree",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3338,9 +3717,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 28523,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26320,
       "corpus_name_matches": [],
-      "head_rows_near": 19599,
+      "head_rows_near": 18204,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3348,6 +3728,8 @@
       "case_id": "everyday-au-2a73f15995959a174e5f5a1d6dd55be084c0eb6d",
       "query": "DOC Delicatessen",
       "expected_name": "DOC Delicatessen",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3359,9 +3741,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 25735,
+      "match_strength": "NONE",
+      "corpus_rows_near": 21709,
       "corpus_name_matches": [],
-      "head_rows_near": 17831,
+      "head_rows_near": 15193,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3369,6 +3752,8 @@
       "case_id": "everyday-au-e02d7d11cc7b4d4fba2aa7671e6b0c7d58ff7a4a",
       "query": "Pado Collection",
       "expected_name": "Pado Collection",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3380,9 +3765,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 28637,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26475,
       "corpus_name_matches": [],
-      "head_rows_near": 19659,
+      "head_rows_near": 18310,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3390,6 +3776,8 @@
       "case_id": "everyday-au-faba65873ed70e414987e2def0149aeb9c8b0b67",
       "query": "White November",
       "expected_name": "White November",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3401,9 +3789,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 30340,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27936,
       "corpus_name_matches": [],
-      "head_rows_near": 20784,
+      "head_rows_near": 19178,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3411,6 +3800,8 @@
       "case_id": "everyday-au-21a506f6d90767d14ef75fb081fb1e9502d6b5e9",
       "query": "Kuwaii",
       "expected_name": "Kuwaii",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3422,11 +3813,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 30885,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27692,
       "corpus_name_matches": [
         "Kuwaii"
       ],
-      "head_rows_near": 21120,
+      "head_rows_near": 18978,
       "head_name_matches": [
         "Kuwaii"
       ],
@@ -3438,6 +3830,8 @@
       "case_id": "everyday-au-2823aaec760fce01b9eedf71fd9d5484c0db9951",
       "query": "Provincial",
       "expected_name": "Provincial",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3449,9 +3843,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 27212,
+      "match_strength": "NONE",
+      "corpus_rows_near": 25397,
       "corpus_name_matches": [],
-      "head_rows_near": 18240,
+      "head_rows_near": 17038,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3459,6 +3854,8 @@
       "case_id": "everyday-au-9680b5f36577de407891803b8ac2a7e821c949c3",
       "query": "Arc'teryx",
       "expected_name": "Arc'teryx",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3470,11 +3867,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 29415,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 26903,
       "corpus_name_matches": [
         "Arc'teryx Melbourne"
       ],
-      "head_rows_near": 20098,
+      "head_rows_near": 18568,
       "head_name_matches": [
         "Arc'teryx Melbourne"
       ],
@@ -3486,6 +3884,8 @@
       "case_id": "everyday-au-aee1a2224208db6e248ca81b8823d1cf179ce768",
       "query": "Zezar",
       "expected_name": "Zezar",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3497,9 +3897,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 27372,
+      "match_strength": "NONE",
+      "corpus_rows_near": 25746,
       "corpus_name_matches": [],
-      "head_rows_near": 18601,
+      "head_rows_near": 17495,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3507,6 +3908,8 @@
       "case_id": "everyday-au-9b86448594e8014d805feb46d111007ec9cc5160",
       "query": "Unreal Christmas Trees",
       "expected_name": "Unreal Christmas Trees",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3518,9 +3921,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 2135,
+      "match_strength": "NONE",
+      "corpus_rows_near": 1688,
       "corpus_name_matches": [],
-      "head_rows_near": 1291,
+      "head_rows_near": 1052,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3528,6 +3932,8 @@
       "case_id": "everyday-au-1f31df1323fe1a701bd570860ec61d597e628bba",
       "query": "D'Aqua",
       "expected_name": "D'Aqua",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -3539,9 +3945,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 30278,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27946,
       "corpus_name_matches": [],
-      "head_rows_near": 20750,
+      "head_rows_near": 19187,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3549,6 +3956,8 @@
       "case_id": "everyday-jp-131041900148",
       "query": "竹田クリニック",
       "expected_name": "竹田クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3560,11 +3969,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 28609,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 25777,
       "corpus_name_matches": [
         "竹田クリニック"
       ],
-      "head_rows_near": 53650,
+      "head_rows_near": 48250,
       "head_name_matches": [
         "竹田クリニック",
         "竹田クリニック"
@@ -3578,6 +3988,8 @@
       "case_id": "everyday-jp-131041900378",
       "query": "晶眼科クリニック",
       "expected_name": "晶眼科クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3589,11 +4001,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 26590,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18370,
       "corpus_name_matches": [
         "晶眼科クリニック"
       ],
-      "head_rows_near": 51032,
+      "head_rows_near": 35619,
       "head_name_matches": [
         "晶眼科クリニック",
         "晶眼科クリニック"
@@ -3607,6 +4020,8 @@
       "case_id": "everyday-jp-131041900460",
       "query": "京王百貨店眼科クリニック",
       "expected_name": "京王百貨店眼科クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3618,9 +4033,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 31558,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26939,
       "corpus_name_matches": [],
-      "head_rows_near": 58262,
+      "head_rows_near": 50127,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3628,6 +4044,8 @@
       "case_id": "everyday-jp-131041900396",
       "query": "オボクリニック",
       "expected_name": "オボクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3639,11 +4057,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 26068,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18287,
       "corpus_name_matches": [
         "オボクリニック"
       ],
-      "head_rows_near": 50093,
+      "head_rows_near": 35403,
       "head_name_matches": [
         "オボクリニック",
         "オボクリニック",
@@ -3659,6 +4078,8 @@
       "case_id": "everyday-jp-131041900309",
       "query": "ミラザ新宿つるかめクリニック",
       "expected_name": "ミラザ新宿つるかめクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3670,12 +4091,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 31670,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27343,
       "corpus_name_matches": [
         "ミラザ新宿つるかめクリニック",
         "ミラザ新宿つるかめクリニック"
       ],
-      "head_rows_near": 58776,
+      "head_rows_near": 51113,
       "head_name_matches": [
         "ミラザ新宿つるかめクリニック",
         "ミラザ新宿つるかめクリニック",
@@ -3696,6 +4118,8 @@
       "case_id": "everyday-jp-131041900289",
       "query": "医療法人社団 医精会マイシティクリニック",
       "expected_name": "医療法人社団 医精会マイシティクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3707,9 +4131,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 30652,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27451,
       "corpus_name_matches": [],
-      "head_rows_near": 57542,
+      "head_rows_near": 51568,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3717,6 +4142,8 @@
       "case_id": "everyday-jp-131041900607",
       "query": "カンナム美容外科新宿院",
       "expected_name": "カンナム美容外科新宿院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3728,9 +4155,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 31007,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27389,
       "corpus_name_matches": [],
-      "head_rows_near": 58108,
+      "head_rows_near": 51362,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3738,6 +4166,8 @@
       "case_id": "everyday-jp-131041900553",
       "query": "医療法人社団松和会 望星西新宿診療所",
       "expected_name": "医療法人社団松和会 望星西新宿診療所",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3749,9 +4179,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 32978,
+      "match_strength": "NONE",
+      "corpus_rows_near": 28549,
       "corpus_name_matches": [],
-      "head_rows_near": 58956,
+      "head_rows_near": 51548,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3759,6 +4190,8 @@
       "case_id": "everyday-jp-131041900117",
       "query": "落合パークサイドクリニック",
       "expected_name": "落合パークサイドクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3770,11 +4203,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 22630,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 16748,
       "corpus_name_matches": [
         "落合パークサイドクリニック"
       ],
-      "head_rows_near": 43249,
+      "head_rows_near": 32095,
       "head_name_matches": [
         "落合パークサイドクリニック",
         "落合パークサイドクリニック"
@@ -3788,6 +4222,8 @@
       "case_id": "everyday-jp-131041900672",
       "query": "愛児クリニック",
       "expected_name": "愛児クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3799,9 +4235,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 23063,
+      "match_strength": "NONE",
+      "corpus_rows_near": 14449,
       "corpus_name_matches": [],
-      "head_rows_near": 45282,
+      "head_rows_near": 28931,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3809,6 +4246,8 @@
       "case_id": "everyday-jp-131041900380",
       "query": "まきレディスクリニック",
       "expected_name": "まきレディスクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3820,12 +4259,13 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 26754,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 18915,
       "corpus_name_matches": [
         "まきレディスクリニック",
         "まきレディスクリニック"
       ],
-      "head_rows_near": 51157,
+      "head_rows_near": 36624,
       "head_name_matches": [
         "まきレディスクリニック",
         "まきレディスクリニック"
@@ -3838,6 +4278,8 @@
       "case_id": "everyday-jp-131041900738",
       "query": "耳鼻いんこう科 山西クリニック",
       "expected_name": "耳鼻いんこう科 山西クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3849,9 +4291,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 29110,
+      "match_strength": "NONE",
+      "corpus_rows_near": 21259,
       "corpus_name_matches": [],
-      "head_rows_near": 56830,
+      "head_rows_near": 41173,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3859,6 +4302,8 @@
       "case_id": "everyday-jp-131041900556",
       "query": "西新宿５丁目駅前眼科",
       "expected_name": "西新宿５丁目駅前眼科",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3870,9 +4315,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 30258,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26029,
       "corpus_name_matches": [],
-      "head_rows_near": 55033,
+      "head_rows_near": 47749,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3880,6 +4326,8 @@
       "case_id": "everyday-jp-131041900690",
       "query": "四谷いわさきクリニック",
       "expected_name": "四谷いわさきクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3891,11 +4339,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 33192,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 24272,
       "corpus_name_matches": [
         "四谷いわさきクリニック"
       ],
-      "head_rows_near": 63163,
+      "head_rows_near": 46858,
       "head_name_matches": [
         "四谷いわさきクリニック",
         "四谷いわさきクリニック"
@@ -3909,6 +4358,8 @@
       "case_id": "everyday-jp-131041900238",
       "query": "ＳＥＬＥＣＴ ＣＬＩＮＩＣ新宿院",
       "expected_name": "ＳＥＬＥＣＴ ＣＬＩＮＩＣ新宿院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3920,9 +4371,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 31572,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27287,
       "corpus_name_matches": [],
-      "head_rows_near": 59043,
+      "head_rows_near": 51321,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3930,6 +4382,8 @@
       "case_id": "everyday-jp-131041900691",
       "query": "みどりの森ひふ科クリニック",
       "expected_name": "みどりの森ひふ科クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -3941,11 +4395,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 33095,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 24231,
       "corpus_name_matches": [
         "みどりの森ひふ科クリニック"
       ],
-      "head_rows_near": 63077,
+      "head_rows_near": 46796,
       "head_name_matches": [
         "みどりの森ひふ科クリニック",
         "みどりの森ひふ科クリニック"
@@ -3959,6 +4414,8 @@
       "case_id": "everyday-jp-131041900502",
       "query": "医療法人社団新光会 新宿南口皮膚科",
       "expected_name": "医療法人社団新光会 新宿南口皮膚科",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3970,9 +4427,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 32920,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27774,
       "corpus_name_matches": [],
-      "head_rows_near": 60047,
+      "head_rows_near": 51186,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -3980,6 +4438,8 @@
       "case_id": "everyday-jp-131041900045",
       "query": "医療法人社団慶幸会 東新宿クリニック",
       "expected_name": "医療法人社団慶幸会 東新宿クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -3991,9 +4451,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 31123,
+      "match_strength": "NONE",
+      "corpus_rows_near": 28962,
       "corpus_name_matches": [],
-      "head_rows_near": 58956,
+      "head_rows_near": 54800,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4001,6 +4462,8 @@
       "case_id": "everyday-jp-131041900567",
       "query": "東京医科大学病院 健診予防医学センター",
       "expected_name": "東京医科大学病院 健診予防医学センター",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4012,11 +4475,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 29458,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 26206,
       "corpus_name_matches": [
         "東京医科大学病院 健診予防医学センター"
       ],
-      "head_rows_near": 54470,
+      "head_rows_near": 48256,
       "head_name_matches": [
         "東京医科大学病院 健診予防医学センター",
         "東京医科大学病院 健診予防医学センター",
@@ -4036,6 +4500,8 @@
       "case_id": "everyday-jp-131041900060",
       "query": "飯田橋ともじり皮ふ科",
       "expected_name": "飯田橋ともじり皮ふ科",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4047,11 +4513,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 25970,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 21031,
       "corpus_name_matches": [
         "飯田橋ともじり皮ふ科"
       ],
-      "head_rows_near": 54607,
+      "head_rows_near": 43933,
       "head_name_matches": [
         "飯田橋ともじり皮ふ科",
         "飯田橋ともじり皮ふ科",
@@ -4068,6 +4535,8 @@
       "case_id": "everyday-jp-131041900642",
       "query": "宮田胃腸内科皮膚科クリニック",
       "expected_name": "宮田胃腸内科皮膚科クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4079,11 +4548,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 30165,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27540,
       "corpus_name_matches": [
         "宮田胃腸内科皮膚科クリニック"
       ],
-      "head_rows_near": 56929,
+      "head_rows_near": 51793,
       "head_name_matches": [
         "宮田胃腸内科皮膚科クリニック",
         "宮田胃腸内科皮膚科クリニック"
@@ -4097,6 +4567,8 @@
       "case_id": "everyday-jp-131041900048",
       "query": "西大久保クリニック",
       "expected_name": "西大久保クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4108,11 +4580,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 30502,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27195,
       "corpus_name_matches": [
         "西大久保クリニック"
       ],
-      "head_rows_near": 58364,
+      "head_rows_near": 52041,
       "head_name_matches": [
         "西大久保クリニック",
         "西大久保クリニック"
@@ -4126,6 +4599,8 @@
       "case_id": "everyday-jp-131041900490",
       "query": "医療法人社団西美会もとび美容外科クリニック",
       "expected_name": "医療法人社団西美会もとび美容外科クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4137,9 +4612,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 31315,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26718,
       "corpus_name_matches": [],
-      "head_rows_near": 57312,
+      "head_rows_near": 49362,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4147,6 +4623,8 @@
       "case_id": "everyday-jp-131041900204",
       "query": "医療法人社団幸楽会 幸楽メディカルクリニック",
       "expected_name": "医療法人社団幸楽会 幸楽メディカルクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4158,9 +4636,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 34774,
+      "match_strength": "NONE",
+      "corpus_rows_near": 28634,
       "corpus_name_matches": [],
-      "head_rows_near": 64920,
+      "head_rows_near": 53776,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4168,6 +4647,8 @@
       "case_id": "everyday-jp-131041900295",
       "query": "新宿レディースＡＧＡクリニック",
       "expected_name": "新宿レディースＡＧＡクリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4179,11 +4660,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 31499,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27428,
       "corpus_name_matches": [
         "新宿レディースAGAクリニック"
       ],
-      "head_rows_near": 58549,
+      "head_rows_near": 51403,
       "head_name_matches": [
         "新宿レディースAGAクリニック",
         "新宿レディースAGAクリニック"
@@ -4197,6 +4679,8 @@
       "case_id": "everyday-jp-131041900707",
       "query": "四谷内科・内視鏡クリニック",
       "expected_name": "四谷内科・内視鏡クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4208,11 +4692,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 36640,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 29460,
       "corpus_name_matches": [
         "四谷内科・内視鏡クリニック"
       ],
-      "head_rows_near": 69352,
+      "head_rows_near": 55848,
       "head_name_matches": [
         "四谷内科・内視鏡クリニック"
       ],
@@ -4224,6 +4709,8 @@
       "case_id": "everyday-jp-131041900704",
       "query": "医療法人社団永康会 四ツ谷腎クリニック",
       "expected_name": "医療法人社団永康会 四ツ谷腎クリニック",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4235,9 +4722,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 35542,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26089,
       "corpus_name_matches": [],
-      "head_rows_near": 66870,
+      "head_rows_near": 49739,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4245,6 +4733,8 @@
       "case_id": "everyday-jp-131041900101",
       "query": "メンズライフクリニック 新宿院",
       "expected_name": "メンズライフクリニック 新宿院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": true,
       "empty": false,
       "strata": {
@@ -4256,11 +4746,12 @@
         "script": "non_latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 31006,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 27749,
       "corpus_name_matches": [
         "メンズライフクリニック 新宿院"
       ],
-      "head_rows_near": 58246,
+      "head_rows_near": 52151,
       "head_name_matches": [
         "メンズライフクリニック 新宿院",
         "メンズライフクリニック 新宿院",
@@ -4276,6 +4767,8 @@
       "case_id": "everyday-jp-131041900398",
       "query": "あゆみレディースクリニック高田馬場",
       "expected_name": "あゆみレディースクリニック高田馬場",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4287,9 +4780,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 26219,
+      "match_strength": "NONE",
+      "corpus_rows_near": 18290,
       "corpus_name_matches": [],
-      "head_rows_near": 50453,
+      "head_rows_near": 35361,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4297,6 +4791,8 @@
       "case_id": "everyday-jp-131041900236",
       "query": "医療法人社団雪焔会 トイトイトイクリニック新宿院",
       "expected_name": "医療法人社団雪焔会 トイトイトイクリニック新宿院",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4308,9 +4804,10 @@
         "script": "non_latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 32264,
+      "match_strength": "NONE",
+      "corpus_rows_near": 27525,
       "corpus_name_matches": [],
-      "head_rows_near": 60025,
+      "head_rows_near": 51669,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4318,6 +4815,8 @@
       "case_id": "everyday-mx-10953881",
       "query": "HOTEL DEL ANGEL",
       "expected_name": "HOTEL DEL ANGEL",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4329,12 +4828,13 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 34926,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 30567,
       "corpus_name_matches": [
         "hotel del angel",
         "Hotel Del Angel"
       ],
-      "head_rows_near": 26475,
+      "head_rows_near": 23280,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4342,6 +4842,8 @@
       "case_id": "everyday-mx-10558119",
       "query": "CITY EXPRESS BY MARRIOT CDMX LA VILLA",
       "expected_name": "CITY EXPRESS BY MARRIOT CDMX LA VILLA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4353,9 +4855,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 11897,
+      "match_strength": "NONE",
+      "corpus_rows_near": 9689,
       "corpus_name_matches": [],
-      "head_rows_near": 7234,
+      "head_rows_near": 5955,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4363,6 +4866,8 @@
       "case_id": "everyday-mx-6259112",
       "query": "HOTEL GAMA",
       "expected_name": "HOTEL GAMA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -4374,11 +4879,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 9958,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 7923,
       "corpus_name_matches": [
         "Hotel Gama"
       ],
-      "head_rows_near": 6638,
+      "head_rows_near": 5167,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4386,6 +4892,8 @@
       "case_id": "everyday-mx-6325252",
       "query": "HOTEL MONARCA",
       "expected_name": "HOTEL MONARCA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4397,11 +4905,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 43641,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 36794,
       "corpus_name_matches": [
         "Hotel Monarca"
       ],
-      "head_rows_near": 32138,
+      "head_rows_near": 27275,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4409,6 +4918,8 @@
       "case_id": "everyday-mx-6305055",
       "query": "HOTEL NAYARIT",
       "expected_name": "HOTEL NAYARIT",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4420,11 +4931,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 13615,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 10694,
       "corpus_name_matches": [
         "Hotel HOT Nayarit"
       ],
-      "head_rows_near": 8412,
+      "head_rows_near": 6567,
       "head_name_matches": [
         "Hotel HOT Nayarit"
       ],
@@ -4436,6 +4948,8 @@
       "case_id": "everyday-mx-6313837",
       "query": "HOTEL PORTO NOVO",
       "expected_name": "HOTEL PORTO NOVO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -4447,11 +4961,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 36280,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 30423,
       "corpus_name_matches": [
         "Hotel Porto Novo"
       ],
-      "head_rows_near": 27207,
+      "head_rows_near": 22856,
       "head_name_matches": [
         "Hotel Porto Novo",
         "Hotel Porto Novo"
@@ -4465,6 +4980,8 @@
       "case_id": "everyday-mx-1002420",
       "query": "HOTEL AMIGO SUITES",
       "expected_name": "HOTEL AMIGO SUITES",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4476,9 +4993,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 25443,
+      "match_strength": "NONE",
+      "corpus_rows_near": 22186,
       "corpus_name_matches": [],
-      "head_rows_near": 16608,
+      "head_rows_near": 14491,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4486,6 +5004,8 @@
       "case_id": "everyday-mx-6317273",
       "query": "HOTEL LUA",
       "expected_name": "HOTEL LUA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4497,11 +5017,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 22294,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 18922,
       "corpus_name_matches": [
         "Lua Hotel & Villas"
       ],
-      "head_rows_near": 16329,
+      "head_rows_near": 13944,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4509,6 +5030,8 @@
       "case_id": "everyday-mx-6325182",
       "query": "HOTEL HABANA",
       "expected_name": "HOTEL HABANA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4520,11 +5043,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 27460,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 23598,
       "corpus_name_matches": [
         "Hotel Habana"
       ],
-      "head_rows_near": 18041,
+      "head_rows_near": 15455,
       "head_name_matches": [
         "Hotel Habana"
       ],
@@ -4536,6 +5060,8 @@
       "case_id": "everyday-mx-9722871",
       "query": "HOSTAL ROTAMUNDOS",
       "expected_name": "HOSTAL ROTAMUNDOS",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -4547,9 +5073,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 38362,
+      "match_strength": "NONE",
+      "corpus_rows_near": 33367,
       "corpus_name_matches": [],
-      "head_rows_near": 28997,
+      "head_rows_near": 25369,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4557,6 +5084,8 @@
       "case_id": "everyday-mx-6259237",
       "query": "HOTEL CENTRAL",
       "expected_name": "HOTEL CENTRAL",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -4568,12 +5097,13 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 29883,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 23574,
       "corpus_name_matches": [
         "Hotel Histórico Central",
         "Zócalo Central Hotel"
       ],
-      "head_rows_near": 20569,
+      "head_rows_near": 16229,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4581,6 +5111,8 @@
       "case_id": "everyday-mx-6325165",
       "query": "MOTEL BOUTIQUE RIALTO",
       "expected_name": "MOTEL BOUTIQUE RIALTO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4592,9 +5124,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 17825,
+      "match_strength": "NONE",
+      "corpus_rows_near": 12933,
       "corpus_name_matches": [],
-      "head_rows_near": 11282,
+      "head_rows_near": 8168,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4602,6 +5135,8 @@
       "case_id": "everyday-mx-7733488",
       "query": "THE GALLERY",
       "expected_name": "THE GALLERY",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -4612,27 +5147,24 @@
         "scope": "everyday",
         "script": "latin"
       },
-      "verdict": "IN_HEAD",
-      "corpus_rows_near": 33670,
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 26323,
       "corpus_name_matches": [
-        "Alquimiamc The Gallery",
         "The Gallery Studio",
-        "The Gallery Condesa"
+        "The Gallery Condesa",
+        "The Home Gallery Collection"
       ],
-      "head_rows_near": 26006,
-      "head_name_matches": [
-        "Alquimiamc The Gallery",
-        "Alquimiamc The Gallery"
-      ],
-      "head_tokens": [
-        "alquimiamc",
-        "e3:alquimiamc the gallery"
-      ]
+      "head_rows_near": 20221,
+      "head_name_matches": [],
+      "head_tokens": []
     },
     {
       "case_id": "everyday-mx-6313854",
       "query": "HOTEL HARARE",
       "expected_name": "HOTEL HARARE",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": false,
       "strata": {
@@ -4644,11 +5176,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 18262,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 14748,
       "corpus_name_matches": [
         "Hotel Harare"
       ],
-      "head_rows_near": 12437,
+      "head_rows_near": 10024,
       "head_name_matches": [
         "Hotel Harare"
       ],
@@ -4660,6 +5193,8 @@
       "case_id": "everyday-mx-6324958",
       "query": "HOTEL ANTENAS",
       "expected_name": "HOTEL ANTENAS",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4671,11 +5206,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 7128,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 6115,
       "corpus_name_matches": [
         "Hotel Antenas"
       ],
-      "head_rows_near": 4054,
+      "head_rows_near": 3460,
       "head_name_matches": [
         "Hotel Antenas"
       ],
@@ -4687,6 +5223,8 @@
       "case_id": "everyday-mx-6323674",
       "query": "HOTEL REAL AZTECA",
       "expected_name": "HOTEL REAL AZTECA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4698,11 +5236,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 9796,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 7874,
       "corpus_name_matches": [
         "Hotel Real Azteca"
       ],
-      "head_rows_near": 6211,
+      "head_rows_near": 5009,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4710,6 +5249,8 @@
       "case_id": "everyday-mx-6325352",
       "query": "HOTEL PENSIL",
       "expected_name": "HOTEL PENSIL",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4721,11 +5262,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 19159,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 15700,
       "corpus_name_matches": [
         "Hotel Pensil"
       ],
-      "head_rows_near": 14410,
+      "head_rows_near": 11803,
       "head_name_matches": [
         "Hotel Pensil"
       ],
@@ -4737,6 +5279,8 @@
       "case_id": "everyday-mx-6810207",
       "query": "BEL AIR UNIQUE CDMX WTC",
       "expected_name": "BEL AIR UNIQUE CDMX WTC",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4748,9 +5292,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 30957,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26418,
       "corpus_name_matches": [],
-      "head_rows_near": 23255,
+      "head_rows_near": 19819,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4758,6 +5303,8 @@
       "case_id": "everyday-mx-6306983",
       "query": "HOTEL MOCTEZUMA LA VILLA",
       "expected_name": "HOTEL MOCTEZUMA LA VILLA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4769,13 +5316,14 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 10973,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 9312,
       "corpus_name_matches": [
+        "Hotel Moctezuma La Villa",
         "hotel la villa",
-        "La Villa",
-        "Hotel Moctezuma La Villa"
+        "La Villa"
       ],
-      "head_rows_near": 6951,
+      "head_rows_near": 5883,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4783,6 +5331,8 @@
       "case_id": "everyday-mx-6304780",
       "query": "HOTEL ESTORIL",
       "expected_name": "HOTEL ESTORIL",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4794,11 +5344,12 @@
         "script": "latin"
       },
       "verdict": "IN_HEAD",
-      "corpus_rows_near": 38739,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 32527,
       "corpus_name_matches": [
         "Hotel Estoril"
       ],
-      "head_rows_near": 26949,
+      "head_rows_near": 22565,
       "head_name_matches": [
         "Hotel Estoril"
       ],
@@ -4810,6 +5361,8 @@
       "case_id": "everyday-mx-7747650",
       "query": "CENTRO INTEGRAL DEL PIE Y LA SALUD",
       "expected_name": "CENTRO INTEGRAL DEL PIE Y LA SALUD",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4821,11 +5374,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 8554,
+      "match_strength": "EXACT",
+      "corpus_rows_near": 6727,
       "corpus_name_matches": [
         "Centro Integral del Pie y la Salud"
       ],
-      "head_rows_near": 5212,
+      "head_rows_near": 4083,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4833,6 +5387,8 @@
       "case_id": "everyday-mx-857595",
       "query": "TIENDA DE ABARROTES LA QUERETANA",
       "expected_name": "TIENDA DE ABARROTES LA QUERETANA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4844,9 +5400,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6837,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5732,
       "corpus_name_matches": [],
-      "head_rows_near": 4521,
+      "head_rows_near": 3835,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4854,6 +5411,8 @@
       "case_id": "everyday-mx-793743",
       "query": "FLORES Y REGALOS FIORELLA",
       "expected_name": "FLORES Y REGALOS FIORELLA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4865,9 +5424,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 11568,
+      "match_strength": "NONE",
+      "corpus_rows_near": 8956,
       "corpus_name_matches": [],
-      "head_rows_near": 7395,
+      "head_rows_near": 5659,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4875,6 +5435,8 @@
       "case_id": "everyday-mx-11109922",
       "query": "RECAUDARIA LOS MARQUEZ",
       "expected_name": "RECAUDARIA LOS MARQUEZ",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4886,9 +5448,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6621,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5331,
       "corpus_name_matches": [],
-      "head_rows_near": 3867,
+      "head_rows_near": 3100,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4896,6 +5459,8 @@
       "case_id": "everyday-mx-10170469",
       "query": "ACUARIO LA CURVA",
       "expected_name": "ACUARIO LA CURVA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4907,9 +5472,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 18265,
+      "match_strength": "NONE",
+      "corpus_rows_near": 15496,
       "corpus_name_matches": [],
-      "head_rows_near": 13783,
+      "head_rows_near": 11670,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4917,6 +5483,8 @@
       "case_id": "everyday-mx-8652847",
       "query": "DULCERIA MAYOREO",
       "expected_name": "DULCERIA MAYOREO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4928,9 +5496,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 6455,
+      "match_strength": "NONE",
+      "corpus_rows_near": 5311,
       "corpus_name_matches": [],
-      "head_rows_near": 3570,
+      "head_rows_near": 2969,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4938,6 +5507,8 @@
       "case_id": "everyday-mx-844080",
       "query": "ROSTICERIA DE POLLOS MAX",
       "expected_name": "ROSTICERIA DE POLLOS MAX",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4949,9 +5520,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 3691,
+      "match_strength": "NONE",
+      "corpus_rows_near": 2866,
       "corpus_name_matches": [],
-      "head_rows_near": 1882,
+      "head_rows_near": 1438,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4959,6 +5531,8 @@
       "case_id": "everyday-mx-952818",
       "query": "GRUPO FERRETRO",
       "expected_name": "GRUPO FERRETRO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4970,9 +5544,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 36488,
+      "match_strength": "NONE",
+      "corpus_rows_near": 26740,
       "corpus_name_matches": [],
-      "head_rows_near": 25812,
+      "head_rows_near": 18930,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -4980,6 +5555,8 @@
       "case_id": "everyday-mx-8260289",
       "query": "MOTOREFACCIONES 101",
       "expected_name": "MOTOREFACCIONES 101",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -4991,9 +5568,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 10906,
+      "match_strength": "NONE",
+      "corpus_rows_near": 9032,
       "corpus_name_matches": [],
-      "head_rows_near": 6494,
+      "head_rows_near": 5323,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -5001,6 +5579,8 @@
       "case_id": "everyday-mx-10632194",
       "query": "MOLINO EL CHINO",
       "expected_name": "MOLINO EL CHINO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -5012,9 +5592,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 5861,
+      "match_strength": "NONE",
+      "corpus_rows_near": 4928,
       "corpus_name_matches": [],
-      "head_rows_near": 3580,
+      "head_rows_near": 3028,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -5022,6 +5603,8 @@
       "case_id": "everyday-mx-9951898",
       "query": "TOCINERIA EL TORITO",
       "expected_name": "TOCINERIA EL TORITO",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -5033,9 +5616,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 11753,
+      "match_strength": "NONE",
+      "corpus_rows_near": 8747,
       "corpus_name_matches": [],
-      "head_rows_near": 7062,
+      "head_rows_near": 5202,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -5043,6 +5627,8 @@
       "case_id": "everyday-mx-11671485",
       "query": "BOUTIQUE ANGIE TIENDA DE ROPA",
       "expected_name": "BOUTIQUE ANGIE TIENDA DE ROPA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -5054,11 +5640,12 @@
         "script": "latin"
       },
       "verdict": "NOT_ADMITTED",
-      "corpus_rows_near": 5940,
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 5297,
       "corpus_name_matches": [
         "Tienda de Ropa"
       ],
-      "head_rows_near": 3797,
+      "head_rows_near": 3332,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -5066,6 +5653,8 @@
       "case_id": "everyday-mx-811127",
       "query": "TLAPALERIA BARRERA",
       "expected_name": "TLAPALERIA BARRERA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -5077,9 +5666,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 5584,
+      "match_strength": "NONE",
+      "corpus_rows_near": 4418,
       "corpus_name_matches": [],
-      "head_rows_near": 3130,
+      "head_rows_near": 2509,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -5087,6 +5677,8 @@
       "case_id": "everyday-mx-9509655",
       "query": "TORTILLERIA DEL PARQUE",
       "expected_name": "TORTILLERIA DEL PARQUE",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -5098,9 +5690,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 8646,
+      "match_strength": "NONE",
+      "corpus_rows_near": 7035,
       "corpus_name_matches": [],
-      "head_rows_near": 5483,
+      "head_rows_near": 4539,
       "head_name_matches": [],
       "head_tokens": []
     },
@@ -5108,6 +5701,8 @@
       "case_id": "everyday-mx-7816471",
       "query": "DECORACIONES NICVAL",
       "expected_name": "DECORACIONES NICVAL",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
       "hit": false,
       "empty": true,
       "strata": {
@@ -5119,9 +5714,10 @@
         "script": "latin"
       },
       "verdict": "ABSENT",
-      "corpus_rows_near": 7766,
+      "match_strength": "NONE",
+      "corpus_rows_near": 6023,
       "corpus_name_matches": [],
-      "head_rows_near": 4387,
+      "head_rows_near": 3393,
       "head_name_matches": [],
       "head_tokens": []
     }

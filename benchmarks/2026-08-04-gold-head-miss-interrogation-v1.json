@@ -1,0 +1,1652 @@
+{
+  "schema": "head-miss-interrogation-v1",
+  "probe_tolerance_multiple": 2.0,
+  "probe_min_km": 1.0,
+  "cases": "benchmarks/v2-forward-gold-cases-v1.json",
+  "run": "benchmarks/2026-08-04-forward-gold-post-additive-wave.json",
+  "division_lane_cases": 10,
+  "misses": 15,
+  "counts": {
+    "IN_HEAD": 13,
+    "ABSENT": 1,
+    "NOT_ADMITTED": 1
+  },
+  "calibration_hits": 30,
+  "calibration_in_head": 29,
+  "verdicts": [
+    {
+      "case_id": "gold:seam:seattle",
+      "query": "Seattle",
+      "expected_name": "Seattle",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 165765,
+      "corpus_name_matches": [
+        "Seattle",
+        "Seattle"
+      ],
+      "head_rows_near": 109536,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:seam:paris",
+      "query": "Paris",
+      "expected_name": "Paris",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 342264,
+      "corpus_name_matches": [
+        "Paris",
+        "Paris",
+        "Paris"
+      ],
+      "head_rows_near": 245410,
+      "head_name_matches": [
+        "Paris  Paris Paris"
+      ],
+      "head_tokens": [
+        "e3:paris paris paris"
+      ]
+    },
+    {
+      "case_id": "gold:seam:berlin",
+      "query": "Berlin",
+      "expected_name": "Berlin",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 175743,
+      "corpus_name_matches": [
+        "Berlin",
+        "Berlin",
+        "Berlin"
+      ],
+      "head_rows_near": 191139,
+      "head_name_matches": [
+        "Berlin"
+      ],
+      "head_tokens": [
+        "alstom"
+      ]
+    },
+    {
+      "case_id": "gold:seam:monaco",
+      "query": "Monaco",
+      "expected_name": "Monaco",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 65480,
+      "corpus_name_matches": [
+        "Monaco",
+        "Monaco"
+      ],
+      "head_rows_near": 54287,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:seam:chicago",
+      "query": "Chicago",
+      "expected_name": "Chicago",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 340573,
+      "corpus_name_matches": [
+        "Chicago",
+        "Chicago",
+        "Chicago"
+      ],
+      "head_rows_near": 257216,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:seam:melbourne",
+      "query": "Melbourne",
+      "expected_name": "Melbourne",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 230131,
+      "corpus_name_matches": [
+        "Melbourne",
+        "Melbourne",
+        "Melbourne"
+      ],
+      "head_rows_near": 136264,
+      "head_name_matches": [
+        "Melbourne"
+      ],
+      "head_tokens": [
+        "alstom"
+      ]
+    },
+    {
+      "case_id": "gold:seam:toronto",
+      "query": "Toronto",
+      "expected_name": "Toronto",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 288461,
+      "corpus_name_matches": [
+        "Toronto",
+        "Toronto",
+        "Toronto"
+      ],
+      "head_rows_near": 218239,
+      "head_name_matches": [
+        "Toronto"
+      ],
+      "head_tokens": [
+        "real_estate_service"
+      ]
+    },
+    {
+      "case_id": "gold:seam:dublin",
+      "query": "Dublin",
+      "expected_name": "Dublin",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 61181,
+      "corpus_name_matches": [
+        "Dublin",
+        "Dublin",
+        "Dublin"
+      ],
+      "head_rows_near": 46492,
+      "head_name_matches": [
+        "Dublin"
+      ],
+      "head_tokens": [
+        "deloitte"
+      ]
+    },
+    {
+      "case_id": "gold:seam:manchester",
+      "query": "Manchester",
+      "expected_name": "Manchester",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 398820,
+      "corpus_name_matches": [
+        "Manchester",
+        "Manchester",
+        "Manchester"
+      ],
+      "head_rows_near": 248567,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:seam:phoenix",
+      "query": "Phoenix",
+      "expected_name": "Phoenix",
+      "expected_feature_type": "locality",
+      "tolerance_km": 25.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 188381,
+      "corpus_name_matches": [
+        "Phoenix",
+        "Phoenix",
+        "Phoenix"
+      ],
+      "head_rows_near": 117995,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:name:eiffel-tower",
+      "query": "Eiffel Tower",
+      "expected_name": "Eiffel Tower",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 85472,
+      "corpus_name_matches": [
+        "Eiffel Tower",
+        "Eiffel Tower",
+        "Eiffel Tower"
+      ],
+      "head_rows_near": 68535,
+      "head_name_matches": [
+        "Eiffel tower",
+        "Eiffel Tower",
+        "Eiffel Tower"
+      ],
+      "head_tokens": [
+        "1er",
+        "arley",
+        "at",
+        "batobus",
+        "beaugrenelle",
+        "bellota",
+        "carousel",
+        "clef"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:eiffel-tower",
+      "query": "Eiffel Tower Paris",
+      "expected_name": "Eiffel Tower",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 85472,
+      "corpus_name_matches": [
+        "Eiffel Tower",
+        "Eiffel Tower",
+        "Eiffel Tower"
+      ],
+      "head_rows_near": 68535,
+      "head_name_matches": [
+        "Eiffel tower",
+        "Eiffel Tower",
+        "Eiffel Tower"
+      ],
+      "head_tokens": [
+        "1er",
+        "arley",
+        "at",
+        "batobus",
+        "beaugrenelle",
+        "bellota",
+        "carousel",
+        "clef"
+      ]
+    },
+    {
+      "case_id": "gold:name:statue-of-liberty",
+      "query": "Statue of Liberty",
+      "expected_name": "Statue of Liberty",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 28475,
+      "corpus_name_matches": [
+        "Statue of Liberty",
+        "Statue Of Liberty National Monument",
+        "Statue of Liberty View"
+      ],
+      "head_rows_near": 25151,
+      "head_name_matches": [
+        "Statue of Liberty",
+        "Statue of Liberty",
+        "Statue Of Liberty National Monument"
+      ],
+      "head_tokens": [
+        "cheapest",
+        "city",
+        "e3:statue of liberty",
+        "liberty",
+        "national",
+        "new",
+        "of",
+        "statue"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:statue-of-liberty",
+      "query": "Statue of Liberty New York",
+      "expected_name": "Statue of Liberty",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 28475,
+      "corpus_name_matches": [
+        "Statue of Liberty",
+        "Statue Of Liberty National Monument",
+        "Statue of Liberty View"
+      ],
+      "head_rows_near": 25151,
+      "head_name_matches": [
+        "Statue of Liberty",
+        "Statue of Liberty",
+        "Statue Of Liberty National Monument"
+      ],
+      "head_tokens": [
+        "cheapest",
+        "city",
+        "e3:statue of liberty",
+        "liberty",
+        "national",
+        "new",
+        "of",
+        "statue"
+      ]
+    },
+    {
+      "case_id": "gold:name:colosseum",
+      "query": "Colosseum",
+      "expected_name": "Colosseum",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 56716,
+      "corpus_name_matches": [
+        "Colosseum",
+        "Colosseum",
+        "Coliseum"
+      ],
+      "head_rows_near": 45190,
+      "head_name_matches": [
+        "Coliseum",
+        "Colosseum"
+      ],
+      "head_tokens": [
+        "coliseum",
+        "colosseum"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:colosseum",
+      "query": "Colosseum Rome",
+      "expected_name": "Colosseum",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 56716,
+      "corpus_name_matches": [
+        "Colosseum",
+        "Colosseum",
+        "Coliseum"
+      ],
+      "head_rows_near": 45190,
+      "head_name_matches": [
+        "Coliseum",
+        "Colosseum"
+      ],
+      "head_tokens": [
+        "coliseum",
+        "colosseum"
+      ]
+    },
+    {
+      "case_id": "gold:name:big-ben",
+      "query": "Big Ben",
+      "expected_name": "Big Ben",
+      "expected_feature_type": "poi",
+      "tolerance_km": 0.25,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 47658,
+      "corpus_name_matches": [
+        "Big Ben",
+        "Big Ben",
+        "Big Ben"
+      ],
+      "head_rows_near": 34869,
+      "head_name_matches": [
+        "Big Ben",
+        "Big Ben",
+        "Big Ben"
+      ],
+      "head_tokens": [
+        "ben",
+        "big",
+        "e2:big ben",
+        "travel_services"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:big-ben",
+      "query": "Big Ben London",
+      "expected_name": "Big Ben",
+      "expected_feature_type": "poi",
+      "tolerance_km": 0.25,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 47658,
+      "corpus_name_matches": [
+        "Big Ben",
+        "Big Ben",
+        "Big Ben"
+      ],
+      "head_rows_near": 34869,
+      "head_name_matches": [
+        "Big Ben",
+        "Big Ben",
+        "Big Ben"
+      ],
+      "head_tokens": [
+        "ben",
+        "big",
+        "e2:big ben",
+        "travel_services"
+      ]
+    },
+    {
+      "case_id": "gold:name:taj-mahal",
+      "query": "Taj Mahal",
+      "expected_name": "Taj Mahal",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 8265,
+      "corpus_name_matches": [
+        "Taj Mahal",
+        "Taj Mahal",
+        "Taj Mahal"
+      ],
+      "head_rows_near": 4521,
+      "head_name_matches": [
+        "Taj Mahal",
+        "Taj Mahal",
+        "Taj Mahal"
+      ],
+      "head_tokens": [
+        "agra",
+        "black",
+        "cabs",
+        "e2:taj mahal",
+        "e3:taj mahal agra",
+        "e3:taj mahal gardens",
+        "e3:taj mahal monument",
+        "e3:the taj mahal"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:taj-mahal",
+      "query": "Taj Mahal Agra",
+      "expected_name": "Taj Mahal",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 8265,
+      "corpus_name_matches": [
+        "Taj Mahal",
+        "Taj Mahal",
+        "Taj Mahal"
+      ],
+      "head_rows_near": 4521,
+      "head_name_matches": [
+        "Taj Mahal",
+        "Taj Mahal",
+        "Taj Mahal"
+      ],
+      "head_tokens": [
+        "agra",
+        "black",
+        "cabs",
+        "e2:taj mahal",
+        "e3:taj mahal agra",
+        "e3:taj mahal gardens",
+        "e3:taj mahal monument",
+        "e3:the taj mahal"
+      ]
+    },
+    {
+      "case_id": "gold:name:machu-picchu",
+      "query": "Machu Picchu",
+      "expected_name": "Machu Picchu",
+      "expected_feature_type": "poi",
+      "tolerance_km": 3.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 580,
+      "corpus_name_matches": [
+        "Santuario histórico de Machu Picchu",
+        "Ciudadela De Machu Picchu",
+        "Machu Picchu"
+      ],
+      "head_rows_near": 501,
+      "head_name_matches": [
+        "Ciudadela De Machu Picchu",
+        "Ciudadela De Machu Picchu",
+        "Machu Picchu"
+      ],
+      "head_tokens": [
+        "allcamayo",
+        "cascadas",
+        "ciudadela",
+        "e2:machu picchu",
+        "e3:machu picchu terraces",
+        "ecopackers",
+        "entrada",
+        "exploring"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:machu-picchu",
+      "query": "Machu Picchu Cusco",
+      "expected_name": "Machu Picchu",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 530,
+      "corpus_name_matches": [
+        "Ciudadela De Machu Picchu",
+        "Machu Picchu",
+        "Machu Picchu"
+      ],
+      "head_rows_near": 468,
+      "head_name_matches": [
+        "Ciudadela De Machu Picchu",
+        "Ciudadela De Machu Picchu",
+        "Machu Picchu"
+      ],
+      "head_tokens": [
+        "allcamayo",
+        "cascadas",
+        "ciudadela",
+        "e2:machu picchu",
+        "e3:machu picchu terraces",
+        "ecopackers",
+        "entrada",
+        "exploring"
+      ]
+    },
+    {
+      "case_id": "gold:name:sagrada-familia",
+      "query": "Sagrada Familia",
+      "expected_name": "Sagrada Familia",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 68603,
+      "corpus_name_matches": [
+        "Sagrada familia",
+        "sagrada familia",
+        "sagrada familia"
+      ],
+      "head_rows_near": 66766,
+      "head_name_matches": [
+        "sagrada familia",
+        "Sagrada familia",
+        "Sagrada Familia"
+      ],
+      "head_tokens": [
+        "ainb",
+        "apartcelonadays",
+        "aspasios",
+        "avinyo",
+        "bcnstop",
+        "bellota",
+        "brustar",
+        "cachapera"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:sagrada-familia",
+      "query": "Sagrada Familia Barcelona",
+      "expected_name": "Sagrada Familia",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 68603,
+      "corpus_name_matches": [
+        "Sagrada familia",
+        "sagrada familia",
+        "sagrada familia"
+      ],
+      "head_rows_near": 66766,
+      "head_name_matches": [
+        "sagrada familia",
+        "Sagrada familia",
+        "Sagrada Familia"
+      ],
+      "head_tokens": [
+        "ainb",
+        "apartcelonadays",
+        "aspasios",
+        "avinyo",
+        "bcnstop",
+        "bellota",
+        "brustar",
+        "cachapera"
+      ]
+    },
+    {
+      "case_id": "gold:name:empire-state-building",
+      "query": "Empire State Building",
+      "expected_name": "Empire State Building",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 134633,
+      "corpus_name_matches": [
+        "Empire State Building",
+        "Empire State Building",
+        "Empire State Building"
+      ],
+      "head_rows_near": 111290,
+      "head_name_matches": [
+        "Empire State Building",
+        "Empire State Building",
+        "Empire State Building"
+      ],
+      "head_tokens": [
+        "102nd",
+        "building",
+        "e3:empire state building",
+        "empire",
+        "floor",
+        "manatthan",
+        "state"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:empire-state-building",
+      "query": "Empire State Building New York",
+      "expected_name": "Empire State Building",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 134633,
+      "corpus_name_matches": [
+        "Empire State Building",
+        "Empire State Building",
+        "Empire State Building"
+      ],
+      "head_rows_near": 111290,
+      "head_name_matches": [
+        "Empire State Building",
+        "Empire State Building",
+        "Empire State Building"
+      ],
+      "head_tokens": [
+        "102nd",
+        "building",
+        "e3:empire state building",
+        "empire",
+        "floor",
+        "manatthan",
+        "state"
+      ]
+    },
+    {
+      "case_id": "gold:name:buckingham-palace",
+      "query": "Buckingham Palace",
+      "expected_name": "Buckingham Palace",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 111598,
+      "corpus_name_matches": [
+        "Buckingham palace",
+        "Buckingham Palace",
+        "Buckingham Palace"
+      ],
+      "head_rows_near": 79708,
+      "head_name_matches": [
+        "Buckingham Palace",
+        "Buckingham Palace",
+        "Buckingham Palace"
+      ],
+      "head_tokens": [
+        "111",
+        "200",
+        "buckingham",
+        "e2:buckingham palace",
+        "home_cleaning",
+        "mews",
+        "state"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:buckingham-palace",
+      "query": "Buckingham Palace London",
+      "expected_name": "Buckingham Palace",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 111598,
+      "corpus_name_matches": [
+        "Buckingham palace",
+        "Buckingham Palace",
+        "Buckingham Palace"
+      ],
+      "head_rows_near": 79708,
+      "head_name_matches": [
+        "Buckingham Palace",
+        "Buckingham Palace",
+        "Buckingham Palace"
+      ],
+      "head_tokens": [
+        "111",
+        "200",
+        "buckingham",
+        "e2:buckingham palace",
+        "home_cleaning",
+        "mews",
+        "state"
+      ]
+    },
+    {
+      "case_id": "gold:name:brandenburg-gate",
+      "query": "Brandenburg Gate",
+      "expected_name": "Brandenburg Gate",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 50898,
+      "corpus_name_matches": [
+        "Brandenburger Tor",
+        "Brandenburger Tor",
+        "Fanmeile Brandenburger Tor Berlin"
+      ],
+      "head_rows_near": 58990,
+      "head_name_matches": [
+        "Brandenburger Tor",
+        "Brandenburger Tor",
+        "Brandenburger Tor"
+      ],
+      "head_tokens": [
+        "alemania",
+        "apartments",
+        "brandenburger",
+        "e2:brandenburger tor",
+        "e3:brandenburg gate berlin",
+        "e3:brandenburger tor berlin",
+        "e3:brandenburger tor museum",
+        "e3:station brandenburger tor"
+      ]
+    },
+    {
+      "case_id": "gold:name_locality:brandenburg-gate",
+      "query": "Brandenburg Gate Berlin",
+      "expected_name": "Brandenburg Gate",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 50898,
+      "corpus_name_matches": [
+        "Brandenburger Tor",
+        "Brandenburger Tor",
+        "Fanmeile Brandenburger Tor Berlin"
+      ],
+      "head_rows_near": 58990,
+      "head_name_matches": [
+        "Brandenburger Tor",
+        "Brandenburger Tor",
+        "Brandenburger Tor"
+      ],
+      "head_tokens": [
+        "alemania",
+        "apartments",
+        "brandenburger",
+        "e2:brandenburger tor",
+        "e3:brandenburg gate berlin",
+        "e3:brandenburger tor berlin",
+        "e3:brandenburger tor museum",
+        "e3:station brandenburger tor"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:pike-place-chowder",
+      "query": "Pike Place Chowder Seattle",
+      "expected_name": "Pike Place Chowder",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 14199,
+      "corpus_name_matches": [
+        "Pike Place Chowder",
+        "Pike Place Chowder"
+      ],
+      "head_rows_near": 11566,
+      "head_name_matches": [
+        "Pike Place Chowder",
+        "Pike Place Chowder"
+      ],
+      "head_tokens": [
+        "chowder"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:noma",
+      "query": "Noma Copenhagen",
+      "expected_name": "Noma",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 6692,
+      "corpus_name_matches": [
+        "Noma",
+        "Noma"
+      ],
+      "head_rows_near": 7503,
+      "head_name_matches": [
+        "Noma",
+        "Noma"
+      ],
+      "head_tokens": [
+        "noma"
+      ]
+    },
+    {
+      "case_id": "gold:brand_branch:din-tai-fung-xinyi",
+      "query": "Din Tai Fung Xinyi",
+      "expected_name": "Din Tai Fung",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "brand_branch"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 31513,
+      "corpus_name_matches": [
+        "鼎泰豐",
+        "鼎泰豐"
+      ],
+      "head_rows_near": 111479,
+      "head_name_matches": [
+        "鼎泰豐",
+        "鼎泰豐",
+        "鼎泰豐"
+      ],
+      "head_tokens": [
+        "泰豐",
+        "鼎泰",
+        "鼎泰豐"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:cafe-de-flore",
+      "query": "Cafe de Flore Paris",
+      "expected_name": "Cafe de Flore",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "food_drink",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 37548,
+      "corpus_name_matches": [
+        "Café de Flore"
+      ],
+      "head_rows_near": 32277,
+      "head_name_matches": [
+        "Café de Flore"
+      ],
+      "head_tokens": [
+        "flore"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:harrods",
+      "query": "Harrods London",
+      "expected_name": "Harrods",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 29344,
+      "corpus_name_matches": [
+        "Harrods",
+        "Harrods"
+      ],
+      "head_rows_near": 21239,
+      "head_name_matches": [
+        "Harrods"
+      ],
+      "head_tokens": [
+        "harrods"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:kadewe",
+      "query": "KaDeWe Berlin",
+      "expected_name": "KaDeWe",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "retail",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 14283,
+      "corpus_name_matches": [
+        "KaDeWe"
+      ],
+      "head_rows_near": 16877,
+      "head_name_matches": [
+        "KaDeWe"
+      ],
+      "head_tokens": [
+        "kadewe"
+      ]
+    },
+    {
+      "case_id": "gold:brand_branch:ikea-berlin-lichtenberg",
+      "query": "IKEA Lichtenberg Berlin",
+      "expected_name": "IKEA",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.5,
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 5279,
+      "corpus_name_matches": [
+        "Freetrailer PKW Anhängervermietung - IKEA Berlin-Lichtenberg"
+      ],
+      "head_rows_near": 5275,
+      "head_name_matches": [
+        "Freetrailer PKW Anhängervermietung - IKEA Berlin-Lichtenberg",
+        "Freetrailer PKW Anhängervermietung - IKEA Berlin-Lichtenberg",
+        "Freetrailer PKW Anhängervermietung - IKEA Berlin-Lichtenberg"
+      ],
+      "head_tokens": [
+        "anhangervermietung",
+        "ikea",
+        "pkw"
+      ]
+    },
+    {
+      "case_id": "gold:brand_branch:apple-marunouchi",
+      "query": "Apple Marunouchi Tokyo",
+      "expected_name": "Apple Marunouchi",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "poi_family": "retail",
+        "scope": "brand_branch"
+      },
+      "verdict": "ABSENT",
+      "match_strength": "NONE",
+      "corpus_rows_near": 47832,
+      "corpus_name_matches": [],
+      "head_rows_near": 104243,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:named_poi:raffles-singapore",
+      "query": "Raffles Hotel Singapore",
+      "expected_name": "Raffles Hotel",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 31934,
+      "corpus_name_matches": [
+        "萊佛士酒店",
+        "Raffles Place, Singapore",
+        "Raffles Hotel Museum"
+      ],
+      "head_rows_near": 31721,
+      "head_name_matches": [
+        "萊佛士酒店",
+        "萊佛士酒店",
+        "萊佛士酒店"
+      ],
+      "head_tokens": [
+        "e3:raffles hotel museum",
+        "e3:raffles place singapore",
+        "hotel",
+        "raffles",
+        "佛士",
+        "士酒",
+        "萊佛",
+        "萊佛士酒店"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:hotel-sacher-vienna",
+      "query": "Hotel Sacher Vienna",
+      "expected_name": "Hotel Sacher",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 22589,
+      "corpus_name_matches": [
+        "Hotel Sacher",
+        "Hotel Vienna"
+      ],
+      "head_rows_near": 26493,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:named_poi:plaza-hotel",
+      "query": "Plaza Hotel New York",
+      "expected_name": "The Plaza",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 66533,
+      "corpus_name_matches": [
+        "The Plaza",
+        "Lexington Plaza Hotel",
+        "The Ritz Plaza"
+      ],
+      "head_rows_near": 54984,
+      "head_name_matches": [
+        "Blandi at the Plaza",
+        "The Ritz Plaza",
+        "Eloise - The Plaza"
+      ],
+      "head_tokens": [
+        "blandi",
+        "e3:the ritz plaza",
+        "eloise",
+        "ladure",
+        "laduree",
+        "mcm",
+        "ritz",
+        "sprawling"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:novotel-monte-carlo",
+      "query": "Novotel Monte Carlo",
+      "expected_name": "Novotel Monte Carlo",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "poi_family": "lodging",
+        "scope": "brand_branch"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3283,
+      "corpus_name_matches": [
+        "Novotel Monte Carlo",
+        "MONTE CARLO"
+      ],
+      "head_rows_near": 2838,
+      "head_name_matches": [
+        "Novotel Monte Carlo",
+        "MONTE CARLO"
+      ],
+      "head_tokens": [
+        "dazur",
+        "novotel"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:mayo-clinic-rochester",
+      "query": "Mayo Clinic Rochester",
+      "expected_name": "Mayo Clinic",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "brand_branch"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3937,
+      "corpus_name_matches": [
+        "Mayo Clinic",
+        "Mayo Clinic",
+        "Lanmark Center - Mayo Clinic"
+      ],
+      "head_rows_near": 2586,
+      "head_name_matches": [
+        "Mayo Clinic",
+        "Mayo Clinic",
+        "Mayo Clinic"
+      ],
+      "head_tokens": [
+        "201",
+        "charlton",
+        "e2:mayo clinic",
+        "e3:mayo clinic libraries",
+        "endocrine",
+        "epilepsy",
+        "gonda",
+        "gonna"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:sickkids-toronto",
+      "query": "SickKids Toronto",
+      "expected_name": "SickKids",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 28507,
+      "corpus_name_matches": [
+        "SickKids",
+        "Hospital For Sick Children, The"
+      ],
+      "head_rows_near": 23084,
+      "head_name_matches": [
+        "SickKids",
+        "Hospital For Sick Children, The"
+      ],
+      "head_tokens": [
+        "sick",
+        "sickkids"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:royal-childrens-melbourne",
+      "query": "Royal Childrens Hospital Melbourne",
+      "expected_name": "The Royal Children's Hospital",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 7792,
+      "corpus_name_matches": [
+        "Kelpie Ward, Royal Childrens Hospital",
+        "Platypus Ward - Royal Children's Hospital, Melbourne",
+        "Parkville Cafe Royal Children's Hospital"
+      ],
+      "head_rows_near": 5482,
+      "head_name_matches": [
+        "Kelpie Ward, Royal Childrens Hospital",
+        "Kelpie Ward, Royal Childrens Hospital",
+        "Ronald McDonald House, Royal Children's Hospital"
+      ],
+      "head_tokens": [
+        "childrens",
+        "kelpie",
+        "mcdonald",
+        "platypus",
+        "ronald",
+        "yalingbu",
+        "yirramboi"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:singapore-general-hospital",
+      "query": "Singapore General Hospital",
+      "expected_name": "Singapore General Hospital",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.5,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "healthcare",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 39974,
+      "corpus_name_matches": [
+        "Singapore General Hospital",
+        "Singapore General Hospital",
+        "Block 7, Singapore General Hospital"
+      ],
+      "head_rows_near": 39633,
+      "head_name_matches": [
+        "Singapore General Hospital",
+        "Singapore General Hospital",
+        "Singapore General Hospital"
+      ],
+      "head_tokens": [
+        "e3:singapore general hospital",
+        "general"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:seattle-central-library",
+      "query": "Seattle Central Library",
+      "expected_name": "Seattle Central Library",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 14708,
+      "corpus_name_matches": [
+        "Seattle Central library",
+        "Friendshop In Seattle Central Library",
+        "Wet Buns @ Central Library"
+      ],
+      "head_rows_near": 11982,
+      "head_name_matches": [
+        "Seattle Central library",
+        "Friendshop In Seattle Central Library"
+      ],
+      "head_tokens": [
+        "e3:seattle central library",
+        "friendshop"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:gpo-dublin",
+      "query": "GPO Dublin",
+      "expected_name": "General Post Office",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "verdict": "NOT_ADMITTED",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 13442,
+      "corpus_name_matches": [
+        "General Post Office Arcade",
+        "Post Office",
+        "Post Office"
+      ],
+      "head_rows_near": 11319,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "gold:named_poi:burton-barr-library",
+      "query": "Burton Barr Library Phoenix",
+      "expected_name": "Burton Barr Central Library",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 5116,
+      "corpus_name_matches": [
+        "Burton Barr Central Library"
+      ],
+      "head_rows_near": 4038,
+      "head_name_matches": [
+        "Burton Barr Central Library",
+        "Burton Barr Central Library"
+      ],
+      "head_tokens": [
+        "barr",
+        "burton"
+      ]
+    },
+    {
+      "case_id": "gold:named_poi:union-station-toronto",
+      "query": "Union Station Toronto",
+      "expected_name": "Union Station",
+      "expected_feature_type": "poi",
+      "tolerance_km": 1.0,
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "poi_family": "civic_transit",
+        "scope": "independent"
+      },
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 22180,
+      "corpus_name_matches": [
+        "Union Station",
+        "Union Station Parking",
+        "Dresden Vision | Union Station"
+      ],
+      "head_rows_near": 17989,
+      "head_name_matches": [
+        "Union Station",
+        "Union Station",
+        "Union Station"
+      ],
+      "head_tokens": [
+        "bus",
+        "chocolato",
+        "cinnaholic",
+        "coffee_and_tea_supplies",
+        "decathlon",
+        "dresden",
+        "e2:union station",
+        "nespresso"
+      ]
+    },
+    {
+      "case_id": "gold:inverse_seam:sydney-opera-house",
+      "query": "Sydney Opera House",
+      "expected_name": "Sydney Opera House",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": true,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 49100,
+      "corpus_name_matches": [
+        "Sydney Opera House",
+        "Opera House Sydney Australia",
+        "Sydney Opera House - Studio"
+      ],
+      "head_rows_near": 32481,
+      "head_name_matches": [
+        "Sydney Opera House",
+        "Sydney Opera House",
+        "Opera House Sydney Australia"
+      ],
+      "head_tokens": [
+        "e3:sydney opera house",
+        "opera",
+        "opera_and_ballet",
+        "vivid"
+      ]
+    },
+    {
+      "case_id": "gold:inverse_seam:golden-gate-bridge",
+      "query": "Golden Gate Bridge",
+      "expected_name": "Golden Gate Bridge",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 3825,
+      "corpus_name_matches": [
+        "Overlook Of Golden Gate Bridge",
+        "Golden gate",
+        "Golden Gate"
+      ],
+      "head_rows_near": 3106,
+      "head_name_matches": [
+        "Golden Gate Bridge Observation Deck",
+        "Golden Gate Bridge Observation Deck",
+        "Golden Gate Bridge Bike Rentals"
+      ],
+      "head_tokens": [
+        "bike_rentals",
+        "crissy",
+        "deck",
+        "e2:golden gate",
+        "observation",
+        "pylon",
+        "roundhouse"
+      ]
+    },
+    {
+      "case_id": "gold:inverse_seam:casino-de-monte-carlo",
+      "query": "Casino de Monte-Carlo",
+      "expected_name": "Casino de Monte-Carlo",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": true,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 3531,
+      "corpus_name_matches": [
+        "Casino de Monte-Carlo",
+        "Monte Carlo Casino, Monaco",
+        "MONTE CARLO"
+      ],
+      "head_rows_near": 3079,
+      "head_name_matches": [
+        "Casino de Monte-Carlo",
+        "MONTE CARLO"
+      ],
+      "head_tokens": [
+        "casino",
+        "dazur"
+      ]
+    },
+    {
+      "case_id": "gold:inverse_seam:times-square",
+      "query": "Times Square",
+      "expected_name": "Times Square",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "CONTAINMENT_ONLY",
+      "corpus_rows_near": 122173,
+      "corpus_name_matches": [
+        "Times Square",
+        "Times Square Limousine",
+        "Times Square House"
+      ],
+      "head_rows_near": 98897,
+      "head_name_matches": [
+        "AKA Times Square",
+        "Aliz Hotel Times Square",
+        "Fushimi Times Square"
+      ],
+      "head_tokens": [
+        "aka",
+        "aliz",
+        "arts_and_entertainment",
+        "asian_fusion_restaurant",
+        "aura",
+        "ball",
+        "billabong",
+        "billbarod"
+      ]
+    },
+    {
+      "case_id": "gold:inverse_seam:louvre-museum",
+      "query": "Louvre Museum",
+      "expected_name": "Louvre Museum",
+      "expected_feature_type": "poi",
+      "tolerance_km": 2.0,
+      "hit": false,
+      "empty": false,
+      "strata": {},
+      "verdict": "IN_HEAD",
+      "match_strength": "EXACT",
+      "corpus_rows_near": 113857,
+      "corpus_name_matches": [
+        "Louvre",
+        "Musee du Louvre",
+        "Louvre Museum"
+      ],
+      "head_rows_near": 92566,
+      "head_name_matches": [
+        "Louvre Museum",
+        "Louvre Museum",
+        "Musee du Louvre"
+      ],
+      "head_tokens": [
+        "e2:louvre museum",
+        "e3:le louvre museum",
+        "e3:louvre museum paris",
+        "e3:musee du louvre",
+        "e3:museum de louvre",
+        "egypte",
+        "expo",
+        "louvre"
+      ]
+    }
+  ]
+}
