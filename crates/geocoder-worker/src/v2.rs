@@ -1881,15 +1881,78 @@ fn locality_suffix_candidates(
     candidates
 }
 
-fn exact_locality_result<'a>(
+/// Does one of the row's *alternate* searchable names equal the suffix
+/// exactly? `search_name` is the `;`-separated primary + alternates/exonyms
+/// column already carried by every division row (new shards; `None` on legacy
+/// shards, where the fallback is simply unavailable). This is what lets
+/// `Tokyo` resolve 東京都 and `Mexico City` resolve Ciudad de México -- the
+/// endonym is the primary name, so the exact primary-name rung can never fire
+/// for those.
+fn alternate_locality_name_matches(
+    result: &geocoder_core::GeocoderResult,
+    locality_tokens: &[String],
+) -> bool {
+    result.search_name.as_deref().is_some_and(|names| {
+        names
+            .split(';')
+            .any(|segment| query_terms(segment.split(',').next().unwrap_or("")) == locality_tokens)
+    })
+}
+
+fn exact_primary_locality_name_matches(
+    result: &geocoder_core::GeocoderResult,
+    locality_tokens: &[String],
+) -> bool {
+    query_terms(result.primary_name.split(',').next().unwrap_or("")) == locality_tokens
+}
+
+/// The bounded set of localities a suffix may resolve to, best first.
+///
+/// Two properties this ordering has to keep:
+/// - Exact primary-name matches come first, in the division lane's own
+///   (importance) order, so the *first* attempt is byte-for-byte the locality
+///   the previous single-shot `exact_locality_result` picked. Nothing that
+///   works today can move.
+/// - Alternate-name matches are appended after them, so the alt-name rung is
+///   purely additive: it can only supply localities where the exact rung
+///   found none, or extra retries after the exact ones came back empty.
+///
+/// Capped at [`LOCALITY_INFERENCE_ATTEMPT_CAP`]: each entry costs one routed
+/// places search.
+fn exact_locality_results<'a>(
     candidate: &LocalitySuffixCandidate,
     results: &'a [geocoder_core::GeocoderResult],
-) -> Option<&'a geocoder_core::GeocoderResult> {
-    results.iter().find(|result| {
-        LOCALITY_SUFFIX_TYPES.contains(&normalized_type(&result.division_type).as_str())
-            && query_terms(result.primary_name.split(',').next().unwrap_or(""))
-                == candidate.locality_tokens
-    })
+) -> Vec<&'a geocoder_core::GeocoderResult> {
+    let mut primary = Vec::new();
+    let mut alternate = Vec::new();
+    for result in results {
+        if !LOCALITY_SUFFIX_TYPES.contains(&normalized_type(&result.division_type).as_str()) {
+            continue;
+        }
+        if exact_primary_locality_name_matches(result, &candidate.locality_tokens) {
+            primary.push(result);
+        } else if alternate_locality_name_matches(result, &candidate.locality_tokens) {
+            alternate.push(result);
+        }
+        if primary.len() >= LOCALITY_INFERENCE_ATTEMPT_CAP {
+            break;
+        }
+    }
+    primary.extend(alternate);
+    primary.truncate(LOCALITY_INFERENCE_ATTEMPT_CAP);
+    primary
+}
+
+/// Should this routed attempt's result be adopted, and should the retry loop
+/// stop? Pure so the policy is testable without a loader.
+///
+/// - A non-empty routed result is always adopted and always stops the loop.
+/// - An empty one is adopted only on the first attempt, which reproduces the
+///   pre-retry behaviour exactly (inference fired, routed lane empty, metadata
+///   still records the inference) while later empty attempts leave that first
+///   adoption in place.
+fn locality_attempt_disposition(attempt_index: usize, routed_is_empty: bool) -> (bool, bool) {
+    (!routed_is_empty || attempt_index == 0, !routed_is_empty)
 }
 
 fn places_locality_inference(
@@ -1908,11 +1971,18 @@ fn places_locality_inference(
     )
 }
 
+/// Bounded homonym-tolerant retry: at most this many localities are tried for
+/// one query, so the worst case is three routed places searches instead of one.
+const LOCALITY_INFERENCE_ATTEMPT_CAP: usize = 3;
+
+/// The ordered, bounded routing plans for a query's locality suffix. Empty
+/// when no suffix resolves; otherwise the first entry is the locality the
+/// single-shot predecessor would have chosen.
 async fn infer_places_locality(
     loader: &ShardLoader,
     core_version: &str,
     candidates: &[LocalitySuffixCandidate],
-) -> Result<Option<(String, PlacesLocalityInference)>> {
+) -> Result<Vec<(String, PlacesLocalityInference)>> {
     let allowed_types: HashSet<String> = LOCALITY_SUFFIX_TYPES
         .iter()
         .map(|value| (*value).to_string())
@@ -1925,11 +1995,15 @@ async fn infer_places_locality(
         let search = loader
             .search_version(core_version, &query, &UserLocation::default(), false)
             .await?;
-        if let Some(result) = exact_locality_result(candidate, &search.results) {
-            return Ok(Some(places_locality_inference(candidate, result)));
+        let matches = exact_locality_results(candidate, &search.results);
+        if !matches.is_empty() {
+            return Ok(matches
+                .into_iter()
+                .map(|result| places_locality_inference(candidate, result))
+                .collect());
         }
     }
-    Ok(None)
+    Ok(Vec::new())
 }
 
 fn apply_places_locality_inference(
@@ -2489,10 +2563,19 @@ pub(crate) async fn handle_forward(
         // tower", and scoring the full string against a POI named "Eiffel
         // Tower" would understate the match.
         let mut effective_query = query.to_string();
-        if let Some((place_query, inference)) =
-            infer_places_locality(&loader, release.core_version(), &suffix_candidates).await?
+        // Bounded homonym-tolerant retry: `Rochester` is several places, and
+        // the highest-ranked one need not be the one holding the POI. Try the
+        // ordered localities in turn (at most LOCALITY_INFERENCE_ATTEMPT_CAP
+        // routed searches) and keep the first that routes to anything. The
+        // first attempt is the pre-retry behaviour, so a query that works
+        // today takes exactly the same path and stops immediately.
+        for (attempt_index, (place_query, inference)) in
+            infer_places_locality(&loader, release.core_version(), &suffix_candidates)
+                .await?
+                .into_iter()
+                .enumerate()
         {
-            places = search_places(
+            let mut routed = search_places(
                 &loader,
                 family,
                 &place_query,
@@ -2501,9 +2584,16 @@ pub(crate) async fn handle_forward(
                 limit,
             )
             .await?;
-            effective_query = place_query;
-            places_locality_inference =
-                Some(apply_places_locality_inference(&mut places, &inference));
+            let (adopt, stop) = locality_attempt_disposition(attempt_index, routed.is_empty());
+            if adopt {
+                places_locality_inference =
+                    Some(apply_places_locality_inference(&mut routed, &inference));
+                places = routed;
+                effective_query = place_query;
+            }
+            if stop {
+                break;
+            }
         }
         let normalized = NormalizedQuery::new(&effective_query);
         let normalized = (!normalized.is_empty()).then_some(normalized);
@@ -4280,6 +4370,21 @@ mod tests {
             country: None,
             region: None,
             population: None,
+            search_name: None,
+        }
+    }
+
+    fn division_result_with_alternates(
+        id: &str,
+        name: &str,
+        division_type: &str,
+        longitude: f64,
+        latitude: f64,
+        search_name: &str,
+    ) -> geocoder_core::GeocoderResult {
+        geocoder_core::GeocoderResult {
+            search_name: Some(search_name.into()),
+            ..division_result(id, name, division_type, longitude, latitude)
         }
     }
 
@@ -4423,9 +4528,172 @@ mod tests {
             division_result("exact", "New York, NY", "locality", -74.006, 40.7128),
         ];
         assert_eq!(
-            exact_locality_result(&candidate, &results).map(|result| result.gers_id.as_str()),
-            Some("exact")
+            exact_locality_results(&candidate, &results)
+                .iter()
+                .map(|result| result.gers_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["exact"]
         );
+    }
+
+    fn locality_candidate(place: &str, locality: &str) -> LocalitySuffixCandidate {
+        LocalitySuffixCandidate {
+            place_query: place.into(),
+            locality_query: locality.into(),
+            locality_tokens: query_terms(locality),
+        }
+    }
+
+    #[test]
+    fn alternate_division_names_resolve_endonym_localities() {
+        // Ciudad de Mexico / Tokyo: the query never equals the primary name,
+        // so only the alternate-name rung can route these.
+        let candidate = locality_candidate("hotel del angel", "mexico city");
+        let results = vec![
+            division_result("elsewhere", "Mexico", "region", -102.0, 23.0),
+            division_result_with_alternates(
+                "cdmx",
+                "Ciudad de Mexico",
+                "locality",
+                -99.13,
+                19.43,
+                "Ciudad de Mexico;Mexico City;CDMX",
+            ),
+        ];
+        assert_eq!(
+            exact_locality_results(&candidate, &results)
+                .iter()
+                .map(|result| result.gers_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["cdmx"]
+        );
+
+        let tokyo = locality_candidate("apple marunouchi", "tokyo");
+        let results = vec![division_result_with_alternates(
+            "tokyo",
+            "\u{6771}\u{4eac}\u{90fd}",
+            "locality",
+            139.69,
+            35.69,
+            "\u{6771}\u{4eac}\u{90fd};Tokyo;Tokyo Metropolis",
+        )];
+        assert_eq!(
+            exact_locality_results(&tokyo, &results)
+                .iter()
+                .map(|result| result.gers_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["tokyo"]
+        );
+    }
+
+    #[test]
+    fn alternate_names_never_displace_an_exact_primary_name_match() {
+        // RC3 guard shape: whatever the exact rung picks today stays the first
+        // attempt, and a partial alternate name is not a match at all.
+        let candidate = locality_candidate("taj mahal", "agra");
+        let results = vec![
+            division_result_with_alternates(
+                "alt",
+                "Agra Cantonment",
+                "locality",
+                78.0,
+                27.15,
+                "Agra Cantonment;Agra",
+            ),
+            division_result("primary", "Agra", "locality", 78.02, 27.18),
+            division_result_with_alternates(
+                "partial",
+                "Fatehpur",
+                "locality",
+                77.66,
+                27.09,
+                "Fatehpur;Agra district",
+            ),
+        ];
+        assert_eq!(
+            exact_locality_results(&candidate, &results)
+                .iter()
+                .map(|result| result.gers_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["primary", "alt"]
+        );
+    }
+
+    #[test]
+    fn locality_matches_are_bounded_and_locality_like() {
+        let candidate = locality_candidate("mayo clinic", "rochester");
+        let mut results = vec![division_result(
+            "region",
+            "Rochester",
+            "region",
+            -77.6,
+            43.2,
+        )];
+        for index in 0..6 {
+            results.push(division_result(
+                &format!("rochester-{index}"),
+                "Rochester",
+                "locality",
+                -92.46,
+                44.02,
+            ));
+        }
+        let matches = exact_locality_results(&candidate, &results);
+        assert_eq!(matches.len(), LOCALITY_INFERENCE_ATTEMPT_CAP);
+        assert_eq!(
+            matches
+                .iter()
+                .map(|result| result.gers_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["rochester-0", "rochester-1", "rochester-2"]
+        );
+    }
+
+    #[test]
+    fn homonym_retry_adopts_the_first_non_empty_routed_attempt() {
+        // Attempt 0 empty: adopted (pre-retry behaviour) but does not stop.
+        assert_eq!(locality_attempt_disposition(0, true), (true, false));
+        // Attempt 1 non-empty: adopted, and stops the loop.
+        assert_eq!(locality_attempt_disposition(1, false), (true, true));
+        // A later empty attempt never overwrites the first adoption.
+        assert_eq!(locality_attempt_disposition(1, true), (false, false));
+        assert_eq!(locality_attempt_disposition(2, true), (false, false));
+        // A query that works today: first attempt non-empty, adopted, stop.
+        assert_eq!(locality_attempt_disposition(0, false), (true, true));
+    }
+
+    #[test]
+    fn already_working_name_plus_locality_queries_keep_their_plan() {
+        // "Taj Mahal Agra" style: the head contains the exact prefix name, one
+        // candidate survives, and the routed plan is unchanged by the retry
+        // work -- first plan, same centroid, same trimmed place query.
+        let tokens = query_terms("Taj Mahal Agra");
+        let candidates = locality_suffix_candidates(&tokens, false, &[head_place("Taj Mahal")]);
+        assert_eq!(candidates.len(), 1);
+        let candidate = &candidates[0];
+        assert_eq!(candidate.place_query, "taj mahal");
+        let divisions = vec![
+            division_result("agra", "Agra", "locality", 78.02, 27.18),
+            division_result_with_alternates(
+                "agra-cantt",
+                "Agra Cantonment",
+                "locality",
+                78.0,
+                27.15,
+                "Agra Cantonment;Agra",
+            ),
+        ];
+        let plans = exact_locality_results(candidate, &divisions)
+            .into_iter()
+            .map(|result| places_locality_inference(candidate, result))
+            .collect::<Vec<_>>();
+        assert_eq!(plans.len(), 2);
+        assert_eq!(plans[0].0, "taj mahal");
+        assert_eq!(plans[0].1.division_id, "agra");
+        assert_eq!((plans[0].1.longitude, plans[0].1.latitude), (78.02, 27.18));
+        // And the first attempt's disposition stops the loop as soon as that
+        // routed search returns anything, so rank 1 cannot move.
+        assert_eq!(locality_attempt_disposition(0, false), (true, true));
     }
 
     #[test]

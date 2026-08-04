@@ -99,6 +99,7 @@ mod tests {
             country: None,
             region: None,
             population,
+            search_name: None,
         }
     }
 
