@@ -187,7 +187,15 @@ pub fn distance_to_bbox(lat: f64, lon: f64, bbox: &[f64; 4]) -> f64 {
                 max_lon
             }
         } else {
-            lon.clamp(min_lon, max_lon)
+            // The point's longitude is INSIDE the wrapped span, so only the
+            // latitude is out of range and the nearest box point shares this
+            // longitude. `lon.clamp(min_lon, max_lon)` cannot be used here:
+            // an antimeridian-crossing box has `min_lon > max_lon`, and
+            // `f64::clamp` panics on `min > max`. That panic reached
+            // production as a Cloudflare 1101 for every biased forward query
+            // whose longitude fell in such a shard's span while its latitude
+            // fell outside the shard's latitude band.
+            lon
         }
     };
     haversine_distance(lat, lon, closest_lat, closest_lon)
@@ -390,6 +398,43 @@ mod tests {
         assert_eq!(distance_to_bbox(0.0, -175.0, &bbox), 0.0);
         let outside = distance_to_bbox(0.0, 0.0, &bbox);
         assert!(outside > 1000.0);
+    }
+
+    /// Regression: a bias point whose longitude lies INSIDE an
+    /// antimeridian-crossing shard's wrapped span while its latitude lies
+    /// outside that shard's latitude band used to reach
+    /// `lon.clamp(min_lon, max_lon)` with `min_lon > max_lon`, which panics.
+    /// In production (build 2026-08-03.0) that panic aborted the whole
+    /// `/v2/forward` request as a Cloudflare 1101 for every proximity query at
+    /// longitudes >= 19.88E or <= 171.87W outside 41.19N..81.90N -- the live
+    /// `RU` shard bbox reproduced verbatim below.
+    #[test]
+    fn test_distance_to_bbox_antimeridian_latitude_outside_does_not_panic() {
+        let russia = [19.879_823_684_692_383, 41.19, -171.872_116_088_867_2, 81.9];
+        // Singapore, Tokyo, Sydney: inside the wrapped longitude span, far
+        // south of the latitude band.
+        for (lat, lon) in [(1.3, 103.85), (35.68, 139.7), (-33.87, 151.2)] {
+            let distance = distance_to_bbox(lat, lon, &russia);
+            assert!(
+                distance.is_finite() && distance > 0.0,
+                "distance for ({lat}, {lon}) was {distance}"
+            );
+            // Only the latitude is out of range, so the answer is the
+            // purely meridional distance to the southern edge.
+            let expected = haversine_distance(lat, lon, russia[1], lon);
+            assert!(
+                (distance - expected).abs() < 1e-6,
+                "distance for ({lat}, {lon}) was {distance}, expected {expected}"
+            );
+        }
+        // The western side of the wrapped span behaves identically.
+        let west = distance_to_bbox(1.3, -175.0, &russia);
+        assert!((west - haversine_distance(1.3, -175.0, russia[1], -175.0)).abs() < 1e-6);
+        // North of the band is still handled.
+        let north = distance_to_bbox(85.0, 103.85, &russia);
+        assert!((north - haversine_distance(85.0, 103.85, russia[3], 103.85)).abs() < 1e-6);
+        // A point inside both spans is still zero.
+        assert_eq!(distance_to_bbox(55.0, 103.85, &russia), 0.0);
     }
 
     #[test]
