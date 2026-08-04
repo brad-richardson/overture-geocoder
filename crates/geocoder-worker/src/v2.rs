@@ -19,7 +19,8 @@ use crate::address_construction_v1::{
     MAX_ADDRESS_ROUTING_BYTES,
 };
 use crate::places_construction_v1::{
-    construction_cell, entity_phrase_key, head_shard_id, head_shard_lookup, merge_head_candidates,
+    compose_entity_phrase_candidates, construction_cell, entity_phrase_key,
+    entity_phrase_token_groups, head_shard_id, head_shard_lookup, merge_head_candidates,
     merge_routed_candidates, record_projection, routed_fetch_plan,
     supports_places_construction_format, validate_entity_phrase_records, HeadRoutingManifest,
     PlacesRouting, HEAD_QUERY_TOKEN_CAP, MAX_HEAD_SHARD_BYTES, MAX_PLACES_HEAD_ROUTING_BYTES,
@@ -2104,29 +2105,34 @@ async fn search_places_construction(
     let head = loader
         .lookup_places_construction_head_routing(&head_manifest_key, &routing.head)
         .await?;
+    let mut phrase_groups = Vec::new();
     if head.admits_entity_phrases() {
-        if let Some(phrase_key) = entity_phrase_key(&tokens) {
-            let shard_id = head_shard_id(&phrase_key, head.shard_bits);
-            if let Some(shard) = head.shard(shard_id) {
-                let object_key = format!("{object_root}/objects/{}", shard.path);
-                let bytes = loader
-                    .places_construction_object(&object_key, MAX_HEAD_SHARD_BYTES)
-                    .await?;
-                let records = head_shard_lookup(&bytes, shard_id, head.shard_bits, &phrase_key)
-                    .map_err(Error::RustError)?;
-                let records = validate_entity_phrase_records(&tokens, records);
-                if !records.is_empty() {
-                    return Ok(records.iter().map(record_projection).collect());
+        for phrase_tokens in entity_phrase_token_groups(&tokens) {
+            if let Some(phrase_key) = entity_phrase_key(phrase_tokens) {
+                let shard_id = head_shard_id(&phrase_key, head.shard_bits);
+                if let Some(shard) = head.shard(shard_id) {
+                    let object_key = format!("{object_root}/objects/{}", shard.path);
+                    let bytes = loader
+                        .places_construction_object(&object_key, MAX_HEAD_SHARD_BYTES)
+                        .await?;
+                    let records = head_shard_lookup(&bytes, shard_id, head.shard_bits, &phrase_key)
+                        .map_err(Error::RustError)?;
+                    let records = validate_entity_phrase_records(phrase_tokens, records);
+                    if !records.is_empty() {
+                        phrase_groups.push(records);
+                    }
                 }
             }
         }
     }
     let mut per_token = Vec::with_capacity(tokens.len());
+    let mut ordinary_complete = true;
     for token in &tokens {
         let shard_id = head_shard_id(token, head.shard_bits);
         // An unpopulated shard means no head record exists for the token.
         let Some(shard) = head.shard(shard_id) else {
-            return Ok(Vec::new());
+            ordinary_complete = false;
+            break;
         };
         let object_key = format!("{object_root}/objects/{}", shard.path);
         let bytes = loader
@@ -2135,11 +2141,18 @@ async fn search_places_construction(
         let records = head_shard_lookup(&bytes, shard_id, head.shard_bits, token)
             .map_err(Error::RustError)?;
         if records.is_empty() {
-            return Ok(Vec::new());
+            ordinary_complete = false;
+            break;
         }
         per_token.push(records);
     }
-    let records = merge_head_candidates(&tokens, per_token).map_err(Error::RustError)?;
+    let ordinary = if ordinary_complete {
+        merge_head_candidates(&tokens, per_token).map_err(Error::RustError)?
+    } else {
+        Vec::new()
+    };
+    let records =
+        compose_entity_phrase_candidates(phrase_groups, ordinary).map_err(Error::RustError)?;
     Ok(records.iter().map(record_projection).collect())
 }
 
@@ -4379,6 +4392,21 @@ mod tests {
             &[head_place("Statue of Liberty National Monument")],
         )
         .is_empty());
+        assert_eq!(
+            locality_suffix_candidates(
+                &query_terms("Union Station Toronto"),
+                false,
+                &[
+                    head_place("Union Station Toronto"),
+                    head_place("Union Station"),
+                ],
+            ),
+            vec![LocalitySuffixCandidate {
+                place_query: "union station".into(),
+                locality_query: "toronto".into(),
+                locality_tokens: vec!["toronto".into()],
+            }]
+        );
     }
 
     #[test]

@@ -1,9 +1,11 @@
 # construction-v1: current state
 
-Last updated 2026-08-03 after the bounded entity-phrase admission implementation,
-the independent correctness audit, fresh v4 formal evidence, sidecar Phase 0's
-cross-release identity measurement, completion of the 200-case everyday-POI
-tripwire, and its current-OSM presence control.
+Last updated 2026-08-04 after the first complete v4 preview exposed two exact
+phrase short-circuit regressions and the bounded additive phrase-composition
+correction was implemented and validated against the immutable candidate head
+shards. It also incorporates the independent correctness audit, fresh v4 formal
+evidence, sidecar Phase 0's cross-release identity measurement, completion of
+the 200-case everyday-POI tripwire, and its current-OSM presence control.
 Read, in order: "Planet Places rebuild and promotion, 2026-08-02", "Head
 saturated-posting correction, 2026-08-02", "RC3 and remaining admission split,
 2026-08-02", "First RC3 live result and locality interaction, 2026-08-02",
@@ -23,11 +25,14 @@ A direct source-stage audit corrected Brandenburg Gate: the nearby June records
 expose German/Spanish names, not the English query surface, and even the German
 routed control misses the canonical record. It is an alias/tokenization plus
 routed-cap problem, not the same global-head eviction. Fresh v4 formal evidence
-is now green, including the planet-wide phrase-posting falsification probe. **The
-non-promoting Places-only planet build under v4 has completed every reducer but
-exposed a measured global-head spill-cap blocker; its scoped head-only recovery
-is the active gate. Preview measurement remains next before catalog promotion.** Keep Brandenburg
-Gate and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
+is now green, including the planet-wide phrase-posting falsification probe. The
+non-promoting Places-only planet build and scoped head-only recovery completed.
+**The first complete preview was net positive but correctly failed its paired
+zero-loss gate: 55-case rank@1 moved 26 -> 29 and rank@10 34 -> 37, while exact
+losses for Statue of Liberty and Union Station Toronto identified a bounded
+Worker phrase-composition bug. The additive Worker correction and repeat
+preview are the active gate before catalog promotion.** Keep Brandenburg Gate
+and `Machu Picchu Cusco` in their separate follow-up backlogs. Do not widen
 phrase admission again in this generation: the repeated functional rehearsal
 has only 31.7 MB of formal head-byte reserve above the 25% headroom floor.
 
@@ -1474,11 +1479,16 @@ adequate startup gate.
 happens before the final result cap. Place reranking applies the audited A2+B+C
 contract: partial multi-token name match quality, exact/qualified full-name
 quality, and bounded category priors. Locality suffix candidates cover two
-through six tokens. The entity-phrase fast path remains fail-closed: positive
+through six tokens. The entity-phrase lane remains fail-closed: positive
 prominence, name field mask, and exact normalized primary-name equality are all
 required; an empty or invalid phrase result falls through to the ordinary path.
-It does not merge an additional ordinary result set into every successful phrase
-query, avoiding two or three unnecessary R2 reads.
+The first complete v4 preview refuted the earlier terminal-fast-path decision.
+A valid phrase posting is now additive evidence: a three-token query reads the
+full phrase, its exact two-token prefix, and the three ordinary postings, then
+deduplicates identical source rows. This is bounded at five head reads and 50
+pre-score candidates. It lets a selective ordinary posting recover a canonical
+feature evicted from a saturated phrase posting, and lets an exact prefix feed
+the already-bounded locality-suffix path.
 
 The gold contract now records point-vs-extent tolerance explicitly, accepts the
 official Machu Picchu extent case without loosening Big Ben, and reports paired
@@ -1530,16 +1540,46 @@ against 8.5 GiB / 9,126,805,504 bytes. This is not an RSS, reducer, R2, candidat
 admission, or runner-ENOSPC failure. No head result, final object, or completion
 marker was published.
 
-The scoped recovery is a fresh `head_only_resume` from run `30799029151`. It
-keeps the request-pinned producer and all immutable staged rows, keys, ordering,
-and binaries. The workflow raises only this head's DuckDB spill allowance to
-three quarters of the admitted scratch cap: 13,690,208,256 of
+The scoped `head_only_resume` recovery from run `30799029151` completed while
+keeping the request-pinned producer and all immutable staged rows, keys,
+ordering, and binaries. The workflow raised only this head's DuckDB spill
+allowance to three quarters of the admitted scratch cap: 13,690,208,256 of
 18,253,611,008 bytes. The independent whole-stage 17 GiB scratch watchdog and
-the runner's 25,000,000-KiB free-disk floor are unchanged. The workflow proves
-both the producer's quarter-share default and the effective three-quarter value
-before starting the expensive statement. Once that recovery is green, preview
-measurement follows; catalog promotion still requires measured quality and
-integrity gates.
+the runner's 25,000,000-KiB free-disk floor remained unchanged. The workflow
+proved both the producer's quarter-share default and the effective
+three-quarter value before starting the expensive statement. The completed
+candidate then entered the preview gate below; it has not been promoted.
+
+**The head-only recovery and first complete preview are finished.** Preview run
+`30865331854` deployed the run-scoped Worker, passed the Big Ben and Empire State
+direct gates, completed both semantic batches, failed only the strict paired
+no-loss gate, and cleaned up its Worker and catalog without touching production.
+Against the 55-case audited baseline, candidate recall@1 was 29/55 versus 26/55
+(four gains, one loss), recall@10 was 37/55 versus 34/55 (five gains, two
+losses), and MRR was 0.580. Against the 200-case everyday baseline, recall@1 was
+65/200 versus 62/200 (three gains, zero losses) and recall@10 was 66/200 versus
+65/200 (one gain, zero losses).
+
+The exact gold losses were `Statue of Liberty` (baseline rank 4 -> absent) and
+`Union Station Toronto` (baseline rank 1 -> absent). Both canonical source rows
+exist. Immutable candidate-shard inspection showed why neither needs another
+planet build: the terminal `e3:statue of liberty` posting contains ten literal
+replicas while the canonical National Park Service row remains retrievable from
+the selective ordinary `liberty` posting; `e3:union station toronto` returns
+literal variants while the official-name Toronto station is present in the
+exact `e2:union station` prefix posting. The Worker returned immediately on the
+non-empty full phrase and suppressed both recovery paths.
+
+The additive composition correction preserves full phrase, optional exact
+prefix, and ordinary results in that order; deduplication uses feature identity
+plus source locator, preserving intentional duplicate UUID rows at different
+source positions. Producer caps fail closed. A read-only local R2 proof fetched
+the ten content-addressed candidate shards: all filenames matched their SHA-256,
+the real Worker decoder resolved nine non-empty token/phrase postings and
+rejected all nine deliberate misroutes, and 22 phrase rows passed the exact
+contract. The `e2:statue of` posting was correctly empty; the Statue recovery
+comes from ordinary `liberty`. Repeat the identical preview after this Worker
+change merges. Promotion remains prohibited until the paired loss count is zero.
 
 **The Worker pass is deployed and measured.** PR #232 merged as `6e9dfda` and
 deploy run `30796985582` published Worker version
@@ -1885,8 +1925,10 @@ ARDX0002 probe projections held: Addresses measured 54.36 B/record against the
    change. Bounded exact-primary-name admission is implemented and slice-proven
    for the confirmed Empire State Building and Big Ben global-head misses. Its
    planet phrase-posting probe and fresh v4 formal evidence are green. The
-   non-promoting Places-only planet build is in progress as run `30799029151`;
-   preview measurement is the next gate before any catalog promotion.
+   non-promoting Places-only planet build and first preview are complete. The
+   preview was net positive but found two exact phrase short-circuit losses;
+   merge the bounded additive Worker correction and repeat the identical
+   preview before any catalog promotion.
    Brandenburg Gate is corrected to the
    source-alias/tokenization plus routed-cap backlog, and Machu Picchu Cusco
    remains in region-context routing. Do not reopen build ordering, duplicate
