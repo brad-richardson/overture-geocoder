@@ -88,15 +88,43 @@ jobs:
             exit 1
           fi
 
-      - name: Discover Overture release once
+      # This smoke verifies OUR pipeline (extract -> build -> upload -> read
+      # back), so the Overture release is an input fixture and must be pinned.
+      # It previously resolved the LATEST release from STAC while checking a
+      # contract of 22 hardcoded GERS IDs frozen against an older release. GERS
+      # IDs churn between releases (measured stability 94.109151%), so that
+      # combination is guaranteed to break on upstream churn that says nothing
+      # about our pipeline -- and it did: the Monaco microhood "Belvedere Gerard
+      # Brianti" was re-issued from 87aaf449-d1f6-49c1-ab5a-9fb8e50d85df to
+      # 8be4707c-a146-401e-8479-a1e1aabb7d6a between 2026-06-17.0 and
+      # 2026-07-22.0 (same place, bbox moved ~15m), reddening main for a week.
+      #
+      # The pin is read from the evidence file rather than duplicated here, so
+      # the release, the contract IDs, and the sha256 pins cannot drift apart.
+      # Moving to a newer release is therefore a deliberate act: re-freeze the
+      # evidence and the contract together.
+      - name: Resolve pinned Overture release from evidence
         run: |
-          RELEASE=$(python3 scripts/stac.py | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
-          if [ -z "$RELEASE" ]; then
-            echo "::error::Failed to discover latest Overture release from STAC"
+          RELEASE=$(jq -er '.overture_release' docs/plans/2026-07-12-monaco-subset-evidence.json) || {
+            echo "::error::Monaco evidence file has no .overture_release pin"
             exit 1
-          fi
+          }
           echo "OVERTURE_RELEASE=$RELEASE" >> "$GITHUB_ENV"
-          echo "Overture release: $RELEASE"
+          echo "Pinned Overture release: $RELEASE"
+
+      # Upstream drift is worth SEEING but must not fail this job -- a new
+      # Overture release is not a regression in our pipeline.
+      - name: Report upstream release drift (non-blocking)
+        continue-on-error: true
+        run: |
+          LATEST=$(python3 scripts/stac.py | grep -oE '[0-9]{4}-[0-9]{2}-[0-9]{2}\.[0-9]+' | head -1)
+          if [ -z "$LATEST" ]; then
+            echo "Could not resolve latest Overture release from STAC; skipping drift check."
+          elif [ "$LATEST" != "$OVERTURE_RELEASE" ]; then
+            echo "::notice::Overture has moved on: pinned ${OVERTURE_RELEASE}, latest ${LATEST}. Re-freeze the Monaco evidence and contract to adopt it."
+          else
+            echo "Pinned release matches latest (${LATEST})."
+          fi
 
       - name: Download Monaco divisions subset
         run: ./scripts/download_divisions.sh --smoke-monaco "$OVERTURE_RELEASE"
@@ -214,7 +242,7 @@ jobs:
           echo "## Forward/Reverse R2 Shard Smoke Test" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "**Country:** MC (Monaco)" >> $GITHUB_STEP_SUMMARY
-          echo "**Overture release:** ${OVERTURE_RELEASE}" >> $GITHUB_STEP_SUMMARY
+          echo "**Overture release (pinned to Monaco evidence):** ${OVERTURE_RELEASE}" >> $GITHUB_STEP_SUMMARY
           echo "**R2 prefix:** ${SMOKE_VERSION}" >> $GITHUB_STEP_SUMMARY
           if [ -f exports/monaco-export-profile.json ]; then
             echo "**Extraction:** $(jq -r '.timings_seconds.total')s; division metadata-eligible row groups $(jq -r '.scan_profiles.division.metadata_eligible_row_groups')/$(jq -r '.scan_profiles.division.total_row_groups'); area metadata-eligible row groups $(jq -r '.scan_profiles.division_area.metadata_eligible_row_groups')/$(jq -r '.scan_profiles.division_area.total_row_groups')" >> $GITHUB_STEP_SUMMARY
