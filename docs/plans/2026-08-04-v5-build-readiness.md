@@ -21,8 +21,8 @@ Overture-only:
 |---|---|---|---|
 | 55-case gold | recall@1 | 0.473 | **0.527** |
 | 55-case gold | recall@10 | 0.618 | **0.691** |
-| 200-case everyday-POI | recall@1 | 0.310 | PENDING |
-| 200-case everyday-POI | recall@10 | 0.325 | PENDING |
+| 200-case everyday-POI | recall@1 | 0.310 | **0.325** |
+| 200-case everyday-POI | recall@10 | 0.325 | **0.330** |
 
 (The gold re-measure flagged a `name_locality` recall drop; it is entirely one
 `Buckingham Palace London` read timeout, not a quality loss. Re-run before
@@ -42,6 +42,44 @@ What v4 **cannot** fix, by construction, and therefore what v5 is for:
 Items 1 and 2 are *partly* addressable in the Worker (see §2); the residue is
 what v5 must carry. Item 3 is v5-only and gated on the sidecar.
 
+### 1.1 How much upside actually exists — measured, and smaller than assumed
+
+`benchmarks/2026-08-04-everyday-poi-miss-classification-v1.json`
+(reproduce with `scripts/classify_everyday_poi_misses.py`) attributes all 134
+post-v4 misses:
+
+| mechanism | misses | with open-data name evidence |
+|---|---:|---:|
+| empty, ≥4 tokens (blocked by the token cap before any read) | 40 | **3** |
+| empty, ≤3 tokens (reached the index and still starved) | 70 | **15** |
+| non-empty, wrong entity returned | 24 | **7** |
+| **total** | **134** | **25** |
+
+"Open-data name evidence" = an exact or fuzzy OSM name within 500 m of the
+authority coordinate, or a Nominatim/Photon hit. **Only 25 of 134 misses have
+any independent evidence that the entity exists in open data under the name we
+queried.** The evidenced ceiling for this set is therefore ~0.455 recall@10,
+not the ~0.6+ suggested by reading the token-cap class as pure upside. The
+≥4-token class in particular — 40 cases, and the single loudest signal in the
+raw data — carries evidence for only 3.
+
+This changes the v5 argument. Sizing `e4:` keys or admission softening off the
+raw miss count would buy far less than the count implies.
+
+**Necessary honesty about that number**: absence of OSM/competitor evidence is
+*weak* evidence of absence for Overture specifically — the same run resolves 33
+cases OSM has no name for at all, which is the whole premise of a
+commercial-feed geocoder. So "109 unevidenced" is not "109 absent"; it is "109
+we cannot yet attribute." Settling it requires asking our own index whether it
+holds a POI at the authority coordinate under a different name — a
+proximity-biased probe.
+
+**That probe is currently blocked**: `/v2/forward` with a `proximity` bias
+returns Cloudflare 1101 (uncaught Worker exception) deterministically across
+much of Asia and the equatorial band, including every Singapore, Mexico, and
+Colombia coordinate in this case set. Fixing that defect is a prerequisite for
+the measurement that sizes v5, not merely a serving bug. See §2 item 6.
+
 ## 2. What must land BEFORE v5 is specified
 
 v5 admission must be sized by what the Worker-only fixes fail to reach — not by
@@ -53,7 +91,17 @@ the pre-fix miss list. Each item below changes the residue that v5 has to cover.
 | 2 | Locality inference: alt-name divisions + bounded homonym retry | Worker | PENDING |
 | 3 | Locality blend + centroid-distance near-tie demotion | Worker | PENDING |
 | 4 | Exact-name small-radius assembly clustering | Worker | PENDING |
-| 5 | Division population tie-break | Worker | PENDING |
+| 5 | Division population tie-break | Worker | Implemented, unmeasured |
+| 6 | **Proximity 1101 crash fix** | Worker | In progress — prerequisite for §1.1's probe |
+
+Items 1, 2, 4 and 5 are implemented and integrated on
+`integration/wave-worker-fixes` (225 worker tests green, wasm32 clean) but
+**none is measured**. Note the risk asymmetry: items 1 and 2 are additive and
+fire only on otherwise-empty responses, so they cannot regress a non-empty
+answer; items 4 and 5 *modify* non-empty responses and can. There is no Worker
+preview environment — `preview-v2-candidate.yml` previews data slices, not code
+— so measurement requires a production deploy with an immediate paired compare
+and rollback readiness.
 
 Gate: all five measured against both frozen sets with
 `benchmark_v2_forward.py --compare`, paired no-loss, before the v5 residue is
