@@ -1,0 +1,5129 @@
+{
+  "schema": "head-miss-interrogation-v1",
+  "probe_degrees": 0.02,
+  "cases": "benchmarks/everyday-poi-tripwire-cases-v1.json",
+  "run": "benchmarks/2026-08-04-everyday-poi-post-additive-wave.json",
+  "misses": 130,
+  "counts": {
+    "IN_HEAD": 23,
+    "NOT_ADMITTED": 15,
+    "ABSENT": 92
+  },
+  "calibration_hits": 70,
+  "calibration_in_head": 68,
+  "verdicts": [
+    {
+      "case_id": "everyday-sg-21193",
+      "query": "GEYLANG BAHRU MRT STATION",
+      "expected_name": "GEYLANG BAHRU MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 17317,
+      "corpus_name_matches": [
+        "Geylang Bahru",
+        "Geylang Bahru",
+        "Geylang Bahru MRT"
+      ],
+      "head_rows_near": 16778,
+      "head_name_matches": [
+        "Geylang Bahru",
+        "Geylang Bahru MRT",
+        "Geylang Bahru MRT"
+      ],
+      "head_tokens": [
+        "e2:geylang bahru",
+        "e3:geylang bahru mrt",
+        "geylang",
+        "mrt",
+        "train_station"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21727",
+      "query": "LABRADOR PARK MRT STATION",
+      "expected_name": "LABRADOR PARK MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 5085,
+      "corpus_name_matches": [
+        "Labrador Park MRT Station"
+      ],
+      "head_rows_near": 4807,
+      "head_name_matches": [
+        "Labrador Park MRT Station",
+        "Labrador Park MRT Station",
+        "Labrador Park MRT Station"
+      ],
+      "head_tokens": [
+        "labrador",
+        "mrt",
+        "train_station"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21302",
+      "query": "UPPER THOMSON MRT STATION",
+      "expected_name": "UPPER THOMSON MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 5323,
+      "corpus_name_matches": [
+        "Upper Thomson",
+        "Upper Thomson MRT",
+        "Upper Thomson"
+      ],
+      "head_rows_near": 4941,
+      "head_name_matches": [
+        "Upper Thomson MRT"
+      ],
+      "head_tokens": [
+        "e3:upper thomson mrt"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21587",
+      "query": "TECK LEE LRT STATION",
+      "expected_name": "TECK LEE LRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 1661,
+      "corpus_name_matches": [
+        "Teck Lee LRT Station"
+      ],
+      "head_rows_near": 1484,
+      "head_name_matches": [
+        "Teck Lee LRT Station",
+        "Teck Lee LRT Station"
+      ],
+      "head_tokens": [
+        "lee",
+        "teck"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21125",
+      "query": "MARSILING MRT STATION",
+      "expected_name": "MARSILING MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 2030,
+      "corpus_name_matches": [
+        "MoneyMax Pawnshop - Marsiling MRT Station",
+        "UOB ATM - Marsiling MRT Station"
+      ],
+      "head_rows_near": 1668,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-sg-21494",
+      "query": "YISHUN MRT STATION",
+      "expected_name": "YISHUN MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 4103,
+      "corpus_name_matches": [
+        "Yishun MRT Station",
+        "Yishun MRT",
+        "Yishun Mrt Station Wt Berth"
+      ],
+      "head_rows_near": 3713,
+      "head_name_matches": [
+        "Yishun Mrt Station Wt Berth",
+        "Yishun MRT",
+        "Yishun MRT Station"
+      ],
+      "head_tokens": [
+        "berth",
+        "e2:yishun mrt",
+        "e3:yishun mrt station",
+        "yishun"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21629",
+      "query": "BOON KENG MRT STATION",
+      "expected_name": "BOON KENG MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 18926,
+      "corpus_name_matches": [
+        "UOB ATM - Boon Keng NEL MRT Station",
+        "Boon Keng MRT Station",
+        "Boon Keng"
+      ],
+      "head_rows_near": 18197,
+      "head_name_matches": [
+        "Boon Keng MRT Station",
+        "Boon Keng MRT Station",
+        "UOB ATM - Boon Keng NEL MRT Station"
+      ],
+      "head_tokens": [
+        "boon",
+        "keng",
+        "nel"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21321",
+      "query": "LAYAR LRT STATION",
+      "expected_name": "LAYAR LRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 3597,
+      "corpus_name_matches": [
+        "Layar LRT Station"
+      ],
+      "head_rows_near": 3162,
+      "head_name_matches": [
+        "Layar LRT Station",
+        "Layar LRT Station"
+      ],
+      "head_tokens": [
+        "e3:layar lrt station",
+        "layar"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21349",
+      "query": "BEDOK RESERVOIR MRT STATION",
+      "expected_name": "BEDOK RESERVOIR MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 5598,
+      "corpus_name_matches": [
+        "Bedok Reservoir",
+        "Bedok Reservoir",
+        "Bedok Reservoir"
+      ],
+      "head_rows_near": 4834,
+      "head_name_matches": [
+        "Bedok Reservoir MRT Station",
+        "Bedok Reservoir",
+        "Bedok Reservoir"
+      ],
+      "head_tokens": [
+        "bedok",
+        "e2:bedok reservoir",
+        "reservoir"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21360",
+      "query": "CHANGI AIRPORT MRT STATION",
+      "expected_name": "CHANGI AIRPORT MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 1211,
+      "corpus_name_matches": [
+        "Changi Airport MRT Station"
+      ],
+      "head_rows_near": 1330,
+      "head_name_matches": [
+        "Changi Airport MRT Station",
+        "Changi Airport MRT Station",
+        "Changi Airport MRT Station"
+      ],
+      "head_tokens": [
+        "changi",
+        "mrt",
+        "station"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21222",
+      "query": "MARINE PARADE MRT STATION",
+      "expected_name": "MARINE PARADE MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 7467,
+      "corpus_name_matches": [
+        "Marine Parade MRT",
+        "Marine Parade"
+      ],
+      "head_rows_near": 7165,
+      "head_name_matches": [
+        "Marine Parade MRT"
+      ],
+      "head_tokens": [
+        "e3:marine parade mrt"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21712",
+      "query": "RENJONG LRT STATION",
+      "expected_name": "RENJONG LRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 4387,
+      "corpus_name_matches": [
+        "Renjong LRT Station"
+      ],
+      "head_rows_near": 3759,
+      "head_name_matches": [
+        "Renjong LRT Station",
+        "Renjong LRT Station"
+      ],
+      "head_tokens": [
+        "e3:renjong lrt station",
+        "renjong"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21729",
+      "query": "TAN KAH KEE MRT STATION",
+      "expected_name": "TAN KAH KEE MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2839,
+      "corpus_name_matches": [
+        "Tan Kah Kee MRT Station"
+      ],
+      "head_rows_near": 3035,
+      "head_name_matches": [
+        "Tan Kah Kee MRT Station",
+        "Tan Kah Kee MRT Station"
+      ],
+      "head_tokens": [
+        "kah",
+        "kee"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21283",
+      "query": "BUGIS MRT STATION",
+      "expected_name": "BUGIS MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 32009,
+      "corpus_name_matches": [
+        "Bugis MRT Station"
+      ],
+      "head_rows_near": 31989,
+      "head_name_matches": [
+        "Bugis MRT Station",
+        "Bugis MRT Station"
+      ],
+      "head_tokens": [
+        "bugis",
+        "e3:bugis mrt station"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21166",
+      "query": "MOUNTBATTEN MRT STATION",
+      "expected_name": "MOUNTBATTEN MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 11162,
+      "corpus_name_matches": [
+        "Mountbatten MRT Station"
+      ],
+      "head_rows_near": 10961,
+      "head_name_matches": [
+        "Mountbatten MRT Station",
+        "Mountbatten MRT Station"
+      ],
+      "head_tokens": [
+        "e3:mountbatten mrt station",
+        "mountbatten"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21198",
+      "query": "BENCOOLEN MRT STATION",
+      "expected_name": "BENCOOLEN MRT STATION",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 36413,
+      "corpus_name_matches": [
+        "Bencoolen MRT Station",
+        "Bencoolen MRT"
+      ],
+      "head_rows_near": 36205,
+      "head_name_matches": [
+        "Bencoolen MRT Station",
+        "Bencoolen MRT Station"
+      ],
+      "head_tokens": [
+        "bencoolen",
+        "e3:bencoolen mrt station"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21492",
+      "query": "SEMBAWANG MRT STATION",
+      "expected_name": "SEMBAWANG MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 4268,
+      "corpus_name_matches": [
+        "MoneyMax Pawnshop - Sembawang MRT Station",
+        "UOB ATM - Sembawang MRT Station"
+      ],
+      "head_rows_near": 3648,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-sg-21185",
+      "query": "BUKIT PANJANG MRT STATION",
+      "expected_name": "BUKIT PANJANG MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2504,
+      "corpus_name_matches": [
+        "Bukit Panjang",
+        "Bukit Panjang",
+        "Bukit Panjang MRT Station"
+      ],
+      "head_rows_near": 2247,
+      "head_name_matches": [
+        "Bukit Panjang"
+      ],
+      "head_tokens": [
+        "e2:bukit panjang"
+      ]
+    },
+    {
+      "case_id": "everyday-sg-21139",
+      "query": "GREAT WORLD MRT STATION",
+      "expected_name": "GREAT WORLD MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 32275,
+      "corpus_name_matches": [
+        "Great World",
+        "Great World MRT"
+      ],
+      "head_rows_near": 32058,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-sg-21431",
+      "query": "DOVER MRT STATION",
+      "expected_name": "DOVER MRT STATION",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "SG",
+        "density": "dense_urban",
+        "macroregion": "southeast_asia",
+        "poi_family": "civic_transit",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 4701,
+      "corpus_name_matches": [],
+      "head_rows_near": 4418,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001087",
+      "query": "修安扁擔豆花",
+      "expected_name": "修安扁擔豆花",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21242,
+      "corpus_name_matches": [
+        "修安扁擔豆花"
+      ],
+      "head_rows_near": 65322,
+      "head_name_matches": [
+        "修安扁擔豆花",
+        "修安扁擔豆花",
+        "修安扁擔豆花"
+      ],
+      "head_tokens": [
+        "修安",
+        "修安扁擔豆花",
+        "安扁",
+        "扁擔",
+        "擔豆"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001176",
+      "query": "美記肉圓",
+      "expected_name": "美記肉圓",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 18454,
+      "corpus_name_matches": [
+        "美記肉圓"
+      ],
+      "head_rows_near": 57278,
+      "head_name_matches": [
+        "美記肉圓",
+        "美記肉圓"
+      ],
+      "head_tokens": [
+        "美記",
+        "美記肉圓"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_006371",
+      "query": "椿友手工烘焙坊",
+      "expected_name": "椿友手工烘焙坊",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 23167,
+      "corpus_name_matches": [
+        "椿友手工烘焙坊"
+      ],
+      "head_rows_near": 71170,
+      "head_name_matches": [
+        "椿友手工烘焙坊",
+        "椿友手工烘焙坊",
+        "椿友手工烘焙坊"
+      ],
+      "head_tokens": [
+        "友手",
+        "工烘",
+        "椿友",
+        "椿友手工烘焙坊"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_006378",
+      "query": "咖啡部屋",
+      "expected_name": "咖啡部屋",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 12968,
+      "corpus_name_matches": [
+        "咖啡部屋"
+      ],
+      "head_rows_near": 40334,
+      "head_name_matches": [
+        "咖啡部屋"
+      ],
+      "head_tokens": [
+        "咖啡部屋"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001151",
+      "query": "蝦到爆",
+      "expected_name": "蝦到爆",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6279,
+      "corpus_name_matches": [],
+      "head_rows_near": 20377,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001132",
+      "query": "振發茶行",
+      "expected_name": "振發茶行",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 23254,
+      "corpus_name_matches": [
+        "振發茶行"
+      ],
+      "head_rows_near": 71368,
+      "head_name_matches": [
+        "振發茶行",
+        "振發茶行",
+        "振發茶行"
+      ],
+      "head_tokens": [
+        "振發",
+        "振發茶行",
+        "發茶"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_002030",
+      "query": "阿娟咖哩飯鴨肉羹",
+      "expected_name": "阿娟咖哩飯鴨肉羹",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 20450,
+      "corpus_name_matches": [
+        "阿娟咖哩飯鴨肉羹"
+      ],
+      "head_rows_near": 63070,
+      "head_name_matches": [
+        "阿娟咖哩飯鴨肉羹",
+        "阿娟咖哩飯鴨肉羹",
+        "阿娟咖哩飯鴨肉羹"
+      ],
+      "head_tokens": [
+        "咖哩",
+        "哩飯",
+        "娟咖",
+        "肉羹",
+        "阿娟",
+        "阿娟咖哩飯鴨肉羹",
+        "飯鴨",
+        "鴨肉"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001058",
+      "query": "楊哥楊嫂肉粽店",
+      "expected_name": "楊哥楊嫂肉粽店",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 20870,
+      "corpus_name_matches": [
+        "楊哥楊嫂肉粽店"
+      ],
+      "head_rows_near": 64341,
+      "head_name_matches": [
+        "楊哥楊嫂肉粽店",
+        "楊哥楊嫂肉粽店",
+        "楊哥楊嫂肉粽店"
+      ],
+      "head_tokens": [
+        "哥楊",
+        "嫂肉",
+        "楊哥",
+        "楊哥楊嫂肉粽店",
+        "楊嫂",
+        "粽店",
+        "肉粽"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_008102",
+      "query": "小葉布丁",
+      "expected_name": "小葉布丁",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 5910,
+      "corpus_name_matches": [
+        "小葉布丁"
+      ],
+      "head_rows_near": 19213,
+      "head_name_matches": [
+        "小葉布丁",
+        "小葉布丁",
+        "小葉布丁"
+      ],
+      "head_tokens": [
+        "小葉",
+        "小葉布丁",
+        "葉布"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001131",
+      "query": "連得堂餅家",
+      "expected_name": "連得堂餅家",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 22558,
+      "corpus_name_matches": [
+        "連得堂餅家"
+      ],
+      "head_rows_near": 69096,
+      "head_name_matches": [
+        "連得堂餅家",
+        "連得堂餅家",
+        "連得堂餅家"
+      ],
+      "head_tokens": [
+        "堂餅",
+        "得堂",
+        "連得",
+        "連得堂餅家"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001518",
+      "query": "大同包子店",
+      "expected_name": "大同包子店",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21299,
+      "corpus_name_matches": [
+        "大同包子店"
+      ],
+      "head_rows_near": 65517,
+      "head_name_matches": [
+        "大同包子店",
+        "大同包子店"
+      ],
+      "head_tokens": [
+        "同包",
+        "大同包子店"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001134",
+      "query": "文峰茶莊",
+      "expected_name": "文峰茶莊",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 23233,
+      "corpus_name_matches": [
+        "文峰茶莊"
+      ],
+      "head_rows_near": 71219,
+      "head_name_matches": [
+        "文峰茶莊",
+        "文峰茶莊",
+        "文峰茶莊"
+      ],
+      "head_tokens": [
+        "峰茶",
+        "文峰",
+        "文峰茶莊",
+        "茶莊"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001459",
+      "query": "許家蝦仁肉圓/芋粿",
+      "expected_name": "許家蝦仁肉圓/芋粿",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21020,
+      "corpus_name_matches": [
+        "許家蝦仁肉圓 芋粿"
+      ],
+      "head_rows_near": 64646,
+      "head_name_matches": [
+        "許家蝦仁肉圓 芋粿",
+        "許家蝦仁肉圓 芋粿"
+      ],
+      "head_tokens": [
+        "家蝦",
+        "許家蝦仁肉圓"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001489",
+      "query": "森茂碗粿(開山店)",
+      "expected_name": "森茂碗粿(開山店)",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 22300,
+      "corpus_name_matches": [],
+      "head_rows_near": 68569,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001114",
+      "query": "阿憨鹹粥",
+      "expected_name": "阿憨鹹粥",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21963,
+      "corpus_name_matches": [
+        "阿憨鹹粥"
+      ],
+      "head_rows_near": 67241,
+      "head_name_matches": [
+        "阿憨鹹粥",
+        "阿憨鹹粥",
+        "阿憨鹹粥"
+      ],
+      "head_tokens": [
+        "憨鹹",
+        "阿憨",
+        "阿憨鹹粥",
+        "鹹粥"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001477",
+      "query": "窄門咖啡館",
+      "expected_name": "窄門咖啡館",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 22071,
+      "corpus_name_matches": [],
+      "head_rows_near": 67800,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001115",
+      "query": "福榮小吃店",
+      "expected_name": "福榮小吃店",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21002,
+      "corpus_name_matches": [
+        "福榮小吃店"
+      ],
+      "head_rows_near": 64599,
+      "head_name_matches": [
+        "福榮小吃店",
+        "福榮小吃店",
+        "福榮小吃店"
+      ],
+      "head_tokens": [
+        "榮小",
+        "福榮",
+        "福榮小吃店"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_006405",
+      "query": "益生興蜜餞",
+      "expected_name": "益生興蜜餞",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 4275,
+      "corpus_name_matches": [
+        "益生興蜜餞"
+      ],
+      "head_rows_near": 14132,
+      "head_name_matches": [
+        "益生興蜜餞",
+        "益生興蜜餞",
+        "益生興蜜餞"
+      ],
+      "head_tokens": [
+        "生興",
+        "益生興蜜餞",
+        "興蜜"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001057",
+      "query": "台南度小月擔仔麵原始店本舖",
+      "expected_name": "台南度小月擔仔麵原始店本舖",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 22488,
+      "corpus_name_matches": [],
+      "head_rows_near": 69154,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001892",
+      "query": "石精臼點心城",
+      "expected_name": "石精臼點心城",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21880,
+      "corpus_name_matches": [
+        "石精臼點心城"
+      ],
+      "head_rows_near": 67106,
+      "head_name_matches": [
+        "石精臼點心城",
+        "石精臼點心城",
+        "石精臼點心城"
+      ],
+      "head_tokens": [
+        "石精臼點心城",
+        "精臼",
+        "臼點"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_006381",
+      "query": "佛都愛玉",
+      "expected_name": "佛都愛玉",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 20716,
+      "corpus_name_matches": [
+        "佛都愛玉"
+      ],
+      "head_rows_near": 63840,
+      "head_name_matches": [
+        "佛都愛玉",
+        "佛都愛玉",
+        "佛都愛玉"
+      ],
+      "head_tokens": [
+        "佛都",
+        "佛都愛玉",
+        "都愛"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_002003",
+      "query": "東東宴會式場-華平囍嫁館",
+      "expected_name": "東東宴會式場-華平囍嫁館",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 9929,
+      "corpus_name_matches": [],
+      "head_rows_near": 31804,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001730",
+      "query": "冬瓜寶冬瓜茶冷飲專賣店",
+      "expected_name": "冬瓜寶冬瓜茶冷飲專賣店",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 19417,
+      "corpus_name_matches": [
+        "冬瓜寶冬瓜茶冷飲專賣店"
+      ],
+      "head_rows_near": 60107,
+      "head_name_matches": [
+        "冬瓜寶冬瓜茶冷飲專賣店",
+        "冬瓜寶冬瓜茶冷飲專賣店",
+        "冬瓜寶冬瓜茶冷飲專賣店"
+      ],
+      "head_tokens": [
+        "冬瓜寶冬瓜茶冷飲專賣店",
+        "寶冬",
+        "瓜寶",
+        "茶冷"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001742",
+      "query": "沙淘宮菜粽",
+      "expected_name": "沙淘宮菜粽",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 21490,
+      "corpus_name_matches": [
+        "沙淘宮菜粽"
+      ],
+      "head_rows_near": 66130,
+      "head_name_matches": [
+        "沙淘宮菜粽",
+        "沙淘宮菜粽",
+        "沙淘宮菜粽"
+      ],
+      "head_tokens": [
+        "宮菜",
+        "沙淘",
+        "沙淘宮菜粽",
+        "淘宮",
+        "菜粽"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001161",
+      "query": "小南米糕",
+      "expected_name": "小南米糕",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 22079,
+      "corpus_name_matches": [
+        "小南米糕",
+        "小南米糕"
+      ],
+      "head_rows_near": 67908,
+      "head_name_matches": [
+        "小南米糕",
+        "小南米糕"
+      ],
+      "head_tokens": [
+        "小南米糕"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_006415",
+      "query": "小方舟串燒酒場",
+      "expected_name": "小方舟串燒酒場",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 17218,
+      "corpus_name_matches": [
+        "小方舟串燒酒場"
+      ],
+      "head_rows_near": 52892,
+      "head_name_matches": [
+        "小方舟串燒酒場",
+        "小方舟串燒酒場",
+        "小方舟串燒酒場"
+      ],
+      "head_tokens": [
+        "小方",
+        "小方舟串燒酒場",
+        "舟串"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001539",
+      "query": "安徒生咖啡館",
+      "expected_name": "安徒生咖啡館",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 17967,
+      "corpus_name_matches": [],
+      "head_rows_near": 54497,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001964",
+      "query": "呷霸浮水魚羹",
+      "expected_name": "呷霸浮水魚羹",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 22092,
+      "corpus_name_matches": [],
+      "head_rows_near": 67795,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_006493",
+      "query": "忠嫂牛肉湯",
+      "expected_name": "忠嫂牛肉湯",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 10424,
+      "corpus_name_matches": [
+        "忠嫂牛肉湯"
+      ],
+      "head_rows_near": 32102,
+      "head_name_matches": [
+        "忠嫂牛肉湯",
+        "忠嫂牛肉湯",
+        "忠嫂牛肉湯"
+      ],
+      "head_tokens": [
+        "嫂牛",
+        "忠嫂",
+        "忠嫂牛肉湯"
+      ]
+    },
+    {
+      "case_id": "everyday-tw-Restaurant_395000000A_001485",
+      "query": "真正紅燒土魠",
+      "expected_name": "真正紅燒土魠",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "TW",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "food_drink",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 23877,
+      "corpus_name_matches": [
+        "真正紅燒土魠"
+      ],
+      "head_rows_near": 73091,
+      "head_name_matches": [
+        "真正紅燒土魠",
+        "真正紅燒土魠",
+        "真正紅燒土魠"
+      ],
+      "head_tokens": [
+        "正紅",
+        "燒土",
+        "真正",
+        "真正紅燒土魠"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-23",
+      "query": "東華三院黃大仙醫院",
+      "expected_name": "東華三院黃大仙醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 5934,
+      "corpus_name_matches": [
+        "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
+        "東華三院黃大仙醫院"
+      ],
+      "head_rows_near": 12662,
+      "head_name_matches": [
+        "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
+        "Tung Wah Group of Hospitals Wong Tai Sin Hospital",
+        "Tung Wah Group of Hospitals Wong Tai Sin Hospital"
+      ],
+      "head_tokens": [
+        "hospitals",
+        "sin",
+        "wah",
+        "三院",
+        "仙醫",
+        "東華三院黃大仙醫院",
+        "院黃",
+        "黃大"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-3",
+      "query": "東華東院",
+      "expected_name": "東華東院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 19166,
+      "corpus_name_matches": [
+        "Tung Wah Eastern Hospital",
+        "東華東院"
+      ],
+      "head_rows_near": 34822,
+      "head_name_matches": [
+        "Tung Wah Eastern Hospital",
+        "Tung Wah Eastern Hospital",
+        "東華東院"
+      ],
+      "head_tokens": [
+        "eastern",
+        "wah",
+        "東華東院",
+        "東院",
+        "華東"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-40",
+      "query": "青山醫院",
+      "expected_name": "青山醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 3159,
+      "corpus_name_matches": [
+        "Castle Peak Hospital Block B",
+        "青山醫院"
+      ],
+      "head_rows_near": 9639,
+      "head_name_matches": [
+        "Castle Peak Hospital Block B",
+        "青山醫院",
+        "青山醫院"
+      ],
+      "head_tokens": [
+        "castle",
+        "山醫",
+        "青山",
+        "青山醫院"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-9",
+      "query": "瑪麗醫院",
+      "expected_name": "瑪麗醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 8279,
+      "corpus_name_matches": [
+        "瑪麗醫院",
+        "Queen Mary Hospital Bus Stop"
+      ],
+      "head_rows_near": 19246,
+      "head_name_matches": [
+        "瑪麗醫院",
+        "瑪麗醫院",
+        "瑪麗醫院"
+      ],
+      "head_tokens": [
+        "瑪麗",
+        "瑪麗醫院",
+        "麗醫"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-14",
+      "query": "東華三院馮堯敬醫院",
+      "expected_name": "東華三院馮堯敬醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 4257,
+      "corpus_name_matches": [
+        "東華三院馮堯敬醫院"
+      ],
+      "head_rows_near": 10966,
+      "head_name_matches": [
+        "東華三院馮堯敬醫院",
+        "東華三院馮堯敬醫院",
+        "東華三院馮堯敬醫院"
+      ],
+      "head_tokens": [
+        "三院",
+        "堯敬",
+        "敬醫",
+        "東華",
+        "東華三院馮堯敬醫院",
+        "華三",
+        "院馮",
+        "馮堯"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-32",
+      "query": "聖母醫院",
+      "expected_name": "聖母醫院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 6100,
+      "corpus_name_matches": [
+        "Our Lady of Maryknoll Hospital"
+      ],
+      "head_rows_near": 13088,
+      "head_name_matches": [
+        "Our Lady of Maryknoll Hospital"
+      ],
+      "head_tokens": [
+        "maryknoll"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-20",
+      "query": "靈實醫院",
+      "expected_name": "靈實醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 3018,
+      "corpus_name_matches": [
+        "Haven of Hope Hospital",
+        "靈實醫院"
+      ],
+      "head_rows_near": 6274,
+      "head_name_matches": [
+        "靈實醫院",
+        "靈實醫院",
+        "靈實醫院"
+      ],
+      "head_tokens": [
+        "實醫",
+        "靈實",
+        "靈實醫院"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-25",
+      "query": "大埔醫院",
+      "expected_name": "大埔醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2232,
+      "corpus_name_matches": [
+        "Tai Po Hospital",
+        "大埔醫院",
+        "Tai Po"
+      ],
+      "head_rows_near": 4954,
+      "head_name_matches": [
+        "Tai Po",
+        "Tai Po Hospital",
+        "大埔醫院"
+      ],
+      "head_tokens": [
+        "e2:tai po",
+        "e3:tai po hospital",
+        "埔醫",
+        "大埔醫院"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-15",
+      "query": "葛量洪醫院",
+      "expected_name": "葛量洪醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2890,
+      "corpus_name_matches": [
+        "Grantham Hospital",
+        "葛量洪醫院"
+      ],
+      "head_rows_near": 5874,
+      "head_name_matches": [
+        "Grantham Hospital",
+        "Grantham Hospital",
+        "葛量洪醫院"
+      ],
+      "head_tokens": [
+        "e2:grantham hospital",
+        "grantham",
+        "洪醫",
+        "葛量",
+        "葛量洪醫院",
+        "量洪"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-11",
+      "query": "東華醫院",
+      "expected_name": "東華醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 17363,
+      "corpus_name_matches": [
+        "Tung Wah Hospital"
+      ],
+      "head_rows_near": 33944,
+      "head_name_matches": [
+        "Tung Wah Hospital",
+        "Tung Wah Hospital"
+      ],
+      "head_tokens": [
+        "e3:tung wah hospital",
+        "wah"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-10",
+      "query": "律敦治醫院",
+      "expected_name": "律敦治醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 25751,
+      "corpus_name_matches": [
+        "Ruttonjee Hospital Pharmacy",
+        "律敦治醫院"
+      ],
+      "head_rows_near": 45112,
+      "head_name_matches": [
+        "Ruttonjee Hospital Pharmacy",
+        "Ruttonjee Hospital Pharmacy",
+        "Ruttonjee Hospital Pharmacy"
+      ],
+      "head_tokens": [
+        "e3:ruttonjee hospital pharmacy",
+        "pharmacy",
+        "ruttonjee",
+        "律敦",
+        "律敦治醫院",
+        "敦治",
+        "治醫"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-17",
+      "query": "屯門醫院",
+      "expected_name": "屯門醫院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 3583,
+      "corpus_name_matches": [
+        "Tuen Mun Hospital Authority Staff Clinic",
+        "Tuen Mun Hospital",
+        "Tuen Mun Social Hygiene Clinic, Tuen Mun Hospital"
+      ],
+      "head_rows_near": 10878,
+      "head_name_matches": [
+        "Tuen Mun",
+        "Tuen Mun Hospital",
+        "Tuen Mun Social Hygiene Clinic, Tuen Mun Hospital"
+      ],
+      "head_tokens": [
+        "e2:tuen mun",
+        "e3:tuen mun hospital",
+        "hygiene",
+        "social"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-28",
+      "query": "沙田醫院",
+      "expected_name": "沙田醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2932,
+      "corpus_name_matches": [],
+      "head_rows_near": 6430,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-hk-31",
+      "query": "北大嶼山醫院",
+      "expected_name": "北大嶼山醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 858,
+      "corpus_name_matches": [
+        "North Lantau Hospital"
+      ],
+      "head_rows_near": 1982,
+      "head_name_matches": [
+        "North Lantau Hospital",
+        "North Lantau Hospital"
+      ],
+      "head_tokens": [
+        "e3:north lantau hospital",
+        "lantau"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-8",
+      "query": "贊育醫院",
+      "expected_name": "贊育醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 16804,
+      "corpus_name_matches": [
+        "贊育醫院",
+        "Tsan Yuk Hospital"
+      ],
+      "head_rows_near": 33233,
+      "head_name_matches": [
+        "Tsan Yuk Hospital",
+        "Tsan Yuk Hospital",
+        "Tsan Yuk Hospital"
+      ],
+      "head_tokens": [
+        "e3:tsan yuk hospital",
+        "tsan",
+        "yuk",
+        "育醫",
+        "贊育",
+        "贊育醫院"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-33",
+      "query": "博愛醫院",
+      "expected_name": "博愛醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 4073,
+      "corpus_name_matches": [
+        "博愛醫院"
+      ],
+      "head_rows_near": 12354,
+      "head_name_matches": [
+        "博愛醫院",
+        "博愛醫院",
+        "博愛醫院"
+      ],
+      "head_tokens": [
+        "博愛",
+        "博愛醫院",
+        "愛醫"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-41",
+      "query": "沙田慈氏護養院",
+      "expected_name": "沙田慈氏護養院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2277,
+      "corpus_name_matches": [
+        "沙田慈氏護養院",
+        "Cheshire Home"
+      ],
+      "head_rows_near": 5002,
+      "head_name_matches": [
+        "Cheshire Home",
+        "Cheshire Home",
+        "沙田慈氏護養院"
+      ],
+      "head_tokens": [
+        "cheshire",
+        "e2:cheshire home",
+        "慈氏",
+        "氏護",
+        "沙田慈氏護養院",
+        "田慈",
+        "護養",
+        "養院"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-30",
+      "query": "威爾斯親王醫院",
+      "expected_name": "威爾斯親王醫院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 3970,
+      "corpus_name_matches": [
+        "Prince of Wales Hospital"
+      ],
+      "head_rows_near": 8374,
+      "head_name_matches": [
+        "Prince of Wales Hospital",
+        "Prince of Wales Hospital",
+        "Prince of Wales Hospital"
+      ],
+      "head_tokens": [
+        "hospital",
+        "prince",
+        "wales"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-4",
+      "query": "麥理浩復康院",
+      "expected_name": "麥理浩復康院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 4177,
+      "corpus_name_matches": [
+        "Maclehose Medical Rehabilitation Centre"
+      ],
+      "head_rows_near": 10784,
+      "head_name_matches": [
+        "Maclehose Medical Rehabilitation Centre",
+        "Maclehose Medical Rehabilitation Centre"
+      ],
+      "head_tokens": [
+        "maclehose",
+        "rehabilitation"
+      ]
+    },
+    {
+      "case_id": "everyday-hk-38",
+      "query": "香港兒童醫院",
+      "expected_name": "香港兒童醫院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "HK",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 14354,
+      "corpus_name_matches": [
+        "Kai Tak Promenade (Hong Kong Children's Hospital Section) Children's Playground",
+        "Hong Kong Children's Hospital"
+      ],
+      "head_rows_near": 27463,
+      "head_name_matches": [
+        "Kai Tak Promenade (Hong Kong Children's Hospital Section) Children's Playground"
+      ],
+      "head_tokens": [
+        "section"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA220043190033021200001",
+      "query": "중앙대학교병원",
+      "expected_name": "중앙대학교병원",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2660,
+      "corpus_name_matches": [
+        "중앙대학교병원"
+      ],
+      "head_rows_near": 3205,
+      "head_name_matches": [
+        "중앙대학교병원",
+        "중앙대학교병원"
+      ],
+      "head_tokens": [
+        "medical_center",
+        "중앙대학교병원"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA220123240033021200001",
+      "query": "공안과병원",
+      "expected_name": "공안과병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 4175,
+      "corpus_name_matches": [],
+      "head_rows_near": 4627,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220213160034021200001",
+      "query": "남서울요양병원",
+      "expected_name": "남서울요양병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 3960,
+      "corpus_name_matches": [],
+      "head_rows_near": 4535,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220123220033021200006",
+      "query": "튼튼병원",
+      "expected_name": "튼튼병원",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 14251,
+      "corpus_name_matches": [],
+      "head_rows_near": 16530,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA219903220033021200001",
+      "query": "차의과학대학교 강남차병원",
+      "expected_name": "차의과학대학교 강남차병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 25826,
+      "corpus_name_matches": [],
+      "head_rows_near": 30451,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA219793000034021200001",
+      "query": "강북삼성병원",
+      "expected_name": "강북삼성병원",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 15937,
+      "corpus_name_matches": [
+        "강북삼성병원"
+      ],
+      "head_rows_near": 19563,
+      "head_name_matches": [
+        "강북삼성병원"
+      ],
+      "head_tokens": [
+        "강북삼성병원"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA220203220033021200002",
+      "query": "라이브치과병원",
+      "expected_name": "라이브치과병원",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 24167,
+      "corpus_name_matches": [],
+      "head_rows_near": 28487,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220073110032021200001",
+      "query": "하나효요양병원",
+      "expected_name": "하나효요양병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2368,
+      "corpus_name_matches": [
+        "하나효요양병원"
+      ],
+      "head_rows_near": 2725,
+      "head_name_matches": [
+        "하나효요양병원"
+      ],
+      "head_tokens": [
+        "하나효요양병원"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA220113050034021200001",
+      "query": "서울나은병원",
+      "expected_name": "서울나은병원",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 6005,
+      "corpus_name_matches": [
+        "서울나은병원"
+      ],
+      "head_rows_near": 6850,
+      "head_name_matches": [
+        "서울나은병원",
+        "서울나은병원"
+      ],
+      "head_tokens": [
+        "서울나은병원",
+        "제기동"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA220043000034021200001",
+      "query": "서울대학교치과병원",
+      "expected_name": "서울대학교치과병원",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 17258,
+      "corpus_name_matches": [],
+      "head_rows_near": 21080,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220223090033021200003",
+      "query": "자향한방병원",
+      "expected_name": "자향한방병원",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2680,
+      "corpus_name_matches": [],
+      "head_rows_near": 3065,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220213230034021200001",
+      "query": "서울세계로병원",
+      "expected_name": "서울세계로병원",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 2560,
+      "corpus_name_matches": [
+        "서울세계로병원"
+      ],
+      "head_rows_near": 2901,
+      "head_name_matches": [
+        "서울세계로병원",
+        "서울세계로병원"
+      ],
+      "head_tokens": [
+        "서울세계로병원",
+        "위례동"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA219763160034021200005",
+      "query": "의료법인다나의료재단구로다나병원",
+      "expected_name": "의료법인다나의료재단구로다나병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2072,
+      "corpus_name_matches": [],
+      "head_rows_near": 2493,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220223200033021200001",
+      "query": "바를정한방병원",
+      "expected_name": "바를정한방병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 4287,
+      "corpus_name_matches": [],
+      "head_rows_near": 4914,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220223230034021200005",
+      "query": "연세우리병원",
+      "expected_name": "연세우리병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 5577,
+      "corpus_name_matches": [],
+      "head_rows_near": 6377,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220053240033021200004",
+      "query": "양병원",
+      "expected_name": "양병원",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 3467,
+      "corpus_name_matches": [],
+      "head_rows_near": 3861,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220073210034021200001",
+      "query": "의료법인 부원의료재단 서초요양병원",
+      "expected_name": "의료법인 부원의료재단 서초요양병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 9449,
+      "corpus_name_matches": [],
+      "head_rows_near": 10974,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220203110032021200001",
+      "query": "이우요양병원",
+      "expected_name": "이우요양병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2258,
+      "corpus_name_matches": [],
+      "head_rows_near": 2563,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-kr-PHMA220253220033021200002",
+      "query": "하병원",
+      "expected_name": "하병원",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 22155,
+      "corpus_name_matches": [
+        "하병원"
+      ],
+      "head_rows_near": 26253,
+      "head_name_matches": [
+        "하병원"
+      ],
+      "head_tokens": [
+        "하병원"
+      ]
+    },
+    {
+      "case_id": "everyday-kr-PHMA220213140033021200001",
+      "query": "바른지성한방병원",
+      "expected_name": "바른지성한방병원",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "KR",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 3678,
+      "corpus_name_matches": [],
+      "head_rows_near": 4180,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2475",
+      "query": "Unidad de Servicios de Salud 10 Abastos",
+      "expected_name": "Unidad de Servicios de Salud 10 Abastos",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6755,
+      "corpus_name_matches": [],
+      "head_rows_near": 4282,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2407",
+      "query": "UNIDAD DE SERVICIOS DE SALUD CRUCES",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD CRUCES",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 12400,
+      "corpus_name_matches": [],
+      "head_rows_near": 8317,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2452",
+      "query": "UNIDAD DE SERVICIOS DE SALUD AMBULATORIA - ABRAHAM LINCON",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD AMBULATORIA - ABRAHAM LINCON",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2496,
+      "corpus_name_matches": [],
+      "head_rows_near": 1578,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2477",
+      "query": "Unidad de Servicios de Salud 30 Bomberos",
+      "expected_name": "Unidad de Servicios de Salud 30 Bomberos",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6169,
+      "corpus_name_matches": [],
+      "head_rows_near": 3950,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2482",
+      "query": "Unidad de Servicios de Salud 60 Visión de Colombia",
+      "expected_name": "Unidad de Servicios de Salud 60 Visión de Colombia",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 5346,
+      "corpus_name_matches": [],
+      "head_rows_near": 3494,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2460",
+      "query": "UNIDAD DE SERVICIOS DE SALUD USME",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD USME",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 159,
+      "corpus_name_matches": [],
+      "head_rows_near": 99,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2438",
+      "query": "UNIDAD DE SERVICIOS DE SALUD SAN LUIS",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD SAN LUIS",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 387,
+      "corpus_name_matches": [],
+      "head_rows_near": 285,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2479",
+      "query": "Unidad de Servicios de Salud 36 Asunción Bochica",
+      "expected_name": "Unidad de Servicios de Salud 36 Asunción Bochica",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 11364,
+      "corpus_name_matches": [],
+      "head_rows_near": 7538,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2513",
+      "query": "Unidad de Servicios de Salud Nuevas Delicias",
+      "expected_name": "Unidad de Servicios de Salud Nuevas Delicias",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6124,
+      "corpus_name_matches": [],
+      "head_rows_near": 3958,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2434",
+      "query": "UNIDAD DE SERVICIOS DE SALUD GAITANA I",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD GAITANA I",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 4379,
+      "corpus_name_matches": [],
+      "head_rows_near": 2708,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2448",
+      "query": "UNIDAD DE SERVICIOS DE SALUD MEISSEN",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD MEISSEN",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2408,
+      "corpus_name_matches": [],
+      "head_rows_near": 1525,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2504",
+      "query": "Unidad de Servicios de Salud San Bernardino",
+      "expected_name": "Unidad de Servicios de Salud San Bernardino",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2474,
+      "corpus_name_matches": [],
+      "head_rows_near": 1480,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2462",
+      "query": "UNIDAD DE SERVICIOS DE SALUD LA REFORMA",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD LA REFORMA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 1026,
+      "corpus_name_matches": [],
+      "head_rows_near": 667,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2487",
+      "query": "Unidad de Servicios de Salud 79 Carvajal",
+      "expected_name": "Unidad de Servicios de Salud 79 Carvajal",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6881,
+      "corpus_name_matches": [],
+      "head_rows_near": 4566,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2435",
+      "query": "UNIDAD DE SERVICIOS DE SALUD PRADO VERANIEGO",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD PRADO VERANIEGO",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 10793,
+      "corpus_name_matches": [],
+      "head_rows_near": 7668,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2419",
+      "query": "LIBERTADORES",
+      "expected_name": "LIBERTADORES",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 468,
+      "corpus_name_matches": [],
+      "head_rows_near": 306,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2510",
+      "query": "Unidad de Servicios de Salud Olarte",
+      "expected_name": "Unidad de Servicios de Salud Olarte",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 4183,
+      "corpus_name_matches": [],
+      "head_rows_near": 2683,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2430",
+      "query": "UNIDAD DE SERVICIOS DE SALUD ALAMOS",
+      "expected_name": "UNIDAD DE SERVICIOS DE SALUD ALAMOS",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6748,
+      "corpus_name_matches": [],
+      "head_rows_near": 4413,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2500",
+      "query": "Unidad de Servicios de Salud Terminal Aéreo",
+      "expected_name": "Unidad de Servicios de Salud Terminal Aéreo",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2073,
+      "corpus_name_matches": [],
+      "head_rows_near": 1222,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-co-2472",
+      "query": "Unidad de Servicios de Salud Mental Floralia",
+      "expected_name": "Unidad de Servicios de Salud Mental Floralia",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "CO",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 7556,
+      "corpus_name_matches": [],
+      "head_rows_near": 4910,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-41e89cc49682207b453703c2157cd0fb66361c32",
+      "query": "Rapha Australia",
+      "expected_name": "Rapha Australia",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 28223,
+      "corpus_name_matches": [],
+      "head_rows_near": 19377,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-e31d8b14d1e137f255168dd67225336734bfb7a8",
+      "query": "Sub-Zero Group Australia Pty Ltd",
+      "expected_name": "Sub-Zero Group Australia Pty Ltd",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 29987,
+      "corpus_name_matches": [],
+      "head_rows_near": 20470,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-224c48b242355b00d960b6a9eef94494e2da33ee",
+      "query": "Australian Diamond Company",
+      "expected_name": "Australian Diamond Company",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 29075,
+      "corpus_name_matches": [
+        "Australian Diamond Company"
+      ],
+      "head_rows_near": 19847,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-fb57afd9c1cad41fc3bed8cadf672e114be9fce6",
+      "query": "13 Demarzo",
+      "expected_name": "13 Demarzo",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 29415,
+      "corpus_name_matches": [],
+      "head_rows_near": 20098,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-01e3e5f469ccfbb4e5817f23ef68fac033dec0d2",
+      "query": "Rossi Clothing Pty Ltd",
+      "expected_name": "Rossi Clothing Pty Ltd",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 28559,
+      "corpus_name_matches": [],
+      "head_rows_near": 19304,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-3510d00d35672b00b3db5c73c668eb99639a234d",
+      "query": "Taylor Family Meats",
+      "expected_name": "Taylor Family Meats",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 26269,
+      "corpus_name_matches": [],
+      "head_rows_near": 18139,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-a79ceab69fccfc40354bfbf2761730c4ba847c4d",
+      "query": "Swords Select",
+      "expected_name": "Swords Select",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 26269,
+      "corpus_name_matches": [],
+      "head_rows_near": 18139,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-19ce76543e11521c819e46620ff527297de17701",
+      "query": "Moko Select",
+      "expected_name": "Moko Select",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 29415,
+      "corpus_name_matches": [
+        "Moko Select"
+      ],
+      "head_rows_near": 20098,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-847f08d1589077e7327d75461df40c9565a14fea",
+      "query": "Matchbox",
+      "expected_name": "Matchbox",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 27212,
+      "corpus_name_matches": [],
+      "head_rows_near": 18240,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-517db0e62f63aeed5afabcd6f8f6e9a1ee3262da",
+      "query": "Amott Quality Meats",
+      "expected_name": "Amott Quality Meats",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 26269,
+      "corpus_name_matches": [
+        "Amott Quality Meats"
+      ],
+      "head_rows_near": 18139,
+      "head_name_matches": [
+        "Amott Quality Meats"
+      ],
+      "head_tokens": [
+        "amott"
+      ]
+    },
+    {
+      "case_id": "everyday-au-375a74267cd52f955cb3ca8c8b5d6a26c41a7adf",
+      "query": "Spencer Street Pharmacy",
+      "expected_name": "Spencer Street Pharmacy",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 27372,
+      "corpus_name_matches": [
+        "Spencer Street Pharmacy",
+        "Spencer Street"
+      ],
+      "head_rows_near": 18601,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-a2ca9a6817ec1fc2cbd44f227d74b0290fb627ea",
+      "query": "St Station",
+      "expected_name": "St Station",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 28523,
+      "corpus_name_matches": [
+        "Spencer St Railway Station",
+        "Finder St Station",
+        "St Station"
+      ],
+      "head_rows_near": 19599,
+      "head_name_matches": [
+        "Filnders St Station",
+        "Finder St Station",
+        "Filnders St Station"
+      ],
+      "head_tokens": [
+        "e3:filnders st station",
+        "e3:finder st station",
+        "filnders",
+        "finder",
+        "spencer"
+      ]
+    },
+    {
+      "case_id": "everyday-au-625a78220cb02f985dea45b2b2097cec3eda111e",
+      "query": "NBA Store",
+      "expected_name": "NBA Store",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 29415,
+      "corpus_name_matches": [],
+      "head_rows_near": 20098,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-8be3a162213c07b0f1bbc7255f8ba15d2b5071bb",
+      "query": "Kidstuff",
+      "expected_name": "Kidstuff",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 29415,
+      "corpus_name_matches": [],
+      "head_rows_near": 20098,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-05c2135d682827c2443e18208a98c27a49254038",
+      "query": "The Vault 389",
+      "expected_name": "The Vault 389",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 22925,
+      "corpus_name_matches": [],
+      "head_rows_near": 16006,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-92affd29602cdc089104cebd688ce8d2e07d4ba3",
+      "query": "Innisfree",
+      "expected_name": "Innisfree",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 28523,
+      "corpus_name_matches": [],
+      "head_rows_near": 19599,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-2a73f15995959a174e5f5a1d6dd55be084c0eb6d",
+      "query": "DOC Delicatessen",
+      "expected_name": "DOC Delicatessen",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 25735,
+      "corpus_name_matches": [],
+      "head_rows_near": 17831,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-e02d7d11cc7b4d4fba2aa7671e6b0c7d58ff7a4a",
+      "query": "Pado Collection",
+      "expected_name": "Pado Collection",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 28637,
+      "corpus_name_matches": [],
+      "head_rows_near": 19659,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-faba65873ed70e414987e2def0149aeb9c8b0b67",
+      "query": "White November",
+      "expected_name": "White November",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 30340,
+      "corpus_name_matches": [],
+      "head_rows_near": 20784,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-21a506f6d90767d14ef75fb081fb1e9502d6b5e9",
+      "query": "Kuwaii",
+      "expected_name": "Kuwaii",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 30885,
+      "corpus_name_matches": [
+        "Kuwaii"
+      ],
+      "head_rows_near": 21120,
+      "head_name_matches": [
+        "Kuwaii"
+      ],
+      "head_tokens": [
+        "kuwaii"
+      ]
+    },
+    {
+      "case_id": "everyday-au-2823aaec760fce01b9eedf71fd9d5484c0db9951",
+      "query": "Provincial",
+      "expected_name": "Provincial",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 27212,
+      "corpus_name_matches": [],
+      "head_rows_near": 18240,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-9680b5f36577de407891803b8ac2a7e821c949c3",
+      "query": "Arc'teryx",
+      "expected_name": "Arc'teryx",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 29415,
+      "corpus_name_matches": [
+        "Arc'teryx Melbourne"
+      ],
+      "head_rows_near": 20098,
+      "head_name_matches": [
+        "Arc'teryx Melbourne"
+      ],
+      "head_tokens": [
+        "teryx"
+      ]
+    },
+    {
+      "case_id": "everyday-au-aee1a2224208db6e248ca81b8823d1cf179ce768",
+      "query": "Zezar",
+      "expected_name": "Zezar",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 27372,
+      "corpus_name_matches": [],
+      "head_rows_near": 18601,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-9b86448594e8014d805feb46d111007ec9cc5160",
+      "query": "Unreal Christmas Trees",
+      "expected_name": "Unreal Christmas Trees",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 2135,
+      "corpus_name_matches": [],
+      "head_rows_near": 1291,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-au-1f31df1323fe1a701bd570860ec61d597e628bba",
+      "query": "D'Aqua",
+      "expected_name": "D'Aqua",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "AU",
+        "density": "dense_urban",
+        "macroregion": "oceania",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 30278,
+      "corpus_name_matches": [],
+      "head_rows_near": 20750,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900148",
+      "query": "竹田クリニック",
+      "expected_name": "竹田クリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 28609,
+      "corpus_name_matches": [
+        "竹田クリニック"
+      ],
+      "head_rows_near": 53650,
+      "head_name_matches": [
+        "竹田クリニック",
+        "竹田クリニック"
+      ],
+      "head_tokens": [
+        "竹田",
+        "竹田クリニック"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900378",
+      "query": "晶眼科クリニック",
+      "expected_name": "晶眼科クリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 26590,
+      "corpus_name_matches": [
+        "晶眼科クリニック"
+      ],
+      "head_rows_near": 51032,
+      "head_name_matches": [
+        "晶眼科クリニック",
+        "晶眼科クリニック"
+      ],
+      "head_tokens": [
+        "晶眼",
+        "晶眼科クリニック"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900460",
+      "query": "京王百貨店眼科クリニック",
+      "expected_name": "京王百貨店眼科クリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 31558,
+      "corpus_name_matches": [],
+      "head_rows_near": 58262,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900396",
+      "query": "オボクリニック",
+      "expected_name": "オボクリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 26068,
+      "corpus_name_matches": [
+        "オボクリニック"
+      ],
+      "head_rows_near": 50093,
+      "head_name_matches": [
+        "オボクリニック",
+        "オボクリニック",
+        "オボクリニック"
+      ],
+      "head_tokens": [
+        "オホ",
+        "オホクリニック",
+        "ホク"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900309",
+      "query": "ミラザ新宿つるかめクリニック",
+      "expected_name": "ミラザ新宿つるかめクリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 31670,
+      "corpus_name_matches": [
+        "ミラザ新宿つるかめクリニック",
+        "ミラザ新宿つるかめクリニック"
+      ],
+      "head_rows_near": 58776,
+      "head_name_matches": [
+        "ミラザ新宿つるかめクリニック",
+        "ミラザ新宿つるかめクリニック",
+        "ミラザ新宿つるかめクリニック"
+      ],
+      "head_tokens": [
+        "かめ",
+        "つる",
+        "めク",
+        "るか",
+        "サ新",
+        "ミラ",
+        "ミラサ新宿つるかめクリニック",
+        "宿つ"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900289",
+      "query": "医療法人社団 医精会マイシティクリニック",
+      "expected_name": "医療法人社団 医精会マイシティクリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 30652,
+      "corpus_name_matches": [],
+      "head_rows_near": 57542,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900607",
+      "query": "カンナム美容外科新宿院",
+      "expected_name": "カンナム美容外科新宿院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 31007,
+      "corpus_name_matches": [],
+      "head_rows_near": 58108,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900553",
+      "query": "医療法人社団松和会 望星西新宿診療所",
+      "expected_name": "医療法人社団松和会 望星西新宿診療所",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 32978,
+      "corpus_name_matches": [],
+      "head_rows_near": 58956,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900117",
+      "query": "落合パークサイドクリニック",
+      "expected_name": "落合パークサイドクリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 22630,
+      "corpus_name_matches": [
+        "落合パークサイドクリニック"
+      ],
+      "head_rows_near": 43249,
+      "head_name_matches": [
+        "落合パークサイドクリニック",
+        "落合パークサイドクリニック"
+      ],
+      "head_tokens": [
+        "合ハ",
+        "落合ハークサイトクリニック"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900672",
+      "query": "愛児クリニック",
+      "expected_name": "愛児クリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 23063,
+      "corpus_name_matches": [],
+      "head_rows_near": 45282,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900380",
+      "query": "まきレディスクリニック",
+      "expected_name": "まきレディスクリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 26754,
+      "corpus_name_matches": [
+        "まきレディスクリニック",
+        "まきレディスクリニック"
+      ],
+      "head_rows_near": 51157,
+      "head_name_matches": [
+        "まきレディスクリニック",
+        "まきレディスクリニック"
+      ],
+      "head_tokens": [
+        "まきレティスクリニック"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900738",
+      "query": "耳鼻いんこう科 山西クリニック",
+      "expected_name": "耳鼻いんこう科 山西クリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 29110,
+      "corpus_name_matches": [],
+      "head_rows_near": 56830,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900556",
+      "query": "西新宿５丁目駅前眼科",
+      "expected_name": "西新宿５丁目駅前眼科",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 30258,
+      "corpus_name_matches": [],
+      "head_rows_near": 55033,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900690",
+      "query": "四谷いわさきクリニック",
+      "expected_name": "四谷いわさきクリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 33192,
+      "corpus_name_matches": [
+        "四谷いわさきクリニック"
+      ],
+      "head_rows_near": 63163,
+      "head_name_matches": [
+        "四谷いわさきクリニック",
+        "四谷いわさきクリニック"
+      ],
+      "head_tokens": [
+        "四谷いわさきクリニック",
+        "谷い"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900238",
+      "query": "ＳＥＬＥＣＴ ＣＬＩＮＩＣ新宿院",
+      "expected_name": "ＳＥＬＥＣＴ ＣＬＩＮＩＣ新宿院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 31572,
+      "corpus_name_matches": [],
+      "head_rows_near": 59043,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900691",
+      "query": "みどりの森ひふ科クリニック",
+      "expected_name": "みどりの森ひふ科クリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 33095,
+      "corpus_name_matches": [
+        "みどりの森ひふ科クリニック"
+      ],
+      "head_rows_near": 63077,
+      "head_name_matches": [
+        "みどりの森ひふ科クリニック",
+        "みどりの森ひふ科クリニック"
+      ],
+      "head_tokens": [
+        "みとりの森ひふ科クリニック",
+        "森ひ"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900502",
+      "query": "医療法人社団新光会 新宿南口皮膚科",
+      "expected_name": "医療法人社団新光会 新宿南口皮膚科",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 32920,
+      "corpus_name_matches": [],
+      "head_rows_near": 60047,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900045",
+      "query": "医療法人社団慶幸会 東新宿クリニック",
+      "expected_name": "医療法人社団慶幸会 東新宿クリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 31123,
+      "corpus_name_matches": [],
+      "head_rows_near": 58956,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900567",
+      "query": "東京医科大学病院 健診予防医学センター",
+      "expected_name": "東京医科大学病院 健診予防医学センター",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 29458,
+      "corpus_name_matches": [
+        "東京医科大学病院 健診予防医学センター"
+      ],
+      "head_rows_near": 54470,
+      "head_name_matches": [
+        "東京医科大学病院 健診予防医学センター",
+        "東京医科大学病院 健診予防医学センター",
+        "東京医科大学病院 健診予防医学センター"
+      ],
+      "head_tokens": [
+        "e2:東京医科大学病院 健診予防医学センター",
+        "予防",
+        "京医",
+        "健診予防医学センター",
+        "東京医科大学病院",
+        "診予",
+        "防医"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900060",
+      "query": "飯田橋ともじり皮ふ科",
+      "expected_name": "飯田橋ともじり皮ふ科",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 25970,
+      "corpus_name_matches": [
+        "飯田橋ともじり皮ふ科"
+      ],
+      "head_rows_near": 54607,
+      "head_name_matches": [
+        "飯田橋ともじり皮ふ科",
+        "飯田橋ともじり皮ふ科",
+        "飯田橋ともじり皮ふ科"
+      ],
+      "head_tokens": [
+        "しり",
+        "り皮",
+        "橋と",
+        "飯田橋ともしり皮ふ科"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900642",
+      "query": "宮田胃腸内科皮膚科クリニック",
+      "expected_name": "宮田胃腸内科皮膚科クリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 30165,
+      "corpus_name_matches": [
+        "宮田胃腸内科皮膚科クリニック"
+      ],
+      "head_rows_near": 56929,
+      "head_name_matches": [
+        "宮田胃腸内科皮膚科クリニック",
+        "宮田胃腸内科皮膚科クリニック"
+      ],
+      "head_tokens": [
+        "宮田胃腸内科皮膚科クリニック",
+        "田胃"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900048",
+      "query": "西大久保クリニック",
+      "expected_name": "西大久保クリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 30502,
+      "corpus_name_matches": [
+        "西大久保クリニック"
+      ],
+      "head_rows_near": 58364,
+      "head_name_matches": [
+        "西大久保クリニック",
+        "西大久保クリニック"
+      ],
+      "head_tokens": [
+        "保ク",
+        "西大久保クリニック"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900490",
+      "query": "医療法人社団西美会もとび美容外科クリニック",
+      "expected_name": "医療法人社団西美会もとび美容外科クリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 31315,
+      "corpus_name_matches": [],
+      "head_rows_near": 57312,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900204",
+      "query": "医療法人社団幸楽会 幸楽メディカルクリニック",
+      "expected_name": "医療法人社団幸楽会 幸楽メディカルクリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 34774,
+      "corpus_name_matches": [],
+      "head_rows_near": 64920,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900295",
+      "query": "新宿レディースＡＧＡクリニック",
+      "expected_name": "新宿レディースＡＧＡクリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 31499,
+      "corpus_name_matches": [
+        "新宿レディースAGAクリニック"
+      ],
+      "head_rows_near": 58549,
+      "head_name_matches": [
+        "新宿レディースAGAクリニック",
+        "新宿レディースAGAクリニック"
+      ],
+      "head_tokens": [
+        "宿レ",
+        "新宿レティースagaクリニック"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900707",
+      "query": "四谷内科・内視鏡クリニック",
+      "expected_name": "四谷内科・内視鏡クリニック",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 36640,
+      "corpus_name_matches": [
+        "四谷内科・内視鏡クリニック"
+      ],
+      "head_rows_near": 69352,
+      "head_name_matches": [
+        "四谷内科・内視鏡クリニック"
+      ],
+      "head_tokens": [
+        "四谷内科"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900704",
+      "query": "医療法人社団永康会 四ツ谷腎クリニック",
+      "expected_name": "医療法人社団永康会 四ツ谷腎クリニック",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 35542,
+      "corpus_name_matches": [],
+      "head_rows_near": 66870,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900101",
+      "query": "メンズライフクリニック 新宿院",
+      "expected_name": "メンズライフクリニック 新宿院",
+      "hit": true,
+      "empty": false,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 31006,
+      "corpus_name_matches": [
+        "メンズライフクリニック 新宿院"
+      ],
+      "head_rows_near": 58246,
+      "head_name_matches": [
+        "メンズライフクリニック 新宿院",
+        "メンズライフクリニック 新宿院",
+        "メンズライフクリニック 新宿院"
+      ],
+      "head_tokens": [
+        "public_health_clinic",
+        "メンスライフクリニック",
+        "新宿院"
+      ]
+    },
+    {
+      "case_id": "everyday-jp-131041900398",
+      "query": "あゆみレディースクリニック高田馬場",
+      "expected_name": "あゆみレディースクリニック高田馬場",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 26219,
+      "corpus_name_matches": [],
+      "head_rows_near": 50453,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-jp-131041900236",
+      "query": "医療法人社団雪焔会 トイトイトイクリニック新宿院",
+      "expected_name": "医療法人社団雪焔会 トイトイトイクリニック新宿院",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "JP",
+        "density": "dense_urban",
+        "macroregion": "east_asia",
+        "poi_family": "healthcare",
+        "scope": "everyday",
+        "script": "non_latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 32264,
+      "corpus_name_matches": [],
+      "head_rows_near": 60025,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-10953881",
+      "query": "HOTEL DEL ANGEL",
+      "expected_name": "HOTEL DEL ANGEL",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 34926,
+      "corpus_name_matches": [
+        "hotel del angel",
+        "Hotel Del Angel"
+      ],
+      "head_rows_near": 26475,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-10558119",
+      "query": "CITY EXPRESS BY MARRIOT CDMX LA VILLA",
+      "expected_name": "CITY EXPRESS BY MARRIOT CDMX LA VILLA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 11897,
+      "corpus_name_matches": [],
+      "head_rows_near": 7234,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6259112",
+      "query": "HOTEL GAMA",
+      "expected_name": "HOTEL GAMA",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 9958,
+      "corpus_name_matches": [
+        "Hotel Gama"
+      ],
+      "head_rows_near": 6638,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6325252",
+      "query": "HOTEL MONARCA",
+      "expected_name": "HOTEL MONARCA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 43641,
+      "corpus_name_matches": [
+        "Hotel Monarca"
+      ],
+      "head_rows_near": 32138,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6305055",
+      "query": "HOTEL NAYARIT",
+      "expected_name": "HOTEL NAYARIT",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 13615,
+      "corpus_name_matches": [
+        "Hotel HOT Nayarit"
+      ],
+      "head_rows_near": 8412,
+      "head_name_matches": [
+        "Hotel HOT Nayarit"
+      ],
+      "head_tokens": [
+        "nayarit"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-6313837",
+      "query": "HOTEL PORTO NOVO",
+      "expected_name": "HOTEL PORTO NOVO",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 36280,
+      "corpus_name_matches": [
+        "Hotel Porto Novo"
+      ],
+      "head_rows_near": 27207,
+      "head_name_matches": [
+        "Hotel Porto Novo",
+        "Hotel Porto Novo"
+      ],
+      "head_tokens": [
+        "novo",
+        "porto"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-1002420",
+      "query": "HOTEL AMIGO SUITES",
+      "expected_name": "HOTEL AMIGO SUITES",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 25443,
+      "corpus_name_matches": [],
+      "head_rows_near": 16608,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6317273",
+      "query": "HOTEL LUA",
+      "expected_name": "HOTEL LUA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 22294,
+      "corpus_name_matches": [
+        "Lua Hotel & Villas"
+      ],
+      "head_rows_near": 16329,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6325182",
+      "query": "HOTEL HABANA",
+      "expected_name": "HOTEL HABANA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 27460,
+      "corpus_name_matches": [
+        "Hotel Habana"
+      ],
+      "head_rows_near": 18041,
+      "head_name_matches": [
+        "Hotel Habana"
+      ],
+      "head_tokens": [
+        "habana"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-9722871",
+      "query": "HOSTAL ROTAMUNDOS",
+      "expected_name": "HOSTAL ROTAMUNDOS",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 38362,
+      "corpus_name_matches": [],
+      "head_rows_near": 28997,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6259237",
+      "query": "HOTEL CENTRAL",
+      "expected_name": "HOTEL CENTRAL",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 29883,
+      "corpus_name_matches": [
+        "Hotel Histórico Central",
+        "Zócalo Central Hotel"
+      ],
+      "head_rows_near": 20569,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6325165",
+      "query": "MOTEL BOUTIQUE RIALTO",
+      "expected_name": "MOTEL BOUTIQUE RIALTO",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 17825,
+      "corpus_name_matches": [],
+      "head_rows_near": 11282,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-7733488",
+      "query": "THE GALLERY",
+      "expected_name": "THE GALLERY",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 33670,
+      "corpus_name_matches": [
+        "Alquimiamc The Gallery",
+        "The Gallery Studio",
+        "The Gallery Condesa"
+      ],
+      "head_rows_near": 26006,
+      "head_name_matches": [
+        "Alquimiamc The Gallery",
+        "Alquimiamc The Gallery"
+      ],
+      "head_tokens": [
+        "alquimiamc",
+        "e3:alquimiamc the gallery"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-6313854",
+      "query": "HOTEL HARARE",
+      "expected_name": "HOTEL HARARE",
+      "hit": false,
+      "empty": false,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 18262,
+      "corpus_name_matches": [
+        "Hotel Harare"
+      ],
+      "head_rows_near": 12437,
+      "head_name_matches": [
+        "Hotel Harare"
+      ],
+      "head_tokens": [
+        "harare"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-6324958",
+      "query": "HOTEL ANTENAS",
+      "expected_name": "HOTEL ANTENAS",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 7128,
+      "corpus_name_matches": [
+        "Hotel Antenas"
+      ],
+      "head_rows_near": 4054,
+      "head_name_matches": [
+        "Hotel Antenas"
+      ],
+      "head_tokens": [
+        "antenas"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-6323674",
+      "query": "HOTEL REAL AZTECA",
+      "expected_name": "HOTEL REAL AZTECA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 9796,
+      "corpus_name_matches": [
+        "Hotel Real Azteca"
+      ],
+      "head_rows_near": 6211,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6325352",
+      "query": "HOTEL PENSIL",
+      "expected_name": "HOTEL PENSIL",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 19159,
+      "corpus_name_matches": [
+        "Hotel Pensil"
+      ],
+      "head_rows_near": 14410,
+      "head_name_matches": [
+        "Hotel Pensil"
+      ],
+      "head_tokens": [
+        "pensil"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-6810207",
+      "query": "BEL AIR UNIQUE CDMX WTC",
+      "expected_name": "BEL AIR UNIQUE CDMX WTC",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 30957,
+      "corpus_name_matches": [],
+      "head_rows_near": 23255,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6306983",
+      "query": "HOTEL MOCTEZUMA LA VILLA",
+      "expected_name": "HOTEL MOCTEZUMA LA VILLA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 10973,
+      "corpus_name_matches": [
+        "hotel la villa",
+        "La Villa",
+        "Hotel Moctezuma La Villa"
+      ],
+      "head_rows_near": 6951,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-6304780",
+      "query": "HOTEL ESTORIL",
+      "expected_name": "HOTEL ESTORIL",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "lodging",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "IN_HEAD",
+      "corpus_rows_near": 38739,
+      "corpus_name_matches": [
+        "Hotel Estoril"
+      ],
+      "head_rows_near": 26949,
+      "head_name_matches": [
+        "Hotel Estoril"
+      ],
+      "head_tokens": [
+        "estoril"
+      ]
+    },
+    {
+      "case_id": "everyday-mx-7747650",
+      "query": "CENTRO INTEGRAL DEL PIE Y LA SALUD",
+      "expected_name": "CENTRO INTEGRAL DEL PIE Y LA SALUD",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 8554,
+      "corpus_name_matches": [
+        "Centro Integral del Pie y la Salud"
+      ],
+      "head_rows_near": 5212,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-857595",
+      "query": "TIENDA DE ABARROTES LA QUERETANA",
+      "expected_name": "TIENDA DE ABARROTES LA QUERETANA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6837,
+      "corpus_name_matches": [],
+      "head_rows_near": 4521,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-793743",
+      "query": "FLORES Y REGALOS FIORELLA",
+      "expected_name": "FLORES Y REGALOS FIORELLA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 11568,
+      "corpus_name_matches": [],
+      "head_rows_near": 7395,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-11109922",
+      "query": "RECAUDARIA LOS MARQUEZ",
+      "expected_name": "RECAUDARIA LOS MARQUEZ",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6621,
+      "corpus_name_matches": [],
+      "head_rows_near": 3867,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-10170469",
+      "query": "ACUARIO LA CURVA",
+      "expected_name": "ACUARIO LA CURVA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 18265,
+      "corpus_name_matches": [],
+      "head_rows_near": 13783,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-8652847",
+      "query": "DULCERIA MAYOREO",
+      "expected_name": "DULCERIA MAYOREO",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 6455,
+      "corpus_name_matches": [],
+      "head_rows_near": 3570,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-844080",
+      "query": "ROSTICERIA DE POLLOS MAX",
+      "expected_name": "ROSTICERIA DE POLLOS MAX",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 3691,
+      "corpus_name_matches": [],
+      "head_rows_near": 1882,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-952818",
+      "query": "GRUPO FERRETRO",
+      "expected_name": "GRUPO FERRETRO",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 36488,
+      "corpus_name_matches": [],
+      "head_rows_near": 25812,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-8260289",
+      "query": "MOTOREFACCIONES 101",
+      "expected_name": "MOTOREFACCIONES 101",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 10906,
+      "corpus_name_matches": [],
+      "head_rows_near": 6494,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-10632194",
+      "query": "MOLINO EL CHINO",
+      "expected_name": "MOLINO EL CHINO",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 5861,
+      "corpus_name_matches": [],
+      "head_rows_near": 3580,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-9951898",
+      "query": "TOCINERIA EL TORITO",
+      "expected_name": "TOCINERIA EL TORITO",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 11753,
+      "corpus_name_matches": [],
+      "head_rows_near": 7062,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-11671485",
+      "query": "BOUTIQUE ANGIE TIENDA DE ROPA",
+      "expected_name": "BOUTIQUE ANGIE TIENDA DE ROPA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "NOT_ADMITTED",
+      "corpus_rows_near": 5940,
+      "corpus_name_matches": [
+        "Tienda de Ropa"
+      ],
+      "head_rows_near": 3797,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-811127",
+      "query": "TLAPALERIA BARRERA",
+      "expected_name": "TLAPALERIA BARRERA",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 5584,
+      "corpus_name_matches": [],
+      "head_rows_near": 3130,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-9509655",
+      "query": "TORTILLERIA DEL PARQUE",
+      "expected_name": "TORTILLERIA DEL PARQUE",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 8646,
+      "corpus_name_matches": [],
+      "head_rows_near": 5483,
+      "head_name_matches": [],
+      "head_tokens": []
+    },
+    {
+      "case_id": "everyday-mx-7816471",
+      "query": "DECORACIONES NICVAL",
+      "expected_name": "DECORACIONES NICVAL",
+      "hit": false,
+      "empty": true,
+      "strata": {
+        "country": "MX",
+        "density": "dense_urban",
+        "macroregion": "latin_america",
+        "poi_family": "retail",
+        "scope": "everyday",
+        "script": "latin"
+      },
+      "verdict": "ABSENT",
+      "corpus_rows_near": 7766,
+      "corpus_name_matches": [],
+      "head_rows_near": 4387,
+      "head_name_matches": [],
+      "head_tokens": []
+    }
+  ]
+}
