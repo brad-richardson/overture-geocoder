@@ -402,7 +402,7 @@ def test_smoke_separates_the_places_head_and_routed_paths():
     assert ".metadata.places_locality_inference == null" in run
     assert ".metadata.places_locality_inference.routing != null" in run
     # Both Places checks prove they returned POIs, not divisions.
-    assert run.count('.properties.feature_type == "poi"') == 2
+    assert run.count('.properties.feature_type == "poi"') == 3
 
 
 def test_smoke_structured_address_sends_country_and_asserts_a_match():
@@ -421,6 +421,20 @@ def test_smoke_structured_address_sends_country_and_asserts_a_match():
     assert '.properties.feature_type == "address"' in run
     # The warn-only escape hatch is gone; an empty result now fails.
     assert "WARN addresses" not in run
+
+
+def test_smoke_preserves_both_point_family_reverse_capabilities():
+    run = next(
+        step["run"]
+        for step in jobs()["promote-catalog"]["steps"]
+        if "/v2/forward" in (step.get("run") or "")
+    )
+    assert '"$BASE_URL/v2/reverse"' in run
+    assert 'types=poi' in run and 'types=address' in run
+    assert '.properties.name == "Space Needle"' in run
+    assert '.properties.number == "400"' in run
+    assert '.properties.street == "BROAD Street"' in run
+    assert '.properties.postcode == "98109"' in run
 
 
 # --- action pinning --------------------------------------------------------------
