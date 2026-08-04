@@ -128,6 +128,38 @@ Evidence:
 - `benchmarks/2026-08-03-sidecar-phase0-candidates-v1.json`; and
 - `benchmarks/2026-08-03-sidecar-phase0-review-queue-v1.json`.
 
+### Golden review instrument, 2026-08-04
+
+The 200 decisions now have a review instrument. It decides nothing: every row is
+still provisional, no verdict is recorded, and `eligible_for_prominence` is
+false everywhere.
+
+- `benchmarks/2026-08-04-sidecar-phase0-golden-review-set-v1.json` joins each
+  queued decision to its evidence — GERS ID, Overture names/coordinate/country/
+  source ids, QID, labels, coordinate candidates, the P1968 claim values with
+  the snapshot and query hashes, the distance or an explicit null reason,
+  normalized-label overlap, every risk flag with a plain-language reason, and
+  the provisional decision with the exact rule text that produced it. It is
+  bound to the candidate-set, queue, places, entities, collection, and spec
+  hashes, carries a stable `decision_id` per row, and keeps the frozen
+  risk-first order.
+- `benchmarks/2026-08-04-sidecar-phase0-golden-verdicts-v1.json` is the empty,
+  append-only verdict file (`accept` / `reject` / `needs_more_evidence`), bound
+  to the sha256 of the review set so a verdict can never silently attach to
+  changed inputs.
+- `benchmarks/2026-08-04-sidecar-phase0-golden-review-sheet-v1.md` renders the
+  same 200 decisions for reading, risk-first with the 50 clean controls last.
+- `scripts/build_sidecar_phase0_golden_review.py` regenerates all three;
+  `scripts/validate_sidecar_phase0_golden_review.py` checks binding integrity,
+  reports coverage, and computes false accepts (provisionally accepted
+  decisions the reviewer rejected). It fails closed: incomplete review is
+  reported as gate-not-met, never as passed.
+
+Four evidence fields are absent from the frozen inputs and cannot be added
+without breaking the frozen hashes: Overture categories, Wikidata descriptions,
+Wikidata aliases, and P1968 statement GUIDs. Each row states this explicitly and
+carries the wikidata.org and Foursquare URLs to check by hand.
+
 Any accepted sidecar that changes `prominence_rank` moves projection identity
 and construction evidence. v4 is already consumed by the in-flight phrase
 admission build, so the first possible construction generation is **v5**.
