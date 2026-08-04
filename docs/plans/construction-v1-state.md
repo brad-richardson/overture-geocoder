@@ -409,6 +409,43 @@ the code under test. With it the suite is 1569 passed, 0 failed.
 sequential HEADs, and the second half of item 1's precondition) is optional
 efficiency, not a blocker.
 
+### 2026-08-04: "cap eviction sinks everyday POIs out of the head" is REFUTED
+
+The working hypothesis behind the cap-raise question was that everyday POIs are
+indexed but sink below `HEAD_RESULT_CAP` on their own name token, so a bigger
+cap would recover them. It was formed from one case read at low resolution
+(`Hotel Habana`, rank 58 of 452 among head candidates) and generalized.
+
+**It is wrong, and a cap raise recovers NOTHING.** Ranking all 13 everyday and
+9 gold EXACT-match IN_HEAD misses against `CAP_ORDER` straight from the
+head-candidate packs found zero records sitting just outside the cap on the
+token that identifies them. `Hotel Habana` really does rank 72 of 452 on
+`habana` -- but it was never `habana` that lost the query. It is evicted on
+`hotel`, and `Harrods` on `london`, and `Mayo Clinic` on `clinic`.
+
+The mechanism is the intersection, not the cap: the head keeps a top-`n` list
+PER QUERY TOKEN and intersects them, so a record must survive the cap in every
+token, and the least informative word in the query is enough to empty the
+result. That makes adding a locality word strictly harmful -- `Harrods` ranks
+22 on its own token while `Harrods London` cannot resolve at any cap size,
+because Harrods is not among the ten most prominent things on Earth carrying
+`london`.
+
+Two corollaries worth keeping:
+
+- The entity-phrase lane does not rescue this class either. It admits only
+  `prominence_rank > 0` and `COMMODITY_CATEGORIES` puts hotels at 0, so
+  `e2:hotel habana` has zero rows. The class that most needs a phrase key is
+  the one excluded from it.
+- So the cap-raise machinery below stays moot on its own merits, independently
+  of the attestation cost. **The lever is selectivity.** The cheapest form
+  needs no rebuild: head entries already carry `primary_name`, so on an empty
+  intersection the Worker can re-query the most selective token alone and
+  filter by the remaining words.
+
+Full measurement, and the three things the probe deliberately refuses to
+overstate, in `docs/plans/2026-08-04-head-cap-eviction-ranks.md`.
+
 ### If the head cap is ever raised, it is contract-bound
 
 `head_result_cap` is not a plain default. `acceptance_gates.head.result_cap_per_token`
@@ -2234,6 +2271,9 @@ These remain useful but do not block the next measured milestone:
 
 ## Evidence and history
 
+- `docs/plans/2026-08-04-head-cap-eviction-ranks.md` — what actually loses an
+  indexed place in the global head, and the refutation of the cap-eviction
+  hypothesis.
 - `docs/plans/2026-07-31-promotion-copy-and-efficiency.md` — measured cost of
   the forward promotion copy, the path to a zero-copy promotion, and the rest of
   the efficiency queue for the next planet run.

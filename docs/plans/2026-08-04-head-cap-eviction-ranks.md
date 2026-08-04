@@ -12,6 +12,29 @@ or after the merge. It does not say *how* the record lost, and the plans that
 follow from "raise the cap" and from "the cap is not the problem" are entirely
 different.
 
+## The hypothesis this probe was built to test, and which it refuted
+
+**Hypothesis (2026-08-04, wrong):** everyday POIs are indexed but sink below
+`HEAD_RESULT_CAP` on their own name token, because `COMMODITY_CATEGORIES` gives
+them `prominence_rank = 0` and confidence is a flat per-source constant, so the
+cap key degenerates to UUID order. Predicted fix: raise the cap.
+
+**Refuted on every clause.** No case is lost on its own name token. Not one
+token in either set has its top ten decided by `feature_id` order
+(`tokens_decided_by_feature_id: 0`). And a cap raise recovers nothing at any
+size tested, out to 1000.
+
+The hypothesis was formed from a single case read at low resolution --
+`Hotel Habana` at rank 58 of 452 -- and generalized without checking which
+token actually emptied the query. The rank was roughly right (72 of 452 here,
+on a different release). The inference from it was not: `habana` never lost the
+query. `hotel` did.
+
+Worth stating plainly because the wrong version was actionable and cheap-looking
+("raise a constant"), while the right one points at query-time selectivity and
+at rebuild-scoped index coverage. Three probe iterations were needed before the
+numbers could be trusted at all -- see "What this probe can and cannot state".
+
 ## Headline
 
 **Raising `HEAD_RESULT_CAP` recovers none of these cases.** Not one miss in
