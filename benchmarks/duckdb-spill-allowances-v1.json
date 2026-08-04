@@ -1,0 +1,48 @@
+{
+  "schema": "overture-duckdb-spill-allowances-v1",
+  "headroom_fraction": 0.25,
+  "hosted_max_scratch_bytes": 18253611008,
+  "note": "Every DuckDB connection in the production families sets both `temp_directory` and `max_temp_directory_size`; this file states the resulting allowance per stage and binds it to a measured peak. A stage present here with no measurement is a BLOCKER, not a pass -- the readiness check fails closed rather than assuming an unmeasured stage fits. Add a stage here in the same commit that adds a production DuckDB connection.",
+  "stages": [
+    {
+      "stage": "places.head.tree_merge",
+      "allowance_bytes": 13690208256,
+      "allowance_derivation": "three quarters of hosted_max_scratch_bytes, via the scoped head_only_resume that completed the v4 head; the default helper share is a quarter and the pre-v4 head ran at a half (9126805504)",
+      "measured_peak_bytes": null,
+      "measured_peak_lower_bound_bytes": 9126805504,
+      "measurement_note": "The v4 head tree-merge DIED at 79% with the 8.5 GiB half-share cap full, so 9126805504 is a lower bound on the peak, not the peak. No completed run has ever reported this stage's spill high-water mark -- the watchdog's evidence at this call site was discarded. Resolve by running one head to completion with the instrumented watchdog and folding its `places.head.tree_merge` observation in here."
+    },
+    {
+      "stage": "places.map.construction",
+      "allowance_bytes": 9126805504,
+      "allowance_derivation": "map_duckdb_temp_limit_bytes(hosted_max_scratch_bytes), MAP_DUCKDB_TEMP_SHARE = 2",
+      "measured_peak_bytes": null,
+      "measured_peak_lower_bound_bytes": null,
+      "measurement_note": "Never separated from peak_scratch_and_output_bytes before the spill subtotal existed. Fold in the `places.map.construction` observation from the next planet map."
+    },
+    {
+      "stage": "places.reduce",
+      "allowance_bytes": 4563402752,
+      "allowance_derivation": "duckdb_temp_limit_bytes(hosted_max_scratch_bytes), DUCKDB_TEMP_SHARE = 4",
+      "measured_peak_bytes": null,
+      "measured_peak_lower_bound_bytes": null,
+      "measurement_note": "Fold in the `places.reduce` observation from the next planet reduce."
+    },
+    {
+      "stage": "addresses.map.construction",
+      "allowance_bytes": 4563402752,
+      "allowance_derivation": "duckdb_temp_limit_bytes(hosted_max_scratch_bytes), DUCKDB_TEMP_SHARE = 4",
+      "measured_peak_bytes": null,
+      "measured_peak_lower_bound_bytes": 2147483648,
+      "measurement_note": "Rehearsal task 87 died on a 2 GiB temp allowance, so 2147483648 is a lower bound under the SMALLER cap that run declared, not a peak under this allowance."
+    },
+    {
+      "stage": "addresses.reduce",
+      "allowance_bytes": 4563402752,
+      "allowance_derivation": "duckdb_temp_limit_bytes(hosted_max_scratch_bytes), DUCKDB_TEMP_SHARE = 4",
+      "measured_peak_bytes": null,
+      "measured_peak_lower_bound_bytes": null,
+      "measurement_note": "Fold in the `addresses.reduce` observation from the next planet reduce."
+    }
+  ]
+}

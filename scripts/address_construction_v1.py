@@ -311,19 +311,106 @@ DUCKDB_TEMP_SHARE = 4
 
 def duckdb_temp_limit(max_scratch_bytes: int) -> str:
     """The `max_temp_directory_size` literal for a stage with this scratch budget."""
+    return f"{duckdb_temp_limit_bytes(max_scratch_bytes)}B"
+
+
+def duckdb_temp_limit_bytes(max_scratch_bytes: int) -> int:
+    """The same cap as an integer, for arithmetic rather than a DuckDB literal.
+
+    A readiness check compares a stage's stated allowance against its measured
+    spill peak; parsing the string form back out is how the two drift apart.
+    """
     if max_scratch_bytes <= 0:
         raise ValueError("DuckDB temp cap needs a positive scratch budget")
-    return f"{max(1, int(max_scratch_bytes) // DUCKDB_TEMP_SHARE)}B"
+    return max(1, int(max_scratch_bytes) // DUCKDB_TEMP_SHARE)
+
+
+# DuckDB names every spill file `duckdb_temp_storage_<size class>-<n>.tmp` inside
+# `temp_directory`, and `max_temp_directory_size` is enforced against the sum of
+# exactly those files. Matching the name is therefore the whole measurement: it
+# separates spill from the stage's own inputs and outputs, which share the same
+# workspace and are already counted by `peak_scratch_and_output_bytes`.
+DUCKDB_TEMP_FILE_PREFIX = "duckdb_temp_storage_"
+DUCKDB_TEMP_FILE_SUFFIX = ".tmp"
+
+
+def is_duckdb_temp_file(name: str) -> bool:
+    return name.startswith(DUCKDB_TEMP_FILE_PREFIX) and name.endswith(
+        DUCKDB_TEMP_FILE_SUFFIX
+    )
+
+
+DUCKDB_SPILL_OBSERVATION_SCHEMA = "overture-duckdb-spill-observation-v1"
+
+# The margin a stage's stated allowance must hold over its measured peak.
+# 25%: three of this pipeline's spill deaths were within a few per cent of the
+# cap (the v4 tree-merge died at 8.4 of 8.5 GiB), and spill volume moves with
+# input volume between releases, so a margin thinner than the release-to-release
+# growth is not a margin.
+DUCKDB_SPILL_HEADROOM_FRACTION = 0.25
+
+
+def duckdb_spill_observation(
+    stage: str,
+    *,
+    peak_bytes: int,
+    cap_bytes: int | None,
+    observations: int,
+    peak_sweep_seconds: float,
+    failed: bool,
+) -> dict[str, Any]:
+    """One stage's measured spill peak against the cap it declared."""
+    record: dict[str, Any] = {
+        "schema": DUCKDB_SPILL_OBSERVATION_SCHEMA,
+        "stage": stage,
+        "peak_duckdb_temp_bytes": int(peak_bytes),
+        "duckdb_temp_cap_bytes": None if cap_bytes is None else int(cap_bytes),
+        # How well the sampler could SEE. A spill burst shorter than one sweep
+        # is invisible, so a peak of 0 over few observations is "not observed",
+        # not "did not spill" -- the readiness check must not read it as proof.
+        "observations": observations,
+        "peak_sweep_seconds": peak_sweep_seconds,
+        "stage_failed": bool(failed),
+    }
+    if cap_bytes:
+        record["used_fraction_of_cap"] = int(peak_bytes) / int(cap_bytes)
+    return record
+
+
+def emit_duckdb_spill_observation(stage: str, **kwargs: Any) -> dict[str, Any]:
+    """Print the observation as one structured line, the convention here.
+
+    Stdout, not the stage's returned report: the report dicts are marker
+    payloads whose bytes participate in construction identity, and a resource
+    observation must never be able to move an identity.
+    """
+    record = duckdb_spill_observation(stage, **kwargs)
+    print(json.dumps({"duckdb_spill_observation": record}, sort_keys=True), flush=True)
+    return record
 
 
 class StageWatchdog:
-    def __init__(self, roots: list[Path], limits: Limits, connection=None):
+    def __init__(
+        self,
+        roots: list[Path],
+        limits: Limits,
+        connection=None,
+        *,
+        stage: str | None = None,
+        duckdb_temp_cap_bytes: int | None = None,
+    ):
         self.roots = roots
         self.limits = limits
         self.connection = connection
+        # Purely observational: naming the stage turns on a structured spill
+        # observation line at exit. It never gates and never aborts -- the
+        # readiness check is what consumes these, one measurement window later.
+        self.stage = stage
+        self.duckdb_temp_cap_bytes = duckdb_temp_cap_bytes
         self.started = time.monotonic()
         self.peak_rss_bytes = 0
         self.peak_disk_bytes = 0
+        self.peak_duckdb_temp_bytes = 0
         self.failure: str | None = None
         self.finished = False
         self.process = None
@@ -334,6 +421,19 @@ class StageWatchdog:
 
     @staticmethod
     def disk_bytes(roots: list[Path]) -> int:
+        """Total regular-file bytes under `roots`. Unchanged callers see no change."""
+        return StageWatchdog.measure_disk(roots)[0]
+
+    @staticmethod
+    def measure_disk(roots: list[Path]) -> tuple[int, int]:
+        """`(total_bytes, duckdb_spill_bytes)` from ONE sweep.
+
+        The spill subtotal rides the sweep the watchdog already pays for, so
+        measuring the DuckDB temp high-water mark costs no extra syscall. Before
+        this, the only spill number anywhere in the pipeline was the CONFIGURED
+        cap -- which is why the v4 head tree-merge could die at 79% against a
+        full 8.5 GiB half-share with no record of how close any prior run came.
+        """
         # Scratch churns continuously while the guarded stage runs: DuckDB
         # writes and unlinks spill blocks under the same workspace, and packs
         # are unlinked after upload. A path can therefore vanish between being
@@ -342,6 +442,7 @@ class StageWatchdog:
         # read as the watchdog failing to observe and abort a healthy stage.
         # One stat per path also avoids a second is_file() syscall.
         total = 0
+        spill = 0
         for root in roots:
             if not root.exists():
                 continue
@@ -352,12 +453,16 @@ class StageWatchdog:
                     continue
                 if S_ISREG(info.st_mode):
                     total += info.st_size
-        return total
+                    if is_duckdb_temp_file(path.name):
+                        spill += info.st_size
+        return total, spill
 
     def _observe(self) -> None:
         started = time.monotonic()
         self.peak_rss_bytes = max(self.peak_rss_bytes, self.process.memory_info().rss)
-        self.peak_disk_bytes = max(self.peak_disk_bytes, self.disk_bytes(self.roots))
+        disk, spill = self.measure_disk(self.roots)
+        self.peak_disk_bytes = max(self.peak_disk_bytes, disk)
+        self.peak_duckdb_temp_bytes = max(self.peak_duckdb_temp_bytes, spill)
         self.sweeps += 1
         self.peak_sweep_seconds = max(
             self.peak_sweep_seconds, time.monotonic() - started
@@ -424,9 +529,22 @@ class StageWatchdog:
     def __exit__(self, exc_type, exc, traceback):
         self.stop.set()
         self.thread.join()
-        self.peak_disk_bytes = max(
-            self.peak_disk_bytes, self.disk_bytes(self.roots)
-        )
+        disk, spill = self.measure_disk(self.roots)
+        self.peak_disk_bytes = max(self.peak_disk_bytes, disk)
+        self.peak_duckdb_temp_bytes = max(self.peak_duckdb_temp_bytes, spill)
+        # Emitted before the failure re-raise below, so a stage that DIED on its
+        # spill cap still leaves the number that explains why. That is the case
+        # the readiness check most needs and the one a success-only emission
+        # would silently drop.
+        if self.stage is not None:
+            emit_duckdb_spill_observation(
+                self.stage,
+                peak_bytes=self.peak_duckdb_temp_bytes,
+                cap_bytes=self.duckdb_temp_cap_bytes,
+                observations=self.sweeps,
+                peak_sweep_seconds=self.peak_sweep_seconds,
+                failed=self.failure is not None or exc is not None,
+            )
         if self.failure is None and not self.finished:
             self.failure = "stage watchdog exited without recording an observation"
         if self.failure:
@@ -447,6 +565,11 @@ class StageWatchdog:
             # how slow the worst one was.
             "observations": self.sweeps,
             "peak_sweep_seconds": self.peak_sweep_seconds,
+            # The DuckDB spill high-water mark, separated out of
+            # `peak_scratch_and_output_bytes`. `max_temp_directory_size` is
+            # enforced against exactly this subtotal, so this is the only number
+            # comparable to the cap the stage declares.
+            "peak_duckdb_temp_bytes": self.peak_duckdb_temp_bytes,
         }
 
 
@@ -1110,7 +1233,15 @@ def map_task(
             "SELECT coalesce(max(pack_id) + 1, 0)::UINTEGER FROM packed"
         ).fetchone()[0]
         packs = []
-        with StageWatchdog([workspace], limits, connection) as watchdog:
+        with StageWatchdog(
+            [workspace],
+            limits,
+            connection,
+            stage="addresses.map.construction",
+            duckdb_temp_cap_bytes=duckdb_temp_limit_bytes(
+                limits.max_scratch_bytes
+            ),
+        ) as watchdog:
             connection.execute("SET threads = 1")
             for pack_id in range(pack_count):
                 pack = workspace / f"pack-{pack_id:06d}.parquet"
@@ -1637,7 +1768,15 @@ def reduce_partition(
         watchdog_roots = [workspace]
         if release is not None:
             watchdog_roots.append(Path(store.root))
-        with StageWatchdog(watchdog_roots, limits, connection) as watchdog:
+        with StageWatchdog(
+            watchdog_roots,
+            limits,
+            connection,
+            stage="addresses.reduce",
+            duckdb_temp_cap_bytes=duckdb_temp_limit_bytes(
+                limits.max_scratch_bytes
+            ),
+        ) as watchdog:
             selected_rows = export_filter(
                 connection, "fetched", predicate, selected, SERVING_ORDER
             )
