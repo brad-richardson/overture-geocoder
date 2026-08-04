@@ -54,7 +54,7 @@ name: Promote v2 Release
 #   promote-catalog  v2_release_manifest.py promote: If-Match compare-and-swap
 #                    of v2/catalog.json against exactly one stated expectation
 #                    (`catalog_expectation` = "absent" or the current catalog
-#                    sha256), then a bounded /v2/forward smoke. A failed smoke
+#                    sha256), then a bounded forward/reverse v2 API smoke. A failed smoke
 #                    fails the job LOUDLY and prints the exact recover
 #                    command; it never auto-recovers (the catalog CAS makes
 #                    manual recovery safe, and an auto-recover could fight a
@@ -1144,7 +1144,7 @@ jobs:
 
   # --- Stage: promote-catalog ----------------------------------------------------
   promote-catalog:
-    name: Compare-and-swap the v2 catalog, then smoke /v2/forward
+    name: Compare-and-swap the v2 catalog, then smoke v2 APIs
     needs: gate
     if: inputs.stage == 'promote-catalog' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
@@ -1210,7 +1210,7 @@ jobs:
             echo "- Recovery expectation for any later recover/promote: \`${PROMOTED_SHA}\`"
           } >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Bounded post-promote smoke of /v2/forward (never auto-recovers)
+      - name: Bounded post-promote smoke of forward and reverse (never auto-recovers)
         if: inputs.mode == 'execute'
         run: |
           set -uo pipefail
@@ -1360,7 +1360,7 @@ jobs:
               sleep 45
             fi
           done
-          echo "::error::/v2/forward smoke failed after 10 attempts on build $GEOCODER_BUILD."
+          echo "::error::v2 API smoke failed after 10 attempts on build $GEOCODER_BUILD."
           {
             echo "## Post-promote smoke FAILED -- manual recovery required"
             echo
