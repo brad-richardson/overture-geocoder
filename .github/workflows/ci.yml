@@ -58,8 +58,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install --only-binary=:all: --require-hashes \
             -r .github/requirements-hosted-rowgroup.txt
-          pip install pytest pyyaml h3==4.3.1 shapely==2.1.2 psutil==7.2.2
+          pip install pytest pytest-xdist pyyaml h3==4.3.1 shapely==2.1.2 psutil==7.2.2
       - name: Run pipeline tests
+        # No -m filter: CI always runs the ENTIRE suite. Parallelism comes from
+        # pytest.ini's `-n auto --dist worksteal`, never from running less.
         run: pytest tests/ -v
 
   js-client:

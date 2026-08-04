@@ -5,6 +5,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 
 SCRIPTS = Path(__file__).parent.parent / "scripts"
 sys.path.insert(0, str(SCRIPTS))
@@ -134,6 +136,7 @@ def test_configuration_selection_reports_when_every_layout_fails():
     assert passed is False
 
 
+@pytest.mark.slow  # ~6s: drives the experiment CLI across every configuration.
 def test_cli_writes_reports(tmp_path):
     source = tmp_path / "places.jsonl"
     source.write_text(

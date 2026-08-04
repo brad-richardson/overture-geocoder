@@ -268,6 +268,7 @@ def equivalence_markers(_generated_equivalence_markers):
     return copy.deepcopy(_generated_equivalence_markers)
 
 
+@pytest.mark.slow  # 2-7s per case: plans the same markers at five row caps.
 @pytest.mark.parametrize("row_cap", [400, 1_000, 4_000, 25_000, 250_000])
 def test_streaming_genesis_plan_is_byte_identical(tmp_path, row_cap, equivalence_markers):
     ADDRESS = FANIN.ADDRESS
@@ -306,6 +307,7 @@ def test_streaming_genesis_plan_matches_on_empty_and_single():
     ) == ADDRESS.canonical_json(_reference_genesis_plan(single, row_cap=800))
 
 
+@pytest.mark.slow  # ~4s: full plan invariants over the large marker set.
 def test_genesis_plan_direct_invariants(equivalence_markers):
     """Prove the plan properties directly, not only via the reference oracle.
 
@@ -414,6 +416,7 @@ def test_benchmark_family_fails_closed_on_tiny_rss_cap(tmp_path):
     assert result["gate_reasons"]
 
 
+@pytest.mark.slow  # ~8s: runs the whole benchmark family plus its gate.
 def test_benchmark_family_passes_small_scale(tmp_path):
     gate = FANIN.Gate(
         wall_seconds=120, max_rss_bytes=2 * 1024**3, max_scratch_bytes=4 * 1024**3
